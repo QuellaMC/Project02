@@ -1,14 +1,16 @@
 import {
-  assertCanonicalRuntimeTimestamp, type CharacterProfile,
-  type RuntimeEventIdentity, type VisibleMessage
+  assertCanonicalRuntimeTimestamp,
+  type CharacterProfile,
+  type RuntimeEventIdentity,
+  type VisibleMessage,
 } from '../../core/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,
   jsonBoundaryUtf8ByteLength,
-  ownJsonRecordValue
+  ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
-import { normalizeRuntimePluginAccessMap } from '../policy/access-control.ts';
+import {normalizeRuntimePluginAccessMap} from '../policy/access-control.ts';
 import {
   runtimePluginContractVersion,
   runtimePluginEvidenceKindValues,
@@ -17,15 +19,15 @@ import {
   runtimePluginPolicyOutcomeValues,
   type RuntimePluginAccessMap,
   type RuntimePluginAccessSnapshot,
-  type RuntimePluginDeclaration
+  type RuntimePluginDeclaration,
 } from './contract.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
-  requiredDeclarationList
+  requiredDeclarationList,
 } from './manifest-validation.ts';
-import { assertUniqueRuntimePluginIds } from './identity.ts';
+import {assertUniqueRuntimePluginIds} from './identity.ts';
 import type {
   CreateRuntimePluginAfterTurnCommittedContextOptions,
   CreateRuntimePluginContextOptions,
@@ -47,9 +49,9 @@ import type {
   RuntimePluginToolCallResult,
   RuntimePluginToolInvocationSnapshot,
   RuntimePluginTurnEvidenceSnapshot,
-  RuntimePluginValidationResult
+  RuntimePluginValidationResult,
 } from './types.ts';
-import { validateRuntimePluginModelFacingToolAccess } from './tool-classification.ts';
+import {validateRuntimePluginModelFacingToolAccess} from './tool-classification.ts';
 import {
   accept,
   freezeRedactedStrings,
@@ -66,16 +68,18 @@ import {
   requiredArrayOrThrow,
   requiredOneOf,
   requiredSourceReferences,
-  requiredStringArrayOrThrow
+  requiredStringArrayOrThrow,
 } from './validation-primitives.ts';
 
 export function createRuntimePluginContext(
-  options: CreateRuntimePluginContextOptions
+  options: CreateRuntimePluginContextOptions,
 ): RuntimePluginContext {
   const deadlineAt = options.deadlineAt ?? Number.MAX_SAFE_INTEGER;
 
   if (!Number.isSafeInteger(deadlineAt) || deadlineAt <= 0) {
-    throw new TypeError('Plugin context deadlineAt must be a positive safe integer.');
+    throw new TypeError(
+      'Plugin context deadlineAt must be a positive safe integer.',
+    );
   }
 
   return Object.freeze({
@@ -86,30 +90,30 @@ export function createRuntimePluginContext(
     eventType: options.eventType,
     timestamp: assertCanonicalRuntimeTimestamp(
       options.createdAt,
-      'Plugin context createdAt'
+      'Plugin context createdAt',
     ),
     deadlineAt,
     signal: options.signal ?? new AbortController().signal,
     currentUserMessage: requirePlainNonEmptyString(
       options.currentUserMessage,
-      'currentUserMessage'
+      'currentUserMessage',
     ),
     character: Object.freeze({
       id: requirePlainNonEmptyString(options.character.id, 'character.id'),
       displayName: requirePlainNonEmptyString(
         options.character.displayName,
-        'character.displayName'
-      )
+        'character.displayName',
+      ),
     } satisfies CharacterProfile),
     privacy: Object.freeze({
       redactionLabels: freezeRedactedStrings(options.redactionLabels ?? []),
-      exposePrivateConfig: false
-    })
+      exposePrivateConfig: false,
+    }),
   } satisfies RuntimePluginContext);
 }
 
 export function createRuntimePluginAfterTurnCommittedContext(
-  options: CreateRuntimePluginAfterTurnCommittedContextOptions
+  options: CreateRuntimePluginAfterTurnCommittedContextOptions,
 ): RuntimePluginAfterTurnCommittedContext {
   const runtimeContext = createRuntimePluginContext(options);
   const visibleMessages = freezeVisibleMessages(options.visibleMessages);
@@ -119,18 +123,18 @@ export function createRuntimePluginAfterTurnCommittedContext(
     committedTurn: Object.freeze({
       committedAt: assertCanonicalRuntimeTimestamp(
         options.committedAt,
-        'Plugin committedAt'
+        'Plugin committedAt',
       ),
       visibleMessageIds: Object.freeze(
-        visibleMessages.map((message) => message.id)
+        visibleMessages.map(message => message.id),
       ),
-      visibleMessages
-    } satisfies RuntimePluginCommittedTurnSnapshot)
+      visibleMessages,
+    } satisfies RuntimePluginCommittedTurnSnapshot),
   } satisfies RuntimePluginAfterTurnCommittedContext);
 }
 
 function freezeVisibleMessages(
-  messages: readonly VisibleMessage[]
+  messages: readonly VisibleMessage[],
 ): readonly VisibleMessage[] {
   return Object.freeze(messages.map(freezeVisibleMessage));
 }
@@ -141,31 +145,29 @@ function freezeVisibleMessage(message: VisibleMessage): VisibleMessage {
     role: message.role,
     speakerId: requirePlainNonEmptyString(
       message.speakerId,
-      'visibleMessage.speakerId'
+      'visibleMessage.speakerId',
     ),
     speakerName: requirePlainNonEmptyString(
       message.speakerName,
-      'visibleMessage.speakerName'
+      'visibleMessage.speakerName',
     ),
-    text: requirePlainNonEmptyString(message.text, 'visibleMessage.text')
+    text: requirePlainNonEmptyString(message.text, 'visibleMessage.text'),
   } satisfies VisibleMessage);
 }
 
-export function createRuntimePlugin(
-  options: {
-    readonly manifest: unknown;
-    readonly providedTools?: readonly unknown[];
-    readonly lifecycleHooks?: RuntimePluginLifecycleHooks;
-  }
-): RuntimePlugin {
+export function createRuntimePlugin(options: {
+  readonly manifest: unknown;
+  readonly providedTools?: readonly unknown[];
+  readonly lifecycleHooks?: RuntimePluginLifecycleHooks;
+}): RuntimePlugin {
   const manifest = createRuntimePluginManifest(options.manifest);
   const providedTools = Object.freeze(
-    (options.providedTools ?? []).map(createRuntimePluginProvidedTool)
+    (options.providedTools ?? []).map(createRuntimePluginProvidedTool),
   );
   const declarationValidation = validatePluginDeclarationsAgainstRuntime({
     manifest,
     providedTools,
-    lifecycleHooks: options.lifecycleHooks ?? {}
+    lifecycleHooks: options.lifecycleHooks ?? {},
   });
 
   if (declarationValidation.status === 'rejected') {
@@ -174,13 +176,13 @@ export function createRuntimePlugin(
 
   validateRuntimePluginModelFacingToolAccess({
     manifest,
-    providedTools
+    providedTools,
   });
 
   return Object.freeze({
     manifest,
     providedTools,
-    lifecycleHooks: freezeLifecycleHooks(options.lifecycleHooks ?? {})
+    lifecycleHooks: freezeLifecycleHooks(options.lifecycleHooks ?? {}),
   } satisfies RuntimePlugin);
 }
 
@@ -195,7 +197,7 @@ export function createRuntimePluginRegistrySnapshot(
         }
       >
     >;
-  } = {}
+  } = {},
 ): RuntimePluginRegistrySnapshot {
   const registrations: RuntimePluginRegistrationSnapshot[] = [];
 
@@ -204,13 +206,13 @@ export function createRuntimePluginRegistrySnapshot(
   for (const plugin of plugins) {
     const resolvedAccess = ownJsonRecordValue(
       options.accessByPluginId,
-      plugin.manifest.id
+      plugin.manifest.id,
     );
     const access = pluginAccessSnapshot({
       manifest: plugin.manifest,
       ...(resolvedAccess?.grantedAccess === undefined
         ? {}
-        : { grantedAccess: resolvedAccess.grantedAccess })
+        : {grantedAccess: resolvedAccess.grantedAccess}),
     });
     registrations.push(
       Object.freeze({
@@ -218,14 +220,14 @@ export function createRuntimePluginRegistrySnapshot(
         providedTools: plugin.providedTools,
         registeredLifecycleHooks: registeredLifecycleHooks(plugin),
         requestedAccess: access.requestedAccess,
-        grantedAccess: access.grantedAccess
-      } satisfies RuntimePluginRegistrationSnapshot)
+        grantedAccess: access.grantedAccess,
+      } satisfies RuntimePluginRegistrationSnapshot),
     );
   }
 
   return Object.freeze({
     contractVersion: runtimePluginContractVersion,
-    plugins: Object.freeze(registrations)
+    plugins: Object.freeze(registrations),
   } satisfies RuntimePluginRegistrySnapshot);
 }
 
@@ -237,21 +239,21 @@ function pluginAccessSnapshot(options: {
   return Object.freeze({
     requestedAccess: normalizeRuntimePluginAccessMap(
       options.requestedAccess ?? options.manifest.requestedAccess,
-      'requestedAccess'
+      'requestedAccess',
     ),
     grantedAccess: normalizeRuntimePluginAccessMap(
       options.grantedAccess,
-      'grantedAccess'
-    )
+      'grantedAccess',
+    ),
   } satisfies RuntimePluginAccessSnapshot);
 }
 
 export function createRuntimePluginEvidenceSnapshot(
-  options: unknown
+  options: unknown,
 ): RuntimePluginEvidenceSnapshot {
   options = createJsonBoundarySnapshot(options, {
     field: 'Plugin evidence snapshot',
-    redact: true
+    redact: true,
   });
 
   if (!isRecord(options)) {
@@ -264,7 +266,7 @@ export function createRuntimePluginEvidenceSnapshot(
   const policyOutcome = optionalOneOf(
     options['policyOutcome'],
     runtimePluginPolicyOutcomeValues,
-    'policyOutcome'
+    'policyOutcome',
   );
   const sourceReferences =
     options['sourceReferences'] === undefined
@@ -272,11 +274,11 @@ export function createRuntimePluginEvidenceSnapshot(
       : requiredSourceReferences(options['sourceReferences']);
   const redactionLabels = requiredStringArrayOrThrow(
     options['redactionLabels'],
-    'redactionLabels'
+    'redactionLabels',
   );
   const configFingerprint = optionalPlainString(
     options['configFingerprint'],
-    'configFingerprint'
+    'configFingerprint',
   );
 
   if (sourceReferences?.status === 'rejected') {
@@ -285,7 +287,7 @@ export function createRuntimePluginEvidenceSnapshot(
   const summary = requirePlainNonEmptyRecordString(options, 'summary');
   if (jsonBoundaryUtf8ByteLength(summary) > 16 * 1_024) {
     throw new TypeError(
-      'Plugin evidence summary exceeds the 16384-byte limit.'
+      'Plugin evidence summary exceeds the 16384-byte limit.',
     );
   }
 
@@ -294,43 +296,41 @@ export function createRuntimePluginEvidenceSnapshot(
     traceId: requirePlainNonEmptyRecordString(options, 'traceId'),
     createdAt: assertCanonicalRuntimeTimestamp(
       requirePlainNonEmptyRecordString(options, 'createdAt'),
-      'Plugin evidence createdAt'
+      'Plugin evidence createdAt',
     ),
     kind: 'runtime_plugin_evidence_snapshot',
     pluginId: requirePlainNonEmptyString(
       requirePlainNonEmptyRecordString(options, 'pluginId'),
-      'pluginId'
+      'pluginId',
     ),
     evidenceKind: requiredOneOf(
       options['evidenceKind'],
       runtimePluginEvidenceKindValues,
-      'evidenceKind'
+      'evidenceKind',
     ),
     status: requiredOneOf(
       options['status'],
       runtimePluginEvidenceStatusValues,
-      'status'
+      'status',
     ),
     summary: redactRuntimePluginText(summary),
-    ...(policyOutcome === undefined
-      ? {}
-      : { policyOutcome }),
+    ...(policyOutcome === undefined ? {} : {policyOutcome}),
     ...(sourceReferences === undefined
       ? {}
-      : { sourceReferences: freezeSourceReferences(sourceReferences.value) }),
+      : {sourceReferences: freezeSourceReferences(sourceReferences.value)}),
     redactionLabels: freezeRedactedStrings(redactionLabels),
     ...(configFingerprint === undefined
       ? {}
-      : { configFingerprint: redactRuntimePluginText(configFingerprint) })
+      : {configFingerprint: redactRuntimePluginText(configFingerprint)}),
   } satisfies RuntimePluginEvidenceSnapshot);
 }
 
 export function createRuntimePluginHealthSnapshot(
-  options: unknown
+  options: unknown,
 ): RuntimePluginHealthSnapshot {
   options = createJsonBoundarySnapshot(options, {
     field: 'Plugin health snapshot',
-    redact: true
+    redact: true,
   });
 
   if (!isRecord(options)) {
@@ -339,32 +339,32 @@ export function createRuntimePluginHealthSnapshot(
 
   const redactionLabels = requiredStringArrayOrThrow(
     options['redactionLabels'],
-    'redactionLabels'
+    'redactionLabels',
   );
 
   return Object.freeze({
     pluginId: requirePlainNonEmptyString(
       requirePlainNonEmptyRecordString(options, 'pluginId'),
-      'pluginId'
+      'pluginId',
     ),
     status: requiredOneOf(
       options['status'],
       runtimePluginHealthStatusValues,
-      'status'
+      'status',
     ),
     checkedAt: assertCanonicalRuntimeTimestamp(
       requirePlainNonEmptyRecordString(options, 'checkedAt'),
-      'Plugin health checkedAt'
+      'Plugin health checkedAt',
     ),
     summary: redactRuntimePluginText(
-      requirePlainNonEmptyRecordString(options, 'summary')
+      requirePlainNonEmptyRecordString(options, 'summary'),
     ),
-    redactionLabels: freezeRedactedStrings(redactionLabels)
+    redactionLabels: freezeRedactedStrings(redactionLabels),
   } satisfies RuntimePluginHealthSnapshot);
 }
 
 export function createRuntimePluginToolInvocationSnapshot(
-  options: unknown
+  options: unknown,
 ): RuntimePluginToolInvocationSnapshot {
   if (!isRecord(options)) {
     throw new TypeError('Plugin tool invocation snapshot must be an object.');
@@ -372,7 +372,7 @@ export function createRuntimePluginToolInvocationSnapshot(
 
   if (options['kind'] !== 'runtime_plugin_tool_invocation_snapshot') {
     throw new TypeError(
-      'Plugin tool invocation snapshot kind is not supported.'
+      'Plugin tool invocation snapshot kind is not supported.',
     );
   }
 
@@ -381,24 +381,24 @@ export function createRuntimePluginToolInvocationSnapshot(
     traceId: requirePlainNonEmptyRecordString(options, 'traceId'),
     createdAt: assertCanonicalRuntimeTimestamp(
       requirePlainNonEmptyRecordString(options, 'createdAt'),
-      'Plugin tool invocation createdAt'
+      'Plugin tool invocation createdAt',
     ),
     kind: 'runtime_plugin_tool_invocation_snapshot',
     pluginId: requirePlainNonEmptyString(
       requirePlainNonEmptyRecordString(options, 'pluginId'),
-      'pluginId'
+      'pluginId',
     ),
     toolName: requirePlainNonEmptyString(
       requirePlainNonEmptyRecordString(options, 'toolName'),
-      'toolName'
+      'toolName',
     ),
     input: createRuntimePluginJsonObject(options['input'], 'input'),
-    result: createRuntimePluginToolCallResultSnapshot(options['result'])
+    result: createRuntimePluginToolCallResultSnapshot(options['result']),
   } satisfies RuntimePluginToolInvocationSnapshot);
 }
 
 export function createPreparedRuntimePluginConfigEffect(
-  options: unknown
+  options: unknown,
 ): PreparedRuntimePluginConfigEffect {
   if (!isRecord(options)) {
     throw new TypeError('Prepared plugin config effect must be an object.');
@@ -412,7 +412,7 @@ export function createPreparedRuntimePluginConfigEffect(
 
   if (!isRecord(operation)) {
     throw new TypeError(
-      'Prepared plugin config effect operation must be an object.'
+      'Prepared plugin config effect operation must be an object.',
     );
   }
 
@@ -421,16 +421,16 @@ export function createPreparedRuntimePluginConfigEffect(
       ? Object.freeze({
           kind: 'set' as const,
           value: createJsonBoundarySnapshot(operation['value'], {
-            field: 'Prepared plugin config effect value'
-          })
+            field: 'Prepared plugin config effect value',
+          }),
         })
       : operation['kind'] === 'unset'
-        ? Object.freeze({ kind: 'unset' as const })
+        ? Object.freeze({kind: 'unset' as const})
         : undefined;
 
   if (normalizedOperation === undefined) {
     throw new TypeError(
-      'Prepared plugin config effect operation is not supported.'
+      'Prepared plugin config effect operation is not supported.',
     );
   }
 
@@ -439,28 +439,25 @@ export function createPreparedRuntimePluginConfigEffect(
     traceId: requirePlainNonEmptyRecordString(options, 'traceId'),
     createdAt: assertCanonicalRuntimeTimestamp(
       requirePlainNonEmptyRecordString(options, 'createdAt'),
-      'Prepared plugin config effect createdAt'
+      'Prepared plugin config effect createdAt',
     ),
     kind: 'runtime_plugin_config_effect',
     effectId: requirePlainNonEmptyRecordString(options, 'effectId'),
-    targetPluginId: requirePlainNonEmptyRecordString(
-      options,
-      'targetPluginId'
-    ),
+    targetPluginId: requirePlainNonEmptyRecordString(options, 'targetPluginId'),
     targetConfigPath: requirePlainNonEmptyRecordString(
       options,
-      'targetConfigPath'
+      'targetConfigPath',
     ),
     fieldName: requirePlainNonEmptyRecordString(options, 'fieldName'),
     expectedFingerprint: requirePlainNonEmptyRecordString(
       options,
-      'expectedFingerprint'
+      'expectedFingerprint',
     ),
     resultFingerprint: requirePlainNonEmptyRecordString(
       options,
-      'resultFingerprint'
+      'resultFingerprint',
     ),
-    operation: normalizedOperation
+    operation: normalizedOperation,
   } satisfies PreparedRuntimePluginConfigEffect);
 }
 
@@ -476,7 +473,7 @@ export function preparedRuntimePluginConfigEffectHasApprovalEvidence(options: {
   readonly toolName: string | undefined;
   readonly result: RuntimePluginToolCallResult | undefined;
 }): boolean {
-  const { effect, result } = options;
+  const {effect, result} = options;
 
   if (
     options.toolCallId !== effect.effectId ||
@@ -497,7 +494,7 @@ export function preparedRuntimePluginConfigEffectHasApprovalEvidence(options: {
   }
 
   return result.evidence.some(
-    (evidence) =>
+    evidence =>
       evidence.eventId === effect.eventId &&
       evidence.traceId === effect.traceId &&
       evidence.createdAt === effect.createdAt &&
@@ -506,19 +503,19 @@ export function preparedRuntimePluginConfigEffectHasApprovalEvidence(options: {
       evidence.status === 'accepted' &&
       evidence.policyOutcome === 'user_approved' &&
       evidence.sourceReferences?.some(
-        (reference) =>
-          reference.kind === 'runtime' && reference.id === effect.effectId
+        reference =>
+          reference.kind === 'runtime' && reference.id === effect.effectId,
       ) === true &&
-      evidence.configFingerprint === effect.resultFingerprint
+      evidence.configFingerprint === effect.resultFingerprint,
   );
 }
 
 export function createRuntimePluginToolCallResultSnapshot(
-  value: unknown
+  value: unknown,
 ): RuntimePluginToolCallResult {
   const boundedValue = createJsonBoundarySnapshot(value, {
     field: 'Plugin tool result',
-    redact: true
+    redact: true,
   });
 
   if (!isRecord(boundedValue)) {
@@ -526,12 +523,12 @@ export function createRuntimePluginToolCallResultSnapshot(
   }
   const evidenceValues = requiredArrayOrThrow(
     boundedValue['evidence'],
-    'result.evidence'
+    'result.evidence',
   );
 
   if (evidenceValues.length > 64) {
     throw new TypeError(
-      'Plugin tool result evidence exceeds the 64-record limit.'
+      'Plugin tool result evidence exceeds the 64-record limit.',
     );
   }
 
@@ -540,8 +537,8 @@ export function createRuntimePluginToolCallResultSnapshot(
       status: 'accepted',
       output: createRuntimePluginJsonValue(boundedValue['output'], 'output'),
       evidence: Object.freeze(
-        evidenceValues.map(createRuntimePluginEvidenceSnapshot)
-      )
+        evidenceValues.map(createRuntimePluginEvidenceSnapshot),
+      ),
     } satisfies RuntimePluginToolCallResult);
   }
 
@@ -549,14 +546,14 @@ export function createRuntimePluginToolCallResultSnapshot(
     return Object.freeze({
       status: 'rejected',
       reason: redactRuntimePluginText(
-        requirePlainNonEmptyRecordString(boundedValue, 'reason')
+        requirePlainNonEmptyRecordString(boundedValue, 'reason'),
       ),
       message: redactRuntimePluginText(
-        requirePlainNonEmptyRecordString(boundedValue, 'message')
+        requirePlainNonEmptyRecordString(boundedValue, 'message'),
       ),
       evidence: Object.freeze(
-        evidenceValues.map(createRuntimePluginEvidenceSnapshot)
-      )
+        evidenceValues.map(createRuntimePluginEvidenceSnapshot),
+      ),
     } satisfies RuntimePluginToolCallResult);
   }
 
@@ -565,18 +562,18 @@ export function createRuntimePluginToolCallResultSnapshot(
 
 function createRuntimePluginJsonObject(
   value: unknown,
-  field: string
+  field: string,
 ): RuntimePluginJsonObject {
   return createJsonBoundaryObjectSnapshot(value, {
     field: `Plugin field "${field}"`,
-    redact: true
+    redact: true,
   });
 }
 
 function createRuntimePluginJsonValue(
   value: unknown,
   field: string,
-  key?: string
+  key?: string,
 ): RuntimePluginJsonValue {
   if (key !== undefined && isRuntimePluginCredentialKey(key)) {
     return '[redacted]';
@@ -584,32 +581,29 @@ function createRuntimePluginJsonValue(
 
   return createJsonBoundarySnapshot(value, {
     field: `Plugin field "${field}"`,
-    redact: true
+    redact: true,
   });
 }
 
 export function createRuntimePluginListingSnapshot(
-  options: unknown
+  options: unknown,
 ): RuntimePluginListingSnapshot {
   if (!isRecord(options)) {
     throw new TypeError('Plugin listing snapshot must be an object.');
   }
 
   const manifest = createRuntimePluginManifest(options['manifest']);
-  const pluginId = requirePlainNonEmptyRecordString(
-    options,
-    'pluginId'
-  );
+  const pluginId = requirePlainNonEmptyRecordString(options, 'pluginId');
   const providedTools = requiredArrayOrThrow(
     options['providedTools'],
-    'providedTools'
+    'providedTools',
   ).map(createRuntimePluginProvidedTool);
   const registeredLifecycleHooks = requiredRegisteredLifecycleHooks(
-    options['registeredLifecycleHooks']
+    options['registeredLifecycleHooks'],
   );
   const redactionLabels = requiredStringArrayOrThrow(
     options['redactionLabels'],
-    'redactionLabels'
+    'redactionLabels',
   );
   const configFingerprint =
     optionalPlainString(options['configFingerprint'], 'configFingerprint') ??
@@ -617,24 +611,22 @@ export function createRuntimePluginListingSnapshot(
   const healthStatus = optionalOneOf(
     options['healthStatus'],
     runtimePluginHealthStatusValues,
-    'healthStatus'
+    'healthStatus',
   );
   const access = pluginAccessSnapshot({
     manifest,
     requestedAccess: normalizeRuntimePluginAccessMap(
       options['requestedAccess'] ?? manifest.requestedAccess,
-      'requestedAccess'
+      'requestedAccess',
     ),
     grantedAccess: normalizeRuntimePluginAccessMap(
       options['grantedAccess'],
-      'grantedAccess'
-    )
+      'grantedAccess',
+    ),
   });
 
   if (pluginId !== manifest.id) {
-    throw new TypeError(
-      'Plugin listing pluginId must match manifest.id.'
-    );
+    throw new TypeError('Plugin listing pluginId must match manifest.id.');
   }
 
   if (registeredLifecycleHooks.status === 'rejected') {
@@ -655,27 +647,25 @@ export function createRuntimePluginListingSnapshot(
     grantedAccess: access.grantedAccess,
     ...(configFingerprint === undefined
       ? {}
-      : { configFingerprint: redactRuntimePluginText(configFingerprint) }),
-    ...(healthStatus === undefined ? {} : { healthStatus })
+      : {configFingerprint: redactRuntimePluginText(configFingerprint)}),
+    ...(healthStatus === undefined ? {} : {healthStatus}),
   } satisfies RuntimePluginListingSnapshot);
 }
 
 export function createRuntimePluginTurnEvidenceSnapshot(
-  options: unknown
+  options: unknown,
 ): RuntimePluginTurnEvidenceSnapshot {
   if (!isRecord(options)) {
     throw new TypeError('Plugin turn evidence snapshot must be an object.');
   }
 
   if (options['kind'] !== 'runtime_plugin_turn_evidence_snapshot') {
-    throw new TypeError(
-      'Plugin turn evidence snapshot kind is not supported.'
-    );
+    throw new TypeError('Plugin turn evidence snapshot kind is not supported.');
   }
 
   if (options['contractVersion'] !== runtimePluginContractVersion) {
     throw new TypeError(
-      `Plugin turn evidence contractVersion must be "${runtimePluginContractVersion}".`
+      `Plugin turn evidence contractVersion must be "${runtimePluginContractVersion}".`,
     );
   }
 
@@ -684,34 +674,35 @@ export function createRuntimePluginTurnEvidenceSnapshot(
     traceId: requirePlainNonEmptyRecordString(options, 'traceId'),
     createdAt: assertCanonicalRuntimeTimestamp(
       requirePlainNonEmptyRecordString(options, 'createdAt'),
-      'Plugin turn evidence createdAt'
-    )
+      'Plugin turn evidence createdAt',
+    ),
   } satisfies RuntimeEventIdentity;
   const plugins = requiredArrayOrThrow(options['plugins'], 'plugins').map(
-    createRuntimePluginListingSnapshot
+    createRuntimePluginListingSnapshot,
   );
-  const contextItems = requiredArrayOrThrow(options['contextItems'], 'contextItems').map(
-    createRuntimePluginContextItem
-  );
+  const contextItems = requiredArrayOrThrow(
+    options['contextItems'],
+    'contextItems',
+  ).map(createRuntimePluginContextItem);
   const toolInvocations = requiredArrayOrThrow(
     options['toolInvocations'] ?? [],
-    'toolInvocations'
+    'toolInvocations',
   ).map(createRuntimePluginToolInvocationSnapshot);
   const evidence = requiredArrayOrThrow(options['evidence'], 'evidence').map(
-    createRuntimePluginEvidenceSnapshot
+    createRuntimePluginEvidenceSnapshot,
   );
   const health = requiredArrayOrThrow(options['health'], 'health').map(
-    createRuntimePluginHealthSnapshot
+    createRuntimePluginHealthSnapshot,
   );
 
   assertUniquePluginListingIds(plugins);
   assertRuntimePluginEvidenceIdentity({
     identity,
-    evidence
+    evidence,
   });
   assertRuntimePluginToolInvocationIdentity({
     identity,
-    toolInvocations
+    toolInvocations,
   });
 
   return Object.freeze({
@@ -722,7 +713,7 @@ export function createRuntimePluginTurnEvidenceSnapshot(
     contextItems: Object.freeze(contextItems),
     toolInvocations: Object.freeze(toolInvocations),
     evidence: Object.freeze(evidence),
-    health: Object.freeze(health)
+    health: Object.freeze(health),
   } satisfies RuntimePluginTurnEvidenceSnapshot);
 }
 
@@ -737,7 +728,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'Plugins with provided tools must declare tool_provider.'
+      'Plugins with provided tools must declare tool_provider.',
     );
   }
 
@@ -747,7 +738,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
     if (seenToolNames.has(tool.name)) {
       return reject(
         'duplicate_declaration',
-        `Plugin provided tool "${tool.name}" is declared more than once.`
+        `Plugin provided tool "${tool.name}" is declared more than once.`,
       );
     }
 
@@ -760,7 +751,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'handleToolCall hooks must declare handle_tool_call.'
+      'handleToolCall hooks must declare handle_tool_call.',
     );
   }
 
@@ -770,7 +761,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'beforeRoleModelCall hooks must declare before_role_model_call.'
+      'beforeRoleModelCall hooks must declare before_role_model_call.',
     );
   }
 
@@ -780,7 +771,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'afterTurnCommitted hooks must declare after_turn_committed.'
+      'afterTurnCommitted hooks must declare after_turn_committed.',
     );
   }
 
@@ -790,7 +781,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'onSessionEnd hooks must declare on_session_end.'
+      'onSessionEnd hooks must declare on_session_end.',
     );
   }
 
@@ -800,7 +791,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'onShutdown hooks must declare on_shutdown.'
+      'onShutdown hooks must declare on_shutdown.',
     );
   }
 
@@ -810,7 +801,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   ) {
     return reject(
       'missing_required_declaration',
-      'health hooks must declare health.'
+      'health hooks must declare health.',
     );
   }
 
@@ -818,7 +809,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
 }
 
 function registeredLifecycleHooks(
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ): readonly RuntimePluginDeclaration[] {
   const hooks: RuntimePluginDeclaration[] = [];
 
@@ -854,24 +845,24 @@ function registeredLifecycleHooks(
 }
 
 function requiredRegisteredLifecycleHooks(
-  value: unknown
+  value: unknown,
 ): RuntimePluginValidationResult<readonly RuntimePluginDeclaration[]> {
   return requiredDeclarationList({
     value,
     field: 'registeredLifecycleHooks',
-    allowEmpty: true
+    allowEmpty: true,
   });
 }
 
 function assertUniquePluginListingIds(
-  plugins: readonly RuntimePluginListingSnapshot[]
+  plugins: readonly RuntimePluginListingSnapshot[],
 ): void {
   const seen = new Set<string>();
 
   for (const plugin of plugins) {
     if (seen.has(plugin.pluginId)) {
       throw new TypeError(
-        `Duplicate plugin listing id "${plugin.pluginId}" is not allowed.`
+        `Duplicate plugin listing id "${plugin.pluginId}" is not allowed.`,
       );
     }
 
@@ -893,7 +884,7 @@ function assertRuntimePluginEvidenceIdentity(options: {
     }
 
     throw new TypeError(
-      'Plugin evidence snapshot identity must match turn evidence identity.'
+      'Plugin evidence snapshot identity must match turn evidence identity.',
     );
   }
 }
@@ -909,19 +900,19 @@ function assertRuntimePluginToolInvocationIdentity(options: {
       invocation.createdAt !== options.identity.createdAt
     ) {
       throw new TypeError(
-        'Plugin tool invocation identity must match turn evidence identity.'
+        'Plugin tool invocation identity must match turn evidence identity.',
       );
     }
 
     assertRuntimePluginEvidenceIdentity({
       identity: options.identity,
-      evidence: invocation.result.evidence
+      evidence: invocation.result.evidence,
     });
   }
 }
 
 function freezeLifecycleHooks(
-  hooks: RuntimePluginLifecycleHooks
+  hooks: RuntimePluginLifecycleHooks,
 ): RuntimePluginLifecycleHooks {
   const beforeRoleModelCall = hooks.beforeRoleModelCall;
   const handleToolCall = hooks.handleToolCall;
@@ -934,32 +925,32 @@ function freezeLifecycleHooks(
     ...(beforeRoleModelCall === undefined
       ? {}
       : {
-          beforeRoleModelCall: (context) => beforeRoleModelCall(context)
+          beforeRoleModelCall: context => beforeRoleModelCall(context),
         }),
     ...(handleToolCall === undefined
       ? {}
       : {
-          handleToolCall: (call, context) => handleToolCall(call, context)
+          handleToolCall: (call, context) => handleToolCall(call, context),
         }),
     ...(afterTurnCommitted === undefined
       ? {}
       : {
-          afterTurnCommitted: (context) => afterTurnCommitted(context)
+          afterTurnCommitted: context => afterTurnCommitted(context),
         }),
     ...(onSessionEnd === undefined
       ? {}
       : {
-          onSessionEnd: (context) => onSessionEnd(context)
+          onSessionEnd: context => onSessionEnd(context),
         }),
     ...(onShutdown === undefined
       ? {}
       : {
-          onShutdown: (context) => onShutdown(context)
+          onShutdown: context => onShutdown(context),
         }),
     ...(health === undefined
       ? {}
       : {
-          health: (context) => health(context)
-        })
+          health: context => health(context),
+        }),
   } satisfies RuntimePluginLifecycleHooks);
 }

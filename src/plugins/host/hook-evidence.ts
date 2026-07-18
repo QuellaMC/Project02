@@ -1,19 +1,19 @@
-import { createRuntimePluginEvidenceSnapshot } from '../api/constructors.ts';
+import {createRuntimePluginEvidenceSnapshot} from '../api/constructors.ts';
 import type {
   RuntimePluginEvidenceKind,
   RuntimePluginEvidenceStatus,
-  RuntimePluginPolicyOutcome
+  RuntimePluginPolicyOutcome,
 } from '../api/contract.ts';
-import { runtimeIdentityMatchesContext } from '../api/identity.ts';
+import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginProvidedTool,
-  RuntimePluginSourceReference
+  RuntimePluginSourceReference,
 } from '../api/types.ts';
-import { mergedRedactionLabels } from '../api/evidence-policy.ts';
+import {mergedRedactionLabels} from '../api/evidence-policy.ts';
 
 export function normalizeEvidenceSnapshots(options: {
   readonly plugin: RuntimePlugin;
@@ -26,24 +26,22 @@ export function normalizeEvidenceSnapshots(options: {
   }
 
   return Object.freeze(
-    items.map((item) => {
-      const evidence = createRuntimePluginEvidenceSnapshot(
-        item
-      );
+    items.map(item => {
+      const evidence = createRuntimePluginEvidenceSnapshot(item);
 
       assertSnapshotPluginId({
         plugin: options.plugin,
         actualPluginId: evidence.pluginId,
-        field: 'evidence.pluginId'
+        field: 'evidence.pluginId',
       });
       assertSnapshotRuntimeIdentity({
         context: options.context,
         snapshot: evidence,
-        field: 'evidence'
+        field: 'evidence',
       });
 
       return evidence;
-    })
+    }),
   );
 }
 
@@ -66,30 +64,30 @@ export function createHookFailureEvidence(options: {
     summary: options.summary,
     ...(options.policyOutcome === undefined
       ? {}
-      : { policyOutcome: options.policyOutcome }),
+      : {policyOutcome: options.policyOutcome}),
     redactionLabels: mergedRedactionLabels({
       plugin: options.plugin,
-      context: options.context
+      context: options.context,
     }),
     ...(options.plugin.manifest.config.fingerprint === undefined
       ? {}
-      : { configFingerprint: options.plugin.manifest.config.fingerprint })
+      : {configFingerprint: options.plugin.manifest.config.fingerprint}),
   });
 }
 
 export function failurePolicyOutcomeOption(
   evidenceKind: RuntimePluginEvidenceKind,
-  failureKind: 'exception' | 'timeout'
-): { readonly policyOutcome?: RuntimePluginPolicyOutcome } {
+  failureKind: 'exception' | 'timeout',
+): {readonly policyOutcome?: RuntimePluginPolicyOutcome} {
   if (failureKind === 'timeout') {
     return {
-      policyOutcome: 'timeout'
+      policyOutcome: 'timeout',
     };
   }
 
   if (evidenceKind === 'after_turn_committed') {
     return {
-      policyOutcome: 'after_commit_failed'
+      policyOutcome: 'after_commit_failed',
     };
   }
 
@@ -106,13 +104,16 @@ export function assertSnapshotPluginId(options: {
   }
 
   throw new TypeError(
-    `${options.field} must match plugin "${options.plugin.manifest.id}".`
+    `${options.field} must match plugin "${options.plugin.manifest.id}".`,
   );
 }
 
 function assertSnapshotRuntimeIdentity(options: {
   readonly context: RuntimePluginContext;
-  readonly snapshot: Pick<RuntimePluginEvidenceSnapshot, 'eventId' | 'traceId' | 'createdAt'>;
+  readonly snapshot: Pick<
+    RuntimePluginEvidenceSnapshot,
+    'eventId' | 'traceId' | 'createdAt'
+  >;
   readonly field: string;
 }): void {
   if (runtimeIdentityMatchesContext(options.snapshot, options.context)) {
@@ -120,7 +121,7 @@ function assertSnapshotRuntimeIdentity(options: {
   }
 
   throw new TypeError(
-    `${options.field} identity must match current runtime event identity.`
+    `${options.field} identity must match current runtime event identity.`,
   );
 }
 
@@ -132,7 +133,7 @@ export function assertContextItemSourceReferences(options: {
     sourceReferencesRequired:
       options.plugin.manifest.runtimePolicy.sourceReferencesRequired,
     sourceReferences: options.contextItem.sourceReferences,
-    message: `Plugin "${options.plugin.manifest.id}" context item "${options.contextItem.id}" requires source references.`
+    message: `Plugin "${options.plugin.manifest.id}" context item "${options.contextItem.id}" requires source references.`,
   });
 }
 
@@ -145,18 +146,19 @@ export function assertAcceptedToolEvidenceSourceReferences(options: {
     sourceReferencesRequired: options.providedTool.sourceReferencesRequired,
     sourceReferences: options.evidence
       .filter(
-        (evidence) =>
+        evidence =>
           evidence.evidenceKind === 'tool_invocation' &&
-          evidence.status === 'accepted'
+          evidence.status === 'accepted',
       )
-      .flatMap((evidence) => evidence.sourceReferences ?? []),
-    message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result requires source references.`
+      .flatMap(evidence => evidence.sourceReferences ?? []),
+    message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result requires source references.`,
   });
 }
 
 function assertRequiredSourceReferences(options: {
   readonly sourceReferencesRequired: boolean;
-  readonly sourceReferences: readonly RuntimePluginSourceReference[] | undefined;
+  readonly sourceReferences:
+    readonly RuntimePluginSourceReference[] | undefined;
   readonly message: string;
 }): void {
   if (!options.sourceReferencesRequired) {
@@ -170,7 +172,10 @@ function assertRequiredSourceReferences(options: {
   throw new TypeError(options.message);
 }
 
-export function requiredArray(value: unknown, field: string): readonly unknown[] {
+export function requiredArray(
+  value: unknown,
+  field: string,
+): readonly unknown[] {
   if (!Array.isArray(value)) {
     throw new TypeError(`${field} must be an array.`);
   }

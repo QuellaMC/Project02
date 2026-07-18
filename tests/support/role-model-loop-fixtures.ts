@@ -3,7 +3,7 @@ import {
   createDefaultRoleModelPluginToolDefinitions,
   type RoleModelAdapter,
   type RoleModelPluginToolDefinition,
-  type RoleModelProviderMetadata
+  type RoleModelProviderMetadata,
 } from '../../src/role-model/index.ts';
 import {
   createRuntimePlugin,
@@ -12,12 +12,12 @@ import {
   type RuntimePluginContext,
   type RuntimePlugin,
   type RuntimePluginToolCall,
-  type RuntimePluginToolCallResult
+  type RuntimePluginToolCallResult,
 } from '../../src/plugins/api/index.ts';
-import { runtimePluginContractVersion } from '../../src/plugins/api/contract.ts';
+import {runtimePluginContractVersion} from '../../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 
 export const memorySearchToolDefinition = Object.freeze({
@@ -27,7 +27,7 @@ export const memorySearchToolDefinition = Object.freeze({
   requiredForUserTurn: false,
   callLimit: {
     scope: 'user_turn',
-    maxCalls: 1
+    maxCalls: 1,
   },
   inputContract: {
     type: 'object',
@@ -35,41 +35,41 @@ export const memorySearchToolDefinition = Object.freeze({
       {
         name: 'query',
         description: 'Search query.',
-        required: true
-      }
+        required: true,
+      },
     ],
-    additionalFields: false
+    additionalFields: false,
   },
   validationOwner: 'plugin_host',
   sideEffectLevel: 'runtime_read',
   requiresConfirmation: false,
-  sourceReferencesRequired: false
+  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 export const requiredMemorySearchToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
-  requiredForUserTurn: true
+  requiredForUserTurn: true,
 } satisfies RoleModelPluginToolDefinition);
 
 export const memoryRecallToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   name: 'memory.recall',
-  description: 'Recall memory.'
+  description: 'Recall memory.',
 } satisfies RoleModelPluginToolDefinition);
 
 export const visibleDotReplyToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   pluginId: 'visible.reply.fixture',
   name: 'visible.reply',
-  description: 'Exercise a provider-name collision with visible_reply.'
+  description: 'Exercise a provider-name collision with visible_reply.',
 } satisfies RoleModelPluginToolDefinition);
 
 export function withVisibleReplyTool(
-  definition: RoleModelPluginToolDefinition
+  definition: RoleModelPluginToolDefinition,
 ): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze([
     ...createDefaultRoleModelPluginToolDefinitions(),
-    definition
+    definition,
   ]);
 }
 
@@ -86,11 +86,11 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
+        sourceSystem: 'test',
       },
       declaredPlugins: ['tool_provider', 'handle_tool_call'],
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
@@ -104,14 +104,14 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: true,
-        reasons: ['test']
+        reasons: ['test'],
       },
-      requestedAccess: { model_input: 'write' }
+      requestedAccess: {model_input: 'write'},
     },
     providedTools: [
       {
@@ -120,7 +120,7 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         requiredForUserTurn: false,
         callLimit: {
           scope: 'user_turn',
-          maxCalls: 1
+          maxCalls: 1,
         },
         inputContract: {
           type: 'object',
@@ -128,16 +128,16 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
             {
               name: 'query',
               description: 'Search query.',
-              required: true
-            }
+              required: true,
+            },
           ],
-          additionalFields: false
+          additionalFields: false,
         },
         validationOwner: 'plugin_host',
         sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
-        sourceReferencesRequired: false
-      }
+        sourceReferencesRequired: false,
+      },
     ],
     lifecycleHooks: {
       handleToolCall() {
@@ -145,16 +145,16 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
           status: 'rejected',
           reason: 'handler_rejected',
           message: 'search backend degraded',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
-  onInvoke: () => void
+  onInvoke: () => void,
 ): RoleModelAdapter {
   let index = 0;
 
@@ -170,14 +170,14 @@ export function createSequencedAdapter(
       onInvoke();
 
       return {
-        rawOutputText: JSON.stringify(decision)
+        rawOutputText: JSON.stringify(decision),
       };
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
 export function createProviderMetadataAdapter(
-  providerMetadata: RoleModelProviderMetadata
+  providerMetadata: RoleModelProviderMetadata,
 ): RoleModelAdapter {
   return Object.freeze({
     invoke() {
@@ -187,14 +187,14 @@ export function createProviderMetadataAdapter(
             {
               name: 'visible_reply',
               input: {
-                text: 'hello'
-              }
-            }
-          ]
+                text: 'hello',
+              },
+            },
+          ],
         }),
-        providerMetadata
+        providerMetadata,
       };
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
@@ -202,9 +202,9 @@ export function createAcceptedToolCallResult(): RuntimePluginToolCallResult {
   return Object.freeze({
     status: 'accepted',
     output: Object.freeze({
-      ok: true
+      ok: true,
     }),
-    evidence: Object.freeze([])
+    evidence: Object.freeze([]),
   } satisfies RuntimePluginToolCallResult);
 }
 
@@ -216,7 +216,7 @@ export function createAcceptedToolCallResultWithBlockingEvidence(options: {
   return Object.freeze({
     status: 'accepted',
     output: Object.freeze({
-      ok: true
+      ok: true,
     }),
     evidence: Object.freeze([
       createRuntimePluginEvidenceSnapshot({
@@ -230,9 +230,9 @@ export function createAcceptedToolCallResultWithBlockingEvidence(options: {
         summary: 'search backend failed',
         policyOutcome:
           options.evidenceStatus === 'failed' ? 'timeout' : 'handler_rejected',
-        redactionLabels: []
-      })
-    ])
+        redactionLabels: [],
+      }),
+    ]),
   } satisfies RuntimePluginToolCallResult);
 }
 
@@ -248,9 +248,9 @@ export function createRejectedToolCallResult(options: {
     evidence: [
       {
         status: options.evidenceStatus,
-        policyOutcome: options.policyOutcome
-      }
-    ]
+        policyOutcome: options.policyOutcome,
+      },
+    ],
   });
 }
 
@@ -266,7 +266,7 @@ export function createRejectedToolCallResultWithEvidence(options: {
     status: 'rejected',
     reason: 'handler_failed',
     message: 'search backend failed',
-    evidence: options.evidence.map((evidence) =>
+    evidence: options.evidence.map(evidence =>
       createRuntimePluginEvidenceSnapshot({
         eventId: options.context.eventId,
         traceId: options.context.traceId,
@@ -277,9 +277,9 @@ export function createRejectedToolCallResultWithEvidence(options: {
         status: evidence.status,
         summary: 'search backend failed',
         policyOutcome: evidence.policyOutcome,
-        redactionLabels: []
-      })
-    )
+        redactionLabels: [],
+      }),
+    ),
   } satisfies RuntimePluginToolCallResult);
 }
 
@@ -288,43 +288,43 @@ export function createTestDecisionContext() {
     sessionId: 'session-loop',
     characterSnapshot: {
       id: 'mira',
-      displayName: 'Mira'
-    }
+      displayName: 'Mira',
+    },
   });
 }
 
 export function createTestPluginContext(
   eventId: string,
-  traceId = `trace_${eventId}`
+  traceId = `trace_${eventId}`,
 ): RuntimePluginContext {
   return createRuntimePluginContext({
     ...createRuntimeEventIdentity({
       eventId,
       traceId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     }),
     sessionId: 'session-loop',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'search memory',
     character: {
       id: 'mira',
-      displayName: 'Mira'
-    }
+      displayName: 'Mira',
+    },
   });
 }
 
 export function createTestEvent(
   message: string,
   eventId: string,
-  traceId = `trace_${eventId}`
+  traceId = `trace_${eventId}`,
 ) {
   return createUserMessageRuntimeEvent(
     message,
     createRuntimeEventIdentity({
       eventId,
       traceId,
-      createdAt: '2026-06-15T00:00:00.000Z'
-    })
+      createdAt: '2026-06-15T00:00:00.000Z',
+    }),
   );
 }
 

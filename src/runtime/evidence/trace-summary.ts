@@ -1,6 +1,8 @@
 import type {
-  RawEventLogRecord, RuntimeTraceEntry,
-  RuntimeTraceStepName, RuntimeTurnStatus
+  RawEventLogRecord,
+  RuntimeTraceEntry,
+  RuntimeTraceStepName,
+  RuntimeTurnStatus,
 } from './records.ts';
 
 export type ChatTraceSummary = {
@@ -28,10 +30,9 @@ export type TraceIdentity = {
   readonly traceId: string;
 };
 
-
 export function sameTraceIdentity(
   evidence: TraceIdentity,
-  identity: TraceIdentity
+  identity: TraceIdentity,
 ): boolean {
   return (
     evidence.eventId === identity.eventId &&
@@ -45,30 +46,28 @@ export function createTraceSummary(
   entries: readonly RuntimeTraceEntry[],
   error?: string,
   rawEvent?: RawEventLogRecord,
-  rawEvents?: readonly RawEventLogRecord[]
+  rawEvents?: readonly RawEventLogRecord[],
 ): ChatTraceSummary {
   return Object.freeze({
     eventId: identity.eventId,
     traceId: identity.traceId,
     status,
-    steps: Object.freeze(entries.map((entry) => entry.step)),
+    steps: Object.freeze(entries.map(entry => entry.step)),
     ...traceProviderSummaryOption(rawEvent, rawEvents),
     ...traceToolCallSummaryOption(rawEvent, rawEvents),
-    ...(error === undefined ? {} : { error })
+    ...(error === undefined ? {} : {error}),
   } satisfies ChatTraceSummary);
 }
 
 export function traceProviderSummaryOption(
   rawEvent: RawEventLogRecord | undefined,
-  rawEvents: readonly RawEventLogRecord[] | undefined
-): { readonly provider?: ChatTraceProviderSummary } {
+  rawEvents: readonly RawEventLogRecord[] | undefined,
+): {readonly provider?: ChatTraceProviderSummary} {
   const providerMetadata =
     rawEvent?.roleModelIOSnapshot?.providerMetadata ??
     [...(rawEvents ?? [])]
       .reverse()
-      .find(
-        (event) => event.roleModelIOSnapshot?.providerMetadata !== undefined
-      )
+      .find(event => event.roleModelIOSnapshot?.providerMetadata !== undefined)
       ?.roleModelIOSnapshot?.providerMetadata;
 
   if (providerMetadata === undefined) {
@@ -80,23 +79,23 @@ export function traceProviderSummaryOption(
       name: providerMetadata.provider,
       ...(providerMetadata.model === undefined
         ? {}
-        : { model: providerMetadata.model }),
+        : {model: providerMetadata.model}),
       ...(providerMetadata.response?.status === undefined
         ? {}
-        : { responseStatus: providerMetadata.response.status }),
+        : {responseStatus: providerMetadata.response.status}),
       ...(providerMetadata.error === undefined
         ? {}
         : {
             errorCode: providerMetadata.error.code,
-            errorMessage: providerMetadata.error.message
-          })
-    } satisfies ChatTraceProviderSummary)
+            errorMessage: providerMetadata.error.message,
+          }),
+    } satisfies ChatTraceProviderSummary),
   };
 }
 
 export function traceToolCallSummaryOption(
   terminalRawEvent: RawEventLogRecord | undefined,
-  rawEvents: readonly RawEventLogRecord[] | undefined
+  rawEvents: readonly RawEventLogRecord[] | undefined,
 ): {
   readonly requestedToolCalls?: readonly string[];
   readonly executedToolCalls?: readonly string[];
@@ -111,11 +110,11 @@ export function traceToolCallSummaryOption(
   const executedToolCalls = executedToolCallNames(turnRawEvents);
   const terminalDecision = terminalDecisionEvidenceRawEvent(
     terminalRawEvent,
-    turnRawEvents
+    turnRawEvents,
   )?.parsedRoleModelDecisionSnapshot?.result;
   const terminalToolCalls =
     terminalDecision?.status === 'accepted'
-      ? terminalDecision.decision.toolCalls.map((call) => call.name)
+      ? terminalDecision.decision.toolCalls.map(call => call.name)
       : [];
 
   if (terminalDecision?.status === 'rejected') {
@@ -127,26 +126,26 @@ export function traceToolCallSummaryOption(
   return {
     requestedToolCalls: Object.freeze(requestedToolCalls),
     executedToolCalls: Object.freeze(executedToolCalls),
-    terminalToolCalls: Object.freeze(terminalToolCalls)
+    terminalToolCalls: Object.freeze(terminalToolCalls),
   };
 }
 
 export function hasTraceToolCallEvidence(
   terminalRawEvent: RawEventLogRecord | undefined,
-  turnRawEvents: readonly RawEventLogRecord[]
+  turnRawEvents: readonly RawEventLogRecord[],
 ): boolean {
   return (
     terminalRawEvent?.parsedRoleModelDecisionSnapshot !== undefined ||
     turnRawEvents.some(
-      (event) =>
+      event =>
         event.parsedRoleModelDecisionSnapshot !== undefined ||
-        event.kind === 'tool_call_finished'
+        event.kind === 'tool_call_finished',
     )
   );
 }
 
 export function requestedToolCallNames(
-  turnRawEvents: readonly RawEventLogRecord[]
+  turnRawEvents: readonly RawEventLogRecord[],
 ): string[] {
   const requestedToolCalls: string[] = [];
   const seenRequestedDecisions = new Set<string>();
@@ -172,7 +171,7 @@ export function requestedToolCallNames(
 
     seenRequestedDecisions.add(decisionEvidenceKey);
     requestedToolCalls.push(
-      ...decisionSnapshot.result.decision.toolCalls.map((call) => call.name)
+      ...decisionSnapshot.result.decision.toolCalls.map(call => call.name),
     );
   }
 
@@ -180,7 +179,7 @@ export function requestedToolCallNames(
 }
 
 export function executedToolCallNames(
-  turnRawEvents: readonly RawEventLogRecord[]
+  turnRawEvents: readonly RawEventLogRecord[],
 ): string[] {
   const executedToolCalls: string[] = [];
   const seenExecutedToolCallIds = new Set<string>();
@@ -211,7 +210,9 @@ export function executedToolCallNames(
   return executedToolCalls;
 }
 
-export function requestedDecisionEvidenceKey(event: RawEventLogRecord): string | undefined {
+export function requestedDecisionEvidenceKey(
+  event: RawEventLogRecord,
+): string | undefined {
   const roleModelIOSnapshot = event.roleModelIOSnapshot;
 
   if (
@@ -226,13 +227,13 @@ export function requestedDecisionEvidenceKey(event: RawEventLogRecord): string |
   // stable key shared by the interim event and every tool-start event for the
   // same decision, including after durable decoding.
   return `${String(
-    roleModelIOSnapshot.inputEnvelope.toolObservations.length
+    roleModelIOSnapshot.inputEnvelope.toolObservations.length,
   )}:${roleModelIOSnapshot.rawOutputText}`;
 }
 
 export function terminalDecisionEvidenceRawEvent(
   terminalRawEvent: RawEventLogRecord | undefined,
-  turnRawEvents: readonly RawEventLogRecord[]
+  turnRawEvents: readonly RawEventLogRecord[],
 ): RawEventLogRecord | undefined {
   if (terminalRawEvent !== undefined) {
     return terminalRawEvent;
@@ -240,19 +241,18 @@ export function terminalDecisionEvidenceRawEvent(
 
   const reverseEvents = [...turnRawEvents].reverse();
   const persistedTerminalEvent = reverseEvents.find(
-    (event) =>
+    event =>
       (event.kind === 'runtime_turn_completed' ||
         event.kind === 'runtime_turn_rejected') &&
-      event.parsedRoleModelDecisionSnapshot !== undefined
+      event.parsedRoleModelDecisionSnapshot !== undefined,
   );
 
   return (
     persistedTerminalEvent ??
     reverseEvents.find(
-      (event) =>
+      event =>
         event.kind === 'visible_reply_committed' &&
-        (event.visibleMessageIds?.length ?? 0) > 0
+        (event.visibleMessageIds?.length ?? 0) > 0,
     )
   );
 }
-

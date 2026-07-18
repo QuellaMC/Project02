@@ -1,10 +1,10 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
   createRuntimePluginContext,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
 
 describe('runtime plugin hook result boundaries', () => {
@@ -21,10 +21,10 @@ describe('runtime plugin hook result boundaries', () => {
         contractVersion: runtimePluginContractVersion,
         compatibility: {
           hostContractVersions: [runtimePluginContractVersion],
-          sourceSystem: 'test'
+          sourceSystem: 'test',
         },
         declaredPlugins: ['before_role_model_call'],
-        config: { fields: [] },
+        config: {fields: []},
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,
@@ -37,21 +37,21 @@ describe('runtime plugin hook result boundaries', () => {
             beforeRoleModelCall: 'degrade',
             handleToolCall: 'reject_tool_call',
             afterTurnCommitted: 'log_failure',
-            health: 'degrade'
-          }
+            health: 'degrade',
+          },
         },
         activation: {
           defaultEnabled: true,
-          reasons: ['test']
+          reasons: ['test'],
         },
-        requestedAccess: { model_input: 'write' }
+        requestedAccess: {model_input: 'write'},
       },
       providedTools: [],
       lifecycleHooks: {
         beforeRoleModelCall(context) {
           return {
             contextItems: [],
-            evidence: Array.from({ length: 5 }, () => ({
+            evidence: Array.from({length: 5}, () => ({
               eventId: context.eventId,
               traceId: context.traceId,
               createdAt: context.timestamp,
@@ -60,15 +60,15 @@ describe('runtime plugin hook result boundaries', () => {
               evidenceKind: 'before_role_model_call' as const,
               status: 'accepted' as const,
               summary,
-              redactionLabels: []
-            }))
+              redactionLabels: [],
+            })),
           };
-        }
-      }
+        },
+      },
     });
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [pluginId]
+      enabledPluginIds: [pluginId],
     });
     const result = await host.beforeRoleModelCall(
       createRuntimePluginContext({
@@ -78,8 +78,8 @@ describe('runtime plugin hook result boundaries', () => {
         sessionId: 'session-hook-aggregate-boundary',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: { id: 'mira', displayName: 'Mira' }
-      })
+        character: {id: 'mira', displayName: 'Mira'},
+      }),
     );
 
     expect(result.status).toBe('completed');
@@ -87,11 +87,9 @@ describe('runtime plugin hook result boundaries', () => {
     expect(result.evidence[0]).toMatchObject({
       pluginId,
       status: 'degraded',
-      policyOutcome: 'optional_degraded'
+      policyOutcome: 'optional_degraded',
     });
-    expect(result.evidence[0]?.summary).toContain(
-      'aggregate JSON text limit'
-    );
+    expect(result.evidence[0]?.summary).toContain('aggregate JSON text limit');
     expect(JSON.stringify(result)).not.toContain(summary);
   });
 });

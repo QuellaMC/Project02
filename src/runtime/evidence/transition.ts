@@ -1,23 +1,23 @@
-import type { CharacterProfile } from '../../core/index.ts';
+import type {CharacterProfile} from '../../core/index.ts';
 import type {
   ConversationLogRecord,
   ConversationLogRecordInput,
   RawEventLogRecord,
   RawEventLogRecordInput,
   RuntimeTraceEntry,
-  RuntimeTraceEntryInput
+  RuntimeTraceEntryInput,
 } from './records.ts';
 import {
   decodeConversationLogRecord,
-  encodeConversationLogRecord
+  encodeConversationLogRecord,
 } from '../storage/conversation-codec.ts';
 import type {
   MutableDurableRuntimeSessionEvidence,
-  RuntimeEvidenceIncrementalState
+  RuntimeEvidenceIncrementalState,
 } from './contract.ts';
 import {
   decodeRawEventLogRecord,
-  encodeRawEventLogRecord
+  encodeRawEventLogRecord,
 } from '../storage/raw-event-codec.ts';
 import {
   applyIncrementalConversationAppend,
@@ -28,11 +28,11 @@ import {
   assertIncrementalRawEventAppend,
   assertIncrementalStatePublicReadable,
   assertIncrementalTraceAppend,
-  createRuntimeEvidenceIncrementalState
+  createRuntimeEvidenceIncrementalState,
 } from './validation.ts';
 import {
   decodeRuntimeTraceEntry,
-  encodeRuntimeTraceEntry
+  encodeRuntimeTraceEntry,
 } from '../storage/trace-codec.ts';
 
 export type RuntimeEvidenceTransitionMachine = {
@@ -43,7 +43,7 @@ export type RuntimeEvidenceTransitionMachine = {
   commitRawEventAppend(record: RawEventLogRecord): void;
   prepareConversationAppend(
     record: ConversationLogRecordInput,
-    expectedCharacter?: CharacterProfile
+    expectedCharacter?: CharacterProfile,
   ): ConversationLogRecord;
   commitConversationAppend(record: ConversationLogRecord): void;
   removeConversationMessages(messageIds: readonly string[]): void;
@@ -59,7 +59,9 @@ export function createRuntimeEvidenceTransitionMachine(options: {
   return Object.freeze({
     state,
     prepareTraceAppend(entry) {
-      const storedEntry = decodeRuntimeTraceEntry(encodeRuntimeTraceEntry(entry));
+      const storedEntry = decodeRuntimeTraceEntry(
+        encodeRuntimeTraceEntry(entry),
+      );
 
       assertIncrementalTraceAppend(state, storedEntry);
       return storedEntry;
@@ -69,7 +71,9 @@ export function createRuntimeEvidenceTransitionMachine(options: {
       applyIncrementalTraceAppend(state, entry);
     },
     prepareRawEventAppend(record) {
-      const storedRecord = decodeRawEventLogRecord(encodeRawEventLogRecord(record));
+      const storedRecord = decodeRawEventLogRecord(
+        encodeRawEventLogRecord(record),
+      );
 
       assertIncrementalRawEventAppend({
         evidence: options.evidence,
@@ -77,7 +81,7 @@ export function createRuntimeEvidenceTransitionMachine(options: {
         record: storedRecord,
         ...(options.sessionId === undefined
           ? {}
-          : { sessionId: options.sessionId })
+          : {sessionId: options.sessionId}),
       });
       return storedRecord;
     },
@@ -86,12 +90,12 @@ export function createRuntimeEvidenceTransitionMachine(options: {
       applyIncrementalRawEventAppend({
         evidence: options.evidence,
         state,
-        record
+        record,
       });
     },
     prepareConversationAppend(record, expectedCharacter) {
       const storedRecord = decodeConversationLogRecord(
-        encodeConversationLogRecord(record)
+        encodeConversationLogRecord(record),
       );
 
       assertIncrementalConversationAppend({
@@ -100,8 +104,8 @@ export function createRuntimeEvidenceTransitionMachine(options: {
         record: storedRecord,
         ...(options.sessionId === undefined
           ? {}
-          : { sessionId: options.sessionId }),
-        ...(expectedCharacter === undefined ? {} : { expectedCharacter })
+          : {sessionId: options.sessionId}),
+        ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
       });
       return storedRecord;
     },
@@ -128,6 +132,6 @@ export function createRuntimeEvidenceTransitionMachine(options: {
     },
     assertPublicReadable() {
       assertIncrementalStatePublicReadable(state);
-    }
+    },
   } satisfies RuntimeEvidenceTransitionMachine);
 }

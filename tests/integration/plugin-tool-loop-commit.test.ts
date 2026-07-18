@@ -1,51 +1,52 @@
-import { spawn } from 'node:child_process';
-import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import {spawn} from 'node:child_process';
+import {readFile} from 'node:fs/promises';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {
   createConversationSession,
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {
   characterStatePluginId,
-  createCharacterStatePlugin
+  createCharacterStatePlugin,
 } from '../../src/plugins/packages/character-state/plugin.ts';
-import { createRuntimePluginFileStore } from '../../src/runtime/storage/plugin-file-store/index.ts';
-import { testRuntimePluginConfigControlCapability, testRuntimePluginFileStoreProvider } from '../support/plugin-host-fixtures.ts';
-import { durablePluginStoreMutationResourceKey } from '../../src/runtime/storage/plugin-file-store/durable-primitives.ts';
+import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {
+  testRuntimePluginConfigControlCapability,
+  testRuntimePluginFileStoreProvider,
+} from '../support/plugin-host-fixtures.ts';
+import {durablePluginStoreMutationResourceKey} from '../../src/runtime/storage/plugin-file-store/durable-primitives.ts';
 import {
   createRuntimePluginHost,
-  type RuntimePluginHost
+  type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
-import { createRuntimePlugin } from '../../src/plugins/api/constructors.ts';
-import { runtimePluginConfigUpdateToolName } from '../../src/plugins/api/contract.ts';
+import {createRuntimePlugin} from '../../src/plugins/api/constructors.ts';
+import {runtimePluginConfigUpdateToolName} from '../../src/plugins/api/contract.ts';
 import {
   firstPartyModelToolsPluginId,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/index.ts';
 import {
   applyRuntimePluginConfigControlOperation,
-  inspectRuntimePluginConfig
+  inspectRuntimePluginConfig,
 } from '../../src/runtime/config/index.ts';
-import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimePluginPaths,
-  createLocalRuntimeStorageLayout
+  createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
-import { LocalRuntimeMutationLockBusyError } from '../../src/runtime/storage/mutation-lock.ts';
-import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
+import {LocalRuntimeMutationLockBusyError} from '../../src/runtime/storage/mutation-lock.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
-  type RoleModelToolObservation
+  type RoleModelToolObservation,
 } from '../../src/role-model/index.ts';
-import {
-  runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost
-} from '../../src/runtime/turn/local.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost} from '../../src/runtime/turn/local.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createAfterTurnCommittedAppendFailingLogStore,
   createAfterTurnCommittedProbeHost,
@@ -61,48 +62,48 @@ import {
   createTurnCompletedAppendFailingLogStore,
   handleFileStoreWritePluginId,
   handleFileStoreWriteToolName,
-  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent
+  runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
-import { writeRuntimeConfig } from '../support/runtime-config.ts';
-import { requiredDottedConfigPlugin } from '../support/runtime-config-fixtures.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {requiredDottedConfigPlugin} from '../support/runtime-config-fixtures.ts';
 
 async function createConfigEffectTestFixture(label: string) {
   const sessionId = `session-config-effect-${label}`;
   const storeRoot = createTestTempRoot(`project02-config-effect-${label}-`);
 
-  await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+  await createLocalRuntimeSessionStore({storeRoot}).createSession({
     sessionId,
-    createdAt: '2026-07-16T00:00:00.000Z'
+    createdAt: '2026-07-16T00:00:00.000Z',
   });
 
   const basePlugin = requiredDottedConfigPlugin(
     `config-effect-${label}.fixture`,
-    'tone'
+    'tone',
   );
   const targetPlugin = createRuntimePlugin({
     manifest: {
       ...basePlugin.manifest,
       config: {
-        fields: basePlugin.manifest.config.fields.map((field) => ({
+        fields: basePlugin.manifest.config.fields.map(field => ({
           ...field,
           required: false,
-          agentMutable: true
-        }))
-      }
-    }
+          agentMutable: true,
+        })),
+      },
+    },
   });
   const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
     plugins: {
       [targetPlugin.manifest.id]: {
-        config: { tone: 'cool' }
-      }
-    }
+        config: {tone: 'cool'},
+      },
+    },
   });
   const before = inspectRuntimePluginConfig({
     manifest: targetPlugin.manifest,
     pluginManifests: [targetPlugin.manifest],
     configPath,
-    storeRoot
+    storeRoot,
   });
 
   return {
@@ -110,7 +111,7 @@ async function createConfigEffectTestFixture(label: string) {
     storeRoot,
     targetPlugin,
     configPath,
-    before
+    before,
   };
 }
 
@@ -118,18 +119,19 @@ function createConfigEffectTestHost(options: {
   readonly fixture: Awaited<ReturnType<typeof createConfigEffectTestFixture>>;
   readonly session: ReturnType<typeof createConversationSession>;
 }): RuntimePluginHost {
-  const { fixture } = options;
+  const {fixture} = options;
 
-  return createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+  return createRuntimePluginHost({
+    fileStore: testRuntimePluginFileStoreProvider,
     storeRoot: fixture.storeRoot,
     sessionId: fixture.sessionId,
     sessionIdentity: options.session,
     pluginConfigControl: {
-        control: testRuntimePluginConfigControlCapability,
+      control: testRuntimePluginConfigControlCapability,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath
+      configPath: fixture.configPath,
     },
-    toolConfirmationHandler: () => ({ status: 'approved' })
+    toolConfirmationHandler: () => ({status: 'approved'}),
   });
 }
 
@@ -143,7 +145,7 @@ function createConfigEffectTestAdapter(options: {
     fieldName: 'tone',
     operation: 'set',
     value: 'warm',
-    expectedFingerprint: options.fixture.before.fingerprint
+    expectedFingerprint: options.fixture.before.fingerprint,
   } as const;
   let invocationCount = 0;
 
@@ -158,9 +160,9 @@ function createConfigEffectTestAdapter(options: {
             toolCalls: [
               {
                 name: runtimePluginConfigUpdateToolName,
-                input: updateInput
-              }
-            ]
+                input: updateInput,
+              },
+            ],
           }),
           nativeAssistantMessage: {
             role: 'assistant',
@@ -171,11 +173,11 @@ function createConfigEffectTestAdapter(options: {
                 type: 'function',
                 function: {
                   name: runtimePluginConfigUpdateToolName,
-                  arguments: JSON.stringify(updateInput)
-                }
-              }
-            ]
-          }
+                  arguments: JSON.stringify(updateInput),
+                },
+              },
+            ],
+          },
         };
       }
 
@@ -184,12 +186,12 @@ function createConfigEffectTestAdapter(options: {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: options.reply }
-            }
-          ]
-        })
+              input: {text: options.reply},
+            },
+          ],
+        }),
       };
-    }
+    },
   } satisfies RoleModelAdapter);
 }
 
@@ -209,15 +211,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
               toolCalls: [
                 {
                   name: 'visible_reply',
-                  input: { text: 'This turn must not run.' }
-                }
-              ]
-            }
-          ])
-        }
-      ])
+                  input: {text: 'This turn must not run.'},
+                },
+              ],
+            },
+          ]),
+        },
+      ]),
     ).rejects.toThrow(
-      'Local runtime turns require an explicitly configured plugin host.'
+      'Local runtime turns require an explicitly configured plugin host.',
     );
     expect(logStore.traceEntries()).toEqual([]);
     expect(logStore.rawEvents()).toEqual([]);
@@ -230,15 +232,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const adapter = createSequencedAdapter([
       {
         text: 'folded model note',
-        toolCalls: []
-      }
+        toolCalls: [],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('quiet turn', 'evt_text_only'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     if (result.status !== 'completed') {
@@ -255,14 +257,14 @@ describe('plugin-driven tool loop commit and rollback', () => {
       parsedRoleModelDecisionSnapshot: {
         result: {
           status: 'accepted',
-          nonCommittedText: 'folded model note'
-        }
+          nonCommittedText: 'folded model note',
+        },
       },
       commitValidation: {
         result: {
-          status: 'accepted'
-        }
-      }
+          status: 'accepted',
+        },
+      },
     });
     expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toBeUndefined();
   });
@@ -276,24 +278,26 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'I can use:\n- runtime.plugin.list\n- character_state.patch'
-            }
-          }
-        ]
-      }
+              text: 'I can use:\n- runtime.plugin.list\n- character_state.patch',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('list tools', 'evt_multiline_visible'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual([
       'list tools',
-      'I can use:\n- runtime.plugin.list\n- character_state.patch'
+      'I can use:\n- runtime.plugin.list\n- character_state.patch',
     ]);
   });
 
@@ -301,41 +305,43 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-authoritative-visible';
     const storeRoot = createTestTempRoot('project02-authoritative-visible-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const session = createConversationSession({id: sessionId});
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const replyText = 'Authorization: Bearer committed-reply-secret';
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'visible_reply',
-            input: { text: replyText }
-          }
-        ]
-      }
+            input: {text: replyText},
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
-      event: createTestEvent('show the exact value', 'evt_authoritative_visible'),
+      event: createTestEvent(
+        'show the exact value',
+        'evt_authoritative_visible',
+      ),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'show the exact value',
-      replyText
-    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['show the exact value', replyText]);
 
     const serializedEvidence = JSON.stringify({
       rawEvents: logStore.rawEvents(),
-      traces: logStore.traceEntries()
+      traces: logStore.traceEntries(),
     });
 
     expect(serializedEvidence).toContain('Authorization: [redacted]');
@@ -351,11 +357,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'this should not remain in memory'
-            }
-          }
-        ]
-      }
+              text: 'this should not remain in memory',
+            },
+          },
+        ],
+      },
     ]);
 
     await expect(
@@ -363,8 +369,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
         event: createTestEvent('hello', 'evt_conversation_append_fails'),
         session,
         logStore,
-        roleModelAdapter: adapter
-      })
+        roleModelAdapter: adapter,
+      }),
     ).rejects.toThrow('conversation append failed');
     expect(session.visibleTranscript).toEqual([]);
     expect(logStore.conversationMessages()).toEqual([]);
@@ -374,39 +380,40 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-character-state-conversation-append-fails';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createConversationAppendFailingLogStore(
       createFileRuntimeLogStore({
         storeRoot,
-        sessionId
-      })
+        sessionId,
+      }),
     );
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        characterStatePluginId
-      ]
+        characterStatePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     });
 
     await expect(
       runLocalUserMessageEvent({
         event: createTestEvent(
           'hello',
-          'evt_character_state_conversation_append_fails'
+          'evt_character_state_conversation_append_fails',
         ),
         session,
         logStore,
@@ -417,23 +424,23 @@ describe('plugin-driven tool loop commit and rollback', () => {
               {
                 name: 'character_state.patch',
                 input: {
-                  mood: 'curious'
-                }
-              }
-            ]
+                  mood: 'curious',
+                },
+              },
+            ],
           },
           {
             toolCalls: [
               {
                 name: 'visible_reply',
                 input: {
-                  text: 'the conversation append should fail'
-                }
-              }
-            ]
-          }
-        ])
-      })
+                  text: 'the conversation append should fail',
+                },
+              },
+            ],
+          },
+        ]),
+      }),
     ).rejects.toThrow('conversation append failed');
 
     expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
@@ -443,27 +450,27 @@ describe('plugin-driven tool loop commit and rollback', () => {
   it('removes a durable user row when paired character append fails', async () => {
     const storeRoot = createTestTempRoot('project02-log-store-');
     const sessionId = 'session-character-append-fails';
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const fileLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const logStore = createCharacterAppendFailingLogStore(fileLogStore);
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'this should not leave an unmatched user row'
-            }
-          }
-        ]
-      }
+              text: 'this should not leave an unmatched user row',
+            },
+          },
+        ],
+      },
     ]);
 
     await expect(
@@ -471,20 +478,20 @@ describe('plugin-driven tool loop commit and rollback', () => {
         event: createTestEvent('hello', 'evt_character_append_fails'),
         session,
         logStore,
-        roleModelAdapter: adapter
-      })
+        roleModelAdapter: adapter,
+      }),
     ).rejects.toThrow('character append failed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
 
     expect(session.visibleTranscript).toEqual([]);
     expect(reopenedLogStore.conversationMessages()).toEqual([]);
     expect(reopenedLogStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
     });
   });
 
@@ -494,10 +501,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
     let visibleMessagesVisibleToHook = false;
     let terminalEventVisibleToHook = false;
     const pluginHost = createAfterTurnCommittedProbeHost(() => {
-      visibleMessagesVisibleToHook = logStore.conversationMessages().length === 2;
+      visibleMessagesVisibleToHook =
+        logStore.conversationMessages().length === 2;
       terminalEventVisibleToHook = logStore
         .rawEvents()
-        .some((event) => event.kind === 'runtime_turn_completed');
+        .some(event => event.kind === 'runtime_turn_completed');
     });
     const adapter = createSequencedAdapter([
       {
@@ -505,11 +513,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'terminal evidence comes first'
-            }
-          }
-        ]
-      }
+              text: 'terminal evidence comes first',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -517,7 +525,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
     });
 
     expect(result.status).toBe('completed');
@@ -525,7 +533,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(terminalEventVisibleToHook).toBe(true);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
-      status: 'completed'
+      status: 'completed',
     });
   });
 
@@ -534,7 +542,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const logStore = createRuntimeLogStore();
     const pluginHost = createAfterTurnCommittedProbeHost(() => {}, {
       status: 'failed',
-      summary: 'After commit fixture failed.'
+      summary: 'After commit fixture failed.',
     });
     const adapter = createSequencedAdapter([
       {
@@ -542,11 +550,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'after commit evidence is durable'
-            }
-          }
-        ]
-      }
+              text: 'after commit evidence is durable',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -554,21 +562,21 @@ describe('plugin-driven tool loop commit and rollback', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
     });
-    const terminalEvent = logStore.rawEvents().find(
-      (event) => event.kind === 'runtime_turn_completed'
-    );
+    const terminalEvent = logStore
+      .rawEvents()
+      .find(event => event.kind === 'runtime_turn_completed');
     const afterCommitEvent = logStore.rawEvents().at(-1);
 
     expect(result.status).toBe('completed');
     expect(result.rawEvent).toMatchObject({
       kind: 'runtime_turn_completed',
-      status: 'completed'
+      status: 'completed',
     });
     expect(terminalEvent).toMatchObject({
       kind: 'runtime_turn_completed',
-      status: 'completed'
+      status: 'completed',
     });
     expect(afterCommitEvent).toMatchObject({
       kind: 'after_turn_committed',
@@ -578,9 +586,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
           pluginId: 'after-commit.fixture',
           evidenceKind: 'after_turn_committed',
           status: 'failed',
-          summary: 'After commit fixture failed.'
-        }
-      ]
+          summary: 'After commit fixture failed.',
+        },
+      ],
     });
   });
 
@@ -589,7 +597,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const logStore = createAfterTurnCommittedAppendFailingLogStore();
     const pluginHost = createAfterTurnCommittedProbeHost(() => {}, {
       status: 'failed',
-      summary: 'After commit fixture failed after terminal commit.'
+      summary: 'After commit fixture failed after terminal commit.',
     });
     const adapter = createSequencedAdapter([
       {
@@ -597,11 +605,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'terminal commit survives after hook log failure'
-            }
-          }
-        ]
-      }
+              text: 'terminal commit survives after hook log failure',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -609,30 +617,29 @@ describe('plugin-driven tool loop commit and rollback', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
     });
 
     expect(result.status).toBe('completed');
     expect(result.rawEvent).toMatchObject({
       kind: 'runtime_turn_completed',
-      status: 'completed'
+      status: 'completed',
     });
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      'terminal commit survives after hook log failure'
-    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello', 'terminal commit survives after hook log failure']);
     expect(
       logStore
         .rawEvents()
         .filter(
-          (event) =>
+          event =>
             event.kind === 'runtime_turn_completed' ||
-            event.kind === 'runtime_turn_rejected'
+            event.kind === 'runtime_turn_rejected',
         )
-        .map((event) => event.kind)
+        .map(event => event.kind),
     ).toEqual(['runtime_turn_completed']);
     expect(
-      logStore.rawEvents().some((event) => event.kind === 'after_turn_committed')
+      logStore.rawEvents().some(event => event.kind === 'after_turn_committed'),
     ).toBe(false);
   });
 
@@ -649,11 +656,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: 'visible_reply',
             input: {
-              text: 'terminal append should fail first'
-            }
-          }
-        ]
-      }
+              text: 'terminal append should fail first',
+            },
+          },
+        ],
+      },
     ]);
 
     await expect(
@@ -662,29 +669,30 @@ describe('plugin-driven tool loop commit and rollback', () => {
         session,
         logStore,
         roleModelAdapter: adapter,
-        pluginHost
-      })
+        pluginHost,
+      }),
     ).rejects.toThrow('terminal raw event append failed');
     expect(afterTurnCommittedCalls).toBe(0);
-    expect(session.visibleTranscript.map((message) => message.text)).toEqual([
+    expect(session.visibleTranscript.map(message => message.text)).toEqual([
       'hello',
-      'terminal append should fail first'
+      'terminal append should fail first',
     ]);
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      'terminal append should fail first'
-    ]);
-    expect(logStore.rawEvents().some((event) => event.kind === 'runtime_turn_completed')).toBe(
-      false
-    );
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello', 'terminal append should fail first']);
+    expect(
+      logStore
+        .rawEvents()
+        .some(event => event.kind === 'runtime_turn_completed'),
+    ).toBe(false);
     const visibleMessageIds = logStore
       .conversationMessages()
-      .map((message) => message.id);
+      .map(message => message.id);
 
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
       status: 'rejected',
-      visibleMessageIds
+      visibleMessageIds,
     });
   });
 
@@ -692,16 +700,17 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-terminal-trace-reconciliation';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const fileLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
-    const logStore = createOneShotTerminalTraceAppendFailingLogStore(fileLogStore);
+    const fileLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore =
+      createOneShotTerminalTraceAppendFailingLogStore(fileLogStore);
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('hello', 'evt_terminal_trace_reconciliation'),
-      session: createConversationSession({ id: sessionId }),
+      session: createConversationSession({id: sessionId}),
       logStore,
       roleModelAdapter: createSequencedAdapter([
         {
@@ -709,39 +718,39 @@ describe('plugin-driven tool loop commit and rollback', () => {
             {
               name: 'visible_reply',
               input: {
-                text: 'the completed reply survives trace reconciliation'
-              }
-            }
-          ]
-        }
-      ])
+                text: 'the completed reply survives trace reconciliation',
+              },
+            },
+          ],
+        },
+      ]),
     });
-    const reopened = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
 
     expect(result).toMatchObject({
       status: 'completed',
       turn: {
         reply: {
-          text: 'the completed reply survives trace reconciliation'
-        }
-      }
+          text: 'the completed reply survives trace reconciliation',
+        },
+      },
     });
     expect(result).not.toHaveProperty('postCommitFailures');
     expect(
       reopened
         .rawEvents()
-        .filter((record) => record.kind === 'runtime_turn_completed')
+        .filter(record => record.kind === 'runtime_turn_completed'),
     ).toHaveLength(1);
     expect(
       reopened
         .traceEntries()
         .filter(
-          (entry) =>
+          entry =>
             entry.eventId === 'evt_terminal_trace_reconciliation' &&
             (entry.step === 'raw_event_log_appended' ||
-              entry.step === 'runtime_turn_completed')
+              entry.step === 'runtime_turn_completed'),
         )
-        .map((entry) => entry.step)
+        .map(entry => entry.step),
     ).toEqual(['raw_event_log_appended', 'runtime_turn_completed']);
   });
 
@@ -749,39 +758,40 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-character-state-terminal-append-fails';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createRuntimeTurnCompletedAppendFailingLogStore(
       createFileRuntimeLogStore({
         storeRoot,
-        sessionId
-      })
+        sessionId,
+      }),
     );
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        characterStatePluginId
-      ]
+        characterStatePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     });
 
     await expect(
       runLocalUserMessageEvent({
         event: createTestEvent(
           'hello',
-          'evt_character_state_terminal_append_fails'
+          'evt_character_state_terminal_append_fails',
         ),
         session,
         logStore,
@@ -792,23 +802,23 @@ describe('plugin-driven tool loop commit and rollback', () => {
               {
                 name: 'character_state.patch',
                 input: {
-                  mood: 'curious'
-                }
-              }
-            ]
+                  mood: 'curious',
+                },
+              },
+            ],
           },
           {
             toolCalls: [
               {
                 name: 'visible_reply',
                 input: {
-                  text: 'the terminal append should fail'
-                }
-              }
-            ]
-          }
-        ])
-      })
+                  text: 'the terminal append should fail',
+                },
+              },
+            ],
+          },
+        ]),
+      }),
     ).rejects.toThrow('terminal raw event append failed');
 
     expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
@@ -819,37 +829,37 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-character-state-terminal-append-then-throw';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const fileLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
-    const logStore = createRuntimeTurnCompletedAppendThenThrowLogStore(
-      fileLogStore
-    );
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const fileLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore =
+      createRuntimeTurnCompletedAppendThenThrowLogStore(fileLogStore);
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        characterStatePluginId
-      ]
+        characterStatePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     });
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent(
         'hello',
-        'evt_character_state_terminal_append_then_throw'
+        'evt_character_state_terminal_append_then_throw',
       ),
-      session: createConversationSession({ id: sessionId }),
+      session: createConversationSession({id: sessionId}),
       logStore,
       pluginHost,
       roleModelAdapter: createSequencedAdapter([
@@ -857,47 +867,47 @@ describe('plugin-driven tool loop commit and rollback', () => {
           toolCalls: [
             {
               name: 'character_state.patch',
-              input: { mood: 'curious' }
-            }
-          ]
+              input: {mood: 'curious'},
+            },
+          ],
         },
         {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: 'the committed terminal is reconciled' }
-            }
-          ]
-        }
-      ])
+              input: {text: 'the committed terminal is reconciled'},
+            },
+          ],
+        },
+      ]),
     });
 
     expect(result).toMatchObject({
       status: 'completed',
       rawEvent: {
-        kind: 'runtime_turn_completed'
+        kind: 'runtime_turn_completed',
       },
       postCommitFailures: [
-        'terminal raw event append reported failure after write'
-      ]
+        'terminal raw event append reported failure after write',
+      ],
     });
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(pluginStore.readJson('checkpoint.json')).toMatchObject({
       current: {
         current: {
-          mood: 'curious'
-        }
-      }
+          mood: 'curious',
+        },
+      },
     });
     expect(
       fileLogStore
         .rawEvents()
         .filter(
-          (event) =>
+          event =>
             event.kind === 'runtime_turn_completed' ||
-            event.kind === 'runtime_turn_rejected'
+            event.kind === 'runtime_turn_rejected',
         )
-        .map((event) => event.kind)
+        .map(event => event.kind),
     ).toEqual(['runtime_turn_completed']);
   });
 
@@ -905,29 +915,30 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-terminal-append-visible-reply-evidence';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
     const fileLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
-    const logStore = createRuntimeTurnCompletedAppendFailingLogStore(fileLogStore);
-    const pluginHost = createRuntimePluginHost({ plugins: [] });
-    const session = createConversationSession({ id: sessionId });
+    const logStore =
+      createRuntimeTurnCompletedAppendFailingLogStore(fileLogStore);
+    const pluginHost = createRuntimePluginHost({plugins: []});
+    const session = createConversationSession({id: sessionId});
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'terminal append fails after visible evidence'
-            }
-          }
-        ]
-      }
+              text: 'terminal append fails after visible evidence',
+            },
+          },
+        ],
+      },
     ]);
 
     await expect(
@@ -936,44 +947,44 @@ describe('plugin-driven tool loop commit and rollback', () => {
         session,
         logStore,
         roleModelAdapter: adapter,
-        pluginHost
-      })
+        pluginHost,
+      }),
     ).rejects.toThrow('terminal raw event append failed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const conversationMessages = reopenedLogStore.conversationMessages();
-    const visibleMessageIds = conversationMessages.map((message) => message.id);
+    const visibleMessageIds = conversationMessages.map(message => message.id);
     const rawEvents = reopenedLogStore.rawEvents();
 
-    expect(conversationMessages.map((message) => message.text)).toEqual([
+    expect(conversationMessages.map(message => message.text)).toEqual([
       'hello',
-      'terminal append fails after visible evidence'
+      'terminal append fails after visible evidence',
     ]);
     expect(
       rawEvents
         .filter(
-          (event) =>
+          event =>
             event.kind === 'runtime_turn_completed' ||
-            event.kind === 'runtime_turn_rejected'
+            event.kind === 'runtime_turn_rejected',
         )
-        .map((event) => event.kind)
+        .map(event => event.kind),
     ).toEqual(['runtime_turn_rejected']);
     expect(
-      rawEvents.find((event) => event.kind === 'visible_reply_committed')
-        ?.visibleMessageIds
+      rawEvents.find(event => event.kind === 'visible_reply_committed')
+        ?.visibleMessageIds,
     ).toEqual(visibleMessageIds);
     expect(rawEvents.at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
       status: 'rejected',
-      visibleMessageIds
+      visibleMessageIds,
     });
 
     const restoredSession = createConversationSession({
       id: sessionId,
-      visibleTranscript: conversationMessages
+      visibleTranscript: conversationMessages,
     });
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('again', 'evt_terminal_append_followup'),
@@ -986,20 +997,22 @@ describe('plugin-driven tool loop commit and rollback', () => {
             {
               name: 'visible_reply',
               input: {
-                text: 'followup after rejection evidence'
-              }
-            }
-          ]
-        }
-      ])
+                text: 'followup after rejection evidence',
+              },
+            },
+          ],
+        },
+      ]),
     });
 
     expect(followupResult.status).toBe('completed');
-    expect(reopenedLogStore.conversationMessages().map((message) => message.text)).toEqual([
+    expect(
+      reopenedLogStore.conversationMessages().map(message => message.text),
+    ).toEqual([
       'hello',
       'terminal append fails after visible evidence',
       'again',
-      'followup after rejection evidence'
+      'followup after rejection evidence',
     ]);
   });
 
@@ -1007,32 +1020,33 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-tool-finish-log-failure';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createToolCallFinishedAppendFailingLogStore(
       createFileRuntimeLogStore({
         storeRoot,
-        sessionId
-      })
+        sessionId,
+      }),
     );
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        handleFileStoreWritePluginId
-      ]
+        handleFileStoreWritePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: handleFileStoreWritePluginId
+      pluginId: handleFileStoreWritePluginId,
     });
     const adapter = createSequencedAdapter([
       {
@@ -1040,21 +1054,21 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: handleFileStoreWriteToolName,
             input: {
-              value: 'side effect'
-            }
-          }
-        ]
+              value: 'side effect',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'finish logging should fail first'
-            }
-          }
-        ]
-      }
+              text: 'finish logging should fail first',
+            },
+          },
+        ],
+      },
     ]);
 
     await expect(
@@ -1063,17 +1077,17 @@ describe('plugin-driven tool loop commit and rollback', () => {
         session,
         logStore,
         roleModelAdapter: adapter,
-        pluginHost
-      })
+        pluginHost,
+      }),
     ).rejects.toThrow('tool_call_finished raw event append failed');
 
     expect(pluginStore.readJson('state.json')).toBeUndefined();
-    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(
-      false
-    );
+    expect(
+      logStore.rawEvents().some(event => event.kind === 'tool_call_finished'),
+    ).toBe(false);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
     });
   });
 
@@ -1081,32 +1095,33 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-tool-prepare-lock-contention';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const session = createConversationSession({id: sessionId});
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        handleFileStoreWritePluginId
-      ]
+        handleFileStoreWritePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: handleFileStoreWritePluginId
+      pluginId: handleFileStoreWritePluginId,
     });
     const pluginRoot = createLocalRuntimePluginPaths({
       storeRoot,
       sessionId,
-      pluginId: handleFileStoreWritePluginId
+      pluginId: handleFileStoreWritePluginId,
     }).pluginRoot;
     const readyPath = join(storeRoot, 'prepare-lock-ready');
     let invocationCount = 0;
@@ -1122,18 +1137,18 @@ describe('plugin-driven tool loop commit and rollback', () => {
               toolCalls: [
                 {
                   name: handleFileStoreWriteToolName,
-                  input: { value: 'must not commit' }
-                }
-              ]
-            })
+                  input: {value: 'must not commit'},
+                },
+              ],
+            }),
           };
         }
 
         lockHolder = startPluginMutationLockHolderChild({
-          locksRoot: createLocalRuntimeStorageLayout({ storeRoot }).locksRoot,
+          locksRoot: createLocalRuntimeStorageLayout({storeRoot}).locksRoot,
           resourceKey: durablePluginStoreMutationResourceKey(pluginRoot),
           readyPath,
-          holdMs: 500
+          holdMs: 500,
         });
         await waitForReadyFile(readyPath);
         contentionStartedAt = Date.now();
@@ -1143,12 +1158,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
             toolCalls: [
               {
                 name: 'visible_reply',
-                input: { text: 'This reply must not commit.' }
-              }
-            ]
-          })
+                input: {text: 'This reply must not commit.'},
+              },
+            ],
+          }),
         };
-      }
+      },
     } satisfies RoleModelAdapter);
     let runtimeFailure: unknown;
     let failureObservedAt: number | undefined;
@@ -1157,12 +1172,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       await runLocalUserMessageEvent({
         event: createTestEvent(
           'write memory',
-          'evt_tool_prepare_lock_contention'
+          'evt_tool_prepare_lock_contention',
         ),
         session,
         logStore,
         roleModelAdapter: adapter,
-        pluginHost
+        pluginHost,
       });
     } catch (error: unknown) {
       runtimeFailure = error;
@@ -1172,19 +1187,21 @@ describe('plugin-driven tool loop commit and rollback', () => {
     }
 
     expect(runtimeFailure).toBeInstanceOf(LocalRuntimeMutationLockBusyError);
-    expect(runtimeFailure).toMatchObject({ code: 'storage_busy' });
+    expect(runtimeFailure).toMatchObject({code: 'storage_busy'});
     expect(contentionStartedAt).toEqual(expect.any(Number));
     expect(failureObservedAt).toEqual(expect.any(Number));
 
     if (contentionStartedAt === undefined || failureObservedAt === undefined) {
-      throw new Error('Expected the runtime prepare contention timing evidence.');
+      throw new Error(
+        'Expected the runtime prepare contention timing evidence.',
+      );
     }
 
     expect(failureObservedAt - contentionStartedAt).toBeLessThan(200);
     expect(pluginStore.readJson('state.json')).toBeUndefined();
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
     });
 
     const retryResult = await runLocalUserMessageEvent({
@@ -1196,37 +1213,37 @@ describe('plugin-driven tool loop commit and rollback', () => {
           toolCalls: [
             {
               name: handleFileStoreWriteToolName,
-              input: { value: 'retry committed' }
-            }
-          ]
+              input: {value: 'retry committed'},
+            },
+          ],
         },
         {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: 'Retry committed.' }
-            }
-          ]
-        }
+              input: {text: 'Retry committed.'},
+            },
+          ],
+        },
       ]),
-      pluginHost
+      pluginHost,
     });
 
     expect(retryResult.status).toBe('completed');
     expect(pluginStore.readJson('state.json')).toEqual({
-      value: 'retry committed'
+      value: 'retry committed',
     });
   }, 15_000);
 
   it('applies an approved config effect only after durable terminal intent', async () => {
     const fixture = await createConfigEffectTestFixture('durable-success');
     const messagesByRound: RoleModelChatMessage[][] = [];
-    const session = createConversationSession({ id: fixture.sessionId });
+    const session = createConversationSession({id: fixture.sessionId});
     const logStore = createFileRuntimeLogStore({
       storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId
+      sessionId: fixture.sessionId,
     });
-    const pluginHost = createConfigEffectTestHost({ fixture, session });
+    const pluginHost = createConfigEffectTestHost({fixture, session});
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('update config', 'evt_config_effect_success'),
       session,
@@ -1235,30 +1252,32 @@ describe('plugin-driven tool loop commit and rollback', () => {
       roleModelAdapter: createConfigEffectTestAdapter({
         fixture,
         reply: 'Config committed.',
-        messagesByRound
-      })
+        messagesByRound,
+      }),
     });
     const after = inspectRuntimePluginConfig({
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
       configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot
+      storeRoot: fixture.storeRoot,
     });
-    const terminal = logStore.rawEvents().find(
-      (event) => event.kind === 'runtime_turn_completed'
-    );
+    const terminal = logStore
+      .rawEvents()
+      .find(event => event.kind === 'runtime_turn_completed');
     const effect = terminal?.runtimeConfigEffects?.[0];
-    const marker = logStore.rawEvents().find(
-      (event) =>
-        event.kind === 'after_turn_committed' &&
-        event.runtimePluginEvidence?.some((evidence) =>
-          evidence.sourceReferences?.some(
-            (reference) => reference.id === effect?.effectId
-          )
-        )
-    );
+    const marker = logStore
+      .rawEvents()
+      .find(
+        event =>
+          event.kind === 'after_turn_committed' &&
+          event.runtimePluginEvidence?.some(evidence =>
+            evidence.sourceReferences?.some(
+              reference => reference.id === effect?.effectId,
+            ),
+          ),
+      );
     const nativeToolResult = messagesByRound[1]?.find(
-      (message) => message.role === 'tool'
+      message => message.role === 'tool',
     );
 
     expect(result.status).toBe('completed');
@@ -1268,19 +1287,19 @@ describe('plugin-driven tool loop commit and rollback', () => {
       runtimeConfigEffects: [
         {
           targetPluginId: fixture.targetPlugin.manifest.id,
-          operation: { kind: 'set', value: 'warm' }
-        }
-      ]
+          operation: {kind: 'set', value: 'warm'},
+        },
+      ],
     });
-    expect(
-      after.fields.find((field) => field.name === 'tone')?.authored
-    ).toEqual({ configured: true, value: 'warm' });
+    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
+      {configured: true, value: 'warm'},
+    );
     expect(marker).toMatchObject({
       kind: 'after_turn_committed',
-      status: 'completed'
+      status: 'completed',
     });
     expect(nativeToolResult?.content).toContain(
-      '"status":"approved_pending_commit"'
+      '"status":"approved_pending_commit"',
     );
     expect(nativeToolResult?.content).not.toContain('preparedConfigEffect');
     expect(nativeToolResult?.content).not.toContain('runtimeConfigEffects');
@@ -1288,18 +1307,18 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('lets the model correct a rejected config update in the same turn', async () => {
     const fixture = await createConfigEffectTestFixture('rejected-retry');
-    const session = createConversationSession({ id: fixture.sessionId });
+    const session = createConversationSession({id: fixture.sessionId});
     const logStore = createFileRuntimeLogStore({
       storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId
+      sessionId: fixture.sessionId,
     });
-    const pluginHost = createConfigEffectTestHost({ fixture, session });
+    const pluginHost = createConfigEffectTestHost({fixture, session});
     const observationsByRound: (readonly RoleModelToolObservation[])[] = [];
     const updateInput = {
       pluginId: fixture.targetPlugin.manifest.id,
       fieldName: 'tone',
       operation: 'set',
-      expectedFingerprint: fixture.before.fingerprint
+      expectedFingerprint: fixture.before.fingerprint,
     } as const;
     let invocationCount = 0;
     const adapter = Object.freeze({
@@ -1313,10 +1332,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
               toolCalls: [
                 {
                   name: runtimePluginConfigUpdateToolName,
-                  input: { ...updateInput, value: 7 }
-                }
-              ]
-            })
+                  input: {...updateInput, value: 7},
+                },
+              ],
+            }),
           };
         }
 
@@ -1326,10 +1345,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
               toolCalls: [
                 {
                   name: runtimePluginConfigUpdateToolName,
-                  input: { ...updateInput, value: 'warm' }
-                }
-              ]
-            })
+                  input: {...updateInput, value: 'warm'},
+                },
+              ],
+            }),
           };
         }
 
@@ -1338,51 +1357,51 @@ describe('plugin-driven tool loop commit and rollback', () => {
             toolCalls: [
               {
                 name: 'visible_reply',
-                input: { text: 'Tone corrected to warm.' }
-              }
-            ]
-          })
+                input: {text: 'Tone corrected to warm.'},
+              },
+            ],
+          }),
         };
-      }
+      },
     } satisfies RoleModelAdapter);
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('update config', 'evt_config_effect_retry'),
       session,
       logStore,
       pluginHost,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
     const after = inspectRuntimePluginConfig({
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
       configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot
+      storeRoot: fixture.storeRoot,
     });
     const rejection = observationsByRound[1]?.find(
-      (observation) =>
-        observation.toolName === runtimePluginConfigUpdateToolName
+      observation => observation.toolName === runtimePluginConfigUpdateToolName,
     );
 
     expect(result.status).toBe('completed');
     expect(rejection?.result).toMatchObject({
       status: 'rejected',
       message:
-        'Plugin config field "tone" must be a string; received a number.'
+        'Plugin config field "tone" must be a string; received a number.',
     });
-    expect(
-      after.fields.find((field) => field.name === 'tone')?.authored
-    ).toEqual({ configured: true, value: 'warm' });
+    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
+      {configured: true, value: 'warm'},
+    );
   });
 
   it('recovers an applied config effect when its commit marker append failed', async () => {
     const fixture = await createConfigEffectTestFixture('marker-recovery');
-    const session = createConversationSession({ id: fixture.sessionId });
+    const session = createConversationSession({id: fixture.sessionId});
     const fileLogStore = createFileRuntimeLogStore({
       storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId
+      sessionId: fixture.sessionId,
     });
-    const logStore = createAfterTurnCommittedAppendFailingLogStore(fileLogStore);
-    const pluginHost = createConfigEffectTestHost({ fixture, session });
+    const logStore =
+      createAfterTurnCommittedAppendFailingLogStore(fileLogStore);
+    const pluginHost = createConfigEffectTestHost({fixture, session});
     const firstResult = await runLocalUserMessageEvent({
       event: createTestEvent('update config', 'evt_config_marker_recovery'),
       session,
@@ -1390,42 +1409,42 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginHost,
       roleModelAdapter: createConfigEffectTestAdapter({
         fixture,
-        reply: 'Config committed before marker failure.'
-      })
+        reply: 'Config committed before marker failure.',
+      }),
     });
-    const terminal = fileLogStore.rawEvents().find(
-      (event) => event.kind === 'runtime_turn_completed'
-    );
+    const terminal = fileLogStore
+      .rawEvents()
+      .find(event => event.kind === 'runtime_turn_completed');
     const effect = terminal?.runtimeConfigEffects?.[0];
     const afterApply = inspectRuntimePluginConfig({
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
       configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot
+      storeRoot: fixture.storeRoot,
     });
 
     expect(firstResult).toMatchObject({
       status: 'completed',
-      postCommitFailures: ['after-turn raw event append failed']
+      postCommitFailures: ['after-turn raw event append failed'],
     });
     expect(afterApply.fingerprint).toBe(effect?.resultFingerprint);
     expect(
-      fileLogStore.rawEvents().some(
-        (event) => event.kind === 'after_turn_committed'
-      )
+      fileLogStore
+        .rawEvents()
+        .some(event => event.kind === 'after_turn_committed'),
     ).toBe(false);
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId
+      sessionId: fixture.sessionId,
     });
     const restoredSession = createConversationSession({
       id: fixture.sessionId,
-      visibleTranscript: reopenedLogStore.conversationMessages()
+      visibleTranscript: reopenedLogStore.conversationMessages(),
     });
     const recoveryHost = createConfigEffectTestHost({
       fixture,
-      session: restoredSession
+      session: restoredSession,
     });
 
     expect(
@@ -1439,34 +1458,36 @@ describe('plugin-driven tool loop commit and rollback', () => {
             toolCalls: [
               {
                 name: 'visible_reply',
-                input: { text: 'Recovered marker.' }
-              }
-            ]
-          }
-        ])
-      })
-    ).toMatchObject({ status: 'completed' });
+                input: {text: 'Recovered marker.'},
+              },
+            ],
+          },
+        ]),
+      }),
+    ).toMatchObject({status: 'completed'});
     expect(
-      reopenedLogStore.rawEvents().filter(
-        (event) =>
-          event.kind === 'after_turn_committed' &&
-          event.runtimePluginEvidence?.some((evidence) =>
-            evidence.sourceReferences?.some(
-              (reference) => reference.id === effect?.effectId
-            )
-          )
-      )
+      reopenedLogStore
+        .rawEvents()
+        .filter(
+          event =>
+            event.kind === 'after_turn_committed' &&
+            event.runtimePluginEvidence?.some(evidence =>
+              evidence.sourceReferences?.some(
+                reference => reference.id === effect?.effectId,
+              ),
+            ),
+        ),
     ).toHaveLength(1);
   });
 
   it('closes a conflicted config effect with a rejected record and continues the session', async () => {
     const fixture = await createConfigEffectTestFixture('fingerprint-drift');
-    const session = createConversationSession({ id: fixture.sessionId });
+    const session = createConversationSession({id: fixture.sessionId});
     const logStore = createFileRuntimeLogStore({
       storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId
+      sessionId: fixture.sessionId,
     });
-    const baseHost = createConfigEffectTestHost({ fixture, session });
+    const baseHost = createConfigEffectTestHost({fixture, session});
     let driftApplied = false;
     const driftHost = Object.freeze({
       ...baseHost,
@@ -1479,10 +1500,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
             operation: {
               kind: 'set',
               fieldName: 'tone',
-              value: 'competing-value'
+              value: 'competing-value',
             },
             configPath: fixture.configPath,
-            storeRoot: fixture.storeRoot
+            storeRoot: fixture.storeRoot,
           });
           driftApplied = true;
         }
@@ -1492,7 +1513,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         }
 
         return baseHost.reconcileConfigEffect(effect);
-      }
+      },
     } satisfies RuntimePluginHost);
     const firstResult = await runLocalUserMessageEvent({
       event: createTestEvent('update config', 'evt_config_effect_drift'),
@@ -1501,54 +1522,56 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginHost: driftHost,
       roleModelAdapter: createConfigEffectTestAdapter({
         fixture,
-        reply: 'Config intent committed.'
-      })
+        reply: 'Config intent committed.',
+      }),
     });
     const afterDrift = inspectRuntimePluginConfig({
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
       configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot
+      storeRoot: fixture.storeRoot,
     });
     const effectId = logStore
       .rawEvents()
-      .find((candidate) => candidate.kind === 'runtime_turn_completed')
+      .find(candidate => candidate.kind === 'runtime_turn_completed')
       ?.runtimeConfigEffects?.[0]?.effectId;
     const rejectedClosureRecords = () =>
-      logStore.rawEvents().filter(
-        (event) =>
-          event.kind === 'after_turn_committed' &&
-          event.runtimePluginEvidence?.some(
-            (evidence) =>
-              evidence.status === 'rejected' &&
-              evidence.sourceReferences?.some(
-                (reference) =>
-                  reference.kind === 'runtime' && reference.id === effectId
-              )
-          )
-      );
+      logStore
+        .rawEvents()
+        .filter(
+          event =>
+            event.kind === 'after_turn_committed' &&
+            event.runtimePluginEvidence?.some(
+              evidence =>
+                evidence.status === 'rejected' &&
+                evidence.sourceReferences?.some(
+                  reference =>
+                    reference.kind === 'runtime' && reference.id === effectId,
+                ),
+            ),
+        );
 
     expect(firstResult.status).toBe('completed');
     expect(
-      firstResult.status === 'completed' ? firstResult.postCommitFailures : []
+      firstResult.status === 'completed' ? firstResult.postCommitFailures : [],
     ).toEqual([
       expect.stringContaining(
-        'cannot be reconciled because authored config changed'
-      )
+        'cannot be reconciled because authored config changed',
+      ),
     ]);
     expect(
-      afterDrift.fields.find((field) => field.name === 'tone')?.authored.value
+      afterDrift.fields.find(field => field.name === 'tone')?.authored.value,
     ).toBe('competing-value');
     expect(effectId).toBeDefined();
     expect(rejectedClosureRecords()).toHaveLength(1);
 
     const restoredSession = createConversationSession({
       id: fixture.sessionId,
-      visibleTranscript: logStore.conversationMessages()
+      visibleTranscript: logStore.conversationMessages(),
     });
     const recoveryHost = createConfigEffectTestHost({
       fixture,
-      session: restoredSession
+      session: restoredSession,
     });
     const followUpResult = await runLocalUserMessageEvent({
       event: createTestEvent('continue', 'evt_config_drift_followup'),
@@ -1560,11 +1583,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: 'Session continues after conflict.' }
-            }
-          ]
-        }
-      ])
+              input: {text: 'Session continues after conflict.'},
+            },
+          ],
+        },
+      ]),
     });
     const thirdResult = await runLocalUserMessageEvent({
       event: createTestEvent('and again', 'evt_config_drift_third'),
@@ -1576,26 +1599,26 @@ describe('plugin-driven tool loop commit and rollback', () => {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: 'Still healthy.' }
-            }
-          ]
-        }
-      ])
+              input: {text: 'Still healthy.'},
+            },
+          ],
+        },
+      ]),
     });
 
     expect(followUpResult.status).toBe('completed');
     expect(thirdResult.status).toBe('completed');
     expect(
-      afterDrift.fields.find((field) => field.name === 'tone')?.authored.value
+      afterDrift.fields.find(field => field.name === 'tone')?.authored.value,
     ).toBe('competing-value');
     expect(rejectedClosureRecords()).toHaveLength(1);
   });
 
   it('rejects a prepared config effect when durable session evidence is unavailable', async () => {
     const fixture = await createConfigEffectTestFixture('no-durable-store');
-    const session = createConversationSession({ id: fixture.sessionId });
+    const session = createConversationSession({id: fixture.sessionId});
     const logStore = createRuntimeLogStore();
-    const pluginHost = createConfigEffectTestHost({ fixture, session });
+    const pluginHost = createConfigEffectTestHost({fixture, session});
 
     await expect(
       runLocalUserMessageEvent({
@@ -1605,28 +1628,28 @@ describe('plugin-driven tool loop commit and rollback', () => {
         pluginHost,
         roleModelAdapter: createConfigEffectTestAdapter({
           fixture,
-          reply: 'Must not commit.'
-        })
-      })
+          reply: 'Must not commit.',
+        }),
+      }),
     ).rejects.toThrow(
-      'Approved runtime config effects require durable local session evidence.'
+      'Approved runtime config effects require durable local session evidence.',
     );
     const after = inspectRuntimePluginConfig({
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
       configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot
+      storeRoot: fixture.storeRoot,
     });
 
     expect(after.fingerprint).toBe(fixture.before.fingerprint);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
     });
     expect(
-      logStore.rawEvents().some(
-        (event) => event.kind === 'runtime_turn_completed'
-      )
+      logStore
+        .rawEvents()
+        .some(event => event.kind === 'runtime_turn_completed'),
     ).toBe(false);
   });
 
@@ -1634,58 +1657,59 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-config-update-recovery';
     const storeRoot = createTestTempRoot('project02-config-update-recovery-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-07-16T00:00:00.000Z'
+      createdAt: '2026-07-16T00:00:00.000Z',
     });
 
     const basePlugin = requiredDottedConfigPlugin(
       'config-update-recovery-target.fixture',
-      'tone'
+      'tone',
     );
     const targetPlugin = createRuntimePlugin({
       manifest: {
         ...basePlugin.manifest,
         config: {
-          fields: basePlugin.manifest.config.fields.map((field) => ({
+          fields: basePlugin.manifest.config.fields.map(field => ({
             ...field,
             required: false,
-            agentMutable: true
-          }))
-        }
-      }
+            agentMutable: true,
+          })),
+        },
+      },
     });
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [targetPlugin.manifest.id]: {
-          config: { tone: 'cool' }
-        }
-      }
+          config: {tone: 'cool'},
+        },
+      },
     });
     const before = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
-    const session = createConversationSession({ id: sessionId });
-    const logStore = createFileRuntimeLogStore({ storeRoot, sessionId });
-    const baseHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const session = createConversationSession({id: sessionId});
+    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const baseHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: session,
       pluginConfigControl: {
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath
+        configPath,
       },
-      toolConfirmationHandler: () => ({ status: 'approved' })
+      toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const recoveryPendingHost = Object.freeze({
       ...baseHost,
       reconcileConfigEffect() {
         throw new Error('simulated config reconciliation interruption');
-      }
+      },
     } satisfies RuntimePluginHost);
     const firstResult = await runLocalUserMessageEvent({
       event: createTestEvent('update config', 'evt_config_update_recovery'),
@@ -1701,73 +1725,76 @@ describe('plugin-driven tool loop commit and rollback', () => {
                 fieldName: 'tone',
                 operation: 'set',
                 value: 'warm',
-                expectedFingerprint: before.fingerprint
-              }
-            }
-          ]
+                expectedFingerprint: before.fingerprint,
+              },
+            },
+          ],
         },
         {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: 'Config update is committed.' }
-            }
-          ]
-        }
+              input: {text: 'Config update is committed.'},
+            },
+          ],
+        },
       ]),
-      pluginHost: recoveryPendingHost
+      pluginHost: recoveryPendingHost,
     });
-    const terminal = logStore.rawEvents().find(
-      (event) => event.kind === 'runtime_turn_completed'
-    );
+    const terminal = logStore
+      .rawEvents()
+      .find(event => event.kind === 'runtime_turn_completed');
     const effect = terminal?.runtimeConfigEffects?.[0];
-    const toolFinished = logStore.rawEvents().find(
-      (event) => event.kind === 'tool_call_finished'
-    );
+    const toolFinished = logStore
+      .rawEvents()
+      .find(event => event.kind === 'tool_call_finished');
     const afterInterruptedCommit = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
 
     expect(firstResult).toMatchObject({
       status: 'completed',
-      postCommitFailures: ['simulated config reconciliation interruption']
+      postCommitFailures: ['simulated config reconciliation interruption'],
     });
     expect(effect).toMatchObject({
       targetPluginId: targetPlugin.manifest.id,
       fieldName: 'tone',
       expectedFingerprint: before.fingerprint,
-      operation: { kind: 'set', value: 'warm' }
+      operation: {kind: 'set', value: 'warm'},
     });
     expect(terminal?.toolCallIds).toContain(effect?.effectId);
     expect(toolFinished?.toolResult).toMatchObject({
       status: 'accepted',
-      output: { status: 'approved_pending_commit' }
+      output: {status: 'approved_pending_commit'},
     });
     expect(toolFinished).not.toHaveProperty('runtimeConfigEffects');
     expect(toolFinished?.toolResult).not.toHaveProperty('preparedConfigEffect');
     expect(
-      JSON.stringify(terminal?.roleModelIOSnapshot?.inputEnvelope.toolObservations)
+      JSON.stringify(
+        terminal?.roleModelIOSnapshot?.inputEnvelope.toolObservations,
+      ),
     ).not.toContain('preparedConfigEffect');
     expect(afterInterruptedCommit.fingerprint).toBe(before.fingerprint);
 
-    const reopenedLogStore = createFileRuntimeLogStore({ storeRoot, sessionId });
+    const reopenedLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
     const restoredSession = createConversationSession({
       id: sessionId,
-      visibleTranscript: reopenedLogStore.conversationMessages()
+      visibleTranscript: reopenedLogStore.conversationMessages(),
     });
-    const recoveryHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const recoveryHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: restoredSession,
       pluginConfigControl: {
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath
+        configPath,
       },
-      toolConfirmationHandler: () => ({ status: 'approved' })
+      toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('continue', 'evt_config_update_recovery_followup'),
@@ -1779,40 +1806,42 @@ describe('plugin-driven tool loop commit and rollback', () => {
           toolCalls: [
             {
               name: 'visible_reply',
-              input: { text: 'Recovered.' }
-            }
-          ]
-        }
-      ])
+              input: {text: 'Recovered.'},
+            },
+          ],
+        },
+      ]),
     });
     const afterRecovery = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
-    const effectMarkers = reopenedLogStore.rawEvents().flatMap((event) =>
-      event.kind !== 'after_turn_committed'
-        ? []
-        : (event.runtimePluginEvidence ?? []).filter((evidence) =>
-            evidence.sourceReferences?.some(
-              (reference) =>
-                reference.kind === 'runtime' &&
-                reference.id === effect?.effectId
-            )
-          )
-    );
+    const effectMarkers = reopenedLogStore
+      .rawEvents()
+      .flatMap(event =>
+        event.kind !== 'after_turn_committed'
+          ? []
+          : (event.runtimePluginEvidence ?? []).filter(evidence =>
+              evidence.sourceReferences?.some(
+                reference =>
+                  reference.kind === 'runtime' &&
+                  reference.id === effect?.effectId,
+              ),
+            ),
+      );
 
     expect(followupResult.status).toBe('completed');
     expect(
-      afterRecovery.fields.find((field) => field.name === 'tone')?.authored
-    ).toEqual({ configured: true, value: 'warm' });
+      afterRecovery.fields.find(field => field.name === 'tone')?.authored,
+    ).toEqual({configured: true, value: 'warm'});
     expect(effectMarkers).toHaveLength(1);
     expect(effectMarkers[0]).toMatchObject({
       pluginId: runtimePluginId,
       evidenceKind: 'after_turn_committed',
       status: 'accepted',
-      configFingerprint: effect?.resultFingerprint
+      configFingerprint: effect?.resultFingerprint,
     });
   });
 
@@ -1820,54 +1849,55 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-config-update-finish-log-failure';
     const storeRoot = createTestTempRoot('project02-config-update-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-07-16T00:00:00.000Z'
+      createdAt: '2026-07-16T00:00:00.000Z',
     });
 
     const basePlugin = requiredDottedConfigPlugin(
       'config-update-target.fixture',
-      'tone'
+      'tone',
     );
     const targetPlugin = createRuntimePlugin({
       manifest: {
         ...basePlugin.manifest,
         config: {
-          fields: basePlugin.manifest.config.fields.map((field) => ({
+          fields: basePlugin.manifest.config.fields.map(field => ({
             ...field,
             required: false,
-            agentMutable: true
-          }))
-        }
-      }
+            agentMutable: true,
+          })),
+        },
+      },
     });
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [targetPlugin.manifest.id]: {
-          config: { tone: 'cool' }
-        }
-      }
+          config: {tone: 'cool'},
+        },
+      },
     });
     const before = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createToolCallFinishedAppendFailingLogStore(
-      createFileRuntimeLogStore({ storeRoot, sessionId })
+      createFileRuntimeLogStore({storeRoot, sessionId}),
     );
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: session,
       pluginConfigControl: {
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath
+        configPath,
       },
-      toolConfirmationHandler: () => ({ status: 'approved' })
+      toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const adapter = createSequencedAdapter([
       {
@@ -1879,49 +1909,54 @@ describe('plugin-driven tool loop commit and rollback', () => {
               fieldName: 'tone',
               operation: 'set',
               value: 'warm',
-              expectedFingerprint: before.fingerprint
-            }
-          }
-        ]
+              expectedFingerprint: before.fingerprint,
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
-            input: { text: 'Config updated.' }
-          }
-        ]
-      }
+            input: {text: 'Config updated.'},
+          },
+        ],
+      },
     ]);
 
     await expect(
       runLocalUserMessageEvent({
-        event: createTestEvent('update config', 'evt_config_update_finish_fails'),
+        event: createTestEvent(
+          'update config',
+          'evt_config_update_finish_fails',
+        ),
         session,
         logStore,
         roleModelAdapter: adapter,
-        pluginHost
-      })
+        pluginHost,
+      }),
     ).rejects.toThrow('tool_call_finished raw event append failed');
 
     const after = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
 
     expect(after.fingerprint).toBe(before.fingerprint);
-    expect(after.fields.find((field) => field.name === 'tone')?.authored).toEqual({
-      configured: true,
-      value: 'cool'
-    });
-    expect(logStore.rawEvents().some((event) => event.kind === 'tool_call_finished')).toBe(
-      false
+    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
+      {
+        configured: true,
+        value: 'cool',
+      },
     );
+    expect(
+      logStore.rawEvents().some(event => event.kind === 'tool_call_finished'),
+    ).toBe(false);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
-      status: 'rejected'
+      status: 'rejected',
     });
   });
 
@@ -1929,54 +1964,55 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-config-update-terminal-append-failure';
     const storeRoot = createTestTempRoot('project02-config-update-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-07-16T00:00:00.000Z'
+      createdAt: '2026-07-16T00:00:00.000Z',
     });
 
     const basePlugin = requiredDottedConfigPlugin(
       'config-update-terminal.fixture',
-      'tone'
+      'tone',
     );
     const targetPlugin = createRuntimePlugin({
       manifest: {
         ...basePlugin.manifest,
         config: {
-          fields: basePlugin.manifest.config.fields.map((field) => ({
+          fields: basePlugin.manifest.config.fields.map(field => ({
             ...field,
             required: false,
-            agentMutable: true
-          }))
-        }
-      }
+            agentMutable: true,
+          })),
+        },
+      },
     });
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [targetPlugin.manifest.id]: {
-          config: { tone: 'cool' }
-        }
-      }
+          config: {tone: 'cool'},
+        },
+      },
     });
     const before = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createTurnCompletedAppendFailingLogStore(
-      createFileRuntimeLogStore({ storeRoot, sessionId })
+      createFileRuntimeLogStore({storeRoot, sessionId}),
     );
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       sessionIdentity: session,
       pluginConfigControl: {
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath
+        configPath,
       },
-      toolConfirmationHandler: () => ({ status: 'approved' })
+      toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const adapter = createSequencedAdapter([
       {
@@ -1988,50 +2024,55 @@ describe('plugin-driven tool loop commit and rollback', () => {
               fieldName: 'tone',
               operation: 'set',
               value: 'warm',
-              expectedFingerprint: before.fingerprint
-            }
-          }
-        ]
+              expectedFingerprint: before.fingerprint,
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
-            input: { text: 'Config updated.' }
-          }
-        ]
-      }
+            input: {text: 'Config updated.'},
+          },
+        ],
+      },
     ]);
 
     await expect(
       runLocalUserMessageEvent({
-        event: createTestEvent('update config', 'evt_config_update_terminal_fails'),
+        event: createTestEvent(
+          'update config',
+          'evt_config_update_terminal_fails',
+        ),
         session,
         logStore,
         roleModelAdapter: adapter,
-        pluginHost
-      })
+        pluginHost,
+      }),
     ).rejects.toThrow('runtime_turn_completed raw event append failed');
 
     const after = inspectRuntimePluginConfig({
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
       configPath,
-      storeRoot
+      storeRoot,
     });
 
     expect(after.fingerprint).toBe(before.fingerprint);
+    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
+      {
+        configured: true,
+        value: 'cool',
+      },
+    );
     expect(
-      after.fields.find((field) => field.name === 'tone')?.authored
-    ).toEqual({
-      configured: true,
-      value: 'cool'
-    });
-    expect(
-      logStore.rawEvents().some((event) => event.kind === 'runtime_turn_completed')
+      logStore
+        .rawEvents()
+        .some(event => event.kind === 'runtime_turn_completed'),
     ).toBe(false);
     expect(
-      logStore.rawEvents().some((event) => event.kind === 'after_turn_committed')
+      logStore.rawEvents().some(event => event.kind === 'after_turn_committed'),
     ).toBe(false);
   });
 
@@ -2039,34 +2080,35 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-staged-write-health-visible';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [
         createHandleFileStoreWritePlugin({
-          rejectHealthWhenValue: 'staged side effect'
-        })
+          rejectHealthWhenValue: 'staged side effect',
+        }),
       ],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        handleFileStoreWritePluginId
-      ]
+        handleFileStoreWritePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: handleFileStoreWritePluginId
+      pluginId: handleFileStoreWritePluginId,
     });
     const adapter = createSequencedAdapter([
       {
@@ -2074,21 +2116,21 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: handleFileStoreWriteToolName,
             input: {
-              value: 'staged side effect'
-            }
-          }
-        ]
+              value: 'staged side effect',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'health should see staged writes'
-            }
-          }
-        ]
-      }
+              text: 'health should see staged writes',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -2096,12 +2138,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'plugin_health_rejected'
+      reason: 'plugin_health_rejected',
     });
     expect(pluginStore.readJson('state.json')).toBeUndefined();
   });
@@ -2110,38 +2152,39 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const sessionId = 'session-staged-write-rejected-terminal';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createHandleFileStoreWritePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        handleFileStoreWritePluginId
-      ]
+        handleFileStoreWritePluginId,
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: handleFileStoreWritePluginId
+      pluginId: handleFileStoreWritePluginId,
     });
     const event = createUserMessageRuntimeEvent(
       'write memory',
       createRuntimeEventIdentity({
         eventId: 'evt_staged_write_rejected_terminal',
         traceId: 'trace_staged_write_rejected_terminal',
-        createdAt: '2026-06-15T00:00:00.000Z'
-      })
+        createdAt: '2026-06-15T00:00:00.000Z',
+      }),
     );
     const adapter = createSequencedAdapter([
       {
@@ -2149,21 +2192,21 @@ describe('plugin-driven tool loop commit and rollback', () => {
           {
             name: handleFileStoreWriteToolName,
             input: {
-              value: 'stale side effect'
-            }
-          }
-        ]
+              value: 'stale side effect',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: ''
-            }
-          }
-        ]
-      }
+              text: '',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -2171,12 +2214,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'invalid_visible_reply'
+      reason: 'invalid_visible_reply',
     });
     expect(pluginStore.readJson('state.json')).toBeUndefined();
   });
@@ -2199,26 +2242,26 @@ function startPluginMutationLockHolderChild(options: {
     "writeFileSync(process.argv[3], 'ready\\n', 'utf8');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'Atomics.wait(sleep, 0, 0, Number(process.argv[4]));',
-    'lease.release();'
+    'lease.release();',
   ].join('\n');
 
   return runInlineModuleChild(script, [
     options.locksRoot,
     options.resourceKey,
     options.readyPath,
-    String(options.holdMs)
+    String(options.holdMs),
   ]);
 }
 
 async function runInlineModuleChild(
   script: string,
-  arguments_: readonly string[]
+  arguments_: readonly string[],
 ): Promise<void> {
   await new Promise<void>((resolveChild, rejectChild) => {
     const child = spawn(
       process.execPath,
       ['--input-type=module', '-e', script, ...arguments_],
-      { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }
+      {cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe']},
     );
     let stderr = '';
 
@@ -2234,7 +2277,7 @@ async function runInlineModuleChild(
       }
 
       rejectChild(
-        new Error(`Inline child failed (${String(code ?? signal)}): ${stderr}`)
+        new Error(`Inline child failed (${String(code ?? signal)}): ${stderr}`),
       );
     });
   });
@@ -2262,7 +2305,7 @@ async function waitForReadyFile(path: string): Promise<void> {
       throw new Error(`Timed out waiting for child readiness file: ${path}.`);
     }
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       setTimeout(resolve, 10);
     });
   }

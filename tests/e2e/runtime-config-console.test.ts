@@ -1,30 +1,22 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { Readable } from 'node:stream';
+import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {Readable} from 'node:stream';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import {
-  runRuntimeConfigCliFromArgs
-} from '../../src/cli/config/main.ts';
-import type {
-  RuntimeConfigConsolePromptAdapter
-} from '../../src/cli/config/console.ts';
-import type {
-  RuntimePlugin
-} from '../../src/plugins/api/types.ts';
-import { runtimeConfigVersion } from '../../src/runtime/config/index.ts';
-import type { RuntimePluginFactoryDefinition } from '../../src/app/index.ts';
+import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
+import type {RuntimePlugin} from '../../src/plugins/api/types.ts';
+import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
+import type {RuntimePluginFactoryDefinition} from '../../src/app/index.ts';
 import {
   requiredDottedConfigPlugin,
   requiredSecretPlugin,
-  requiredSecretPluginWithManifestEnvVar
+  requiredSecretPluginWithManifestEnvVar,
 } from '../support/runtime-config-fixtures.ts';
-import {
-  writeRuntimeConfig
-} from '../support/runtime-config.ts';
-import { collect } from '../support/streams.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {collect} from '../support/streams.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 type ScriptedPromptStep =
   | string
@@ -43,13 +35,13 @@ describe('runtime config console UI', () => {
       ['--store', storeRoot, 'ui'],
       {
         stdin: Readable.from([]),
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
-        })
-      }
+        }),
+      },
     );
 
     expect(exitCode).toBe(0);
@@ -58,7 +50,9 @@ describe('runtime config console UI', () => {
   });
 
   it('accepts a quit command through the default terminal prompt', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-default-prompt-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-default-prompt-',
+    );
     let stdout = '';
     let stderr = '';
 
@@ -66,13 +60,13 @@ describe('runtime config console UI', () => {
       ['--store', storeRoot, 'ui'],
       {
         stdin: Readable.from(['q\n']),
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
-        })
-      }
+        }),
+      },
     );
 
     expect(exitCode).toBe(0);
@@ -87,17 +81,17 @@ describe('runtime config console UI', () => {
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', 'q'])
-      }
+        prompt: scriptedPrompt(['2', 'q']),
+      },
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\nSystem services\n3\) .+ \(first_party\.model_tools\)\n4\) .+ \(runtime\.plugin\)/
+      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\nSystem services\n3\) .+ \(first_party\.model_tools\)\n4\) .+ \(runtime\.plugin\)/,
     );
     expect(stdout.match(/\(runtime\.plugin\)/g)).toHaveLength(1);
     expect(stdout).not.toContain('runtime.plugin_discovery');
@@ -110,128 +104,139 @@ describe('runtime config console UI', () => {
     const packageRoot = join(storeRoot, 'plugins', plugin.manifest.id);
     let stdout = '';
 
-    mkdirSync(packageRoot, { recursive: true });
+    mkdirSync(packageRoot, {recursive: true});
     writeFileSync(
       join(packageRoot, 'package.json'),
-      `${JSON.stringify({ type: 'module' })}\n`,
-      'utf8'
+      `${JSON.stringify({type: 'module'})}\n`,
+      'utf8',
     );
     writeFileSync(
       join(packageRoot, 'project02.plugin.json'),
       `${JSON.stringify({
         format: 'project02.plugin.v1',
         entry: './index.mjs',
-        manifest: plugin.manifest
+        manifest: plugin.manifest,
       })}\n`,
-      'utf8'
+      'utf8',
     );
     writeFileSync(
       join(packageRoot, 'index.mjs'),
       "throw new Error('console must not import plugin entries');\n",
-      'utf8'
+      'utf8',
     );
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', 'q'])
-      }
+        prompt: scriptedPrompt(['2', 'q']),
+      },
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\n3\) .+ \(operator\.console\)\nSystem services/
+      /Plugins\n1\) .+ \(character-state\)\n2\) .+ \(demo-config\)\n3\) .+ \(operator\.console\)\nSystem services/,
     );
   });
 
   it('shows an operator package as disabled despite its manifest default claim', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-operator-default-');
-    const plugin = requiredDottedConfigPlugin('operator.console-default', 'endpoint');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-operator-default-',
+    );
+    const plugin = requiredDottedConfigPlugin(
+      'operator.console-default',
+      'endpoint',
+    );
     const packageRoot = join(storeRoot, 'plugins', plugin.manifest.id);
     let stdout = '';
 
-    mkdirSync(packageRoot, { recursive: true });
+    mkdirSync(packageRoot, {recursive: true});
     writeFileSync(
       join(packageRoot, 'package.json'),
-      `${JSON.stringify({ type: 'module' })}\n`,
-      'utf8'
+      `${JSON.stringify({type: 'module'})}\n`,
+      'utf8',
     );
     writeFileSync(
       join(packageRoot, 'project02.plugin.json'),
       `${JSON.stringify({
         format: 'project02.plugin.v1',
         entry: './index.mjs',
-        manifest: plugin.manifest
+        manifest: plugin.manifest,
       })}\n`,
-      'utf8'
+      'utf8',
     );
     writeFileSync(
       join(packageRoot, 'index.mjs'),
       "throw new Error('console must not import plugin entries');\n",
-      'utf8'
+      'utf8',
     );
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '3', 'q'])
-      }
+        prompt: scriptedPrompt(['2', '3', 'q']),
+      },
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain(
-      'Required Memory (operator.console-default)\n1) Enabled: false'
+      'Required Memory (operator.console-default)\n1) Enabled: false',
     );
   });
 
   it('selects a system service through the continuous plugin index', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-system-selection-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-system-selection-',
+    );
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '4', 'q'])
-      }
+        prompt: scriptedPrompt(['2', '4', 'q']),
+      },
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toMatch(/System services\n3\) .+\n4\) .+ \(runtime\.plugin\)/);
+    expect(stdout).toMatch(
+      /System services\n3\) .+\n4\) .+ \(runtime\.plugin\)/,
+    );
     expect(stdout).toContain('(runtime.plugin)\n1) Enabled:');
   });
 
   it('re-enables runtime.plugin through the operator console recovery path', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-runtime-plugin-recovery-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-runtime-plugin-recovery-',
+    );
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         'runtime.plugin': {
-          enabled: false
-        }
-      }
+          enabled: false,
+        },
+      },
     });
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
-        prompt: scriptedPrompt(['2', '4', '1', '1', '1'])
-      }
+        prompt: scriptedPrompt(['2', '4', '1', '1', '1']),
+      },
     );
 
     expect(exitCode).toBe(0);
@@ -239,30 +244,34 @@ describe('runtime config console UI', () => {
     expect(stdout).toContain('Old: false');
     expect(stdout).toContain('New: true');
     expect(stdout).toContain('Saved plugins.runtime.plugin.enabled.');
-    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+    expect(
+      JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
+    ).toMatchObject({
       plugins: {
         'runtime.plugin': {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
   });
 
   it('lists package factories separately from canonical bootstrap services', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-plugin-group-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-plugin-group-',
+    );
     const plugin = requiredDottedConfigPlugin('sample.plugin', 'endpoint');
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', 'q'])
-      }
+        prompt: scriptedPrompt(['2', 'q']),
+      },
     );
 
     expect(exitCode).toBe(0);
@@ -272,11 +281,13 @@ describe('runtime config console UI', () => {
   });
 
   it('reports a default terminal prompt input failure without hanging', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-input-failure-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-input-failure-',
+    );
     const input = new Readable({
       read() {
         this.destroy(new Error('console input failed'));
-      }
+      },
     });
     let stderr = '';
 
@@ -285,10 +296,10 @@ describe('runtime config console UI', () => {
       {
         stdin: input,
         stdout: collect(() => {}),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
-        })
-      }
+        }),
+      },
     );
 
     expect(exitCode).toBe(1);
@@ -300,8 +311,8 @@ describe('runtime config console UI', () => {
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       project02: {
         storeRoot,
-        roleModelProvider: 'local'
-      }
+        roleModelProvider: 'local',
+      },
     });
     let stdout = '';
     let stderr = '';
@@ -309,14 +320,14 @@ describe('runtime config console UI', () => {
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
-        prompt: scriptedPrompt(['1', '3', '1', 'unsupported', 'nvidia', '1'])
-      }
+        prompt: scriptedPrompt(['1', '3', '1', 'unsupported', 'nvidia', '1']),
+      },
     );
 
     expect(exitCode).toBe(0);
@@ -328,83 +339,99 @@ describe('runtime config console UI', () => {
     expect(stdout).toContain('Old: "local"');
     expect(stdout).toContain('New: "nvidia"');
     expect(stdout).toContain('Saved project02.roleModelProvider.');
-    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+    expect(
+      JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
+    ).toMatchObject({
       version: runtimeConfigVersion,
       project02: {
-        roleModelProvider: 'nvidia'
-      }
+        roleModelProvider: 'nvidia',
+      },
     });
   });
 
   it('edits a declared non-secret plugin field through the structured operator control', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-plugin-field-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-plugin-field-',
+    );
     const plugin = requiredDottedConfigPlugin('sample.plugin', 'endpoint');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      project02: { storeRoot },
+      project02: {storeRoot},
       plugins: {
         [plugin.manifest.id]: {
           enabled: true,
-          config: { endpoint: 'local' }
-        }
-      }
+          config: {endpoint: 'local'},
+        },
+      },
     });
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2', '1', 'remote', '1'])
-      }
+        prompt: scriptedPrompt(['2', '1', '2', '1', 'remote', '1']),
+      },
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain('Target: plugins.sample.plugin.config.endpoint');
     expect(stdout).toContain('Old: "local"');
     expect(stdout).toContain('New: "remote"');
-    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+    expect(
+      JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
+    ).toMatchObject({
       plugins: {
         [plugin.manifest.id]: {
           enabled: true,
-          config: { endpoint: 'remote' }
-        }
-      }
+          config: {endpoint: 'remote'},
+        },
+      },
     });
   });
 
   it.each([
-    { finalAnswer: '1', expectedEnabled: false, expectedText: 'Saved plugins.sample.plugin.enabled.' },
-    { finalAnswer: '2', expectedEnabled: true, expectedText: 'Change cancelled.' }
+    {
+      finalAnswer: '1',
+      expectedEnabled: false,
+      expectedText: 'Saved plugins.sample.plugin.enabled.',
+    },
+    {
+      finalAnswer: '2',
+      expectedEnabled: true,
+      expectedText: 'Change cancelled.',
+    },
   ])(
     'supports one exact plugin activation change with explicit Save or Cancel',
-    async ({ finalAnswer, expectedEnabled, expectedText }) => {
-      const storeRoot = createTestTempRoot('project02-config-console-plugin-toggle-');
+    async ({finalAnswer, expectedEnabled, expectedText}) => {
+      const storeRoot = createTestTempRoot(
+        'project02-config-console-plugin-toggle-',
+      );
       const plugin = requiredDottedConfigPlugin('sample.plugin', 'endpoint');
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-        project02: { storeRoot },
+        project02: {storeRoot},
         plugins: {
           [plugin.manifest.id]: {
             enabled: true,
-            config: { endpoint: 'local' }
-          }
-        }
+            config: {endpoint: 'local'},
+          },
+        },
       });
       let stdout = '';
 
       const exitCode = await runRuntimeConfigCliFromArgs(
         ['--store', storeRoot, 'ui'],
         {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
           stderr: collect(() => {}),
           factories: factoriesFor(plugin),
-          prompt: scriptedPrompt(['2', '1', '1', '2', finalAnswer])
-        }
+          prompt: scriptedPrompt(['2', '1', '1', '2', finalAnswer]),
+        },
       );
 
       expect(exitCode).toBe(0);
@@ -412,33 +439,35 @@ describe('runtime config console UI', () => {
       expect(stdout).toContain('Old: true');
       expect(stdout).toContain('New: false');
       expect(stdout).toContain(expectedText);
-      expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+      expect(
+        JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
+      ).toMatchObject({
         plugins: {
           [plugin.manifest.id]: {
             enabled: expectedEnabled,
-            config: { endpoint: 'local' }
-          }
-        }
+            config: {endpoint: 'local'},
+          },
+        },
       });
-    }
+    },
   );
 
   it('never displays or accepts a resolved plugin secret and directs to secret set', async () => {
     const storeRoot = createTestTempRoot('project02-config-console-secret-');
     const plugin = requiredSecretPluginWithManifestEnvVar(
       'memory.secret',
-      'MEMORY_SECRET_API_KEY'
+      'MEMORY_SECRET_API_KEY',
     );
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      project02: { storeRoot },
+      project02: {storeRoot},
       plugins: {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: 'MEMORY_SECRET_API_KEY' }
-          }
-        }
-      }
+            apiKey: {$env: 'MEMORY_SECRET_API_KEY'},
+          },
+        },
+      },
     });
     const before = readFileSync(configPath, 'utf8');
     let stdout = '';
@@ -446,30 +475,35 @@ describe('runtime config console UI', () => {
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
         env: {
-          MEMORY_SECRET_API_KEY: 'must-never-appear'
+          MEMORY_SECRET_API_KEY: 'must-never-appear',
         },
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2'])
-      }
+        prompt: scriptedPrompt(['2', '1', '2']),
+      },
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('Secret values are not displayed or entered in this console.');
     expect(stdout).toContain(
-      "pnpm runtime-config --store '" + storeRoot +
-        "' -- secret set 'memory.secret' 'apiKey' 'MEMORY_SECRET_API_KEY'"
+      'Secret values are not displayed or entered in this console.',
+    );
+    expect(stdout).toContain(
+      "pnpm runtime-config --store '" +
+        storeRoot +
+        "' -- secret set 'memory.secret' 'apiKey' 'MEMORY_SECRET_API_KEY'",
     );
     expect(stdout).not.toContain('must-never-appear');
     expect(readFileSync(configPath, 'utf8')).toBe(before);
   });
 
   it('suggests a deterministic environment name when secret metadata omits one', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-secret-name-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-secret-name-',
+    );
     const plugin = requiredSecretPlugin('memory.secret-auto');
     let stdout = '';
 
@@ -478,63 +512,69 @@ describe('runtime config console UI', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: 'MEMORY_SECRET_AUTO_APIKEY' }
-          }
-        }
-      }
+            apiKey: {$env: 'MEMORY_SECRET_AUTO_APIKEY'},
+          },
+        },
+      },
     });
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2'])
-      }
+        prompt: scriptedPrompt(['2', '1', '2']),
+      },
     );
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain(
-      "secret set 'memory.secret-auto' 'apiKey' 'MEMORY_SECRET_AUTO_APIKEY'"
+      "secret set 'memory.secret-auto' 'apiKey' 'MEMORY_SECRET_AUTO_APIKEY'",
     );
   });
 
   it('resolves plugin secrets from the selected runtime env file without exposing them', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-runtime-env-');
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-runtime-env-',
+    );
     const envVar = 'MEMORY_RUNTIME_FILE_API_KEY';
     const secretValue = 'must-stay-in-runtime-env';
     const plugin = requiredSecretPluginWithManifestEnvVar(
       'memory.runtime-file',
-      envVar
+      envVar,
     );
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      project02: { storeRoot },
+      project02: {storeRoot},
       plugins: {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
-    writeFileSync(join(storeRoot, '.env'), `${envVar}="${secretValue}"\n`, 'utf8');
+    writeFileSync(
+      join(storeRoot, '.env'),
+      `${envVar}="${secretValue}"\n`,
+      'utf8',
+    );
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
         env: {},
         factories: factoriesFor(plugin),
-        prompt: scriptedPrompt(['2', '1', '2'])
-      }
+        prompt: scriptedPrompt(['2', '1', '2']),
+      },
     );
 
     expect(exitCode).toBe(0);
@@ -548,8 +588,8 @@ describe('runtime config console UI', () => {
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       project02: {
         storeRoot,
-        roleModelProvider: 'local'
-      }
+        roleModelProvider: 'local',
+      },
     });
     let stdout = '';
     let stderr = '';
@@ -557,10 +597,10 @@ describe('runtime config console UI', () => {
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'ui'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         prompt: scriptedPrompt([
@@ -575,40 +615,44 @@ describe('runtime config console UI', () => {
                 project02: {
                   storeRoot,
                   defaultMemoryProvider: 'memory.external',
-                  roleModelProvider: 'local'
-                }
+                  roleModelProvider: 'local',
+                },
               });
-            }
-          }
-        ])
-      }
+            },
+          },
+        ]),
+      },
     );
 
     expect(exitCode).toBe(1);
     expect(stdout).toContain('Target: project02.roleModelProvider');
-    expect(stderr).toContain('Runtime config changed before the mutation could be committed.');
-    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toMatchObject({
+    expect(stderr).toContain(
+      'Runtime config changed before the mutation could be committed.',
+    );
+    expect(
+      JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
+    ).toMatchObject({
       project02: {
         defaultMemoryProvider: 'memory.external',
-        roleModelProvider: 'local'
-      }
+        roleModelProvider: 'local',
+      },
     });
   });
 });
 
 function factoriesFor(
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ): Readonly<Record<string, RuntimePluginFactoryDefinition>> {
   return Object.freeze({
     [plugin.manifest.id]: Object.freeze({
       manifest: plugin.manifest,
-      create: () => plugin
-    } satisfies RuntimePluginFactoryDefinition)
+      create: () => plugin,
+    } satisfies RuntimePluginFactoryDefinition),
   });
 }
 
 function scriptedPrompt(
-  steps: readonly ScriptedPromptStep[]
+  steps: readonly ScriptedPromptStep[],
 ): RuntimeConfigConsolePromptAdapter {
   let index = 0;
 
@@ -627,6 +671,6 @@ function scriptedPrompt(
 
       step.beforeAnswer();
       return Promise.resolve(step.answer);
-    }
+    },
   });
 }

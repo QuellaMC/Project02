@@ -2,14 +2,14 @@ import {
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   isRuntimeConfigConflictError,
   preparedRuntimePluginConfigEffectIsStillCurrent,
-  type RuntimePluginConfigControlHostState
+  type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
-import { createRuntimePluginEvidenceSnapshot } from '../api/constructors.ts';
-import { mergedRedactionLabels } from '../api/evidence-policy.ts';
-import { redactRuntimePluginText } from '../api/validation-primitives.ts';
+import {createRuntimePluginEvidenceSnapshot} from '../api/constructors.ts';
+import {mergedRedactionLabels} from '../api/evidence-policy.ts';
+import {redactRuntimePluginText} from '../api/validation-primitives.ts';
 import type {
   RuntimePluginEvidenceStatus,
-  RuntimePluginPolicyOutcome
+  RuntimePluginPolicyOutcome,
 } from '../api/contract.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
@@ -19,7 +19,7 @@ import type {
   RuntimePluginProvidedTool,
   RuntimePluginToolCall,
   RuntimePluginToolCallExecutionResult,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../api/types.ts';
 
 export type RuntimePluginToolConfirmationRequest = {
@@ -30,9 +30,9 @@ export type RuntimePluginToolConfirmationRequest = {
 };
 
 export type RuntimePluginToolConfirmationDecision =
-  | { readonly status: 'approved' }
-  | { readonly status: 'denied' }
-  | { readonly status: 'cancelled' };
+  | {readonly status: 'approved'}
+  | {readonly status: 'denied'}
+  | {readonly status: 'cancelled'};
 
 export type RuntimePluginToolConfirmationContext = {
   readonly signal: AbortSignal;
@@ -41,7 +41,7 @@ export type RuntimePluginToolConfirmationContext = {
 
 export type RuntimePluginToolConfirmationHandler = (
   request: RuntimePluginToolConfirmationRequest,
-  context: RuntimePluginToolConfirmationContext
+  context: RuntimePluginToolConfirmationContext,
 ) =>
   | RuntimePluginToolConfirmationDecision
   | Promise<RuntimePluginToolConfirmationDecision>;
@@ -51,8 +51,10 @@ export const runtimePluginToolApprovalTimeoutMs = 5 * 60_000;
 export async function requestRuntimePluginToolConfirmation(
   handler: RuntimePluginToolConfirmationHandler,
   request: RuntimePluginToolConfirmationRequest,
-  timeoutMs = runtimePluginToolApprovalTimeoutMs
-): Promise<RuntimePluginToolConfirmationDecision | { readonly status: 'timed_out' }> {
+  timeoutMs = runtimePluginToolApprovalTimeoutMs,
+): Promise<
+  RuntimePluginToolConfirmationDecision | {readonly status: 'timed_out'}
+> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
   const abortController = new AbortController();
   const deadlineAt = Date.now() + timeoutMs;
@@ -62,15 +64,15 @@ export async function requestRuntimePluginToolConfirmation(
       Promise.resolve().then(() =>
         handler(request, {
           signal: abortController.signal,
-          deadlineAt
-        })
+          deadlineAt,
+        }),
       ),
-      new Promise<{ readonly status: 'timed_out' }>((resolve) => {
+      new Promise<{readonly status: 'timed_out'}>(resolve => {
         timeoutId = setTimeout(() => {
-          resolve(Object.freeze({ status: 'timed_out' as const }));
+          resolve(Object.freeze({status: 'timed_out' as const}));
           abortController.abort();
         }, timeoutMs);
-      })
+      }),
     ]);
   } finally {
     if (timeoutId !== undefined) {
@@ -87,7 +89,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
   readonly context: RuntimePluginContext;
   readonly result: Extract<
     RuntimePluginToolCallExecutionResult,
-    { readonly status: 'accepted' }
+    {readonly status: 'accepted'}
   >;
   readonly confirmationHandler: RuntimePluginToolConfirmationHandler;
   readonly pluginConfigControl: RuntimePluginConfigControlHostState;
@@ -97,7 +99,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
 
   if (effect === undefined) {
     throw new TypeError(
-      'Approval-gated runtime config tool result is missing its prepared effect.'
+      'Approval-gated runtime config tool result is missing its prepared effect.',
     );
   }
 
@@ -109,7 +111,9 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
     preview = createPreparedRuntimePluginConfigEffectConfirmationPreview({
       effect,
       state: options.pluginConfigControl,
-      ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
     });
   } catch (error: unknown) {
     if (!isRuntimeConfigConflictError(error)) {
@@ -123,7 +127,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
       message:
         'Plugin config changed before approval and the prepared update was discarded.',
       evidenceStatus: 'rejected',
-      policyOutcome: 'handler_rejected'
+      policyOutcome: 'handler_rejected',
     });
   }
 
@@ -138,8 +142,8 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
         pluginId: options.plugin.manifest.id,
         toolName: options.providedTool.name,
         summary: options.providedTool.description,
-        preview
-      })
+        preview,
+      }),
     );
   } catch {
     return createRejectedToolCallResult({
@@ -148,7 +152,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
       reason: 'plugin_config_approval_unavailable',
       message: 'Plugin config update approval could not be completed.',
       evidenceStatus: 'rejected',
-      policyOutcome: 'handler_rejected'
+      policyOutcome: 'handler_rejected',
     });
   }
 
@@ -159,7 +163,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
         state: options.pluginConfigControl,
         ...(options.storeRoot === undefined
           ? {}
-          : { storeRoot: options.storeRoot })
+          : {storeRoot: options.storeRoot}),
       })
     ) {
       return createRejectedToolCallResult({
@@ -169,14 +173,14 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
         message:
           'Plugin config changed during approval and the prepared update was discarded.',
         evidenceStatus: 'rejected',
-        policyOutcome: 'handler_rejected'
+        policyOutcome: 'handler_rejected',
       });
     }
     return withRuntimePluginToolApprovalEvidence({
       plugin: options.plugin,
       context: options.context,
       effect,
-      result: options.result
+      result: options.result,
     });
   }
 
@@ -184,16 +188,16 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
     decision.status === 'timed_out'
       ? {
           reason: 'plugin_config_approval_timeout',
-          message: `Plugin config update approval timed out after ${String(runtimePluginToolApprovalTimeoutMs)}ms.`
+          message: `Plugin config update approval timed out after ${String(runtimePluginToolApprovalTimeoutMs)}ms.`,
         }
       : decision.status === 'denied'
         ? {
             reason: 'plugin_config_approval_denied',
-            message: 'Plugin config update was denied by the user.'
+            message: 'Plugin config update was denied by the user.',
           }
         : {
             reason: 'plugin_config_approval_cancelled',
-            message: 'Plugin config update approval was cancelled.'
+            message: 'Plugin config update approval was cancelled.',
           };
 
   return createRejectedToolCallResult({
@@ -201,7 +205,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
     context: options.context,
     ...rejection,
     evidenceStatus: 'rejected',
-    policyOutcome: 'handler_rejected'
+    policyOutcome: 'handler_rejected',
   });
 }
 
@@ -211,7 +215,7 @@ function withRuntimePluginToolApprovalEvidence(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly result: Extract<
     RuntimePluginToolCallExecutionResult,
-    { readonly status: 'accepted' }
+    {readonly status: 'accepted'}
   >;
 }): RuntimePluginToolCallExecutionResult {
   const approvalEvidence = createRuntimePluginEvidenceSnapshot({
@@ -227,19 +231,19 @@ function withRuntimePluginToolApprovalEvidence(options: {
     sourceReferences: [
       {
         kind: 'runtime',
-        id: options.effect.effectId
-      }
+        id: options.effect.effectId,
+      },
     ],
     redactionLabels: mergedRedactionLabels({
       plugin: options.plugin,
-      context: options.context
+      context: options.context,
     }),
-    configFingerprint: options.effect.resultFingerprint
+    configFingerprint: options.effect.resultFingerprint,
   });
 
   return Object.freeze({
     ...options.result,
-    evidence: Object.freeze([...options.result.evidence, approvalEvidence])
+    evidence: Object.freeze([...options.result.evidence, approvalEvidence]),
   });
 }
 
@@ -268,8 +272,8 @@ export function createRejectedToolCallResult(options: {
         status: options.evidenceStatus ?? 'rejected',
         summary: message,
         policyOutcome: options.policyOutcome ?? 'handler_rejected',
-        redactionLabels: options.context.privacy.redactionLabels
-      })
-    ])
+        redactionLabels: options.context.privacy.redactionLabels,
+      }),
+    ]),
   } satisfies RuntimePluginToolCallResult);
 }

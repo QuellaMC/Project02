@@ -4,7 +4,7 @@ import {
   type CharacterTurnResult,
   type ConversationSession,
   type RuntimeEventIdentity,
-  type UserMessageRuntimeEvent
+  type UserMessageRuntimeEvent,
 } from '../../core/index.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
@@ -12,21 +12,21 @@ import type {
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginToolCall,
-  RuntimePluginToolInvocationSnapshot
+  RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
   RuntimePluginFileStorePreparedTransaction,
-  RuntimePluginHost
+  RuntimePluginHost,
 } from '../../plugins/index.ts';
 import type {
   ParsedRoleModelDecisionSnapshot,
   RoleModelDecisionRejectionReason,
-  RoleModelIOSnapshot
+  RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
 import type {
   RoleModelAdapter,
-  RoleModelPluginToolRoutingEvidence
+  RoleModelPluginToolRoutingEvidence,
 } from '../../role-model/index.ts';
 import type {
   ConversationLogRecord,
@@ -36,7 +36,7 @@ import type {
   RoleModelCommitValidationSnapshot,
   RuntimeLogStore,
   RuntimeTraceEntry,
-  RuntimeTraceStepName
+  RuntimeTraceStepName,
 } from '../evidence/records.ts';
 
 export const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
@@ -60,7 +60,7 @@ export type RunLocalUserMessageEventOptions = {
   readonly characterTurnOptions?: CharacterTurnOptions;
   readonly committedAt?: string;
   readonly onProgress?: (
-    event: LocalRuntimeTurnProgressEvent
+    event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;
 };
 
@@ -132,7 +132,7 @@ export type RoleModelRawEvidence = {
 };
 
 export function roleModelIOSnapshotSessionId(
-  snapshot: RoleModelIOSnapshot
+  snapshot: RoleModelIOSnapshot,
 ): string {
   return snapshot.inputEnvelope.decisionContext.sessionId;
 }
@@ -159,8 +159,7 @@ export type RuntimeTurnState = {
   runtimePluginHostForTurn: RuntimePluginHost | undefined;
   pluginFileStoreTransactionActive: boolean;
   preparedPluginFileStoreTransaction:
-    | RuntimePluginFileStorePreparedTransaction
-    | undefined;
+    RuntimePluginFileStorePreparedTransaction | undefined;
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
   readonly startedPluginToolCalls: Map<string, RuntimePluginToolCall>;

@@ -1,23 +1,23 @@
-import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import {createHash} from 'node:crypto';
+import {lstatSync, readFileSync} from 'node:fs';
+import {dirname, join} from 'node:path';
 
-import type { RuntimeEventIdentity } from '../../../core/index.ts';
-import { createLocalRuntimeSessionPaths } from '../layout-contract.ts';
-import type { RuntimePluginJsonValue } from '../../../plugins/index.ts';
+import type {RuntimeEventIdentity} from '../../../core/index.ts';
+import {createLocalRuntimeSessionPaths} from '../layout-contract.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import {
   assertRegularFile,
   assertSafeDurableTransactionJournalDirectory,
   isNonEmptyString,
   isNonNegativeSafeInteger,
   isPositiveSafeInteger,
-  writeTextAtomic
+  writeTextAtomic,
 } from './durable-primitives.ts';
 import {
   freezeRuntimePluginFileStoreJsonValue,
   isMissingFileError,
   isPlainObject,
-  normalizeRuntimePluginFileStorePath
+  normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
 
 export const durableTransactionJournalVersion =
@@ -67,15 +67,11 @@ export function durablePluginFileStoreTransactionJournalPath(options: {
     .update(options.identity.createdAt)
     .digest('hex');
 
-  return join(
-    sessionPaths.sessionRoot,
-    '.plugin-transactions',
-    `${key}.json`
-  );
+  return join(sessionPaths.sessionRoot, '.plugin-transactions', `${key}.json`);
 }
 
 export function assertDurableTransactionJournalDoesNotExist(
-  journalPath: string
+  journalPath: string,
 ): void {
   try {
     lstatSync(journalPath);
@@ -92,14 +88,14 @@ export function assertDurableTransactionJournalDoesNotExist(
 
 export function writeDurablePluginFileStoreJournal(
   journalPath: string,
-  journal: DurablePluginFileStoreJournal
+  journal: DurablePluginFileStoreJournal,
 ): void {
   assertSafeDurableTransactionJournalDirectory(dirname(journalPath));
   writeTextAtomic(journalPath, `${JSON.stringify(journal)}\n`);
 }
 
 export function readDurablePluginFileStoreJournal(
-  journalPath: string
+  journalPath: string,
 ): DurablePluginFileStoreJournal {
   assertRegularFile(journalPath, 'Plugin fileStore transaction journal');
 
@@ -109,7 +105,7 @@ export function readDurablePluginFileStoreJournal(
     value = JSON.parse(readFileSync(journalPath, 'utf8')) as unknown;
   } catch (error: unknown) {
     throw new TypeError('Plugin fileStore transaction journal is malformed.', {
-      cause: error
+      cause: error,
     });
   }
 
@@ -142,7 +138,7 @@ export function readDurablePluginFileStoreJournal(
   }
 
   const operations = rawOperations.map((rawOperation, index) =>
-    decodeDurablePluginFileStoreJournalOperation(rawOperation, index)
+    decodeDurablePluginFileStoreJournalOperation(rawOperation, index),
   );
 
   return Object.freeze({
@@ -154,7 +150,7 @@ export function readDurablePluginFileStoreJournal(
     ownerNonce,
     ownerPid,
     sessionId,
-    operations: Object.freeze(operations)
+    operations: Object.freeze(operations),
   } satisfies DurablePluginFileStoreJournal);
 }
 
@@ -174,14 +170,14 @@ function isOwnerNonce(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(
-      value
+      value,
     )
   );
 }
 
 function decodeDurablePluginFileStoreJournalOperation(
   value: unknown,
-  expectedIndex: number
+  expectedIndex: number,
 ): DurablePluginFileStoreJournalOperation {
   if (!isPlainObject(value)) {
     throw new TypeError('Plugin fileStore transaction operation is malformed.');
@@ -214,7 +210,7 @@ function decodeDurablePluginFileStoreJournalOperation(
     value: freezeRuntimePluginFileStoreJsonValue(value['value']),
     status,
     expectedBeforeHash,
-    ...decodePlannedJournalOperationFields(value, kind, status)
+    ...decodePlannedJournalOperationFields(value, kind, status),
   } satisfies DurablePluginFileStoreJournalOperation;
 
   if (
@@ -231,7 +227,7 @@ function decodeDurablePluginFileStoreJournalOperation(
 function decodePlannedJournalOperationFields(
   value: Readonly<Record<string, unknown>>,
   kind: DurablePluginFileStoreJournalOperation['kind'],
-  status: DurablePluginFileStoreJournalOperation['status']
+  status: DurablePluginFileStoreJournalOperation['status'],
 ): Partial<
   Pick<
     DurablePluginFileStoreJournalOperation,
@@ -261,10 +257,10 @@ function decodePlannedJournalOperationFields(
     appendedLine,
     afterLength,
     beforeRevision,
-    afterRevision
+    afterRevision,
   ];
 
-  if (status === 'pending' && fields.every((field) => field === undefined)) {
+  if (status === 'pending' && fields.every(field => field === undefined)) {
     return {};
   }
 
@@ -282,7 +278,7 @@ function decodePlannedJournalOperationFields(
     beforeHash,
     afterHash,
     beforeRevision,
-    afterRevision
+    afterRevision,
   };
 
   if (kind === 'write_json') {
@@ -292,10 +288,12 @@ function decodePlannedJournalOperationFields(
       appendedLine !== undefined ||
       afterLength !== undefined
     ) {
-      throw new TypeError('Plugin fileStore transaction operation is malformed.');
+      throw new TypeError(
+        'Plugin fileStore transaction operation is malformed.',
+      );
     }
 
-    return { ...common, afterContent };
+    return {...common, afterContent};
   }
 
   if (
@@ -312,6 +310,6 @@ function decodePlannedJournalOperationFields(
     ...common,
     beforeLength,
     appendedLine,
-    afterLength
+    afterLength,
   };
 }

@@ -1,8 +1,11 @@
-import { isJsonBoundaryCredentialKey, redactJsonBoundaryText } from '../../shared/redaction.ts';
+import {
+  isJsonBoundaryCredentialKey,
+  redactJsonBoundaryText,
+} from '../../shared/redaction.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
-  ResolvedRuntimeConfigField
+  ResolvedRuntimeConfigField,
 } from './types.ts';
 
 export function redactRuntimeConfigText(value: string): string {
@@ -11,7 +14,7 @@ export function redactRuntimeConfigText(value: string): string {
 
 export function redactRuntimeConfigValue(
   value: RuntimeConfigValue,
-  options: { readonly secret?: boolean; readonly key?: string } = {}
+  options: {readonly secret?: boolean; readonly key?: string} = {},
 ): RuntimeConfigValue {
   if (options.secret === true || runtimeConfigValueIsSecretMarker(value)) {
     return '[redacted]';
@@ -37,24 +40,26 @@ export function redactRuntimeConfigValue(
     const items: readonly RuntimeConfigValue[] = value;
 
     return Object.freeze(
-      items.map((item) => redactRuntimeConfigValue(item, options))
+      items.map(item => redactRuntimeConfigValue(item, options)),
     );
   }
 
   return Object.freeze(
     Object.fromEntries(
-      Object.entries(value).map(([key, item]: readonly [string, RuntimeConfigValue]) => [
-        key,
-        redactRuntimeConfigValue(item, {
-          key: runtimeConfigRedactionPath(options.key, key)
-        })
-      ])
-    ) as Readonly<Record<string, RuntimeConfigValue>>
+      Object.entries(value).map(
+        ([key, item]: readonly [string, RuntimeConfigValue]) => [
+          key,
+          redactRuntimeConfigValue(item, {
+            key: runtimeConfigRedactionPath(options.key, key),
+          }),
+        ],
+      ),
+    ) as Readonly<Record<string, RuntimeConfigValue>>,
   );
 }
 
 export function redactResolvedRuntimeConfigField(
-  field: ResolvedRuntimeConfigField
+  field: ResolvedRuntimeConfigField,
 ): RedactedRuntimeConfigField {
   return Object.freeze({
     name: field.name,
@@ -66,16 +71,16 @@ export function redactResolvedRuntimeConfigField(
       : {
           value: redactRuntimeConfigValue(field.value, {
             secret: field.secret,
-            key: field.name
-          })
-        })
+            key: field.name,
+          }),
+        }),
   } satisfies RedactedRuntimeConfigField);
 }
 
 // The single owner of secret-marker detection: a config value is a secret
 // marker when it is a `$env` or `$plaintextSecret` object.
 export function runtimeConfigValueIsSecretMarker(
-  value: RuntimeConfigValue
+  value: RuntimeConfigValue,
 ): boolean {
   return (
     typeof value === 'object' &&
@@ -87,7 +92,7 @@ export function runtimeConfigValueIsSecretMarker(
 
 function runtimeConfigRedactionPath(
   parent: string | undefined,
-  key: string
+  key: string,
 ): string {
   return parent === undefined ? key : `${parent}.${key}`;
 }

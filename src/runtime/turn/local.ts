@@ -1,14 +1,14 @@
-import type { ConversationSession } from '../../core/index.ts';
-import { LocalRuntimeStorageContractError } from '../storage/layout-contract.ts';
-import { acquireLocalRuntimeSessionWriterLease } from '../storage/session-store.ts';
-import { runSerializedLocalUserMessageEvent } from './model.ts';
-import { recoverPendingRuntimeConfigEffects } from './config-effects.ts';
+import type {ConversationSession} from '../../core/index.ts';
+import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
+import {acquireLocalRuntimeSessionWriterLease} from '../storage/session-store.ts';
+import {runSerializedLocalUserMessageEvent} from './model.ts';
+import {recoverPendingRuntimeConfigEffects} from './config-effects.ts';
 import type {
   LocalRuntimeUserMessageResult,
-  RunLocalUserMessageEventOptions
+  RunLocalUserMessageEventOptions,
 } from './contracts.ts';
 
-export { recordLocalUserMessageInputRejection } from './input.ts';
+export {recordLocalUserMessageInputRejection} from './input.ts';
 export type {
   LocalRuntimeTurnProgressEvent,
   LocalRuntimeUserMessageCompletedResult,
@@ -17,13 +17,16 @@ export type {
   LocalRuntimeUserMessageRejectionReason,
   LocalRuntimeUserMessageResult,
   RecordLocalUserMessageInputRejectionOptions,
-  RunLocalUserMessageEventOptions
+  RunLocalUserMessageEventOptions,
 } from './contracts.ts';
 
-const localRuntimeTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
+const localRuntimeTurnQueues = new WeakMap<
+  ConversationSession,
+  Promise<void>
+>();
 
 export async function runLocalUserMessageEvent(
-  options: RunLocalUserMessageEventOptions
+  options: RunLocalUserMessageEventOptions,
 ): Promise<LocalRuntimeUserMessageResult> {
   return await enqueueLocalRuntimeTurn(options.session, async () => {
     return await runLocalUserMessageEventWithWriterLease(options);
@@ -31,7 +34,7 @@ export async function runLocalUserMessageEvent(
 }
 
 async function runLocalUserMessageEventWithWriterLease(
-  options: RunLocalUserMessageEventOptions
+  options: RunLocalUserMessageEventOptions,
 ): Promise<LocalRuntimeUserMessageResult> {
   const sessionPaths = options.logStore.localRuntimeSessionPaths;
 
@@ -44,14 +47,14 @@ async function runLocalUserMessageEventWithWriterLease(
     sessionId: sessionPaths.sessionId,
     ...(options.logStore.localRuntimeWriterLockOwnerToken === undefined
       ? {}
-      : { ownerToken: options.logStore.localRuntimeWriterLockOwnerToken })
+      : {ownerToken: options.logStore.localRuntimeWriterLockOwnerToken}),
   });
 
   try {
     options.logStore.recoverAbandonedWriterEvidence?.();
     recoverPendingRuntimeConfigEffects({
       logStore: options.logStore,
-      pluginHost: options.pluginHost
+      pluginHost: options.pluginHost,
     });
     assertDurableTranscriptIsCurrent(options);
     return await runSerializedLocalUserMessageEvent(options);
@@ -65,7 +68,7 @@ async function runLocalUserMessageEventWithWriterLease(
 }
 
 function assertDurableTranscriptIsCurrent(
-  options: RunLocalUserMessageEventOptions
+  options: RunLocalUserMessageEventOptions,
 ): void {
   const sessionPaths = options.logStore.localRuntimeSessionPaths;
 
@@ -94,14 +97,14 @@ function assertDurableTranscriptIsCurrent(
   ) {
     throw new LocalRuntimeStorageContractError(
       'stale_session',
-      `Conversation session "${options.session.id}" is stale relative to durable session "${sessionPaths.sessionId}".`
+      `Conversation session "${options.session.id}" is stale relative to durable session "${sessionPaths.sessionId}".`,
     );
   }
 }
 
 async function enqueueLocalRuntimeTurn<T>(
   session: ConversationSession,
-  operation: () => Promise<T>
+  operation: () => Promise<T>,
 ): Promise<T> {
   const previousTurn = localRuntimeTurnQueues.get(session) ?? Promise.resolve();
   const currentTurn = previousTurn.then(operation, operation);
@@ -110,8 +113,8 @@ async function enqueueLocalRuntimeTurn<T>(
     session,
     currentTurn.then(
       () => undefined,
-      () => undefined
-    )
+      () => undefined,
+    ),
   );
 
   return await currentTurn;

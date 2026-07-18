@@ -1,13 +1,13 @@
 import {
   createPreparedRuntimePluginConfigEffect,
-  createRuntimePluginEvidenceSnapshot
+  createRuntimePluginEvidenceSnapshot,
 } from '../../api/constructors.ts';
 import {
   runtimePluginConfigUpdateToolName,
-  runtimePluginId
+  runtimePluginId,
 } from '../../api/contract.ts';
-import { runtimeIdentityMatchesContext } from '../../api/identity.ts';
-import { isApprovalGatedRuntimePluginTool } from '../../api/tool-classification.ts';
+import {runtimeIdentityMatchesContext} from '../../api/identity.ts';
+import {isApprovalGatedRuntimePluginTool} from '../../api/tool-classification.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
   RuntimePluginConfigField,
@@ -15,26 +15,27 @@ import type {
   RuntimePluginJsonObject,
   RuntimePluginToolCallExecutionResult,
   RuntimePluginProvidedTool,
-  RuntimePluginToolCall
+  RuntimePluginToolCall,
 } from '../../api/types.ts';
 import type {
   RuntimeConfigValue,
   RuntimePluginConfigControlCapability,
-  RuntimePluginConfigFieldControlOperation
+  RuntimePluginConfigFieldControlOperation,
 } from '../../../runtime/config/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot
+  createJsonBoundarySnapshot,
 } from '../../../shared/json-boundary.ts';
 import {
   inspectRuntimePluginConfigForControl,
   nonEmptyPluginConfigInputString,
   pluginConfigErrorMessage,
-  rejectedPluginConfigToolCall
+  rejectedPluginConfigToolCall,
 } from './config.ts';
 import {
-  isRuntimeConfigConflictError, requiredRuntimePluginConfigControl,
-  type RuntimePluginConfigControlHostState
+  isRuntimeConfigConflictError,
+  requiredRuntimePluginConfigControl,
+  type RuntimePluginConfigControlHostState,
 } from './state.ts';
 
 export const runtimePluginConfigUpdateExecutionTimeoutMs = 5_000;
@@ -52,41 +53,41 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
           name: 'pluginId',
           description: 'Exact installed plugin id to update.',
           required: true,
-          valueType: 'string'
+          valueType: 'string',
         },
         {
           name: 'fieldName',
           description: 'Exact manifest-declared config field name.',
           required: true,
-          valueType: 'string'
+          valueType: 'string',
         },
         {
           name: 'operation',
           description: 'Apply exactly one set or unset operation.',
           required: true,
           valueType: 'string',
-          allowedValues: ['set', 'unset']
+          allowedValues: ['set', 'unset'],
         },
         {
           name: 'value',
           description:
-            'New JSON value. Required for set and unavailable for unset. Must match the target field\'s declared valueType and allowedValues as returned by runtime.plugin.config (e.g. a plain string for a string field, not a JSON-encoded array).',
-          required: false
+            "New JSON value. Required for set and unavailable for unset. Must match the target field's declared valueType and allowedValues as returned by runtime.plugin.config (e.g. a plain string for a string field, not a JSON-encoded array).",
+          required: false,
         },
         {
           name: 'expectedFingerprint',
           description:
             'Authored config fingerprint returned by runtime.plugin.config.',
           required: true,
-          valueType: 'string'
-        }
+          valueType: 'string',
+        },
       ],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_config_write',
     requiresConfirmation: true,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: false,
   };
 }
 
@@ -96,12 +97,12 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
   readonly storeRoot?: string | undefined;
 }) {
   const manifest = options.state.pluginManifests.find(
-    (candidate) => candidate.id === options.effect.targetPluginId
+    candidate => candidate.id === options.effect.targetPluginId,
   );
 
   if (manifest === undefined) {
     throw new TypeError(
-      `Prepared config effect target plugin "${options.effect.targetPluginId}" is not installed.`
+      `Prepared config effect target plugin "${options.effect.targetPluginId}" is not installed.`,
     );
   }
 
@@ -110,35 +111,39 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
       ? {
           kind: 'set',
           fieldName: options.effect.fieldName,
-          value: options.effect.operation.value
+          value: options.effect.operation.value,
         }
       : {
           kind: 'unset',
-          fieldName: options.effect.fieldName
+          fieldName: options.effect.fieldName,
         };
-  const field = requiredRuntimePluginConfigControl(options.state).validateOperation({
+  const field = requiredRuntimePluginConfigControl(
+    options.state,
+  ).validateOperation({
     manifest,
     actor: 'agent',
-    operation
+    operation,
   });
-  const targetConfigPath = requiredRuntimePluginConfigControl(options.state).resolveTargetPath({
+  const targetConfigPath = requiredRuntimePluginConfigControl(
+    options.state,
+  ).resolveTargetPath({
     ...(options.state.configPath === undefined
       ? {}
-      : { configPath: options.state.configPath }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    ...(options.state.env === undefined ? {} : { env: options.state.env })
+      : {configPath: options.state.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.state.env === undefined ? {} : {env: options.state.env}),
   });
 
   if (targetConfigPath !== options.effect.targetConfigPath) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
-      `Prepared config effect "${options.effect.effectId}" targets another runtime config path.`
+      `Prepared config effect "${options.effect.effectId}" targets another runtime config path.`,
     );
   }
 
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   let reconciliation: 'already_applied' | 'applied';
 
@@ -146,23 +151,27 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     reconciliation = 'already_applied';
   } else {
     if (inspection.fingerprint !== options.effect.expectedFingerprint) {
-      throw requiredRuntimePluginConfigControl(options.state).createConflictError(
-        `Prepared config effect "${options.effect.effectId}" cannot be reconciled because authored config changed.`
+      throw requiredRuntimePluginConfigControl(
+        options.state,
+      ).createConflictError(
+        `Prepared config effect "${options.effect.effectId}" cannot be reconciled because authored config changed.`,
       );
     }
 
-    const prepared = requiredRuntimePluginConfigControl(options.state).prepareOperation({
+    const prepared = requiredRuntimePluginConfigControl(
+      options.state,
+    ).prepareOperation({
       manifest,
       actor: 'agent',
       expectedFingerprint: options.effect.expectedFingerprint,
       operation,
       ...(options.state.configPath === undefined
         ? {}
-        : { configPath: options.state.configPath }),
+        : {configPath: options.state.configPath}),
       ...(options.storeRoot === undefined
         ? {}
-        : { storeRoot: options.storeRoot }),
-      ...(options.state.env === undefined ? {} : { env: options.state.env })
+        : {storeRoot: options.storeRoot}),
+      ...(options.state.env === undefined ? {} : {env: options.state.env}),
     });
 
     if (
@@ -170,27 +179,29 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
       prepared.resultFingerprint !== options.effect.resultFingerprint
     ) {
       throw new Error(
-        `Prepared config effect "${options.effect.effectId}" does not match its validated config candidate.`
+        `Prepared config effect "${options.effect.effectId}" does not match its validated config candidate.`,
       );
     }
 
-    const result = requiredRuntimePluginConfigControl(options.state).applyOperation({
+    const result = requiredRuntimePluginConfigControl(
+      options.state,
+    ).applyOperation({
       manifest,
       actor: 'agent',
       expectedFingerprint: options.effect.expectedFingerprint,
       operation,
       ...(options.state.configPath === undefined
         ? {}
-        : { configPath: options.state.configPath }),
+        : {configPath: options.state.configPath}),
       ...(options.storeRoot === undefined
         ? {}
-        : { storeRoot: options.storeRoot }),
-      ...(options.state.env === undefined ? {} : { env: options.state.env })
+        : {storeRoot: options.storeRoot}),
+      ...(options.state.env === undefined ? {} : {env: options.state.env}),
     });
 
     if (result.fingerprint !== options.effect.resultFingerprint) {
       throw new Error(
-        `Prepared config effect "${options.effect.effectId}" produced an unexpected config fingerprint.`
+        `Prepared config effect "${options.effect.effectId}" produced an unexpected config fingerprint.`,
       );
     }
 
@@ -212,11 +223,11 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     sourceReferences: [
       {
         kind: 'runtime',
-        id: options.effect.effectId
-      }
+        id: options.effect.effectId,
+      },
     ],
     redactionLabels: field.redactionLabels,
-    configFingerprint: options.effect.resultFingerprint
+    configFingerprint: options.effect.resultFingerprint,
   });
 }
 
@@ -231,7 +242,7 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
 
   if (!isApprovalGatedRuntimePluginTool(options.providedTool)) {
     throw new TypeError(
-      'Only an approval-gated runtime config tool can prepare a config effect.'
+      'Only an approval-gated runtime config tool can prepare a config effect.',
     );
   }
 
@@ -239,7 +250,7 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
 
   if (!runtimeIdentityMatchesContext(effect, options.context)) {
     throw new TypeError(
-      'Prepared plugin config effect identity must match current runtime event identity.'
+      'Prepared plugin config effect identity must match current runtime event identity.',
     );
   }
 
@@ -252,24 +263,26 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   readonly storeRoot?: string;
 }): boolean {
   const manifest = options.state.pluginManifests.find(
-    (candidate) => candidate.id === options.effect.targetPluginId
+    candidate => candidate.id === options.effect.targetPluginId,
   );
 
   if (manifest === undefined) {
     return false;
   }
 
-  const targetConfigPath = requiredRuntimePluginConfigControl(options.state).resolveTargetPath({
+  const targetConfigPath = requiredRuntimePluginConfigControl(
+    options.state,
+  ).resolveTargetPath({
     ...(options.state.configPath === undefined
       ? {}
-      : { configPath: options.state.configPath }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    ...(options.state.env === undefined ? {} : { env: options.state.env })
+      : {configPath: options.state.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.state.env === undefined ? {} : {env: options.state.env}),
   });
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return !(
@@ -278,15 +291,13 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   );
 }
 
-export function createPreparedRuntimePluginConfigEffectConfirmationPreview(
-  options: {
-    readonly effect: PreparedRuntimePluginConfigEffect;
-    readonly state: RuntimePluginConfigControlHostState;
-    readonly storeRoot?: string;
-  }
-): RuntimePluginJsonObject {
+export function createPreparedRuntimePluginConfigEffectConfirmationPreview(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly state: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+}): RuntimePluginJsonObject {
   const manifest = options.state.pluginManifests.find(
-    (candidate) => candidate.id === options.effect.targetPluginId
+    candidate => candidate.id === options.effect.targetPluginId,
   );
 
   if (
@@ -294,7 +305,7 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(
     !preparedRuntimePluginConfigEffectIsStillCurrent(options)
   ) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
-      'Prepared plugin config effect is no longer current for approval.'
+      'Prepared plugin config effect is no longer current for approval.',
     );
   }
 
@@ -303,29 +314,31 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(
       ? {
           kind: 'set',
           fieldName: options.effect.fieldName,
-          value: options.effect.operation.value
+          value: options.effect.operation.value,
         }
       : {
           kind: 'unset',
-          fieldName: options.effect.fieldName
+          fieldName: options.effect.fieldName,
         };
-  const field = requiredRuntimePluginConfigControl(options.state).validateOperation({
+  const field = requiredRuntimePluginConfigControl(
+    options.state,
+  ).validateOperation({
     manifest,
     actor: 'agent',
-    operation
+    operation,
   });
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const inspectedField = inspection.fields.find(
-    (candidate) => candidate.name === field.name
+    candidate => candidate.name === field.name,
   );
 
   if (inspectedField === undefined) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
-      `Plugin config inspection is missing field "${field.name}".`
+      `Plugin config inspection is missing field "${field.name}".`,
     );
   }
 
@@ -336,9 +349,10 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(
       operation,
       expectedFingerprint: options.effect.expectedFingerprint,
       authored: inspectedField.authored,
-      redactValue: requiredRuntimePluginConfigControl(options.state).redactValue
+      redactValue: requiredRuntimePluginConfigControl(options.state)
+        .redactValue,
     }),
-    { field: 'Prepared plugin config approval preview' }
+    {field: 'Prepared plugin config approval preview'},
   );
 }
 
@@ -355,18 +369,18 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   } catch (error: unknown) {
     return rejectedPluginConfigToolCall(
       'plugin_config_update_invalid',
-      pluginConfigErrorMessage(error)
+      pluginConfigErrorMessage(error),
     );
   }
 
   const manifest = options.state.pluginManifests.find(
-    (candidate) => candidate.id === pluginId
+    candidate => candidate.id === pluginId,
   );
 
   if (manifest === undefined) {
     return rejectedPluginConfigToolCall(
       'plugin_config_unknown_plugin',
-      `Plugin "${pluginId}" is not installed in the current host catalog.`
+      `Plugin "${pluginId}" is not installed in the current host catalog.`,
     );
   }
 
@@ -377,40 +391,42 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   try {
     operation = pluginConfigOperationFromInput(options.call.input);
     expectedFingerprint = nonEmptyPluginConfigInputString(
-      options.call.input['expectedFingerprint']
+      options.call.input['expectedFingerprint'],
     );
-    field = requiredRuntimePluginConfigControl(options.state).validateOperation({
-      manifest,
-      actor: 'agent',
-      operation
-    });
+    field = requiredRuntimePluginConfigControl(options.state).validateOperation(
+      {
+        manifest,
+        actor: 'agent',
+        operation,
+      },
+    );
   } catch (error: unknown) {
     return rejectedPluginConfigToolCall(
       'plugin_config_update_invalid',
-      pluginConfigErrorMessage(error)
+      pluginConfigErrorMessage(error),
     );
   }
 
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const blockingDiagnostic = inspection.diagnostics.find(
-    (diagnostic) => diagnostic.severity === 'error'
+    diagnostic => diagnostic.severity === 'error',
   );
 
   if (blockingDiagnostic !== undefined) {
     return rejectedPluginConfigToolCall(
       'plugin_config_update_invalid',
-      `Plugin config cannot be updated while its current authored config is invalid: ${blockingDiagnostic.message}`
+      `Plugin config cannot be updated while its current authored config is invalid: ${blockingDiagnostic.message}`,
     );
   }
 
   if (inspection.fingerprint !== expectedFingerprint) {
     return rejectedPluginConfigToolCall(
       'plugin_config_fingerprint_conflict',
-      'Plugin config changed after it was inspected. Inspect again before requesting an update.'
+      'Plugin config changed after it was inspected. Inspect again before requesting an update.',
     );
   }
 
@@ -418,18 +434,20 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   let targetConfigPath: string;
 
   try {
-    const prepared = requiredRuntimePluginConfigControl(options.state).prepareOperation({
+    const prepared = requiredRuntimePluginConfigControl(
+      options.state,
+    ).prepareOperation({
       manifest,
       actor: 'agent',
       expectedFingerprint,
       operation,
       ...(options.state.configPath === undefined
         ? {}
-        : { configPath: options.state.configPath }),
+        : {configPath: options.state.configPath}),
       ...(options.storeRoot === undefined
         ? {}
-        : { storeRoot: options.storeRoot }),
-      ...(options.state.env === undefined ? {} : { env: options.state.env })
+        : {storeRoot: options.storeRoot}),
+      ...(options.state.env === undefined ? {} : {env: options.state.env}),
     });
 
     resultFingerprint = prepared.resultFingerprint;
@@ -438,13 +456,13 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     if (isRuntimeConfigConflictError(error)) {
       return rejectedPluginConfigToolCall(
         'plugin_config_fingerprint_conflict',
-        'Plugin config changed after approval and was not updated.'
+        'Plugin config changed after approval and was not updated.',
       );
     }
 
     return rejectedPluginConfigToolCall(
       'plugin_config_update_failed',
-      pluginConfigErrorMessage(error)
+      pluginConfigErrorMessage(error),
     );
   }
 
@@ -458,9 +476,9 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
         fieldName: field.name,
         operation: operation.kind,
         fingerprint: resultFingerprint,
-        reloadRequired: field.reloadRequired === true
+        reloadRequired: field.reloadRequired === true,
       },
-      { field: 'Prepared plugin config update' }
+      {field: 'Prepared plugin config update'},
     ),
     evidence: [
       createRuntimePluginEvidenceSnapshot({
@@ -473,8 +491,8 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
         status: 'accepted',
         summary: `Approved plugin "${manifest.id}" config field "${field.name}" for turn commit.`,
         redactionLabels: options.context.privacy.redactionLabels,
-        configFingerprint: resultFingerprint
-      })
+        configFingerprint: resultFingerprint,
+      }),
     ],
     preparedConfigEffect: Object.freeze({
       eventId: options.call.eventId,
@@ -494,16 +512,16 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
           ? Object.freeze({
               kind: 'set',
               value: createJsonBoundarySnapshot(operation.value, {
-                field: 'Prepared plugin config update value'
-              })
+                field: 'Prepared plugin config update value',
+              }),
             })
-          : Object.freeze({ kind: 'unset' })
-    })
+          : Object.freeze({kind: 'unset'}),
+    }),
   };
 }
 
 function pluginConfigOperationFromInput(
-  input: RuntimePluginJsonObject
+  input: RuntimePluginJsonObject,
 ): RuntimePluginConfigFieldControlOperation {
   const fieldName = nonEmptyPluginConfigInputString(input['fieldName']);
   const operation = nonEmptyPluginConfigInputString(input['operation']);
@@ -518,8 +536,8 @@ function pluginConfigOperationFromInput(
       kind: 'set',
       fieldName,
       value: createJsonBoundarySnapshot(value, {
-        field: 'Plugin config update value'
-      })
+        field: 'Plugin config update value',
+      }),
     };
   }
 
@@ -528,7 +546,7 @@ function pluginConfigOperationFromInput(
       throw new TypeError('Plugin config unset input must not include value.');
     }
 
-    return { kind: 'unset', fieldName };
+    return {kind: 'unset', fieldName};
   }
 
   throw new TypeError('Plugin config operation must be "set" or "unset".');
@@ -555,16 +573,16 @@ function pluginConfigChangePreview(options: {
       configured: options.authored.configured,
       ...(options.authored.value === undefined
         ? {}
-        : { value: options.authored.value })
+        : {value: options.authored.value}),
     }),
     after:
       options.operation.kind === 'set'
         ? Object.freeze({
             configured: true,
             value: options.redactValue(options.operation.value, {
-              key: options.field.name
-            })
+              key: options.field.name,
+            }),
           })
-        : Object.freeze({ configured: false })
+        : Object.freeze({configured: false}),
   });
 }

@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
+import {readFileSync} from 'node:fs';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import * as project02 from '../../src/index.ts';
 
@@ -14,7 +14,7 @@ import {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
   runLocalUserMessageEvent,
-  visibleReplyModelToolName
+  visibleReplyModelToolName,
 } from '../../src/index.ts';
 
 describe('root public surface', () => {
@@ -24,25 +24,25 @@ describe('root public surface', () => {
 
   it('exposes prepared plugin activation-plan APIs', () => {
     expect(project02.prepareConfiguredProject02PluginActivation).toBeTypeOf(
-      'function'
+      'function',
     );
     expect(project02.createConfiguredProject02PluginHostFromPlan).toBeTypeOf(
-      'function'
+      'function',
     );
   });
 
   it('keeps the broad production barrels cold for Character State', () => {
     const pluginBarrel = readFileSync(
       new URL('../../src/plugins/index.ts', import.meta.url),
-      'utf8'
+      'utf8',
     );
     const rootBarrel = readFileSync(
       new URL('../../src/index.ts', import.meta.url),
-      'utf8'
+      'utf8',
     );
     const chatEntrypoint = readFileSync(
       new URL('../../src/cli/chat/main.ts', import.meta.url),
-      'utf8'
+      'utf8',
     );
 
     expect(pluginBarrel).not.toContain('packages/character-state/plugin');
@@ -54,7 +54,7 @@ describe('root public surface', () => {
   it('declares the root public surface without wildcard exports', () => {
     const rootBarrel = readFileSync(
       new URL('../../src/index.ts', import.meta.url),
-      'utf8'
+      'utf8',
     );
 
     expect(rootBarrel).not.toMatch(/\bexport\s+\*/u);
@@ -71,12 +71,12 @@ describe('role-model module smoke', () => {
             {
               name: visibleReplyModelToolName,
               input: {
-                text: 'hello'
-              }
-            }
-          ]
-        })
-      )
+                text: 'hello',
+              },
+            },
+          ],
+        }),
+      ),
     ).toEqual({
       status: 'accepted',
       decision: {
@@ -85,17 +85,17 @@ describe('role-model module smoke', () => {
           {
             name: visibleReplyModelToolName,
             input: {
-              text: 'hello'
-            }
-          }
-        ]
-      }
+              text: 'hello',
+            },
+          },
+        ],
+      },
     });
   });
 
   it('keeps root runtime compatibility exports usable together', async () => {
     const session = createConversationSession({
-      id: 'root-compat-session'
+      id: 'root-compat-session',
     });
     const logStore = createRuntimeLogStore();
 
@@ -105,20 +105,19 @@ describe('role-model module smoke', () => {
         createRuntimeEventIdentity({
           eventId: 'evt_root_compat',
           traceId: 'trace_root_compat',
-          createdAt: '2026-06-16T00:00:00.000Z'
-        })
+          createdAt: '2026-06-16T00:00:00.000Z',
+        }),
       ),
       session,
       logStore,
       pluginHost: createRuntimePluginHost(),
       roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
-      committedAt: '2026-06-16T00:00:01.000Z'
+      committedAt: '2026-06-16T00:00:01.000Z',
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      "I'm here. Tell me what you need."
-    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello', "I'm here. Tell me what you need."]);
   });
 });

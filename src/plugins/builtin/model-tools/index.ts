@@ -1,24 +1,20 @@
-import {
-  builtInModelToolDefinitionsForUserTurn
-} from '../../../role-model/api/index.ts';
+import {builtInModelToolDefinitionsForUserTurn} from '../../../role-model/api/index.ts';
 import {
   firstPartyModelToolsPluginId,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
 } from '../../api/contract.ts';
-import {
-  createRuntimePlugin
-} from '../../api/constructors.ts';
-import { createRuntimePluginManifest } from '../../api/manifest-validation.ts';
+import {createRuntimePlugin} from '../../api/constructors.ts';
+import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {
   RuntimePlugin,
   RuntimePluginManifest,
-  RuntimePluginProvidedTool
+  RuntimePluginProvidedTool,
 } from '../../api/types.ts';
 
 const firstPartyModelToolsPluginInstances = new WeakSet<RuntimePlugin>();
 
 export const firstPartyModelToolsProvidedTools = Object.freeze(
-  builtInModelToolDefinitionsForUserTurn().map((definition) =>
+  builtInModelToolDefinitionsForUserTurn().map(definition =>
     Object.freeze({
       name: definition.name,
       description: definition.description,
@@ -28,16 +24,16 @@ export const firstPartyModelToolsProvidedTools = Object.freeze(
       validationOwner: 'built_in_model_tools',
       sideEffectLevel: 'none',
       requiresConfirmation: false,
-      sourceReferencesRequired: false
-    } satisfies RuntimePluginProvidedTool)
-  )
+      sourceReferencesRequired: false,
+    } satisfies RuntimePluginProvidedTool),
+  ),
 );
 
 export function createFirstPartyModelToolsPlugin(): RuntimePlugin {
   const plugin = createRuntimePlugin({
     manifest: createFirstPartyModelToolsPluginManifest(),
     providedTools: firstPartyModelToolsProvidedTools,
-    lifecycleHooks: {}
+    lifecycleHooks: {},
   });
 
   firstPartyModelToolsPluginInstances.add(plugin);
@@ -56,11 +52,11 @@ export function createFirstPartyModelToolsPluginManifest(): RuntimePluginManifes
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
       sourceSystem: 'project02',
-      externalContract: 'built_in_model_tools'
+      externalContract: 'built_in_model_tools',
     },
     declaredPlugins: ['tool_provider'],
     config: {
-      fields: []
+      fields: [],
     },
     localTrustLevel: 'first_party',
     runtimePolicy: {
@@ -74,14 +70,14 @@ export function createFirstPartyModelToolsPluginManifest(): RuntimePluginManifes
         beforeRoleModelCall: 'reject_turn',
         handleToolCall: 'reject_tool_call',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: true,
-      reasons: ['built_in_user_turn_tools']
+      reasons: ['built_in_user_turn_tools'],
     },
-    requestedAccess: { model_input: 'write' }
+    requestedAccess: {model_input: 'write'},
   });
 }
 

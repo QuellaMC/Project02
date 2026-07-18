@@ -1,24 +1,27 @@
-import { createRuntimePluginEvidenceSnapshot } from '../../api/constructors.ts';
-import { runtimePluginConfigReadToolName, runtimePluginId } from '../../api/contract.ts';
+import {createRuntimePluginEvidenceSnapshot} from '../../api/constructors.ts';
+import {
+  runtimePluginConfigReadToolName,
+  runtimePluginId,
+} from '../../api/contract.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginJsonObject,
   RuntimePluginManifest,
   RuntimePluginProvidedTool,
   RuntimePluginToolCall,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../../api/types.ts';
-import type { RuntimePluginConfigControlCapability } from '../../../runtime/config/index.ts';
-import { requiredRuntimePluginConfigControl } from './state.ts';
+import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
+import {requiredRuntimePluginConfigControl} from './state.ts';
 
 type RuntimePluginConfigInspection = ReturnType<
   RuntimePluginConfigControlCapability['inspectConfig']
 >;
 import {
   createJsonBoundaryObjectSnapshot,
-  ownJsonRecordValue
+  ownJsonRecordValue,
 } from '../../../shared/json-boundary.ts';
-import type { RuntimePluginConfigControlHostState } from './state.ts';
+import type {RuntimePluginConfigControlHostState} from './state.ts';
 
 export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
   return {
@@ -33,15 +36,15 @@ export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
           name: 'pluginId',
           description: 'Exact installed plugin id to inspect.',
           required: true,
-          valueType: 'string'
-        }
+          valueType: 'string',
+        },
       ],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false
+    sourceReferencesRequired: false,
   };
 }
 
@@ -58,32 +61,32 @@ export function handleRuntimePluginConfigReadToolCall(options: {
   } catch (error: unknown) {
     return rejectedPluginConfigToolCall(
       'plugin_config_inspect_invalid',
-      pluginConfigErrorMessage(error)
+      pluginConfigErrorMessage(error),
     );
   }
 
   const manifest = options.state.pluginManifests.find(
-    (candidate) => candidate.id === pluginId
+    candidate => candidate.id === pluginId,
   );
 
   if (manifest === undefined) {
     return rejectedPluginConfigToolCall(
       'plugin_config_unknown_plugin',
-      `Plugin "${pluginId}" is not installed in the current host catalog.`
+      `Plugin "${pluginId}" is not installed in the current host catalog.`,
     );
   }
 
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot })
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return {
     status: 'accepted',
     output: createJsonBoundaryObjectSnapshot(
       modelVisiblePluginConfigInspection(inspection),
-      { field: 'Plugin config inspection' }
+      {field: 'Plugin config inspection'},
     ),
     evidence: [
       createRuntimePluginEvidenceSnapshot({
@@ -96,9 +99,9 @@ export function handleRuntimePluginConfigReadToolCall(options: {
         status: 'accepted',
         summary: `Inspected redacted config for plugin "${manifest.id}".`,
         redactionLabels: options.context.privacy.redactionLabels,
-        configFingerprint: inspection.fingerprint
-      })
-    ]
+        configFingerprint: inspection.fingerprint,
+      }),
+    ],
   };
 }
 
@@ -109,25 +112,25 @@ export function inspectRuntimePluginConfigForControl(options: {
 }): RuntimePluginConfigInspection {
   const activation = ownJsonRecordValue(
     options.state.activationByPluginId,
-    options.manifest.id
+    options.manifest.id,
   );
 
   return requiredRuntimePluginConfigControl(options.state).inspectConfig({
     manifest: options.manifest,
     pluginManifests: options.state.pluginManifests,
-    ...(activation === undefined ? {} : { activation }),
+    ...(activation === undefined ? {} : {activation}),
     ...(options.state.defaultEnabledPluginIds === undefined
       ? {}
       : {
           defaultEnabled: options.state.defaultEnabledPluginIds.includes(
-            options.manifest.id
-          )
+            options.manifest.id,
+          ),
         }),
     ...(options.state.configPath === undefined
       ? {}
-      : { configPath: options.state.configPath }),
-    ...(options.storeRoot === undefined ? {} : { storeRoot: options.storeRoot }),
-    ...(options.state.env === undefined ? {} : { env: options.state.env })
+      : {configPath: options.state.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.state.env === undefined ? {} : {env: options.state.env}),
   });
 }
 
@@ -140,38 +143,40 @@ export function nonEmptyPluginConfigInputString(value: unknown): string {
 }
 
 export function pluginConfigErrorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : 'Plugin config update failed.';
+  return error instanceof Error
+    ? error.message
+    : 'Plugin config update failed.';
 }
 
 export function rejectedPluginConfigToolCall(
   reason: string,
-  message: string
+  message: string,
 ): RuntimePluginToolCallResult {
   return {
     status: 'rejected',
     reason,
     message,
-    evidence: Object.freeze([])
+    evidence: Object.freeze([]),
   };
 }
 
 function modelVisiblePluginConfigInspection(
-  inspection: RuntimePluginConfigInspection
+  inspection: RuntimePluginConfigInspection,
 ): RuntimePluginJsonObject {
   return {
     ...inspection,
-    fields: inspection.fields.map((field) => ({
+    fields: inspection.fields.map(field => ({
       name: field.name,
       description: field.description,
       required: field.required,
       sensitive: field.secret,
-      ...(field.valueType === undefined ? {} : { valueType: field.valueType }),
+      ...(field.valueType === undefined ? {} : {valueType: field.valueType}),
       ...(field.defaultValueSummary === undefined
         ? {}
-        : { defaultValueSummary: field.defaultValueSummary }),
+        : {defaultValueSummary: field.defaultValueSummary}),
       ...(field.allowedValues === undefined
         ? {}
-        : { allowedValues: field.allowedValues }),
+        : {allowedValues: field.allowedValues}),
       agentMutable: field.agentMutable && !field.secret,
       reloadRequired: field.reloadRequired,
       authored: field.authored,
@@ -182,8 +187,8 @@ function modelVisiblePluginConfigInspection(
         resolved: field.effective.resolved,
         ...(field.effective.value === undefined
           ? {}
-          : { value: field.effective.value })
-      }
-    }))
+          : {value: field.effective.value}),
+      },
+    })),
   };
 }

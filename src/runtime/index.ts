@@ -12,7 +12,7 @@ export {
   runLocalUserMessageEvent,
   type LocalRuntimeTurnProgressEvent,
   type LocalRuntimeUserMessageInputRejectedResult,
-  type LocalRuntimeUserMessageResult
+  type LocalRuntimeUserMessageResult,
 } from './turn/local.ts';
 export {
   createRoleModelCommitValidationSnapshot,
@@ -37,5 +37,5 @@ export {
   type RuntimeTraceEntry,
   type RuntimeTraceEntryInput,
   type RuntimeTraceStepName,
-  type RuntimeTurnStatus
+  type RuntimeTurnStatus,
 } from './evidence/records.ts';

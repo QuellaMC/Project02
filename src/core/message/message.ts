@@ -15,10 +15,12 @@ export type VisibleMessage = {
   readonly text: string;
 };
 
-export function freezeCharacterProfile(character: CharacterProfile): CharacterProfile {
+export function freezeCharacterProfile(
+  character: CharacterProfile,
+): CharacterProfile {
   return Object.freeze({
     id: character.id,
-    displayName: character.displayName
+    displayName: character.displayName,
   } satisfies CharacterProfile);
 }
 
@@ -26,5 +28,5 @@ export function freezeCharacterProfile(character: CharacterProfile): CharacterPr
 // deployment persona referenced by durable-evidence validation.
 export const localCharacterProfile: CharacterProfile = freezeCharacterProfile({
   id: 'mira',
-  displayName: 'Mira'
+  displayName: 'Mira',
 });

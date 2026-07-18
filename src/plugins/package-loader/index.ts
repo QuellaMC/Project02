@@ -3,9 +3,9 @@ import {
   readFileSync,
   readdirSync,
   realpathSync,
-  statSync
+  statSync,
 } from 'node:fs';
-import type { Dirent } from 'node:fs';
+import type {Dirent} from 'node:fs';
 import {
   basename,
   extname,
@@ -13,35 +13,32 @@ import {
   join,
   relative,
   resolve,
-  sep
+  sep,
 } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import type {
   RuntimePluginFactoryInput,
-  RuntimePluginPackageCatalogEntry
+  RuntimePluginPackageCatalogEntry,
 } from '../api/factory.ts';
-import { createRuntimePlugin } from '../api/constructors.ts';
-import { createRuntimePluginManifest } from '../api/manifest-validation.ts';
-import { isNodeErrorWithCode } from '../../shared/node-error.ts';
-import { isRecord } from '../api/validation-primitives.ts';
+import {createRuntimePlugin} from '../api/constructors.ts';
+import {createRuntimePluginManifest} from '../api/manifest-validation.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {isRecord} from '../api/validation-primitives.ts';
 import type {
   RuntimePlugin,
   RuntimePluginLifecycleHooks,
-  RuntimePluginManifest
+  RuntimePluginManifest,
 } from '../api/types.ts';
-import {
-  createJsonBoundarySnapshot
-} from '../../shared/json-boundary.ts';
-import { canonicalJsonValuesEqual } from '../../shared/canonical-json.ts';
+import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
+import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 
-export const runtimePluginPackageDescriptorFormat =
-  'project02.plugin.v1';
+export const runtimePluginPackageDescriptorFormat = 'project02.plugin.v1';
 
 export const maxRuntimePluginPackageMetadataBytes = 256 * 1_024;
 
 export const bundledRuntimePluginPackageRoot = fileURLToPath(
-  new URL('../packages/', import.meta.url)
+  new URL('../packages/', import.meta.url),
 );
 
 export type RuntimePluginPackageProvenance = 'bundled' | 'operator';
@@ -61,9 +58,10 @@ export type RuntimePluginPackageDiagnostic = {
   readonly claimedPluginId?: string;
 };
 
-export type DiscoveredRuntimePluginPackage = RuntimePluginPackageCatalogEntry & {
-  readonly provenance: RuntimePluginPackageProvenance;
-};
+export type DiscoveredRuntimePluginPackage =
+  RuntimePluginPackageCatalogEntry & {
+    readonly provenance: RuntimePluginPackageProvenance;
+  };
 
 export type RuntimePluginPackageDiscovery = {
   readonly packages: readonly DiscoveredRuntimePluginPackage[];
@@ -86,7 +84,7 @@ export function discoverRuntimePluginPackages(options: {
     let entries: Dirent[];
 
     try {
-      entries = readdirSync(source.root, { withFileTypes: true });
+      entries = readdirSync(source.root, {withFileTypes: true});
     } catch (error: unknown) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
         continue;
@@ -97,14 +95,14 @@ export function discoverRuntimePluginPackages(options: {
           code: 'package_source_unavailable',
           message: 'Runtime plugin package source is unavailable.',
           path: source.root,
-          provenance: source.provenance
-        })
+          provenance: source.provenance,
+        }),
       );
       continue;
     }
 
     for (const entry of entries.sort((left, right) =>
-      compareText(left.name, right.name)
+      compareText(left.name, right.name),
     )) {
       const packageRoot = join(source.root, entry.name);
 
@@ -116,8 +114,8 @@ export function discoverRuntimePluginPackages(options: {
               'Runtime plugin package directories must not be symbolic links.',
             path: packageRoot,
             provenance: source.provenance,
-            pluginId: entry.name
-          })
+            pluginId: entry.name,
+          }),
         );
         continue;
       }
@@ -129,8 +127,8 @@ export function discoverRuntimePluginPackages(options: {
         candidates.push(
           discoverRuntimePluginPackage({
             packageRoot,
-            provenance: source.provenance
-          })
+            provenance: source.provenance,
+          }),
         );
       } catch (error: unknown) {
         diagnostics.push(
@@ -141,8 +139,8 @@ export function discoverRuntimePluginPackages(options: {
                 message: 'Runtime plugin package is invalid.',
                 path: packageRoot,
                 provenance: source.provenance,
-                pluginId: entry.name
-              })
+                pluginId: entry.name,
+              }),
         );
       }
     }
@@ -151,15 +149,16 @@ export function discoverRuntimePluginPackages(options: {
   const packages = applyPackageIdentityPolicy({
     candidates,
     reservedPluginIds: options.reservedPluginIds,
-    diagnostics
+    diagnostics,
   });
-  diagnostics.sort((left, right) =>
-    compareText(left.path, right.path) || compareText(left.code, right.code)
+  diagnostics.sort(
+    (left, right) =>
+      compareText(left.path, right.path) || compareText(left.code, right.code),
   );
 
   return Object.freeze({
     packages: Object.freeze(packages),
-    diagnostics: Object.freeze(diagnostics)
+    diagnostics: Object.freeze(diagnostics),
   } satisfies RuntimePluginPackageDiscovery);
 }
 
@@ -173,7 +172,7 @@ function discoverRuntimePluginPackage(options: {
     entry: descriptor.entry,
     descriptorPath: descriptor.descriptorPath,
     provenance: options.provenance,
-    pluginId: descriptor.manifest.id
+    pluginId: descriptor.manifest.id,
   });
 
   return Object.freeze({
@@ -181,14 +180,14 @@ function discoverRuntimePluginPackage(options: {
       catalogKind: 'package',
       manifest: descriptor.manifest,
       provenance: options.provenance,
-      load: (input) =>
+      load: input =>
         loadRuntimePluginPackage({
           entryPath,
           manifest: descriptor.manifest,
-          input
-        })
+          input,
+        }),
     } satisfies DiscoveredRuntimePluginPackage),
-    descriptorPath: descriptor.descriptorPath
+    descriptorPath: descriptor.descriptorPath,
   } satisfies DiscoveredRuntimePluginPackageCandidate);
 }
 
@@ -207,7 +206,7 @@ function readRuntimePluginPackageDescriptor(options: {
     code: 'invalid_package_json',
     label: 'package.json',
     provenance: options.provenance,
-    pluginId
+    pluginId,
   });
 
   if (!isRecord(packageJson) || packageJson['type'] !== 'module') {
@@ -217,7 +216,7 @@ function readRuntimePluginPackageDescriptor(options: {
         'Runtime plugin package package.json must declare type "module".',
       path: packageJsonPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
 
@@ -227,7 +226,7 @@ function readRuntimePluginPackageDescriptor(options: {
     code: 'invalid_descriptor',
     label: 'descriptor',
     provenance: options.provenance,
-    pluginId
+    pluginId,
   });
 
   if (!isRecord(descriptor)) {
@@ -236,14 +235,14 @@ function readRuntimePluginPackageDescriptor(options: {
       message: 'Runtime plugin package descriptor must be an object.',
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
 
   const descriptorFields = new Set(['format', 'entry', 'manifest']);
   const unknownDescriptorField = Object.keys(descriptor)
     .sort(compareText)
-    .find((field) => !descriptorFields.has(field));
+    .find(field => !descriptorFields.has(field));
 
   if (unknownDescriptorField !== undefined) {
     throw packageDiscoveryError({
@@ -251,7 +250,7 @@ function readRuntimePluginPackageDescriptor(options: {
       message: `Runtime plugin package descriptor contains unknown field "${unknownDescriptorField}".`,
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
 
@@ -268,7 +267,7 @@ function readRuntimePluginPackageDescriptor(options: {
           : 'Runtime plugin package manifest is invalid.',
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
   const entry = descriptor['entry'];
@@ -279,7 +278,7 @@ function readRuntimePluginPackageDescriptor(options: {
       message: `Runtime plugin package format must be "${runtimePluginPackageDescriptorFormat}".`,
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
   if (typeof entry !== 'string') {
@@ -288,7 +287,7 @@ function readRuntimePluginPackageDescriptor(options: {
       message: 'Runtime plugin package entry must be a string.',
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
   if (!entry.startsWith('./')) {
@@ -298,7 +297,7 @@ function readRuntimePluginPackageDescriptor(options: {
         'Runtime plugin package entry must stay inside its package directory.',
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
   if (!['.ts', '.js', '.mjs'].includes(extname(entry))) {
@@ -307,7 +306,7 @@ function readRuntimePluginPackageDescriptor(options: {
       message: 'Runtime plugin package entry must use .ts, .js, or .mjs.',
       path: descriptorPath,
       provenance: options.provenance,
-      pluginId
+      pluginId,
     });
   }
   if (pluginId !== manifest.id) {
@@ -317,11 +316,11 @@ function readRuntimePluginPackageDescriptor(options: {
       path: descriptorPath,
       provenance: options.provenance,
       pluginId,
-      claimedPluginId: manifest.id
+      claimedPluginId: manifest.id,
     });
   }
 
-  return Object.freeze({ descriptorPath, entry, manifest });
+  return Object.freeze({descriptorPath, entry, manifest});
 }
 
 function resolveRuntimePluginPackageEntryPath(options: {
@@ -347,18 +346,17 @@ function resolveRuntimePluginPackageEntryPath(options: {
         'Runtime plugin package entry must stay inside its package directory.',
       path: options.descriptorPath,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
   try {
     if (lstatSync(unresolvedEntryPath).isSymbolicLink()) {
       throw packageDiscoveryError({
         code: 'invalid_entry',
-        message:
-          'Runtime plugin package entry must not be a symbolic link.',
+        message: 'Runtime plugin package entry must not be a symbolic link.',
         path: options.descriptorPath,
         provenance: options.provenance,
-        pluginId: options.pluginId
+        pluginId: options.pluginId,
       });
     }
     if (!statSync(unresolvedEntryPath).isFile()) {
@@ -371,11 +369,10 @@ function resolveRuntimePluginPackageEntryPath(options: {
 
     throw packageDiscoveryError({
       code: 'invalid_entry',
-      message:
-        'Runtime plugin package entry must reference an existing file.',
+      message: 'Runtime plugin package entry must reference an existing file.',
       path: options.descriptorPath,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
@@ -394,7 +391,7 @@ function resolveRuntimePluginPackageEntryPath(options: {
         'Runtime plugin package entry must stay inside its package directory.',
       path: options.descriptorPath,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
@@ -421,9 +418,10 @@ function applyPackageIdentityPolicy(options: {
     candidatesByPluginId.set(pluginId, matchingCandidates);
   }
 
-  for (const [pluginId, matchingCandidates] of [...candidatesByPluginId]
-    .sort(([left], [right]) => compareText(left, right))) {
-    const eligibleCandidates = matchingCandidates.filter((candidate) => {
+  for (const [pluginId, matchingCandidates] of [...candidatesByPluginId].sort(
+    ([left], [right]) => compareText(left, right),
+  )) {
+    const eligibleCandidates = matchingCandidates.filter(candidate => {
       if (
         candidate.package.provenance === 'operator' &&
         reservedPluginIds.has(pluginId)
@@ -434,8 +432,8 @@ function applyPackageIdentityPolicy(options: {
             message: `Operator runtime plugin package id "${pluginId}" is reserved by the host.`,
             path: candidate.descriptorPath,
             provenance: 'operator',
-            pluginId
-          })
+            pluginId,
+          }),
         );
         return false;
       }
@@ -456,11 +454,10 @@ function applyPackageIdentityPolicy(options: {
     }
 
     const bundledCandidates = eligibleCandidates.filter(
-      (candidate) => candidate.package.provenance === 'bundled'
+      candidate => candidate.package.provenance === 'bundled',
     );
-    const winner = bundledCandidates.length === 1
-      ? bundledCandidates[0]
-      : undefined;
+    const winner =
+      bundledCandidates.length === 1 ? bundledCandidates[0] : undefined;
 
     if (winner !== undefined) {
       packages.push(winner.package);
@@ -477,8 +474,8 @@ function applyPackageIdentityPolicy(options: {
           message: `Runtime plugin package id "${pluginId}" conflicts with another discovered package.`,
           path: candidate.descriptorPath,
           provenance: candidate.package.provenance,
-          pluginId
-        })
+          pluginId,
+        }),
       );
     }
   }
@@ -496,7 +493,7 @@ async function loadRuntimePluginPackage(options: {
     !canonicalJsonValuesEqual(options.input.manifest, options.manifest)
   ) {
     throw new TypeError(
-      `Runtime plugin package factory input does not match "${options.manifest.id}".`
+      `Runtime plugin package factory input does not match "${options.manifest.id}".`,
     );
   }
 
@@ -506,13 +503,13 @@ async function loadRuntimePluginPackage(options: {
     moduleNamespace = await import(pathToFileURL(options.entryPath).href);
   } catch {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" entry could not be imported.`
+      `Runtime plugin package "${options.manifest.id}" entry could not be imported.`,
     );
   }
 
   if (!isRecord(moduleNamespace)) {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" entry must be an ESM module.`
+      `Runtime plugin package "${options.manifest.id}" entry must be an ESM module.`,
     );
   }
 
@@ -523,7 +520,7 @@ async function loadRuntimePluginPackage(options: {
     moduleExports[0] !== 'createProject02Plugin'
   ) {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" must export exactly one named createProject02Plugin factory.`
+      `Runtime plugin package "${options.manifest.id}" must export exactly one named createProject02Plugin factory.`,
     );
   }
 
@@ -531,26 +528,24 @@ async function loadRuntimePluginPackage(options: {
 
   if (typeof createProject02Plugin !== 'function') {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" must export named createProject02Plugin.`
+      `Runtime plugin package "${options.manifest.id}" must export named createProject02Plugin.`,
     );
   }
 
   const factoryInput = Object.freeze({
     ...options.input,
     pluginId: options.manifest.id,
-    manifest: options.manifest
+    manifest: options.manifest,
   } satisfies RuntimePluginFactoryInput);
   let factoryOutput: unknown;
 
   try {
-    factoryOutput = await Reflect.apply(
-      createProject02Plugin,
-      undefined,
-      [factoryInput]
-    );
+    factoryOutput = await Reflect.apply(createProject02Plugin, undefined, [
+      factoryInput,
+    ]);
   } catch {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" factory failed during construction.`
+      `Runtime plugin package "${options.manifest.id}" factory failed during construction.`,
     );
   }
 
@@ -564,13 +559,13 @@ async function loadRuntimePluginPackage(options: {
     plugin = createRuntimePlugin(factoryOutput);
   } catch {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" factory returned an invalid plugin definition.`
+      `Runtime plugin package "${options.manifest.id}" factory returned an invalid plugin definition.`,
     );
   }
 
   if (!canonicalJsonValuesEqual(plugin.manifest, options.manifest)) {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" factory returned a different manifest.`
+      `Runtime plugin package "${options.manifest.id}" factory returned a different manifest.`,
     );
   }
 
@@ -584,7 +579,7 @@ type RuntimePluginFactoryOutput = {
 };
 
 function isRuntimePluginFactoryOutput(
-  value: unknown
+  value: unknown,
 ): value is RuntimePluginFactoryOutput {
   return (
     isRecord(value) &&
@@ -595,7 +590,7 @@ function isRuntimePluginFactoryOutput(
 }
 
 function isRuntimePluginLifecycleHooks(
-  value: unknown
+  value: unknown,
 ): value is RuntimePluginLifecycleHooks {
   if (!isRecord(value)) {
     return false;
@@ -606,12 +601,12 @@ function isRuntimePluginLifecycleHooks(
     'handleToolCall',
     'afterTurnCommitted',
     'onSessionEnd',
-    'health'
+    'health',
   ] as const;
 
   return hookNames.every(
-    (hookName) =>
-      value[hookName] === undefined || typeof value[hookName] === 'function'
+    hookName =>
+      value[hookName] === undefined || typeof value[hookName] === 'function',
   );
 }
 
@@ -633,7 +628,7 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} is unreadable.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
@@ -643,7 +638,7 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} must not be a symbolic link.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
   if (!metadataStat.isFile()) {
@@ -652,7 +647,7 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} must be a regular file.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
   if (metadataStat.size > maxRuntimePluginPackageMetadataBytes) {
@@ -661,7 +656,7 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} exceeds the metadata size limit.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
@@ -673,17 +668,19 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} is unreadable.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
-  if (Buffer.byteLength(source, 'utf8') > maxRuntimePluginPackageMetadataBytes) {
+  if (
+    Buffer.byteLength(source, 'utf8') > maxRuntimePluginPackageMetadataBytes
+  ) {
     throw packageDiscoveryError({
       code: options.code,
       message: `Runtime plugin package ${options.label} exceeds the metadata size limit.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
@@ -697,13 +694,13 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} must contain valid JSON.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 
   try {
     return createJsonBoundarySnapshot(parsed, {
-      field: `Runtime plugin package ${options.label}`
+      field: `Runtime plugin package ${options.label}`,
     });
   } catch {
     throw packageDiscoveryError({
@@ -711,7 +708,7 @@ function parsePackageJsonFile(options: {
       message: `Runtime plugin package ${options.label} exceeds safe JSON metadata limits.`,
       path: options.path,
       provenance: options.provenance,
-      pluginId: options.pluginId
+      pluginId: options.pluginId,
     });
   }
 }
@@ -727,13 +724,13 @@ class RuntimePluginPackageDiscoveryError extends Error {
 }
 
 function packageDiscoveryError(
-  options: Omit<RuntimePluginPackageDiagnostic, 'severity'>
+  options: Omit<RuntimePluginPackageDiagnostic, 'severity'>,
 ): RuntimePluginPackageDiscoveryError {
   return new RuntimePluginPackageDiscoveryError(packageDiagnostic(options));
 }
 
 function packageDiagnostic(
-  options: Omit<RuntimePluginPackageDiagnostic, 'severity'>
+  options: Omit<RuntimePluginPackageDiagnostic, 'severity'>,
 ): RuntimePluginPackageDiagnostic {
   return Object.freeze({
     severity: 'error',
@@ -741,14 +738,13 @@ function packageDiagnostic(
     message: options.message,
     path: options.path,
     provenance: options.provenance,
-    ...(options.pluginId === undefined ? {} : { pluginId: options.pluginId }),
+    ...(options.pluginId === undefined ? {} : {pluginId: options.pluginId}),
     ...(options.claimedPluginId === undefined
       ? {}
-      : { claimedPluginId: options.claimedPluginId })
+      : {claimedPluginId: options.claimedPluginId}),
   } satisfies RuntimePluginPackageDiagnostic);
 }
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
-

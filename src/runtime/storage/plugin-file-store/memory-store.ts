@@ -1,15 +1,15 @@
-import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
-import type { InMemoryRuntimePluginFileStoreOptions } from '../../../plugins/index.ts';
+import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
+import type {InMemoryRuntimePluginFileStoreOptions} from '../../../plugins/index.ts';
 import type {
   InMemoryPluginStoreState,
-  StagedPluginFileStoreOperation
+  StagedPluginFileStoreOperation,
 } from './contracts.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
   freezeRuntimePluginFileStoreJsonValue,
   isJsonArray,
-  normalizeRuntimePluginFileStorePath
+  normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
 
 const inMemoryPluginStoresBySessionIdentity = new WeakMap<
@@ -18,7 +18,7 @@ const inMemoryPluginStoresBySessionIdentity = new WeakMap<
 >();
 
 export function createInMemoryRuntimePluginFileStore(
-  options: InMemoryRuntimePluginFileStoreOptions
+  options: InMemoryRuntimePluginFileStoreOptions,
 ): RuntimePluginFileStore {
   const state = inMemoryPluginStoreState(options);
 
@@ -78,16 +78,16 @@ export function createInMemoryRuntimePluginFileStore(
     },
     revision() {
       return state.revision;
-    }
+    },
   } satisfies RuntimePluginFileStore);
 }
 
 export function inMemoryPluginStoreState(
-  options: InMemoryRuntimePluginFileStoreOptions
+  options: InMemoryRuntimePluginFileStoreOptions,
 ): InMemoryPluginStoreState {
   const key = `${options.sessionId}\u0000${options.pluginId}`;
   let stores = inMemoryPluginStoresBySessionIdentity.get(
-    options.sessionIdentity
+    options.sessionIdentity,
   );
 
   if (stores === undefined) {
@@ -100,7 +100,7 @@ export function inMemoryPluginStoreState(
 
 function pluginStoreStateForKey(
   stores: Map<string, InMemoryPluginStoreState>,
-  key: string
+  key: string,
 ): InMemoryPluginStoreState {
   let state = stores.get(key);
 
@@ -108,7 +108,7 @@ function pluginStoreStateForKey(
     state = {
       files: new Map(),
       pathModes: new Map(),
-      revision: 0
+      revision: 0,
     };
     stores.set(key, state);
   }
@@ -118,7 +118,7 @@ function pluginStoreStateForKey(
 
 export function inMemoryPluginFileStoreContent(
   state: InMemoryPluginStoreState,
-  path: string
+  path: string,
 ): string | undefined {
   const value = state.files.get(path);
 
@@ -131,7 +131,7 @@ export function inMemoryPluginFileStoreContent(
       throw new TypeError('Plugin JSONL path already stores non-array JSON.');
     }
 
-    return value.map((line) => `${JSON.stringify(line)}\n`).join('');
+    return value.map(line => `${JSON.stringify(line)}\n`).join('');
   }
 
   return `${JSON.stringify(value)}\n`;
@@ -139,7 +139,7 @@ export function inMemoryPluginFileStoreContent(
 
 export function applyInMemoryPluginFileStoreOperation(
   state: InMemoryPluginStoreState,
-  operation: Pick<StagedPluginFileStoreOperation, 'kind' | 'path' | 'value'>
+  operation: Pick<StagedPluginFileStoreOperation, 'kind' | 'path' | 'value'>,
 ): void {
   if (operation.kind === 'write_json') {
     assertJsonPathMode(state.pathModes.get(operation.path));
@@ -157,7 +157,7 @@ export function applyInMemoryPluginFileStoreOperation(
   } else if (isJsonArray(current)) {
     state.files.set(
       operation.path,
-      Object.freeze([...current, operation.value])
+      Object.freeze([...current, operation.value]),
     );
   } else {
     throw new TypeError('Plugin JSONL path already stores non-array JSON.');

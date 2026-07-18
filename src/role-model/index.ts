@@ -52,7 +52,7 @@ export {
   type RoleModelToolObservation,
   type RoleModelToolObservationResult,
   roleModelUnknownToolRejectionReason,
-  roleModelUnsupportedEffectRejectionReason
+  roleModelUnsupportedEffectRejectionReason,
 } from './api/contracts.ts';
 export {
   createAcceptedRoleModelDecisionResult,
@@ -64,18 +64,18 @@ export {
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
   createVisibleReplyCharacterDecision,
-  freezeAllowedTools
+  freezeAllowedTools,
 } from './api/decision.ts';
 export {
   buildUserTurnDecisionContext,
-  type BuildUserTurnDecisionContextOptions
+  type BuildUserTurnDecisionContextOptions,
 } from './api/decision-context.ts';
 export {
   createRoleModelAdapterRawOutput,
   type RoleModelAdapter,
   type RoleModelAdapterInvocation,
   type RoleModelAdapterRawOutput,
-  type RoleModelNativeToolCallArgumentError
+  type RoleModelNativeToolCallArgumentError,
 } from './api/adapter.ts';
 export {
   freezeProviderMetadata,
@@ -83,18 +83,18 @@ export {
   freezeRuntimePluginJsonObject,
   freezeRuntimePluginJsonValue,
   isJsonRecord,
-  parseRoleModelProviderExchangeSnapshot
+  parseRoleModelProviderExchangeSnapshot,
 } from './api/provider-exchange.ts';
 export {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelPluginToolDefinitions,
   defaultAllowedToolsForPluginDefinitions,
   modelToolDefinitionsForPluginToolDefinitions,
-  toolDefinitionsForAllowedTools
+  toolDefinitionsForAllowedTools,
 } from './api/plugin-tool-definitions.ts';
 export {
   scrubReasoningBlocks,
-  type ScrubReasoningBlocksResult
+  type ScrubReasoningBlocksResult,
 } from './api/reasoning.ts';
 export {
   type AcceptedRoleModelLoopResult,
@@ -110,18 +110,18 @@ export {
   type RoleModelPluginToolHost,
   type RoleModelPluginToolRoutingEvidence,
   runRoleModelLoop,
-  type RunRoleModelLoopOptions
+  type RunRoleModelLoopOptions,
 } from './loop/loop.ts';
 export {
   getRequiredVisibleReplyText,
   getVisibleReplyToolCall,
   parseRoleModelDecision,
-  parseRoleModelExecutionDecision
+  parseRoleModelExecutionDecision,
 } from './loop/decision-parser.ts';
 export {
   isRoleModelProviderErrorRawOutputEvidence,
   isRoleModelRawOutputReplayableDecisionEvidence,
-  normalizeReplayableRejectedRoleModelDecisionResult
+  normalizeReplayableRejectedRoleModelDecisionResult,
 } from './loop/replay-evidence.ts';
 export {
   createRoleModelProviderToolNameMappings,
@@ -139,14 +139,12 @@ export {
   type RoleModelPromptFrameKind,
   roleModelStableSystemPromptText,
   type RoleModelTurnContext,
-  runtimeToolNameForProviderToolName
+  runtimeToolNameForProviderToolName,
 } from './prompt/render.ts';
-export {
-  createDeterministicCharacterAgent
-} from './providers/deterministic.ts';
+export {createDeterministicCharacterAgent} from './providers/deterministic.ts';
 export {
   createDeterministicLocalRoleModelAdapter,
-  createRoleModelAdapterFromCharacterAgent
+  createRoleModelAdapterFromCharacterAgent,
 } from './providers/local.ts';
 export {
   createNvidiaRoleModelProviderAdapter,
@@ -172,7 +170,7 @@ export {
   type NvidiaRoleModelThinkingMode,
   nvidiaRoleModelTopP,
   renderNvidiaMessages,
-  renderNvidiaTools
+  renderNvidiaTools,
 } from './providers/nvidia.ts';
 export {
   createSelectedRoleModelAdapter,
@@ -180,6 +178,6 @@ export {
   providerOption,
   RoleModelProviderSelectionError,
   selectChatProvider,
-  type ChatProviderName
+  type ChatProviderName,
 } from './providers/select.ts';
 export * from './api/index.ts';

@@ -6,7 +6,7 @@ import {
   runtimeEventTypeValues,
   type UserMessageRuntimeEvent,
   type VisibleMessage,
-  VisibleMessageTextValidationError
+  VisibleMessageTextValidationError,
 } from '../../core/index.ts';
 import {
   createAcceptedRoleModelDecisionResult,
@@ -42,13 +42,13 @@ import {
   type RoleModelOutputContract,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
-  type RoleModelToolObservation
+  type RoleModelToolObservation,
 } from '../../role-model/index.ts';
 import {
   createVisibleReplyModelToolCall,
   visibleReplyModelToolName,
   type PluginModelToolCall,
-  type ModelToolCall
+  type ModelToolCall,
 } from '../../role-model/index.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
@@ -64,7 +64,7 @@ import {
   type RuntimePluginJsonValue,
   type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult,
-  type RuntimePluginTurnEvidenceSnapshot
+  type RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
 import {
   characterStatePatchModelToolName,
@@ -75,7 +75,7 @@ import {
   type RuntimePluginEvidenceKind,
   type RuntimePluginEvidenceStatus,
   type RuntimePluginPolicyOutcome,
-  type RuntimePluginSourceKind
+  type RuntimePluginSourceKind,
 } from '../../plugins/api/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
@@ -89,16 +89,16 @@ import {
   type RejectedRoleModelCommitValidationResult,
   type RoleModelCommitValidationResult,
   type RoleModelCommitValidationSnapshot,
-  type RuntimeTurnStatus
+  type RuntimeTurnStatus,
 } from '../evidence/records.ts';
 import {
   isOneOf,
   requiredNormalizedVisibleMessageText,
   requiredRuntimeEventIdentity,
   requiredVisibleMessageRole,
-  throwMalformedRecord
+  throwMalformedRecord,
 } from './codec-primitives.ts';
-import { assertToolRawEventSemantics } from './raw-event-tool-semantics.ts';
+import {assertToolRawEventSemantics} from './raw-event-tool-semantics.ts';
 import {
   LocalRuntimeStorageContractError,
   isRecord,
@@ -106,13 +106,13 @@ import {
   requiredNonEmptyString,
   requiredRecordCanonicalTimestamp,
   requiredRecordString,
-  type LocalRuntimeStorageContractErrorCode
+  type LocalRuntimeStorageContractErrorCode,
 } from './layout-contract.ts';
 
 const commitOwnedRoleModelRejectionReasons = [
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
-  roleModelCommitValidationFailureRejectionReason
+  roleModelCommitValidationFailureRejectionReason,
 ] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
 const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
@@ -123,17 +123,17 @@ const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
   requiredForUserTurn: false,
   callLimit: {
     scope: 'user_turn',
-    maxCalls: 1
+    maxCalls: 1,
   },
   inputContract: {
     type: 'object',
     fields: [],
-    additionalFields: true
+    additionalFields: true,
   },
   validationOwner: 'plugin_host',
   sideEffectLevel: 'local_memory_write',
   requiresConfirmation: false,
-  sourceReferencesRequired: false
+  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
@@ -142,64 +142,73 @@ export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
 
 export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const record = parseJsonObject(line, 'malformed_record');
-  const { eventId, traceId, createdAt } = requiredRuntimeEventIdentity(record);
+  const {eventId, traceId, createdAt} = requiredRuntimeEventIdentity(record);
   const kind = requiredRawEventKind(record['kind']);
   const eventType = requiredRuntimeEventType(record['eventType']);
   const status = optionalRuntimeTurnStatus(record['status']);
   const reason = optionalRecordString(record, 'reason', 'malformed_record');
-  const visibleMessageIds = optionalStringArray(record['visibleMessageIds'], 'visibleMessageIds');
-  const toolCallIds = optionalStringArray(record['toolCallIds'], 'toolCallIds');
-  const toolCallId = optionalRecordString(record, 'toolCallId', 'malformed_record');
-  const dispatchedToHost = optionalRecordBoolean(
-    record,
-    'dispatchedToHost'
+  const visibleMessageIds = optionalStringArray(
+    record['visibleMessageIds'],
+    'visibleMessageIds',
   );
+  const toolCallIds = optionalStringArray(record['toolCallIds'], 'toolCallIds');
+  const toolCallId = optionalRecordString(
+    record,
+    'toolCallId',
+    'malformed_record',
+  );
+  const dispatchedToHost = optionalRecordBoolean(record, 'dispatchedToHost');
   const toolRound = optionalRecordNumber(record, 'toolRound');
   const toolName = optionalRecordString(record, 'toolName', 'malformed_record');
-  const toolPluginId = optionalRecordString(record, 'toolPluginId', 'malformed_record');
+  const toolPluginId = optionalRecordString(
+    record,
+    'toolPluginId',
+    'malformed_record',
+  );
   const toolInput = optionalRuntimePluginJsonObject(record['toolInput']);
   const toolResult = optionalRuntimePluginToolCallResult(record['toolResult']);
   const pluginStoreRevision = optionalRecordNumber(
     record,
-    'pluginStoreRevision'
+    'pluginStoreRevision',
   );
-  const payloadSummary = optionalRawEventPayloadSummary(record['payloadSummary']);
+  const payloadSummary = optionalRawEventPayloadSummary(
+    record['payloadSummary'],
+  );
   const roleModelIOSnapshot = optionalRoleModelIOSnapshot(
-    record['roleModelIOSnapshot']
+    record['roleModelIOSnapshot'],
   );
   const decodedParsedRoleModelDecisionSnapshot =
     optionalParsedRoleModelDecisionSnapshot(
-      record['parsedRoleModelDecisionSnapshot']
+      record['parsedRoleModelDecisionSnapshot'],
     );
   const parsedRoleModelDecisionSnapshot =
     normalizeLegacyRejectedDecisionRequestedToolNames({
       roleModelIOSnapshot,
-      parsedRoleModelDecisionSnapshot:
-        decodedParsedRoleModelDecisionSnapshot
+      parsedRoleModelDecisionSnapshot: decodedParsedRoleModelDecisionSnapshot,
     });
   const commitValidation = optionalRoleModelCommitValidationSnapshot(
-    record['commitValidation']
+    record['commitValidation'],
   );
   const runtimePluginEvidence = optionalRuntimePluginEvidenceSnapshots(
-    record['runtimePluginEvidence']
+    record['runtimePluginEvidence'],
   );
   const runtimePluginTurnEvidence = optionalRuntimePluginTurnEvidenceSnapshot(
-    record['runtimePluginTurnEvidence']
+    record['runtimePluginTurnEvidence'],
   );
   const runtimeConfigEffects = optionalPreparedRuntimePluginConfigEffects(
-    record['runtimeConfigEffects']
+    record['runtimeConfigEffects'],
   );
 
   assertTerminalRawEventSemantics({
     kind,
     status,
-    visibleMessageIds
+    visibleMessageIds,
   });
   assertToolRawEventSemantics({
     identity: {
       eventId,
       traceId,
-      createdAt
+      createdAt,
     },
     kind,
     toolCallId,
@@ -208,13 +217,13 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     toolName,
     toolPluginId,
     toolInput,
-    toolResult
+    toolResult,
   });
   assertRoleModelRawEventEvidenceSemantics({
     identity: {
       eventId,
       traceId,
-      createdAt
+      createdAt,
     },
     payloadSummary,
     kind,
@@ -222,22 +231,22 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     status,
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot,
-    commitValidation
+    commitValidation,
   });
   assertRuntimePluginEvidenceSemantics({
     identity: {
       eventId,
       traceId,
-      createdAt
+      createdAt,
     },
     runtimePluginEvidence,
-    runtimePluginTurnEvidence
+    runtimePluginTurnEvidence,
   });
   assertRuntimeConfigEffectSemantics({
-    identity: { eventId, traceId, createdAt },
+    identity: {eventId, traceId, createdAt},
     kind,
     toolCallIds,
-    runtimeConfigEffects
+    runtimeConfigEffects,
   });
 
   return Object.freeze({
@@ -246,38 +255,36 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     createdAt,
     kind,
     eventType,
-    ...(status === undefined ? {} : { status }),
-    ...(reason === undefined ? {} : { reason }),
-    ...(visibleMessageIds === undefined ? {} : { visibleMessageIds }),
-    ...(toolCallIds === undefined ? {} : { toolCallIds }),
-    ...(toolCallId === undefined ? {} : { toolCallId }),
-    ...(dispatchedToHost === undefined ? {} : { dispatchedToHost }),
-    ...(toolRound === undefined ? {} : { toolRound }),
-    ...(toolName === undefined ? {} : { toolName }),
-    ...(toolPluginId === undefined ? {} : { toolPluginId }),
-    ...(toolInput === undefined ? {} : { toolInput }),
-    ...(toolResult === undefined ? {} : { toolResult }),
-    ...(pluginStoreRevision === undefined ? {} : { pluginStoreRevision }),
-    ...(payloadSummary === undefined ? {} : { payloadSummary }),
-    ...(roleModelIOSnapshot === undefined ? {} : { roleModelIOSnapshot }),
+    ...(status === undefined ? {} : {status}),
+    ...(reason === undefined ? {} : {reason}),
+    ...(visibleMessageIds === undefined ? {} : {visibleMessageIds}),
+    ...(toolCallIds === undefined ? {} : {toolCallIds}),
+    ...(toolCallId === undefined ? {} : {toolCallId}),
+    ...(dispatchedToHost === undefined ? {} : {dispatchedToHost}),
+    ...(toolRound === undefined ? {} : {toolRound}),
+    ...(toolName === undefined ? {} : {toolName}),
+    ...(toolPluginId === undefined ? {} : {toolPluginId}),
+    ...(toolInput === undefined ? {} : {toolInput}),
+    ...(toolResult === undefined ? {} : {toolResult}),
+    ...(pluginStoreRevision === undefined ? {} : {pluginStoreRevision}),
+    ...(payloadSummary === undefined ? {} : {payloadSummary}),
+    ...(roleModelIOSnapshot === undefined ? {} : {roleModelIOSnapshot}),
     ...(parsedRoleModelDecisionSnapshot === undefined
       ? {}
-      : { parsedRoleModelDecisionSnapshot }),
-    ...(commitValidation === undefined ? {} : { commitValidation }),
-    ...(runtimePluginEvidence === undefined
-      ? {}
-      : { runtimePluginEvidence }),
+      : {parsedRoleModelDecisionSnapshot}),
+    ...(commitValidation === undefined ? {} : {commitValidation}),
+    ...(runtimePluginEvidence === undefined ? {} : {runtimePluginEvidence}),
     ...(runtimePluginTurnEvidence === undefined
       ? {}
-      : { runtimePluginTurnEvidence }),
-    ...(runtimeConfigEffects === undefined ? {} : { runtimeConfigEffects })
+      : {runtimePluginTurnEvidence}),
+    ...(runtimeConfigEffects === undefined ? {} : {runtimeConfigEffects}),
   } satisfies RawEventLogRecord);
 }
 
 function optionalRecordString(
   record: Record<string, unknown>,
   key: string,
-  code: LocalRuntimeStorageContractErrorCode
+  code: LocalRuntimeStorageContractErrorCode,
 ): string | undefined {
   const value = record[key];
 
@@ -291,14 +298,14 @@ function optionalRecordString(
 function requiredRecordStringAllowingEmpty(
   record: Record<string, unknown>,
   key: string,
-  code: LocalRuntimeStorageContractErrorCode
+  code: LocalRuntimeStorageContractErrorCode,
 ): string {
   const value = record[key];
 
   if (typeof value !== 'string') {
     throw new LocalRuntimeStorageContractError(
       code,
-      `Stored local runtime field "${key}" must be a string.`
+      `Stored local runtime field "${key}" must be a string.`,
     );
   }
 
@@ -308,7 +315,7 @@ function requiredRecordStringAllowingEmpty(
 function optionalRecordStringAllowingEmpty(
   record: Record<string, unknown>,
   key: string,
-  code: LocalRuntimeStorageContractErrorCode
+  code: LocalRuntimeStorageContractErrorCode,
 ): string | undefined {
   const value = record[key];
 
@@ -322,14 +329,14 @@ function optionalRecordStringAllowingEmpty(
 function requiredRecordNumber(
   record: Record<string, unknown>,
   key: string,
-  code: LocalRuntimeStorageContractErrorCode
+  code: LocalRuntimeStorageContractErrorCode,
 ): number {
   const value = record[key];
 
   if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
     throw new LocalRuntimeStorageContractError(
       code,
-      `Stored local runtime field "${key}" must be a positive integer.`
+      `Stored local runtime field "${key}" must be a positive integer.`,
     );
   }
 
@@ -338,7 +345,7 @@ function requiredRecordNumber(
 
 function optionalRecordNumber(
   record: Record<string, unknown>,
-  key: string
+  key: string,
 ): number | undefined {
   const value = record[key];
 
@@ -351,7 +358,7 @@ function optionalRecordNumber(
 
 function optionalRecordBoolean(
   record: Record<string, unknown>,
-  key: string
+  key: string,
 ): boolean | undefined {
   const value = record[key];
 
@@ -382,7 +389,9 @@ function requiredRuntimeEventType(value: unknown): RuntimeEventType {
   throwMalformedRecord('eventType');
 }
 
-function optionalRuntimeTurnStatus(value: unknown): RuntimeTurnStatus | undefined {
+function optionalRuntimeTurnStatus(
+  value: unknown,
+): RuntimeTurnStatus | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -395,7 +404,7 @@ function optionalRuntimeTurnStatus(value: unknown): RuntimeTurnStatus | undefine
 }
 
 function requiredRuntimePluginEvidenceKind(
-  value: unknown
+  value: unknown,
 ): RuntimePluginEvidenceKind {
   if (isOneOf(value, runtimePluginEvidenceKindValues)) {
     return value;
@@ -405,7 +414,7 @@ function requiredRuntimePluginEvidenceKind(
 }
 
 function requiredRuntimePluginEvidenceStatus(
-  value: unknown
+  value: unknown,
 ): RuntimePluginEvidenceStatus {
   if (isOneOf(value, runtimePluginEvidenceStatusValues)) {
     return value;
@@ -415,7 +424,7 @@ function requiredRuntimePluginEvidenceStatus(
 }
 
 function optionalRuntimePluginPolicyOutcome(
-  value: unknown
+  value: unknown,
 ): RuntimePluginPolicyOutcome | undefined {
   if (value === undefined) {
     return undefined;
@@ -429,7 +438,7 @@ function optionalRuntimePluginPolicyOutcome(
 }
 
 function requiredRuntimePluginSourceKind(
-  value: unknown
+  value: unknown,
 ): RuntimePluginSourceKind {
   if (isOneOf(value, runtimePluginSourceKindValues)) {
     return value;
@@ -447,7 +456,10 @@ function assertTerminalRawEventSemantics(options: {
     return;
   }
 
-  if (options.visibleMessageIds !== undefined && options.visibleMessageIds.length === 0) {
+  if (
+    options.visibleMessageIds !== undefined &&
+    options.visibleMessageIds.length === 0
+  ) {
     throwMalformedRecord('visibleMessageIds');
   }
 
@@ -467,7 +479,10 @@ function assertTerminalRawEventSemantics(options: {
   }
 }
 
-function optionalStringArray(value: unknown, key: string): readonly string[] | undefined {
+function optionalStringArray(
+  value: unknown,
+  key: string,
+): readonly string[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -491,7 +506,7 @@ function optionalStringArray(value: unknown, key: string): readonly string[] | u
 }
 
 function optionalRawEventPayloadSummary(
-  value: unknown
+  value: unknown,
 ): RawEventLogPayloadSummary | undefined {
   if (value === undefined) {
     return undefined;
@@ -504,19 +519,19 @@ function optionalRawEventPayloadSummary(
   const rawInput = optionalPayloadSummaryString(value, 'rawInput');
   const normalizedCurrentUserMessage = optionalPayloadSummaryString(
     value,
-    'normalizedCurrentUserMessage'
+    'normalizedCurrentUserMessage',
   );
 
   return Object.freeze({
-    ...(rawInput === undefined ? {} : { rawInput }),
+    ...(rawInput === undefined ? {} : {rawInput}),
     ...(normalizedCurrentUserMessage === undefined
       ? {}
-      : { normalizedCurrentUserMessage })
+      : {normalizedCurrentUserMessage}),
   } satisfies RawEventLogPayloadSummary);
 }
 
 function optionalRoleModelIOSnapshot(
-  value: unknown
+  value: unknown,
 ): RoleModelIOSnapshot | undefined {
   if (value === undefined) {
     return undefined;
@@ -530,7 +545,7 @@ function optionalRoleModelIOSnapshot(
     value,
     'kind',
     'role_model_io_snapshot',
-    'roleModelIOSnapshot.kind'
+    'roleModelIOSnapshot.kind',
   );
 
   return createRoleModelIOSnapshot({
@@ -539,22 +554,22 @@ function optionalRoleModelIOSnapshot(
     createdAt: requiredRecordCanonicalTimestamp(
       value,
       'createdAt',
-      'malformed_record'
+      'malformed_record',
     ),
     sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
     inputEnvelope: requiredRoleModelInputEnvelope(value['inputEnvelope']),
     rawOutputText: requiredRecordStringAllowingEmpty(
       value,
       'rawOutputText',
-      'malformed_record'
+      'malformed_record',
     ),
     ...optionalRoleModelProviderMetadataOption(value['providerMetadata']),
-    ...optionalRoleModelProviderExchangeOption(value['providerExchange'])
+    ...optionalRoleModelProviderExchangeOption(value['providerExchange']),
   });
 }
 
 function optionalParsedRoleModelDecisionSnapshot(
-  value: unknown
+  value: unknown,
 ): ParsedRoleModelDecisionSnapshot | undefined {
   if (value === undefined) {
     return undefined;
@@ -568,7 +583,7 @@ function optionalParsedRoleModelDecisionSnapshot(
     value,
     'kind',
     'role_model_decision_snapshot',
-    'parsedRoleModelDecisionSnapshot.kind'
+    'parsedRoleModelDecisionSnapshot.kind',
   );
 
   return createParsedRoleModelDecisionSnapshot({
@@ -577,15 +592,15 @@ function optionalParsedRoleModelDecisionSnapshot(
     createdAt: requiredRecordCanonicalTimestamp(
       value,
       'createdAt',
-      'malformed_record'
+      'malformed_record',
     ),
     sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
-    result: requiredRoleModelDecisionResult(value['result'])
+    result: requiredRoleModelDecisionResult(value['result']),
   });
 }
 
 function optionalRoleModelCommitValidationSnapshot(
-  value: unknown
+  value: unknown,
 ): RoleModelCommitValidationSnapshot | undefined {
   if (value === undefined) {
     return undefined;
@@ -599,7 +614,7 @@ function optionalRoleModelCommitValidationSnapshot(
     value,
     'kind',
     'role_model_commit_validation_snapshot',
-    'commitValidation.kind'
+    'commitValidation.kind',
   );
 
   return createRoleModelCommitValidationSnapshot({
@@ -608,15 +623,15 @@ function optionalRoleModelCommitValidationSnapshot(
     createdAt: requiredRecordCanonicalTimestamp(
       value,
       'createdAt',
-      'malformed_record'
+      'malformed_record',
     ),
     sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
-    result: requiredRoleModelCommitValidationResult(value['result'])
+    result: requiredRoleModelCommitValidationResult(value['result']),
   });
 }
 
 function optionalRuntimePluginEvidenceSnapshots(
-  value: unknown
+  value: unknown,
 ): readonly RuntimePluginEvidenceSnapshot[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -640,7 +655,7 @@ function optionalRuntimePluginEvidenceSnapshots(
 }
 
 function optionalRuntimePluginJsonObject(
-  value: unknown
+  value: unknown,
 ): RuntimePluginJsonObject | undefined {
   if (value === undefined) {
     return undefined;
@@ -654,7 +669,7 @@ function optionalRuntimePluginJsonObject(
 }
 
 function optionalRuntimePluginToolCallResult(
-  value: unknown
+  value: unknown,
 ): RuntimePluginToolCallResult | undefined {
   if (value === undefined) {
     return undefined;
@@ -672,7 +687,7 @@ function optionalRuntimePluginToolCallResult(
 }
 
 function optionalRuntimePluginTurnEvidenceSnapshot(
-  value: unknown
+  value: unknown,
 ): RuntimePluginTurnEvidenceSnapshot | undefined {
   if (value === undefined) {
     return undefined;
@@ -690,7 +705,7 @@ function optionalRuntimePluginTurnEvidenceSnapshot(
 }
 
 function optionalPreparedRuntimePluginConfigEffects(
-  value: unknown
+  value: unknown,
 ): readonly PreparedRuntimePluginConfigEffect[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -701,12 +716,12 @@ function optionalPreparedRuntimePluginConfigEffects(
 
     if (items.length === 0 || items.length > 16) {
       throw new TypeError(
-        'runtimeConfigEffects must contain between 1 and 16 records.'
+        'runtimeConfigEffects must contain between 1 and 16 records.',
       );
     }
 
     return Object.freeze(
-      items.map((item) => createPreparedRuntimePluginConfigEffect(item))
+      items.map(item => createPreparedRuntimePluginConfigEffect(item)),
     );
   } catch (error: unknown) {
     if (error instanceof TypeError) {
@@ -722,8 +737,7 @@ function assertRuntimeConfigEffectSemantics(options: {
   readonly kind: RawEventLogRecordKind;
   readonly toolCallIds: readonly string[] | undefined;
   readonly runtimeConfigEffects:
-    | readonly PreparedRuntimePluginConfigEffect[]
-    | undefined;
+    readonly PreparedRuntimePluginConfigEffect[] | undefined;
 }): void {
   if (options.runtimeConfigEffects === undefined) {
     return;
@@ -746,7 +760,7 @@ function assertRuntimeConfigEffectSemantics(options: {
 }
 
 function requiredRuntimePluginEvidenceSnapshot(
-  value: unknown
+  value: unknown,
 ): RuntimePluginEvidenceSnapshot {
   if (!isRecord(value)) {
     throwMalformedRecord('runtimePluginEvidence');
@@ -756,19 +770,19 @@ function requiredRuntimePluginEvidenceSnapshot(
     value,
     'kind',
     'runtime_plugin_evidence_snapshot',
-    'runtimePluginEvidence.kind'
+    'runtimePluginEvidence.kind',
   );
 
   const sourceReferences = optionalRuntimePluginSourceReferences(
-    value['sourceReferences']
+    value['sourceReferences'],
   );
   const policyOutcome = optionalRuntimePluginPolicyOutcome(
-    value['policyOutcome']
+    value['policyOutcome'],
   );
   const configFingerprint = optionalRecordString(
     value,
     'configFingerprint',
-    'malformed_record'
+    'malformed_record',
   );
 
   return createRuntimePluginEvidenceSnapshot({
@@ -777,29 +791,25 @@ function requiredRuntimePluginEvidenceSnapshot(
     createdAt: requiredRecordCanonicalTimestamp(
       value,
       'createdAt',
-      'malformed_record'
+      'malformed_record',
     ),
     kind: 'runtime_plugin_evidence_snapshot',
-    pluginId: requiredRecordString(
-      value,
-      'pluginId',
-      'malformed_record'
-    ),
+    pluginId: requiredRecordString(value, 'pluginId', 'malformed_record'),
     evidenceKind: requiredRuntimePluginEvidenceKind(value['evidenceKind']),
     status: requiredRuntimePluginEvidenceStatus(value['status']),
     summary: requiredRecordString(value, 'summary', 'malformed_record'),
-    ...(policyOutcome === undefined ? {} : { policyOutcome }),
-    ...(sourceReferences === undefined ? {} : { sourceReferences }),
+    ...(policyOutcome === undefined ? {} : {policyOutcome}),
+    ...(sourceReferences === undefined ? {} : {sourceReferences}),
     redactionLabels: requiredStringArray(
       value['redactionLabels'],
-      'runtimePluginEvidence.redactionLabels'
+      'runtimePluginEvidence.redactionLabels',
     ),
-    ...(configFingerprint === undefined ? {} : { configFingerprint })
+    ...(configFingerprint === undefined ? {} : {configFingerprint}),
   });
 }
 
 function optionalRuntimePluginSourceReferences(
-  value: unknown
+  value: unknown,
 ): readonly RuntimePluginSourceReference[] | undefined {
   if (value === undefined) {
     return undefined;
@@ -815,7 +825,7 @@ function optionalRuntimePluginSourceReferences(
 }
 
 function requiredRuntimePluginSourceReference(
-  value: unknown
+  value: unknown,
 ): RuntimePluginSourceReference {
   if (!isRecord(value)) {
     throwMalformedRecord('sourceReferences');
@@ -827,25 +837,23 @@ function requiredRuntimePluginSourceReference(
   return Object.freeze({
     kind: requiredRuntimePluginSourceKind(value['kind']),
     id: requiredRecordString(value, 'id', 'malformed_record'),
-    ...(title === undefined ? {} : { title }),
-    ...(uri === undefined ? {} : { uri })
+    ...(title === undefined ? {} : {title}),
+    ...(uri === undefined ? {} : {uri}),
   } satisfies RuntimePluginSourceReference);
 }
 
 function assertRuntimePluginEvidenceSemantics(options: {
   readonly identity: RuntimeEventIdentity;
   readonly runtimePluginEvidence:
-    | readonly RuntimePluginEvidenceSnapshot[]
-    | undefined;
+    readonly RuntimePluginEvidenceSnapshot[] | undefined;
   readonly runtimePluginTurnEvidence:
-    | RuntimePluginTurnEvidenceSnapshot
-    | undefined;
+    RuntimePluginTurnEvidenceSnapshot | undefined;
 }): void {
   for (const snapshot of options.runtimePluginEvidence ?? []) {
     assertMatchingRoleModelIdentity({
       actual: snapshot,
       expected: options.identity,
-      field: 'runtimePluginEvidence'
+      field: 'runtimePluginEvidence',
     });
   }
 
@@ -856,7 +864,7 @@ function assertRuntimePluginEvidenceSemantics(options: {
   assertMatchingRoleModelIdentity({
     actual: options.runtimePluginTurnEvidence,
     expected: options.identity,
-    field: 'runtimePluginTurnEvidence'
+    field: 'runtimePluginTurnEvidence',
   });
 }
 
@@ -868,19 +876,15 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   readonly reason: string | undefined;
   readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
   readonly parsedRoleModelDecisionSnapshot:
-    | ParsedRoleModelDecisionSnapshot
-    | undefined;
+    ParsedRoleModelDecisionSnapshot | undefined;
   readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
 }): void {
   const roleModelEvidenceCount = [
     options.roleModelIOSnapshot,
-    options.parsedRoleModelDecisionSnapshot
-  ].filter((value) => value !== undefined).length;
+    options.parsedRoleModelDecisionSnapshot,
+  ].filter(value => value !== undefined).length;
 
-  if (
-    roleModelEvidenceCount === 0 &&
-    options.commitValidation === undefined
-  ) {
+  if (roleModelEvidenceCount === 0 && options.commitValidation === undefined) {
     return;
   }
 
@@ -899,40 +903,40 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   assertMatchingRoleModelIdentity({
     actual: roleModelIOSnapshot,
     expected: options.identity,
-    field: 'roleModelIOSnapshot'
+    field: 'roleModelIOSnapshot',
   });
   assertMatchingRoleModelIdentity({
     actual: roleModelIOSnapshot.inputEnvelope.event,
     expected: options.identity,
-    field: 'roleModelIOSnapshot.inputEnvelope.event'
+    field: 'roleModelIOSnapshot.inputEnvelope.event',
   });
   assertRoleModelInputTextMatchesPayloadSummary({
     payloadSummary: options.payloadSummary,
     inputText:
-      roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage
+      roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage,
   });
   assertMatchingRoleModelIdentity({
     actual: parsedRoleModelDecisionSnapshot,
     expected: options.identity,
-    field: 'parsedRoleModelDecisionSnapshot'
+    field: 'parsedRoleModelDecisionSnapshot',
   });
   assertMatchingRoleModelSession({
     actual: roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId,
     expected: roleModelIOSnapshot.sessionId,
-    field: 'roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId'
+    field: 'roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId',
   });
   assertMatchingRoleModelSession({
     actual: parsedRoleModelDecisionSnapshot.sessionId,
     expected: roleModelIOSnapshot.sessionId,
-    field: 'parsedRoleModelDecisionSnapshot.sessionId'
+    field: 'parsedRoleModelDecisionSnapshot.sessionId',
   });
   assertParsedRoleModelDecisionMatchesRawOutput({
     roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot
+    parsedRoleModelDecisionSnapshot,
   });
   assertParsedRoleModelDecisionAllowedByEnvelope({
     roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot
+    parsedRoleModelDecisionSnapshot,
   });
 
   if (commitValidation === undefined) {
@@ -953,27 +957,26 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   assertMatchingRoleModelSession({
     actual: commitValidation.sessionId,
     expected: roleModelIOSnapshot.sessionId,
-    field: 'commitValidation.sessionId'
+    field: 'commitValidation.sessionId',
   });
   assertMatchingRoleModelIdentity({
     actual: commitValidation,
     expected: options.identity,
-    field: 'commitValidation'
+    field: 'commitValidation',
   });
   assertRoleModelCommitStatusMatchesRawEvent({
     kind: options.kind,
     status: options.status,
     reason: options.reason,
     parsedRoleModelDecisionSnapshot,
-    commitValidation
+    commitValidation,
   });
 }
 
 function normalizeLegacyRejectedDecisionRequestedToolNames(options: {
   readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
   readonly parsedRoleModelDecisionSnapshot:
-    | ParsedRoleModelDecisionSnapshot
-    | undefined;
+    ParsedRoleModelDecisionSnapshot | undefined;
 }): ParsedRoleModelDecisionSnapshot | undefined {
   const roleModelIOSnapshot = options.roleModelIOSnapshot;
   const parsedSnapshot = options.parsedRoleModelDecisionSnapshot;
@@ -995,7 +998,7 @@ function normalizeLegacyRejectedDecisionRequestedToolNames(options: {
     allowedTools: roleModelIOSnapshot.inputEnvelope.allowedTools,
     pluginToolDefinitions:
       roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
-    toolObservations: roleModelIOSnapshot.inputEnvelope.toolObservations
+    toolObservations: roleModelIOSnapshot.inputEnvelope.toolObservations,
   });
 
   if (
@@ -1010,7 +1013,7 @@ function normalizeLegacyRejectedDecisionRequestedToolNames(options: {
     traceId: parsedSnapshot.traceId,
     createdAt: parsedSnapshot.createdAt,
     sessionId: parsedSnapshot.sessionId,
-    result: normalizedResult
+    result: normalizedResult,
   });
 }
 
@@ -1030,7 +1033,7 @@ function assertRoleModelInputTextMatchesPayloadSummary(options: {
   }
 
   throwMalformedRecord(
-    'roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage'
+    'roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage',
   );
 }
 
@@ -1046,7 +1049,8 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
       allowedTools: options.roleModelIOSnapshot.inputEnvelope.allowedTools,
       pluginToolDefinitions:
         options.roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
-      toolObservations: options.roleModelIOSnapshot.inputEnvelope.toolObservations
+      toolObservations:
+        options.roleModelIOSnapshot.inputEnvelope.toolObservations,
     })
   ) {
     return;
@@ -1070,9 +1074,11 @@ function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
   // tool_not_declared); only visible_reply must be allowed when present,
   // because it commits without a routing gate.
   const visibleReplyIsAllowed = parsedResult.decision.toolCalls.every(
-    (call) =>
+    call =>
       call.name !== visibleReplyModelToolName ||
-      options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(call.name)
+      options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(
+        call.name,
+      ),
   );
 
   if (!visibleReplyIsAllowed) {
@@ -1098,7 +1104,7 @@ function assertRoleModelCommitStatusMatchesRawEvent(options: {
 
     assertAcceptedCommitTextMatchesParsedDecision({
       actual: commitResult.acceptedVisibleReplyText,
-      parsedDecision: parsedResult.decision
+      parsedDecision: parsedResult.decision,
     });
 
     if (
@@ -1143,7 +1149,7 @@ function assertRoleModelCommitStatusMatchesRawEvent(options: {
 
   assertRejectedCommitMatchesParsedDecision({
     parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
-    commitValidation: options.commitValidation
+    commitValidation: options.commitValidation,
   });
 }
 
@@ -1151,7 +1157,8 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
   readonly actual: string | undefined;
   readonly parsedDecision: CharacterDecision;
 }): void {
-  const parsedDecisionText = getVisibleReplyToolCall(options.parsedDecision)?.input.text;
+  const parsedDecisionText = getVisibleReplyToolCall(options.parsedDecision)
+    ?.input.text;
 
   if (parsedDecisionText === undefined) {
     if (options.actual === undefined) {
@@ -1168,13 +1175,12 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
   let normalizedParsedDecisionText: string;
 
   try {
-    normalizedParsedDecisionText = normalizeVisibleMessageText(
-      parsedDecisionText
-    );
+    normalizedParsedDecisionText =
+      normalizeVisibleMessageText(parsedDecisionText);
   } catch (error: unknown) {
     if (error instanceof VisibleMessageTextValidationError) {
       throwMalformedRecord(
-        'parsedRoleModelDecisionSnapshot.result.decision.action.text'
+        'parsedRoleModelDecisionSnapshot.result.decision.action.text',
       );
     }
 
@@ -1212,7 +1218,7 @@ function assertRejectedCommitMatchesParsedDecision(options: {
   if (
     !isOneOf(
       commitResult.rejection.reason,
-      commitOwnedRoleModelRejectionReasons
+      commitOwnedRoleModelRejectionReasons,
     )
   ) {
     throwMalformedRecord('commitValidation.result.rejection.reason');
@@ -1223,13 +1229,13 @@ function assertRejectedCommitMatchesParsedDecision(options: {
     roleModelInvalidVisibleReplyRejectionReason
   ) {
     assertParsedDecisionTextFailsCommitValidation(
-      getRequiredVisibleReplyText(parsedResult.decision)
+      getRequiredVisibleReplyText(parsedResult.decision),
     );
   }
 }
 
 function assertParsedDecisionTextFailsCommitValidation(
-  parsedDecisionText: string
+  parsedDecisionText: string,
 ): void {
   try {
     normalizeVisibleMessageText(parsedDecisionText);
@@ -1273,7 +1279,7 @@ function assertMatchingRoleModelSession(options: {
 }
 
 function requiredRoleModelInputEnvelope(
-  value: unknown
+  value: unknown,
 ): RoleModelInputEnvelope {
   if (!isRecord(value)) {
     throwMalformedRecord('roleModelInputEnvelope');
@@ -1292,9 +1298,9 @@ function requiredRoleModelInputEnvelope(
       allowedTools,
       pluginToolDefinitions,
       toolObservations: optionalRoleModelToolObservations(
-        value['toolObservations']
+        value['toolObservations'],
       ),
-      outputContract: requiredRoleModelOutputContract(value['outputContract'])
+      outputContract: requiredRoleModelOutputContract(value['outputContract']),
     });
   } catch (error: unknown) {
     if (error instanceof TypeError) {
@@ -1306,22 +1312,22 @@ function requiredRoleModelInputEnvelope(
 }
 
 function legacyRoleModelPluginToolDefinitions(
-  allowedTools: readonly RoleModelAllowedToolName[]
+  allowedTools: readonly RoleModelAllowedToolName[],
 ): readonly RoleModelPluginToolDefinition[] {
   // Schema 1 stored character_state.patch as a built-in tool before plugin
   // definitions were persisted with role-model envelopes.
   return Object.freeze([
-    ...createDefaultRoleModelPluginToolDefinitions().filter((definition) =>
-      allowedTools.includes(definition.name)
+    ...createDefaultRoleModelPluginToolDefinitions().filter(definition =>
+      allowedTools.includes(definition.name),
     ),
     ...(allowedTools.includes(characterStatePatchModelToolName)
       ? [legacySchema1CharacterStatePatchPluginToolDefinition]
-      : [])
+      : []),
   ]);
 }
 
 function requiredUserMessageRuntimeEvent(
-  value: unknown
+  value: unknown,
 ): UserMessageRuntimeEvent {
   if (!isRecord(value)) {
     throwMalformedRecord('event');
@@ -1339,16 +1345,16 @@ function requiredUserMessageRuntimeEvent(
     createdAt: requiredRecordCanonicalTimestamp(
       value,
       'createdAt',
-      'malformed_record'
+      'malformed_record',
     ),
     type: requiredRuntimeEventType(value['type']),
     payload: Object.freeze({
       currentUserMessage: requiredRecordString(
         payload,
         'currentUserMessage',
-        'malformed_record'
-      )
-    })
+        'malformed_record',
+      ),
+    }),
   } satisfies UserMessageRuntimeEvent);
 }
 
@@ -1362,12 +1368,12 @@ function requiredDecisionContext(value: unknown): DecisionContext {
     characterSnapshot: requiredCharacterProfile(value['characterSnapshot']),
     recentVisibleMessages: requiredVisibleMessages(
       value['recentVisibleMessages'],
-      'recentVisibleMessages'
+      'recentVisibleMessages',
     ),
     runtimeNotes: requiredStringArray(value['runtimeNotes'], 'runtimeNotes'),
     pluginContextItems: optionalRuntimePluginContextItems(
-      value['pluginContextItems']
-    )
+      value['pluginContextItems'],
+    ),
   });
 }
 
@@ -1378,13 +1384,13 @@ function requiredCharacterProfile(value: unknown): CharacterProfile {
 
   return Object.freeze({
     id: requiredRecordString(value, 'id', 'malformed_record'),
-    displayName: requiredRecordString(value, 'displayName', 'malformed_record')
+    displayName: requiredRecordString(value, 'displayName', 'malformed_record'),
   } satisfies CharacterProfile);
 }
 
 function requiredVisibleMessages(
   value: unknown,
-  key: string
+  key: string,
 ): readonly VisibleMessage[] {
   const messages: VisibleMessage[] = [];
 
@@ -1405,7 +1411,7 @@ function requiredVisibleMessage(value: unknown): VisibleMessage {
     role: requiredVisibleMessageRole(value['role']),
     speakerId: requiredRecordString(value, 'speakerId', 'malformed_record'),
     speakerName: requiredRecordString(value, 'speakerName', 'malformed_record'),
-    text: requiredNormalizedVisibleMessageText(value, 'text')
+    text: requiredNormalizedVisibleMessageText(value, 'text'),
   } satisfies VisibleMessage);
 }
 
@@ -1424,7 +1430,7 @@ function requiredStringArray(value: unknown, key: string): readonly string[] {
 }
 
 function optionalRuntimePluginContextItems(
-  value: unknown
+  value: unknown,
 ): readonly RuntimePluginContextItem[] {
   if (value === undefined) {
     return Object.freeze([]);
@@ -1448,7 +1454,7 @@ function optionalRuntimePluginContextItems(
 }
 
 function optionalRoleModelPluginToolDefinitions(
-  value: unknown
+  value: unknown,
 ): readonly RoleModelPluginToolDefinition[] {
   if (value === undefined) {
     return Object.freeze([]);
@@ -1461,18 +1467,14 @@ function optionalRoleModelPluginToolDefinitions(
       throwMalformedRecord('pluginToolDefinitions');
     }
 
-    const pluginId = requiredRecordString(
-      item,
-      'pluginId',
-      'malformed_record'
-    );
+    const pluginId = requiredRecordString(item, 'pluginId', 'malformed_record');
 
     try {
       definitions.push(
         Object.freeze({
           pluginId,
-          ...createRuntimePluginProvidedTool(item)
-        } satisfies RoleModelPluginToolDefinition)
+          ...createRuntimePluginProvidedTool(item),
+        } satisfies RoleModelPluginToolDefinition),
       );
     } catch (error: unknown) {
       if (error instanceof TypeError) {
@@ -1487,7 +1489,7 @@ function optionalRoleModelPluginToolDefinitions(
 }
 
 function optionalRoleModelToolObservations(
-  value: unknown
+  value: unknown,
 ): readonly RoleModelToolObservation[] {
   if (value === undefined) {
     return Object.freeze([]);
@@ -1510,15 +1512,11 @@ function optionalRoleModelToolObservations(
       observations.push(
         createRoleModelToolObservation({
           round: requiredRecordNumber(item, 'round', 'malformed_record'),
-          pluginId: requiredRecordString(
-            item,
-            'pluginId',
-            'malformed_record'
-          ),
+          pluginId: requiredRecordString(item, 'pluginId', 'malformed_record'),
           toolName: requiredRecordString(item, 'toolName', 'malformed_record'),
           input: freezeJsonRecord(input),
-          result: requiredRoleModelToolObservationResult(item['result'])
-        })
+          result: requiredRoleModelToolObservationResult(item['result']),
+        }),
       );
     } catch (error: unknown) {
       if (error instanceof TypeError) {
@@ -1533,7 +1531,7 @@ function optionalRoleModelToolObservations(
 }
 
 function requiredRoleModelToolObservationResult(
-  value: unknown
+  value: unknown,
 ): RoleModelToolObservation['result'] {
   if (!isRecord(value)) {
     throwMalformedRecord('toolObservations.result');
@@ -1544,7 +1542,7 @@ function requiredRoleModelToolObservationResult(
   if (status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      output: freezeJsonValue(value['output'])
+      output: freezeJsonValue(value['output']),
     } satisfies RoleModelToolObservation['result']);
   }
 
@@ -1552,7 +1550,7 @@ function requiredRoleModelToolObservationResult(
     return Object.freeze({
       status: 'rejected',
       reason: requiredRecordString(value, 'reason', 'malformed_record'),
-      message: requiredRecordString(value, 'message', 'malformed_record')
+      message: requiredRecordString(value, 'message', 'malformed_record'),
     } satisfies RoleModelToolObservation['result']);
   }
 
@@ -1560,7 +1558,7 @@ function requiredRoleModelToolObservationResult(
 }
 
 function requiredRoleModelAllowedTools(
-  value: unknown
+  value: unknown,
 ): readonly RoleModelAllowedToolName[] {
   const tools: RoleModelAllowedToolName[] = [];
 
@@ -1580,7 +1578,7 @@ function requiredRoleModelAllowedTools(
 }
 
 function requiredRoleModelOutputContract(
-  value: unknown
+  value: unknown,
 ): RoleModelOutputContract {
   if (!isRecord(value)) {
     throwMalformedRecord('outputContract');
@@ -1594,7 +1592,7 @@ function requiredRoleModelOutputContract(
 
   return Object.freeze({
     version,
-    text: requiredRecordString(value, 'text', 'malformed_record')
+    text: requiredRecordString(value, 'text', 'malformed_record'),
   } satisfies RoleModelOutputContract);
 }
 
@@ -1623,11 +1621,11 @@ function optionalRoleModelProviderMetadataOption(value: unknown): {
   return {
     providerMetadata: Object.freeze({
       provider,
-      ...(model === undefined ? {} : { model }),
-      ...(request === undefined ? {} : { request }),
-      ...(response === undefined ? {} : { response }),
-      ...(error === undefined ? {} : { error })
-    } satisfies RoleModelProviderMetadata)
+      ...(model === undefined ? {} : {model}),
+      ...(request === undefined ? {} : {request}),
+      ...(response === undefined ? {} : {response}),
+      ...(error === undefined ? {} : {error}),
+    } satisfies RoleModelProviderMetadata),
   };
 }
 
@@ -1645,12 +1643,12 @@ function optionalRoleModelProviderExchangeOption(value: unknown): {
   }
 
   return {
-    providerExchange
+    providerExchange,
   };
 }
 
 function optionalProviderRequestMetadata(
-  value: unknown
+  value: unknown,
 ): RoleModelProviderMetadata['request'] | undefined {
   if (value === undefined) {
     return undefined;
@@ -1667,17 +1665,21 @@ function optionalProviderRequestMetadata(
     throwMalformedRecord('providerMetadata.request.messageCount');
   }
 
-  requiredLiteralBooleanFalse(value, 'stream', 'providerMetadata.request.stream');
+  requiredLiteralBooleanFalse(
+    value,
+    'stream',
+    'providerMetadata.request.stream',
+  );
 
   return Object.freeze({
-    ...(endpoint === undefined ? {} : { endpoint }),
-    ...(messageCount === undefined ? {} : { messageCount }),
-    stream: false
+    ...(endpoint === undefined ? {} : {endpoint}),
+    ...(messageCount === undefined ? {} : {messageCount}),
+    stream: false,
   });
 }
 
 function optionalProviderResponseMetadata(
-  value: unknown
+  value: unknown,
 ): RoleModelProviderMetadata['response'] | undefined {
   if (value === undefined) {
     return undefined;
@@ -1694,12 +1696,12 @@ function optionalProviderResponseMetadata(
   }
 
   return Object.freeze({
-    ...(status === undefined ? {} : { status })
+    ...(status === undefined ? {} : {status}),
   });
 }
 
 function optionalProviderErrorMetadata(
-  value: unknown
+  value: unknown,
 ): RoleModelProviderMetadata['error'] | undefined {
   if (value === undefined) {
     return undefined;
@@ -1711,12 +1713,12 @@ function optionalProviderErrorMetadata(
 
   return Object.freeze({
     code: requiredRecordString(value, 'code', 'malformed_record'),
-    message: requiredRecordString(value, 'message', 'malformed_record')
+    message: requiredRecordString(value, 'message', 'malformed_record'),
   });
 }
 
 function requiredRoleModelDecisionResult(
-  value: unknown
+  value: unknown,
 ): RoleModelDecisionResult {
   if (!isRecord(value)) {
     throwMalformedRecord('roleModelDecisionResult');
@@ -1728,14 +1730,14 @@ function requiredRoleModelDecisionResult(
     const nonCommittedText = optionalRecordStringAllowingEmpty(
       value,
       'nonCommittedText',
-      'malformed_record'
+      'malformed_record',
     );
 
     return createAcceptedRoleModelDecisionResult(
       requiredCharacterDecision(value['decision']),
       {
-        ...(nonCommittedText === undefined ? {} : { nonCommittedText })
-      }
+        ...(nonCommittedText === undefined ? {} : {nonCommittedText}),
+      },
     );
   }
 
@@ -1743,12 +1745,12 @@ function requiredRoleModelDecisionResult(
     const rejection = requiredRoleModelDecisionRejection(value['rejection']);
     const requestedToolNames = optionalStringArray(
       value['requestedToolNames'],
-      'roleModelDecisionResult.requestedToolNames'
+      'roleModelDecisionResult.requestedToolNames',
     );
 
     if (
       requestedToolNames?.some(
-        (toolName) => !isRoleModelAllowedToolName(toolName)
+        toolName => !isRoleModelAllowedToolName(toolName),
       ) === true
     ) {
       throwMalformedRecord('roleModelDecisionResult.requestedToolNames');
@@ -1758,8 +1760,8 @@ function requiredRoleModelDecisionResult(
       rejection.reason,
       rejection.details,
       {
-        ...(requestedToolNames === undefined ? {} : { requestedToolNames })
-      }
+        ...(requestedToolNames === undefined ? {} : {requestedToolNames}),
+      },
     );
   }
 
@@ -1776,9 +1778,9 @@ function requiredCharacterDecision(value: unknown): CharacterDecision {
       version: roleModelDecisionContractVersion,
       toolCalls: Object.freeze(
         requiredArray(value['toolCalls'], 'decision.toolCalls').map(
-          requiredModelToolCall
-        )
-      )
+          requiredModelToolCall,
+        ),
+      ),
     } satisfies CharacterDecision);
   }
 
@@ -1801,7 +1803,7 @@ function requiredModelToolCall(value: unknown): ModelToolCall {
     const text = requiredRecordStringAllowingEmpty(
       input,
       'text',
-      'malformed_record'
+      'malformed_record',
     );
 
     return createVisibleReplyModelToolCall(text);
@@ -1809,12 +1811,12 @@ function requiredModelToolCall(value: unknown): ModelToolCall {
 
   return Object.freeze({
     name,
-    input: freezeJsonRecord(input)
+    input: freezeJsonRecord(input),
   } satisfies PluginModelToolCall);
 }
 
 function freezeJsonRecord(
-  record: Readonly<Record<string, unknown>>
+  record: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, RuntimePluginJsonValue>> {
   const snapshot: Record<string, RuntimePluginJsonValue> = {};
 
@@ -1847,7 +1849,7 @@ function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
 }
 
 function requiredRoleModelCommitValidationResult(
-  value: unknown
+  value: unknown,
 ): RoleModelCommitValidationResult {
   if (!isRecord(value)) {
     throwMalformedRecord('commitValidation.result');
@@ -1861,21 +1863,21 @@ function requiredRoleModelCommitValidationResult(
         ? undefined
         : requiredNormalizedVisibleMessageText(
             value,
-            'acceptedVisibleReplyText'
+            'acceptedVisibleReplyText',
           );
 
     return Object.freeze({
       status: 'accepted',
       ...(acceptedVisibleReplyText === undefined
         ? {}
-        : { acceptedVisibleReplyText })
+        : {acceptedVisibleReplyText}),
     } satisfies AcceptedRoleModelCommitValidationResult);
   }
 
   if (status === 'rejected') {
     return Object.freeze({
       status: 'rejected',
-      rejection: requiredRoleModelDecisionRejection(value['rejection'])
+      rejection: requiredRoleModelDecisionRejection(value['rejection']),
     } satisfies RejectedRoleModelCommitValidationResult);
   }
 
@@ -1883,7 +1885,7 @@ function requiredRoleModelCommitValidationResult(
 }
 
 function requiredRoleModelDecisionRejection(
-  value: unknown
+  value: unknown,
 ): RoleModelDecisionRejection {
   if (!isRecord(value)) {
     throwMalformedRecord('rejection');
@@ -1893,17 +1895,17 @@ function requiredRoleModelDecisionRejection(
   const details = optionalRecordStringAllowingEmpty(
     value,
     'details',
-    'malformed_record'
+    'malformed_record',
   );
 
   return Object.freeze({
     reason,
-    ...(details === undefined ? {} : { details })
+    ...(details === undefined ? {} : {details}),
   } satisfies RoleModelDecisionRejection);
 }
 
 function requiredRoleModelDecisionRejectionReason(
-  value: unknown
+  value: unknown,
 ): RoleModelDecisionRejectionReason {
   if (isOneOf(value, roleModelDecisionRejectionReasons)) {
     return value;
@@ -1924,7 +1926,7 @@ function requiredLiteralString(
   record: Record<string, unknown>,
   key: string,
   expectedValue: string,
-  errorField: string
+  errorField: string,
 ): void {
   const value = requiredRecordString(record, key, 'malformed_record');
 
@@ -1936,7 +1938,7 @@ function requiredLiteralString(
 function requiredLiteralBooleanFalse(
   record: Record<string, unknown>,
   key: string,
-  errorField: string
+  errorField: string,
 ): void {
   if (record[key] !== false) {
     throwMalformedRecord(errorField);
@@ -1945,7 +1947,7 @@ function requiredLiteralBooleanFalse(
 
 function optionalPayloadSummaryString(
   record: Record<string, unknown>,
-  key: string
+  key: string,
 ): string | undefined {
   const value = record[key];
 

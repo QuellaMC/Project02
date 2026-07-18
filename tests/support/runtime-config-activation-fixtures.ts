@@ -5,14 +5,14 @@ import {
   runtimePluginContractVersion,
   runtimePluginListToolName,
   type RuntimePluginAccessMap,
-  type RuntimePluginContext
+  type RuntimePluginContext,
 } from '../../src/plugins/index.ts';
 
 export function requiredSecretPlugin(
   id: string,
   options: {
     readonly defaultEnabled?: boolean;
-  } = {}
+  } = {},
 ) {
   return createRuntimePlugin({
     manifest: {
@@ -24,7 +24,7 @@ export function requiredSecretPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02'
+        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -35,9 +35,9 @@ export function requiredSecretPlugin(
             required: true,
             secret: true,
             valueType: 'secret',
-            redactionLabels: ['secret']
-          }
-        ]
+            redactionLabels: ['secret'],
+          },
+        ],
       },
       localTrustLevel: 'trusted_adapter',
       runtimePolicy: {
@@ -51,21 +51,21 @@ export function requiredSecretPlugin(
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: options.defaultEnabled ?? true,
-        reasons: ['test_required_secret']
+        reasons: ['test_required_secret'],
       },
-      requestedAccess: {}
-    }
+      requestedAccess: {},
+    },
   });
 }
 
-export function requiredSecretAndEndpointPlugin(id: string): ReturnType<
-  typeof requiredSecretPlugin
-> {
+export function requiredSecretAndEndpointPlugin(
+  id: string,
+): ReturnType<typeof requiredSecretPlugin> {
   const plugin = requiredSecretPlugin(id);
 
   return createRuntimePlugin({
@@ -80,11 +80,11 @@ export function requiredSecretAndEndpointPlugin(id: string): ReturnType<
             required: true,
             secret: false,
             valueType: 'string',
-            redactionLabels: []
-          }
-        ]
-      }
-    }
+            redactionLabels: [],
+          },
+        ],
+      },
+    },
   });
 }
 
@@ -104,11 +104,11 @@ export function pluginWithAdditionalConfigField(id: string) {
             required: false,
             secret: false,
             valueType: 'string',
-            redactionLabels: []
-          }
-        ]
-      }
-    }
+            redactionLabels: [],
+          },
+        ],
+      },
+    },
   });
 }
 
@@ -116,7 +116,7 @@ export function firstPartyPlugin(
   id: string,
   options: {
     readonly defaultEnabled?: boolean;
-  } = {}
+  } = {},
 ) {
   return createRuntimePlugin({
     manifest: {
@@ -128,11 +128,11 @@ export function firstPartyPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02'
+        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'first_party',
       runtimePolicy: {
@@ -146,15 +146,15 @@ export function firstPartyPlugin(
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: options.defaultEnabled ?? true,
-        reasons: ['test_first_party']
+        reasons: ['test_first_party'],
       },
-      requestedAccess: {}
-    }
+      requestedAccess: {},
+    },
   });
 }
 
@@ -163,30 +163,30 @@ export function sessionEndPlugin(
   onSessionEnd: (context: RuntimePluginContext) => void,
   options: {
     readonly defaultEnabled?: boolean;
-  } = {}
+  } = {},
 ) {
   const plugin = firstPartyPlugin(id, options);
 
   return createRuntimePlugin({
     manifest: {
       ...plugin.manifest,
-      declaredPlugins: ['plugin_discovery', 'on_session_end']
+      declaredPlugins: ['plugin_discovery', 'on_session_end'],
     },
     lifecycleHooks: {
       onSessionEnd(context) {
         onSessionEnd(context);
         return {
           status: 'completed',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function fileStoreSessionEndPlugin(
   id: string,
-  onSessionEnd: (context: RuntimePluginContext) => void
+  onSessionEnd: (context: RuntimePluginContext) => void,
 ) {
   const plugin = firstPartyPlugin(id);
 
@@ -196,19 +196,19 @@ export function fileStoreSessionEndPlugin(
       declaredPlugins: ['plugin_discovery', 'on_session_end'],
       runtimePolicy: {
         ...plugin.manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write'
+        sideEffectLevel: 'local_memory_write',
       },
-      requestedAccess: { file_store: 'write' }
+      requestedAccess: {file_store: 'write'},
     },
     lifecycleHooks: {
       onSessionEnd(context) {
         onSessionEnd(context);
         return {
           status: 'completed',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -221,9 +221,9 @@ export function modelFacingMemorySearchPlugin(id: string) {
       declaredPlugins: [
         'plugin_discovery',
         'tool_provider',
-        'handle_tool_call'
+        'handle_tool_call',
       ],
-      requestedAccess: { model_input: 'write' }
+      requestedAccess: {model_input: 'write'},
     },
     providedTools: [memorySearchTool('memory.search')],
     lifecycleHooks: {
@@ -231,16 +231,16 @@ export function modelFacingMemorySearchPlugin(id: string) {
         return {
           status: 'accepted',
           output: {},
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
 export function modelFacingPluginListCollisionPlugin(
   id: string,
-  onSessionEnd: (context: RuntimePluginContext) => void
+  onSessionEnd: (context: RuntimePluginContext) => void,
 ) {
   const plugin = firstPartyPlugin(id);
 
@@ -251,9 +251,9 @@ export function modelFacingPluginListCollisionPlugin(
         'plugin_discovery',
         'tool_provider',
         'handle_tool_call',
-        'on_session_end'
+        'on_session_end',
       ],
-      requestedAccess: { model_input: 'write' }
+      requestedAccess: {model_input: 'write'},
     },
     providedTools: [memorySearchTool(runtimePluginListToolName)],
     lifecycleHooks: {
@@ -261,7 +261,7 @@ export function modelFacingPluginListCollisionPlugin(
         return {
           status: 'accepted',
           output: {},
-          evidence: []
+          evidence: [],
         };
       },
       onSessionEnd(context) {
@@ -269,10 +269,10 @@ export function modelFacingPluginListCollisionPlugin(
 
         return {
           status: 'completed',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 
@@ -309,19 +309,19 @@ export function parseActivationOutput(stdout: string): {
 }
 
 export function nonHostScopedActivationPlugins(
-  output: ReturnType<typeof parseActivationOutput>
+  output: ReturnType<typeof parseActivationOutput>,
 ): ReturnType<typeof parseActivationOutput>['plugins'] {
   const hostScopedPluginIds = new Set(hostScopedFirstPartyRuntimePluginIds);
 
   return Object.freeze(
-    output.plugins.filter((plugin) => !hostScopedPluginIds.has(plugin.pluginId))
+    output.plugins.filter(plugin => !hostScopedPluginIds.has(plugin.pluginId)),
   );
 }
 
 export function enabledNonHostScopedActivationPlugins(
-  output: ReturnType<typeof parseActivationOutput>
+  output: ReturnType<typeof parseActivationOutput>,
 ): ReturnType<typeof parseActivationOutput>['plugins'] {
   return Object.freeze(
-    nonHostScopedActivationPlugins(output).filter((plugin) => plugin.enabled)
+    nonHostScopedActivationPlugins(output).filter(plugin => plugin.enabled),
   );
 }

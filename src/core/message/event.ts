@@ -3,7 +3,7 @@ import {
   oneLineMessageMissingErrorMessage,
   oneLineMessageMultilineErrorMessage,
   OneLineMessageValidationError,
-  type OneLineMessageValidationReason
+  type OneLineMessageValidationReason,
 } from './validation.ts';
 
 export const runtimeEventTypeValues = ['USER_MESSAGE'] as const;
@@ -17,7 +17,7 @@ export type RuntimeEventIdentity = {
 };
 
 export function runtimeEventIdentityKey(
-  identity: RuntimeEventIdentity
+  identity: RuntimeEventIdentity,
 ): string {
   return `${identity.eventId}\u0000${identity.traceId}\u0000${identity.createdAt}`;
 }
@@ -41,11 +41,14 @@ export class RuntimeEventInputError extends Error {
   readonly reason: OneLineMessageValidationReason;
   readonly identity: RuntimeEventIdentity;
 
-  constructor(reason: OneLineMessageValidationReason, identity: RuntimeEventIdentity) {
+  constructor(
+    reason: OneLineMessageValidationReason,
+    identity: RuntimeEventIdentity,
+  ) {
     super(
       reason === 'empty'
         ? oneLineMessageMissingErrorMessage
-        : oneLineMessageMultilineErrorMessage
+        : oneLineMessageMultilineErrorMessage,
     );
     this.name = 'RuntimeEventInputError';
     this.reason = reason;
@@ -54,18 +57,18 @@ export class RuntimeEventInputError extends Error {
 }
 
 export function createRuntimeEventIdentity(
-  options: RuntimeEventIdentityOptions = {}
+  options: RuntimeEventIdentityOptions = {},
 ): RuntimeEventIdentity {
   return createRuntimeEventIdentitySnapshot({
     eventId: options.eventId ?? `evt_${crypto.randomUUID()}`,
     traceId: options.traceId ?? `trace_${crypto.randomUUID()}`,
-    createdAt: options.createdAt ?? new Date().toISOString()
+    createdAt: options.createdAt ?? new Date().toISOString(),
   });
 }
 
 export function assertCanonicalRuntimeTimestamp(
   value: unknown,
-  field: string
+  field: string,
 ): string {
   if (typeof value !== 'string') {
     throw new TypeError(`${field} must be a canonical UTC ISO timestamp.`);
@@ -82,7 +85,7 @@ export function assertCanonicalRuntimeTimestamp(
 
 export function createUserMessageRuntimeEvent(
   message: string | undefined,
-  identity: RuntimeEventIdentity = createRuntimeEventIdentity()
+  identity: RuntimeEventIdentity = createRuntimeEventIdentity(),
 ): UserMessageRuntimeEvent {
   const runtimeIdentity = createRuntimeEventIdentitySnapshot(identity);
 
@@ -91,8 +94,8 @@ export function createUserMessageRuntimeEvent(
       ...runtimeIdentity,
       type: 'USER_MESSAGE',
       payload: Object.freeze({
-        currentUserMessage: normalizeOneLineMessage(message)
-      })
+        currentUserMessage: normalizeOneLineMessage(message),
+      }),
     } satisfies UserMessageRuntimeEvent);
   } catch (error: unknown) {
     if (error instanceof OneLineMessageValidationError) {
@@ -104,14 +107,21 @@ export function createUserMessageRuntimeEvent(
 }
 
 export function createRuntimeEventIdentitySnapshot(
-  identity: RuntimeEventIdentity
+  identity: RuntimeEventIdentity,
 ): RuntimeEventIdentity {
-  if (identity.eventId.trim().length === 0 || identity.traceId.trim().length === 0) {
-    throw new TypeError('Runtime event identity requires non-empty event and trace IDs.');
+  if (
+    identity.eventId.trim().length === 0 ||
+    identity.traceId.trim().length === 0
+  ) {
+    throw new TypeError(
+      'Runtime event identity requires non-empty event and trace IDs.',
+    );
   }
 
   if (identity.eventId === identity.traceId) {
-    throw new TypeError('Runtime event identity requires separate event and trace IDs.');
+    throw new TypeError(
+      'Runtime event identity requires separate event and trace IDs.',
+    );
   }
 
   return Object.freeze({
@@ -119,7 +129,7 @@ export function createRuntimeEventIdentitySnapshot(
     traceId: identity.traceId,
     createdAt: assertCanonicalRuntimeTimestamp(
       identity.createdAt,
-      'Runtime event createdAt'
-    )
+      'Runtime event createdAt',
+    ),
   } satisfies RuntimeEventIdentity);
 }

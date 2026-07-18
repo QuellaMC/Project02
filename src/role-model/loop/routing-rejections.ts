@@ -5,13 +5,13 @@ import {
   type RuntimePluginEvidenceStatus,
   type RuntimePluginPolicyOutcome,
   type RuntimePluginToolCall,
-  type RuntimePluginToolCallResult
+  type RuntimePluginToolCallResult,
 } from '../../plugins/api/index.ts';
 import {
   type RoleModelPluginToolDefinition,
-  type RoleModelToolObservation
+  type RoleModelToolObservation,
 } from '../api/contracts.ts';
-import { type ModelToolCall } from '../api/model-tools.ts';
+import {type ModelToolCall} from '../api/model-tools.ts';
 
 export type RoleModelPluginToolRoutingEvidence = {
   readonly callId: string;
@@ -55,10 +55,10 @@ export function createRejectedToolRoutingEvidence(options: {
                 status: options.evidenceStatus ?? 'rejected',
                 summary: message,
                 policyOutcome: options.policyOutcome ?? 'handler_rejected',
-                redactionLabels: options.context.privacy.redactionLabels
-              })
-            ])
-    } satisfies RuntimePluginToolCallResult)
+                redactionLabels: options.context.privacy.redactionLabels,
+              }),
+            ]),
+    } satisfies RuntimePluginToolCallResult),
   } satisfies RoleModelPluginToolRoutingEvidence);
 }
 
@@ -73,14 +73,14 @@ export function missingRoutingTargetRejection(options: {
     callId: options.callId,
     call: options.call,
     dispatchedToHost: false,
-    ...(options.context === undefined ? {} : { context: options.context }),
+    ...(options.context === undefined ? {} : {context: options.context}),
     reason: options.pluginDeclared ? 'tool_host_missing' : 'tool_not_declared',
     message: options.pluginDeclared
       ? `Tool "${options.toolName}" has no host handler for this turn.`
       : `Tool "${options.toolName}" is not declared for this turn.`,
     policyOutcome: options.pluginDeclared
       ? 'handler_rejected'
-      : 'disallowed_tool_call'
+      : 'disallowed_tool_call',
   });
 }
 
@@ -107,10 +107,10 @@ export function userTurnCallLimitRoutingRejection(options: {
 
   const attemptCount =
     options.priorToolObservations.filter(
-      (observation) => observation.toolName === options.toolCall.name
+      observation => observation.toolName === options.toolCall.name,
     ).length +
     options.routedResults.filter(
-      (result) => result.call.toolName === options.toolCall.name
+      result => result.call.toolName === options.toolCall.name,
     ).length;
 
   if (attemptCount < callLimit.maxCalls) {
@@ -121,15 +121,15 @@ export function userTurnCallLimitRoutingRejection(options: {
     callId: options.callId,
     call: options.call,
     dispatchedToHost: false,
-    ...(options.context === undefined ? {} : { context: options.context }),
+    ...(options.context === undefined ? {} : {context: options.context}),
     reason: 'tool_call_limit_reached',
     message: `Tool "${options.toolCall.name}" was already attempted ${String(
-      attemptCount
+      attemptCount,
     )} ${
       attemptCount === 1 ? 'time' : 'times'
     } this turn; user_turn maxCalls is ${String(
-      callLimit.maxCalls
+      callLimit.maxCalls,
     )}. Do not request it again.`,
-    policyOutcome: 'disallowed_tool_call'
+    policyOutcome: 'disallowed_tool_call',
   });
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   createRuntimePluginAfterTurnCommittedContext,
@@ -7,22 +7,22 @@ import {
   createRuntimePluginHealthSnapshot,
   createRuntimePluginToolInvocationSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
-  runtimePluginContractVersion
+  runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
 import {
   createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
-  createRoleModelIOSnapshot
+  createRoleModelIOSnapshot,
 } from '../../src/role-model/index.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
-  runtimeEventIdentityKey
+  runtimeEventIdentityKey,
 } from '../../src/core/index.ts';
 import {
   createLocalRuntimeSessionMetadata,
-  createLocalRuntimeStorageSchemaMarker
+  createLocalRuntimeStorageSchemaMarker,
 } from '../../src/runtime/storage/layout-contract.ts';
 const nonCanonicalTimestamp = '2026-07-11T08:00:00+08:00';
 const canonicalTimestamp = '2026-07-11T00:00:00.000Z';
@@ -33,14 +33,14 @@ describe('canonical timestamp boundaries', () => {
       runtimeEventIdentityKey({
         eventId: 'evt_same',
         traceId: 'trace_same',
-        createdAt: canonicalTimestamp
-      })
+        createdAt: canonicalTimestamp,
+      }),
     ).not.toBe(
       runtimeEventIdentityKey({
         eventId: 'evt_same',
         traceId: 'trace_same',
-        createdAt: '2026-07-11T00:00:01.000Z'
-      })
+        createdAt: '2026-07-11T00:00:01.000Z',
+      }),
     );
   });
 
@@ -53,8 +53,8 @@ describe('canonical timestamp boundaries', () => {
           sessionId: 'session-canonical-time',
           eventType: 'USER_MESSAGE',
           currentUserMessage: 'hello',
-          character: { id: 'mira', displayName: 'Mira' }
-        })
+          character: {id: 'mira', displayName: 'Mira'},
+        }),
     ],
     [
       'plugin after-turn commit',
@@ -64,10 +64,10 @@ describe('canonical timestamp boundaries', () => {
           sessionId: 'session-canonical-time',
           eventType: 'USER_MESSAGE',
           currentUserMessage: 'hello',
-          character: { id: 'mira', displayName: 'Mira' },
+          character: {id: 'mira', displayName: 'Mira'},
           committedAt: nonCanonicalTimestamp,
-          visibleMessages: []
-        })
+          visibleMessages: [],
+        }),
     ],
     [
       'plugin evidence',
@@ -79,8 +79,8 @@ describe('canonical timestamp boundaries', () => {
           evidenceKind: 'before_role_model_call',
           status: 'accepted',
           summary: 'safe',
-          redactionLabels: []
-        })
+          redactionLabels: [],
+        }),
     ],
     [
       'plugin health',
@@ -90,8 +90,8 @@ describe('canonical timestamp boundaries', () => {
           status: 'ok',
           checkedAt: nonCanonicalTimestamp,
           summary: 'safe',
-          redactionLabels: []
-        })
+          redactionLabels: [],
+        }),
     ],
     [
       'plugin tool invocation',
@@ -102,8 +102,8 @@ describe('canonical timestamp boundaries', () => {
           pluginId: 'memory.fixture',
           toolName: 'memory.search',
           input: {},
-          result: { status: 'accepted', output: null, evidence: [] }
-        })
+          result: {status: 'accepted', output: null, evidence: []},
+        }),
     ],
     [
       'plugin turn evidence',
@@ -116,8 +116,8 @@ describe('canonical timestamp boundaries', () => {
           contextItems: [],
           toolInvocations: [],
           evidence: [],
-          health: []
-        })
+          health: [],
+        }),
     ],
     [
       'role-model IO evidence',
@@ -126,8 +126,8 @@ describe('canonical timestamp boundaries', () => {
           ...identity(nonCanonicalTimestamp),
           sessionId: 'session-canonical-time',
           inputEnvelope: canonicalInputEnvelope(),
-          rawOutputText: '{"toolCalls":[]}'
-        })
+          rawOutputText: '{"toolCalls":[]}',
+        }),
     ],
     [
       'session metadata',
@@ -135,8 +135,8 @@ describe('canonical timestamp boundaries', () => {
         createLocalRuntimeSessionMetadata({
           sessionId: 'session-canonical-time',
           createdAt: nonCanonicalTimestamp,
-          updatedAt: canonicalTimestamp
-        })
+          updatedAt: canonicalTimestamp,
+        }),
     ],
     [
       'session metadata update',
@@ -144,16 +144,16 @@ describe('canonical timestamp boundaries', () => {
         createLocalRuntimeSessionMetadata({
           sessionId: 'session-canonical-time',
           createdAt: canonicalTimestamp,
-          updatedAt: nonCanonicalTimestamp
-        })
+          updatedAt: nonCanonicalTimestamp,
+        }),
     ],
     [
       'storage schema marker',
       () =>
         createLocalRuntimeStorageSchemaMarker({
-          createdAt: nonCanonicalTimestamp
-        })
-    ]
+          createdAt: nonCanonicalTimestamp,
+        }),
+    ],
   ])('rejects non-canonical timestamps at the %s boundary', (_label, run) => {
     expect(run).toThrow('must be a canonical UTC ISO timestamp');
   });
@@ -163,21 +163,21 @@ function identity(createdAt: string) {
   return {
     eventId: 'evt_canonical_timestamp_boundary',
     traceId: 'trace_canonical_timestamp_boundary',
-    createdAt
+    createdAt,
   } as const;
 }
 
 function canonicalInputEnvelope() {
   const runtimeIdentity = createRuntimeEventIdentity({
-    ...identity(canonicalTimestamp)
+    ...identity(canonicalTimestamp),
   });
 
   return createRoleModelInputEnvelope({
     event: createUserMessageRuntimeEvent('hello', runtimeIdentity),
     decisionContext: createDecisionContext({
       sessionId: 'session-canonical-time',
-      characterSnapshot: { id: 'mira', displayName: 'Mira' }
+      characterSnapshot: {id: 'mira', displayName: 'Mira'},
     }),
-    pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions()
+    pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
   });
 }

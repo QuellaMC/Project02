@@ -1,11 +1,11 @@
-import { createHookFailureEvidence } from '../host/hook-evidence.ts';
+import {createHookFailureEvidence} from '../host/hook-evidence.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
   RuntimePluginContextItem,
-  RuntimePluginEvidenceSnapshot
+  RuntimePluginEvidenceSnapshot,
 } from '../api/types.ts';
-import { beforeRoleModelFailureRejectsTurn } from '../api/evidence-policy.ts';
+import {beforeRoleModelFailureRejectsTurn} from '../api/evidence-policy.ts';
 
 const runtimePluginContextEstimatedTokenBudget = 256;
 
@@ -40,20 +40,20 @@ export function boundPluginPromptContext(options: {
   readonly contextItems: readonly CollectedPluginContextItem[];
 }): BoundedPluginPromptContextResult {
   const candidates = collectedPluginPromptContextCandidates({
-    contextItems: options.contextItems
+    contextItems: options.contextItems,
   });
   const totalEstimatedTokens = candidates.reduce(
     (total, candidate) => total + candidate.estimatedTokens,
-    0
+    0,
   );
 
   if (totalEstimatedTokens <= runtimePluginContextEstimatedTokenBudget) {
     return Object.freeze({
       status: 'completed',
       contextItems: Object.freeze(
-        options.contextItems.map((contextItem) => contextItem.item)
+        options.contextItems.map(contextItem => contextItem.item),
       ),
-      evidence: Object.freeze([])
+      evidence: Object.freeze([]),
     });
   }
 
@@ -61,7 +61,7 @@ export function boundPluginPromptContext(options: {
   let retainedEstimatedTokens = 0;
 
   for (const candidate of [...candidates].sort(
-    compareCollectedPromptContextPriority
+    compareCollectedPromptContextPriority,
   )) {
     const nextEstimatedTokens =
       retainedEstimatedTokens + candidate.estimatedTokens;
@@ -74,7 +74,7 @@ export function boundPluginPromptContext(options: {
     retainedEstimatedTokens = nextEstimatedTokens;
   }
 
-  const retainedContextItems = candidates.flatMap((candidate) => {
+  const retainedContextItems = candidates.flatMap(candidate => {
     if (!retainedCandidates.has(candidate)) {
       return [];
     }
@@ -82,13 +82,13 @@ export function boundPluginPromptContext(options: {
     return [candidate.contextItem.item];
   });
   const droppedCandidates = candidates.filter(
-    (candidate) => !retainedCandidates.has(candidate)
+    candidate => !retainedCandidates.has(candidate),
   );
   const evidence = contextBudgetEvidence({
     context: options.context,
     droppedCandidates,
     retainedEstimatedTokens,
-    totalEstimatedTokens
+    totalEstimatedTokens,
   });
   const rejectedContextItem =
     firstDroppedPromptContextThatRejectsTurn(droppedCandidates);
@@ -98,14 +98,14 @@ export function boundPluginPromptContext(options: {
       status: 'rejected',
       pluginId: rejectedContextItem.plugin.manifest.id,
       message: requiredContextBudgetRejectionMessage(rejectedContextItem),
-      evidence
+      evidence,
     });
   }
 
   return Object.freeze({
     status: 'completed',
     contextItems: Object.freeze(retainedContextItems),
-    evidence
+    evidence,
   });
 }
 
@@ -120,7 +120,7 @@ function collectedPluginPromptContextCandidates(options: {
       promptIndex: candidates.length,
       estimatedTokens: estimateContextItemTokens(contextItem.item),
       priority: contextItem.item.budget.priority,
-      contextItem
+      contextItem,
     });
   }
 
@@ -129,7 +129,7 @@ function collectedPluginPromptContextCandidates(options: {
 
 function compareCollectedPromptContextPriority(
   left: CollectedPluginPromptContext,
-  right: CollectedPluginPromptContext
+  right: CollectedPluginPromptContext,
 ): number {
   return right.priority - left.priority || left.promptIndex - right.promptIndex;
 }
@@ -155,7 +155,7 @@ function contextBudgetEvidence(options: {
     if (entry === undefined) {
       droppedByPlugin.set(pluginId, {
         plugin: droppedCandidate.plugin,
-        dropped: [droppedCandidate]
+        dropped: [droppedCandidate],
       });
       continue;
     }
@@ -164,7 +164,7 @@ function contextBudgetEvidence(options: {
   }
 
   return Object.freeze(
-    [...droppedByPlugin.values()].map((entry) => {
+    [...droppedByPlugin.values()].map(entry => {
       const rejectsTurn = beforeRoleModelFailureRejectsTurn(entry.plugin);
 
       return createHookFailureEvidence({
@@ -175,27 +175,27 @@ function contextBudgetEvidence(options: {
         summary: contextBudgetEvidenceSummary({
           droppedCandidates: entry.dropped,
           retainedEstimatedTokens: options.retainedEstimatedTokens,
-          totalEstimatedTokens: options.totalEstimatedTokens
+          totalEstimatedTokens: options.totalEstimatedTokens,
         }),
-        policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded'
+        policyOutcome: rejectsTurn ? 'required_rejected' : 'optional_degraded',
       });
-    })
+    }),
   );
 }
 
 function firstDroppedPromptContextThatRejectsTurn(
-  droppedCandidates: readonly CollectedPluginPromptContext[]
+  droppedCandidates: readonly CollectedPluginPromptContext[],
 ): CollectedPluginPromptContext | undefined {
-  return droppedCandidates.find((candidate) =>
-    beforeRoleModelFailureRejectsTurn(candidate.plugin)
+  return droppedCandidates.find(candidate =>
+    beforeRoleModelFailureRejectsTurn(candidate.plugin),
   );
 }
 
 function requiredContextBudgetRejectionMessage(
-  candidate: CollectedPluginPromptContext
+  candidate: CollectedPluginPromptContext,
 ): string {
   return `Required before-role-model plugin context exceeded the ${String(
-    runtimePluginContextEstimatedTokenBudget
+    runtimePluginContextEstimatedTokenBudget,
   )}-token budget; dropped context item "${candidate.contextItem.item.id}".`;
 }
 
@@ -205,16 +205,14 @@ function contextBudgetEvidenceSummary(options: {
   readonly totalEstimatedTokens: number;
 }): string {
   const droppedIds = options.droppedCandidates
-    .map((candidate) => candidate.contextItem.item.id)
+    .map(candidate => candidate.contextItem.item.id)
     .join(', ');
 
   return `Plugin context budget kept ${String(
-    options.retainedEstimatedTokens
-  )}/${String(runtimePluginContextEstimatedTokenBudget)} estimated tokens and dropped ${
-    String(options.droppedCandidates.length)
-  } item(s) from ${String(
-    options.totalEstimatedTokens
-  )} estimated tokens${
+    options.retainedEstimatedTokens,
+  )}/${String(runtimePluginContextEstimatedTokenBudget)} estimated tokens and dropped ${String(
+    options.droppedCandidates.length,
+  )} item(s) from ${String(options.totalEstimatedTokens)} estimated tokens${
     droppedIds.length === 0 ? '' : `; dropped ids ${droppedIds}`
   }`;
 }
@@ -222,7 +220,7 @@ function contextBudgetEvidenceSummary(options: {
 function estimateContextItemTokens(item: RuntimePluginContextItem): number {
   return Math.max(
     item.budget.estimatedTokens,
-    estimateRuntimeTextTokens(item.text)
+    estimateRuntimeTextTokens(item.text),
   );
 }
 

@@ -1,23 +1,23 @@
 import {
   createRuntimePluginEvidenceSnapshot,
-  createRuntimePluginHealthSnapshot
+  createRuntimePluginHealthSnapshot,
 } from '../../api/constructors.ts';
-import { createRuntimePluginContextItem } from '../../api/manifest-validation.ts';
-import type { RuntimePluginEvidenceKind } from '../../api/contract.ts';
+import {createRuntimePluginContextItem} from '../../api/manifest-validation.ts';
+import type {RuntimePluginEvidenceKind} from '../../api/contract.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginJsonObject,
   RuntimePluginLifecycleHooks,
   RuntimePluginSourceReference,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 import {
   boundedMemoryItems,
   boundedText,
-  memoryProviderMaxItems
+  memoryProviderMaxItems,
 } from './context.ts';
-import type { MemoryRecallItem, Project02MemoryProvider } from './types.ts';
+import type {MemoryRecallItem, Project02MemoryProvider} from './types.ts';
 
 export function createMemoryProviderLifecycleHooks(options: {
   readonly provider: Project02MemoryProvider;
@@ -28,22 +28,23 @@ export function createMemoryProviderLifecycleHooks(options: {
   return Object.freeze({
     ...(options.provider.recall === undefined
       ? {}
-      : { beforeRoleModelCall: createRecallHook(options) }),
+      : {beforeRoleModelCall: createRecallHook(options)}),
     ...(options.provider.captureTurn === undefined
       ? {}
-      : { afterTurnCommitted: createCaptureTurnHook(options) }),
-    ...(options.provider.search === undefined && options.provider.add === undefined
+      : {afterTurnCommitted: createCaptureTurnHook(options)}),
+    ...(options.provider.search === undefined &&
+    options.provider.add === undefined
       ? {}
-      : { handleToolCall: createToolCallHook(options) }),
+      : {handleToolCall: createToolCallHook(options)}),
     ...(options.provider.health === undefined
       ? {}
-      : { health: createHealthHook(options) }),
+      : {health: createHealthHook(options)}),
     ...(options.provider.endSession === undefined
       ? {}
-      : { onSessionEnd: createSessionEndHook(options) }),
+      : {onSessionEnd: createSessionEndHook(options)}),
     ...(options.provider.close === undefined
       ? {}
-      : { onShutdown: createShutdownHook(options) })
+      : {onShutdown: createShutdownHook(options)}),
   } satisfies RuntimePluginLifecycleHooks);
 }
 
@@ -55,22 +56,22 @@ type MemoryProviderHookOptions = {
 };
 
 function createRecallHook(
-  options: MemoryProviderHookOptions
+  options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['beforeRoleModelCall']> {
-  return async (context) => {
+  return async context => {
     const result = await options.provider.recall?.({
       sessionId: context.sessionId,
       currentUserMessage: context.currentUserMessage,
       maxItems: memoryProviderMaxItems,
       deadlineAt: context.deadlineAt,
-      signal: context.signal
+      signal: context.signal,
     });
     const items = boundedMemoryItems(
-      sourceBackedMemoryItems(result?.items ?? [])
+      sourceBackedMemoryItems(result?.items ?? []),
     );
 
     return {
-      contextItems: items.map((item) =>
+      contextItems: items.map(item =>
         createRuntimePluginContextItem({
           pluginId: options.pluginId,
           id: memoryContextItemId(item.id),
@@ -78,14 +79,14 @@ function createRecallHook(
           text: item.text,
           budget: {
             estimatedTokens: Math.max(1, Math.ceil(item.text.length / 4)),
-            priority: 70
+            priority: 70,
           },
           sourceReferences: item.sourceReferences,
           ...(item.confidence === undefined
             ? {}
-            : { confidence: item.confidence }),
-          redactionLabels: ['memory']
-        })
+            : {confidence: item.confidence}),
+          redactionLabels: ['memory'],
+        }),
       ),
       evidence: [
         memoryEvidence({
@@ -93,19 +94,19 @@ function createRecallHook(
           pluginId: options.pluginId,
           evidenceKind: 'before_role_model_call',
           status: 'accepted',
-          summary: `Provided ${String(items.length)} memory item(s).`
-        })
-      ]
+          summary: `Provided ${String(items.length)} memory item(s).`,
+        }),
+      ],
     };
   };
 }
 
 function createCaptureTurnHook(
-  options: MemoryProviderHookOptions
+  options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['afterTurnCommitted']> {
-  return async (context) => {
+  return async context => {
     const lastCharacterMessage = context.committedTurn.visibleMessages
-      .filter((message) => message.role === 'character')
+      .filter(message => message.role === 'character')
       .at(-1)?.text;
     const inputSourceReferences = currentTurnSourceReferences(context);
     const result = await options.provider.captureTurn?.({
@@ -116,10 +117,10 @@ function createCaptureTurnHook(
       signal: context.signal,
       ...(lastCharacterMessage === undefined
         ? {}
-        : { characterMessage: lastCharacterMessage })
+        : {characterMessage: lastCharacterMessage}),
     });
     const providerSourceReferences = nonEmptySourceReferences(
-      result?.sourceReferences
+      result?.sourceReferences,
     );
     const missingAcceptedCaptureSources =
       result?.captured !== false && providerSourceReferences === undefined;
@@ -137,18 +138,17 @@ function createCaptureTurnHook(
               : 'accepted',
           summary: captureTurnEvidenceSummary({
             resultSummary: result?.summary,
-            missingAcceptedCaptureSources
+            missingAcceptedCaptureSources,
           }),
-          sourceReferences:
-            providerSourceReferences ?? inputSourceReferences
-        })
-      ]
+          sourceReferences: providerSourceReferences ?? inputSourceReferences,
+        }),
+      ],
     };
   };
 }
 
 function createToolCallHook(
-  options: MemoryProviderHookOptions
+  options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['handleToolCall']> {
   return async (call, context) => {
     if (
@@ -175,9 +175,9 @@ function createToolCallHook(
           pluginId: options.pluginId,
           evidenceKind: 'tool_invocation',
           status: 'rejected',
-          summary: 'Rejected unsupported memory tool call.'
-        })
-      ]
+          summary: 'Rejected unsupported memory tool call.',
+        }),
+      ],
     } satisfies RuntimePluginToolCallResult;
   };
 }
@@ -185,14 +185,14 @@ function createToolCallHook(
 async function runMemorySearchTool(
   options: MemoryProviderHookOptions,
   input: RuntimePluginJsonObject,
-  context: RuntimePluginContext
+  context: RuntimePluginContext,
 ): Promise<RuntimePluginToolCallResult> {
   const result = await options.provider.search?.({
     sessionId: context.sessionId,
     query: stringInput(input, 'query'),
     maxItems: memoryProviderMaxItems,
     deadlineAt: context.deadlineAt,
-    signal: context.signal
+    signal: context.signal,
   });
 
   if (result === undefined) {
@@ -204,16 +204,16 @@ async function runMemorySearchTool(
   return acceptedToolResult({
     context,
     pluginId: options.pluginId,
-    output: { items: items.map(memoryItemOutput) },
+    output: {items: items.map(memoryItemOutput)},
     summary: `Returned ${String(items.length)} memory search result(s).`,
-    sourceReferences: searchSourceReferences({ context, items })
+    sourceReferences: searchSourceReferences({context, items}),
   });
 }
 
 async function runMemoryAddTool(
   options: MemoryProviderHookOptions,
   input: RuntimePluginJsonObject,
-  context: RuntimePluginContext
+  context: RuntimePluginContext,
 ): Promise<RuntimePluginToolCallResult> {
   const inputSourceReferences = currentTurnSourceReferences(context);
   const result = await options.provider.add?.({
@@ -221,7 +221,7 @@ async function runMemoryAddTool(
     text: boundedText(stringInput(input, 'text'), 600),
     sourceReferences: inputSourceReferences,
     deadlineAt: context.deadlineAt,
-    signal: context.signal
+    signal: context.signal,
   });
 
   if (result === undefined) {
@@ -235,24 +235,21 @@ async function runMemoryAddTool(
     pluginId: options.pluginId,
     output: {
       id: result.id,
-      sourceReferences: persistedSourceReferences
+      sourceReferences: persistedSourceReferences,
     },
     summary: 'Added one memory item.',
-    sourceReferences: [
-      ...inputSourceReferences,
-      ...persistedSourceReferences
-    ]
+    sourceReferences: [...inputSourceReferences, ...persistedSourceReferences],
   });
 }
 
 function createHealthHook(
-  options: MemoryProviderHookOptions
+  options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['health']> {
-  return async (context) => {
+  return async context => {
     const result = await options.provider.health?.({
       checkedAt: context.timestamp,
       deadlineAt: context.deadlineAt,
-      signal: context.signal
+      signal: context.signal,
     });
 
     return createRuntimePluginHealthSnapshot({
@@ -260,43 +257,43 @@ function createHealthHook(
       status: result?.status ?? 'unavailable',
       checkedAt: context.timestamp,
       summary: boundedText(result?.summary ?? 'Health unavailable.', 160),
-      redactionLabels: ['memory']
+      redactionLabels: ['memory'],
     });
   };
 }
 
 function createSessionEndHook(
-  options: MemoryProviderHookOptions
+  options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['onSessionEnd']> {
-  return async (context) => {
+  return async context => {
     await options.provider.endSession?.(context.sessionId, {
       deadlineAt: context.deadlineAt,
-      signal: context.signal
+      signal: context.signal,
     });
 
     return completedLifecycleResult(
       context,
       options.pluginId,
       'session_end',
-      'Ended memory provider session.'
+      'Ended memory provider session.',
     );
   };
 }
 
 function createShutdownHook(
-  options: MemoryProviderHookOptions
+  options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['onShutdown']> {
-  return async (context) => {
+  return async context => {
     await options.provider.close?.({
       deadlineAt: context.deadlineAt,
-      signal: context.signal
+      signal: context.signal,
     });
 
     return completedLifecycleResult(
       context,
       options.pluginId,
       'shutdown',
-      'Closed memory provider.'
+      'Closed memory provider.',
     );
   };
 }
@@ -305,7 +302,7 @@ function completedLifecycleResult(
   context: RuntimePluginContext,
   pluginId: string,
   evidenceKind: Extract<RuntimePluginEvidenceKind, 'session_end' | 'shutdown'>,
-  summary: string
+  summary: string,
 ): ReturnType<NonNullable<RuntimePluginLifecycleHooks['onSessionEnd']>> {
   return {
     status: 'completed',
@@ -315,9 +312,9 @@ function completedLifecycleResult(
         pluginId,
         evidenceKind,
         status: 'accepted',
-        summary
-      })
-    ]
+        summary,
+      }),
+    ],
   };
 }
 
@@ -340,9 +337,9 @@ function acceptedToolResult(options: {
         summary: options.summary,
         ...(options.sourceReferences === undefined
           ? {}
-          : { sourceReferences: options.sourceReferences })
-      })
-    ]
+          : {sourceReferences: options.sourceReferences}),
+      }),
+    ],
   };
 }
 
@@ -350,24 +347,25 @@ function memoryItemOutput(item: MemoryRecallItem): RuntimePluginJsonObject {
   return {
     id: item.id,
     text: item.text,
-    sourceReferences: item.sourceReferences.map((reference) => ({
+    sourceReferences: item.sourceReferences.map(reference => ({
       kind: reference.kind,
       id: reference.id,
-      ...(reference.title === undefined ? {} : { title: reference.title }),
-      ...(reference.uri === undefined ? {} : { uri: reference.uri })
+      ...(reference.title === undefined ? {} : {title: reference.title}),
+      ...(reference.uri === undefined ? {} : {uri: reference.uri}),
     })),
-    ...(item.confidence === undefined ? {} : { confidence: item.confidence })
+    ...(item.confidence === undefined ? {} : {confidence: item.confidence}),
   };
 }
 
 function sourceBackedMemoryItems(
-  items: readonly MemoryRecallItem[]
+  items: readonly MemoryRecallItem[],
 ): readonly MemoryRecallItem[] {
   return Object.freeze(
     items.filter(
-      (item) =>
-        Array.isArray(item.sourceReferences) && item.sourceReferences.length > 0
-    )
+      item =>
+        Array.isArray(item.sourceReferences) &&
+        item.sourceReferences.length > 0,
+    ),
   );
 }
 
@@ -383,7 +381,7 @@ function searchSourceReferences(options: {
   readonly items: readonly MemoryRecallItem[];
 }): readonly RuntimePluginSourceReference[] {
   const itemSourceReferences = options.items.flatMap(
-    (item) => item.sourceReferences
+    item => item.sourceReferences,
   );
 
   if (itemSourceReferences.length > 0) {
@@ -394,8 +392,8 @@ function searchSourceReferences(options: {
     {
       kind: 'runtime',
       id: `${options.context.eventId}:memory.search.no_results`,
-      title: 'Memory search completed with no results'
-    }
+      title: 'Memory search completed with no results',
+    },
   ] satisfies RuntimePluginSourceReference[]);
 }
 
@@ -405,7 +403,7 @@ function addResultSourceReferences(options: {
 }): readonly RuntimePluginSourceReference[] {
   if (
     options.sourceReferences.some(
-      (reference) => reference.kind === 'memory' && reference.id === options.id
+      reference => reference.kind === 'memory' && reference.id === options.id,
     )
   ) {
     return options.sourceReferences;
@@ -416,25 +414,25 @@ function addResultSourceReferences(options: {
     {
       kind: 'memory',
       id: options.id,
-      title: 'Persisted memory item'
-    }
+      title: 'Persisted memory item',
+    },
   ] satisfies RuntimePluginSourceReference[]);
 }
 
 function currentTurnSourceReferences(
-  context: RuntimePluginContext
+  context: RuntimePluginContext,
 ): readonly RuntimePluginSourceReference[] {
   return Object.freeze([
     {
       kind: 'conversation',
       id: context.eventId,
-      title: 'Current conversation turn'
-    }
+      title: 'Current conversation turn',
+    },
   ] satisfies RuntimePluginSourceReference[]);
 }
 
 function nonEmptySourceReferences(
-  sourceReferences: readonly RuntimePluginSourceReference[] | undefined
+  sourceReferences: readonly RuntimePluginSourceReference[] | undefined,
 ): readonly RuntimePluginSourceReference[] | undefined {
   return sourceReferences === undefined || sourceReferences.length === 0
     ? undefined
@@ -455,7 +453,7 @@ function captureTurnEvidenceSummary(options: {
 
   return boundedText(
     `${boundedText(summary, 160 - suffix.length)}${suffix}`,
-    160
+    160,
   );
 }
 
@@ -470,7 +468,7 @@ function memoryEvidence(options: {
 }): RuntimePluginEvidenceSnapshot {
   const sourceReferences =
     options.sourceReferences ??
-    options.sourceItems?.flatMap((item) => item.sourceReferences);
+    options.sourceItems?.flatMap(item => item.sourceReferences);
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,
@@ -481,8 +479,8 @@ function memoryEvidence(options: {
     evidenceKind: options.evidenceKind,
     status: options.status,
     summary: boundedText(options.summary, 160),
-    ...(sourceReferences === undefined ? {} : { sourceReferences }),
-    redactionLabels: ['memory']
+    ...(sourceReferences === undefined ? {} : {sourceReferences}),
+    redactionLabels: ['memory'],
   });
 }
 
@@ -490,7 +488,9 @@ function stringInput(input: RuntimePluginJsonObject, key: string): string {
   const value = input[key];
 
   if (typeof value !== 'string' || value.trim().length === 0) {
-    throw new TypeError(`Memory tool input "${key}" must be a non-empty string.`);
+    throw new TypeError(
+      `Memory tool input "${key}" must be a non-empty string.`,
+    );
   }
 
   return value;

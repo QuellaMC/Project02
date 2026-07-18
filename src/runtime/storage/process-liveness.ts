@@ -1,4 +1,4 @@
-import { isNodeErrorWithCode } from '../../shared/node-error.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
 export function processIsAlive(pid: number): boolean {
   try {

@@ -57,7 +57,7 @@ export {
   type RuntimePluginSideEffectLevel,
   type RuntimePluginSourceKind,
   type RuntimePluginToolValidationOwner,
-  type RuntimePluginTrustLevel
+  type RuntimePluginTrustLevel,
 } from './contract.ts';
 export {
   type CreateRuntimePluginAfterTurnCommittedContextOptions,
@@ -94,7 +94,7 @@ export {
   type RuntimePluginToolInvocationSnapshot,
   type RuntimePluginTurnEvidenceSnapshot,
   type RuntimePluginValidationFailureReason,
-  type RuntimePluginValidationResult
+  type RuntimePluginValidationResult,
 } from './types.ts';
 export {
   createPreparedRuntimePluginConfigEffect,
@@ -108,7 +108,7 @@ export {
   createRuntimePluginToolCallResultSnapshot,
   createRuntimePluginToolInvocationSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
-  preparedRuntimePluginConfigEffectHasApprovalEvidence
+  preparedRuntimePluginConfigEffectHasApprovalEvidence,
 } from './constructors.ts';
 export {
   createRuntimePluginContextItem,
@@ -116,30 +116,30 @@ export {
   createRuntimePluginProvidedTool,
   validateRuntimePluginContextItem,
   validateRuntimePluginManifest,
-  validateRuntimePluginProvidedTool
+  validateRuntimePluginProvidedTool,
 } from './manifest-validation.ts';
 export {
   isRuntimePluginCredentialKey,
-  redactRuntimePluginText
+  redactRuntimePluginText,
 } from './validation-primitives.ts';
 export {
   isApprovalGatedRuntimePluginTool,
   isModelFacingRuntimePluginTool,
-  validateRuntimePluginModelFacingToolAccess
+  validateRuntimePluginModelFacingToolAccess,
 } from './tool-classification.ts';
 export {
   beforeRoleModelFailureRejectsTurn,
   mergedRedactionLabels,
   runtimePluginEvidenceBlocksToolInvocation,
-  runtimePluginToolResultHasBlockingEvidence
+  runtimePluginToolResultHasBlockingEvidence,
 } from './evidence-policy.ts';
 export {
   requiredModelToolCallLimit,
-  requiredModelToolInputContract
+  requiredModelToolInputContract,
 } from './tool-schema-validation.ts';
 export {
   assertUniqueRuntimePluginIds,
-  runtimeIdentityMatchesContext
+  runtimeIdentityMatchesContext,
 } from './identity.ts';
 // factory.ts is deliberately NOT re-exported here: it type-imports
 // runtime/config (resolved plugin config shapes), so exposing it through
@@ -148,7 +148,7 @@ export {
 // plugins/index.ts or intra-module paths.
 export {
   createPluginContextEvidence,
-  createPluginToolEvidence
+  createPluginToolEvidence,
 } from './evidence-helpers.ts';
 export {
   type CreateRuntimePluginFileStoreOptions,
@@ -157,5 +157,5 @@ export {
   type RuntimePluginFileStorePathMode,
   type RuntimePluginFileStorePreparedTransaction,
   type RuntimePluginFileStoreProvider,
-  type RuntimePluginFileStoreTransaction
+  type RuntimePluginFileStoreTransaction,
 } from './file-store-contract.ts';

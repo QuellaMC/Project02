@@ -3,7 +3,7 @@ import {
   prepareConfiguredProject02PluginActivation,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginCatalogSnapshot,
-  type RuntimePluginFactoryDefinition
+  type RuntimePluginFactoryDefinition,
 } from './activation.ts';
 import {
   defaultDotEnvForRuntimeLocation,
@@ -13,7 +13,7 @@ import {
   readDefaultDotEnvFile,
   shouldReadDefaultDotEnvForRuntimeLocation,
   type LoadedProject02RuntimeConfig,
-  type RuntimeLocationCliState
+  type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
@@ -33,8 +33,7 @@ type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
 };
 
 type RuntimeCliStartupOptions =
-  | RuntimeCliActivationStartupOptions
-  | RuntimeCliConfigStartupOptions;
+  RuntimeCliActivationStartupOptions | RuntimeCliConfigStartupOptions;
 
 type RuntimeCliStartupBase = {
   readonly location: RuntimeLocationCliState;
@@ -63,81 +62,77 @@ type RuntimeCliStartupResult =
     });
 
 export function resolveRuntimeCliStartup(
-  options: RuntimeCliConfigStartupOptions
+  options: RuntimeCliConfigStartupOptions,
 ): RuntimeCliConfigStartupResult;
 export function resolveRuntimeCliStartup(
-  options?: RuntimeCliActivationStartupOptions
+  options?: RuntimeCliActivationStartupOptions,
 ): RuntimeCliStartupResult;
 export function resolveRuntimeCliStartup(
-  options: RuntimeCliStartupOptions = {}
-):
-  | RuntimeCliConfigStartupResult
-  | RuntimeCliStartupResult {
-  const location = Object.freeze({ ...(options.location ?? {}) });
+  options: RuntimeCliStartupOptions = {},
+): RuntimeCliConfigStartupResult | RuntimeCliStartupResult {
+  const location = Object.freeze({...(options.location ?? {})});
   const suppliedEnv = options.env ?? process.env;
   const cwdDotEnv = resolveCwdDotEnv({
     location,
     suppliedEnv,
     mode: options.cwdDotEnv ?? 'auto',
-    mayReadProcessCwd:
-      options.env === undefined || options.env === process.env
+    mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
-  const configEnv = Object.freeze({ ...cwdDotEnv, ...suppliedEnv });
+  const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
   const loadedConfig = loadProject02RuntimeConfig({
     ...location,
-    env: configEnv
+    env: configEnv,
   });
   const startupBase = {
     location,
     cwdDotEnv,
     configEnv,
-    loadedConfig
+    loadedConfig,
   };
 
   if (options.stage === 'config') {
     return Object.freeze(startupBase);
   }
 
-  const catalogSnapshot = options.factories === undefined
-    ? createRuntimePluginCatalogSnapshot({
-        loadedConfig,
-        ...(location.storeRoot === undefined
-          ? {}
-          : { storeRoot: location.storeRoot })
-      })
-    : undefined;
+  const catalogSnapshot =
+    options.factories === undefined
+      ? createRuntimePluginCatalogSnapshot({
+          loadedConfig,
+          ...(location.storeRoot === undefined
+            ? {}
+            : {storeRoot: location.storeRoot}),
+        })
+      : undefined;
   const activationPlanBeforeRuntimeEnv = prepareActivationPlan({
     loadedConfig,
     location,
     env: configEnv,
-    ...(options.factories === undefined
-      ? {}
-      : { factories: options.factories }),
-    ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
+    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
   });
   const base = {
     ...startupBase,
-    ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
+    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
   };
 
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
     return Object.freeze({
       ...base,
       status: 'config_invalid',
-      activationPlan: activationPlanBeforeRuntimeEnv
+      activationPlan: activationPlanBeforeRuntimeEnv,
     });
   }
 
   if (
     options.continueAfterActivationErrors !== true &&
     activationDiagnosticsCanBypassRuntimeEnvFile(
-      activationPlanBeforeRuntimeEnv.activation.diagnostics
+      activationPlanBeforeRuntimeEnv.activation.diagnostics,
     )
   ) {
     return Object.freeze({
       ...base,
       status: 'activation_blocked_before_runtime_env',
-      activationPlan: activationPlanBeforeRuntimeEnv
+      activationPlan: activationPlanBeforeRuntimeEnv,
     });
   }
 
@@ -145,23 +140,21 @@ export function resolveRuntimeCliStartup(
     loadedConfig,
     location,
     suppliedEnv,
-    cwdDotEnv
+    cwdDotEnv,
   });
   const activationPlan = prepareActivationPlan({
     loadedConfig,
     location,
     env: runtimeEnv,
-    ...(options.factories === undefined
-      ? {}
-      : { factories: options.factories }),
-    ...(catalogSnapshot === undefined ? {} : { catalogSnapshot })
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
+    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
   });
 
   return Object.freeze({
     ...base,
     status: 'resolved',
     runtimeEnv,
-    activationPlan
+    activationPlan,
   });
 }
 
@@ -176,17 +169,14 @@ function resolveCwdDotEnv(options: {
     (options.mode === 'auto' &&
       !shouldReadDefaultDotEnvForRuntimeLocation({
         location: options.location,
-        env: options.suppliedEnv
+        env: options.suppliedEnv,
       }))
   ) {
     return Object.freeze({});
   }
 
   return Object.freeze(
-    defaultDotEnvForRuntimeLocation(
-      readDefaultDotEnvFile(),
-      options.location
-    )
+    defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location),
   );
 }
 
@@ -201,10 +191,10 @@ function loadRuntimeEnv(options: {
       loadedConfig: options.loadedConfig,
       ...(options.location.storeRoot === undefined
         ? {}
-        : { storeRoot: options.location.storeRoot }),
+        : {storeRoot: options.location.storeRoot}),
       env: options.suppliedEnv,
-      envDefaults: options.cwdDotEnv
-    })
+      envDefaults: options.cwdDotEnv,
+    }),
   );
 }
 
@@ -219,27 +209,27 @@ function prepareActivationPlan(options: {
     loadedConfig: options.loadedConfig,
     ...(options.location.storeRoot === undefined
       ? {}
-      : { storeRoot: options.location.storeRoot }),
+      : {storeRoot: options.location.storeRoot}),
     env: options.env,
-    ...(options.factories === undefined ? {} : { factories: options.factories }),
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
     ...(options.catalogSnapshot === undefined
       ? {}
-      : { catalogSnapshot: options.catalogSnapshot })
+      : {catalogSnapshot: options.catalogSnapshot}),
   });
 }
 
 function activationDiagnosticsCanBypassRuntimeEnvFile(
-  diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics']
+  diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
 ): boolean {
   const errors = diagnostics.filter(
-    (diagnostic) => diagnostic.severity === 'error'
+    diagnostic => diagnostic.severity === 'error',
   );
 
   return (
     errors.length > 0 &&
     errors.every(
-      (diagnostic) =>
-        diagnostic.code !== 'runtime_config_required_secret_missing'
+      diagnostic =>
+        diagnostic.code !== 'runtime_config_required_secret_missing',
     )
   );
 }

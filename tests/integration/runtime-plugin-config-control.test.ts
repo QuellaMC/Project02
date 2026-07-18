@@ -1,7 +1,7 @@
-import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {existsSync, readFileSync, realpathSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {
   applyRuntimePluginConfigControlOperation,
@@ -13,15 +13,15 @@ import {
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type RuntimePluginConfigFieldInspectShape,
-  type RuntimePluginConfigInspectShape
+  type RuntimePluginConfigInspectShape,
 } from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
-  type RuntimePluginManifest
+  type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
-import { writeRuntimeConfig } from '../support/runtime-config.ts';
-import { requiredSecretPlugin } from '../support/runtime-config-fixtures.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
 
 const fixturePluginId = 'config.control.fixture';
 const fixtureSecretEnvVar = 'PROJECT02_FIXTURE_API_KEY';
@@ -39,23 +39,23 @@ describe('runtime plugin config control', () => {
           config: {
             mode: 'remote',
             label: 'primary',
-            apiKey: { $env: fixtureSecretEnvVar }
-          }
-        }
-      }
+            apiKey: {$env: fixtureSecretEnvVar},
+          },
+        },
+      },
     };
 
-    writeRuntimeConfig(configPath, { plugins: authoredConfig.plugins });
+    writeRuntimeConfig(configPath, {plugins: authoredConfig.plugins});
 
     const inspected = inspectRuntimePluginConfig({
       configPath,
-      env: { [fixtureSecretEnvVar]: 'resolved-secret-value' },
-      manifest
+      env: {[fixtureSecretEnvVar]: 'resolved-secret-value'},
+      manifest,
     });
     const inspectedWithChangedSecret = inspectRuntimePluginConfig({
       configPath,
-      env: { [fixtureSecretEnvVar]: 'changed-secret-value' },
-      manifest
+      env: {[fixtureSecretEnvVar]: 'changed-secret-value'},
+      manifest,
     });
 
     expect(inspected).toMatchObject({
@@ -65,9 +65,9 @@ describe('runtime plugin config control', () => {
       enabled: true,
       activation: {
         enabled: true,
-        status: 'active'
+        status: 'active',
       },
-      diagnostics: []
+      diagnostics: [],
     });
     expect(inspectField(inspected, 'mode')).toEqual({
       name: 'mode',
@@ -81,15 +81,15 @@ describe('runtime plugin config control', () => {
       reloadRequired: true,
       authored: {
         configured: true,
-        value: 'remote'
+        value: 'remote',
       },
       effective: {
         name: 'mode',
         secret: false,
         source: 'config',
         resolved: true,
-        value: 'remote'
-      }
+        value: 'remote',
+      },
     });
     expect(inspectField(inspected, 'apiKey')).toEqual({
       name: 'apiKey',
@@ -101,42 +101,44 @@ describe('runtime plugin config control', () => {
       reloadRequired: false,
       authored: {
         configured: true,
-        value: '[redacted]'
+        value: '[redacted]',
       },
       effective: {
         name: 'apiKey',
         secret: true,
         source: `env:${fixtureSecretEnvVar}`,
         resolved: true,
-        value: '[redacted]'
-      }
+        value: '[redacted]',
+      },
     });
     expect(inspected.fingerprint).toBe(
-      createRuntimeConfigFingerprint(authoredConfig)
+      createRuntimeConfigFingerprint(authoredConfig),
     );
     expect(inspectedWithChangedSecret.fingerprint).toBe(inspected.fingerprint);
-    expect(JSON.stringify([inspected, inspectedWithChangedSecret])).not.toContain(
-      'resolved-secret-value'
-    );
-    expect(JSON.stringify([inspected, inspectedWithChangedSecret])).not.toContain(
-      'changed-secret-value'
-    );
+    expect(
+      JSON.stringify([inspected, inspectedWithChangedSecret]),
+    ).not.toContain('resolved-secret-value');
+    expect(
+      JSON.stringify([inspected, inspectedWithChangedSecret]),
+    ).not.toContain('changed-secret-value');
   });
 
   it('includes global authored-config diagnostics in plugin inspection', () => {
-    const root = createTestTempRoot('project02-plugin-config-global-diagnostic-');
+    const root = createTestTempRoot(
+      'project02-plugin-config-global-diagnostic-',
+    );
     const configPath = join(root, 'config.json');
 
     writeFileSync(
       configPath,
-      `${JSON.stringify({ version: 'project02.config.unsupported' })}\n`,
-      'utf8'
+      `${JSON.stringify({version: 'project02.config.unsupported'})}\n`,
+      'utf8',
     );
 
     const inspected = inspectRuntimePluginConfig({
       configPath,
       env: {},
-      manifest: configControlManifest()
+      manifest: configControlManifest(),
     });
 
     expect(inspected.diagnostics).toEqual(
@@ -145,16 +147,16 @@ describe('runtime plugin config control', () => {
           scope: 'global',
           severity: 'error',
           code: 'runtime_config_version_unsupported',
-          path: 'version'
-        })
-      ])
+          path: 'version',
+        }),
+      ]),
     );
     expect(inspected.activation).toMatchObject({
       enabled: false,
-      status: 'blocked'
+      status: 'blocked',
     });
     expect(inspected.activation.reasons).toContain(
-      'runtime_config_error:runtime_config_version_unsupported'
+      'runtime_config_error:runtime_config_version_unsupported',
     );
   });
 
@@ -170,8 +172,8 @@ describe('runtime plugin config control', () => {
       operation: {
         kind: 'set',
         fieldName: 'label',
-        value: 'after'
-      }
+        value: 'after',
+      },
     });
     const expectedAfterSet: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
@@ -180,16 +182,16 @@ describe('runtime plugin config control', () => {
           enabled: true,
           config: {
             mode: 'local',
-            label: 'after'
-          }
+            label: 'after',
+          },
         },
         'untouched.plugin': {
           enabled: false,
           config: {
-            keep: 'value'
-          }
-        }
-      }
+            keep: 'value',
+          },
+        },
+      },
     };
 
     expect(setResult.config).toEqual(expectedAfterSet);
@@ -203,8 +205,8 @@ describe('runtime plugin config control', () => {
       expectedFingerprint: setResult.fingerprint,
       operation: {
         kind: 'unset',
-        fieldName: 'label'
-      }
+        fieldName: 'label',
+      },
     });
     const expectedAfterUnset: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
@@ -212,16 +214,16 @@ describe('runtime plugin config control', () => {
         [fixturePluginId]: {
           enabled: true,
           config: {
-            mode: 'local'
-          }
+            mode: 'local',
+          },
         },
         'untouched.plugin': {
           enabled: false,
           config: {
-            keep: 'value'
-          }
-        }
-      }
+            keep: 'value',
+          },
+        },
+      },
     };
 
     expect(unsetResult.config).toEqual(expectedAfterUnset);
@@ -241,11 +243,11 @@ describe('runtime plugin config control', () => {
         operation: {
           kind: 'set',
           fieldName: 'unknownField',
-          value: 'ignored'
-        }
-      })
+          value: 'ignored',
+        },
+      }),
     ).toThrow(
-      `Plugin "${fixturePluginId}" does not declare config field "unknownField".`
+      `Plugin "${fixturePluginId}" does not declare config field "unknownField".`,
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -262,9 +264,9 @@ describe('runtime plugin config control', () => {
         expectedFingerprint: fixture.fingerprint,
         operation: {
           kind: 'unset',
-          fieldName: 'mode'
-        }
-      })
+          fieldName: 'mode',
+        },
+      }),
     ).toThrow('Required plugin config field "mode" cannot be unset.');
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -282,11 +284,11 @@ describe('runtime plugin config control', () => {
         operation: {
           kind: 'set',
           fieldName: 'operatorOnly',
-          value: true
-        }
-      })
+          value: true,
+        },
+      }),
     ).toThrow(
-      'Plugin config field "operatorOnly" does not allow agent mutation.'
+      'Plugin config field "operatorOnly" does not allow agent mutation.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -304,11 +306,11 @@ describe('runtime plugin config control', () => {
         operation: {
           kind: 'set',
           fieldName: 'apiKey',
-          value: { $env: 'ATTACKER_SELECTED_SECRET' }
-        }
-      })
+          value: {$env: 'ATTACKER_SELECTED_SECRET'},
+        },
+      }),
     ).toThrow(
-      'Plugin config field "apiKey" is secret and must be managed through the dedicated secret command.'
+      'Plugin config field "apiKey" is secret and must be managed through the dedicated secret command.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -321,26 +323,26 @@ describe('runtime plugin config control', () => {
         {
           kind: 'set',
           fieldName: 'retries',
-          value: 'three'
+          value: 'three',
         },
-        'Plugin config field "retries" must be a finite number; received a string.'
+        'Plugin config field "retries" must be a finite number; received a string.',
       ],
       [
         {
           kind: 'set',
           fieldName: 'mode',
-          value: 'unsupported'
+          value: 'unsupported',
         },
-        'Plugin config field "mode" must be one of: local, remote; received a string that is not an allowed value.'
+        'Plugin config field "mode" must be one of: local, remote; received a string that is not an allowed value.',
       ],
       [
         {
           kind: 'set',
           fieldName: 'retries',
-          value: Number.NaN
+          value: Number.NaN,
         },
-        'Plugin config field "retries" must be a finite number; received a number.'
-      ]
+        'Plugin config field "retries" must be a finite number; received a number.',
+      ],
     ] as const) {
       expect(() =>
         applyRuntimePluginConfigControlOperation({
@@ -349,8 +351,8 @@ describe('runtime plugin config control', () => {
           manifest: fixture.manifest,
           actor: 'agent',
           expectedFingerprint: fixture.fingerprint,
-          operation
-        })
+          operation,
+        }),
       ).toThrow(message);
     }
 
@@ -372,13 +374,13 @@ describe('runtime plugin config control', () => {
           fieldName: 'settings',
           value: {
             authentication: {
-              token: { $env: 'NESTED_SECRET' }
-            }
-          }
-        }
-      })
+              token: {$env: 'NESTED_SECRET'},
+            },
+          },
+        },
+      }),
     ).toThrow(
-      'Plugin config field "settings" value must not embed secret references; secrets are managed through the dedicated secret command.'
+      'Plugin config field "settings" value must not embed secret references; secrets are managed through the dedicated secret command.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -398,13 +400,13 @@ describe('runtime plugin config control', () => {
           fieldName: 'settings',
           value: {
             authentication: {
-              token: 'agent-chosen-secret'
-            }
-          }
-        }
-      })
+              token: 'agent-chosen-secret',
+            },
+          },
+        },
+      }),
     ).toThrow(
-      'Plugin config field "settings" value contains content that must stay redacted and cannot be written.'
+      'Plugin config field "settings" value contains content that must stay redacted and cannot be written.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
@@ -420,13 +422,13 @@ describe('runtime plugin config control', () => {
           config: {
             mode: 'local',
             label: 'before',
-            undeclaredSibling: 'must-block-the-write'
-          }
-        }
-      }
+            undeclaredSibling: 'must-block-the-write',
+          },
+        },
+      },
     };
 
-    writeRuntimeConfig(fixture.configPath, { plugins: invalidConfig.plugins });
+    writeRuntimeConfig(fixture.configPath, {plugins: invalidConfig.plugins});
 
     expect(() =>
       applyRuntimePluginConfigControlOperation({
@@ -434,16 +436,15 @@ describe('runtime plugin config control', () => {
         env: {},
         manifest: fixture.manifest,
         actor: 'agent',
-        expectedFingerprint:
-          createRuntimeConfigFingerprint(invalidConfig),
+        expectedFingerprint: createRuntimeConfigFingerprint(invalidConfig),
         operation: {
           kind: 'set',
           fieldName: 'label',
-          value: 'after'
-        }
-      })
+          value: 'after',
+        },
+      }),
     ).toThrow(
-      'Cannot update plugin config because the resulting config is invalid: Unknown config field "undeclaredSibling"'
+      'Cannot update plugin config because the resulting config is invalid: Unknown config field "undeclaredSibling"',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(invalidConfig);
   });
@@ -459,8 +460,8 @@ describe('runtime plugin config control', () => {
       operation: {
         kind: 'set',
         fieldName: 'label',
-        value: 'committed'
-      }
+        value: 'committed',
+      },
     });
 
     expect(() =>
@@ -473,9 +474,9 @@ describe('runtime plugin config control', () => {
         operation: {
           kind: 'set',
           fieldName: 'label',
-          value: 'stale-write'
-        }
-      })
+          value: 'stale-write',
+        },
+      }),
     ).toThrow(RuntimeConfigConflictError);
     expect(readConfigFile(fixture.configPath)).toEqual(committed.config);
   });
@@ -491,10 +492,10 @@ describe('runtime plugin config control', () => {
           ...fixture.config.plugins?.[fixturePluginId],
           config: {
             ...fixture.config.plugins?.[fixturePluginId]?.config,
-            label: 'prepared'
-          }
-        }
-      }
+            label: 'prepared',
+          },
+        },
+      },
     };
     const options = {
       configPath: fixture.configPath,
@@ -505,14 +506,14 @@ describe('runtime plugin config control', () => {
       operation: {
         kind: 'set' as const,
         fieldName: 'label',
-        value: 'prepared'
-      }
+        value: 'prepared',
+      },
     };
 
     const prepared = prepareRuntimePluginConfigControlOperation(options);
 
     expect(prepared.resultFingerprint).toBe(
-      createRuntimeConfigFingerprint(expectedConfig)
+      createRuntimeConfigFingerprint(expectedConfig),
     );
     expect(readFileSync(fixture.configPath, 'utf8')).toBe(originalConfigText);
 
@@ -530,18 +531,18 @@ describe('runtime plugin config control', () => {
     const inspected = inspectRuntimePluginConfig({
       storeRoot,
       env: {},
-      manifest
+      manifest,
     });
     const bootstrapBase: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
       project02: {
-        storeRoot: canonicalStoreRoot
-      }
+        storeRoot: canonicalStoreRoot,
+      },
     };
 
     expect(existsSync(configPath)).toBe(false);
     expect(inspected.fingerprint).toBe(
-      createRuntimeConfigFingerprint(bootstrapBase)
+      createRuntimeConfigFingerprint(bootstrapBase),
     );
 
     const result = applyRuntimePluginConfigControlOperation({
@@ -553,18 +554,18 @@ describe('runtime plugin config control', () => {
       operation: {
         kind: 'set',
         fieldName: 'mode',
-        value: 'local'
-      }
+        value: 'local',
+      },
     });
     const expectedConfig: Project02RuntimeConfig = {
       ...bootstrapBase,
       plugins: {
         [fixturePluginId]: {
           config: {
-            mode: 'local'
-          }
-        }
-      }
+            mode: 'local',
+          },
+        },
+      },
     };
 
     expect(result.config).toEqual(expectedConfig);
@@ -573,7 +574,7 @@ describe('runtime plugin config control', () => {
 });
 
 function configControlManifest(
-  id: string = fixturePluginId
+  id: string = fixturePluginId,
 ): RuntimePluginManifest {
   const base = requiredSecretPlugin(id);
 
@@ -594,7 +595,7 @@ function configControlManifest(
             allowedValues: ['local', 'remote'],
             agentMutable: true,
             reloadRequired: true,
-            redactionLabels: []
+            redactionLabels: [],
           },
           {
             name: 'label',
@@ -603,7 +604,7 @@ function configControlManifest(
             secret: false,
             valueType: 'string',
             agentMutable: true,
-            redactionLabels: []
+            redactionLabels: [],
           },
           {
             name: 'operatorOnly',
@@ -612,7 +613,7 @@ function configControlManifest(
             secret: false,
             valueType: 'boolean',
             agentMutable: false,
-            redactionLabels: []
+            redactionLabels: [],
           },
           {
             name: 'retries',
@@ -621,7 +622,7 @@ function configControlManifest(
             secret: false,
             valueType: 'number',
             agentMutable: true,
-            redactionLabels: []
+            redactionLabels: [],
           },
           {
             name: 'settings',
@@ -630,7 +631,7 @@ function configControlManifest(
             secret: false,
             valueType: 'object',
             agentMutable: true,
-            redactionLabels: []
+            redactionLabels: [],
           },
           {
             name: 'apiKey',
@@ -639,19 +640,21 @@ function configControlManifest(
             secret: true,
             valueType: 'secret',
             envVar: fixtureSecretEnvVar,
-            redactionLabels: ['secret']
-          }
-        ]
-      }
-    }
+            redactionLabels: ['secret'],
+          },
+        ],
+      },
+    },
   }).manifest;
 }
 
 function inspectField(
   inspected: RuntimePluginConfigInspectShape,
-  fieldName: string
+  fieldName: string,
 ): RuntimePluginConfigFieldInspectShape {
-  const field = inspected.fields.find((candidate) => candidate.name === fieldName);
+  const field = inspected.fields.find(
+    candidate => candidate.name === fieldName,
+  );
 
   if (field === undefined) {
     throw new Error(`Expected inspect output to include field ${fieldName}.`);
@@ -676,19 +679,19 @@ function createSeededControlFixture(): {
         enabled: true,
         config: {
           mode: 'local',
-          label: 'before'
-        }
+          label: 'before',
+        },
       },
       'untouched.plugin': {
         enabled: false,
         config: {
-          keep: 'value'
-        }
-      }
-    }
+          keep: 'value',
+        },
+      },
+    },
   };
 
-  writeRuntimeConfig(configPath, { plugins: config.plugins });
+  writeRuntimeConfig(configPath, {plugins: config.plugins});
 
   return {
     configPath,
@@ -697,8 +700,8 @@ function createSeededControlFixture(): {
     fingerprint: inspectRuntimePluginConfig({
       configPath,
       env: {},
-      manifest
-    }).fingerprint
+      manifest,
+    }).fingerprint,
   };
 }
 

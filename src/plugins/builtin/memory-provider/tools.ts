@@ -1,6 +1,4 @@
-import type {
-  RuntimePluginProvidedTool
-} from '../../api/types.ts';
+import type {RuntimePluginProvidedTool} from '../../api/types.ts';
 
 export function memorySearchTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({
@@ -9,7 +7,7 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 2
+      maxCalls: 2,
     },
     inputContract: {
       type: 'object',
@@ -18,15 +16,15 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
           name: 'query',
           description: 'Search query.',
           required: true,
-          valueType: 'string'
-        }
+          valueType: 'string',
+        },
       ],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: true
+    sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
 }
 
@@ -37,7 +35,7 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
     requiredForUserTurn: false,
     callLimit: {
       scope: 'user_turn',
-      maxCalls: 1
+      maxCalls: 1,
     },
     inputContract: {
       type: 'object',
@@ -46,14 +44,14 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
           name: 'text',
           description: 'Memory text.',
           required: true,
-          valueType: 'string'
-        }
+          valueType: 'string',
+        },
       ],
-      additionalFields: false
+      additionalFields: false,
     },
     validationOwner: 'plugin_host',
     sideEffectLevel: 'local_memory_write',
     requiresConfirmation: false,
-    sourceReferencesRequired: true
+    sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
 }

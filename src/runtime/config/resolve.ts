@@ -1,19 +1,11 @@
-import {
-  createLocalRuntimeStorageLayout
-} from '../storage/layout-contract.ts';
+import {createLocalRuntimeStorageLayout} from '../storage/layout-contract.ts';
 import type {
   RuntimePluginConfigField,
-  RuntimePluginManifest
+  RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
-import {
-  createRuntimeConfigFingerprint
-} from './fingerprint.ts';
-import {
-  storeRootForSelectedDefaultConfigPath
-} from './mutate.ts';
-import {
-  redactResolvedRuntimeConfigField
-} from './redact.ts';
+import {createRuntimeConfigFingerprint} from './fingerprint.ts';
+import {storeRootForSelectedDefaultConfigPath} from './mutate.ts';
+import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
   isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
@@ -25,14 +17,14 @@ import {
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticPluginMetadata,
   type RuntimeConfigSecretRef,
-  type RuntimeConfigValue
+  type RuntimeConfigValue,
 } from './types.ts';
 import {
   createJsonBoundarySnapshot,
-  ownJsonRecordValue
+  ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
-import { createRuntimeConfigDiagnostic } from './diagnostic.ts';
-import { runtimeConfigValueMatchesField } from './schema.ts';
+import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
+import {runtimeConfigValueMatchesField} from './schema.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -45,13 +37,13 @@ export type ResolveProject02RuntimeConfigOptions = {
 };
 
 export function resolveProject02RuntimeConfig(
-  options: ResolveProject02RuntimeConfigOptions
+  options: ResolveProject02RuntimeConfigOptions,
 ): ResolvedProject02RuntimeConfig {
   const env = options.env ?? process.env;
   const config = options.loadedConfig.config;
   const storeRoot = resolveProject02RuntimeStoreRoot(options);
   const diagnostics: RuntimeConfigDiagnostic[] = [
-    ...options.loadedConfig.diagnostics
+    ...options.loadedConfig.diagnostics,
   ];
   const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
@@ -59,8 +51,8 @@ export function resolveProject02RuntimeConfig(
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
   const project02 = Object.freeze({
     storeRoot,
-    ...(defaultMemoryProvider === undefined ? {} : { defaultMemoryProvider }),
-    roleModelProvider
+    ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
+    roleModelProvider,
   });
 
   for (const manifest of options.pluginManifests ?? []) {
@@ -74,7 +66,7 @@ export function resolveProject02RuntimeConfig(
       defaultEnabled:
         options.defaultEnabledPluginIds?.has(manifest.id) ??
         manifest.activation.defaultEnabled,
-      diagnostics
+      diagnostics,
     });
 
     pluginConfigs[manifest.id] = resolved;
@@ -82,9 +74,9 @@ export function resolveProject02RuntimeConfig(
       Object.fromEntries(
         Object.entries(resolved).map(([name, field]) => [
           name,
-          redactResolvedRuntimeConfigField(field)
-        ])
-      )
+          redactResolvedRuntimeConfigField(field),
+        ]),
+      ),
     );
   }
 
@@ -92,7 +84,7 @@ export function resolveProject02RuntimeConfig(
     source: options.loadedConfig.source,
     ...(options.loadedConfig.path === undefined
       ? {}
-      : { path: options.loadedConfig.path }),
+      : {path: options.loadedConfig.path}),
     project02,
     pluginConfigs: Object.freeze(pluginConfigs),
     redactedPluginConfigs: Object.freeze(redactedPluginConfigs),
@@ -101,9 +93,9 @@ export function resolveProject02RuntimeConfig(
       effectiveFingerprintInput({
         config,
         storeRoot,
-        redactedPluginConfigs
-      })
-    )
+        redactedPluginConfigs,
+      }),
+    ),
   } satisfies ResolvedProject02RuntimeConfig);
 }
 
@@ -117,12 +109,12 @@ export function resolveProject02RuntimeStoreRoot(options: {
     storeRootForLoadedDefaultConfigPath(options.loadedConfig);
 
   return createLocalRuntimeStorageLayout(
-    configuredStoreRoot === undefined ? {} : { storeRoot: configuredStoreRoot }
+    configuredStoreRoot === undefined ? {} : {storeRoot: configuredStoreRoot},
   ).storeRoot;
 }
 
 export function storeRootForLoadedDefaultConfigPath(
-  loadedConfig: LoadedProject02RuntimeConfig
+  loadedConfig: LoadedProject02RuntimeConfig,
 ): string | undefined {
   return loadedConfig.path === undefined
     ? undefined
@@ -130,9 +122,9 @@ export function storeRootForLoadedDefaultConfigPath(
 }
 
 export function diagnosticsHaveErrors(
-  diagnostics: readonly RuntimeConfigDiagnostic[]
+  diagnostics: readonly RuntimeConfigDiagnostic[],
 ): boolean {
-  return diagnostics.some((diagnostic) => diagnostic.severity === 'error');
+  return diagnostics.some(diagnostic => diagnostic.severity === 'error');
 }
 
 export function pluginHasConfigErrors(options: {
@@ -140,12 +132,12 @@ export function pluginHasConfigErrors(options: {
   readonly pluginId: string;
 }): boolean {
   return options.diagnostics.some(
-    (diagnostic) =>
+    diagnostic =>
       diagnostic.severity === 'error' &&
       runtimeConfigDiagnosticMatchesPluginConfig({
         diagnostic,
-        pluginId: options.pluginId
-      })
+        pluginId: options.pluginId,
+      }),
   );
 }
 
@@ -181,36 +173,36 @@ function resolvePluginConfig(options: {
 }): ResolvedPluginRuntimeConfig {
   const configuredPlugin = ownJsonRecordValue(
     options.config?.plugins,
-    options.manifest.id
+    options.manifest.id,
   );
   const validateConfig =
     options.validateInactivePluginConfigs ||
     shouldValidatePluginConfig({
       config: options.config,
       manifest: options.manifest,
-      defaultEnabled: options.defaultEnabled
+      defaultEnabled: options.defaultEnabled,
     });
 
   if (validateConfig) {
     pushUnknownPluginConfigFieldDiagnostics({
       manifest: options.manifest,
       rawConfig: configuredPlugin?.config,
-      diagnostics: options.diagnostics
+      diagnostics: options.diagnostics,
     });
   }
 
   return Object.freeze(
     Object.fromEntries(
-      options.manifest.config.fields.map((field) => [
+      options.manifest.config.fields.map(field => [
         field.name,
         resolvePluginConfigField({
           ...options,
           validateConfig,
           field,
-          rawValue: ownJsonRecordValue(configuredPlugin?.config, field.name)
-        })
-      ])
-    )
+          rawValue: ownJsonRecordValue(configuredPlugin?.config, field.name),
+        }),
+      ]),
+    ),
   );
 }
 
@@ -227,7 +219,7 @@ function resolvePluginConfigField(options: {
   const path = `plugins.${options.manifest.id}.config.${options.field.name}`;
 
   if (options.field.secret) {
-    return resolveSecretField({ ...options, path });
+    return resolveSecretField({...options, path});
   }
 
   if (options.rawValue === undefined) {
@@ -238,15 +230,15 @@ function resolvePluginConfigField(options: {
           'runtime_config_required_value_missing',
           `Required config field "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
           path,
-          pluginConfigDiagnosticMetadata(options)
-        )
+          pluginConfigDiagnosticMetadata(options),
+        ),
       );
     }
 
     return fieldResult({
       field: options.field,
       source: 'missing',
-      resolved: !options.field.required
+      resolved: !options.field.required,
     });
   }
 
@@ -260,14 +252,14 @@ function resolvePluginConfigField(options: {
           'runtime_config_secret_ref_for_non_secret',
           `Non-secret config field "${options.field.name}" cannot contain a secret value.`,
           secretValuePath,
-          pluginConfigDiagnosticMetadata(options)
-        )
+          pluginConfigDiagnosticMetadata(options),
+        ),
       );
     }
     return fieldResult({
       field: options.field,
       source: 'config',
-      resolved: false
+      resolved: false,
     });
   }
 
@@ -279,15 +271,15 @@ function resolvePluginConfigField(options: {
           'runtime_config_value_type_invalid',
           `Config field "${options.field.name}" does not match its declared metadata.`,
           path,
-          pluginConfigDiagnosticMetadata(options)
-        )
+          pluginConfigDiagnosticMetadata(options),
+        ),
       );
     }
     return fieldResult({
       field: options.field,
       source: 'config',
       resolved: false,
-      value: options.rawValue
+      value: options.rawValue,
     });
   }
 
@@ -295,7 +287,7 @@ function resolvePluginConfigField(options: {
     field: options.field,
     source: 'config',
     resolved: true,
-    value: options.rawValue
+    value: options.rawValue,
   });
 }
 
@@ -311,7 +303,7 @@ function resolveSecretField(options: {
 }): ResolvedRuntimeConfigField {
   const envRef =
     options.rawValue === undefined && options.field.envVar !== undefined
-      ? { $env: options.field.envVar }
+      ? {$env: options.field.envVar}
       : isSecretRef(options.rawValue)
         ? options.rawValue
         : undefined;
@@ -325,15 +317,15 @@ function resolveSecretField(options: {
             'runtime_config_reserved_control_env_var',
             `Secret config field "${options.field.name}" for plugin "${options.manifest.id}" cannot use reserved Project02 runtime control env var "${envRef.$env}".`,
             options.path,
-            pluginConfigDiagnosticMetadata(options)
-          )
+            pluginConfigDiagnosticMetadata(options),
+          ),
         );
       }
 
       return fieldResult({
         field: options.field,
         source: `env:${envRef.$env}`,
-        resolved: false
+        resolved: false,
       });
     }
 
@@ -347,8 +339,8 @@ function resolveSecretField(options: {
           'runtime_config_required_secret_missing',
           `Required secret "${options.field.name}" for plugin "${options.manifest.id}" is missing from env:${envRef.$env}.`,
           options.path,
-          pluginConfigDiagnosticMetadata(options)
-        )
+          pluginConfigDiagnosticMetadata(options),
+        ),
       );
     }
 
@@ -356,7 +348,7 @@ function resolveSecretField(options: {
       field: options.field,
       source: `env:${envRef.$env}`,
       resolved,
-      ...(resolved ? { value: secretValue } : {})
+      ...(resolved ? {value: secretValue} : {}),
     });
   }
 
@@ -368,8 +360,8 @@ function resolveSecretField(options: {
           'runtime_config_plaintext_secret_rejected',
           `Plaintext secret override for "${options.field.name}" is not allowed.`,
           options.path,
-          pluginConfigDiagnosticMetadata(options)
-        )
+          pluginConfigDiagnosticMetadata(options),
+        ),
       );
     }
 
@@ -378,8 +370,8 @@ function resolveSecretField(options: {
       source: 'plaintext_override',
       resolved: options.allowPlaintextSecrets,
       ...(options.allowPlaintextSecrets
-        ? { value: options.rawValue.$plaintextSecret }
-        : {})
+        ? {value: options.rawValue.$plaintextSecret}
+        : {}),
     });
   }
 
@@ -391,14 +383,14 @@ function resolveSecretField(options: {
           'runtime_config_plaintext_secret_rejected',
           `Secret config field "${options.field.name}" must use an env ref.`,
           options.path,
-          pluginConfigDiagnosticMetadata(options)
-        )
+          pluginConfigDiagnosticMetadata(options),
+        ),
       );
     }
     return fieldResult({
       field: options.field,
       source: 'config',
-      resolved: false
+      resolved: false,
     });
   }
 
@@ -409,15 +401,15 @@ function resolveSecretField(options: {
         'runtime_config_required_secret_missing',
         `Required secret "${options.field.name}" is missing for plugin "${options.manifest.id}".`,
         options.path,
-        pluginConfigDiagnosticMetadata(options)
-      )
+        pluginConfigDiagnosticMetadata(options),
+      ),
     );
   }
 
   return fieldResult({
     field: options.field,
     source: 'missing',
-    resolved: !options.field.required
+    resolved: !options.field.required,
   });
 }
 
@@ -428,7 +420,7 @@ function shouldValidatePluginConfig(options: {
 }): boolean {
   const configured = ownJsonRecordValue(
     options.config?.plugins,
-    options.manifest.id
+    options.manifest.id,
   );
 
   if (configured?.enabled === false) {
@@ -438,7 +430,7 @@ function shouldValidatePluginConfig(options: {
   if (
     !pluginCanRequireConfigValidation({
       config: options.config,
-      manifest: options.manifest
+      manifest: options.manifest,
     })
   ) {
     return false;
@@ -489,11 +481,11 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
   }
 
   const declaredFields = new Set(
-    options.manifest.config.fields.map((field) => field.name)
+    options.manifest.config.fields.map(field => field.name),
   );
 
   for (const fieldName of Object.keys(options.rawConfig).sort((a, b) =>
-    a.localeCompare(b)
+    a.localeCompare(b),
   )) {
     if (declaredFields.has(fieldName)) {
       continue;
@@ -507,9 +499,9 @@ function pushUnknownPluginConfigFieldDiagnostics(options: {
         `plugins.${options.manifest.id}.config.${fieldName}`,
         {
           pluginId: options.manifest.id,
-          pluginConfigField: fieldName
-        }
-      )
+          pluginConfigField: fieldName,
+        },
+      ),
     );
   }
 }
@@ -520,7 +512,7 @@ function pluginConfigDiagnosticMetadata(options: {
 }): RuntimeConfigDiagnosticPluginMetadata {
   return {
     pluginId: options.manifest.id,
-    pluginConfigField: options.field.name
+    pluginConfigField: options.field.name,
   };
 }
 
@@ -539,14 +531,14 @@ function fieldResult(options: {
       ? {}
       : {
           value: createJsonBoundarySnapshot(options.value, {
-            field: `Resolved runtime config field ${options.field.name}`
-          })
-        })
+            field: `Resolved runtime config field ${options.field.name}`,
+          }),
+        }),
   } satisfies ResolvedRuntimeConfigField);
 }
 
 function isSecretRef(
-  value: RuntimeConfigValue | undefined
+  value: RuntimeConfigValue | undefined,
 ): value is RuntimeConfigSecretRef {
   return (
     typeof value === 'object' &&
@@ -557,7 +549,9 @@ function isSecretRef(
   );
 }
 
-function isPlaintextSecretOverride(value: RuntimeConfigValue | undefined): value is {
+function isPlaintextSecretOverride(
+  value: RuntimeConfigValue | undefined,
+): value is {
   readonly $plaintextSecret: string;
   readonly allowPlaintextSecret: true;
   readonly justification: string;
@@ -572,7 +566,7 @@ function isPlaintextSecretOverride(value: RuntimeConfigValue | undefined): value
 
 function nestedSecretValuePath(
   value: RuntimeConfigValue | undefined,
-  path: string
+  path: string,
 ): string | undefined {
   if (value === undefined) {
     return undefined;
@@ -586,7 +580,10 @@ function nestedSecretValuePath(
     const items: readonly RuntimeConfigValue[] = value;
 
     for (const [index, item] of items.entries()) {
-      const nestedPath = nestedSecretValuePath(item, `${path}.${String(index)}`);
+      const nestedPath = nestedSecretValuePath(
+        item,
+        `${path}.${String(index)}`,
+      );
 
       if (nestedPath !== undefined) {
         return nestedPath;
@@ -614,7 +611,9 @@ function nestedSecretValuePath(
 function effectiveFingerprintInput(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly storeRoot: string;
-  readonly redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
+  readonly redactedPluginConfigs: Readonly<
+    Record<string, RedactedPluginRuntimeConfig>
+  >;
 }): RuntimeConfigValue {
   const pluginActivation = pluginActivationFingerprintInput(options.config);
 
@@ -624,15 +623,16 @@ function effectiveFingerprintInput(options: {
       storeRoot: options.storeRoot,
       defaultMemoryProvider:
         options.config?.project02?.defaultMemoryProvider ?? null,
-      roleModelProvider: options.config?.project02?.roleModelProvider ?? 'local'
+      roleModelProvider:
+        options.config?.project02?.roleModelProvider ?? 'local',
     }),
     plugins: options.redactedPluginConfigs,
-    ...(pluginActivation === undefined ? {} : { pluginActivation })
+    ...(pluginActivation === undefined ? {} : {pluginActivation}),
   });
 }
 
 function pluginActivationFingerprintInput(
-  config: Project02RuntimeConfig | undefined
+  config: Project02RuntimeConfig | undefined,
 ): RuntimeConfigValue | undefined {
   const plugins = config?.plugins;
 
@@ -645,7 +645,7 @@ function pluginActivationFingerprintInput(
   for (const [pluginId, pluginConfig] of Object.entries(plugins)) {
     if (pluginConfig.enabled !== undefined) {
       activation[pluginId] = Object.freeze({
-        enabled: pluginConfig.enabled
+        enabled: pluginConfig.enabled,
       });
     }
   }

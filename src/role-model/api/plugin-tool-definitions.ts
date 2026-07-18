@@ -1,27 +1,28 @@
 import {
-  createRuntimePluginProvidedTool, firstPartyModelToolsPluginId,
+  createRuntimePluginProvidedTool,
+  firstPartyModelToolsPluginId,
   isApprovalGatedRuntimePluginTool,
-  type RuntimePluginProvidedTool
+  type RuntimePluginProvidedTool,
 } from '../../plugins/api/index.ts';
 import {
   builtInModelToolDefinitionsForUserTurn,
-  isBuiltInModelToolName
+  isBuiltInModelToolName,
 } from './model-tools.ts';
-import { requiredRoleModelIdentifier } from './tool-names.ts';
+import {requiredRoleModelIdentifier} from './tool-names.ts';
 
 import type {
   RoleModelPluginToolDefinition,
-  RoleModelToolDefinition
+  RoleModelToolDefinition,
 } from './contracts.ts';
-import { freezeModelToolDefinition } from './model-tools.ts';
-import type { RoleModelAllowedToolName } from './tool-names.ts';
+import {freezeModelToolDefinition} from './model-tools.ts';
+import type {RoleModelAllowedToolName} from './tool-names.ts';
 
 export function createDefaultRoleModelPluginToolDefinitions(): readonly RoleModelPluginToolDefinition[] {
   // Derived from the built-in tool definitions directly; the first-party
   // model-tools package derives its provided tools from the same source,
   // so both sides stay in lockstep without importing an implementation.
   return Object.freeze(
-    builtInModelToolDefinitionsForUserTurn().map((definition) =>
+    builtInModelToolDefinitionsForUserTurn().map(definition =>
       Object.freeze({
         pluginId: firstPartyModelToolsPluginId,
         name: definition.name,
@@ -32,14 +33,14 @@ export function createDefaultRoleModelPluginToolDefinitions(): readonly RoleMode
         validationOwner: 'built_in_model_tools',
         sideEffectLevel: 'none',
         requiresConfirmation: false,
-        sourceReferencesRequired: false
-      } satisfies RoleModelPluginToolDefinition)
-    )
+        sourceReferencesRequired: false,
+      } satisfies RoleModelPluginToolDefinition),
+    ),
   );
 }
 
 export function createRoleModelPluginToolDefinitions(
-  definitions: readonly RoleModelPluginToolDefinition[]
+  definitions: readonly RoleModelPluginToolDefinition[],
 ): readonly RoleModelPluginToolDefinition[] {
   const frozenDefinitions: RoleModelPluginToolDefinition[] = [];
   const seenNames = new Set<string>();
@@ -47,13 +48,13 @@ export function createRoleModelPluginToolDefinitions(
   for (const definition of definitions) {
     const pluginId = requiredRoleModelIdentifier(
       definition.pluginId,
-      'pluginId'
+      'pluginId',
     );
     const providedTool = createRuntimePluginProvidedTool(definition);
 
     if (seenNames.has(providedTool.name)) {
       throw new TypeError(
-        `Plugin tool "${providedTool.name}" is declared more than once.`
+        `Plugin tool "${providedTool.name}" is declared more than once.`,
       );
     }
 
@@ -63,8 +64,8 @@ export function createRoleModelPluginToolDefinitions(
     frozenDefinitions.push(
       Object.freeze({
         pluginId,
-        ...providedTool
-      } satisfies RoleModelPluginToolDefinition)
+        ...providedTool,
+      } satisfies RoleModelPluginToolDefinition),
     );
   }
 
@@ -73,7 +74,7 @@ export function createRoleModelPluginToolDefinitions(
 
 function assertRoleModelPluginToolPolicy(
   pluginId: string,
-  providedTool: RuntimePluginProvidedTool
+  providedTool: RuntimePluginProvidedTool,
 ): void {
   if (isBuiltInModelToolName(providedTool.name)) {
     assertBuiltInRoleModelToolPolicy(pluginId, providedTool);
@@ -85,7 +86,7 @@ function assertRoleModelPluginToolPolicy(
 
 function assertBuiltInRoleModelToolPolicy(
   pluginId: string,
-  providedTool: RuntimePluginProvidedTool
+  providedTool: RuntimePluginProvidedTool,
 ): void {
   if (
     pluginId !== firstPartyModelToolsPluginId ||
@@ -96,17 +97,17 @@ function assertBuiltInRoleModelToolPolicy(
     providedTool.callLimit.maxCalls !== 1
   ) {
     throw new TypeError(
-      `Plugin tool "${providedTool.name}" must be provided by ${firstPartyModelToolsPluginId}.`
+      `Plugin tool "${providedTool.name}" must be provided by ${firstPartyModelToolsPluginId}.`,
     );
   }
 }
 
 function assertHostRoleModelToolPolicy(
-  providedTool: RuntimePluginProvidedTool
+  providedTool: RuntimePluginProvidedTool,
 ): void {
   if (providedTool.validationOwner !== 'plugin_host') {
     throw new TypeError(
-      `Plugin tool "${providedTool.name}" must be validated by plugin_host.`
+      `Plugin tool "${providedTool.name}" must be validated by plugin_host.`,
     );
   }
 
@@ -115,19 +116,16 @@ function assertHostRoleModelToolPolicy(
     providedTool.callLimit.scope !== 'user_turn'
   ) {
     throw new TypeError(
-      `Plugin tool "${providedTool.name}" may only declare a user_turn call limit.`
+      `Plugin tool "${providedTool.name}" may only declare a user_turn call limit.`,
     );
   }
 
   const approvalGatedRuntimeConfigWrite =
     isApprovalGatedRuntimePluginTool(providedTool);
 
-  if (
-    providedTool.requiresConfirmation &&
-    !approvalGatedRuntimeConfigWrite
-  ) {
+  if (providedTool.requiresConfirmation && !approvalGatedRuntimeConfigWrite) {
     throw new TypeError(
-      `Plugin tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`
+      `Plugin tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`,
     );
   }
 
@@ -138,26 +136,26 @@ function assertHostRoleModelToolPolicy(
     !approvalGatedRuntimeConfigWrite
   ) {
     throw new TypeError(
-      `Plugin tool "${providedTool.name}" must be read-only or local-memory-only for CT-03.`
+      `Plugin tool "${providedTool.name}" must be read-only or local-memory-only for CT-03.`,
     );
   }
 }
 
 export function modelToolDefinitionsForPluginToolDefinitions(
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
 ): readonly RoleModelToolDefinition[] {
   return Object.freeze(
-    pluginToolDefinitions.map((definition) =>
-      freezeModelToolDefinition(definition)
-    )
+    pluginToolDefinitions.map(definition =>
+      freezeModelToolDefinition(definition),
+    ),
   );
 }
 
 export function defaultAllowedToolsForPluginDefinitions(
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[]
+  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
 ): readonly RoleModelAllowedToolName[] {
   return Object.freeze(
-    pluginToolDefinitions.map((definition) => definition.name)
+    pluginToolDefinitions.map(definition => definition.name),
   );
 }
 
@@ -167,8 +165,7 @@ export function toolDefinitionsForAllowedTools(options: {
 }): readonly RoleModelToolDefinition[] {
   return Object.freeze(
     options.toolDefinitions
-      .filter((definition) => options.allowedTools.includes(definition.name))
-      .map(freezeModelToolDefinition)
+      .filter(definition => options.allowedTools.includes(definition.name))
+      .map(freezeModelToolDefinition),
   );
 }
-

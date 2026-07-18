@@ -1,7 +1,7 @@
 import type {
   CreateRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePathMode,
-  RuntimePluginJsonValue
+  RuntimePluginJsonValue,
 } from '../../../plugins/index.ts';
 
 /**

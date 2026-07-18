@@ -3,7 +3,7 @@ export function readFlagValue(
   args: readonly string[],
   index: number,
   flag: string,
-  createUsageError: (message: string) => Error
+  createUsageError: (message: string) => Error,
 ): string {
   const value = args[index + 1];
 

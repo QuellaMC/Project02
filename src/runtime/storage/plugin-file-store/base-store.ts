@@ -1,13 +1,13 @@
-import type { RuntimePluginFileStore } from '../../../plugins/index.ts';
+import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
 import type {
   CreateRuntimePluginFileStoreOptions,
-  InMemoryRuntimePluginFileStoreOptions
+  InMemoryRuntimePluginFileStoreOptions,
 } from '../../../plugins/index.ts';
-import { createDurableRuntimePluginFileStore } from './durable-store.ts';
-import { createInMemoryRuntimePluginFileStore } from './memory-store.ts';
+import {createDurableRuntimePluginFileStore} from './durable-store.ts';
+import {createInMemoryRuntimePluginFileStore} from './memory-store.ts';
 
 export function createRuntimePluginFileStore(
-  options: CreateRuntimePluginFileStoreOptions
+  options: CreateRuntimePluginFileStoreOptions,
 ): RuntimePluginFileStore {
   if (options.storeRoot === undefined) {
     const sessionIdentity = requiredInMemorySessionIdentity(options);
@@ -16,14 +16,14 @@ export function createRuntimePluginFileStore(
       Object.freeze({
         sessionId: options.sessionId,
         sessionIdentity,
-        pluginId: options.pluginId
-      } satisfies InMemoryRuntimePluginFileStoreOptions)
+        pluginId: options.pluginId,
+      } satisfies InMemoryRuntimePluginFileStoreOptions),
     );
   }
 
   return createDurableRuntimePluginFileStore({
     ...options,
-    storeRoot: options.storeRoot
+    storeRoot: options.storeRoot,
   });
 }
 
@@ -35,9 +35,7 @@ function requiredInMemorySessionIdentity(options: object): object {
     (typeof sessionIdentity !== 'object' &&
       typeof sessionIdentity !== 'function')
   ) {
-    throw new TypeError(
-      'In-memory plugin fileStore requires sessionIdentity.'
-    );
+    throw new TypeError('In-memory plugin fileStore requires sessionIdentity.');
   }
 
   return sessionIdentity;

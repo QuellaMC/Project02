@@ -1,10 +1,10 @@
 import {
   selectRecentVisibleMessages,
-  type ConversationSession
+  type ConversationSession,
 } from '../../core/index.ts';
-import { createDecisionContext } from './decision.ts';
-import type { DecisionContext } from './contracts.ts';
-import type { RuntimePluginContextItem } from '../../plugins/api/index.ts';
+import {createDecisionContext} from './decision.ts';
+import type {DecisionContext} from './contracts.ts';
+import type {RuntimePluginContextItem} from '../../plugins/api/index.ts';
 
 export type BuildUserTurnDecisionContextOptions = {
   readonly session: ConversationSession;
@@ -14,16 +14,16 @@ export type BuildUserTurnDecisionContextOptions = {
 };
 
 export function buildUserTurnDecisionContext(
-  options: BuildUserTurnDecisionContextOptions
+  options: BuildUserTurnDecisionContextOptions,
 ): DecisionContext {
   return createDecisionContext({
     sessionId: options.session.id,
     characterSnapshot: options.session.character,
     recentVisibleMessages: selectRecentVisibleMessages(
       options.session.visibleTranscript,
-      options.recentMessageLimit
+      options.recentMessageLimit,
     ),
     runtimeNotes: options.runtimeNotes ?? [],
-    pluginContextItems: options.pluginContextItems ?? []
+    pluginContextItems: options.pluginContextItems ?? [],
   });
 }

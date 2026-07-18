@@ -1,15 +1,13 @@
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import {
-  createRuntimePluginFileStoreTransaction
-} from '../../src/runtime/storage/plugin-file-store/index.ts';
-import { durablePathModesFileName } from '../../src/runtime/storage/plugin-file-store/shared.ts';
-import type { RuntimePluginFileStore } from '../../src/plugins/api/index.ts';
-import { createLocalRuntimePluginPaths } from '../../src/runtime/storage/layout-contract.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {createRuntimePluginFileStoreTransaction} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {durablePathModesFileName} from '../../src/runtime/storage/plugin-file-store/shared.ts';
+import type {RuntimePluginFileStore} from '../../src/plugins/api/index.ts';
+import {createLocalRuntimePluginPaths} from '../../src/runtime/storage/layout-contract.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('runtime plugin file store transaction lifecycle', () => {
   it('fails every staged file-store method closed after prepare and finalize', async () => {
@@ -17,10 +15,10 @@ describe('runtime plugin file store transaction lifecycle', () => {
     const fileStore = transaction.fileStoreFor({
       sessionId: 'session-closed-after-prepare',
       sessionIdentity: {},
-      pluginId: 'plugin.closed-after-prepare'
+      pluginId: 'plugin.closed-after-prepare',
     });
 
-    fileStore.appendJsonl('events.jsonl', { value: 1 });
+    fileStore.appendJsonl('events.jsonl', {value: 1});
     const prepared = await transaction.prepare(testIdentity());
 
     expectFileStoreClosed(fileStore);
@@ -33,10 +31,10 @@ describe('runtime plugin file store transaction lifecycle', () => {
     const fileStore = transaction.fileStoreFor({
       sessionId: 'session-closed-after-rollback',
       sessionIdentity: {},
-      pluginId: 'plugin.closed-after-rollback'
+      pluginId: 'plugin.closed-after-rollback',
     });
 
-    fileStore.appendJsonl('events.jsonl', { value: 1 });
+    fileStore.appendJsonl('events.jsonl', {value: 1});
     transaction.rollback();
 
     expectFileStoreClosed(fileStore);
@@ -49,30 +47,30 @@ describe('runtime plugin file store transaction lifecycle', () => {
     const pluginRoot = createLocalRuntimePluginPaths({
       storeRoot,
       sessionId,
-      pluginId
+      pluginId,
     }).pluginRoot;
     const pathModes = Object.fromEntries(
-      Array.from({ length: 8_000 }, (_, index) => [
+      Array.from({length: 8_000}, (_, index) => [
         `idempotency/${String(index).padStart(8, '0')}.json`,
-        'json'
-      ])
+        'json',
+      ]),
     );
 
-    mkdirSync(pluginRoot, { recursive: true });
+    mkdirSync(pluginRoot, {recursive: true});
     writeFileSync(
       join(pluginRoot, durablePathModesFileName),
       `${JSON.stringify(pathModes)}\n`,
-      'utf8'
+      'utf8',
     );
     const deadTempPath = join(
       pluginRoot,
-      '.state.json.99999999.00000000-0000-4000-8000-000000000000.tmp'
+      '.state.json.99999999.00000000-0000-4000-8000-000000000000.tmp',
     );
     writeFileSync(deadTempPath, '{"incomplete":true}\n', 'utf8');
 
     const transaction = createRuntimePluginFileStoreTransaction();
 
-    transaction.fileStoreFor({ storeRoot, sessionId, pluginId });
+    transaction.fileStoreFor({storeRoot, sessionId, pluginId});
 
     expect(existsSync(deadTempPath)).toBe(true);
   });
@@ -83,12 +81,12 @@ function expectFileStoreClosed(fileStore: RuntimePluginFileStore): void {
     () => fileStore.readJson('state.json'),
     () => fileStore.readJsonl('events.jsonl'),
     () => {
-      fileStore.writeJsonAtomic('state.json', { value: 2 });
+      fileStore.writeJsonAtomic('state.json', {value: 2});
     },
     () => {
-      fileStore.appendJsonl('events.jsonl', { value: 2 });
+      fileStore.appendJsonl('events.jsonl', {value: 2});
     },
-    () => fileStore.revision()
+    () => fileStore.revision(),
   ];
 
   for (const operation of operations) {
@@ -100,6 +98,6 @@ function testIdentity() {
   return {
     eventId: 'evt_closed_transaction',
     traceId: 'trace_closed_transaction',
-    createdAt: '2026-07-11T00:00:00.000Z'
+    createdAt: '2026-07-11T00:00:00.000Z',
   };
 }

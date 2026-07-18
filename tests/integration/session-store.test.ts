@@ -1,59 +1,58 @@
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
-import { createDeterministicCharacterAgent } from '../../src/role-model/providers/deterministic.ts';
+import {createDeterministicCharacterAgent} from '../../src/role-model/providers/deterministic.ts';
 
 import {
   ConversationRehydrationError,
   createConversationSession,
   createUserMessageRuntimeEvent,
-  runCharacterTurn
+  runCharacterTurn,
 } from '../../src/core/index.ts';
-import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
   encodeStorageSchemaMarker,
-  LocalRuntimeStorageContractError
+  LocalRuntimeStorageContractError,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionStore,
-  LocalRuntimeSessionStoreError
+  LocalRuntimeSessionStoreError,
 } from '../../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
-import {
-  runLocalUserMessageEvent
-} from '../../src/runtime/turn/local.ts';
-import type {
-  ConversationLogRecord
-} from '../../src/runtime/evidence/records.ts';
-import type {
-  LocalRuntimeStorageContractErrorCode
-} from '../../src/runtime/storage/layout-contract.ts';
-import type {
-  LocalRuntimeSessionConversationLogReader
-} from '../../src/runtime/storage/session-store.ts';
-import { assertLocalRuntimeSessionReadable } from '../../src/runtime/storage/session-store.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
+import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
+import type {ConversationLogRecord} from '../../src/runtime/evidence/records.ts';
+import type {LocalRuntimeStorageContractErrorCode} from '../../src/runtime/storage/layout-contract.ts';
+import type {LocalRuntimeSessionConversationLogReader} from '../../src/runtime/storage/session-store.ts';
+import {assertLocalRuntimeSessionReadable} from '../../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
 type RuntimeControlLayoutPath = 'configPath' | 'envPath';
 const symlinkedRuntimeControlFileCases = Object.freeze([
   {
     description: 'config.json',
-    layoutPaths: ['configPath']
+    layoutPaths: ['configPath'],
   },
   {
     description: '.env',
-    layoutPaths: ['envPath']
+    layoutPaths: ['envPath'],
   },
   {
     description: 'config.json and .env',
-    layoutPaths: ['configPath', 'envPath']
-  }
+    layoutPaths: ['configPath', 'envPath'],
+  },
 ] as const satisfies readonly {
   readonly description: string;
   readonly layoutPaths: readonly RuntimeControlLayoutPath[];
@@ -62,9 +61,9 @@ const symlinkedRuntimeControlFileCases = Object.freeze([
 describe('local runtime session store', () => {
   afterEach(async () => {
     await Promise.all(
-      tempRoots.map(async (root) => {
-        await rm(root, { recursive: true, force: true });
-      })
+      tempRoots.map(async root => {
+        await rm(root, {recursive: true, force: true});
+      }),
     );
     tempRoots.length = 0;
   });
@@ -73,36 +72,33 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock([
-        '2026-06-04T00:00:00.000Z',
-        '2026-06-04T00:01:00.000Z'
-      ])
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
     const first = await store.createSession({
-      sessionId: 'mira-local'
+      sessionId: 'mira-local',
     });
     const second = await store.createSession({
-      sessionId: 'evening-chat'
+      sessionId: 'evening-chat',
     });
 
     expect(await store.listSessions()).toEqual([first, second]);
     await expect(
       store.createSession({
-        sessionId: 'mira-local'
-      })
+        sessionId: 'mira-local',
+      }),
     ).rejects.toThrow(LocalRuntimeSessionStoreError);
 
     const reopened = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:05:00.000Z'])
+      now: fixedClock(['2026-06-04T00:05:00.000Z']),
     });
     const selected = await reopened.selectSession('mira-local');
 
     expect(selected).toEqual({
       sessionId: 'mira-local',
       createdAt: '2026-06-04T00:00:00.000Z',
-      updatedAt: '2026-06-04T00:05:00.000Z'
+      updatedAt: '2026-06-04T00:05:00.000Z',
     });
     expect(await reopened.readSession('mira-local')).toEqual(selected);
     expect(await reopened.listSessions()).toEqual([selected, second]);
@@ -112,18 +108,18 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const invalid = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['not-a-time'])
+      now: fixedClock(['not-a-time']),
     });
 
     await expect(
-      invalid.createSession({ sessionId: 'bad-time' })
-    ).rejects.toMatchObject({ code: 'malformed_schema_marker' });
+      invalid.createSession({sessionId: 'bad-time'}),
+    ).rejects.toMatchObject({code: 'malformed_schema_marker'});
 
     const valid = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-07-11T00:00:00.000Z'])
+      now: fixedClock(['2026-07-11T00:00:00.000Z']),
     });
-    const created = await valid.createSession({ sessionId: 'good-time' });
+    const created = await valid.createSession({sessionId: 'good-time'});
 
     await expect(valid.readSession('good-time')).resolves.toEqual(created);
   });
@@ -132,21 +128,21 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
     const created = await store.createSession({
-      sessionId: 'mira-local'
+      sessionId: 'mira-local',
     });
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: created.sessionId
+      sessionId: created.sessionId,
     });
 
-    await rm(paths.sessionRoot, { recursive: true, force: true });
+    await rm(paths.sessionRoot, {recursive: true, force: true});
 
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'missing_file'
+      'missing_file',
     );
   });
 
@@ -154,27 +150,24 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock([
-        '2026-06-04T00:00:00.000Z',
-        '2026-06-04T00:01:00.000Z'
-      ])
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
-    const alpha = await store.createSession({ sessionId: 'alpha' });
-    await store.createSession({ sessionId: 'beta' });
+    const alpha = await store.createSession({sessionId: 'alpha'});
+    await store.createSession({sessionId: 'beta'});
     const betaPaths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'beta'
+      sessionId: 'beta',
     });
 
-    await rm(betaPaths.sessionRoot, { recursive: true, force: true });
+    await rm(betaPaths.sessionRoot, {recursive: true, force: true});
 
     await expect(store.readSession('alpha')).resolves.toEqual(alpha);
     expect(
-      assertLocalRuntimeSessionReadable({ storeRoot, sessionId: 'alpha' })
+      assertLocalRuntimeSessionReadable({storeRoot, sessionId: 'alpha'}),
     ).toEqual(alpha);
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'missing_file'
+      'missing_file',
     );
   });
 
@@ -182,24 +175,24 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
-    const alpha = await store.createSession({ sessionId: 'alpha' });
+    const alpha = await store.createSession({sessionId: 'alpha'});
 
     await writeFile(
       store.layout.sessionCatalogPath,
       `${JSON.stringify(alpha)}\n${JSON.stringify({
         sessionId: 'unrelated',
         createdAt: false,
-        updatedAt: false
+        updatedAt: false,
       })}\n`,
-      'utf8'
+      'utf8',
     );
 
     await expect(store.readSession('alpha')).resolves.toEqual(alpha);
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'malformed_record'
+      'malformed_record',
     );
   });
 
@@ -207,31 +200,31 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const logStore = createRuntimeLogStore();
     const originalSession = createConversationSession({
-      id: 'mira-local'
+      id: 'mira-local',
     });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent('first', {
         eventId: 'evt_first',
         traceId: 'trace_first',
-        createdAt: '2026-06-04T00:00:00.000Z'
+        createdAt: '2026-06-04T00:00:00.000Z',
       }),
       session: originalSession,
       logStore,
-      pluginHost: createRuntimePluginHost()
+      pluginHost: createRuntimePluginHost(),
     });
 
     const reader = createConversationLogReader({
-      'mira-local': logStore.conversationMessages()
+      'mira-local': logStore.conversationMessages(),
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       conversationLogReader: reader,
-      now: fixedClock(['2026-06-04T00:02:00.000Z'])
+      now: fixedClock(['2026-06-04T00:02:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'mira-local'
+      sessionId: 'mira-local',
     });
 
     const rehydrated = await store.rehydrateConversationSession('mira-local');
@@ -242,15 +235,15 @@ describe('local runtime session store', () => {
         role: 'user',
         speakerId: 'local-user',
         speakerName: 'You',
-        text: 'first'
+        text: 'first',
       },
       {
         id: 'mira-local:message-2',
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: "I'm here. Tell me what you need."
-      }
+        text: "I'm here. Tell me what you need.",
+      },
     ]);
   });
 
@@ -263,32 +256,36 @@ describe('local runtime session store', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'first'
+          text: 'first',
         }),
         createConversationRecord({
           id: 'mira-local:message-2',
           role: 'character',
           speakerId: 'mira',
           speakerName: 'Mira',
-          text: "I'm here. Tell me what you need."
-        })
-      ]
+          text: "I'm here. Tell me what you need.",
+        }),
+      ],
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       conversationLogReader: reader,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'mira-local'
+      sessionId: 'mira-local',
     });
 
     const rehydrated = await store.rehydrateConversationSession('mira-local');
-    const result = await runCharacterTurn(rehydrated, 'second', createDeterministicCharacterAgent());
+    const result = await runCharacterTurn(
+      rehydrated,
+      'second',
+      createDeterministicCharacterAgent(),
+    );
 
     expect(result.reply.text).toBe(
-      'I remember you said "first" Stay with me for a minute.'
+      'I remember you said "first" Stay with me for a minute.',
     );
     expect(result.userMessage.id).toBe('mira-local:message-3');
     expect(result.characterMessage.id).toBe('mira-local:message-4');
@@ -303,15 +300,15 @@ describe('local runtime session store', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'alpha first'
+          text: 'alpha first',
         }),
         createConversationRecord({
           id: 'alpha:message-2',
           role: 'character',
           speakerId: 'mira',
           speakerName: 'Mira',
-          text: 'alpha reply'
-        })
+          text: 'alpha reply',
+        }),
       ],
       beta: [
         createConversationRecord({
@@ -319,45 +316,46 @@ describe('local runtime session store', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'beta first'
+          text: 'beta first',
         }),
         createConversationRecord({
           id: 'beta:message-2',
           role: 'character',
           speakerId: 'mira',
           speakerName: 'Mira',
-          text: 'beta reply'
-        })
-      ]
+          text: 'beta reply',
+        }),
+      ],
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       conversationLogReader: reader,
-      now: fixedClock([
-        '2026-06-04T00:00:00.000Z',
-        '2026-06-04T00:01:00.000Z'
-      ])
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'alpha'
+      sessionId: 'alpha',
     });
     await store.createSession({
-      sessionId: 'beta'
+      sessionId: 'beta',
     });
 
     const alpha = await store.rehydrateConversationSession('alpha');
     const beta = await store.rehydrateConversationSession('beta');
 
-    await expect(runCharacterTurn(alpha, 'second', createDeterministicCharacterAgent())).resolves.toMatchObject({
+    await expect(
+      runCharacterTurn(alpha, 'second', createDeterministicCharacterAgent()),
+    ).resolves.toMatchObject({
       reply: {
-        text: 'I remember you said "alpha first" Stay with me for a minute.'
-      }
+        text: 'I remember you said "alpha first" Stay with me for a minute.',
+      },
     });
-    await expect(runCharacterTurn(beta, 'second', createDeterministicCharacterAgent())).resolves.toMatchObject({
+    await expect(
+      runCharacterTurn(beta, 'second', createDeterministicCharacterAgent()),
+    ).resolves.toMatchObject({
       reply: {
-        text: 'I remember you said "beta first" Stay with me for a minute.'
-      }
+        text: 'I remember you said "beta first" Stay with me for a minute.',
+      },
     });
   });
 
@@ -370,22 +368,22 @@ describe('local runtime session store', () => {
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
-          text: 'wrong owner'
-        })
-      ]
+          text: 'wrong owner',
+        }),
+      ],
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       conversationLogReader: reader,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'alpha'
+      sessionId: 'alpha',
     });
 
     await expect(store.rehydrateConversationSession('alpha')).rejects.toThrow(
-      ConversationRehydrationError
+      ConversationRehydrationError,
     );
   });
 
@@ -393,15 +391,15 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'alpha'
+      sessionId: 'alpha',
     });
 
     await expect(store.rehydrateConversationSession('alpha')).rejects.toThrow(
-      LocalRuntimeSessionStoreError
+      LocalRuntimeSessionStoreError,
     );
   });
 
@@ -409,25 +407,25 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'alpha'
+      sessionId: 'alpha',
     });
     await writeFile(
       store.layout.sessionCatalogPath,
       JSON.stringify({
         sessionId: 'alpha',
         createdAt: '2026-06-04T00:00:00.000Z',
-        updatedAt: '2026-06-04T00:00:00.000Z'
+        updatedAt: '2026-06-04T00:00:00.000Z',
       }),
-      'utf8'
+      'utf8',
     );
 
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'partial_write'
+      'partial_write',
     );
   });
 
@@ -435,19 +433,19 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
-    const alpha = await store.createSession({ sessionId: 'alpha' });
+    const alpha = await store.createSession({sessionId: 'alpha'});
 
     await writeFile(
       store.layout.sessionCatalogPath,
       `${JSON.stringify(alpha)}\n\n`,
-      'utf8'
+      'utf8',
     );
 
     await expectStorageErrorCode(
       async () => await store.readSession('alpha'),
-      'malformed_record'
+      'malformed_record',
     );
   });
 
@@ -455,25 +453,25 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:00:00.000Z'])
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
     await store.createSession({
-      sessionId: 'alpha'
+      sessionId: 'alpha',
     });
     await writeFile(
       store.layout.sessionCatalogPath,
       `${JSON.stringify({
         sessionId: 'alpha ',
         createdAt: '2026-06-04T00:00:00.000Z',
-        updatedAt: '2026-06-04T00:00:00.000Z'
+        updatedAt: '2026-06-04T00:00:00.000Z',
       })}\n`,
-      'utf8'
+      'utf8',
     );
 
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'malformed_record'
+      'malformed_record',
     );
 
     await writeFile(
@@ -481,47 +479,47 @@ describe('local runtime session store', () => {
       `${JSON.stringify({
         sessionId: 'alpha/beta',
         createdAt: '2026-06-04T00:00:00.000Z',
-        updatedAt: '2026-06-04T00:00:00.000Z'
+        updatedAt: '2026-06-04T00:00:00.000Z',
       })}\n`,
-      'utf8'
+      'utf8',
     );
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'malformed_record'
+      'malformed_record',
     );
   });
 
   it('keeps MVP-006 schema 1 session catalogs readable through the current layout', async () => {
     const storeRoot = await createTempStoreRoot();
-    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'mira-local'
+      sessionId: 'mira-local',
     });
     const metadata = {
       sessionId: 'mira-local',
       createdAt: '2026-06-04T00:00:00.000Z',
-      updatedAt: '2026-06-04T00:00:00.000Z'
+      updatedAt: '2026-06-04T00:00:00.000Z',
     };
 
-    await mkdir(paths.sessionRoot, { recursive: true });
+    await mkdir(paths.sessionRoot, {recursive: true});
     await writeFile(
       layout.schemaPath,
       `${JSON.stringify({
         schemaVersion: 1,
-        createdAt: '2026-06-04T00:00:00.000Z'
+        createdAt: '2026-06-04T00:00:00.000Z',
       })}\n`,
-      'utf8'
+      'utf8',
     );
     await writeFile(
       layout.sessionCatalogPath,
       `${JSON.stringify(metadata)}\n`,
-      'utf8'
+      'utf8',
     );
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:05:00.000Z'])
+      now: fixedClock(['2026-06-04T00:05:00.000Z']),
     });
 
     await expect(store.listSessions()).resolves.toEqual([metadata]);
@@ -529,108 +527,108 @@ describe('local runtime session store', () => {
     expect(
       assertLocalRuntimeSessionReadable({
         storeRoot,
-        sessionId: 'mira-local'
-      })
+        sessionId: 'mira-local',
+      }),
     ).toEqual(metadata);
 
     await expect(store.selectSession('mira-local')).resolves.toEqual({
       ...metadata,
-      updatedAt: '2026-06-04T00:05:00.000Z'
+      updatedAt: '2026-06-04T00:05:00.000Z',
     });
     await expect(readFile(layout.schemaPath, 'utf8')).resolves.toBe(
       `${JSON.stringify({
         schemaVersion: 1,
-        createdAt: '2026-06-04T00:00:00.000Z'
-      })}\n`
+        createdAt: '2026-06-04T00:00:00.000Z',
+      })}\n`,
     );
   });
 
   it('tolerates empty orphan session directories when the catalog was never created', async () => {
     const storeRoot = await createTempStoreRoot();
-    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
     const orphanPaths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'orphan'
+      sessionId: 'orphan',
     });
 
-    await mkdir(orphanPaths.sessionRoot, { recursive: true });
+    await mkdir(orphanPaths.sessionRoot, {recursive: true});
     await writeFile(
       layout.schemaPath,
       `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
-          createdAt: '2026-06-04T00:00:00.000Z'
-        })
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
       )}\n`,
-      'utf8'
+      'utf8',
     );
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:01:00.000Z'])
+      now: fixedClock(['2026-06-04T00:01:00.000Z']),
     });
 
     await expect(store.listSessions()).resolves.toEqual([]);
 
     const created = await store.createSession({
-      sessionId: 'fresh'
+      sessionId: 'fresh',
     });
 
     expect(created).toEqual({
       sessionId: 'fresh',
       createdAt: '2026-06-04T00:01:00.000Z',
-      updatedAt: '2026-06-04T00:01:00.000Z'
+      updatedAt: '2026-06-04T00:01:00.000Z',
     });
     await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
-      `${JSON.stringify(created)}\n`
+      `${JSON.stringify(created)}\n`,
     );
   });
 
   it('fails empty session catalogs when session directories contain durable evidence', async () => {
     const storeRoot = await createTempStoreRoot();
-    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
     const orphanPaths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'orphan'
+      sessionId: 'orphan',
     });
 
-    await mkdir(orphanPaths.sessionRoot, { recursive: true });
+    await mkdir(orphanPaths.sessionRoot, {recursive: true});
     await writeFile(
       layout.schemaPath,
       `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
-          createdAt: '2026-06-04T00:00:00.000Z'
-        })
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
       )}\n`,
-      'utf8'
+      'utf8',
     );
     await writeFile(layout.sessionCatalogPath, '', 'utf8');
     await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:01:00.000Z'])
+      now: fixedClock(['2026-06-04T00:01:00.000Z']),
     });
 
     await expectStorageErrorCode(
       async () => await store.listSessions(),
-      'missing_file'
+      'missing_file',
     );
     await expectStorageErrorCode(
       async () =>
         await store.createSession({
-          sessionId: 'fresh'
+          sessionId: 'fresh',
         }),
-      'missing_file'
+      'missing_file',
     );
     await expectStorageErrorCode(
       async () =>
         await Promise.resolve(
           assertLocalRuntimeSessionReadable({
             storeRoot,
-            sessionId: 'orphan'
-          })
+            sessionId: 'orphan',
+          }),
         ),
-      'missing_file'
+      'missing_file',
     );
     await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe('');
   });
@@ -639,55 +637,49 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock([
-        '2026-06-04T00:00:00.000Z',
-        '2026-06-04T00:01:00.000Z'
-      ])
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
     const existing = await store.createSession({
-      sessionId: 'cataloged'
+      sessionId: 'cataloged',
     });
     const orphanPaths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'orphan'
+      sessionId: 'orphan',
     });
-    await mkdir(orphanPaths.sessionRoot, { recursive: true });
+    await mkdir(orphanPaths.sessionRoot, {recursive: true});
     await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
 
     await expectStorageErrorCode(
       async () =>
         await store.createSession({
-          sessionId: 'orphan'
+          sessionId: 'orphan',
         }),
-      'missing_file'
+      'missing_file',
     );
-    await expect(readFile(store.layout.sessionCatalogPath, 'utf8')).resolves.toBe(
-      `${JSON.stringify(existing)}\n`
-    );
+    await expect(
+      readFile(store.layout.sessionCatalogPath, 'utf8'),
+    ).resolves.toBe(`${JSON.stringify(existing)}\n`);
   });
 
   it('creates an uncataloged session only after verifying its directory is empty', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock([
-        '2026-06-04T00:00:00.000Z',
-        '2026-06-04T00:01:00.000Z'
-      ])
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
     const existing = await store.createSession({
-      sessionId: 'cataloged'
+      sessionId: 'cataloged',
     });
     const emptyPaths = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'empty-orphan'
+      sessionId: 'empty-orphan',
     });
-    await mkdir(emptyPaths.sessionRoot, { recursive: true });
+    await mkdir(emptyPaths.sessionRoot, {recursive: true});
 
     const created = await store.createSession({
-      sessionId: 'empty-orphan'
+      sessionId: 'empty-orphan',
     });
 
     expect(await store.listSessions()).toEqual([existing, created]);
@@ -695,25 +687,25 @@ describe('local runtime session store', () => {
 
   it('tolerates an empty sessions root when the schema marker was never created', async () => {
     const storeRoot = await createTempStoreRoot();
-    const layout = createLocalRuntimeStorageLayout({ storeRoot });
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
 
-    await mkdir(layout.sessionsRoot, { recursive: true });
+    await mkdir(layout.sessionsRoot, {recursive: true});
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
-      now: fixedClock(['2026-06-04T00:02:00.000Z'])
+      now: fixedClock(['2026-06-04T00:02:00.000Z']),
     });
     const created = await store.createSession({
-      sessionId: 'fresh'
+      sessionId: 'fresh',
     });
 
     expect(created).toEqual({
       sessionId: 'fresh',
       createdAt: '2026-06-04T00:02:00.000Z',
-      updatedAt: '2026-06-04T00:02:00.000Z'
+      updatedAt: '2026-06-04T00:02:00.000Z',
     });
     await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
-      `${JSON.stringify(created)}\n`
+      `${JSON.stringify(created)}\n`,
     );
   });
 
@@ -721,9 +713,9 @@ describe('local runtime session store', () => {
     it(`initializes a fresh store containing only symlinked ${testCase.description}`, async () => {
       const storeRoot = await createTempStoreRoot();
       const controlTargetRoot = await createTempRoot(
-        'project02-session-store-control-target-'
+        'project02-session-store-control-target-',
       );
-      const layout = createLocalRuntimeStorageLayout({ storeRoot });
+      const layout = createLocalRuntimeStorageLayout({storeRoot});
 
       for (const layoutPath of testCase.layoutPaths) {
         const targetPath = join(controlTargetRoot, `${layoutPath}.target`);
@@ -734,19 +726,19 @@ describe('local runtime session store', () => {
 
       const store = createLocalRuntimeSessionStore({
         storeRoot,
-        now: fixedClock(['2026-06-04T00:02:00.000Z'])
+        now: fixedClock(['2026-06-04T00:02:00.000Z']),
       });
       const created = await store.createSession({
-        sessionId: 'fresh'
+        sessionId: 'fresh',
       });
 
       expect(created).toEqual({
         sessionId: 'fresh',
         createdAt: '2026-06-04T00:02:00.000Z',
-        updatedAt: '2026-06-04T00:02:00.000Z'
+        updatedAt: '2026-06-04T00:02:00.000Z',
       });
       await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
-        `${JSON.stringify(created)}\n`
+        `${JSON.stringify(created)}\n`,
       );
     });
   }
@@ -779,12 +771,14 @@ function fixedClock(times: readonly string[]): () => string {
 }
 
 function createConversationLogReader(
-  recordsBySessionId: Readonly<Record<string, readonly ConversationLogRecord[]>>
+  recordsBySessionId: Readonly<
+    Record<string, readonly ConversationLogRecord[]>
+  >,
 ): LocalRuntimeSessionConversationLogReader {
   return {
     readConversationMessages(sessionId) {
       return recordsBySessionId[sessionId] ?? [];
-    }
+    },
   };
 }
 
@@ -792,20 +786,20 @@ function createConversationRecord(
   message: Pick<
     ConversationLogRecord,
     'id' | 'role' | 'speakerId' | 'speakerName' | 'text'
-  >
+  >,
 ): ConversationLogRecord {
   return Object.freeze({
     eventId: 'evt_persisted',
     traceId: 'trace_persisted',
     createdAt: '2026-06-04T00:00:00.000Z',
     committedAt: '2026-06-04T00:00:01.000Z',
-    ...message
+    ...message,
   } satisfies ConversationLogRecord);
 }
 
 async function expectStorageErrorCode(
   operation: () => Promise<unknown>,
-  code: LocalRuntimeStorageContractErrorCode
+  code: LocalRuntimeStorageContractErrorCode,
 ): Promise<void> {
   try {
     await operation();
@@ -814,7 +808,7 @@ async function expectStorageErrorCode(
 
     if (!(error instanceof LocalRuntimeStorageContractError)) {
       throw new Error('Expected LocalRuntimeStorageContractError.', {
-        cause: error
+        cause: error,
       });
     }
 

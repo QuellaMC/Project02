@@ -1,62 +1,54 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 
-import { createTestTempRoot } from '../support/temp-root.ts';
-import {
-  writeRuntimeConfig
-} from '../support/runtime-config.ts';
-import { collect } from '../support/streams.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {collect} from '../support/streams.ts';
 
 import {
   createConversationSession,
   createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent
+  createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
-import {
-  createFileRuntimeLogStore
-} from '../../src/runtime/storage/file-runtime-log-store.ts';
-import {
-  createLocalRuntimeSessionStore
-} from '../../src/runtime/storage/session-store.ts';
-import {
-  runLocalUserMessageEvent
-} from '../../src/runtime/turn/local.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
 import {
   defaultRoleModelProviderCapabilities,
-  type RoleModelAdapter
+  type RoleModelAdapter,
 } from '../../src/role-model/index.ts';
-import { runInspectCliFromArgs } from '../../src/cli/inspect/main.ts';
+import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
   runtimeConfigEnvVarName,
-  runtimeConfigVersion
+  runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
   runtimePluginContractVersion,
   type RuntimePlugin,
   type RuntimePluginAccessMap,
-  type RuntimePluginContext
+  type RuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import {
   firstPartyModelToolsPluginId,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
-import { createDefaultProject02PluginHost } from '../support/default-plugin-host.ts';
+import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-inspect',
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-inspect'
+      sessionId: 'session-inspect',
     });
-    const session = createConversationSession({ id: 'session-inspect' });
+    const session = createConversationSession({id: 'session-inspect'});
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -64,28 +56,28 @@ describe('inspect CLI plugin evidence', () => {
         createRuntimeEventIdentity({
           eventId: 'evt_inspect',
           traceId: 'trace_inspect',
-          createdAt: '2026-06-15T00:00:00.000Z'
-        })
+          createdAt: '2026-06-15T00:00:00.000Z',
+        }),
       ),
       session,
       logStore,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot,
         sessionId: 'session-inspect',
-        sessionIdentity: session
+        sessionIdentity: session,
       }),
-      roleModelAdapter: createPatchThenReplyAdapter()
+      roleModelAdapter: createPatchThenReplyAdapter(),
     });
 
     let stdout = '';
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--session', 'session-inspect'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect(() => {})
-      }
+        stderr: collect(() => {}),
+      },
     );
     const output = JSON.parse(stdout) as {
       readonly evidenceScopes: {
@@ -121,7 +113,7 @@ describe('inspect CLI plugin evidence', () => {
               };
             };
           }[];
-          readonly toolEvents: readonly [{ readonly pluginId: string }];
+          readonly toolEvents: readonly [{readonly pluginId: string}];
           readonly pluginEvidence: {
             readonly evidence: readonly {
               readonly pluginId: string;
@@ -129,7 +121,7 @@ describe('inspect CLI plugin evidence', () => {
               readonly status: string;
             }[];
           };
-        }
+        },
       ];
     };
 
@@ -138,39 +130,38 @@ describe('inspect CLI plugin evidence', () => {
       runtimeConfig: 'current_at_inspection',
       activation: 'current_at_inspection',
       storedSessionEvidence: 'stored_history',
-      derivedTraceEvidence: 'derived_not_persisted'
+      derivedTraceEvidence: 'derived_not_persisted',
     });
     expect(output.counts.derivedTraceEntries).toBe(0);
     expect(output.turns[0].derivedSteps).toEqual([]);
     expect(output.turns[0].modelRounds).toHaveLength(2);
-    expect(output.turns[0].modelRounds.map((round) => round.rawEventKind)).toEqual([
-      'tool_call_started',
-      'visible_reply_committed'
-    ]);
     expect(
-      output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText
+      output.turns[0].modelRounds.map(round => round.rawEventKind),
+    ).toEqual(['tool_call_started', 'visible_reply_committed']);
+    expect(
+      output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText,
     ).toContain('character_state.patch');
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.input
-        ?.pluginContextItems[0]?.text
+        ?.pluginContextItems[0]?.text,
     ).toContain("Mira's internal Character State");
     expect(
-      output.turns[0].modelRounds[1]?.roleModelEvidence.output
-        ?.providerExchange?.renderedMessages.length
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
+        ?.renderedMessages.length,
     ).toBeGreaterThan(0);
     expect(
-      output.turns[0].modelRounds[1]?.roleModelEvidence.output
-        ?.providerExchange?.renderedTools.length
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
+        ?.renderedTools.length,
     ).toBeGreaterThan(0);
     expect(
-      output.turns[0].modelRounds[1]?.roleModelEvidence.output
-        ?.providerExchange?.requestBody
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
+        ?.requestBody,
     ).toMatchObject({
-      provider: 'local-fixture'
+      provider: 'local-fixture',
     });
     expect(
-      output.turns[0].modelRounds[1]?.roleModelEvidence.output
-        ?.providerExchange?.nativeToolResultMessages.length
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
+        ?.nativeToolResultMessages.length,
     ).toBeGreaterThan(0);
     expect(output.turns[0].toolEvents[0].pluginId).toBe('character-state');
     expect(output.turns[0].pluginEvidence.evidence).toEqual(
@@ -179,9 +170,9 @@ describe('inspect CLI plugin evidence', () => {
           pluginId: 'character-state',
           evidenceKind: 'tool_invocation',
           status: 'accepted',
-          summary: 'Applied 1 Character State changes.'
-        })
-      ])
+          summary: 'Applied 1 Character State changes.',
+        }),
+      ]),
     );
   });
 
@@ -193,33 +184,33 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot,
       plugins: {
         'unknown-plugin': {
-          enabled: true
+          enabled: true,
         },
         'character-state': {
-          enabled: false
-        }
-      }
+          enabled: false,
+        },
+      },
     });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-config',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     let stdout = '';
     const exitCode = await runInspectCliFromArgs(
       ['--config', configPath, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect(() => {})
-      }
+        stderr: collect(() => {}),
+      },
     );
     const output = JSON.parse(stdout) as {
       readonly runtimeConfig: {
         readonly source: string;
         readonly path: string;
-        readonly project02: { readonly storeRoot: string };
+        readonly project02: {readonly storeRoot: string};
       };
       readonly plugins: readonly {
         readonly pluginId: string;
@@ -233,25 +224,25 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.runtimeConfig).toMatchObject({
       source: 'path',
       path: configPath,
-      project02: { storeRoot }
+      project02: {storeRoot},
     });
     expect(output.plugins).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           pluginId: runtimePluginId,
           enabled: true,
-          requestedAccess: { model_input: 'write' },
-          grantedAccess: { model_input: 'write' }
+          requestedAccess: {model_input: 'write'},
+          grantedAccess: {model_input: 'write'},
         }),
         expect.objectContaining({
           pluginId: firstPartyModelToolsPluginId,
-          enabled: true
+          enabled: true,
         }),
         expect.objectContaining({
           pluginId: 'character-state',
-          enabled: false
-        })
-      ])
+          enabled: false,
+        }),
+      ]),
     );
     expect(stdout).toContain('"activationDiagnostics"');
     expect(stdout).toContain('"runtime_config_unknown_plugin"');
@@ -262,7 +253,7 @@ describe('inspect CLI plugin evidence', () => {
     const cwdRoot = createTestTempRoot('project02-inspect-cwd-env-');
     const storeRoot = createTestTempRoot('project02-inspect-cwd-store-');
     const configPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
-      storeRoot
+      storeRoot,
     });
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
@@ -271,11 +262,11 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(cwdRoot, '.env'),
       `${runtimeConfigEnvVarName}=${configPath}\n`,
-      'utf8'
+      'utf8',
     );
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-cwd-config',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     try {
@@ -283,30 +274,30 @@ describe('inspect CLI plugin evidence', () => {
       process.chdir(cwdRoot);
 
       const exitCode = await runInspectCliFromArgs(['--sessions'], {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect(() => {})
+        stderr: collect(() => {}),
       });
       const output = JSON.parse(stdout) as {
         readonly runtimeConfig: {
           readonly source: string;
           readonly path: string;
-          readonly project02: { readonly storeRoot: string };
+          readonly project02: {readonly storeRoot: string};
         };
-        readonly sessions: readonly { readonly sessionId: string }[];
+        readonly sessions: readonly {readonly sessionId: string}[];
       };
 
       expect(exitCode).toBe(0);
       expect(output.runtimeConfig).toMatchObject({
         source: 'env',
         path: configPath,
-        project02: { storeRoot }
+        project02: {storeRoot},
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
-          sessionId: 'session-cwd-config'
-        })
+          sessionId: 'session-cwd-config',
+        }),
       );
     } finally {
       process.chdir(previousCwd);
@@ -316,10 +307,14 @@ describe('inspect CLI plugin evidence', () => {
 
   it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
     const cwdRoot = createTestTempRoot('project02-inspect-cwd-store-');
-    const defaultStoreRoot = createTestTempRoot('project02-inspect-default-store-');
-    const selectedStoreRoot = createTestTempRoot('project02-inspect-selected-store-');
+    const defaultStoreRoot = createTestTempRoot(
+      'project02-inspect-default-store-',
+    );
+    const selectedStoreRoot = createTestTempRoot(
+      'project02-inspect-selected-store-',
+    );
     const defaultConfigPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
-      storeRoot: defaultStoreRoot
+      storeRoot: defaultStoreRoot,
     });
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
@@ -328,11 +323,13 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(cwdRoot, '.env'),
       `${runtimeConfigEnvVarName}=${defaultConfigPath}\n`,
-      'utf8'
+      'utf8',
     );
-    await createLocalRuntimeSessionStore({ storeRoot: selectedStoreRoot }).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: selectedStoreRoot,
+    }).createSession({
       sessionId: 'session-selected-store',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     try {
@@ -342,29 +339,29 @@ describe('inspect CLI plugin evidence', () => {
       const exitCode = await runInspectCliFromArgs(
         ['--store', selectedStoreRoot, '--sessions'],
         {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
-          stderr: collect(() => {})
-        }
+          stderr: collect(() => {}),
+        },
       );
       const output = JSON.parse(stdout) as {
         readonly runtimeConfig: {
           readonly source: string;
-          readonly project02: { readonly storeRoot: string };
+          readonly project02: {readonly storeRoot: string};
         };
-        readonly sessions: readonly { readonly sessionId: string }[];
+        readonly sessions: readonly {readonly sessionId: string}[];
       };
 
       expect(exitCode).toBe(0);
       expect(output.runtimeConfig).toMatchObject({
         source: 'none',
-        project02: { storeRoot: selectedStoreRoot }
+        project02: {storeRoot: selectedStoreRoot},
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
-          sessionId: 'session-selected-store'
-        })
+          sessionId: 'session-selected-store',
+        }),
       );
     } finally {
       process.chdir(previousCwd);
@@ -374,16 +371,20 @@ describe('inspect CLI plugin evidence', () => {
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
     const cwdRoot = createTestTempRoot('project02-inspect-cwd-dotenv-error-');
-    const selectedStoreRoot = createTestTempRoot('project02-inspect-selected-dotenv-error-');
+    const selectedStoreRoot = createTestTempRoot(
+      'project02-inspect-selected-dotenv-error-',
+    );
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
-    await createLocalRuntimeSessionStore({ storeRoot: selectedStoreRoot }).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: selectedStoreRoot,
+    }).createSession({
       sessionId: 'session-selected-before-cwd-dotenv',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     try {
@@ -393,32 +394,32 @@ describe('inspect CLI plugin evidence', () => {
       const exitCode = await runInspectCliFromArgs(
         ['--store', selectedStoreRoot, '--sessions'],
         {
-          stdout: collect((chunk) => {
+          stdout: collect(chunk => {
             stdout += chunk;
           }),
-          stderr: collect((chunk) => {
+          stderr: collect(chunk => {
             stderr += chunk;
-          })
-        }
+          }),
+        },
       );
       const output = JSON.parse(stdout) as {
         readonly runtimeConfig: {
           readonly source: string;
-          readonly project02: { readonly storeRoot: string };
+          readonly project02: {readonly storeRoot: string};
         };
-        readonly sessions: readonly { readonly sessionId: string }[];
+        readonly sessions: readonly {readonly sessionId: string}[];
       };
 
       expect(exitCode).toBe(0);
       expect(stderr).toBe('');
       expect(output.runtimeConfig).toMatchObject({
         source: 'none',
-        project02: { storeRoot: selectedStoreRoot }
+        project02: {storeRoot: selectedStoreRoot},
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
-          sessionId: 'session-selected-before-cwd-dotenv'
-        })
+          sessionId: 'session-selected-before-cwd-dotenv',
+        }),
       );
     } finally {
       process.chdir(previousCwd);
@@ -427,14 +428,20 @@ describe('inspect CLI plugin evidence', () => {
   });
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
-    const cwdRoot = createTestTempRoot('project02-inspect-env-cwd-dotenv-error-');
-    const selectedStoreRoot = createTestTempRoot('project02-inspect-env-selected-store-');
-    const configRoot = createTestTempRoot('project02-inspect-env-selected-config-');
+    const cwdRoot = createTestTempRoot(
+      'project02-inspect-env-cwd-dotenv-error-',
+    );
+    const selectedStoreRoot = createTestTempRoot(
+      'project02-inspect-env-selected-store-',
+    );
+    const configRoot = createTestTempRoot(
+      'project02-inspect-env-selected-config-',
+    );
     const configPath = writeRuntimeConfig(
       join(configRoot, 'runtime-config.json'),
       {
-        storeRoot: selectedStoreRoot
-      }
+        storeRoot: selectedStoreRoot,
+      },
     );
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
@@ -443,10 +450,10 @@ describe('inspect CLI plugin evidence', () => {
 
     mkdirSync(join(cwdRoot, '.env'));
     await createLocalRuntimeSessionStore({
-      storeRoot: selectedStoreRoot
+      storeRoot: selectedStoreRoot,
     }).createSession({
       sessionId: 'session-env-selected-before-cwd-dotenv',
-      createdAt: '2026-06-22T00:00:00.000Z'
+      createdAt: '2026-06-22T00:00:00.000Z',
     });
 
     try {
@@ -454,20 +461,20 @@ describe('inspect CLI plugin evidence', () => {
       process.chdir(cwdRoot);
 
       const exitCode = await runInspectCliFromArgs(['--sessions'], {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
-        })
+        }),
       });
       const output = JSON.parse(stdout) as {
         readonly runtimeConfig: {
           readonly source: string;
           readonly path: string;
-          readonly project02: { readonly storeRoot: string };
+          readonly project02: {readonly storeRoot: string};
         };
-        readonly sessions: readonly { readonly sessionId: string }[];
+        readonly sessions: readonly {readonly sessionId: string}[];
       };
 
       expect(exitCode).toBe(0);
@@ -475,12 +482,12 @@ describe('inspect CLI plugin evidence', () => {
       expect(output.runtimeConfig).toMatchObject({
         source: 'env',
         path: configPath,
-        project02: { storeRoot: selectedStoreRoot }
+        project02: {storeRoot: selectedStoreRoot},
       });
       expect(output.sessions).toContainEqual(
         expect.objectContaining({
-          sessionId: 'session-env-selected-before-cwd-dotenv'
-        })
+          sessionId: 'session-env-selected-before-cwd-dotenv',
+        }),
       );
     } finally {
       process.chdir(previousCwd);
@@ -497,19 +504,19 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-custom-factory',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
@@ -520,13 +527,13 @@ describe('inspect CLI plugin evidence', () => {
               factoryCalls += 1;
 
               return plugin;
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     );
     const output = JSON.parse(stdout) as {
-      readonly activationDiagnostics: readonly { readonly code: string }[];
+      readonly activationDiagnostics: readonly {readonly code: string}[];
       readonly plugins: readonly {
         readonly pluginId: string;
         readonly enabled: boolean;
@@ -537,52 +544,61 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_unknown_plugin'
+    expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
+      'runtime_config_unknown_plugin',
     );
     const inspectedPlugin = output.plugins.find(
-      (item) => item.pluginId === plugin.manifest.id
+      item => item.pluginId === plugin.manifest.id,
     );
 
     expect(inspectedPlugin).toMatchObject({
       pluginId: plugin.manifest.id,
       enabled: true,
-      activationStatus: 'active'
+      activationStatus: 'active',
     });
     expect(inspectedPlugin?.activationReasons).toEqual(
-      expect.arrayContaining(['test_inspect_fixture', 'enabled_by_config'])
+      expect.arrayContaining(['test_inspect_fixture', 'enabled_by_config']),
     );
   });
 
   it('reports config load errors before runtime env file errors', async () => {
-    const storeRoot = createTestTempRoot('project02-inspect-load-error-before-env-');
+    const storeRoot = createTestTempRoot(
+      'project02-inspect-load-error-before-env-',
+    );
     let stdout = '';
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      storeRoot: 42
+      storeRoot: 42,
     });
     mkdirSync(join(storeRoot, '.env'));
 
-    const exitCode = await runInspectCliFromArgs(['--store', storeRoot, '--sessions'], {
-      stdout: collect((chunk) => {
-        stdout += chunk;
-      }),
-      stderr: collect((chunk) => {
-        stderr += chunk;
-      })
-    });
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+      },
+    );
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
-    expect(stderr).toContain('Runtime config field must be a non-empty string.');
+    expect(stderr).toContain(
+      'Runtime config field must be a non-empty string.',
+    );
     expect(stderr).not.toContain('Could not load runtime config env file');
   });
 
   it('reports env-independent activation errors before runtime env file errors', async () => {
-    const storeRoot = createTestTempRoot('project02-inspect-activation-before-env-');
+    const storeRoot = createTestTempRoot(
+      'project02-inspect-activation-before-env-',
+    );
     const plugin = createInspectRequiredConfigFixturePlugin(
-      'inspect.required-config'
+      'inspect.required-config',
     );
     let stdout = '';
     let stderr = '';
@@ -590,23 +606,23 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-activation-before-env',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
     mkdirSync(join(storeRoot, '.env'));
 
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         factories: {
@@ -614,10 +630,10 @@ describe('inspect CLI plugin evidence', () => {
             manifest: plugin.manifest,
             create() {
               throw new Error('inspect should not construct invalid plugins');
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     );
     const output = JSON.parse(stdout) as {
       readonly activationDiagnostics: readonly {
@@ -632,17 +648,19 @@ describe('inspect CLI plugin evidence', () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: 'runtime_config_required_value_missing',
-          path: `plugins.${plugin.manifest.id}.config.endpoint`
-        })
-      ])
+          path: `plugins.${plugin.manifest.id}.config.endpoint`,
+        }),
+      ]),
     );
     expect(stdout).not.toContain('Could not load runtime config env file');
   });
 
   it('loads runtime env before reporting mixed inspect activation diagnostics', async () => {
-    const storeRoot = createTestTempRoot('project02-inspect-mixed-activation-env-');
+    const storeRoot = createTestTempRoot(
+      'project02-inspect-mixed-activation-env-',
+    );
     const plugin = createInspectRequiredSecretAndConfigFixturePlugin(
-      'inspect.mixed-config'
+      'inspect.mixed-config',
     );
     const envVar = 'PROJECT02_INSPECT_MIXED_SECRET_3452532128';
     let stdout = '';
@@ -653,24 +671,28 @@ describe('inspect CLI plugin evidence', () => {
         [plugin.manifest.id]: {
           enabled: true,
           config: {
-            apiKey: { $env: envVar }
-          }
-        }
-      }
+            apiKey: {$env: envVar},
+          },
+        },
+      },
     });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-mixed-activation-env',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
-    writeFileSync(join(storeRoot, '.env'), `${envVar}=inspect-secret\n`, 'utf8');
+    writeFileSync(
+      join(storeRoot, '.env'),
+      `${envVar}=inspect-secret\n`,
+      'utf8',
+    );
 
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         factories: {
@@ -678,10 +700,10 @@ describe('inspect CLI plugin evidence', () => {
             manifest: plugin.manifest,
             create() {
               throw new Error('inspect should not construct invalid plugins');
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     );
     const output = JSON.parse(stdout) as {
       readonly activationDiagnostics: readonly {
@@ -696,12 +718,12 @@ describe('inspect CLI plugin evidence', () => {
       expect.arrayContaining([
         expect.objectContaining({
           code: 'runtime_config_required_value_missing',
-          path: `plugins.${plugin.manifest.id}.config.endpoint`
-        })
-      ])
+          path: `plugins.${plugin.manifest.id}.config.endpoint`,
+        }),
+      ]),
     );
-    expect(output.activationDiagnostics.map((item) => item.code)).not.toContain(
-      'runtime_config_required_secret_missing'
+    expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
+      'runtime_config_required_secret_missing',
     );
     expect(stdout).not.toContain(`plugins.${plugin.manifest.id}.config.apiKey`);
   });
@@ -709,7 +731,7 @@ describe('inspect CLI plugin evidence', () => {
   it('does not invoke plugin lifecycle hooks while listing sessions', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-close-');
     const sessionEndContexts: RuntimePluginContext[] = [];
-    const plugin = createInspectSessionEndFixturePlugin((context) => {
+    const plugin = createInspectSessionEndFixturePlugin(context => {
       sessionEndContexts.push(context);
     });
     let stdout = '';
@@ -717,19 +739,19 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-close',
-      createdAt: '2026-06-22T00:00:00.000Z'
+      createdAt: '2026-06-22T00:00:00.000Z',
     });
 
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
         stderr: collect(() => {}),
@@ -738,10 +760,10 @@ describe('inspect CLI plugin evidence', () => {
             manifest: plugin.manifest,
             create() {
               return plugin;
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     );
     const output = JSON.parse(stdout) as {
       readonly plugins: readonly {
@@ -750,20 +772,20 @@ describe('inspect CLI plugin evidence', () => {
         readonly grantedAccess: RuntimePluginAccessMap;
         readonly activationStatus: string;
       }[];
-      readonly sessions: readonly { readonly sessionId: string }[];
+      readonly sessions: readonly {readonly sessionId: string}[];
     };
 
     expect(exitCode).toBe(0);
     expect(output.sessions).toContainEqual(
-      expect.objectContaining({ sessionId: 'session-close' })
+      expect.objectContaining({sessionId: 'session-close'}),
     );
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: plugin.manifest.id,
-        requestedAccess: { turn_context: 'read' },
-        grantedAccess: { turn_context: 'read' },
-        activationStatus: 'active'
-      })
+        requestedAccess: {turn_context: 'read'},
+        grantedAccess: {turn_context: 'read'},
+        activationStatus: 'active',
+      }),
     );
     expect(sessionEndContexts).toHaveLength(0);
   });
@@ -772,7 +794,7 @@ describe('inspect CLI plugin evidence', () => {
     const storeRoot = createTestTempRoot('project02-inspect-close-failure-');
     const missingSessionId = 'missing-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
-    const plugin = createInspectSessionEndFixturePlugin((context) => {
+    const plugin = createInspectSessionEndFixturePlugin(context => {
       sessionEndContexts.push(context);
     });
     let stdout = '';
@@ -781,22 +803,22 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'existing-session',
-      createdAt: '2026-06-22T00:00:00.000Z'
+      createdAt: '2026-06-22T00:00:00.000Z',
     });
 
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--session', missingSessionId],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         factories: {
@@ -804,10 +826,10 @@ describe('inspect CLI plugin evidence', () => {
             manifest: plugin.manifest,
             create() {
               return plugin;
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     );
 
     expect(exitCode).toBe(1);
@@ -829,18 +851,18 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot,
       plugins: {
         [plugin.manifest.id]: {
-          enabled: true
-        }
-      }
+          enabled: true,
+        },
+      },
     });
 
     const exitCode = await runInspectCliFromArgs(
       ['--config', configPath, '--sessions'],
       {
-        stdout: collect((chunk) => {
+        stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect((chunk) => {
+        stderr: collect(chunk => {
           stderr += chunk;
         }),
         factories: {
@@ -848,10 +870,10 @@ describe('inspect CLI plugin evidence', () => {
             manifest: plugin.manifest,
             create() {
               return plugin;
-            }
-          }
-        }
-      }
+            },
+          },
+        },
+      },
     );
 
     expect(exitCode).toBe(1);
@@ -871,18 +893,22 @@ describe('inspect CLI plugin evidence', () => {
         {
           version: runtimeConfigVersion,
           project02: {
-            storeRoot
-          }
+            storeRoot,
+          },
         },
         null,
-        2
+        2,
       )}\n`,
-      'utf8'
+      'utf8',
     );
-    writeFileSync(join(storeRoot, '.env'), `${envVar}=inspect-secret\n`, 'utf8');
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    writeFileSync(
+      join(storeRoot, '.env'),
+      `${envVar}=inspect-secret\n`,
+      'utf8',
+    );
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId: 'session-env',
-      createdAt: '2026-06-21T00:00:00.000Z'
+      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     try {
@@ -892,8 +918,8 @@ describe('inspect CLI plugin evidence', () => {
         ['--config', configPath, '--sessions'],
         {
           stdout: collect(() => {}),
-          stderr: collect(() => {})
-        }
+          stderr: collect(() => {}),
+        },
       );
 
       expect(exitCode).toBe(0);
@@ -922,10 +948,10 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
               {
                 name: 'character_state.patch',
                 input: {
-                  mood: 'curious'
-                }
-              }
-            ]
+                  mood: 'curious',
+                },
+              },
+            ],
           }),
           nativeAssistantMessage: {
             role: 'assistant',
@@ -936,11 +962,11 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
                 type: 'function',
                 function: {
                   name: 'character_state.patch',
-                  arguments: '{"mood":"curious"}'
-                }
-              }
-            ]
-          }
+                  arguments: '{"mood":"curious"}',
+                },
+              },
+            ],
+          },
         };
       }
 
@@ -950,37 +976,39 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
             {
               name: 'visible_reply',
               input: {
-                text: 'done'
-              }
-            }
-          ]
+                text: 'done',
+              },
+            },
+          ],
         }),
         providerExchange: {
           provider: {
             name: 'local',
-            model: 'inspect-fixture'
+            model: 'inspect-fixture',
           },
           capabilities: defaultRoleModelProviderCapabilities,
           reasoning: {
             mode: 'none',
-            params: {}
+            params: {},
           },
           renderedMessages: invocation.turnContext.messages,
           renderedTools: invocation.turnContext.tools,
           toolNameMappings: [],
           requestBody: {
-            provider: 'local-fixture'
+            provider: 'local-fixture',
           },
           nativeToolResultMessages: invocation.turnContext.messages.filter(
-            (message) => message.role === 'tool'
-          )
-        }
+            message => message.role === 'tool',
+          ),
+        },
       };
-    }
+    },
   };
 }
 
-function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin {
+function createInspectFixturePlugin(
+  pluginId = 'inspect.custom',
+): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
       id: pluginId,
@@ -991,11 +1019,11 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
+        sourceSystem: 'test',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
@@ -1009,19 +1037,21 @@ function createInspectFixturePlugin(pluginId = 'inspect.custom'): RuntimePlugin 
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: false,
-        reasons: ['test_inspect_fixture']
+        reasons: ['test_inspect_fixture'],
       },
-      requestedAccess: {}
-    }
+      requestedAccess: {},
+    },
   });
 }
 
-function createInspectRequiredConfigFixturePlugin(pluginId: string): RuntimePlugin {
+function createInspectRequiredConfigFixturePlugin(
+  pluginId: string,
+): RuntimePlugin {
   const plugin = createInspectFixturePlugin(pluginId);
 
   return createRuntimePlugin({
@@ -1035,16 +1065,16 @@ function createInspectRequiredConfigFixturePlugin(pluginId: string): RuntimePlug
             required: true,
             secret: false,
             valueType: 'string',
-            redactionLabels: []
-          }
-        ]
-      }
-    }
+            redactionLabels: [],
+          },
+        ],
+      },
+    },
   });
 }
 
 function createInspectRequiredSecretAndConfigFixturePlugin(
-  pluginId: string
+  pluginId: string,
 ): RuntimePlugin {
   const plugin = createInspectRequiredConfigFixturePlugin(pluginId);
 
@@ -1060,16 +1090,16 @@ function createInspectRequiredSecretAndConfigFixturePlugin(
             required: true,
             secret: true,
             valueType: 'secret',
-            redactionLabels: ['secret']
-          }
-        ]
-      }
-    }
+            redactionLabels: ['secret'],
+          },
+        ],
+      },
+    },
   });
 }
 
 function createInspectSessionEndFixturePlugin(
-  onSessionEnd: (context: RuntimePluginContext) => void
+  onSessionEnd: (context: RuntimePluginContext) => void,
 ): RuntimePlugin {
   const pluginId = 'inspect.session-end.fixture';
 
@@ -1083,11 +1113,11 @@ function createInspectSessionEndFixturePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test'
+        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {
-        fields: []
+        fields: [],
       },
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
@@ -1101,14 +1131,14 @@ function createInspectSessionEndFixturePlugin(
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
           afterTurnCommitted: 'log_failure',
-          health: 'degrade'
-        }
+          health: 'degrade',
+        },
       },
       activation: {
         defaultEnabled: false,
-        reasons: ['test_inspect_cleanup']
+        reasons: ['test_inspect_cleanup'],
       },
-      requestedAccess: { turn_context: 'read' }
+      requestedAccess: {turn_context: 'read'},
     },
     lifecycleHooks: {
       onSessionEnd(context) {
@@ -1116,10 +1146,10 @@ function createInspectSessionEndFixturePlugin(
 
         return {
           status: 'completed',
-          evidence: []
+          evidence: [],
         };
-      }
-    }
+      },
+    },
   });
 }
 

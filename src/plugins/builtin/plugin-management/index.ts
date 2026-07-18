@@ -3,18 +3,18 @@ import {
   runtimePluginConfigUpdateToolName,
   runtimePluginContractVersion,
   runtimePluginId,
-  runtimePluginListToolName
+  runtimePluginListToolName,
 } from '../../api/contract.ts';
-import { createRuntimePlugin } from '../../api/constructors.ts';
-import { createRuntimePluginManifest } from '../../api/manifest-validation.ts';
+import {createRuntimePlugin} from '../../api/constructors.ts';
+import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {
   RuntimePlugin,
   RuntimePluginProvidedTool,
-  RuntimePluginToolCallResult
+  RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 import {
   createRuntimePluginConfigReadTool,
-  handleRuntimePluginConfigReadToolCall
+  handleRuntimePluginConfigReadToolCall,
 } from './config.ts';
 import {
   createRuntimePluginConfigUpdateTool,
@@ -23,17 +23,17 @@ import {
   preparedRuntimePluginConfigEffectIsStillCurrent,
   handleRuntimePluginConfigUpdateToolCall,
   reconcilePreparedRuntimePluginConfigEffect,
-  runtimePluginConfigUpdateExecutionTimeoutMs
+  runtimePluginConfigUpdateExecutionTimeoutMs,
 } from './config-update.ts';
 import {
   createRuntimePluginListTool,
   handleRuntimePluginListToolCall,
-  type RuntimePluginListHostState
+  type RuntimePluginListHostState,
 } from './list.ts';
 import {
   assertRuntimePluginConfigControlCapabilityPresent,
   createRuntimePluginConfigControlHostStateSnapshot,
-  type RuntimePluginConfigControlHostState
+  type RuntimePluginConfigControlHostState,
 } from './state.ts';
 
 export type CreateRuntimePluginManagementPluginOptions = {
@@ -45,11 +45,11 @@ export type CreateRuntimePluginManagementPluginOptions = {
 const runtimePluginManagementPluginInstances = new WeakSet<RuntimePlugin>();
 
 export function createRuntimePluginManagementPlugin(
-  options: CreateRuntimePluginManagementPluginOptions
+  options: CreateRuntimePluginManagementPluginOptions,
 ): RuntimePlugin {
   if (options.pluginConfigControl !== undefined) {
     assertRuntimePluginConfigControlCapabilityPresent(
-      options.pluginConfigControl
+      options.pluginConfigControl,
     );
   }
 
@@ -57,10 +57,10 @@ export function createRuntimePluginManagementPlugin(
     options.pluginConfigControl === undefined
       ? undefined
       : createRuntimePluginConfigControlHostStateSnapshot(
-          options.pluginConfigControl
+          options.pluginConfigControl,
         );
   const providedTools: RuntimePluginProvidedTool[] = [
-    createRuntimePluginListTool()
+    createRuntimePluginListTool(),
   ];
 
   if (pluginConfigControl !== undefined) {
@@ -77,7 +77,7 @@ export function createRuntimePluginManagementPlugin(
           return handleRuntimePluginListToolCall({
             call,
             context,
-            hostStateForTurn: options.hostStateForTurn
+            hostStateForTurn: options.hostStateForTurn,
           });
         }
 
@@ -91,7 +91,7 @@ export function createRuntimePluginManagementPlugin(
             state: pluginConfigControl,
             ...(options.storeRoot === undefined
               ? {}
-              : { storeRoot: options.storeRoot })
+              : {storeRoot: options.storeRoot}),
           });
         }
 
@@ -105,13 +105,13 @@ export function createRuntimePluginManagementPlugin(
             state: pluginConfigControl,
             ...(options.storeRoot === undefined
               ? {}
-              : { storeRoot: options.storeRoot })
+              : {storeRoot: options.storeRoot}),
           });
         }
 
         return unavailableRuntimePluginManagementTool(call.toolName);
-      }
-    }
+      },
+    },
   });
 
   runtimePluginManagementPluginInstances.add(plugin);
@@ -130,11 +130,11 @@ export function createRuntimePluginManagementPluginManifest() {
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
       sourceSystem: 'project02',
-      externalContract: 'runtime_plugin_management'
+      externalContract: 'runtime_plugin_management',
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {
-      fields: []
+      fields: [],
     },
     localTrustLevel: 'first_party',
     runtimePolicy: {
@@ -148,31 +148,31 @@ export function createRuntimePluginManagementPluginManifest() {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
         afterTurnCommitted: 'log_failure',
-        health: 'degrade'
-      }
+        health: 'degrade',
+      },
     },
     activation: {
       defaultEnabled: true,
-      reasons: ['host_provided_plugin_management']
+      reasons: ['host_provided_plugin_management'],
     },
-    requestedAccess: { model_input: 'write' }
+    requestedAccess: {model_input: 'write'},
   });
 }
 
 export function isRuntimePluginManagementPlugin(
-  plugin: RuntimePlugin
+  plugin: RuntimePlugin,
 ): boolean {
   return runtimePluginManagementPluginInstances.has(plugin);
 }
 
 function unavailableRuntimePluginManagementTool(
-  toolName: string
+  toolName: string,
 ): RuntimePluginToolCallResult {
   return {
     status: 'rejected',
     reason: 'runtime_plugin_management_tool_unavailable',
     message: `Tool "${toolName}" is not available in this host.`,
-    evidence: Object.freeze([])
+    evidence: Object.freeze([]),
   };
 }
 
@@ -181,18 +181,18 @@ export {
   createRuntimePluginListSummary,
   type RuntimePluginListActivationState,
   type RuntimePluginListActivationStatus,
-  type RuntimePluginListHostState
+  type RuntimePluginListHostState,
 } from './list.ts';
 export {
   createRuntimePluginConfigControlHostStateSnapshot,
   isRuntimeConfigConflictError,
   requiredRuntimePluginConfigControl,
   runtimeConfigConflictErrorCode,
-  type RuntimePluginConfigControlHostState
+  type RuntimePluginConfigControlHostState,
 } from './state.ts';
 export {
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   normalizePreparedRuntimePluginConfigEffect,
   preparedRuntimePluginConfigEffectIsStillCurrent,
-  reconcilePreparedRuntimePluginConfigEffect
+  reconcilePreparedRuntimePluginConfigEffect,
 };

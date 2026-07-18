@@ -1,35 +1,35 @@
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {
   createConversationSession,
-  createRuntimeEventIdentity
+  createRuntimeEventIdentity,
 } from '../../src/core/index.ts';
 import {
   characterStatePluginId,
-  createCharacterStatePlugin
+  createCharacterStatePlugin,
 } from '../../src/plugins/packages/character-state/plugin.ts';
-import { createRuntimePluginFileStore } from '../../src/runtime/storage/plugin-file-store/index.ts';
-import { testRuntimePluginFileStoreProvider } from '../support/plugin-host-fixtures.ts';
-import { createRuntimePluginHost } from '../../src/plugins/host/index.ts';
+import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {testRuntimePluginFileStoreProvider} from '../support/plugin-host-fixtures.ts';
+import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePluginContext,
   firstPartyModelToolsPluginId,
-  runtimePluginId
+  runtimePluginId,
 } from '../../src/plugins/api/index.ts';
-import { createFileRuntimeLogStore } from '../../src/runtime/storage/file-runtime-log-store.ts';
-import { createLocalRuntimeSessionStore } from '../../src/runtime/storage/session-store.ts';
-import { createRuntimeLogStore } from '../../src/runtime/evidence/index.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
-  type RoleModelChatMessage
+  type RoleModelChatMessage,
 } from '../../src/role-model/index.ts';
-import { createTestTempRoot } from '../support/temp-root.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,
   createHealthRejectingPlugin,
   createSequencedAdapter,
   createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
-  transactionIdentityFromContext
+  transactionIdentityFromContext,
 } from '../support/plugin-tool-loop-fixtures.ts';
 
 describe('plugin-driven Character State tool loop', () => {
@@ -42,44 +42,43 @@ describe('plugin-driven Character State tool loop', () => {
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'state updated'
-            }
-          }
-        ]
-      }
+              text: 'state updated',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('hello', 'evt_plugin_patch'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result.status).toBe('completed');
-    expect(logStore.conversationMessages().map((message) => message.text)).toEqual([
-      'hello',
-      'state updated'
-    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello', 'state updated']);
 
     const rawEvents = logStore.rawEvents();
-    const toolEvents = rawEvents.filter((event) =>
-      event.kind.startsWith('tool_call')
+    const toolEvents = rawEvents.filter(event =>
+      event.kind.startsWith('tool_call'),
     );
 
-    expect(toolEvents.map((event) => event.kind)).toEqual([
+    expect(toolEvents.map(event => event.kind)).toEqual([
       'tool_call_started',
-      'tool_call_finished'
+      'tool_call_finished',
     ]);
     expect(toolEvents[0]).toMatchObject({
       toolCallId:
@@ -87,8 +86,8 @@ describe('plugin-driven Character State tool loop', () => {
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolInput: {
-        mood: 'curious'
-      }
+        mood: 'curious',
+      },
     });
     expect(toolEvents[1]).toMatchObject({
       toolCallId:
@@ -97,19 +96,19 @@ describe('plugin-driven Character State tool loop', () => {
       toolName: 'character_state.patch',
       toolPluginId: 'character-state',
       toolResult: {
-        status: 'accepted'
-      }
+        status: 'accepted',
+      },
     });
     expect(toolEvents[1]).not.toHaveProperty('pluginStoreRevision');
     const terminalEvent = rawEvents.find(
-      (event) => event.kind === 'runtime_turn_completed'
+      event => event.kind === 'runtime_turn_completed',
     );
 
     expect(terminalEvent).toMatchObject({
       kind: 'runtime_turn_completed',
       toolCallIds: [
-        'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch'
-      ]
+        'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
+      ],
     });
     const observations =
       terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolObservations ?? [];
@@ -123,50 +122,47 @@ describe('plugin-driven Character State tool loop', () => {
 
   it('persists role-model evidence on tool-authorizing rounds without interim replies', async () => {
     const sessionId = 'session-tool-round-evidence';
-    const {
-      session,
-      logStore,
-      storeRoot
-    } = await createDurableCharacterStateHarness(sessionId);
+    const {session, logStore, storeRoot} =
+      await createDurableCharacterStateHarness(sessionId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'state updated'
-            }
-          }
-        ]
-      }
+              text: 'state updated',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('hello', 'evt_tool_round_evidence'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result.status).toBe('completed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const reopenedRawEvents = reopenedLogStore.rawEvents();
     const toolStartEvents = reopenedRawEvents.filter(
-      (event) => event.kind === 'tool_call_started'
+      event => event.kind === 'tool_call_started',
     );
     const toolStartEvent = toolStartEvents[0];
 
@@ -182,8 +178,8 @@ describe('plugin-driven Character State tool loop', () => {
       toolRound: 1,
       roleModelIOSnapshot: {
         inputEnvelope: {
-          toolObservations: []
-        }
+          toolObservations: [],
+        },
       },
       parsedRoleModelDecisionSnapshot: {
         result: {
@@ -193,40 +189,40 @@ describe('plugin-driven Character State tool loop', () => {
               {
                 name: 'character_state.patch',
                 input: {
-                  mood: 'curious'
-                }
-              }
-            ]
-          }
-        }
-      }
+                  mood: 'curious',
+                },
+              },
+            ],
+          },
+        },
+      },
     });
     expect(toolStartEvent.roleModelIOSnapshot?.rawOutputText).toContain(
-      'character_state.patch'
+      'character_state.patch',
     );
     expect(toolStartEvent.commitValidation).toBeUndefined();
 
     const terminalEvent = reopenedRawEvents.find(
-      (event) => event.kind === 'runtime_turn_completed'
+      event => event.kind === 'runtime_turn_completed',
     );
 
     expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).toContain(
-      'visible_reply'
+      'visible_reply',
     );
     expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).not.toContain(
-      'character_state.patch'
+      'character_state.patch',
     );
   });
 
   it('persists repeated same tool calls across separate durable turns', async () => {
     const sessionId = 'session-repeated-tool-turns';
-    const {
-      session,
-      logStore,
-      storeRoot
-    } = await createDurableCharacterStateHarness(sessionId);
+    const {session, logStore, storeRoot} =
+      await createDurableCharacterStateHarness(sessionId);
 
-    for (const eventId of ['evt_repeated_tool_first', 'evt_repeated_tool_second']) {
+    for (const eventId of [
+      'evt_repeated_tool_first',
+      'evt_repeated_tool_second',
+    ]) {
       const result = await runLocalUserMessageEvent({
         event: createTestEvent('update state', eventId),
         session,
@@ -237,22 +233,22 @@ describe('plugin-driven Character State tool loop', () => {
               {
                 name: 'character_state.patch',
                 input: {
-                  mood: 'curious'
-                }
-              }
-            ]
+                  mood: 'curious',
+                },
+              },
+            ],
           },
           {
             toolCalls: [
               {
                 name: 'visible_reply',
                 input: {
-                  text: `state updated for ${eventId}`
-                }
-              }
-            ]
-          }
-        ])
+                  text: `state updated for ${eventId}`,
+                },
+              },
+            ],
+          },
+        ]),
       });
 
       expect(result.status).toBe('completed');
@@ -260,69 +256,66 @@ describe('plugin-driven Character State tool loop', () => {
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const toolStartIds = reopenedLogStore
       .rawEvents()
-      .filter((event) => event.kind === 'tool_call_started')
-      .map((event) => event.toolCallId);
+      .filter(event => event.kind === 'tool_call_started')
+      .map(event => event.toolCallId);
 
     expect(toolStartIds).toEqual([
       'evt_repeated_tool_first.trace_evt_repeated_tool_first.round-1.1.character_state.patch',
-      'evt_repeated_tool_second.trace_evt_repeated_tool_second.round-1.1.character_state.patch'
+      'evt_repeated_tool_second.trace_evt_repeated_tool_second.round-1.1.character_state.patch',
     ]);
   });
 
   it('counts invalid character_state.patch attempts against its turn limit', async () => {
-    const {
-      session,
-      logStore,
-      pluginStore
-    } = await createDurableCharacterStateHarness(
-      'session-plugin-patch-invalid-retry'
-    );
+    const {session, logStore, pluginStore} =
+      await createDurableCharacterStateHarness(
+        'session-plugin-patch-invalid-retry',
+      );
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'character_state.patch',
             input: {
-              activity: 'reflecting'
-            }
-          }
-        ]
+              activity: 'reflecting',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'character_state.patch',
             input: {
-              currentActivity: 'reflecting'
-            }
-          }
-        ]
+              currentActivity: 'reflecting',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'state corrected'
-            }
-          }
-        ]
-      }
+              text: 'state corrected',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('correct state', 'evt_plugin_patch_invalid_retry'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
     const toolFinishedEvents = logStore
       .rawEvents()
-      .filter((event) => event.kind === 'tool_call_finished');
+      .filter(event => event.kind === 'tool_call_finished');
 
     expect(result.status).toBe('completed');
     expect(toolFinishedEvents).toHaveLength(2);
@@ -331,120 +324,112 @@ describe('plugin-driven Character State tool loop', () => {
       toolName: 'character_state.patch',
       toolResult: {
         status: 'rejected',
-        reason: 'invalid_input'
-      }
+        reason: 'invalid_input',
+      },
     });
     expect(toolFinishedEvents[1]).toMatchObject({
       dispatchedToHost: false,
       toolName: 'character_state.patch',
       toolResult: {
         status: 'rejected',
-        reason: 'tool_call_limit_reached'
-      }
+        reason: 'tool_call_limit_reached',
+      },
     });
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
     const checkpoint = pluginStore.readJson('checkpoint.json');
-    expect(checkpoint).toMatchObject({ eventCount: 0 });
+    expect(checkpoint).toMatchObject({eventCount: 0});
     expect(JSON.stringify(checkpoint)).not.toContain('reflecting');
   });
 
   it('replays a durably stored turn that recovered through decision-error feedback', async () => {
     const sessionId = 'session-feedback-replay';
-    const {
-      session,
-      logStore,
-      storeRoot
-    } = await createDurableCharacterStateHarness(sessionId);
+    const {session, logStore, storeRoot} =
+      await createDurableCharacterStateHarness(sessionId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'memory.unknown',
-            input: { query: 'Mira' }
-          }
-        ]
+            input: {query: 'Mira'},
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
-            input: { text: 'recovered after feedback' }
-          }
-        ]
-      }
+            input: {text: 'recovered after feedback'},
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('try unknown', 'evt_feedback_replay'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result.status).toBe('completed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
     const replayedEvents = reopenedLogStore.rawEvents();
     const terminal = replayedEvents.at(-1);
 
     expect(terminal).toMatchObject({
-      kind: 'runtime_turn_completed'
+      kind: 'runtime_turn_completed',
     });
     expect(
-      replayedEvents.filter((event) => event.kind === 'tool_call_finished')
+      replayedEvents.filter(event => event.kind === 'tool_call_finished'),
     ).toMatchObject([
       {
         dispatchedToHost: false,
         toolName: 'memory.unknown',
-        toolResult: { status: 'rejected', reason: 'tool_not_declared' }
-      }
+        toolResult: {status: 'rejected', reason: 'tool_not_declared'},
+      },
     ]);
     expect(
       reopenedLogStore
         .conversationMessages()
-        .some((message) => message.text === 'recovered after feedback')
+        .some(message => message.text === 'recovered after feedback'),
     ).toBe(true);
   });
 
   it('persists character_state.patch during handleToolCall', async () => {
-    const {
-      session,
-      logStore,
-      pluginStore
-    } = await createDurableCharacterStateHarness(
-      'session-plugin-patch-accepted'
-    );
+    const {session, logStore, pluginStore} =
+      await createDurableCharacterStateHarness('session-plugin-patch-accepted');
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'state updated'
-            }
-          }
-        ]
-      }
+              text: 'state updated',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('hello', 'evt_plugin_patch_accepted'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result.status).toBe('completed');
@@ -452,53 +437,48 @@ describe('plugin-driven Character State tool loop', () => {
     expect(pluginStore.readJson('checkpoint.json')).toMatchObject({
       current: {
         current: {
-          mood: 'curious'
-        }
-      }
+          mood: 'curious',
+        },
+      },
     });
   });
 
   it('discards staged character_state.patch when a later commit validation rejects the turn', async () => {
-    const {
-      session,
-      logStore,
-      pluginStore
-    } = await createDurableCharacterStateHarness(
-      'session-plugin-patch-rejected'
-    );
+    const {session, logStore, pluginStore} =
+      await createDurableCharacterStateHarness('session-plugin-patch-rejected');
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: ''
-            }
-          }
-        ]
-      }
+              text: '',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('hello', 'evt_plugin_patch_rejected'),
       session,
       logStore,
-      roleModelAdapter: adapter
+      roleModelAdapter: adapter,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'invalid_visible_reply'
+      reason: 'invalid_visible_reply',
     });
     expect(logStore.conversationMessages()).toEqual([]);
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
@@ -509,34 +489,32 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-health-rejected';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({ id: sessionId });
+    const session = createConversationSession({id: sessionId});
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId
+      sessionId,
     });
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
-      plugins: [
-        createCharacterStatePlugin(),
-        createHealthRejectingPlugin()
-      ],
+      plugins: [createCharacterStatePlugin(), createHealthRejectingPlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
         characterStatePluginId,
-        'health-reject.fixture'
-      ]
+        'health-reject.fixture',
+      ],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     });
     const adapter = createSequencedAdapter([
       {
@@ -544,21 +522,21 @@ describe('plugin-driven Character State tool loop', () => {
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'health should reject before commit'
-            }
-          }
-        ]
-      }
+              text: 'health should reject before commit',
+            },
+          },
+        ],
+      },
     ]);
 
     const result = await runLocalUserMessageEvent({
@@ -566,12 +544,12 @@ describe('plugin-driven Character State tool loop', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      pluginHost
+      pluginHost,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'plugin_health_rejected'
+      reason: 'plugin_health_rejected',
     });
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
     expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
@@ -581,34 +559,35 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-idempotent';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        characterStatePluginId
-      ]
+        characterStatePluginId,
+      ],
     });
     const context = createRuntimePluginContext({
       ...createRuntimeEventIdentity({
         eventId: 'evt_plugin_patch_idempotent',
         traceId: 'trace_plugin_patch_idempotent',
-        createdAt: '2026-06-15T00:00:00.000Z'
+        createdAt: '2026-06-15T00:00:00.000Z',
       }),
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
       character: {
         id: 'mira',
-        displayName: 'Mira'
-      }
+        displayName: 'Mira',
+      },
     });
     const call = Object.freeze({
       eventId: context.eventId,
@@ -619,13 +598,13 @@ describe('plugin-driven Character State tool loop', () => {
       pluginId: characterStatePluginId,
       toolName: 'character_state.patch',
       input: {
-        mood: 'curious'
-      }
+        mood: 'curious',
+      },
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     });
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -634,7 +613,7 @@ describe('plugin-driven Character State tool loop', () => {
 
       expect(result.status).toBe('accepted');
       const prepared = await pluginHost.prepareFileStoreTransaction?.(
-        transactionIdentityFromContext(context)
+        transactionIdentityFromContext(context),
       );
       await prepared?.finalize();
     }
@@ -643,9 +622,9 @@ describe('plugin-driven Character State tool loop', () => {
     expect(pluginStore.readJson('checkpoint.json')).toMatchObject({
       current: {
         current: {
-          mood: 'curious'
-        }
-      }
+          mood: 'curious',
+        },
+      },
     });
   });
 
@@ -653,34 +632,35 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-idempotent-replay';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({ storeRoot }).createSession({
+    await createLocalRuntimeSessionStore({storeRoot}).createSession({
       sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z'
+      createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const pluginHost = createRuntimePluginHost({ fileStore: testRuntimePluginFileStoreProvider,
+    const pluginHost = createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,
-        characterStatePluginId
-      ]
+        characterStatePluginId,
+      ],
     });
     const context = createRuntimePluginContext({
       ...createRuntimeEventIdentity({
         eventId: 'evt_plugin_patch_idempotent_replay',
         traceId: 'trace_plugin_patch_idempotent_replay',
-        createdAt: '2026-06-15T00:00:00.000Z'
+        createdAt: '2026-06-15T00:00:00.000Z',
       }),
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
       character: {
         id: 'mira',
-        displayName: 'Mira'
-      }
+        displayName: 'Mira',
+      },
     });
     const originalCall = Object.freeze({
       eventId: context.eventId,
@@ -690,22 +670,22 @@ describe('plugin-driven Character State tool loop', () => {
       pluginId: characterStatePluginId,
       toolName: 'character_state.patch',
       input: {
-        mood: 'curious'
-      }
+        mood: 'curious',
+      },
     });
     const interveningContext = createRuntimePluginContext({
       ...createRuntimeEventIdentity({
         eventId: 'evt_plugin_patch_intervening',
         traceId: 'trace_plugin_patch_intervening',
-        createdAt: context.timestamp
+        createdAt: context.timestamp,
       }),
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
       character: {
         id: 'mira',
-        displayName: 'Mira'
-      }
+        displayName: 'Mira',
+      },
     });
     const interveningCall = Object.freeze({
       eventId: interveningContext.eventId,
@@ -715,32 +695,37 @@ describe('plugin-driven Character State tool loop', () => {
       pluginId: characterStatePluginId,
       toolName: 'character_state.patch',
       input: {
-        mood: 'playful'
-      }
+        mood: 'playful',
+      },
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,
       sessionId,
-      pluginId: characterStatePluginId
+      pluginId: characterStatePluginId,
     });
 
     pluginHost.beginFileStoreTransaction?.();
-    const originalResult = await pluginHost.handleToolCall(originalCall, context);
+    const originalResult = await pluginHost.handleToolCall(
+      originalCall,
+      context,
+    );
     const originalPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(context)
+      transactionIdentityFromContext(context),
     );
     await originalPrepared?.finalize();
     pluginHost.beginFileStoreTransaction?.();
     await pluginHost.handleToolCall(interveningCall, interveningContext);
-    const interveningPrepared =
-      await pluginHost.prepareFileStoreTransaction?.(
-        transactionIdentityFromContext(interveningContext)
-      );
+    const interveningPrepared = await pluginHost.prepareFileStoreTransaction?.(
+      transactionIdentityFromContext(interveningContext),
+    );
     await interveningPrepared?.finalize();
     pluginHost.beginFileStoreTransaction?.();
-    const replayedResult = await pluginHost.handleToolCall(originalCall, context);
+    const replayedResult = await pluginHost.handleToolCall(
+      originalCall,
+      context,
+    );
     const replayPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(context)
+      transactionIdentityFromContext(context),
     );
     await replayPrepared?.finalize();
     pluginHost.beginFileStoreTransaction?.();
@@ -748,13 +733,13 @@ describe('plugin-driven Character State tool loop', () => {
       {
         ...originalCall,
         input: {
-          mood: 'tired'
-        }
+          mood: 'tired',
+        },
       },
-      context
+      context,
     );
     const conflictingPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(context)
+      transactionIdentityFromContext(context),
     );
     await conflictingPrepared?.finalize();
 
@@ -762,55 +747,50 @@ describe('plugin-driven Character State tool loop', () => {
       status: 'accepted',
       output: {
         current: {
-          mood: 'curious'
+          mood: 'curious',
         },
         appliedChanges: [
           {
             field: 'mood',
             before: 'steady',
-            after: 'curious'
-          }
-        ]
-      }
+            after: 'curious',
+          },
+        ],
+      },
     });
     expect(replayedResult).toMatchObject({
       status: 'accepted',
       output: {
         current: {
-          mood: 'curious'
+          mood: 'curious',
         },
         appliedChanges: [
           {
             field: 'mood',
             before: 'steady',
-            after: 'curious'
-          }
+            after: 'curious',
+          },
         ],
-        idempotent: true
-      }
+        idempotent: true,
+      },
     });
     expect(conflictingResult).toMatchObject({
       status: 'rejected',
-      reason: 'character_state_idempotency_conflict'
+      reason: 'character_state_idempotency_conflict',
     });
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(2);
     expect(pluginStore.readJson('checkpoint.json')).toMatchObject({
       current: {
         current: {
-          mood: 'playful'
-        }
-      }
+          mood: 'playful',
+        },
+      },
     });
   });
 
   it('records no-op character_state.patch identities without writing the current cache', async () => {
-    const {
-      session,
-      logStore,
-      pluginStore
-    } = await createDurableCharacterStateHarness(
-      'session-plugin-patch-noop'
-    );
+    const {session, logStore, pluginStore} =
+      await createDurableCharacterStateHarness('session-plugin-patch-noop');
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('hello', 'evt_plugin_patch_noop'),
       session,
@@ -821,22 +801,22 @@ describe('plugin-driven Character State tool loop', () => {
             {
               name: 'character_state.patch',
               input: {
-                mood: 'steady'
-              }
-            }
-          ]
+                mood: 'steady',
+              },
+            },
+          ],
         },
         {
           toolCalls: [
             {
               name: 'visible_reply',
               input: {
-                text: 'no change needed'
-              }
-            }
-          ]
-        }
-      ])
+                text: 'no change needed',
+              },
+            },
+          ],
+        },
+      ]),
     });
 
     expect(result.status).toBe('completed');
@@ -844,17 +824,17 @@ describe('plugin-driven Character State tool loop', () => {
       {
         result: {
           status: 'accepted',
-          appliedChanges: []
-        }
-      }
+          appliedChanges: [],
+        },
+      },
     ]);
     expect(pluginStore.readJson('checkpoint.json')).toMatchObject({
       eventCount: 1,
       current: {
         current: {
-          mood: 'steady'
-        }
-      }
+          mood: 'steady',
+        },
+      },
     });
   });
 
@@ -867,28 +847,28 @@ describe('plugin-driven Character State tool loop', () => {
           {
             name: 'character_state.patch',
             input: {
-              mood: 'curious'
-            }
-          }
-        ]
+              mood: 'curious',
+            },
+          },
+        ],
       },
       {
         toolCalls: [
           {
             name: 'visible_reply',
             input: {
-              text: 'first updated'
-            }
-          }
-        ]
-      }
+              text: 'first updated',
+            },
+          },
+        ],
+      },
     ]);
 
     await runLocalUserMessageEvent({
       event: createTestEvent('first session', 'evt_session_isolation_first'),
       session: firstSession,
       logStore: firstLogStore,
-      roleModelAdapter: firstAdapter
+      roleModelAdapter: firstAdapter,
     });
 
     const secondSession = createConversationSession();
@@ -904,28 +884,28 @@ describe('plugin-driven Character State tool loop', () => {
               {
                 name: 'visible_reply',
                 input: {
-                  text: 'second fresh'
-                }
-              }
-            ]
-          })
+                  text: 'second fresh',
+                },
+              },
+            ],
+          }),
         };
-      }
+      },
     });
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('second session', 'evt_session_isolation_second'),
       session: secondSession,
       logStore: secondLogStore,
-      roleModelAdapter: secondAdapter
+      roleModelAdapter: secondAdapter,
     });
     const runtimeContextMessage = messagesByRound[0]?.find(
-      (message) =>
+      message =>
         message.role === 'user' &&
-        message.content.includes('Untrusted plugin context')
+        message.content.includes('Untrusted plugin context'),
     );
     const currentUserMessage = messagesByRound[0]?.findLast(
-      (message) => message.role === 'user'
+      message => message.role === 'user',
     );
 
     expect(result.status).toBe('completed');

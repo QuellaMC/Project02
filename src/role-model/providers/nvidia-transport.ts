@@ -1,4 +1,4 @@
-import { isJsonRecord } from '../api/provider-exchange.ts';
+import {isJsonRecord} from '../api/provider-exchange.ts';
 
 export type NvidiaFetchRequest = {
   readonly method: 'POST';
@@ -16,7 +16,7 @@ export type NvidiaFetchResponse = {
 
 export type NvidiaFetchClient = (
   url: string,
-  request: NvidiaFetchRequest
+  request: NvidiaFetchRequest,
 ) => Promise<NvidiaFetchResponse>;
 
 export type NvidiaRequestDeadline = {
@@ -38,13 +38,13 @@ export class NvidiaRequestTimeoutError extends Error {
 }
 
 export function normalizeNvidiaRequestTimeoutMs(
-  value: number | undefined
+  value: number | undefined,
 ): number {
   const timeoutMs = value ?? defaultNvidiaRoleModelRequestTimeoutMs;
 
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0) {
     throw new TypeError(
-      'NVIDIA provider request timeout must be a positive safe integer.'
+      'NVIDIA provider request timeout must be a positive safe integer.',
     );
   }
 
@@ -52,14 +52,14 @@ export function normalizeNvidiaRequestTimeoutMs(
 }
 
 export function normalizeNvidiaTransportRetryDelays(
-  value: readonly number[] | undefined
+  value: readonly number[] | undefined,
 ): readonly number[] {
   const delays = value ?? defaultNvidiaTransportRetryDelaysMs;
 
   for (const delayMs of delays) {
     if (!Number.isSafeInteger(delayMs) || delayMs < 0) {
       throw new TypeError(
-        'NVIDIA transport retry delays must be non-negative safe integers.'
+        'NVIDIA transport retry delays must be non-negative safe integers.',
       );
     }
   }
@@ -68,7 +68,7 @@ export function normalizeNvidiaTransportRetryDelays(
 }
 
 export function createNvidiaRequestDeadline(
-  timeoutMs: number
+  timeoutMs: number,
 ): NvidiaRequestDeadline {
   const controller = new AbortController();
   const deadlineAt = performance.now() + timeoutMs;
@@ -103,7 +103,7 @@ export function createNvidiaRequestDeadline(
         clearTimeout(timeoutId);
         timeoutId = undefined;
       }
-    }
+    },
   });
 }
 
@@ -145,14 +145,17 @@ export async function performNvidiaTransportRequest(options: {
           method: 'POST',
           headers: {
             authorization: `Bearer ${options.apiKey}`,
-            'content-type': 'application/json'
+            'content-type': 'application/json',
           },
           body: options.body,
-          signal: options.requestDeadline.signal
-        })
+          signal: options.requestDeadline.signal,
+        }),
       );
     } catch (error: unknown) {
-      if (error instanceof NvidiaRequestTimeoutError || retryDelayMs === undefined) {
+      if (
+        error instanceof NvidiaRequestTimeoutError ||
+        retryDelayMs === undefined
+      ) {
         throw error;
       }
 
@@ -164,12 +167,12 @@ export async function performNvidiaTransportRequest(options: {
       return {
         status: 'accepted',
         httpStatus: response.status,
-        responseBody: await options.requestDeadline.wait(response.json())
+        responseBody: await options.requestDeadline.wait(response.json()),
       };
     }
 
     const message = await options.requestDeadline.wait(
-      responseErrorMessage(response)
+      responseErrorMessage(response),
     );
 
     if (
@@ -179,7 +182,7 @@ export async function performNvidiaTransportRequest(options: {
       return {
         status: 'rejected',
         httpStatus: response.status,
-        message
+        message,
       };
     }
 
@@ -193,7 +196,7 @@ function isRetryableNvidiaHttpStatus(status: number): boolean {
 
 function waitForNvidiaRetryDelay(
   requestDeadline: NvidiaRequestDeadline,
-  delayMs: number
+  delayMs: number,
 ): Promise<void> {
   if (delayMs === 0) {
     return Promise.resolve();
@@ -203,9 +206,9 @@ function waitForNvidiaRetryDelay(
 
   return requestDeadline
     .wait(
-      new Promise<void>((resolve) => {
+      new Promise<void>(resolve => {
         timeoutId = setTimeout(resolve, delayMs);
-      })
+      }),
     )
     .finally(() => {
       clearTimeout(timeoutId);
@@ -213,7 +216,7 @@ function waitForNvidiaRetryDelay(
 }
 
 async function responseErrorMessage(
-  response: NvidiaFetchResponse
+  response: NvidiaFetchResponse,
 ): Promise<string> {
   let text: string;
 

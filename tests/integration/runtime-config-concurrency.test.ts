@@ -1,17 +1,17 @@
-import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import {spawn} from 'node:child_process';
+import {mkdtemp, readFile, rm, writeFile} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 
-import { afterEach, describe, expect, it } from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
 const tempRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    tempRoots.splice(0).map(async (root) => {
-      await rm(root, { force: true, recursive: true });
-    })
+    tempRoots.splice(0).map(async root => {
+      await rm(root, {force: true, recursive: true});
+    }),
   );
 });
 
@@ -20,28 +20,28 @@ describe('runtime config mutation concurrency', () => {
     const storeRoot = await createTempStoreRoot();
     const barrierPath = join(storeRoot, 'start');
     const pluginIds = Array.from(
-      { length: 24 },
-      (_, index) => `plugin-${String(index).padStart(2, '0')}`
+      {length: 24},
+      (_, index) => `plugin-${String(index).padStart(2, '0')}`,
     );
-    const children = pluginIds.map((pluginId) =>
-      runConfigMutationChild({ storeRoot, barrierPath, pluginId })
+    const children = pluginIds.map(pluginId =>
+      runConfigMutationChild({storeRoot, barrierPath, pluginId}),
     );
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       setTimeout(resolve, 250);
     });
     await writeFile(barrierPath, 'go\n', 'utf8');
     await Promise.all(children);
 
     const stored = JSON.parse(
-      await readFile(join(storeRoot, 'config.json'), 'utf8')
+      await readFile(join(storeRoot, 'config.json'), 'utf8'),
     ) as {
-      readonly plugins?: Readonly<Record<string, { readonly enabled?: boolean }>>;
+      readonly plugins?: Readonly<Record<string, {readonly enabled?: boolean}>>;
     };
 
     expect(Object.keys(stored.plugins ?? {}).sort()).toEqual(pluginIds);
     expect(
-      pluginIds.every((pluginId) => stored.plugins?.[pluginId]?.enabled === true)
+      pluginIds.every(pluginId => stored.plugins?.[pluginId]?.enabled === true),
     ).toBe(true);
   }, 20_000);
 
@@ -49,7 +49,7 @@ describe('runtime config mutation concurrency', () => {
     const storeRoot = await createTempStoreRoot();
     const barrierPath = join(storeRoot, 'secret-start');
     const mutationCount = 24;
-    const children = Array.from({ length: mutationCount }, (_value, index) => {
+    const children = Array.from({length: mutationCount}, (_value, index) => {
       const suffix = String(index).padStart(2, '0');
 
       return runSecretMutationChild({
@@ -58,11 +58,11 @@ describe('runtime config mutation concurrency', () => {
         configPath: join(storeRoot, `config-${suffix}`, 'runtime.json'),
         pluginId: `memory-${suffix}`,
         envVar: `PROJECT02_SHARED_SECRET_${suffix}`,
-        secretValue: `secret-${suffix}`
+        secretValue: `secret-${suffix}`,
       });
     });
 
-    await new Promise<void>((resolve) => {
+    await new Promise<void>(resolve => {
       setTimeout(resolve, 250);
     });
     await writeFile(barrierPath, 'go\n', 'utf8');
@@ -74,7 +74,7 @@ describe('runtime config mutation concurrency', () => {
       const suffix = String(index).padStart(2, '0');
 
       expect(envContent).toContain(
-        `PROJECT02_SHARED_SECRET_${suffix}="secret-${suffix}"`
+        `PROJECT02_SHARED_SECRET_${suffix}="secret-${suffix}"`,
       );
     }
   }, 30_000);
@@ -93,12 +93,12 @@ async function runConfigMutationChild(options: {
     'applyRuntimeConfigMutation({',
     '  storeRoot: process.argv[1],',
     "  operation: { kind: 'plugin_enable', pluginId: process.argv[3] }",
-    '});'
+    '});',
   ].join('\n');
 
   await runMutationChildProcess({
     script,
-    args: [options.storeRoot, options.barrierPath, options.pluginId]
+    args: [options.storeRoot, options.barrierPath, options.pluginId],
   });
 }
 
@@ -125,7 +125,7 @@ async function runSecretMutationChild(options: {
     '    envVar: process.argv[5],',
     '    secretValue: process.argv[6]',
     '  }',
-    '});'
+    '});',
   ].join('\n');
 
   await runMutationChildProcess({
@@ -136,8 +136,8 @@ async function runSecretMutationChild(options: {
       options.configPath,
       options.pluginId,
       options.envVar,
-      options.secretValue
-    ]
+      options.secretValue,
+    ],
   });
 }
 
@@ -149,7 +149,7 @@ async function runMutationChildProcess(options: {
     const child = spawn(
       process.execPath,
       ['--input-type=module', '-e', options.script, ...options.args],
-      { cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe'] }
+      {cwd: process.cwd(), stdio: ['ignore', 'pipe', 'pipe']},
     );
     let stderr = '';
 
@@ -166,8 +166,8 @@ async function runMutationChildProcess(options: {
 
       rejectChild(
         new Error(
-          `Runtime config mutation child failed (${String(code ?? signal)}): ${stderr}`
-        )
+          `Runtime config mutation child failed (${String(code ?? signal)}): ${stderr}`,
+        ),
       );
     });
   });

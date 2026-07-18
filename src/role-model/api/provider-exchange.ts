@@ -1,20 +1,20 @@
 import {
   freezeRoleModelChatMessage,
-  type RoleModelChatCompletionTool, type RoleModelChatMessage,
-  type RoleModelProviderToolNameMapping
+  type RoleModelChatCompletionTool,
+  type RoleModelChatMessage,
+  type RoleModelProviderToolNameMapping,
 } from './chat-wire.ts';
-import {
-  createJsonBoundarySnapshot
-} from '../../shared/json-boundary.ts';
-import { isModelToolJsonSchemaType } from './model-tools.ts';
-import { redactRuntimePluginText } from '../../plugins/api/index.ts';
-import type { RuntimePluginJsonValue } from '../../plugins/api/index.ts';
+import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
+import {isModelToolJsonSchemaType} from './model-tools.ts';
+import {redactRuntimePluginText} from '../../plugins/api/index.ts';
+import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import type {
-  RoleModelProviderExchangeSnapshot, RoleModelProviderMetadata
+  RoleModelProviderExchangeSnapshot,
+  RoleModelProviderMetadata,
 } from './contracts.ts';
 
 export function parseRoleModelProviderExchangeSnapshot(
-  value: unknown
+  value: unknown,
 ): RoleModelProviderExchangeSnapshot | undefined {
   if (!isRoleModelProviderExchangeSnapshot(value)) {
     return undefined;
@@ -24,11 +24,11 @@ export function parseRoleModelProviderExchangeSnapshot(
 }
 
 export function freezeRoleModelProviderExchangeSnapshot(
-  snapshot: RoleModelProviderExchangeSnapshot
+  snapshot: RoleModelProviderExchangeSnapshot,
 ): RoleModelProviderExchangeSnapshot {
   const boundedSnapshot = createJsonBoundarySnapshot(snapshot, {
     field: 'Role-model provider exchange',
-    redact: true
+    redact: true,
   });
 
   if (!isRoleModelProviderExchangeSnapshot(boundedSnapshot)) {
@@ -42,76 +42,76 @@ export function freezeRoleModelProviderExchangeSnapshot(
       name: snapshot.provider.name,
       ...(snapshot.provider.model === undefined
         ? {}
-        : { model: snapshot.provider.model }),
+        : {model: snapshot.provider.model}),
       ...(snapshot.provider.endpoint === undefined
         ? {}
-        : { endpoint: snapshot.provider.endpoint })
+        : {endpoint: snapshot.provider.endpoint}),
     }),
-    capabilities: Object.freeze({ ...snapshot.capabilities }),
+    capabilities: Object.freeze({...snapshot.capabilities}),
     reasoning: Object.freeze({
       mode: snapshot.reasoning.mode,
-      params: freezeRuntimePluginJsonValue(snapshot.reasoning.params)
+      params: freezeRuntimePluginJsonValue(snapshot.reasoning.params),
     }),
     renderedMessages: Object.freeze(
-      snapshot.renderedMessages.map(freezeRoleModelChatMessage)
+      snapshot.renderedMessages.map(freezeRoleModelChatMessage),
     ),
     renderedTools: Object.freeze(
-      snapshot.renderedTools.map(freezeProviderExchangeTool)
+      snapshot.renderedTools.map(freezeProviderExchangeTool),
     ),
     toolNameMappings: Object.freeze(
-      snapshot.toolNameMappings.map((mapping) =>
+      snapshot.toolNameMappings.map(mapping =>
         Object.freeze({
           runtimeName: mapping.runtimeName,
-          providerName: mapping.providerName
-        } satisfies RoleModelProviderToolNameMapping)
-      )
+          providerName: mapping.providerName,
+        } satisfies RoleModelProviderToolNameMapping),
+      ),
     ),
     ...(snapshot.toolChoice === undefined
       ? {}
-      : { toolChoice: freezeRuntimePluginJsonValue(snapshot.toolChoice) }),
+      : {toolChoice: freezeRuntimePluginJsonValue(snapshot.toolChoice)}),
     ...(snapshot.parallelToolCalls === undefined
       ? {}
-      : { parallelToolCalls: snapshot.parallelToolCalls }),
+      : {parallelToolCalls: snapshot.parallelToolCalls}),
     requestBody: freezeRuntimePluginJsonValue(snapshot.requestBody),
     ...(snapshot.rawFinishReason === undefined
       ? {}
       : {
           rawFinishReason: freezeRuntimePluginJsonValue(
-            snapshot.rawFinishReason
-          )
+            snapshot.rawFinishReason,
+          ),
         }),
     ...(snapshot.finishReason === undefined
       ? {}
-      : { finishReason: snapshot.finishReason }),
+      : {finishReason: snapshot.finishReason}),
     ...(snapshot.usage === undefined
       ? {}
-      : { usage: freezeRuntimePluginJsonValue(snapshot.usage) }),
+      : {usage: freezeRuntimePluginJsonValue(snapshot.usage)}),
     ...(snapshot.nativeAssistantMessage === undefined
       ? {}
       : {
           nativeAssistantMessage: freezeRoleModelChatMessage(
-            snapshot.nativeAssistantMessage
-          )
+            snapshot.nativeAssistantMessage,
+          ),
         }),
     nativeToolResultMessages: Object.freeze(
-      snapshot.nativeToolResultMessages.map(freezeRoleModelChatMessage)
+      snapshot.nativeToolResultMessages.map(freezeRoleModelChatMessage),
     ),
     ...(snapshot.responseBody === undefined
       ? {}
-      : { responseBody: freezeRuntimePluginJsonValue(snapshot.responseBody) }),
+      : {responseBody: freezeRuntimePluginJsonValue(snapshot.responseBody)}),
     ...(snapshot.outputNormalization === undefined
       ? {}
       : {
           outputNormalization: Object.freeze({
             source: snapshot.outputNormalization.source,
-            committed: false
-          })
-        })
+            committed: false,
+          }),
+        }),
   } satisfies RoleModelProviderExchangeSnapshot);
 }
 
 function isRoleModelProviderExchangeSnapshot(
-  value: unknown
+  value: unknown,
 ): value is RoleModelProviderExchangeSnapshot {
   if (!isJsonRecord(value)) {
     return false;
@@ -124,7 +124,7 @@ function isRoleModelProviderExchangeSnapshot(
 }
 
 function isRequiredRoleModelProviderExchangeSnapshot(
-  value: Readonly<Record<string, unknown>>
+  value: Readonly<Record<string, unknown>>,
 ): boolean {
   const renderedMessages = value['renderedMessages'];
   const renderedTools = value['renderedTools'];
@@ -148,7 +148,7 @@ function isRequiredRoleModelProviderExchangeSnapshot(
 }
 
 function isOptionalRoleModelProviderExchangeSnapshot(
-  value: Readonly<Record<string, unknown>>
+  value: Readonly<Record<string, unknown>>,
 ): boolean {
   return (
     isOptionalRuntimePluginJsonValue(value['toolChoice']) &&
@@ -159,12 +159,12 @@ function isOptionalRoleModelProviderExchangeSnapshot(
     isOptionalRuntimePluginJsonValue(value['usage']) &&
     (value['nativeAssistantMessage'] === undefined ||
       isRoleModelProviderExchangeChatMessage(
-        value['nativeAssistantMessage']
+        value['nativeAssistantMessage'],
       )) &&
     isOptionalRuntimePluginJsonValue(value['responseBody']) &&
     (value['outputNormalization'] === undefined ||
       isRoleModelProviderExchangeOutputNormalization(
-        value['outputNormalization']
+        value['outputNormalization'],
       ))
   );
 }
@@ -210,7 +210,7 @@ function isRoleModelProviderExchangeReasoning(value: unknown): boolean {
 }
 
 function isRoleModelProviderExchangeChatMessage(
-  value: unknown
+  value: unknown,
 ): value is RoleModelChatMessage {
   if (!isJsonRecord(value)) {
     return false;
@@ -256,7 +256,7 @@ function isRoleModelProviderExchangeChatToolCall(value: unknown): boolean {
 }
 
 function isRoleModelProviderExchangeTool(
-  value: unknown
+  value: unknown,
 ): value is RoleModelChatCompletionTool {
   if (!isJsonRecord(value) || value['type'] !== 'function') {
     return false;
@@ -283,7 +283,10 @@ function isRoleModelObjectJsonSchema(value: unknown): boolean {
   );
 }
 
-function isRoleModelJsonSchema(value: unknown, depth = 0): value is Readonly<Record<string, unknown>> {
+function isRoleModelJsonSchema(
+  value: unknown,
+  depth = 0,
+): value is Readonly<Record<string, unknown>> {
   if (!isJsonRecord(value) || depth > 64) {
     return false;
   }
@@ -314,35 +317,32 @@ function isRoleModelJsonSchemaTypeDeclaration(value: unknown): boolean {
 
 function isRoleModelJsonSchemaProperties(
   value: unknown,
-  depth: number
+  depth: number,
 ): boolean {
   return (
     value === undefined ||
     (isJsonRecord(value) &&
-      Object.values(value).every((property) =>
-        isRoleModelJsonSchema(property, depth + 1)
+      Object.values(value).every(property =>
+        isRoleModelJsonSchema(property, depth + 1),
       ))
   );
 }
 
 function areRoleModelJsonSchemaRequiredNamesValid(
   properties: unknown,
-  required: unknown
+  required: unknown,
 ): boolean {
   return (
     required === undefined ||
     (isStringArray(required) &&
       new Set(required).size === required.length &&
       required.every(
-        (name) => isJsonRecord(properties) && Object.hasOwn(properties, name)
+        name => isJsonRecord(properties) && Object.hasOwn(properties, name),
       ))
   );
 }
 
-function isOptionalRoleModelJsonSchema(
-  value: unknown,
-  depth: number
-): boolean {
+function isOptionalRoleModelJsonSchema(value: unknown, depth: number): boolean {
   return value === undefined || isRoleModelJsonSchema(value, depth + 1);
 }
 
@@ -355,7 +355,7 @@ function isRoleModelProviderToolNameMapping(value: unknown): boolean {
 }
 
 function isRoleModelProviderExchangeOutputNormalization(
-  value: unknown
+  value: unknown,
 ): boolean {
   return (
     isJsonRecord(value) &&
@@ -370,7 +370,7 @@ function isOptionalString(value: unknown): boolean {
 }
 
 function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+  return Array.isArray(value) && value.every(item => typeof item === 'string');
 }
 
 function isOptionalRuntimePluginJsonValue(value: unknown): boolean {
@@ -395,19 +395,19 @@ function isRuntimePluginJsonValue(value: unknown, depth = 0): boolean {
   }
 
   if (Array.isArray(value)) {
-    return value.every((item) => isRuntimePluginJsonValue(item, depth + 1));
+    return value.every(item => isRuntimePluginJsonValue(item, depth + 1));
   }
 
   return (
     isJsonRecord(value) &&
-    Object.values(value).every((item) =>
-      isRuntimePluginJsonValue(item, depth + 1)
+    Object.values(value).every(item =>
+      isRuntimePluginJsonValue(item, depth + 1),
     )
   );
 }
 
 function freezeProviderExchangeTool(
-  tool: RoleModelChatCompletionTool
+  tool: RoleModelChatCompletionTool,
 ): RoleModelChatCompletionTool {
   return Object.freeze({
     type: 'function',
@@ -415,62 +415,62 @@ function freezeProviderExchangeTool(
       name: tool.function.name,
       description: tool.function.description,
       parameters: freezeRuntimePluginJsonValue(
-        tool.function.parameters
+        tool.function.parameters,
       ) as RoleModelChatCompletionTool['function']['parameters'],
-      ...(tool.function.strict === undefined ? {} : { strict: true })
-    })
+      ...(tool.function.strict === undefined ? {} : {strict: true}),
+    }),
   } satisfies RoleModelChatCompletionTool);
 }
 
 export function freezeProviderMetadata(
-  metadata: RoleModelProviderMetadata
+  metadata: RoleModelProviderMetadata,
 ): RoleModelProviderMetadata {
   const messageCount =
     metadata.request?.messageCount === undefined
       ? undefined
       : finiteProviderMetadataNumber(
           metadata.request.messageCount,
-          'providerMetadata.request.messageCount'
+          'providerMetadata.request.messageCount',
         );
   const status =
     metadata.response?.status === undefined
       ? undefined
       : finiteProviderMetadataNumber(
           metadata.response.status,
-          'providerMetadata.response.status'
+          'providerMetadata.response.status',
         );
 
   return Object.freeze({
     provider: metadata.provider,
     ...(metadata.model === undefined
       ? {}
-      : { model: redactRuntimePluginText(metadata.model) }),
+      : {model: redactRuntimePluginText(metadata.model)}),
     ...(metadata.request === undefined
       ? {}
       : {
           request: Object.freeze({
             ...(metadata.request.endpoint === undefined
               ? {}
-              : { endpoint: redactRuntimePluginText(metadata.request.endpoint) }),
-            ...(messageCount === undefined ? {} : { messageCount }),
-            stream: false
-          })
+              : {endpoint: redactRuntimePluginText(metadata.request.endpoint)}),
+            ...(messageCount === undefined ? {} : {messageCount}),
+            stream: false,
+          }),
         }),
     ...(metadata.response === undefined
       ? {}
       : {
           response: Object.freeze({
-            ...(status === undefined ? {} : { status })
-          })
+            ...(status === undefined ? {} : {status}),
+          }),
         }),
     ...(metadata.error === undefined
       ? {}
       : {
           error: Object.freeze({
             code: redactRuntimePluginText(metadata.error.code),
-            message: redactRuntimePluginText(metadata.error.message)
-          })
-        })
+            message: redactRuntimePluginText(metadata.error.message),
+          }),
+        }),
   } satisfies RoleModelProviderMetadata);
 }
 
@@ -482,10 +482,8 @@ function finiteProviderMetadataNumber(value: number, field: string): number {
   return value;
 }
 
-
-
 export function freezeRuntimePluginJsonObject(
-  value: Readonly<Record<string, unknown>>
+  value: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, RuntimePluginJsonValue>> {
   const snapshot: Record<string, RuntimePluginJsonValue> = {};
 
@@ -497,7 +495,7 @@ export function freezeRuntimePluginJsonObject(
 }
 
 export function freezeRuntimePluginJsonValue(
-  value: unknown
+  value: unknown,
 ): RuntimePluginJsonValue {
   if (
     value === null ||
@@ -516,12 +514,13 @@ export function freezeRuntimePluginJsonValue(
     return freezeRuntimePluginJsonObject(value);
   }
 
-  throw new TypeError('Role-model tool observation values must be JSON-compatible.');
+  throw new TypeError(
+    'Role-model tool observation values must be JSON-compatible.',
+  );
 }
 
-
 export function isJsonRecord(
-  value: unknown
+  value: unknown,
 ): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
