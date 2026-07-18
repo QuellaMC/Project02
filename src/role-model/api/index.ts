@@ -22,7 +22,6 @@ export {
   modelToolInputFieldValueTypes,
   modelToolJsonSchemaTypeValues,
   userTurnBuiltInModelToolNames,
-  validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
   type BuiltInModelToolCall,
   type BuiltInModelToolDefinition,
@@ -34,7 +33,6 @@ export {
   type ModelToolInputContract,
   type ModelToolInputField,
   type ModelToolInputFieldValueType,
-  type ModelToolInputValidationResult,
   type ModelToolJsonSchema,
   type ModelToolJsonSchemaType,
   type ModelToolObjectJsonSchema,
@@ -43,6 +41,10 @@ export {
   type VisibleReplyModelToolName,
   type VisibleReplyToolInput,
 } from './model-tools.ts';
+export {
+  validateModelToolInputAgainstContract,
+  type ModelToolInputValidationResult,
+} from './model-tool-input-validation.ts';
 export {
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,

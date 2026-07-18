@@ -5,33 +5,18 @@ import type {
 } from '../../plugins/api/index.ts';
 import {runtimePluginListToolName} from '../../plugins/api/index.ts';
 import type {RoleModelInputEnvelope} from '../api/contracts.ts';
-import type {
-  ModelToolDefinition,
-  ModelToolInputContract,
-  ModelToolInputField,
-  ModelToolInputFieldValueType,
-  ModelToolJsonSchema,
-  ModelToolJsonSchemaType,
-  ModelToolObjectJsonSchema,
-} from '../api/model-tools.ts';
-import {
-  freezeModelToolJsonSchemaType,
-  isModelToolJsonSchemaTypeArray,
-  visibleReplyModelToolName,
-} from '../api/model-tools.ts';
+import {visibleReplyModelToolName} from '../api/model-tools.ts';
 import {
   freezeRoleModelChatMessage,
   type RoleModelAssistantChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,
   type RoleModelDeveloperChatMessage,
-  type RoleModelJsonSchema,
-  type RoleModelObjectJsonSchema,
   type RoleModelProviderCapabilities,
-  type RoleModelProviderToolNameMapping,
   type RoleModelSystemChatMessage,
   type RoleModelUserChatMessage,
 } from '../api/chat-wire.ts';
+import {modelToolDefinitionToChatTool} from './tool-wire.ts';
 
 export type RoleModelPromptFrameKind =
   | 'system_protocol'
@@ -170,104 +155,6 @@ export function prepareRoleModelRequest(
       ),
     ),
   } satisfies RoleModelPreparedRequest);
-}
-
-export function modelToolDefinitionToChatTool(
-  definition: ModelToolDefinition,
-  options: {readonly strict?: boolean} = {},
-): RoleModelChatCompletionTool {
-  const parameters = modelToolInputContractToJsonSchema(
-    definition.inputContract,
-  );
-  const strict =
-    options.strict === true && jsonSchemaSupportsStrictTools(parameters);
-
-  return Object.freeze({
-    type: 'function',
-    function: Object.freeze({
-      name: definition.name,
-      description: `${definition.description} ${modelToolTurnPolicyDescription(
-        definition,
-      )}`,
-      parameters,
-      ...(strict ? {strict: true} : {}),
-    }),
-  } satisfies RoleModelChatCompletionTool);
-}
-
-function modelToolTurnPolicyDescription(
-  definition: ModelToolDefinition,
-): string {
-  const required = definition.requiredForUserTurn
-    ? 'Required for this user turn'
-    : 'Optional for this user turn';
-  const limit = definition.callLimit; // absent means unlimited
-
-  if (limit === undefined) {
-    return `${required}.`;
-  }
-
-  const scope = limit.scope === 'user_turn' ? 'user turn' : 'model response';
-
-  return `${required}; at most ${String(limit.maxCalls)} call${limit.maxCalls === 1 ? '' : 's'} per ${scope}.`;
-}
-
-export function createRoleModelProviderToolNameMappings(
-  runtimeNames: readonly string[],
-): readonly RoleModelProviderToolNameMapping[] {
-  const usedProviderNames = new Set<string>();
-  const mappings: RoleModelProviderToolNameMapping[] = [];
-
-  for (const runtimeName of runtimeNames) {
-    const baseProviderName = roleModelProviderSafeToolName(runtimeName);
-    let providerName = baseProviderName;
-    let suffix = 1;
-
-    while (usedProviderNames.has(providerName)) {
-      suffix += 1;
-      providerName = `${baseProviderName}_${String(suffix)}`;
-    }
-
-    usedProviderNames.add(providerName);
-    mappings.push(
-      Object.freeze({
-        runtimeName,
-        providerName,
-      } satisfies RoleModelProviderToolNameMapping),
-    );
-  }
-
-  return Object.freeze(mappings);
-}
-
-export function providerToolNameForRuntimeToolName(
-  runtimeName: string,
-  mappings: readonly RoleModelProviderToolNameMapping[],
-): string {
-  return (
-    mappings.find(mapping => mapping.runtimeName === runtimeName)
-      ?.providerName ?? roleModelProviderSafeToolName(runtimeName)
-  );
-}
-
-export function runtimeToolNameForProviderToolName(
-  providerName: string,
-  mappings: readonly RoleModelProviderToolNameMapping[],
-): string {
-  return (
-    mappings.find(mapping => mapping.providerName === providerName)
-      ?.runtimeName ?? providerName
-  );
-}
-
-function roleModelProviderSafeToolName(runtimeName: string): string {
-  const safeName = runtimeName.replaceAll(/[^A-Za-z0-9_-]/gu, '_');
-
-  if (/^[A-Za-z]/u.test(safeName)) {
-    return safeName;
-  }
-
-  return `tool_${safeName}`;
 }
 
 function createSystemMessage(
@@ -622,158 +509,4 @@ function sanitizeRuntimeContextText(value: string): readonly string[] {
       .map(line => line.trim())
       .filter(line => line.length > 0),
   );
-}
-
-function modelToolInputContractToJsonSchema(
-  contract: ModelToolInputContract,
-): RoleModelObjectJsonSchema {
-  if (contract.jsonSchema !== undefined) {
-    return modelToolObjectJsonSchemaToRoleModelSchema(contract.jsonSchema);
-  }
-
-  const properties: Record<string, RoleModelJsonSchema> = {};
-  const required: string[] = [];
-
-  for (const field of contract.fields) {
-    properties[field.name] = modelToolInputFieldToJsonSchema(field);
-
-    if (field.required) {
-      required.push(field.name);
-    }
-  }
-
-  return Object.freeze({
-    type: 'object',
-    properties: Object.freeze(properties),
-    required: Object.freeze(required),
-    additionalProperties: contract.additionalFields,
-  } satisfies RoleModelObjectJsonSchema);
-}
-
-function modelToolObjectJsonSchemaToRoleModelSchema(
-  schema: ModelToolObjectJsonSchema,
-): RoleModelObjectJsonSchema {
-  const converted = modelToolJsonSchemaToRoleModelSchema(schema);
-
-  return Object.freeze({
-    type: 'object',
-    properties: Object.freeze(converted.properties ?? {}),
-    required: Object.freeze(converted.required ?? []),
-    additionalProperties: converted.additionalProperties ?? false,
-  } satisfies RoleModelObjectJsonSchema);
-}
-
-function modelToolJsonSchemaToRoleModelSchema(
-  schema: ModelToolJsonSchema,
-): RoleModelJsonSchema {
-  const schemaType = freezeRoleModelJsonSchemaType(schema.type);
-
-  return Object.freeze({
-    ...(schemaType === undefined ? {} : {type: schemaType}),
-    ...(schema.description === undefined
-      ? {}
-      : {description: schema.description}),
-    ...(schema.enum === undefined
-      ? {}
-      : {enum: Object.freeze([...schema.enum])}),
-    ...(schema.properties === undefined
-      ? {}
-      : {
-          properties: Object.freeze(
-            Object.fromEntries(
-              Object.entries(schema.properties).map(([key, value]) => [
-                key,
-                modelToolJsonSchemaToRoleModelSchema(value),
-              ]),
-            ),
-          ),
-        }),
-    ...(schema.required === undefined
-      ? {}
-      : {required: Object.freeze([...schema.required])}),
-    ...(schema.additionalProperties === undefined
-      ? {}
-      : {additionalProperties: schema.additionalProperties}),
-    ...(schema.items === undefined
-      ? {}
-      : {items: modelToolJsonSchemaToRoleModelSchema(schema.items)}),
-  } satisfies RoleModelJsonSchema);
-}
-
-function freezeRoleModelJsonSchemaType(
-  type: ModelToolJsonSchema['type'],
-): ModelToolJsonSchema['type'] {
-  return type === undefined ? undefined : freezeModelToolJsonSchemaType(type);
-}
-
-function modelToolInputFieldToJsonSchema(
-  field: ModelToolInputField,
-): RoleModelJsonSchema {
-  return Object.freeze({
-    ...(field.valueType === undefined && field.allowedValues === undefined
-      ? {}
-      : {type: modelToolInputFieldJsonSchemaType(field)}),
-    description: field.description,
-    ...(field.allowedValues === undefined
-      ? {}
-      : {enum: Object.freeze([...field.allowedValues])}),
-  } satisfies RoleModelJsonSchema);
-}
-
-function modelToolInputFieldJsonSchemaType(
-  field: ModelToolInputField,
-): NonNullable<RoleModelJsonSchema['type']> {
-  if (field.allowedValues !== undefined) {
-    return 'string';
-  }
-
-  return modelToolValueTypeToJsonSchemaType(field.valueType);
-}
-
-function modelToolValueTypeToJsonSchemaType(
-  valueType: ModelToolInputFieldValueType | undefined,
-): NonNullable<RoleModelJsonSchema['type']> {
-  if (valueType === undefined) {
-    return 'string';
-  }
-
-  return valueType;
-}
-
-function jsonSchemaSupportsStrictTools(schema: RoleModelJsonSchema): boolean {
-  const schemaTypes = roleModelJsonSchemaTypes(schema.type);
-
-  if (schemaTypes.includes('object')) {
-    if (schema.additionalProperties !== false) {
-      return false;
-    }
-
-    if (
-      !Object.values(schema.properties ?? {}).every(
-        jsonSchemaSupportsStrictTools,
-      )
-    ) {
-      return false;
-    }
-  }
-
-  if (
-    schemaTypes.includes('array') &&
-    schema.items !== undefined &&
-    !jsonSchemaSupportsStrictTools(schema.items)
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-function roleModelJsonSchemaTypes(
-  type: RoleModelJsonSchema['type'],
-): readonly ModelToolJsonSchemaType[] {
-  if (type === undefined) {
-    return Object.freeze([]);
-  }
-
-  return isModelToolJsonSchemaTypeArray(type) ? type : Object.freeze([type]);
 }

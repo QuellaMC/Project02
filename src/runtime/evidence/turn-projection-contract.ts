@@ -1,0 +1,203 @@
+/**
+ * Output contract of the turn-evidence projection: the read-only
+ * `Inspect*` shapes the inspect CLI renders. The projection that
+ * produces them lives in `turn-projection.ts`.
+ */
+import type {ConversationLogRecord, RuntimeTurnStatus} from './records.ts';
+import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
+
+export type InspectTurnEvidence = {
+  readonly eventId: string;
+  readonly traceId: string;
+  readonly status: RuntimeTurnStatus;
+  readonly steps: readonly string[];
+  readonly derivedSteps: readonly {
+    readonly step: string;
+    readonly source: 'terminal_raw_event';
+    readonly reason: 'missing_persisted_trace_entry';
+    readonly rawEventAnchor: {
+      readonly eventId: string;
+      readonly traceId: string;
+      readonly createdAt: string;
+      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
+    };
+  }[];
+  readonly visibleMessages: readonly InspectVisibleMessage[];
+  readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
+  readonly toolEvents: readonly InspectToolCallEvent[];
+  readonly roleModelEvidence?: InspectRoleModelEvidence;
+  readonly pluginEvidence?: InspectPluginEvidence;
+  readonly reason?: string;
+};
+
+export type InspectVisibleMessage = {
+  readonly id: string;
+  readonly role: ConversationLogRecord['role'];
+  readonly speakerName: string;
+  readonly text: string;
+};
+
+export type InspectToolCallEvent = {
+  readonly callId: string;
+  readonly round: number;
+  readonly toolName: string;
+  readonly pluginId: string;
+  readonly input?: unknown;
+  readonly result?: InspectPluginToolInvocationResult;
+  readonly pluginStoreRevision?: number;
+};
+
+export type InspectRoleModelEvidence = {
+  readonly input?: {
+    readonly sessionId: string;
+    readonly allowedTools: readonly string[];
+    readonly outputContractVersion: string;
+    readonly currentUserMessage: string;
+    readonly recentVisibleMessages: readonly InspectVisibleMessage[];
+    readonly runtimeNotes: readonly string[];
+    readonly pluginContextItems: readonly InspectPluginContextItem[];
+  };
+  readonly output?: {
+    readonly rawOutputText: string;
+    readonly providerMetadata?: unknown;
+    readonly providerExchange?: unknown;
+  };
+  readonly parsedDecision?: InspectParsedRoleModelDecision;
+  readonly commitValidation?: InspectRoleModelCommitValidation;
+};
+
+export type InspectRoleModelRoundEvidence = {
+  readonly rawEventKind: string;
+  readonly roleModelEvidence: InspectRoleModelEvidence;
+};
+
+export type InspectParsedRoleModelDecision =
+  | {
+      readonly status: 'accepted';
+      readonly toolCalls: readonly InspectModelToolCall[];
+      readonly nonCommittedTopLevelText?: InspectNonCommittedTopLevelText;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly rejectionReason: string;
+      readonly rejectionDetails?: string;
+    };
+
+export type InspectModelToolCall = {
+  readonly name: string;
+  readonly input: Readonly<Record<string, unknown>>;
+};
+
+export type InspectNonCommittedTopLevelText = {
+  readonly source: 'model_top_level_text';
+  readonly committed: false;
+  readonly text: string;
+};
+
+export type InspectRoleModelCommitValidation =
+  | {
+      readonly status: 'accepted';
+      readonly acceptedVisibleReplyText?: string;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly rejectionReason: string;
+      readonly rejectionDetails?: string;
+    };
+
+export type InspectPluginEvidence = {
+  readonly contractVersion?: string;
+  readonly plugins: readonly InspectPluginListing[];
+  readonly contextItems: readonly InspectPluginContextItem[];
+  readonly toolInvocations: readonly InspectPluginToolInvocation[];
+  readonly evidence: readonly InspectPluginEvidenceSnapshot[];
+  readonly policyOutcomes: readonly string[];
+  readonly health: readonly InspectPluginHealthSnapshot[];
+};
+
+export type InspectPluginListing = {
+  readonly pluginId: string;
+  readonly displayName: string;
+  readonly version: string;
+  readonly kind: string;
+  readonly localTrustLevel: string;
+  readonly installed: boolean;
+  readonly registered: boolean;
+  readonly enabled: boolean;
+  readonly availableForTurn: boolean;
+  readonly requestedAccess: RuntimePluginAccessMap;
+  readonly grantedAccess: RuntimePluginAccessMap;
+  readonly providedTools: readonly InspectPluginToolListing[];
+  readonly registeredLifecycleHooks: readonly string[];
+  readonly redactionLabels: readonly string[];
+  readonly configFingerprint?: string;
+  readonly healthStatus?: string;
+};
+
+export type InspectPluginToolListing = {
+  readonly name: string;
+  readonly validationOwner: string;
+  readonly sideEffectLevel: string;
+  readonly requiresConfirmation: boolean;
+  readonly sourceReferencesRequired: boolean;
+};
+
+export type InspectPluginContextItem = {
+  readonly pluginId: string;
+  readonly id: string;
+  readonly kind: string;
+  readonly text: string;
+  readonly budget: {
+    readonly estimatedTokens: number;
+    readonly priority: number;
+  };
+  readonly sourceReferences: readonly InspectPluginSourceReference[];
+  readonly redactionLabels: readonly string[];
+  readonly confidence?: number;
+};
+
+export type InspectPluginToolInvocation = {
+  readonly pluginId: string;
+  readonly toolName: string;
+  readonly input: unknown;
+  readonly result: InspectPluginToolInvocationResult;
+};
+
+export type InspectPluginToolInvocationResult =
+  | {
+      readonly status: 'accepted';
+      readonly output: unknown;
+      readonly evidence: readonly InspectPluginEvidenceSnapshot[];
+    }
+  | {
+      readonly status: 'rejected';
+      readonly reason: string;
+      readonly message: string;
+      readonly evidence: readonly InspectPluginEvidenceSnapshot[];
+    };
+
+export type InspectPluginEvidenceSnapshot = {
+  readonly pluginId: string;
+  readonly evidenceKind: string;
+  readonly status: string;
+  readonly summary: string;
+  readonly redactionLabels: readonly string[];
+  readonly policyOutcome?: string;
+  readonly sourceReferences?: readonly InspectPluginSourceReference[];
+  readonly configFingerprint?: string;
+};
+
+export type InspectPluginHealthSnapshot = {
+  readonly pluginId: string;
+  readonly status: string;
+  readonly checkedAt: string;
+  readonly summary: string;
+  readonly redactionLabels: readonly string[];
+};
+
+export type InspectPluginSourceReference = {
+  readonly kind: string;
+  readonly id: string;
+  readonly title?: string;
+  readonly uri?: string;
+};

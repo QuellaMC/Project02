@@ -6,11 +6,11 @@ import {
 } from '../api/contracts.ts';
 import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
 import {
-  validateModelToolInputAgainstContract,
   visibleReplyModelToolName,
   type ModelToolCall,
   type ModelToolInputContract,
 } from '../api/model-tools.ts';
+import {validateModelToolInputAgainstContract} from '../api/model-tool-input-validation.ts';
 import type {
   RoleModelAssistantChatMessage,
   RoleModelChatCompletionTool,
@@ -20,13 +20,15 @@ import type {
   RoleModelProviderToolNameMapping,
 } from '../api/chat-wire.ts';
 import {
-  createRoleModelProviderToolNameMappings,
   defaultRoleModelProviderCapabilities,
-  providerToolNameForRuntimeToolName,
   renderRoleModelTurnContext,
-  runtimeToolNameForProviderToolName,
   type RoleModelTurnContext,
 } from '../prompt/render.ts';
+import {
+  createRoleModelProviderToolNameMappings,
+  providerToolNameForRuntimeToolName,
+  runtimeToolNameForProviderToolName,
+} from '../prompt/tool-wire.ts';
 import type {
   RoleModelAdapter,
   RoleModelAdapterInvocation,

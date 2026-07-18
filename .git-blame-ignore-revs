@@ -1,4 +1,4 @@
-# One-time mechanical Prettier reformat (Google TS style adoption).
-# Used automatically by GitHub blame; locally requires:
-#   git config blame.ignoreRevsFile .git-blame-ignore-revs
-736634dab0df36d041594b52ac869acdcf19e5b2
+# Google TS style adoption: one-time mechanical Prettier reformat, landed
+# as the PR #46 squash commit. Used automatically by GitHub blame; locally
+# requires: git config blame.ignoreRevsFile .git-blame-ignore-revs
+750b828d23221aac2ab29b35d513e1d025be7701

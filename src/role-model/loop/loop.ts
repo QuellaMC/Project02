@@ -62,10 +62,8 @@ import {
   type RoleModelProviderToolNameMapping,
   type RoleModelToolChatMessage,
 } from '../api/chat-wire.ts';
-import {
-  renderRoleModelTurnContext,
-  runtimeToolNameForProviderToolName,
-} from '../prompt/render.ts';
+import {renderRoleModelTurnContext} from '../prompt/render.ts';
+import {runtimeToolNameForProviderToolName} from '../prompt/tool-wire.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginToolCallResultSnapshot,
