@@ -7,8 +7,6 @@ import {fileURLToPath} from 'node:url';
 
 import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 
-export const runtimePluginPackageDescriptorFormat = 'project02.plugin.v1';
-
 export const maxRuntimePluginPackageMetadataBytes = 256 * 1_024;
 
 export const bundledRuntimePluginPackageRoot = fileURLToPath(

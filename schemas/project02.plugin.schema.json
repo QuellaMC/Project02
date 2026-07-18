@@ -1,0 +1,251 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "project02.plugin.schema.json",
+  "title": "Project02 runtime plugin package descriptor",
+  "description": "Authoring schema for project02.plugin.json. Mirrors the runtime validator (src/plugins/api/manifest-validation.ts and package-descriptor.ts); intentionally stricter about unknown keys so typos surface while editing. tests/unit/plugin-package-schema.test.ts keeps this file honest against the code validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "entry", "manifest"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": "project02.plugin.v1"
+    },
+    "entry": {
+      "type": "string",
+      "pattern": "^\\./.+\\.(ts|js|mjs)$",
+      "description": "Package-relative entry module exporting exactly one named createProject02Plugin factory."
+    },
+    "manifest": {
+      "$ref": "#/definitions/manifest"
+    }
+  },
+  "definitions": {
+    "identifier": {
+      "type": "string",
+      "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,127}$"
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "stringArray": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "displayName",
+        "version",
+        "kind",
+        "description",
+        "contractVersion",
+        "compatibility",
+        "declaredPlugins",
+        "config",
+        "localTrustLevel",
+        "runtimePolicy",
+        "activation",
+        "requestedAccess"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/identifier",
+          "description": "Stable plugin id; must equal the package folder name."
+        },
+        "displayName": {"$ref": "#/definitions/nonEmptyString"},
+        "version": {"$ref": "#/definitions/nonEmptyString"},
+        "kind": {
+          "enum": [
+            "first_party",
+            "memory_provider",
+            "tool_provider",
+            "context_provider",
+            "bridge_adapter"
+          ]
+        },
+        "description": {"$ref": "#/definitions/nonEmptyString"},
+        "contractVersion": {
+          "const": "mvp-008.runtime_plugin.v2"
+        },
+        "compatibility": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["hostContractVersions"],
+          "properties": {
+            "hostContractVersions": {
+              "type": "array",
+              "items": {"type": "string"},
+              "contains": {"const": "mvp-008.runtime_plugin.v2"}
+            },
+            "sourceSystem": {"type": "string"},
+            "sourceVersion": {"type": "string"},
+            "externalContract": {"type": "string"},
+            "notes": {"$ref": "#/definitions/stringArray"}
+          }
+        },
+        "declaredPlugins": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "tool_provider",
+              "context_provider",
+              "before_role_model_call",
+              "handle_tool_call",
+              "after_turn_committed",
+              "on_session_end",
+              "on_shutdown",
+              "health",
+              "plugin_discovery"
+            ]
+          }
+        },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["fields"],
+          "properties": {
+            "fields": {
+              "type": "array",
+              "items": {"$ref": "#/definitions/configField"}
+            },
+            "fingerprint": {"type": "string"}
+          }
+        },
+        "localTrustLevel": {
+          "enum": ["first_party", "trusted_adapter", "test_fixture"]
+        },
+        "runtimePolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "requiredForTurn",
+            "sideEffectLevel",
+            "confirmation",
+            "timeoutMs",
+            "sourceReferencesRequired",
+            "redactionLabels",
+            "failureBehavior"
+          ],
+          "properties": {
+            "requiredForTurn": {"type": "boolean"},
+            "sideEffectLevel": {
+              "enum": [
+                "none",
+                "runtime_read",
+                "runtime_config_write",
+                "local_memory_write",
+                "external_read",
+                "external_write"
+              ]
+            },
+            "confirmation": {"enum": ["not_required", "required"]},
+            "timeoutMs": {"type": "integer", "minimum": 1},
+            "sourceReferencesRequired": {"type": "boolean"},
+            "redactionLabels": {"$ref": "#/definitions/stringArray"},
+            "failureBehavior": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "beforeRoleModelCall",
+                "handleToolCall",
+                "afterTurnCommitted",
+                "health"
+              ],
+              "properties": {
+                "beforeRoleModelCall": {"enum": ["reject_turn", "degrade"]},
+                "handleToolCall": {"enum": ["reject_tool_call", "degrade"]},
+                "afterTurnCommitted": {"enum": ["log_failure"]},
+                "health": {"enum": ["degrade", "reject_turn"]}
+              }
+            }
+          }
+        },
+        "activation": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["defaultEnabled", "reasons"],
+          "properties": {
+            "defaultEnabled": {
+              "type": "boolean",
+              "description": "Bundled packages with true activate without config; demo/test plugins should stay false and be enabled per store."
+            },
+            "reasons": {"$ref": "#/definitions/stringArray"}
+          }
+        },
+        "requestedAccess": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "file_store": {"$ref": "#/definitions/accessLevel"},
+            "turn_context": {"$ref": "#/definitions/accessLevel"},
+            "model_input": {"$ref": "#/definitions/accessLevel"}
+          }
+        }
+      }
+    },
+    "accessLevel": {
+      "enum": ["none", "read", "write"]
+    },
+    "configField": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "description", "required", "secret", "redactionLabels"],
+      "properties": {
+        "name": {"$ref": "#/definitions/identifier"},
+        "description": {"$ref": "#/definitions/nonEmptyString"},
+        "required": {"type": "boolean"},
+        "secret": {
+          "type": "boolean",
+          "description": "Secret values are env references only and are redacted in every read; secret fields cannot be agentMutable."
+        },
+        "valueType": {
+          "enum": [
+            "string",
+            "number",
+            "boolean",
+            "object",
+            "array",
+            "secret",
+            "path",
+            "enum"
+          ]
+        },
+        "defaultValueSummary": {"type": "string"},
+        "envVar": {"type": "string"},
+        "allowedValues": {"$ref": "#/definitions/stringArray"},
+        "agentMutable": {
+          "type": "boolean",
+          "description": "true lets the model propose approval-gated updates via runtime.plugin.config.update."
+        },
+        "reloadRequired": {
+          "type": "boolean",
+          "description": "Whether a committed change to this field requires a runtime reload before taking effect."
+        },
+        "redactionLabels": {"$ref": "#/definitions/stringArray"},
+        "configFingerprint": {"type": "string"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"secret": {"const": true}},
+            "required": ["secret"]
+          },
+          "then": {
+            "not": {
+              "properties": {"agentMutable": {"const": true}},
+              "required": ["agentMutable"]
+            }
+          }
+        }
+      ]
+    }
+  }
+}
