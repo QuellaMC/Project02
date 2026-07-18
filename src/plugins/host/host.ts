@@ -84,6 +84,7 @@ import {
   createRuntimePluginConfigControlHostStateSnapshot,
   createRuntimePluginInventoryHostStateSnapshot,
   normalizePreparedRuntimePluginConfigEffect,
+  preparedRuntimePluginConfigEffectIsAlreadyApplied,
   reconcilePreparedRuntimePluginConfigEffect,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
@@ -211,6 +212,10 @@ export type RuntimePluginHost = {
   reconcileConfigEffect?(
     effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
+  /** True when the authored config already carries the effect's result fingerprint. */
+  configEffectIsAlreadyApplied?(
+    effect: PreparedRuntimePluginConfigEffect,
+  ): boolean;
   reloadPluginForCommittedConfig?(
     effects: readonly PreparedRuntimePluginConfigEffect[],
   ): Promise<RuntimePluginConfigReloadHostResult>;
@@ -351,6 +356,21 @@ export function createRuntimePluginHost(
         effect,
         state: pluginConfigControl,
         storeRoot: options.storeRoot,
+      });
+    },
+    configEffectIsAlreadyApplied(effect) {
+      if (pluginConfigControl === undefined) {
+        throw new Error(
+          'Runtime plugin config reconciliation requires configured host control state.',
+        );
+      }
+
+      return preparedRuntimePluginConfigEffectIsAlreadyApplied({
+        effect,
+        state: pluginConfigControl,
+        ...(options.storeRoot === undefined
+          ? {}
+          : {storeRoot: options.storeRoot}),
       });
     },
     async reloadPluginForCommittedConfig(effects) {

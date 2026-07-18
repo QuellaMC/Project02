@@ -22,18 +22,47 @@ export async function recoverPendingRuntimeConfigEffects(options: {
 
   const rawEvents = options.logStore.readSessionEvidence().stored.rawEvents;
   const reconciledEffectIds = reconciledRuntimeConfigEffectIds(rawEvents);
+  const acceptedReconciledIds = reconciledRuntimeConfigEffectIds(rawEvents, [
+    'accepted',
+  ]);
 
   for (const terminal of rawEvents) {
     if (terminal.kind !== 'runtime_turn_completed') {
       continue;
     }
 
-    const pendingEffects = (terminal.runtimeConfigEffects ?? []).filter(
+    const terminalEffects = terminal.runtimeConfigEffects ?? [];
+    const pendingEffects = terminalEffects.filter(
       effect => !reconciledEffectIds.has(effect.effectId),
     );
 
     if (pendingEffects.length === 0) {
       continue;
+    }
+
+    // Snapshot which pending effects the authored file ALREADY carries
+    // before replay mutates anything: those effects landed in an earlier
+    // pass (e.g. a commit whose marker append was lost), so the running
+    // host was constructed at-or-after their config and a reload would
+    // pointlessly rebuild and retire a fresh instance.
+    const preAppliedEffectIds = new Set(
+      pendingEffects
+        .filter(
+          effect =>
+            options.pluginHost.configEffectIsAlreadyApplied?.(effect) === true,
+        )
+        .map(effect => effect.effectId),
+    );
+    const priorAcceptedEffectIds = new Set(
+      terminalEffects
+        .filter(effect => acceptedReconciledIds.has(effect.effectId))
+        .map(effect => effect.effectId),
+    );
+
+    // Effects reconciled in an earlier pass were applied in that pass, so
+    // they never count as newly applied by this one.
+    for (const effectId of priorAcceptedEffectIds) {
+      preAppliedEffectIds.add(effectId);
     }
 
     const reconcileEvidence: RuntimePluginEvidenceSnapshot[] = [];
@@ -64,13 +93,16 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     // file, so its instances are stale in exactly the mid-session way;
     // recovery runs at turn start, which is what keeps the "next turn
     // reflects the change" contract across crashes. The event's effects
-    // reload as ONE batch so a group the original commit would have
-    // refused to live-apply (e.g. mixed live and session-scoped fields)
-    // defers here exactly the same way.
+    // reload as ONE batch — including effects already reconciled by an
+    // earlier pass — so a group the original commit would have refused
+    // to live-apply (e.g. mixed live and session-scoped fields) defers
+    // here exactly the same way.
     const reload = await applyCompletedRuntimeConfigReloads({
       pluginHost: options.pluginHost,
-      effects: pendingEffects,
+      effects: terminalEffects,
       reconcileEvidence,
+      priorAcceptedEffectIds,
+      preAppliedEffectIds,
     });
 
     options.logStore.appendRawEvent({
@@ -112,6 +144,10 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   readonly pluginHost: RuntimePluginHost;
   readonly effects: readonly PreparedRuntimePluginConfigEffect[];
   readonly reconcileEvidence: readonly RuntimePluginEvidenceSnapshot[];
+  /** Effects accepted by an earlier pass; they join the group for eligibility. */
+  readonly priorAcceptedEffectIds?: ReadonlySet<string>;
+  /** Effects the authored file already carried before this pass replayed anything. */
+  readonly preAppliedEffectIds?: ReadonlySet<string>;
 }): Promise<{
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly failures: readonly string[];
@@ -127,6 +163,11 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   const acceptedEffectIds = acceptedReconcileEffectIds(
     options.reconcileEvidence,
   );
+
+  for (const effectId of options.priorAcceptedEffectIds ?? []) {
+    acceptedEffectIds.add(effectId);
+  }
+
   const effectsByPluginId = new Map<
     string,
     PreparedRuntimePluginConfigEffect[]
@@ -147,6 +188,17 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   const failures: string[] = [];
 
   for (const group of effectsByPluginId.values()) {
+    // A group this pass did not move needs no reload: the running host was
+    // constructed at-or-after that config (or an earlier pass already made
+    // the reload decision), so a rebuild would only churn a fresh instance.
+    if (
+      group.every(
+        effect => options.preAppliedEffectIds?.has(effect.effectId) === true,
+      )
+    ) {
+      continue;
+    }
+
     try {
       const result = await reload(group);
 
@@ -330,6 +382,7 @@ function reconcileRuntimeConfigEffect(options: {
 
 export function reconciledRuntimeConfigEffectIds(
   rawEvents: readonly RawEventLogRecord[],
+  statuses: readonly ('accepted' | 'rejected')[] = ['accepted', 'rejected'],
 ): Set<string> {
   const effectIds = new Set<string>();
 
@@ -342,7 +395,7 @@ export function reconciledRuntimeConfigEffectIds(
       if (
         evidence.pluginId !== runtimePluginId ||
         evidence.evidenceKind !== 'after_turn_committed' ||
-        (evidence.status !== 'accepted' && evidence.status !== 'rejected')
+        !statuses.some(status => status === evidence.status)
       ) {
         continue;
       }

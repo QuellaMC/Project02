@@ -297,6 +297,7 @@ async function createLiveReloadLoopFixture(
     storeRoot: fixture.storeRoot,
     sessionId: fixture.sessionId,
   });
+  let reloaderInvocations = 0;
   const createPluginHost = () =>
     createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
@@ -318,15 +319,17 @@ async function createLiveReloadLoopFixture(
       pluginReloader:
         overrides.reloader ??
         Object.freeze({
-          reload: (pluginId: string) =>
-            Promise.resolve(
+          reload: (pluginId: string) => {
+            reloaderInvocations += 1;
+            return Promise.resolve(
               pluginId === manifest.id
                 ? {
                     status: 'rebuilt' as const,
                     plugin: stylePlugin(authoredTone()),
                   }
                 : {status: 'declined' as const, reason: 'unknown plugin'},
-            ),
+            );
+          },
         }),
     });
   const pluginHost = createPluginHost();
@@ -353,6 +356,7 @@ async function createLiveReloadLoopFixture(
     afterCommitLog,
     capturedContexts,
     contextCaptureAdapter,
+    reloaderCalls: () => reloaderInvocations,
     updateInput: {
       pluginId: manifest.id,
       fieldName: 'tone',
@@ -1757,6 +1761,152 @@ describe('plugin-driven tool loop commit and rollback', () => {
             ),
         ),
     ).toHaveLength(1);
+  });
+
+  it('skips the recovery rebuild when the running host already carries the config', async () => {
+    const live = await createLiveReloadLoopFixture('already-applied');
+    const failingStore = createAfterTurnCommittedAppendFailingLogStore(
+      live.logStore,
+    );
+    const crashResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update tone', 'evt_already_applied_update'),
+      session: live.session,
+      logStore: failingStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+          ],
+        },
+        {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
+      ]),
+    });
+
+    expect(crashResult.status).toBe('completed');
+    if (crashResult.status !== 'completed') {
+      throw new Error('Expected the marker-losing turn to complete.');
+    }
+    // The commit applied AND live-applied the change; only the marker died.
+    expect(crashResult.postCommitFailures?.join(' ')).toContain(
+      'append failed',
+    );
+    expect(live.authoredTone()).toBe('warm');
+    expect(live.reloaderCalls()).toBe(1);
+
+    // A restarted host is built from the already-updated config; replaying
+    // the pending effect must not rebuild and retire its fresh instance.
+    const restartedHost = live.createPluginHost();
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_already_applied_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: restartedHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(live.capturedContexts[0]).toContain('tone:warm');
+    expect(live.reloaderCalls()).toBe(1);
+
+    const recoveryEvents = live.logStore
+      .rawEvents()
+      .filter(
+        event =>
+          event.kind === 'after_turn_committed' &&
+          event.eventId === 'evt_already_applied_update',
+      );
+
+    expect(recoveryEvents).toHaveLength(1);
+    expect(
+      (recoveryEvents[0]?.runtimePluginEvidence ?? []).some(evidence =>
+        evidence.summary.startsWith('Live-applied'),
+      ),
+    ).toBe(false);
+  });
+
+  it('includes prior-reconciled effects when recovery groups a reload', async () => {
+    const live = await createLiveReloadLoopFixture('prior-accepted', {
+      withSessionScopedNote: true,
+    });
+    // Turn 1: the session-scoped no-op reconciles fine, the live field hits
+    // a transient (non-conflict) error, so the marker records ONE effect as
+    // reconciled and leaves the live one pending.
+    const baseHost = live.pluginHost;
+    const flakyHost = Object.freeze({
+      ...baseHost,
+      reconcileConfigEffect(effect) {
+        if (effect.fieldName === 'tone') {
+          throw new Error('io hiccup during reconcile');
+        }
+
+        if (baseHost.reconcileConfigEffect === undefined) {
+          throw new Error('Expected config effect reconciliation support.');
+        }
+
+        return baseHost.reconcileConfigEffect(effect);
+      },
+    } satisfies RuntimePluginHost);
+    const noteInput = {
+      pluginId: live.updateInput.pluginId,
+      fieldName: 'note',
+      operation: 'set',
+      value: 'quiet',
+      expectedFingerprint: live.updateInput.expectedFingerprint,
+    };
+    const crashResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update note and tone', 'evt_prior_accepted'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: flakyHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: noteInput},
+          ],
+        },
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+          ],
+        },
+        {toolCalls: [{name: 'visible_reply', input: {text: 'both approved'}}]},
+      ]),
+    });
+
+    expect(crashResult.status).toBe('completed');
+    if (crashResult.status !== 'completed') {
+      throw new Error('Expected the flaky update turn to complete.');
+    }
+    expect(crashResult.postCommitFailures?.join(' ')).toContain('io hiccup');
+    expect(live.authoredTone()).toBe('cool');
+
+    // Turn 2: recovery replays the live field, but its reload group must
+    // still contain the previously reconciled session-scoped effect — the
+    // commit path would have deferred this mixed group.
+    const recoveryHost = live.createPluginHost();
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_prior_accepted_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: recoveryHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(live.authoredTone()).toBe('warm');
+    expect(live.capturedContexts[0]).toContain('tone:cool');
+    expect(live.reloaderCalls()).toBe(0);
+
+    const deferredEvidence = live.logStore
+      .rawEvents()
+      .filter(event => event.kind === 'after_turn_committed')
+      .flatMap(event => event.runtimePluginEvidence ?? [])
+      .find(evidence => evidence.status === 'degraded');
+
+    expect(deferredEvidence?.summary).toContain(
+      'mix live and reload-required fields',
+    );
   });
 
   it('defers a mixed pending config group at recovery exactly like the commit path', async () => {

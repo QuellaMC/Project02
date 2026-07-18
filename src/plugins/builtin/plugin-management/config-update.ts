@@ -291,6 +291,34 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   );
 }
 
+/**
+ * True when the authored config already carries this effect's result — the
+ * mutation landed in an earlier pass (e.g. a commit whose marker append was
+ * lost), so replaying it will reconcile as already applied without moving
+ * the file.
+ */
+export function preparedRuntimePluginConfigEffectIsAlreadyApplied(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly state: RuntimePluginConfigControlHostState;
+  readonly storeRoot?: string;
+}): boolean {
+  const manifest = options.state.pluginManifests.find(
+    candidate => candidate.id === options.effect.targetPluginId,
+  );
+
+  if (manifest === undefined) {
+    return false;
+  }
+
+  const inspection = inspectRuntimePluginConfigForControl({
+    manifest,
+    state: options.state,
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  });
+
+  return inspection.fingerprint === options.effect.resultFingerprint;
+}
+
 export function createPreparedRuntimePluginConfigEffectConfirmationPreview(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
