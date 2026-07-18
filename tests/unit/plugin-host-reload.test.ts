@@ -309,6 +309,42 @@ describe('runtime plugin host live config reload', () => {
 
     expect(result?.outcome).toBe('live_applied');
     expect(seenFingerprints).toEqual(['sha256:final']);
+    // The evidence must describe the authored file the reload verified,
+    // which is the final effect's fingerprint, not the intermediate one.
+    expect(result?.evidence).toMatchObject({
+      configFingerprint: 'sha256:final',
+    });
+  });
+
+  it('defers and retires a rebuilt instance that drops a lifecycle hook', async () => {
+    const sessionEndLog: string[] = [];
+    const hollowRebuild = createRuntimePlugin({
+      manifest: reloadFixtureManifest(),
+      lifecycleHooks: {
+        onSessionEnd() {
+          sessionEndLog.push('declined-rebuild');
+          return {status: 'completed' as const, evidence: []};
+        },
+      },
+    });
+    const host = reloadHost({
+      initial: reloadFixturePlugin('v1', sessionEndLog),
+      reloader: {
+        reload: () =>
+          Promise.resolve({status: 'rebuilt', plugin: hollowRebuild}),
+      },
+    });
+
+    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+
+    expect(result?.outcome).toBe('deferred');
+    expect(result?.evidence?.summary).toContain('hook');
+    expect(await contextText(host)).toBe('v1');
+
+    // The declined rebuild may hold factory-allocated resources, so terminal
+    // lifecycle hooks must still reach it even though it never served.
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    expect(sessionEndLog.sort()).toEqual(['declined-rebuild', 'v1']);
   });
 
   it('runs terminal lifecycle hooks on superseded instances too', async () => {

@@ -18,6 +18,7 @@ import {
 } from './config.ts';
 import {
   createRuntimePluginConfigUpdateTool,
+  createRuntimePluginConfigUpdateTurnTracker,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   normalizePreparedRuntimePluginConfigEffect,
   preparedRuntimePluginConfigEffectIsStillCurrent,
@@ -62,6 +63,7 @@ export function createRuntimePluginManagementPlugin(
   const providedTools: RuntimePluginProvidedTool[] = [
     createRuntimePluginListTool(),
   ];
+  const configUpdateTurnTracker = createRuntimePluginConfigUpdateTurnTracker();
 
   if (pluginConfigControl !== undefined) {
     providedTools.push(createRuntimePluginConfigReadTool());
@@ -103,6 +105,7 @@ export function createRuntimePluginManagementPlugin(
             call,
             context,
             state: pluginConfigControl,
+            turnTracker: configUpdateTurnTracker,
             canLiveReload: pluginId => {
               const hostState = options.hostStateForTurn();
 

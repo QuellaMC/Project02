@@ -262,6 +262,8 @@ type RuntimePluginHostState = {
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
+  /** Retains a never-serving instance (e.g. a guard-declined rebuild) for terminal hooks. */
+  readonly retirePlugin: (plugin: RuntimePlugin) => void;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly registrySnapshot: RuntimePluginRegistrySnapshot;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
@@ -278,6 +280,7 @@ export function createRuntimePluginHost(
     livePlugins,
     supersededPlugins,
     swapEnabledPlugin,
+    retirePlugin,
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,
@@ -347,6 +350,7 @@ export function createRuntimePluginHost(
         pluginConfigControl,
         livePlugins,
         swapEnabledPlugin,
+        retirePlugin,
       });
     },
     beginFileStoreTransaction() {
@@ -463,6 +467,9 @@ function createRuntimePluginHostState(
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let supersededPlugins: readonly RuntimePlugin[] = Object.freeze([]);
+  const retirePlugin = (plugin: RuntimePlugin): void => {
+    supersededPlugins = Object.freeze([...supersededPlugins, plugin]);
+  };
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
   assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
@@ -542,9 +549,10 @@ function createRuntimePluginHostState(
       allPlugins = Object.freeze(
         allPlugins.map(plugin => (plugin === previous ? next : plugin)),
       );
-      supersededPlugins = Object.freeze([...supersededPlugins, previous]);
+      retirePlugin(previous);
       return previous;
     },
+    retirePlugin,
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,

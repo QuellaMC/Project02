@@ -890,6 +890,126 @@ describe('host-owned runtime plugin management tools', () => {
     });
   });
 
+  it('stops promising next_turn once the same turn approves a session-scoped update', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-config-mixed-turn-');
+    const baseManifest = configurablePluginManifest();
+    const manifest = createRuntimePluginManifest({
+      ...baseManifest,
+      config: {
+        fields: [
+          ...baseManifest.config.fields.map(field =>
+            field.name === 'tone' ? {...field, reloadRequired: false} : field,
+          ),
+          {
+            name: 'signoff',
+            description: 'Session-scoped signoff.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            agentMutable: true,
+            redactionLabels: [],
+          },
+        ],
+      },
+    });
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [manifest.id]: {
+          config: {tone: 'cool'},
+        },
+      },
+    });
+    const fingerprint = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath,
+      storeRoot,
+    }).fingerprint;
+    const host = createRuntimePluginHost({
+      storeRoot,
+      plugins: [createRuntimePlugin({manifest})],
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        manifest.id,
+      ],
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+        configPath,
+      },
+      toolConfirmationHandler: () => ({status: 'approved'}),
+      pluginReloader: {
+        reload: () =>
+          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
+      },
+    });
+
+    const liveFirst = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'warm',
+      expectedFingerprint: fingerprint,
+    });
+
+    expect(liveFirst).toMatchObject({
+      status: 'accepted',
+      output: {appliesTo: 'next_turn'},
+    });
+    expect(JSON.stringify(liveFirst)).not.toContain('appliesToNote');
+
+    const sessionScoped = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'signoff',
+      operation: 'set',
+      value: 'cheers',
+      expectedFingerprint: fingerprint,
+    });
+
+    expect(sessionScoped).toMatchObject({
+      status: 'accepted',
+      output: {appliesTo: 'future_host_construction', reloadRequired: true},
+    });
+
+    // Committed same-plugin changes reload as one group and a mixed group
+    // always defers, so the live field must stop promising next_turn now.
+    const liveAfterMix = await updateConfigField(host, {
+      pluginId: manifest.id,
+      fieldName: 'tone',
+      operation: 'set',
+      value: 'sharp',
+      expectedFingerprint: fingerprint,
+    });
+
+    expect(liveAfterMix).toMatchObject({
+      status: 'accepted',
+      output: {
+        appliesTo: 'future_host_construction',
+        appliesToNote: expect.stringContaining('session-scoped') as unknown,
+        reloadRequired: false,
+      },
+    });
+
+    // A new runtime event starts a fresh update group, so the promise returns.
+    const nextEvent = await updateConfigField(
+      host,
+      {
+        pluginId: manifest.id,
+        fieldName: 'tone',
+        operation: 'set',
+        value: 'warm',
+        expectedFingerprint: fingerprint,
+      },
+      'evt_plugin_config_test_next',
+    );
+
+    expect(nextEvent).toMatchObject({
+      status: 'accepted',
+      output: {appliesTo: 'next_turn'},
+    });
+  });
+
   it('prepares one approved field update without mutating authored config', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-approved-');
     const manifest = configurablePluginManifest();
@@ -1871,9 +1991,10 @@ function testIdentity() {
   } as const;
 }
 
-function testContext() {
+function testContext(eventId?: string) {
   return createRuntimePluginContext({
     ...testIdentity(),
+    ...(eventId === undefined ? {} : {eventId}),
     sessionId: 'session_plugin_config_test',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'inspect plugin config',
@@ -1887,15 +2008,17 @@ function testContext() {
 async function updateConfigField(
   host: ReturnType<typeof createRuntimePluginHost>,
   input: Readonly<Record<string, string | number | boolean | null>>,
+  eventId?: string,
 ) {
   return await host.handleToolCall(
     {
       ...testIdentity(),
+      ...(eventId === undefined ? {} : {eventId}),
       pluginId: runtimePluginId,
       toolName: runtimePluginConfigUpdateToolName,
       input,
     },
-    testContext(),
+    testContext(eventId),
   );
 }
 

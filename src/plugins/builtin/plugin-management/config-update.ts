@@ -356,11 +356,52 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(optio
   );
 }
 
+export type RuntimePluginConfigUpdateTurnTracker = {
+  sessionScopedUpdateApproved(eventId: string, pluginId: string): boolean;
+  recordApprovedUpdate(options: {
+    readonly eventId: string;
+    readonly pluginId: string;
+    readonly sessionScoped: boolean;
+  }): void;
+};
+
+/**
+ * Tracks approved config updates within one runtime event so a live-field
+ * update stops promising appliesTo: next_turn once a session-scoped update
+ * for the same plugin was already approved this turn — committed same-plugin
+ * changes reload as one group, and a mixed group always defers.
+ */
+export function createRuntimePluginConfigUpdateTurnTracker(): RuntimePluginConfigUpdateTurnTracker {
+  let trackedEventId: string | undefined;
+  const sessionScopedPluginIds = new Set<string>();
+  const enterEvent = (eventId: string): void => {
+    if (trackedEventId !== eventId) {
+      trackedEventId = eventId;
+      sessionScopedPluginIds.clear();
+    }
+  };
+
+  return {
+    sessionScopedUpdateApproved(eventId, pluginId) {
+      enterEvent(eventId);
+      return sessionScopedPluginIds.has(pluginId);
+    },
+    recordApprovedUpdate(options) {
+      enterEvent(options.eventId);
+
+      if (options.sessionScoped) {
+        sessionScopedPluginIds.add(options.pluginId);
+      }
+    },
+  };
+}
+
 export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
   readonly canLiveReload?: (pluginId: string) => boolean;
+  readonly turnTracker?: RuntimePluginConfigUpdateTurnTracker;
   readonly storeRoot?: string;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
@@ -467,16 +508,69 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     );
   }
 
+  return approvedRuntimePluginConfigUpdateResult({
+    call: options.call,
+    context: options.context,
+    manifest,
+    field,
+    operation,
+    expectedFingerprint,
+    resultFingerprint,
+    targetConfigPath,
+    ...(options.canLiveReload === undefined
+      ? {}
+      : {canLiveReload: options.canLiveReload}),
+    ...(options.turnTracker === undefined
+      ? {}
+      : {turnTracker: options.turnTracker}),
+  });
+}
+
+function approvedRuntimePluginConfigUpdateResult(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly manifest: {readonly id: string};
+  readonly field: RuntimePluginConfigField;
+  readonly operation: RuntimePluginConfigFieldControlOperation;
+  readonly expectedFingerprint: string;
+  readonly resultFingerprint: string;
+  readonly targetConfigPath: string;
+  readonly canLiveReload?: (pluginId: string) => boolean;
+  readonly turnTracker?: RuntimePluginConfigUpdateTurnTracker;
+}): RuntimePluginToolCallExecutionResult {
+  const {call, context, manifest, field, operation, resultFingerprint} =
+    options;
+  const liveField = field.reloadRequired === false;
+  const mixedTurnGroup =
+    liveField &&
+    options.turnTracker?.sessionScopedUpdateApproved(
+      call.eventId,
+      manifest.id,
+    ) === true;
+
+  options.turnTracker?.recordApprovedUpdate({
+    eventId: call.eventId,
+    pluginId: manifest.id,
+    sessionScoped: !liveField,
+  });
+
   return {
     status: 'accepted',
     output: createJsonBoundaryObjectSnapshot(
       {
         status: 'approved_pending_commit',
         appliesTo:
-          field.reloadRequired === false &&
+          liveField &&
+          !mixedTurnGroup &&
           options.canLiveReload?.(manifest.id) === true
             ? 'next_turn'
             : 'future_host_construction',
+        ...(mixedTurnGroup
+          ? {
+              appliesToNote:
+                'Not promised for the next turn: this turn already approved a session-scoped update for this plugin, and committed same-plugin changes are never live-applied as a mixed group.',
+            }
+          : {}),
         pluginId: manifest.id,
         fieldName: field.name,
         operation: operation.kind,
@@ -487,30 +581,30 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     ),
     evidence: [
       createRuntimePluginEvidenceSnapshot({
-        eventId: options.context.eventId,
-        traceId: options.context.traceId,
-        createdAt: options.context.timestamp,
+        eventId: context.eventId,
+        traceId: context.traceId,
+        createdAt: context.timestamp,
         kind: 'runtime_plugin_evidence_snapshot',
         pluginId: runtimePluginId,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
         summary: `Approved plugin "${manifest.id}" config field "${field.name}" for turn commit.`,
-        redactionLabels: options.context.privacy.redactionLabels,
+        redactionLabels: context.privacy.redactionLabels,
         configFingerprint: resultFingerprint,
       }),
     ],
     preparedConfigEffect: Object.freeze({
-      eventId: options.call.eventId,
-      traceId: options.call.traceId,
-      createdAt: options.call.createdAt,
+      eventId: call.eventId,
+      traceId: call.traceId,
+      createdAt: call.createdAt,
       kind: 'runtime_plugin_config_effect',
       effectId:
-        options.call.toolCallId ??
-        `${options.call.eventId}.${options.call.traceId}.${runtimePluginConfigUpdateToolName}`,
+        call.toolCallId ??
+        `${call.eventId}.${call.traceId}.${runtimePluginConfigUpdateToolName}`,
       targetPluginId: manifest.id,
-      targetConfigPath,
+      targetConfigPath: options.targetConfigPath,
       fieldName: field.name,
-      expectedFingerprint,
+      expectedFingerprint: options.expectedFingerprint,
       resultFingerprint,
       operation:
         operation.kind === 'set'

@@ -28,58 +28,75 @@ export async function recoverPendingRuntimeConfigEffects(options: {
       continue;
     }
 
-    for (const effect of terminal.runtimeConfigEffects ?? []) {
-      if (reconciledEffectIds.has(effect.effectId)) {
-        continue;
-      }
+    const pendingEffects = (terminal.runtimeConfigEffects ?? []).filter(
+      effect => !reconciledEffectIds.has(effect.effectId),
+    );
 
-      let evidence: RuntimePluginEvidenceSnapshot;
+    if (pendingEffects.length === 0) {
+      continue;
+    }
 
+    const reconcileEvidence: RuntimePluginEvidenceSnapshot[] = [];
+
+    for (const effect of pendingEffects) {
       try {
-        evidence = reconcileRuntimeConfigEffect({
-          pluginHost: options.pluginHost,
-          effect,
-        });
+        reconcileEvidence.push(
+          reconcileRuntimeConfigEffect({
+            pluginHost: options.pluginHost,
+            effect,
+          }),
+        );
       } catch (error: unknown) {
         if (!(error instanceof RuntimeConfigConflictError)) {
           throw error;
         }
 
-        evidence = closeConflictedPreparedRuntimePluginConfigEffect({
-          effect,
-          reason: error.message,
-        });
+        reconcileEvidence.push(
+          closeConflictedPreparedRuntimePluginConfigEffect({
+            effect,
+            reason: error.message,
+          }),
+        );
       }
+    }
 
-      // The host was constructed before this replay mutated the config
-      // file, so its instances are stale in exactly the mid-session way;
-      // recovery runs at turn start, which is what keeps the "next turn
-      // reflects the change" contract across crashes.
-      const reload = await applyCompletedRuntimeConfigReloads({
-        pluginHost: options.pluginHost,
-        effects: [effect],
-        reconcileEvidence: [evidence],
-      });
+    // The host was constructed before this replay mutated the config
+    // file, so its instances are stale in exactly the mid-session way;
+    // recovery runs at turn start, which is what keeps the "next turn
+    // reflects the change" contract across crashes. The event's effects
+    // reload as ONE batch so a group the original commit would have
+    // refused to live-apply (e.g. mixed live and session-scoped fields)
+    // defers here exactly the same way.
+    const reload = await applyCompletedRuntimeConfigReloads({
+      pluginHost: options.pluginHost,
+      effects: pendingEffects,
+      reconcileEvidence,
+    });
 
-      options.logStore.appendRawEvent({
-        eventId: terminal.eventId,
-        traceId: terminal.traceId,
-        createdAt: terminal.createdAt,
-        kind: 'after_turn_committed',
-        eventType: terminal.eventType,
-        status:
-          reload.failures.length > 0 ? 'completed_with_failures' : 'completed',
-        ...(terminal.visibleMessageIds === undefined
-          ? {}
-          : {visibleMessageIds: terminal.visibleMessageIds}),
-        ...(terminal.toolCallIds === undefined
-          ? {}
-          : {toolCallIds: terminal.toolCallIds}),
-        ...(terminal.payloadSummary === undefined
-          ? {}
-          : {payloadSummary: terminal.payloadSummary}),
-        ...runtimePluginEvidenceOption([evidence, ...reload.evidence]),
-      });
+    options.logStore.appendRawEvent({
+      eventId: terminal.eventId,
+      traceId: terminal.traceId,
+      createdAt: terminal.createdAt,
+      kind: 'after_turn_committed',
+      eventType: terminal.eventType,
+      status:
+        reload.failures.length > 0 ? 'completed_with_failures' : 'completed',
+      ...(terminal.visibleMessageIds === undefined
+        ? {}
+        : {visibleMessageIds: terminal.visibleMessageIds}),
+      ...(terminal.toolCallIds === undefined
+        ? {}
+        : {toolCallIds: terminal.toolCallIds}),
+      ...(terminal.payloadSummary === undefined
+        ? {}
+        : {payloadSummary: terminal.payloadSummary}),
+      ...runtimePluginEvidenceOption([
+        ...reconcileEvidence,
+        ...reload.evidence,
+      ]),
+    });
+
+    for (const effect of pendingEffects) {
       reconciledEffectIds.add(effect.effectId);
     }
   }

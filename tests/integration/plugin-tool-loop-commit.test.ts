@@ -202,7 +202,10 @@ function createConfigEffectTestAdapter(options: {
 
 async function createLiveReloadLoopFixture(
   label: string,
-  overrides: {readonly reloader?: RuntimePluginReloader} = {},
+  overrides: {
+    readonly reloader?: RuntimePluginReloader;
+    readonly withSessionScopedNote?: boolean;
+  } = {},
 ) {
   const fixture = await createConfigEffectTestFixture(`reload-${label}`);
   const manifest = createRuntimePluginManifest({
@@ -210,11 +213,43 @@ async function createLiveReloadLoopFixture(
     declaredPlugins: ['before_role_model_call', 'after_turn_committed'],
     requestedAccess: {model_input: 'write'},
     config: {
-      fields: fixture.targetPlugin.manifest.config.fields.map(field =>
-        field.name === 'tone' ? {...field, reloadRequired: false} : field,
-      ),
+      fields: [
+        ...fixture.targetPlugin.manifest.config.fields.map(field =>
+          field.name === 'tone' ? {...field, reloadRequired: false} : field,
+        ),
+        ...(overrides.withSessionScopedNote === true
+          ? [
+              {
+                name: 'note',
+                description: 'Session-scoped note.',
+                required: false,
+                secret: false,
+                valueType: 'string' as const,
+                agentMutable: true,
+                redactionLabels: [],
+              },
+            ]
+          : []),
+      ],
     },
   });
+  let before = fixture.before;
+
+  if (overrides.withSessionScopedNote === true) {
+    writeRuntimeConfig(fixture.configPath, {
+      plugins: {
+        [manifest.id]: {
+          config: {tone: 'cool', note: 'quiet'},
+        },
+      },
+    });
+    before = inspectRuntimePluginConfig({
+      manifest,
+      pluginManifests: [manifest],
+      configPath: fixture.configPath,
+      storeRoot: fixture.storeRoot,
+    });
+  }
   const afterCommitLog: string[] = [];
   const stylePlugin = (tone: string) =>
     createRuntimePlugin({
@@ -262,37 +297,39 @@ async function createLiveReloadLoopFixture(
     storeRoot: fixture.storeRoot,
     sessionId: fixture.sessionId,
   });
-  const pluginHost = createRuntimePluginHost({
-    fileStore: testRuntimePluginFileStoreProvider,
-    storeRoot: fixture.storeRoot,
-    sessionId: fixture.sessionId,
-    sessionIdentity: session,
-    plugins: [stylePlugin(authoredTone())],
-    enabledPluginIds: [
-      runtimePluginId,
-      firstPartyModelToolsPluginId,
-      manifest.id,
-    ],
-    pluginConfigControl: {
-      control: testRuntimePluginConfigControlCapability,
-      pluginManifests: [manifest],
-      configPath: fixture.configPath,
-    },
-    toolConfirmationHandler: () => ({status: 'approved'}),
-    pluginReloader:
-      overrides.reloader ??
-      Object.freeze({
-        reload: (pluginId: string) =>
-          Promise.resolve(
-            pluginId === manifest.id
-              ? {
-                  status: 'rebuilt' as const,
-                  plugin: stylePlugin(authoredTone()),
-                }
-              : {status: 'declined' as const, reason: 'unknown plugin'},
-          ),
-      }),
-  });
+  const createPluginHost = () =>
+    createRuntimePluginHost({
+      fileStore: testRuntimePluginFileStoreProvider,
+      storeRoot: fixture.storeRoot,
+      sessionId: fixture.sessionId,
+      sessionIdentity: session,
+      plugins: [stylePlugin(authoredTone())],
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        manifest.id,
+      ],
+      pluginConfigControl: {
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+        configPath: fixture.configPath,
+      },
+      toolConfirmationHandler: () => ({status: 'approved'}),
+      pluginReloader:
+        overrides.reloader ??
+        Object.freeze({
+          reload: (pluginId: string) =>
+            Promise.resolve(
+              pluginId === manifest.id
+                ? {
+                    status: 'rebuilt' as const,
+                    plugin: stylePlugin(authoredTone()),
+                  }
+                : {status: 'declined' as const, reason: 'unknown plugin'},
+            ),
+        }),
+    });
+  const pluginHost = createPluginHost();
   const capturedContexts: string[][] = [];
   const contextCaptureAdapter = Object.freeze({
     invoke(inputEnvelope) {
@@ -311,6 +348,7 @@ async function createLiveReloadLoopFixture(
     session,
     logStore,
     pluginHost,
+    createPluginHost,
     authoredTone,
     afterCommitLog,
     capturedContexts,
@@ -320,7 +358,7 @@ async function createLiveReloadLoopFixture(
       fieldName: 'tone',
       operation: 'set',
       value: 'warm',
-      expectedFingerprint: fixture.before.fingerprint,
+      expectedFingerprint: before.fingerprint,
     },
   };
 }
@@ -1719,6 +1757,111 @@ describe('plugin-driven tool loop commit and rollback', () => {
             ),
         ),
     ).toHaveLength(1);
+  });
+
+  it('defers a mixed pending config group at recovery exactly like the commit path', async () => {
+    const live = await createLiveReloadLoopFixture('mixed-recovery', {
+      withSessionScopedNote: true,
+    });
+    // Crash the turn between the terminal event append and reconciliation so
+    // both effects stay pending; recovery must then replay them as ONE group.
+    const crashingHost = Object.freeze({
+      ...live.pluginHost,
+      reconcileConfigEffect() {
+        throw new Error('reconcile crashed before applying the group');
+      },
+    } satisfies RuntimePluginHost);
+    const noteInput = {
+      pluginId: live.updateInput.pluginId,
+      fieldName: 'note',
+      operation: 'set',
+      value: 'quiet',
+      expectedFingerprint: live.updateInput.expectedFingerprint,
+    };
+    const crashResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update note and tone', 'evt_mixed_recovery'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: crashingHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: noteInput},
+          ],
+        },
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+          ],
+        },
+        {toolCalls: [{name: 'visible_reply', input: {text: 'both approved'}}]},
+      ]),
+    });
+
+    expect(crashResult.status).toBe('completed');
+    if (crashResult.status !== 'completed') {
+      throw new Error('Expected the crashing update turn to complete.');
+    }
+    expect(crashResult.postCommitFailures?.join(' ')).toContain(
+      'reconcile crashed',
+    );
+    expect(live.authoredTone()).toBe('cool');
+
+    const terminal = live.logStore
+      .rawEvents()
+      .find(
+        event =>
+          event.kind === 'runtime_turn_completed' &&
+          event.eventId === 'evt_mixed_recovery',
+      );
+
+    expect(terminal?.runtimeConfigEffects).toHaveLength(2);
+
+    const recoveryHost = live.createPluginHost();
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_mixed_recovery_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: recoveryHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    // Recovery replayed the authored changes but must NOT live-apply them:
+    // the commit path would have deferred this mixed group, so the follow-up
+    // turn still serves the instance built from the pre-update config.
+    expect(live.authoredTone()).toBe('warm');
+    expect(live.capturedContexts[0]).toContain('tone:cool');
+
+    const recoveryEvents = live.logStore
+      .rawEvents()
+      .filter(
+        event =>
+          event.kind === 'after_turn_committed' &&
+          (event.runtimePluginEvidence ?? []).some(evidence =>
+            evidence.sourceReferences?.some(
+              reference => reference.kind === 'runtime',
+            ),
+          ),
+      );
+
+    expect(recoveryEvents).toHaveLength(1);
+    expect(recoveryEvents[0]?.status).toBe('completed');
+
+    const recoveryEvidence = recoveryEvents[0]?.runtimePluginEvidence ?? [];
+
+    expect(
+      recoveryEvidence.filter(evidence => evidence.status === 'accepted'),
+    ).toHaveLength(2);
+    expect(
+      recoveryEvidence.find(evidence => evidence.status === 'degraded'),
+    ).toMatchObject({
+      summary: expect.stringContaining(
+        'mix live and reload-required fields',
+      ) as unknown,
+      configFingerprint:
+        terminal?.runtimeConfigEffects?.at(-1)?.resultFingerprint,
+    });
   });
 
   it('closes a conflicted config effect with a rejected record and continues the session', async () => {

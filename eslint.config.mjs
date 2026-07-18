@@ -61,12 +61,13 @@ export default tseslint.config(
     // Re-pinned +2 for the inventory/control host-state import split, then
     // +46 for the live config-reload seam (state refs, superseded-instance
     // retention, and method delegation only; the reload policy lives in
-    // src/plugins/host/reload.ts).
+    // src/plugins/host/reload.ts), then +7 for the retirePlugin closure that
+    // keeps guard-declined rebuilds reachable for terminal lifecycle hooks.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1826, skipBlankLines: true, skipComments: true},
+        {max: 1833, skipBlankLines: true, skipComments: true},
       ],
     },
   },

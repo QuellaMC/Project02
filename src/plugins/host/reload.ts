@@ -8,6 +8,7 @@
  */
 import {
   createRuntimePluginEvidenceSnapshot,
+  registeredRuntimePluginLifecycleHooks,
   runtimePluginId,
 } from '../api/index.ts';
 import type {
@@ -52,6 +53,8 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
+  /** Retains an instance that will never serve so it still receives terminal lifecycle hooks. */
+  readonly retirePlugin: (plugin: RuntimePlugin) => void;
 }): Promise<RuntimePluginConfigReloadHostResult> {
   const [firstEffect] = options.effects;
 
@@ -146,21 +149,19 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
     };
   }
 
-  if (
-    !canonicalJsonValuesEqual(reloaded.plugin.manifest, previous.manifest) ||
-    !canonicalJsonValuesEqual(
-      reloaded.plugin.providedTools,
-      previous.providedTools,
-    )
-  ) {
+  if (rebuiltPluginChangesFrozenSurface(previous, reloaded.plugin)) {
+    // The rebuilt instance may already hold factory-allocated resources, so
+    // it is retired (not dropped) even though it never serves a dispatch.
+    options.retirePlugin(reloaded.plugin);
     return deferred(
       options.effects,
       pluginId,
-      'the rebuilt plugin changed its manifest or tool surface',
+      'the rebuilt plugin changed its manifest, hook, or tool surface',
     );
   }
 
   if (options.swapEnabledPlugin(reloaded.plugin) === undefined) {
+    options.retirePlugin(reloaded.plugin);
     return deferred(options.effects, pluginId, 'the plugin left the host');
   }
 
@@ -172,6 +173,26 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
       `Live-applied committed config for plugin "${pluginId}" by rebuilding its instance (fields: ${liveFieldNames.join(', ')}).`,
     ),
   };
+}
+
+/**
+ * The runtime surface advertised at construction stays frozen across a swap:
+ * manifest, provided tools, AND which lifecycle hooks are registered — a
+ * rebuild that drops handleToolCall would strand advertised tools, and one
+ * that adds hooks would dispatch behavior the host never advertised.
+ */
+function rebuiltPluginChangesFrozenSurface(
+  previous: RuntimePlugin,
+  rebuilt: RuntimePlugin,
+): boolean {
+  return (
+    !canonicalJsonValuesEqual(rebuilt.manifest, previous.manifest) ||
+    !canonicalJsonValuesEqual(rebuilt.providedTools, previous.providedTools) ||
+    !canonicalJsonValuesEqual(
+      registeredRuntimePluginLifecycleHooks(rebuilt),
+      registeredRuntimePluginLifecycleHooks(previous),
+    )
+  );
 }
 
 function deferred(
@@ -195,8 +216,9 @@ function reloadEvidence(
   summary: string,
 ): RuntimePluginEvidenceSnapshot {
   const [firstEffect] = effects;
+  const finalEffect = effects[effects.length - 1];
 
-  if (firstEffect === undefined) {
+  if (firstEffect === undefined || finalEffect === undefined) {
     throw new TypeError('Runtime plugin reload evidence requires effects.');
   }
 
@@ -214,6 +236,8 @@ function reloadEvidence(
       id: effect.effectId,
     })),
     redactionLabels: [],
-    configFingerprint: firstEffect.resultFingerprint,
+    // Effects arrive in apply order, so the authored file the reload saw (or
+    // deferred on) is the LAST effect's fingerprint, not the first.
+    configFingerprint: finalEffect.resultFingerprint,
   });
 }
