@@ -45,10 +45,6 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
     description:
       'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings, and applies only to later host construction.',
     requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1
-    },
     inputContract: {
       type: 'object',
       fields: [
@@ -73,7 +69,8 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
         },
         {
           name: 'value',
-          description: 'New JSON value. Required for set and unavailable for unset.',
+          description:
+            'New JSON value. Required for set and unavailable for unset. Must match the target field\'s declared valueType and allowedValues as returned by runtime.plugin.config (e.g. a plain string for a string field, not a JSON-encoded array).',
           required: false
         },
         {

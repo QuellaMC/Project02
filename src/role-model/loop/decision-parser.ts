@@ -501,8 +501,9 @@ function validateUserTurnToolCallCardinality(
 
     // user_turn budgets are enforced at tool routing, where an over-limit
     // call becomes a rejected observation the model can react to; only
-    // per-response shape violations reject the decision itself.
-    if (definition.callLimit.scope !== 'model_response') {
+    // per-response shape violations reject the decision itself. An absent
+    // callLimit means the tool is unlimited.
+    if (definition.callLimit?.scope !== 'model_response') {
       continue;
     }
 

@@ -89,7 +89,8 @@ export type ModelToolDefinition = {
   readonly name: string;
   readonly description: string;
   readonly requiredForUserTurn: boolean;
-  readonly callLimit: ModelToolCallLimit;
+  /** Absent means unlimited: tools are only call-limited when they declare one. */
+  readonly callLimit?: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
 };
 
@@ -195,7 +196,7 @@ export function freezeModelToolDefinition(
     name: definition.name,
     description: definition.description,
     requiredForUserTurn: definition.requiredForUserTurn,
-    callLimit: freezeModelToolCallLimit(definition.callLimit),
+    ...(definition.callLimit === undefined ? {} : { callLimit: freezeModelToolCallLimit(definition.callLimit) }),
     inputContract: freezeModelToolInputContract(definition.inputContract)
   } satisfies ModelToolDefinition);
 }
