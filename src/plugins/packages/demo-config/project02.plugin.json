@@ -1,4 +1,5 @@
 {
+  "$schema": "../../../../schemas/project02.plugin.schema.json",
   "format": "project02.plugin.v1",
   "entry": "./index.ts",
   "manifest": {

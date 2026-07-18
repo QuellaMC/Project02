@@ -141,6 +141,15 @@ export {
   assertUniqueRuntimePluginIds,
   runtimeIdentityMatchesContext,
 } from './identity.ts';
+export {
+  parseRuntimePluginPackageDescriptor,
+  readRuntimePluginPackageDescriptor,
+  runtimePluginPackageDescriptorFormat,
+  runtimePluginPackageEntryExtensions,
+  type ParsedRuntimePluginPackageDescriptor,
+  type RuntimePluginPackageDescriptorIssue,
+  type RuntimePluginPackageDescriptorParseResult,
+} from './package-descriptor.ts';
 // factory.ts is deliberately NOT re-exported here: it type-imports
 // runtime/config (resolved plugin config shapes), so exposing it through
 // this barrel would put the barrel on a runtime->api->runtime cycle.

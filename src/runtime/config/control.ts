@@ -344,8 +344,13 @@ export function validateRuntimePluginConfigControlOperation(options: {
   );
 
   if (field === undefined) {
+    const declaredFieldNames = options.manifest.config.fields
+      .map(candidate => candidate.name)
+      .join(', ');
+
     throw new TypeError(
-      `Plugin "${options.manifest.id}" does not declare config field "${options.operation.fieldName}".`,
+      `Plugin "${options.manifest.id}" does not declare config field "${options.operation.fieldName}". ` +
+        `Declared fields: ${declaredFieldNames.length === 0 ? 'none' : declaredFieldNames}.`,
     );
   }
 

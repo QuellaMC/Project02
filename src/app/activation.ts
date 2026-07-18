@@ -19,6 +19,7 @@ import {
   type RuntimePluginAccessMap,
   type RuntimePluginCatalogEntry,
   type RuntimePluginConfigControlHostState,
+  type RuntimePluginInventoryHostState,
   type RuntimePluginFactoryDefinition as RuntimePluginFactoryDefinitionContract,
   type RuntimePluginFactoryFunction,
   type RuntimePluginHost,
@@ -882,9 +883,11 @@ function isRuntimePluginInventoryRecoveryManifest(
   );
 }
 
+// Invalid-config hosts get inventory only: the config-control capability
+// deliberately does not survive into this state, so config tools stay off.
 function runtimePluginInventoryStateForInvalidConfig(
   state: RuntimePluginConfigControlHostState,
-): RuntimePluginConfigControlHostState {
+): RuntimePluginInventoryHostState {
   const manifestsById = new Map<string, RuntimePluginManifest>();
 
   for (const manifest of state.pluginManifests) {
@@ -903,7 +906,6 @@ function runtimePluginInventoryStateForInvalidConfig(
       : {defaultEnabledPluginIds: state.defaultEnabledPluginIds}),
     ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
     ...(state.env === undefined ? {} : {env: state.env}),
-    ...(state.control === undefined ? {} : {control: state.control}),
   });
 }
 
