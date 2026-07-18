@@ -1,14 +1,11 @@
 import {createHash} from 'node:crypto';
-import {readFileSync} from 'node:fs';
 
 import {assertCanonicalRuntimeTimestamp} from '../../../core/index.ts';
 import {canonicalJsonStringify} from '../../../shared/canonical-json.ts';
 
 import {createRuntimePlugin} from '../../api/constructors.ts';
-import {
-  createRuntimePluginContextItem,
-  createRuntimePluginManifest,
-} from '../../api/manifest-validation.ts';
+import {createRuntimePluginContextItem} from '../../api/manifest-validation.ts';
+import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
 import type {
   RuntimePluginContext,
@@ -45,7 +42,6 @@ import {characterStatePluginId} from '../../api/contract.ts';
 
 export {characterStatePluginId} from '../../api/contract.ts';
 
-const characterStatePluginDescriptorFormat = 'project02.plugin.v1';
 const characterStatePluginEntry = './index.ts';
 const characterStatePluginDescriptorUrl = new URL(
   './project02.plugin.json',
@@ -99,9 +95,10 @@ const characterStatePatchInputContract = Object.freeze({
 } satisfies ModelToolInputContract);
 
 export function createCharacterStatePluginManifest(): RuntimePluginManifest {
-  const descriptor = readCharacterStatePluginDescriptor();
-
-  return createRuntimePluginManifest(descriptor['manifest']);
+  return readRuntimePluginPackageDescriptor({
+    descriptorUrl: characterStatePluginDescriptorUrl,
+    expectedEntry: characterStatePluginEntry,
+  }).manifest;
 }
 
 export function createCharacterStatePlugin(): RuntimePlugin {
@@ -310,35 +307,6 @@ function createCharacterStatePluginFromManifest(
   });
 
   return plugin;
-}
-
-function readCharacterStatePluginDescriptor(): RuntimePluginJsonObject {
-  let descriptor: unknown;
-
-  try {
-    descriptor = JSON.parse(
-      readFileSync(characterStatePluginDescriptorUrl, 'utf8'),
-    ) as unknown;
-  } catch (error: unknown) {
-    throw new TypeError(
-      'Character State plugin descriptor could not be read.',
-      {cause: error},
-    );
-  }
-
-  if (
-    !isJsonObject(descriptor) ||
-    descriptor['format'] !== characterStatePluginDescriptorFormat ||
-    descriptor['entry'] !== characterStatePluginEntry ||
-    !Object.hasOwn(descriptor, 'manifest') ||
-    Object.keys(descriptor).some(
-      key => key !== 'format' && key !== 'entry' && key !== 'manifest',
-    )
-  ) {
-    throw new TypeError('Character State plugin descriptor is malformed.');
-  }
-
-  return descriptor;
 }
 
 function readCharacterStatePatchIdempotencyRecord(options: {

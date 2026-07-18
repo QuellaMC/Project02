@@ -1,23 +1,17 @@
-import {readFileSync} from 'node:fs';
-
 import {createRuntimePlugin} from '../../api/constructors.ts';
-import {
-  createRuntimePluginContextItem,
-  createRuntimePluginManifest,
-} from '../../api/manifest-validation.ts';
+import {createRuntimePluginContextItem} from '../../api/manifest-validation.ts';
+import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
 import {createPluginContextEvidence} from '../../api/evidence-helpers.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
 import type {
   RuntimePlugin,
   RuntimePluginBeforeRoleModelCallResult,
-  RuntimePluginJsonObject,
   RuntimePluginManifest,
 } from '../../api/types.ts';
 
 export const demoConfigPluginId = 'demo-config';
 export const demoConfigDefaultTone = 'neutral';
 
-const demoConfigPluginDescriptorFormat = 'project02.plugin.v1';
 const demoConfigPluginEntry = './index.ts';
 const demoConfigPluginDescriptorUrl = new URL(
   './project02.plugin.json',
@@ -25,9 +19,10 @@ const demoConfigPluginDescriptorUrl = new URL(
 );
 
 export function createDemoConfigPluginManifest(): RuntimePluginManifest {
-  return createRuntimePluginManifest(
-    readDemoConfigPluginDescriptor()['manifest'],
-  );
+  return readRuntimePluginPackageDescriptor({
+    descriptorUrl: demoConfigPluginDescriptorUrl,
+    expectedEntry: demoConfigPluginEntry,
+  }).manifest;
 }
 
 // Package entry adapter: the discovered manifest and the resolved runtime
@@ -96,36 +91,4 @@ function configuredStringValue(
   const value = field.value.trim();
 
   return value.length === 0 ? undefined : value;
-}
-
-function readDemoConfigPluginDescriptor(): RuntimePluginJsonObject {
-  let descriptor: unknown;
-
-  try {
-    descriptor = JSON.parse(
-      readFileSync(demoConfigPluginDescriptorUrl, 'utf8'),
-    ) as unknown;
-  } catch (error: unknown) {
-    throw new TypeError('Demo Config plugin descriptor could not be read.', {
-      cause: error,
-    });
-  }
-
-  if (
-    !isJsonObject(descriptor) ||
-    descriptor['format'] !== demoConfigPluginDescriptorFormat ||
-    descriptor['entry'] !== demoConfigPluginEntry ||
-    !Object.hasOwn(descriptor, 'manifest') ||
-    Object.keys(descriptor).some(
-      key => key !== 'format' && key !== 'entry' && key !== 'manifest',
-    )
-  ) {
-    throw new TypeError('Demo Config plugin descriptor is malformed.');
-  }
-
-  return descriptor;
-}
-
-function isJsonObject(value: unknown): value is RuntimePluginJsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

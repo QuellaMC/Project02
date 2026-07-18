@@ -6,11 +6,11 @@
 export {
   bundledRuntimePluginPackageRoot,
   maxRuntimePluginPackageMetadataBytes,
-  runtimePluginPackageDescriptorFormat,
   type DiscoveredRuntimePluginPackage,
   type RuntimePluginPackageDiagnostic,
   type RuntimePluginPackageDiscovery,
   type RuntimePluginPackageProvenance,
   type RuntimePluginPackageSource,
 } from './contract.ts';
+export {runtimePluginPackageDescriptorFormat} from '../api/package-descriptor.ts';
 export {discoverRuntimePluginPackages} from './discovery.ts';
