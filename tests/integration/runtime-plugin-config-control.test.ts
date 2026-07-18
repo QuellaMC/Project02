@@ -247,7 +247,8 @@ describe('runtime plugin config control', () => {
         },
       }),
     ).toThrow(
-      `Plugin "${fixturePluginId}" does not declare config field "unknownField".`,
+      `Plugin "${fixturePluginId}" does not declare config field "unknownField". ` +
+        'Declared fields: mode, label, operatorOnly, retries, settings, apiKey.',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(fixture.config);
   });
