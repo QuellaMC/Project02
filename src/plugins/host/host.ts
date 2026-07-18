@@ -82,9 +82,11 @@ import {
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {
   createRuntimePluginConfigControlHostStateSnapshot,
+  createRuntimePluginInventoryHostStateSnapshot,
   normalizePreparedRuntimePluginConfigEffect,
   reconcilePreparedRuntimePluginConfigEffect,
   type RuntimePluginConfigControlHostState,
+  type RuntimePluginInventoryHostState,
 } from '../builtin/plugin-management/index.ts';
 import {
   confirmPreparedRuntimePluginToolResult,
@@ -108,7 +110,7 @@ export type CreateRuntimePluginHostOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly pluginInventoryState?: RuntimePluginConfigControlHostState;
+  readonly pluginInventoryState?: RuntimePluginInventoryHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
@@ -427,7 +429,7 @@ function createRuntimePluginHostState(
     pluginConfigControl ??
     (options.pluginInventoryState === undefined
       ? undefined
-      : createRuntimePluginConfigControlHostStateSnapshot(
+      : createRuntimePluginInventoryHostStateSnapshot(
           options.pluginInventoryState,
         ));
   let allPlugins: readonly RuntimePlugin[] = [];

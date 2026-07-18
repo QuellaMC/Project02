@@ -11,24 +11,15 @@ import {
   statSync,
 } from 'node:fs';
 import type {Dirent} from 'node:fs';
-import {
-  basename,
-  extname,
-  isAbsolute,
-  join,
-  relative,
-  resolve,
-  sep,
-} from 'node:path';
+import {basename, isAbsolute, join, relative, resolve, sep} from 'node:path';
 
-import {createRuntimePluginManifest} from '../api/manifest-validation.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {isRecord} from '../api/validation-primitives.ts';
+import {parseRuntimePluginPackageDescriptor} from '../api/package-descriptor.ts';
 import type {RuntimePluginManifest} from '../api/types.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {
   maxRuntimePluginPackageMetadataBytes,
-  runtimePluginPackageDescriptorFormat,
   type DiscoveredRuntimePluginPackage,
   type RuntimePluginPackageDiagnostic,
   type RuntimePluginPackageDiscovery,
@@ -198,86 +189,20 @@ function readRuntimePluginPackageDescriptor(options: {
     pluginId,
   });
 
-  if (!isRecord(descriptor)) {
+  const parsed = parseRuntimePluginPackageDescriptor(descriptor);
+
+  if (parsed.status === 'rejected') {
     throw packageDiscoveryError({
-      code: 'invalid_descriptor',
-      message: 'Runtime plugin package descriptor must be an object.',
+      code: parsed.issue.code,
+      message: parsed.issue.message,
       path: descriptorPath,
       provenance: options.provenance,
       pluginId,
     });
   }
 
-  const descriptorFields = new Set(['format', 'entry', 'manifest']);
-  const unknownDescriptorField = Object.keys(descriptor)
-    .sort(compareText)
-    .find(field => !descriptorFields.has(field));
+  const {entry, manifest} = parsed.descriptor;
 
-  if (unknownDescriptorField !== undefined) {
-    throw packageDiscoveryError({
-      code: 'invalid_descriptor',
-      message: `Runtime plugin package descriptor contains unknown field "${unknownDescriptorField}".`,
-      path: descriptorPath,
-      provenance: options.provenance,
-      pluginId,
-    });
-  }
-
-  let manifest: RuntimePluginManifest;
-
-  try {
-    manifest = createRuntimePluginManifest(descriptor['manifest']);
-  } catch (error: unknown) {
-    throw packageDiscoveryError({
-      code: 'invalid_manifest',
-      message:
-        error instanceof Error
-          ? error.message
-          : 'Runtime plugin package manifest is invalid.',
-      path: descriptorPath,
-      provenance: options.provenance,
-      pluginId,
-    });
-  }
-  const entry = descriptor['entry'];
-
-  if (descriptor['format'] !== runtimePluginPackageDescriptorFormat) {
-    throw packageDiscoveryError({
-      code: 'invalid_descriptor',
-      message: `Runtime plugin package format must be "${runtimePluginPackageDescriptorFormat}".`,
-      path: descriptorPath,
-      provenance: options.provenance,
-      pluginId,
-    });
-  }
-  if (typeof entry !== 'string') {
-    throw packageDiscoveryError({
-      code: 'invalid_entry',
-      message: 'Runtime plugin package entry must be a string.',
-      path: descriptorPath,
-      provenance: options.provenance,
-      pluginId,
-    });
-  }
-  if (!entry.startsWith('./')) {
-    throw packageDiscoveryError({
-      code: 'invalid_entry',
-      message:
-        'Runtime plugin package entry must stay inside its package directory.',
-      path: descriptorPath,
-      provenance: options.provenance,
-      pluginId,
-    });
-  }
-  if (!['.ts', '.js', '.mjs'].includes(extname(entry))) {
-    throw packageDiscoveryError({
-      code: 'invalid_entry',
-      message: 'Runtime plugin package entry must use .ts, .js, or .mjs.',
-      path: descriptorPath,
-      provenance: options.provenance,
-      pluginId,
-    });
-  }
   if (pluginId !== manifest.id) {
     throw packageDiscoveryError({
       code: 'package_id_mismatch',
