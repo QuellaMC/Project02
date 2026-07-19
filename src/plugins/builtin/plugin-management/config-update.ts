@@ -510,6 +510,13 @@ function approvedRuntimePluginConfigUpdateResult(options: {
   const {call, context, manifest, field, operation, resultFingerprint} =
     options;
   const liveField = field.reloadRequired === false;
+  // Backward-looking on purpose. A later same-turn update cannot break an
+  // earlier next_turn promise: config mutations are compare-and-swap on the
+  // whole-file fingerprint, so once a fingerprint-CHANGING live update is
+  // approved, any later update prepared this turn conflict-closes at commit
+  // and never joins the group. The one sequence where both commit is a
+  // value-preserving (no-op) live update first — whose next_turn promise is
+  // vacuous, since there is no observable change to apply.
   const mixedTurnGroup =
     liveField &&
     options.sessionScopedUpdateConfirmedThisTurn?.(manifest.id) === true;

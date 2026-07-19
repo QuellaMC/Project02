@@ -94,6 +94,33 @@ describe('applyCompletedRuntimeConfigReloads', () => {
     ]);
   });
 
+  it('records a throwing currency predicate as a reload failure', async () => {
+    const baseHost = createRuntimePluginHost();
+    const explodingHost = Object.freeze({
+      ...baseHost,
+      pluginConfigCurrentFor(): boolean {
+        throw new Error('currency check exploded');
+      },
+      reloadPluginForCommittedConfig(): Promise<never> {
+        throw new Error('must not be reached');
+      },
+    } satisfies RuntimePluginHost);
+
+    // The turn is already durable by the time reloads run, so a throwing
+    // host predicate must surface as a post-commit failure, not a rejection.
+    const result = await applyCompletedRuntimeConfigReloads({
+      pluginHost: explodingHost,
+      effects: [
+        applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f1'),
+      ],
+      reconcileEvidence: [acceptedReconcileEvidence('effect-a')],
+    });
+
+    expect(result.failures).toEqual([
+      expect.stringContaining('currency check exploded') as unknown,
+    ]);
+  });
+
   it('skips a no-op group only when the host already reflects it', async () => {
     const noOpTurnEffects = [
       applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f0'),

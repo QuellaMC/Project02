@@ -46,6 +46,7 @@ export async function recoverPendingRuntimeConfigEffects(options: {
         .map(effect => effect.effectId),
     );
     const reconcileEvidence: RuntimePluginEvidenceSnapshot[] = [];
+    const failedEffectIds = new Set<string>();
 
     for (const effect of pendingEffects) {
       try {
@@ -56,14 +57,25 @@ export async function recoverPendingRuntimeConfigEffects(options: {
           }),
         );
       } catch (error: unknown) {
-        if (!(error instanceof RuntimeConfigConflictError)) {
-          throw error;
+        if (error instanceof RuntimeConfigConflictError) {
+          reconcileEvidence.push(
+            closeConflictedPreparedRuntimePluginConfigEffect({
+              effect,
+              reason: error.message,
+            }),
+          );
+          continue;
         }
 
+        // A transient (non-conflict) failure must not abort the pass: the
+        // effects already replayed keep their durable evidence below, and
+        // this one stays pending — its failed snapshot is audit, not
+        // closure, so the next pass retries it.
+        failedEffectIds.add(effect.effectId);
         reconcileEvidence.push(
-          closeConflictedPreparedRuntimePluginConfigEffect({
+          failedRuntimeConfigEffectRecoveryEvidence({
             effect,
-            reason: error.message,
+            message: runtimePostCommitFailureMessage(error),
           }),
         );
       }
@@ -93,7 +105,9 @@ export async function recoverPendingRuntimeConfigEffects(options: {
       kind: 'after_turn_committed',
       eventType: terminal.eventType,
       status:
-        reload.failures.length > 0 ? 'completed_with_failures' : 'completed',
+        reload.failures.length > 0 || failedEffectIds.size > 0
+          ? 'completed_with_failures'
+          : 'completed',
       ...(terminal.visibleMessageIds === undefined
         ? {}
         : {visibleMessageIds: terminal.visibleMessageIds}),
@@ -110,9 +124,34 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     });
 
     for (const effect of pendingEffects) {
-      reconciledEffectIds.add(effect.effectId);
+      if (!failedEffectIds.has(effect.effectId)) {
+        reconciledEffectIds.add(effect.effectId);
+      }
     }
   }
+}
+
+function failedRuntimeConfigEffectRecoveryEvidence(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly message: string;
+}): RuntimePluginEvidenceSnapshot {
+  return createRuntimePluginEvidenceSnapshot({
+    eventId: options.effect.eventId,
+    traceId: options.effect.traceId,
+    createdAt: options.effect.createdAt,
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: runtimePluginId,
+    evidenceKind: 'after_turn_committed',
+    status: 'failed',
+    summary: `Recovery could not reconcile plugin "${options.effect.targetPluginId}" config effect "${options.effect.effectId}"; it stays pending: ${options.message}`,
+    sourceReferences: [
+      {
+        kind: 'runtime',
+        id: options.effect.effectId,
+      },
+    ],
+    redactionLabels: [],
+  });
 }
 
 /**
@@ -188,14 +227,17 @@ export async function applyCompletedRuntimeConfigReloads(options: {
         fingerprint,
       ) === true;
 
-    if (
-      hostReflects(groupFinalEffect?.resultFingerprint) ||
-      hostReflects(turnFinalAcceptedEffect?.resultFingerprint)
-    ) {
-      continue;
-    }
-
     try {
+      // Inside the try on purpose: a host whose currency predicate throws
+      // is handled exactly like a throwing reloader — recorded as a reload
+      // failure, never escaping after the turn is already durable.
+      if (
+        hostReflects(groupFinalEffect?.resultFingerprint) ||
+        hostReflects(turnFinalAcceptedEffect?.resultFingerprint)
+      ) {
+        continue;
+      }
+
       const result = await reload(
         group,
         turnFinalAcceptedEffect === undefined

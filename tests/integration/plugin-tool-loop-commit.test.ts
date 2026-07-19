@@ -2038,6 +2038,125 @@ describe('plugin-driven tool loop commit and rollback', () => {
     );
   });
 
+  it('keeps recovery progress durable when one effect fails to reconcile', async () => {
+    const live = await createLiveReloadLoopFixture('partial-recovery', {
+      withSessionScopedNote: true,
+    });
+    // Turn 1 crashes reconciliation entirely, leaving both effects pending
+    // with the config file untouched.
+    const crashingHost = Object.freeze({
+      ...live.pluginHost,
+      reconcileConfigEffect() {
+        throw new Error('reconcile crashed before applying the group');
+      },
+    } satisfies RuntimePluginHost);
+    const noteInput = {
+      pluginId: live.updateInput.pluginId,
+      fieldName: 'note',
+      operation: 'set',
+      value: 'quiet',
+      expectedFingerprint: live.updateInput.expectedFingerprint,
+    };
+    const crashResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update note and tone', 'evt_partial_recovery'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: crashingHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: noteInput},
+          ],
+        },
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+          ],
+        },
+        {toolCalls: [{name: 'visible_reply', input: {text: 'both approved'}}]},
+      ]),
+    });
+
+    expect(crashResult.status).toBe('completed');
+
+    // Turn 2's recovery replays the note effect fine but hits a transient
+    // error on the tone effect: the pass must complete the turn, keep the
+    // note's evidence durable, and leave only the tone effect pending.
+    const baseRecoveryHost = live.createPluginHost();
+    const flakyRecoveryHost = Object.freeze({
+      ...baseRecoveryHost,
+      reconcileConfigEffect(effect) {
+        if (effect.fieldName === 'tone') {
+          throw new Error('disk hiccup during recovery');
+        }
+
+        if (baseRecoveryHost.reconcileConfigEffect === undefined) {
+          throw new Error('Expected config effect reconciliation support.');
+        }
+
+        return baseRecoveryHost.reconcileConfigEffect(effect);
+      },
+    } satisfies RuntimePluginHost);
+    const secondResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_partial_recovery_second'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: flakyRecoveryHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(secondResult.status).toBe('completed');
+    expect(live.authoredTone()).toBe('cool');
+
+    const partialEvent = live.logStore
+      .rawEvents()
+      .find(
+        event =>
+          event.kind === 'after_turn_committed' &&
+          (event.runtimePluginEvidence ?? []).some(
+            evidence => evidence.status === 'failed',
+          ),
+      );
+
+    expect(partialEvent?.status).toBe('completed_with_failures');
+    expect(
+      (partialEvent?.runtimePluginEvidence ?? []).some(
+        evidence =>
+          evidence.status === 'failed' &&
+          evidence.summary.includes('stays pending'),
+      ),
+    ).toBe(true);
+    expect(
+      (partialEvent?.runtimePluginEvidence ?? []).filter(
+        evidence => evidence.status === 'accepted',
+      ),
+    ).toHaveLength(1);
+
+    // Turn 3 retries the pending tone effect on a healthy host; the group
+    // still includes the previously reconciled note, so it defers as mixed.
+    const thirdResult = await runLocalUserMessageEvent({
+      event: createTestEvent('once more', 'evt_partial_recovery_third'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: live.createPluginHost(),
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(thirdResult.status).toBe('completed');
+    expect(live.authoredTone()).toBe('warm');
+    expect(live.capturedContexts.at(-1)).toContain('tone:cool');
+    expect(
+      live.logStore
+        .rawEvents()
+        .flatMap(event => event.runtimePluginEvidence ?? [])
+        .some(
+          evidence =>
+            evidence.status === 'degraded' &&
+            evidence.summary.includes('mix live and reload-required fields'),
+        ),
+    ).toBe(true);
+  });
+
   it('defers a mixed pending config group at recovery exactly like the commit path', async () => {
     const live = await createLiveReloadLoopFixture('mixed-recovery', {
       withSessionScopedNote: true,
