@@ -75,3 +75,8 @@ export {
   type RuntimePluginToolConfirmationHandler,
   type RuntimePluginToolConfirmationRequest,
 } from './host/tool-confirmation.ts';
+export {
+  type RuntimePluginConfigReloadHostResult,
+  type RuntimePluginReloader,
+  type RuntimePluginReloadResult,
+} from './host/reload.ts';

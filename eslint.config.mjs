@@ -58,12 +58,18 @@ export default tseslint.config(
   // seam-based extraction only (never size-motivated cuts), and a cohesive file that
   // genuinely needs to grow may raise its pin in its own commit with a stated reason.
   {
-    // Re-pinned +2 for the inventory/control host-state import split.
+    // Grown across the live config-reload seam and its review hardening
+    // (reload policy in src/plugins/host/reload.ts; the retired-instance
+    // registry in src/plugins/host/instance-lifecycle.ts), then ratcheted
+    // back DOWN from its 1961 peak as the late-dispatch machinery was
+    // deleted in favor of the plain ordered-phase model. Remaining bulk:
+    // state refs, reload/currency delegation, and the confirmed
+    // config-update turn log.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1780, skipBlankLines: true, skipComments: true},
+        {max: 1895, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -105,11 +111,14 @@ export default tseslint.config(
     },
   },
   {
+    // Re-pinned +2 to inject the plugin reloader capability into the host,
+    // then +13 to stamp the plan with its authored-config fingerprint and
+    // hand it to the host as the construction-currency signal recovery uses.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1132, skipBlankLines: true, skipComments: true},
+        {max: 1147, skipBlankLines: true, skipComments: true},
       ],
     },
   },

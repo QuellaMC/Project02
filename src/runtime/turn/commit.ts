@@ -21,6 +21,7 @@ import type {
   RuntimePluginHost,
 } from '../../plugins/index.ts';
 import {
+  applyCompletedRuntimeConfigReloads,
   assertRuntimeConfigEffectsCanCommit,
   reconcileCompletedRuntimeConfigEffects,
   runtimeConfigEffectsForCompletedTurn,
@@ -432,6 +433,7 @@ export async function completeRuntimeTurn(
     options,
     durability.postCommitFailures,
     configEffectEvidence,
+    runtimeConfigEffects,
   );
 
   return Object.freeze({
@@ -678,6 +680,7 @@ async function recordAfterTurnCommitted(
   options: CompleteRuntimeTurnOptions,
   postCommitFailures: string[],
   configEffectEvidence: readonly RuntimePluginEvidenceSnapshot[],
+  runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[],
 ): Promise<void> {
   const {state} = options;
   let afterCommitResult:
@@ -707,13 +710,29 @@ async function recordAfterTurnCommitted(
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
   }
 
+  // Live reloads run only after the committing turn's own after-commit
+  // hooks, so the instance that served this turn finalizes its state and
+  // the swapped instance starts serving strictly at the next turn.
+  const configReload = await applyCompletedRuntimeConfigReloads({
+    pluginHost: options.pluginHost,
+    effects: runtimeConfigEffects,
+    reconcileEvidence: configEffectEvidence,
+  });
+
+  postCommitFailures.push(...configReload.failures);
+
   const evidence = Object.freeze([
     ...(afterCommitResult?.evidence ?? []),
     ...configEffectEvidence,
+    ...configReload.evidence,
   ]);
   const status =
-    afterCommitResult?.status ??
-    (configEffectEvidence.length === 0 ? undefined : 'completed_with_failures');
+    configReload.failures.length > 0
+      ? 'completed_with_failures'
+      : (afterCommitResult?.status ??
+        (configEffectEvidence.length === 0
+          ? undefined
+          : 'completed_with_failures'));
 
   if (
     status === undefined ||

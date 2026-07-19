@@ -98,7 +98,7 @@ describe('runtime plugin config control', () => {
       secret: true,
       valueType: 'secret',
       agentMutable: false,
-      reloadRequired: false,
+      reloadRequired: true,
       authored: {
         configured: true,
         value: '[redacted]',

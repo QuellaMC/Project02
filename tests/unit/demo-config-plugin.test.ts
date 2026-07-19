@@ -69,6 +69,9 @@ describe('demo-config plugin package', () => {
     );
 
     expect(fieldsByName['tone']?.agentMutable).toBe(true);
+    expect(fieldsByName['tone']?.reloadRequired).toBe(false);
+    expect(fieldsByName['signoff']?.reloadRequired).toBe(false);
+    expect(fieldsByName['operatorNote']?.reloadRequired).toBeUndefined();
     expect(fieldsByName['tone']?.allowedValues).toContain('pirate');
     expect(fieldsByName['signoff']?.agentMutable).toBe(true);
     expect(fieldsByName['operatorNote']?.agentMutable).toBe(false);
