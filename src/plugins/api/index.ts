@@ -109,6 +109,7 @@ export {
   createRuntimePluginToolInvocationSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
+  registeredRuntimePluginLifecycleHooks,
 } from './constructors.ts';
 export {
   createRuntimePluginContextItem,

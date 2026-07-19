@@ -405,7 +405,7 @@ async function runChatCliAfterConfiguredHost(options: {
     }
 
     pluginHost = startupPluginHost;
-    recoverPendingRuntimeConfigEffects({
+    await recoverPendingRuntimeConfigEffects({
       logStore: durableRuntime.logStore,
       pluginHost,
     });

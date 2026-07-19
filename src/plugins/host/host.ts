@@ -93,6 +93,17 @@ import {
   createRejectedToolCallResult,
   type RuntimePluginToolConfirmationHandler,
 } from './tool-confirmation.ts';
+import {
+  createConfirmedRuntimePluginConfigUpdateLog,
+  reloadRuntimePluginForCommittedConfig,
+  type ConfirmedRuntimePluginConfigUpdateLog,
+  type RuntimePluginConfigReloadHostResult,
+  type RuntimePluginReloader,
+} from './reload.ts';
+import {
+  createRetiredRuntimePluginLifecycle,
+  type RetiredRuntimePluginLifecycle,
+} from './instance-lifecycle.ts';
 import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 
 export {runtimePluginId} from '../api/contract.ts';
@@ -115,6 +126,9 @@ export type CreateRuntimePluginHostOptions = {
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
+  readonly pluginReloader?: RuntimePluginReloader;
+  /** Authored-config fingerprint the host's plugin instances were constructed from. */
+  readonly constructionConfigFingerprint?: string;
 };
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
@@ -203,6 +217,20 @@ export type RuntimePluginHost = {
   reconcileConfigEffect?(
     effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
+  /**
+   * True when this host's live instance of the plugin is known to reflect
+   * the fingerprinted authored config — it was constructed from it, or a
+   * live reload swapped it in. Recovery uses this to skip redundant rebuilds
+   * without ever skipping a reload whose outcome was never made durable.
+   */
+  pluginConfigCurrentFor?(pluginId: string, configFingerprint: string): boolean;
+  reloadPluginForCommittedConfig?(
+    effects: readonly PreparedRuntimePluginConfigEffect[],
+    reloadOptions?: {
+      /** Authored fingerprint after ALL of the turn's accepted effects, across plugins. */
+      readonly turnResultFingerprint?: string;
+    },
+  ): Promise<RuntimePluginConfigReloadHostResult>;
   beginFileStoreTransaction?(): void;
   prepareFileStoreTransaction?(
     identity: RuntimeEventIdentity,
@@ -246,10 +274,42 @@ type RuntimePluginHostState = {
   readonly pluginConfigControl: RuntimePluginConfigControlHostState | undefined;
   readonly enabledIds: readonly string[];
   readonly enabledPlugins: readonly RuntimePlugin[];
+  /** Current instances: identical to enabledPlugins until a live config reload swaps one. */
+  readonly livePlugins: () => readonly RuntimePlugin[];
+  /** Replaces the live instance sharing next's plugin id; pure list swap. */
+  readonly swapEnabledPlugin: (
+    next: RuntimePlugin,
+  ) => RuntimePlugin | undefined;
+  readonly recordLiveAppliedFingerprint: (
+    pluginId: string,
+    configFingerprint: string,
+  ) => void;
+  readonly liveAppliedFingerprintFor: (pluginId: string) => string | undefined;
+  readonly confirmedConfigUpdates:
+    ConfirmedRuntimePluginConfigUpdateLog | undefined;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly registrySnapshot: RuntimePluginRegistrySnapshot;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
 };
+
+function createSwapWithRetirement(
+  swapEnabledPlugin: (next: RuntimePlugin) => RuntimePlugin | undefined,
+  retiredLifecycle: RetiredRuntimePluginLifecycle,
+): (next: RuntimePlugin) => RuntimePlugin | undefined {
+  return next => {
+    const previous = swapEnabledPlugin(next);
+
+    if (previous === undefined) {
+      return undefined;
+    }
+
+    // Live and retired stay disjoint: a resurrected instance gives up its
+    // retired slot, and the replaced one takes a slot at most once.
+    retiredLifecycle.unretire(next);
+    retiredLifecycle.retire(previous);
+    return previous;
+  };
+}
 
 export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {},
@@ -259,6 +319,11 @@ export function createRuntimePluginHost(
     pluginConfigControl,
     enabledIds,
     enabledPlugins,
+    livePlugins,
+    swapEnabledPlugin,
+    recordLiveAppliedFingerprint,
+    liveAppliedFingerprintFor,
+    confirmedConfigUpdates,
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,
@@ -270,6 +335,13 @@ export function createRuntimePluginHost(
   });
   let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
+  const retiredLifecycle = createRetiredRuntimePluginLifecycle({
+    isLive: plugin => livePlugins().includes(plugin),
+  });
+  const swapAndRetirePlugin = createSwapWithRetirement(
+    swapEnabledPlugin,
+    retiredLifecycle,
+  );
 
   return Object.freeze({
     registrySnapshot() {
@@ -283,7 +355,7 @@ export function createRuntimePluginHost(
     },
     async beforeRoleModelCall(context) {
       return await runBeforeRoleModelCall({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -294,8 +366,8 @@ export function createRuntimePluginHost(
       });
     },
     async handleToolCall(call, context) {
-      return await runHandleToolCall({
-        plugins: enabledPlugins,
+      const result = await runHandleToolCall({
+        plugins: livePlugins(),
         call,
         context,
         accessByPluginId,
@@ -307,6 +379,11 @@ export function createRuntimePluginHost(
         createFileStore: options.fileStore?.createFileStore,
         fileStoreTransaction: activeFileStoreTransaction,
       });
+
+      // Settled results pass exactly one choke point, so the turn log sees
+      // the same confirmed effects the commit path will consume.
+      confirmedConfigUpdates?.note(result);
+      return result;
     },
     reconcileConfigEffect(effect) {
       if (pluginConfigControl === undefined) {
@@ -319,6 +396,29 @@ export function createRuntimePluginHost(
         effect,
         state: pluginConfigControl,
         storeRoot: options.storeRoot,
+      });
+    },
+    pluginConfigCurrentFor(pluginId, configFingerprint) {
+      // A live reload supersedes the construction fingerprint for its
+      // plugin: currency is what the CURRENT instance was built from, not
+      // any config this host ever reflected.
+      return (
+        (liveAppliedFingerprintFor(pluginId) ??
+          options.constructionConfigFingerprint) === configFingerprint
+      );
+    },
+    async reloadPluginForCommittedConfig(effects, reloadOptions) {
+      return await reloadRuntimePluginForCommittedConfig({
+        effects,
+        reloader: options.pluginReloader,
+        pluginConfigControl,
+        livePlugins,
+        swapEnabledPlugin: swapAndRetirePlugin,
+        retirePlugin: retiredLifecycle.retire,
+        recordLiveAppliedFingerprint,
+        ...(reloadOptions?.turnResultFingerprint === undefined
+          ? {}
+          : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
       });
     },
     beginFileStoreTransaction() {
@@ -345,7 +445,7 @@ export function createRuntimePluginHost(
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -364,7 +464,10 @@ export function createRuntimePluginHost(
     },
     async onSessionEnd(context, hookOptions) {
       return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-        plugins: enabledPlugins,
+        // Retired instances run BEFORE live ones: both sides of a swap share
+        // one plugin id and store, so the live instance's terminal writes
+        // must land last and win.
+        plugins: [...retiredLifecycle.retiredPlugins(), ...livePlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -376,7 +479,7 @@ export function createRuntimePluginHost(
     },
     shutdown(context) {
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: enabledPlugins,
+        plugins: [...retiredLifecycle.retiredPlugins(), ...livePlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -389,7 +492,7 @@ export function createRuntimePluginHost(
     },
     async health(context) {
       return await runHealth({
-        plugins: enabledPlugins,
+        plugins: livePlugins(),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -432,8 +535,15 @@ function createRuntimePluginHostState(
       : createRuntimePluginInventoryHostStateSnapshot(
           options.pluginInventoryState,
         ));
+  const confirmedConfigUpdates =
+    pluginConfigControl === undefined
+      ? undefined
+      : createConfirmedRuntimePluginConfigUpdateLog({
+          pluginManifests: pluginConfigControl.pluginManifests,
+        });
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
+  const liveAppliedFingerprintByPluginId = new Map<string, string>();
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
   assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
@@ -444,6 +554,13 @@ function createRuntimePluginHostState(
       confirmationAvailable:
         options.toolConfirmationHandler !== undefined &&
         pluginConfigControl !== undefined,
+      liveReloadAvailable: options.pluginReloader !== undefined,
+      ...(confirmedConfigUpdates === undefined
+        ? {}
+        : {
+            sessionScopedConfigUpdateConfirmed:
+              confirmedConfigUpdates.sessionScopedConfirmed,
+          }),
       ...(pluginInventoryState === undefined
         ? {}
         : {installedPluginManifests: pluginInventoryState.pluginManifests}),
@@ -495,6 +612,30 @@ function createRuntimePluginHostState(
     pluginConfigControl,
     enabledIds,
     enabledPlugins,
+    confirmedConfigUpdates,
+    livePlugins: () => enabledPlugins,
+    swapEnabledPlugin: next => {
+      const previous = enabledPlugins.find(
+        plugin => plugin.manifest.id === next.manifest.id,
+      );
+
+      if (previous === undefined) {
+        return undefined;
+      }
+
+      enabledPlugins = Object.freeze(
+        enabledPlugins.map(plugin => (plugin === previous ? next : plugin)),
+      );
+      allPlugins = Object.freeze(
+        allPlugins.map(plugin => (plugin === previous ? next : plugin)),
+      );
+      return previous;
+    },
+    recordLiveAppliedFingerprint: (pluginId, configFingerprint) => {
+      liveAppliedFingerprintByPluginId.set(pluginId, configFingerprint);
+    },
+    liveAppliedFingerprintFor: pluginId =>
+      liveAppliedFingerprintByPluginId.get(pluginId),
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,

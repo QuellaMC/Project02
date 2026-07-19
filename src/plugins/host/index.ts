@@ -23,6 +23,11 @@ export {
   type RuntimePluginToolConfirmationRequest,
 } from './tool-confirmation.ts';
 export {
+  type RuntimePluginConfigReloadHostResult,
+  type RuntimePluginReloader,
+  type RuntimePluginReloadResult,
+} from './reload.ts';
+export {
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
 } from './lifecycle.ts';

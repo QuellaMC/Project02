@@ -52,7 +52,7 @@ async function runLocalUserMessageEventWithWriterLease(
 
   try {
     options.logStore.recoverAbandonedWriterEvidence?.();
-    recoverPendingRuntimeConfigEffects({
+    await recoverPendingRuntimeConfigEffects({
       logStore: options.logStore,
       pluginHost: options.pluginHost,
     });

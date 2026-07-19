@@ -218,7 +218,7 @@ export function createRuntimePluginRegistrySnapshot(
       Object.freeze({
         manifest: plugin.manifest,
         providedTools: plugin.providedTools,
-        registeredLifecycleHooks: registeredLifecycleHooks(plugin),
+        registeredLifecycleHooks: registeredRuntimePluginLifecycleHooks(plugin),
         requestedAccess: access.requestedAccess,
         grantedAccess: access.grantedAccess,
       } satisfies RuntimePluginRegistrationSnapshot),
@@ -808,7 +808,7 @@ function validatePluginDeclarationsAgainstRuntime(options: {
   return accept(undefined);
 }
 
-function registeredLifecycleHooks(
+export function registeredRuntimePluginLifecycleHooks(
   plugin: RuntimePlugin,
 ): readonly RuntimePluginDeclaration[] {
   const hooks: RuntimePluginDeclaration[] = [];

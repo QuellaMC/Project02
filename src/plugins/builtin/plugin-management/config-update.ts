@@ -44,7 +44,7 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
   return {
     name: runtimePluginConfigUpdateToolName,
     description:
-      'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings, and applies only to later host construction.',
+      'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. Committed changes apply by the next turn when the host can live-reload the plugin (reported per update as appliesTo), otherwise at a later host construction.',
     requiredForUserTurn: false,
     inputContract: {
       type: 'object',
@@ -360,6 +360,14 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
+  readonly canLiveReload?: (pluginId: string) => boolean;
+  /**
+   * Host-kept turn record: true when this turn already CONFIRMED a
+   * session-scoped update for the plugin. Committed same-plugin changes
+   * reload as one group and a mixed group always defers, so a live-field
+   * update must stop promising appliesTo: next_turn in that case.
+   */
+  readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
   readonly storeRoot?: string;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
@@ -466,46 +474,104 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     );
   }
 
+  return approvedRuntimePluginConfigUpdateResult({
+    call: options.call,
+    context: options.context,
+    manifest,
+    field,
+    operation,
+    expectedFingerprint,
+    resultFingerprint,
+    targetConfigPath,
+    ...(options.canLiveReload === undefined
+      ? {}
+      : {canLiveReload: options.canLiveReload}),
+    ...(options.sessionScopedUpdateConfirmedThisTurn === undefined
+      ? {}
+      : {
+          sessionScopedUpdateConfirmedThisTurn:
+            options.sessionScopedUpdateConfirmedThisTurn,
+        }),
+  });
+}
+
+function approvedRuntimePluginConfigUpdateResult(options: {
+  readonly call: RuntimePluginToolCall;
+  readonly context: RuntimePluginContext;
+  readonly manifest: {readonly id: string};
+  readonly field: RuntimePluginConfigField;
+  readonly operation: RuntimePluginConfigFieldControlOperation;
+  readonly expectedFingerprint: string;
+  readonly resultFingerprint: string;
+  readonly targetConfigPath: string;
+  readonly canLiveReload?: (pluginId: string) => boolean;
+  readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
+}): RuntimePluginToolCallExecutionResult {
+  const {call, context, manifest, field, operation, resultFingerprint} =
+    options;
+  const liveField = field.reloadRequired === false;
+  // Backward-looking on purpose. A later same-turn update cannot break an
+  // earlier next_turn promise: config mutations are compare-and-swap on the
+  // whole-file fingerprint, so once a fingerprint-CHANGING live update is
+  // approved, any later update prepared this turn conflict-closes at commit
+  // and never joins the group. The one sequence where both commit is a
+  // value-preserving (no-op) live update first — whose next_turn promise is
+  // vacuous, since there is no observable change to apply.
+  const mixedTurnGroup =
+    liveField &&
+    options.sessionScopedUpdateConfirmedThisTurn?.(manifest.id) === true;
+
   return {
     status: 'accepted',
     output: createJsonBoundaryObjectSnapshot(
       {
         status: 'approved_pending_commit',
-        appliesTo: 'future_host_construction',
+        appliesTo:
+          liveField &&
+          !mixedTurnGroup &&
+          options.canLiveReload?.(manifest.id) === true
+            ? 'next_turn'
+            : 'future_host_construction',
+        ...(mixedTurnGroup
+          ? {
+              appliesToNote:
+                'Not promised for the next turn: this turn already approved a session-scoped update for this plugin, and committed same-plugin changes are never live-applied as a mixed group.',
+            }
+          : {}),
         pluginId: manifest.id,
         fieldName: field.name,
         operation: operation.kind,
         fingerprint: resultFingerprint,
-        reloadRequired: field.reloadRequired === true,
+        reloadRequired: field.reloadRequired !== false,
       },
       {field: 'Prepared plugin config update'},
     ),
     evidence: [
       createRuntimePluginEvidenceSnapshot({
-        eventId: options.context.eventId,
-        traceId: options.context.traceId,
-        createdAt: options.context.timestamp,
+        eventId: context.eventId,
+        traceId: context.traceId,
+        createdAt: context.timestamp,
         kind: 'runtime_plugin_evidence_snapshot',
         pluginId: runtimePluginId,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
         summary: `Approved plugin "${manifest.id}" config field "${field.name}" for turn commit.`,
-        redactionLabels: options.context.privacy.redactionLabels,
+        redactionLabels: context.privacy.redactionLabels,
         configFingerprint: resultFingerprint,
       }),
     ],
     preparedConfigEffect: Object.freeze({
-      eventId: options.call.eventId,
-      traceId: options.call.traceId,
-      createdAt: options.call.createdAt,
+      eventId: call.eventId,
+      traceId: call.traceId,
+      createdAt: call.createdAt,
       kind: 'runtime_plugin_config_effect',
       effectId:
-        options.call.toolCallId ??
-        `${options.call.eventId}.${options.call.traceId}.${runtimePluginConfigUpdateToolName}`,
+        call.toolCallId ??
+        `${call.eventId}.${call.traceId}.${runtimePluginConfigUpdateToolName}`,
       targetPluginId: manifest.id,
-      targetConfigPath,
+      targetConfigPath: options.targetConfigPath,
       fieldName: field.name,
-      expectedFingerprint,
+      expectedFingerprint: options.expectedFingerprint,
       resultFingerprint,
       operation:
         operation.kind === 'set'

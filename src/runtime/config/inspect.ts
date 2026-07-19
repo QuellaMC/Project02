@@ -105,7 +105,7 @@ export function createRuntimePluginConfigInspectShape(options: {
             ? {}
             : {allowedValues: Object.freeze([...field.allowedValues])}),
           agentMutable: field.agentMutable === true && !field.secret,
-          reloadRequired: field.reloadRequired === true,
+          reloadRequired: field.reloadRequired !== false,
           authored: Object.freeze({
             configured: authoredValue !== undefined,
             ...(authoredValue === undefined
