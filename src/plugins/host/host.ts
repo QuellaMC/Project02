@@ -292,51 +292,9 @@ type RuntimePluginHostState = {
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
 };
 
-type HostRetiredLifecycle = RetiredRuntimePluginLifecycle<
-  {
-    readonly context: RuntimePluginContext;
-    readonly hookOptions: RuntimePluginSessionEndOptions | undefined;
-  },
-  {readonly context: RuntimePluginContext}
->;
-
-function createHostRetiredLifecycle(config: {
-  readonly livePlugins: () => readonly RuntimePlugin[];
-  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
-  readonly storeRoot?: string | undefined;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-}): HostRetiredLifecycle {
-  return createRetiredRuntimePluginLifecycle({
-    isLive: plugin => config.livePlugins().includes(plugin),
-    dispatchSessionEnd: (plugin, phase) =>
-      runRuntimePluginSessionEndHooksWithResolvedPermissions({
-        plugins: [plugin],
-        context: phase.context,
-        accessByPluginId: config.accessByPluginId,
-        storeRoot: config.storeRoot,
-        sessionId: config.sessionId,
-        sessionIdentity: config.sessionIdentity,
-        createFileStore: config.createFileStore,
-        hookOptions: phase.hookOptions,
-      }),
-    dispatchShutdown: (plugin, phase) =>
-      runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: [plugin],
-        context: phase.context,
-        accessByPluginId: config.accessByPluginId,
-        storeRoot: config.storeRoot,
-        sessionId: config.sessionId,
-        sessionIdentity: config.sessionIdentity,
-        createFileStore: config.createFileStore,
-      }),
-  });
-}
-
 function createSwapWithRetirement(
   swapEnabledPlugin: (next: RuntimePlugin) => RuntimePlugin | undefined,
-  retiredLifecycle: HostRetiredLifecycle,
+  retiredLifecycle: RetiredRuntimePluginLifecycle,
 ): (next: RuntimePlugin) => RuntimePlugin | undefined {
   return next => {
     const previous = swapEnabledPlugin(next);
@@ -377,13 +335,8 @@ export function createRuntimePluginHost(
   });
   let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
-  const retiredLifecycle = createHostRetiredLifecycle({
-    livePlugins,
-    accessByPluginId,
-    storeRoot: options.storeRoot,
-    sessionId: options.sessionId,
-    sessionIdentity,
-    createFileStore: options.fileStore?.createFileStore,
+  const retiredLifecycle = createRetiredRuntimePluginLifecycle({
+    isLive: plugin => livePlugins().includes(plugin),
   });
   const swapAndRetirePlugin = createSwapWithRetirement(
     swapEnabledPlugin,
@@ -514,10 +467,7 @@ export function createRuntimePluginHost(
         // Retired instances run BEFORE live ones: both sides of a swap share
         // one plugin id and store, so the live instance's terminal writes
         // must land last and win.
-        plugins: [
-          ...retiredLifecycle.beginSessionEnd({context, hookOptions}),
-          ...livePlugins(),
-        ],
+        plugins: [...retiredLifecycle.retiredPlugins(), ...livePlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -529,10 +479,7 @@ export function createRuntimePluginHost(
     },
     shutdown(context) {
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: [
-          ...retiredLifecycle.beginShutdown({context}),
-          ...livePlugins(),
-        ],
+        plugins: [...retiredLifecycle.retiredPlugins(), ...livePlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,

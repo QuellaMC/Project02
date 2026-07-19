@@ -59,16 +59,17 @@ export default tseslint.config(
   // genuinely needs to grow may raise its pin in its own commit with a stated reason.
   {
     // Grown across the live config-reload seam and its review hardening
-    // (reload policy in src/plugins/host/reload.ts; retired-instance state
-    // machine extracted to src/plugins/host/instance-lifecycle.ts), which
-    // brought the pin back DOWN from its 1961 peak. Remaining bulk: state
-    // refs, reload/currency delegation, the confirmed config-update turn
-    // log, and the lifecycle wiring helpers.
+    // (reload policy in src/plugins/host/reload.ts; the retired-instance
+    // registry in src/plugins/host/instance-lifecycle.ts), then ratcheted
+    // back DOWN from its 1961 peak as the late-dispatch machinery was
+    // deleted in favor of the plain ordered-phase model. Remaining bulk:
+    // state refs, reload/currency delegation, and the confirmed
+    // config-update turn log.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1946, skipBlankLines: true, skipComments: true},
+        {max: 1895, skipBlankLines: true, skipComments: true},
       ],
     },
   },

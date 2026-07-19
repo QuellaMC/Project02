@@ -74,8 +74,8 @@ describe('applyCompletedRuntimeConfigReloads', () => {
     const result = await applyCompletedRuntimeConfigReloads({
       pluginHost: capturingHost,
       effects: [
-        applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f0'),
-        applyReloadEffect('plugin.beta', 'effect-b', 'sha256:f0', 'sha256:f1'),
+        applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f1'),
+        applyReloadEffect('plugin.beta', 'effect-b', 'sha256:f1', 'sha256:f2'),
       ],
       reconcileEvidence: [
         acceptedReconcileEvidence('effect-a'),
@@ -89,8 +89,37 @@ describe('applyCompletedRuntimeConfigReloads', () => {
       ['plugin.beta'],
     ]);
     expect(calls.map(call => call.turnResultFingerprint)).toEqual([
-      'sha256:f1',
-      'sha256:f1',
+      'sha256:f2',
+      'sha256:f2',
     ]);
+  });
+
+  it('does not reload a plugin whose accepted effects are pure no-ops', async () => {
+    const calls: string[][] = [];
+    const baseHost = createRuntimePluginHost();
+    const capturingHost = Object.freeze({
+      ...baseHost,
+      reloadPluginForCommittedConfig(effects) {
+        calls.push(effects.map(effect => effect.targetPluginId));
+        return Promise.resolve({outcome: 'deferred' as const});
+      },
+    } satisfies RuntimePluginHost);
+
+    // Alpha's accepted update left the file exactly where it was; only
+    // beta's config actually changed. Rebuilding alpha would reset its
+    // per-session state for nothing.
+    await applyCompletedRuntimeConfigReloads({
+      pluginHost: capturingHost,
+      effects: [
+        applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f0'),
+        applyReloadEffect('plugin.beta', 'effect-b', 'sha256:f0', 'sha256:f1'),
+      ],
+      reconcileEvidence: [
+        acceptedReconcileEvidence('effect-a'),
+        acceptedReconcileEvidence('effect-b'),
+      ],
+    });
+
+    expect(calls).toEqual([['plugin.beta']]);
   });
 });

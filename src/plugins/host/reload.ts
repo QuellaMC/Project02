@@ -306,8 +306,11 @@ export const runtimePluginReloadTimeoutMs = 10_000;
  * Bounds the reloader like every other plugin dispatch: a factory that never
  * settles must not block the per-session turn queue after the turn is
  * already durable. A factory that settles late may still have built an
- * instance, so the loser of the race is handed to retirement to keep the
- * at-most-once retention invariant.
+ * instance, so the loser of the race is handed to ordinary retirement: it
+ * joins whichever ordered terminal phases have not run yet, and one that
+ * arrives after the last phase is deliberately dropped — the process is
+ * exiting, and dispatching it out of band is what would let a never-served
+ * instance write after the live instance's final state.
  */
 async function settleReloadWithinTimeout(
   pending: Promise<RuntimePluginReloadResult>,

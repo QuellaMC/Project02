@@ -570,46 +570,7 @@ describe('runtime plugin host live config reload', () => {
     ).toBe(false);
   });
 
-  it('disposes a factory result that settles after terminal hooks ran', async () => {
-    vi.useFakeTimers();
-
-    try {
-      const sessionEndLog: string[] = [];
-      let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
-      const host = reloadHost({
-        initial: reloadFixturePlugin('v1', sessionEndLog),
-        reloader: {
-          reload: () =>
-            new Promise(resolve => {
-              settleLate = plugin => {
-                resolve({status: 'rebuilt', plugin});
-              };
-            }),
-        },
-      });
-      const resultPromise = host.reloadPluginForCommittedConfig?.([
-        toneEffect(),
-      ]);
-
-      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
-      expect((await resultPromise)?.outcome).toBe('failed');
-
-      await host.onSessionEnd(testPluginContext(), {
-        allowFileStoreWrites: false,
-      });
-      expect(sessionEndLog).toEqual(['v1']);
-
-      // The retired list will never be dispatched again, so a factory that
-      // settles after terminal hooks must get its cleanup immediately.
-      settleLate?.(reloadFixturePlugin('late', sessionEndLog));
-      await vi.runAllTimersAsync();
-      expect(sessionEndLog).toEqual(['v1', 'late']);
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('gives a late factory result the remaining terminal phases too', async () => {
+  it('runs a late factory result inside the next ordered terminal phase only', async () => {
     vi.useFakeTimers();
 
     try {
@@ -660,19 +621,62 @@ describe('runtime plugin host live config reload', () => {
       });
       expect(terminalLog).toEqual(['v1:sessionEnd']);
 
-      // Settling between session end and shutdown: the late instance gets
-      // the phase it missed immediately AND stays registered for shutdown.
+      // Settling between phases must NOT dispatch anything out of band —
+      // a never-served instance writing after the live instance's terminal
+      // writes is exactly what ordered dispatch exists to prevent.
       settleLate?.(trackedPlugin('late'));
       await vi.runAllTimersAsync();
-      expect(terminalLog).toEqual(['v1:sessionEnd', 'late:sessionEnd']);
+      expect(terminalLog).toEqual(['v1:sessionEnd']);
 
+      // It joins the NEXT phase instead, retired before live.
       await host.shutdown(testPluginContext());
       expect(terminalLog).toEqual([
         'v1:sessionEnd',
-        'late:sessionEnd',
         'late:shutdown',
         'v1:shutdown',
       ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('drops a factory result that settles after the final terminal phase', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const sessionEndLog: string[] = [];
+      let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
+      const host = reloadHost({
+        initial: reloadFixturePlugin('v1', sessionEndLog),
+        reloader: {
+          reload: () =>
+            new Promise(resolve => {
+              settleLate = plugin => {
+                resolve({status: 'rebuilt', plugin});
+              };
+            }),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      await host.onSessionEnd(testPluginContext(), {
+        allowFileStoreWrites: false,
+      });
+      await host.shutdown(testPluginContext());
+      const terminalLogLength = sessionEndLog.length;
+
+      // Every ordered phase already ran; the deliberately simple contract
+      // drops the late result rather than dispatching it out of band in a
+      // process that is exiting.
+      settleLate?.(reloadFixturePlugin('late', sessionEndLog));
+      await vi.runAllTimersAsync();
+      expect(sessionEndLog).toHaveLength(terminalLogLength);
+      expect(sessionEndLog).not.toContain('late');
     } finally {
       vi.useRealTimers();
     }
