@@ -562,6 +562,51 @@ describe('runtime plugin host live config reload', () => {
     expect(host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:after')).toBe(
       true,
     );
+    // The swap supersedes the construction fingerprint for this plugin: a
+    // later update that RESTORES the startup config must not read as
+    // already-current while the newer instance is the one serving.
+    expect(
+      host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:construction'),
+    ).toBe(false);
+  });
+
+  it('disposes a factory result that settles after terminal hooks ran', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const sessionEndLog: string[] = [];
+      let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
+      const host = reloadHost({
+        initial: reloadFixturePlugin('v1', sessionEndLog),
+        reloader: {
+          reload: () =>
+            new Promise(resolve => {
+              settleLate = plugin => {
+                resolve({status: 'rebuilt', plugin});
+              };
+            }),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      await host.onSessionEnd(testPluginContext(), {
+        allowFileStoreWrites: false,
+      });
+      expect(sessionEndLog).toEqual(['v1']);
+
+      // The retired list will never be dispatched again, so a factory that
+      // settles after terminal hooks must get its cleanup immediately.
+      settleLate?.(reloadFixturePlugin('late', sessionEndLog));
+      await vi.runAllTimersAsync();
+      expect(sessionEndLog).toEqual(['v1', 'late']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('defers when the host has no reloader', async () => {

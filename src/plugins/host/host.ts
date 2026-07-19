@@ -291,6 +291,80 @@ type RuntimePluginHostState = {
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
 };
 
+/**
+ * Best-effort terminal cleanup for an instance that arrives AFTER the
+ * terminal hooks already ran (e.g. a reload factory settling past its
+ * timeout): the retired list will never be dispatched again, so the late
+ * instance gets its terminal hooks immediately instead of a retired slot.
+ */
+function createLateRetirementDisposer(config: {
+  readonly retirePlugin: (plugin: RuntimePlugin) => void;
+  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
+  readonly storeRoot?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
+}): {
+  readonly retireOrDisposePlugin: (plugin: RuntimePlugin) => void;
+  readonly noteSessionEnd: (
+    context: RuntimePluginContext,
+    hookOptions?: RuntimePluginSessionEndOptions,
+  ) => void;
+  readonly noteShutdown: (context: RuntimePluginContext) => void;
+} {
+  let sessionEndContext: RuntimePluginContext | undefined;
+  let sessionEndHookOptions: RuntimePluginSessionEndOptions | undefined;
+  let shutdownContext: RuntimePluginContext | undefined;
+  const disposeLatePlugin = async (plugin: RuntimePlugin): Promise<void> => {
+    try {
+      if (sessionEndContext !== undefined) {
+        await runRuntimePluginSessionEndHooksWithResolvedPermissions({
+          plugins: [plugin],
+          context: sessionEndContext,
+          accessByPluginId: config.accessByPluginId,
+          storeRoot: config.storeRoot,
+          sessionId: config.sessionId,
+          sessionIdentity: config.sessionIdentity,
+          createFileStore: config.createFileStore,
+          hookOptions: sessionEndHookOptions,
+        });
+      }
+
+      if (shutdownContext !== undefined) {
+        await runRuntimePluginShutdownHooksWithResolvedPermissions({
+          plugins: [plugin],
+          context: shutdownContext,
+          accessByPluginId: config.accessByPluginId,
+          storeRoot: config.storeRoot,
+          sessionId: config.sessionId,
+          sessionIdentity: config.sessionIdentity,
+          createFileStore: config.createFileStore,
+        });
+      }
+    } catch {
+      // Terminal cleanup for late instances is best-effort by contract.
+    }
+  };
+
+  return {
+    retireOrDisposePlugin: plugin => {
+      if (sessionEndContext === undefined && shutdownContext === undefined) {
+        config.retirePlugin(plugin);
+        return;
+      }
+
+      void disposeLatePlugin(plugin);
+    },
+    noteSessionEnd: (context, hookOptions) => {
+      sessionEndContext = context;
+      sessionEndHookOptions = hookOptions;
+    },
+    noteShutdown: context => {
+      shutdownContext ??= context;
+    },
+  };
+}
+
 export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {},
 ): RuntimePluginHost {
@@ -317,6 +391,15 @@ export function createRuntimePluginHost(
   });
   let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
+  const {retireOrDisposePlugin, noteSessionEnd, noteShutdown} =
+    createLateRetirementDisposer({
+      retirePlugin,
+      accessByPluginId,
+      storeRoot: options.storeRoot,
+      sessionId: options.sessionId,
+      sessionIdentity,
+      createFileStore: options.fileStore?.createFileStore,
+    });
 
   return Object.freeze({
     registrySnapshot() {
@@ -374,9 +457,12 @@ export function createRuntimePluginHost(
       });
     },
     pluginConfigCurrentFor(pluginId, configFingerprint) {
+      // A live reload supersedes the construction fingerprint for its
+      // plugin: currency is what the CURRENT instance was built from, not
+      // any config this host ever reflected.
       return (
-        options.constructionConfigFingerprint === configFingerprint ||
-        liveAppliedFingerprintFor(pluginId) === configFingerprint
+        (liveAppliedFingerprintFor(pluginId) ??
+          options.constructionConfigFingerprint) === configFingerprint
       );
     },
     async reloadPluginForCommittedConfig(effects, reloadOptions) {
@@ -386,7 +472,7 @@ export function createRuntimePluginHost(
         pluginConfigControl,
         livePlugins,
         swapEnabledPlugin,
-        retirePlugin,
+        retirePlugin: retireOrDisposePlugin,
         recordLiveAppliedFingerprint,
         ...(reloadOptions?.turnResultFingerprint === undefined
           ? {}
@@ -435,6 +521,7 @@ export function createRuntimePluginHost(
       } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context, hookOptions) {
+      noteSessionEnd(context, hookOptions);
       return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
         // Retired instances run BEFORE live ones: both sides of a swap share
         // one plugin id and store, so the live instance's terminal writes
@@ -450,6 +537,7 @@ export function createRuntimePluginHost(
       });
     },
     shutdown(context) {
+      noteShutdown(context);
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
         plugins: [...supersededPlugins(), ...livePlugins()],
         context,

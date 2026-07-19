@@ -65,13 +65,14 @@ export default tseslint.config(
     // invariant, the confirmed config-update turn log wired at the
     // tool-dispatch choke point, the pluginConfigCurrentFor currency signal
     // (construction + live-applied fingerprints) recovery uses to skip
-    // redundant rebuilds, and the turn-final fingerprint pass-through for
-    // multi-plugin turns.
+    // redundant rebuilds, the turn-final fingerprint pass-through for
+    // multi-plugin turns, and the late-retirement disposer that gives
+    // post-terminal factory results immediate best-effort cleanup.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1887, skipBlankLines: true, skipComments: true},
+        {max: 1961, skipBlankLines: true, skipComments: true},
       ],
     },
   },
