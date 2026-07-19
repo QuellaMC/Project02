@@ -321,6 +321,107 @@ describe('configured runtime plugin reloader', () => {
     expect(result.plugin).toBeUndefined();
   });
 
+  it('rebuilds a valid target even when another plugin has config errors', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-reload-unrelated-');
+    const configPath = join(storeRoot, 'config.json');
+
+    // character-state carries an undeclared config field (a plugin-scoped
+    // error); demo-config itself is valid and must still be reloadable.
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'demo-config': {enabled: true, config: {tone: 'warm'}},
+        'character-state': {config: {undeclared: 'boom'}},
+      },
+    });
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      storeRoot,
+      env: {},
+    });
+    const reloader = createConfiguredRuntimePluginReloader({activationPlan});
+
+    const result = await reloader.reload('demo-config', {
+      expectedFingerprint: authoredFingerprint({
+        activationPlan,
+        configPath,
+        storeRoot,
+      }),
+    });
+
+    if (result.status !== 'rebuilt') {
+      throw new Error(`Expected rebuilt, got ${result.status}`);
+    }
+    expect(await demoConfigContextText(result.plugin)).toContain('warm tone');
+  });
+
+  it('declines when the authored config moves while the factory is rebuilding', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-reload-race-');
+    const configPath = join(storeRoot, 'config.json');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      storeRoot,
+      env: {},
+    });
+    const entry = activationPlan.catalogEntries['demo-config'];
+
+    if (entry === undefined || entry.catalogKind !== 'package') {
+      throw new Error('demo-config package entry missing from the plan');
+    }
+
+    const reloader = createConfiguredRuntimePluginReloader({
+      activationPlan: {
+        ...activationPlan,
+        catalogEntries: {
+          ...activationPlan.catalogEntries,
+          'demo-config': {
+            ...entry,
+            load: async input => {
+              const plugin = await entry.load(input);
+
+              // Another writer moves the config while the factory runs.
+              writeRuntimeConfig(configPath, {
+                plugins: {
+                  'demo-config': {enabled: true, config: {tone: 'playful'}},
+                },
+              });
+              return plugin;
+            },
+          },
+        },
+      },
+    });
+
+    const result = await reloader.reload('demo-config', {
+      expectedFingerprint: authoredFingerprint({
+        activationPlan,
+        configPath,
+        storeRoot,
+      }),
+    });
+
+    if (result.status !== 'declined') {
+      throw new Error(`Expected declined, got ${result.status}`);
+    }
+    expect(result.reason).toContain('moved while the factory');
+    // The instance was constructed before the decline, so it comes back for
+    // retirement.
+    expect(result.plugin).toBeDefined();
+  });
+
   it('declines a reload when the refreshed config is invalid', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-reload-invalid-');
     const configPath = join(storeRoot, 'config.json');

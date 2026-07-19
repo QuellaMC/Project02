@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {
   createPreparedRuntimePluginConfigEffect,
@@ -14,6 +14,7 @@ import type {
 } from '../../src/plugins/api/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import type {RuntimePluginReloader} from '../../src/plugins/host/index.ts';
+import {runtimePluginReloadTimeoutMs} from '../../src/plugins/host/reload.ts';
 import {createPluginContextEvidence} from '../../src/plugins/api/evidence-helpers.ts';
 import {
   testIdentity,
@@ -142,6 +143,7 @@ function toneEffect(
 function reloadHost(options: {
   readonly reloader?: RuntimePluginReloader;
   readonly initial?: RuntimePlugin;
+  readonly constructionConfigFingerprint?: string;
 }) {
   return createRuntimePluginHost({
     plugins: [options.initial ?? reloadFixturePlugin('v1')],
@@ -153,6 +155,11 @@ function reloadHost(options: {
     ...(options.reloader === undefined
       ? {}
       : {pluginReloader: options.reloader}),
+    ...(options.constructionConfigFingerprint === undefined
+      ? {}
+      : {
+          constructionConfigFingerprint: options.constructionConfigFingerprint,
+        }),
   });
 }
 
@@ -501,7 +508,60 @@ describe('runtime plugin host live config reload', () => {
 
     expect(result?.outcome).toBe('live_applied');
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
-    expect(sessionEndLog.sort()).toEqual(['v1', 'v2']);
+    // Retired instances run BEFORE the live one so the live instance's
+    // terminal writes land last and win.
+    expect(sessionEndLog).toEqual(['v1', 'v2']);
+  });
+
+  it('fails a reload whose factory never settles instead of blocking the turn', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const host = reloadHost({
+        reloader: {
+          reload: () => new Promise<never>(() => undefined),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+
+      const result = await resultPromise;
+
+      expect(result?.outcome).toBe('failed');
+      expect(result?.failure).toContain('did not settle');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('reports config currency from construction and live-applied fingerprints', async () => {
+    const host = reloadHost({
+      constructionConfigFingerprint: 'sha256:construction',
+      reloader: {
+        reload: () =>
+          Promise.resolve({
+            status: 'rebuilt',
+            plugin: reloadFixturePlugin('v2'),
+          }),
+      },
+    });
+
+    expect(
+      host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:construction'),
+    ).toBe(true);
+    expect(host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:after')).toBe(
+      false,
+    );
+
+    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+
+    expect(result?.outcome).toBe('live_applied');
+    expect(host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:after')).toBe(
+      true,
+    );
   });
 
   it('defers when the host has no reloader', async () => {

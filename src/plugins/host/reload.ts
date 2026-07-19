@@ -131,6 +131,11 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   ) => RuntimePlugin | undefined;
   /** Retains an instance that will never serve so it still receives terminal lifecycle hooks. */
   readonly retirePlugin: (plugin: RuntimePlugin) => void;
+  /** Records that this host swapped the plugin to an instance built from the fingerprinted config. */
+  readonly recordLiveAppliedFingerprint: (
+    pluginId: string,
+    configFingerprint: string,
+  ) => void;
   /**
    * Authored-config fingerprint after ALL of the turn's accepted effects,
    * across plugins. A turn that updates several plugins leaves the file at
@@ -206,19 +211,6 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
     );
   }
 
-  let reloaded: RuntimePluginReloadResult;
-
-  try {
-    reloaded = await options.reloader.reload(pluginId, {
-      expectedFingerprint: authoredResultFingerprint,
-    });
-  } catch (error: unknown) {
-    reloaded = {
-      status: 'failed',
-      message: error instanceof Error ? error.message : 'Plugin reload failed.',
-    };
-  }
-
   // Retention is only safe under a truthful id: terminal dispatch resolves
   // access by the retired instance's own manifest.id, so an id-drifted
   // factory product must not enter ordinary lifecycle dispatch — under an
@@ -229,6 +221,22 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
       options.retirePlugin(instance);
     }
   };
+
+  let reloaded: RuntimePluginReloadResult;
+
+  try {
+    reloaded = await settleReloadWithinTimeout(
+      options.reloader.reload(pluginId, {
+        expectedFingerprint: authoredResultFingerprint,
+      }),
+      retireRebuilt,
+    );
+  } catch (error: unknown) {
+    reloaded = {
+      status: 'failed',
+      message: error instanceof Error ? error.message : 'Plugin reload failed.',
+    };
+  }
 
   if (reloaded.status === 'declined') {
     if (reloaded.plugin !== undefined) {
@@ -280,6 +288,7 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
     );
   }
 
+  options.recordLiveAppliedFingerprint(pluginId, authoredResultFingerprint);
   return {
     outcome: 'live_applied',
     evidence: reloadEvidence(
@@ -289,6 +298,54 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
       authoredResultFingerprint,
     ),
   };
+}
+
+export const runtimePluginReloadTimeoutMs = 10_000;
+
+/**
+ * Bounds the reloader like every other plugin dispatch: a factory that never
+ * settles must not block the per-session turn queue after the turn is
+ * already durable. A factory that settles late may still have built an
+ * instance, so the loser of the race is handed to retirement to keep the
+ * at-most-once retention invariant.
+ */
+async function settleReloadWithinTimeout(
+  pending: Promise<RuntimePluginReloadResult>,
+  retireLateInstance: (plugin: RuntimePlugin) => void,
+): Promise<RuntimePluginReloadResult> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  let timedOut = false;
+  const timeout = new Promise<RuntimePluginReloadResult>(resolve => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      resolve({
+        status: 'failed',
+        message: `the reloader did not settle within ${String(runtimePluginReloadTimeoutMs)}ms`,
+      });
+    }, runtimePluginReloadTimeoutMs);
+  });
+
+  pending
+    .then(late => {
+      if (!timedOut) {
+        return;
+      }
+
+      if (late.status === 'rebuilt') {
+        retireLateInstance(late.plugin);
+      } else if (late.status === 'declined' && late.plugin !== undefined) {
+        retireLateInstance(late.plugin);
+      }
+    })
+    .catch(() => undefined);
+
+  try {
+    return await Promise.race([pending, timeout]);
+  } finally {
+    if (timeoutId !== undefined) {
+      clearTimeout(timeoutId);
+    }
+  }
 }
 
 function groupFieldEligibility(

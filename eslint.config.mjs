@@ -63,14 +63,15 @@ export default tseslint.config(
     // refs and method delegation (policy lives in src/plugins/host/reload.ts),
     // superseded-instance retention with the disjoint at-most-once retire
     // invariant, the confirmed config-update turn log wired at the
-    // tool-dispatch choke point, the configEffectIsAlreadyApplied delegation
-    // recovery uses to skip redundant rebuilds, and the turn-final
-    // fingerprint pass-through for multi-plugin turns.
+    // tool-dispatch choke point, the pluginConfigCurrentFor currency signal
+    // (construction + live-applied fingerprints) recovery uses to skip
+    // redundant rebuilds, and the turn-final fingerprint pass-through for
+    // multi-plugin turns.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1883, skipBlankLines: true, skipComments: true},
+        {max: 1887, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -112,12 +113,14 @@ export default tseslint.config(
     },
   },
   {
-    // Re-pinned +2 to inject the plugin reloader capability into the host.
+    // Re-pinned +2 to inject the plugin reloader capability into the host,
+    // then +13 to stamp the plan with its authored-config fingerprint and
+    // hand it to the host as the construction-currency signal recovery uses.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1134, skipBlankLines: true, skipComments: true},
+        {max: 1147, skipBlankLines: true, skipComments: true},
       ],
     },
   },

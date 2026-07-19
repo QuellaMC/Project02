@@ -20,7 +20,6 @@ import {
   createRuntimePluginConfigUpdateTool,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   normalizePreparedRuntimePluginConfigEffect,
-  preparedRuntimePluginConfigEffectIsAlreadyApplied,
   preparedRuntimePluginConfigEffectIsStillCurrent,
   handleRuntimePluginConfigUpdateToolCall,
   reconcilePreparedRuntimePluginConfigEffect,
@@ -215,7 +214,6 @@ export {
 export {
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   normalizePreparedRuntimePluginConfigEffect,
-  preparedRuntimePluginConfigEffectIsAlreadyApplied,
   preparedRuntimePluginConfigEffectIsStillCurrent,
   reconcilePreparedRuntimePluginConfigEffect,
 };

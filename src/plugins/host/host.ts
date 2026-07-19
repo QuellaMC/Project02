@@ -84,7 +84,6 @@ import {
   createRuntimePluginConfigControlHostStateSnapshot,
   createRuntimePluginInventoryHostStateSnapshot,
   normalizePreparedRuntimePluginConfigEffect,
-  preparedRuntimePluginConfigEffectIsAlreadyApplied,
   reconcilePreparedRuntimePluginConfigEffect,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
@@ -124,6 +123,8 @@ export type CreateRuntimePluginHostOptions = {
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
   readonly pluginReloader?: RuntimePluginReloader;
+  /** Authored-config fingerprint the host's plugin instances were constructed from. */
+  readonly constructionConfigFingerprint?: string;
 };
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
@@ -212,10 +213,13 @@ export type RuntimePluginHost = {
   reconcileConfigEffect?(
     effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
-  /** True when the authored config already carries the effect's result fingerprint. */
-  configEffectIsAlreadyApplied?(
-    effect: PreparedRuntimePluginConfigEffect,
-  ): boolean;
+  /**
+   * True when this host's live instance of the plugin is known to reflect
+   * the fingerprinted authored config — it was constructed from it, or a
+   * live reload swapped it in. Recovery uses this to skip redundant rebuilds
+   * without ever skipping a reload whose outcome was never made durable.
+   */
+  pluginConfigCurrentFor?(pluginId: string, configFingerprint: string): boolean;
   reloadPluginForCommittedConfig?(
     effects: readonly PreparedRuntimePluginConfigEffect[],
     reloadOptions?: {
@@ -275,6 +279,11 @@ type RuntimePluginHostState = {
   ) => RuntimePlugin | undefined;
   /** Retains a never-serving instance (e.g. a guard-declined rebuild) for terminal hooks. */
   readonly retirePlugin: (plugin: RuntimePlugin) => void;
+  readonly recordLiveAppliedFingerprint: (
+    pluginId: string,
+    configFingerprint: string,
+  ) => void;
+  readonly liveAppliedFingerprintFor: (pluginId: string) => string | undefined;
   readonly confirmedConfigUpdates:
     ConfirmedRuntimePluginConfigUpdateLog | undefined;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
@@ -294,6 +303,8 @@ export function createRuntimePluginHost(
     supersededPlugins,
     swapEnabledPlugin,
     retirePlugin,
+    recordLiveAppliedFingerprint,
+    liveAppliedFingerprintFor,
     confirmedConfigUpdates,
     accessByPluginId,
     registrySnapshot,
@@ -362,20 +373,11 @@ export function createRuntimePluginHost(
         storeRoot: options.storeRoot,
       });
     },
-    configEffectIsAlreadyApplied(effect) {
-      if (pluginConfigControl === undefined) {
-        throw new Error(
-          'Runtime plugin config reconciliation requires configured host control state.',
-        );
-      }
-
-      return preparedRuntimePluginConfigEffectIsAlreadyApplied({
-        effect,
-        state: pluginConfigControl,
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
-      });
+    pluginConfigCurrentFor(pluginId, configFingerprint) {
+      return (
+        options.constructionConfigFingerprint === configFingerprint ||
+        liveAppliedFingerprintFor(pluginId) === configFingerprint
+      );
     },
     async reloadPluginForCommittedConfig(effects, reloadOptions) {
       return await reloadRuntimePluginForCommittedConfig({
@@ -385,6 +387,7 @@ export function createRuntimePluginHost(
         livePlugins,
         swapEnabledPlugin,
         retirePlugin,
+        recordLiveAppliedFingerprint,
         ...(reloadOptions?.turnResultFingerprint === undefined
           ? {}
           : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
@@ -433,7 +436,10 @@ export function createRuntimePluginHost(
     },
     async onSessionEnd(context, hookOptions) {
       return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-        plugins: [...livePlugins(), ...supersededPlugins()],
+        // Retired instances run BEFORE live ones: both sides of a swap share
+        // one plugin id and store, so the live instance's terminal writes
+        // must land last and win.
+        plugins: [...supersededPlugins(), ...livePlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -445,7 +451,7 @@ export function createRuntimePluginHost(
     },
     shutdown(context) {
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: [...livePlugins(), ...supersededPlugins()],
+        plugins: [...supersededPlugins(), ...livePlugins()],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -510,6 +516,7 @@ function createRuntimePluginHostState(
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
   let supersededPlugins: readonly RuntimePlugin[] = Object.freeze([]);
+  const liveAppliedFingerprintByPluginId = new Map<string, string>();
   const retirePlugin = (plugin: RuntimePlugin): void => {
     // At-most-once invariant across live + retired instances: a factory that
     // hands back the still-live object (or the same reject twice) must not
@@ -616,6 +623,11 @@ function createRuntimePluginHostState(
       return previous;
     },
     retirePlugin,
+    recordLiveAppliedFingerprint: (pluginId, configFingerprint) => {
+      liveAppliedFingerprintByPluginId.set(pluginId, configFingerprint);
+    },
+    liveAppliedFingerprintFor: pluginId =>
+      liveAppliedFingerprintByPluginId.get(pluginId),
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,

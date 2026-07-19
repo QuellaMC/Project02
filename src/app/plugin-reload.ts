@@ -12,8 +12,8 @@ import {
   createRuntimeConfigMutationBase,
   diagnosticsHaveErrors,
   loadProject02RuntimeConfig,
-  pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
+  runtimeConfigDiagnosticMatchesPlugin,
 } from '../runtime/config/index.ts';
 import type {
   RuntimePluginCatalogEntry,
@@ -54,22 +54,28 @@ export function createConfiguredRuntimePluginReloader(options: {
         };
       }
 
-      const loadedConfig = loadProject02RuntimeConfig({
-        ...(pluginConfigControl.configPath === undefined
-          ? {}
-          : {configPath: pluginConfigControl.configPath}),
-        env: pluginConfigControl.env ?? {},
-        storeRoot: resolvedConfig.project02.storeRoot,
-      });
-      const authoredFingerprint = createRuntimeConfigFingerprint(
-        createRuntimeConfigMutationBase({
-          loadedConfig,
+      const loadAuthoredConfig = () =>
+        loadProject02RuntimeConfig({
           ...(pluginConfigControl.configPath === undefined
             ? {}
             : {configPath: pluginConfigControl.configPath}),
+          env: pluginConfigControl.env ?? {},
           storeRoot: resolvedConfig.project02.storeRoot,
-        }),
-      );
+        });
+      const authoredFingerprintOf = (
+        loaded: ReturnType<typeof loadProject02RuntimeConfig>,
+      ) =>
+        createRuntimeConfigFingerprint(
+          createRuntimeConfigMutationBase({
+            loadedConfig: loaded,
+            ...(pluginConfigControl.configPath === undefined
+              ? {}
+              : {configPath: pluginConfigControl.configPath}),
+            storeRoot: resolvedConfig.project02.storeRoot,
+          }),
+        );
+      const loadedConfig = loadAuthoredConfig();
+      const authoredFingerprint = authoredFingerprintOf(loadedConfig);
 
       if (authoredFingerprint !== reloadOptions.expectedFingerprint) {
         return {
@@ -87,13 +93,17 @@ export function createConfiguredRuntimePluginReloader(options: {
           : {env: pluginConfigControl.env}),
       });
 
-      if (
-        diagnosticsHaveErrors(freshResolvedConfig.diagnostics) ||
-        pluginHasConfigErrors({
-          diagnostics: freshResolvedConfig.diagnostics,
-          pluginId,
-        })
-      ) {
+      // Mirror the update tool's inspection scope: only global diagnostics
+      // or errors for THIS plugin block its rebuild. Another plugin's bad
+      // config must not strand a valid live target whose update was already
+      // promised for the next turn.
+      const blockingDiagnostics = freshResolvedConfig.diagnostics.filter(
+        diagnostic =>
+          diagnostic.scope === 'global' ||
+          runtimeConfigDiagnosticMatchesPlugin({diagnostic, pluginId}),
+      );
+
+      if (diagnosticsHaveErrors(blockingDiagnostics)) {
         return {
           status: 'declined',
           reason: `the refreshed config for plugin "${pluginId}" has errors`,
@@ -131,6 +141,21 @@ export function createConfiguredRuntimePluginReloader(options: {
           // The factory already ran: hand the instance back so the host
           // retires it into the terminal-lifecycle list instead of leaking
           // whatever the factory allocated.
+          plugin,
+        };
+      }
+
+      // The factory await is a real window: another writer may have moved
+      // the authored config while it ran, and swapping in an instance built
+      // from the older snapshot would silently serve stale config. Re-check
+      // after the load, exactly like the pre-load check.
+      if (
+        authoredFingerprintOf(loadAuthoredConfig()) !==
+        reloadOptions.expectedFingerprint
+      ) {
+        return {
+          status: 'declined',
+          reason: `the authored config for plugin "${pluginId}" moved while the factory was rebuilding`,
           plugin,
         };
       }

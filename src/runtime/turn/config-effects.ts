@@ -40,18 +40,24 @@ export async function recoverPendingRuntimeConfigEffects(options: {
       continue;
     }
 
-    // Snapshot which pending effects the authored file ALREADY carries
-    // before replay mutates anything: those effects landed in an earlier
-    // pass (e.g. a commit whose marker append was lost), so the running
-    // host was constructed at-or-after their config and a reload would
-    // pointlessly rebuild and retire a fresh instance.
+    // A reload is skipped only when the RUNNING HOST is known to reflect
+    // the event's final config — constructed from it, or live-applied it in
+    // this process. A marker-lost turn whose reload failed or deferred has
+    // neither signal, so recovery re-runs the reload and re-derives that
+    // decision durably instead of silently closing the effect.
+    const terminalFinalEffect = terminalEffects[terminalEffects.length - 1];
     const preAppliedEffectIds = new Set(
-      pendingEffects
-        .filter(
-          effect =>
-            options.pluginHost.configEffectIsAlreadyApplied?.(effect) === true,
-        )
-        .map(effect => effect.effectId),
+      terminalFinalEffect === undefined
+        ? []
+        : pendingEffects
+            .filter(
+              effect =>
+                options.pluginHost.pluginConfigCurrentFor?.(
+                  effect.targetPluginId,
+                  terminalFinalEffect.resultFingerprint,
+                ) === true,
+            )
+            .map(effect => effect.effectId),
     );
     const priorAcceptedEffectIds = new Set(
       terminalEffects

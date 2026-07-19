@@ -38,6 +38,8 @@ import {
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
   createRuntimeConfigDiagnostic,
+  createRuntimeConfigFingerprint,
+  createRuntimeConfigMutationBase,
   createRuntimePluginConfigControlCapability,
   diagnosticsHaveErrors,
   resolveProject02RuntimeConfig,
@@ -105,6 +107,8 @@ export type PreparedProject02PluginActivationPlan =
       Record<string, RuntimePluginCatalogEntry>
     >;
     readonly pluginConfigControl: RuntimePluginConfigControlHostState;
+    /** Fingerprint of the authored config this plan's plugins are built from. */
+    readonly authoredConfigFingerprint: string;
   };
 
 export type RuntimePluginCatalogSnapshot = {
@@ -341,6 +345,15 @@ export function prepareConfiguredProject02PluginActivation(options: {
     packageProvenanceByPluginId: composition.packageProvenanceByPluginId,
     resolvedConfig,
     activation,
+    authoredConfigFingerprint: createRuntimeConfigFingerprint(
+      createRuntimeConfigMutationBase({
+        loadedConfig: options.loadedConfig,
+        ...(resolvedConfig.path === undefined
+          ? {}
+          : {configPath: resolvedConfig.path}),
+        storeRoot: resolvedConfig.project02.storeRoot,
+      }),
+    ),
     pluginConfigControl: Object.freeze({
       pluginManifests,
       control: createRuntimePluginConfigControlCapability(),
@@ -464,6 +477,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       pluginReloader: createConfiguredRuntimePluginReloader({activationPlan}),
+      constructionConfigFingerprint: activationPlan.authoredConfigFingerprint,
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({

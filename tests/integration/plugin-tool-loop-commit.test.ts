@@ -304,6 +304,15 @@ async function createLiveReloadLoopFixture(
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
       sessionIdentity: session,
+      // Mirrors the configured composition root: the host records which
+      // authored config its instances were built from, so recovery can skip
+      // rebuilds the running host already reflects.
+      constructionConfigFingerprint: inspectRuntimePluginConfig({
+        manifest,
+        pluginManifests: [manifest],
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }).fingerprint,
       plugins: [stylePlugin(authoredTone())],
       enabledPluginIds: [
         runtimePluginId,
@@ -1823,6 +1832,73 @@ describe('plugin-driven tool loop commit and rollback', () => {
         evidence.summary.startsWith('Live-applied'),
       ),
     ).toBe(false);
+  });
+
+  it('retries at recovery a reload whose outcome was never made durable', async () => {
+    const live = await createLiveReloadLoopFixture('undurable-reload', {
+      reloader: {
+        reload: () => Promise.reject(new Error('factory exploded')),
+      },
+    });
+    const failingStore = createAfterTurnCommittedAppendFailingLogStore(
+      live.logStore,
+    );
+    const crashResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update tone', 'evt_undurable_reload'),
+      session: live.session,
+      logStore: failingStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+          ],
+        },
+        {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
+      ]),
+    });
+
+    expect(crashResult.status).toBe('completed');
+    if (crashResult.status !== 'completed') {
+      throw new Error('Expected the marker-losing turn to complete.');
+    }
+    // The reload failed AND the marker append died, so no reload decision
+    // is durable and the same process keeps serving the stale instance.
+    expect(crashResult.postCommitFailures?.join(' ')).toContain(
+      'factory exploded',
+    );
+    expect(live.authoredTone()).toBe('warm');
+
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_undurable_reload_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(live.capturedContexts[0]).toContain('tone:cool');
+
+    // Recovery must NOT skip: the running host is not current for the
+    // committed config, so the reload is re-attempted and its outcome is
+    // finally recorded durably.
+    const recoveryEvent = live.logStore
+      .rawEvents()
+      .find(
+        event =>
+          event.kind === 'after_turn_committed' &&
+          event.eventId === 'evt_undurable_reload',
+      );
+
+    expect(recoveryEvent?.status).toBe('completed_with_failures');
+    expect(
+      (recoveryEvent?.runtimePluginEvidence ?? []).some(
+        evidence =>
+          evidence.status === 'failed' &&
+          evidence.summary.startsWith('Live config reload'),
+      ),
+    ).toBe(true);
   });
 
   it('includes prior-reconciled effects when recovery groups a reload', async () => {
