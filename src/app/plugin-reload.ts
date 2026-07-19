@@ -59,7 +59,12 @@ export function createConfiguredRuntimePluginReloader(options: {
           ...(pluginConfigControl.configPath === undefined
             ? {}
             : {configPath: pluginConfigControl.configPath}),
-          env: pluginConfigControl.env ?? {},
+          // Omitted env falls back to process.env inside the loader, the
+          // same default the inspection/approval path used — forcing {}
+          // here would strand $env secrets that approval already resolved.
+          ...(pluginConfigControl.env === undefined
+            ? {}
+            : {env: pluginConfigControl.env}),
           storeRoot: resolvedConfig.project02.storeRoot,
         });
       const authoredFingerprintOf = (

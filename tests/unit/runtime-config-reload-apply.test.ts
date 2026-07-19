@@ -94,32 +94,59 @@ describe('applyCompletedRuntimeConfigReloads', () => {
     ]);
   });
 
-  it('does not reload a plugin whose accepted effects are pure no-ops', async () => {
-    const calls: string[][] = [];
-    const baseHost = createRuntimePluginHost();
-    const capturingHost = Object.freeze({
-      ...baseHost,
-      reloadPluginForCommittedConfig(effects) {
-        calls.push(effects.map(effect => effect.targetPluginId));
-        return Promise.resolve({outcome: 'deferred' as const});
-      },
-    } satisfies RuntimePluginHost);
+  it('skips a no-op group only when the host already reflects it', async () => {
+    const noOpTurnEffects = [
+      applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f0'),
+      applyReloadEffect('plugin.beta', 'effect-b', 'sha256:f0', 'sha256:f1'),
+    ];
+    const noOpTurnEvidence = [
+      acceptedReconcileEvidence('effect-a'),
+      acceptedReconcileEvidence('effect-b'),
+    ];
+    const capturingHost = (constructionConfigFingerprint?: string) => {
+      const calls: string[][] = [];
+      const baseHost = createRuntimePluginHost(
+        constructionConfigFingerprint === undefined
+          ? {}
+          : {constructionConfigFingerprint},
+      );
 
-    // Alpha's accepted update left the file exactly where it was; only
-    // beta's config actually changed. Rebuilding alpha would reset its
+      return {
+        calls,
+        host: Object.freeze({
+          ...baseHost,
+          reloadPluginForCommittedConfig(effects) {
+            calls.push(effects.map(effect => effect.targetPluginId));
+            return Promise.resolve({outcome: 'deferred' as const});
+          },
+        } satisfies RuntimePluginHost),
+      };
+    };
+
+    // Alpha's accepted update left the file exactly where it was and the
+    // host was built from that state: rebuilding alpha would reset its
     // per-session state for nothing.
+    const current = capturingHost('sha256:f0');
+
     await applyCompletedRuntimeConfigReloads({
-      pluginHost: capturingHost,
-      effects: [
-        applyReloadEffect('plugin.alpha', 'effect-a', 'sha256:f0', 'sha256:f0'),
-        applyReloadEffect('plugin.beta', 'effect-b', 'sha256:f0', 'sha256:f1'),
-      ],
-      reconcileEvidence: [
-        acceptedReconcileEvidence('effect-a'),
-        acceptedReconcileEvidence('effect-b'),
-      ],
+      pluginHost: current.host,
+      effects: noOpTurnEffects,
+      reconcileEvidence: noOpTurnEvidence,
     });
 
-    expect(calls).toEqual([['plugin.beta']]);
+    expect(current.calls).toEqual([['plugin.beta']]);
+
+    // Same no-op update against a STALE host (an earlier reload failed and
+    // nothing reflects f0): the same-value update must retry the reload
+    // instead of being skipped as "unchanged".
+    const stale = capturingHost();
+
+    await applyCompletedRuntimeConfigReloads({
+      pluginHost: stale.host,
+      effects: noOpTurnEffects,
+      reconcileEvidence: noOpTurnEvidence,
+    });
+
+    expect(stale.calls).toEqual([['plugin.alpha'], ['plugin.beta']]);
   });
 });

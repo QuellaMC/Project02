@@ -173,29 +173,24 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   const failures: string[] = [];
 
   for (const [groupPluginId, group] of effectsByPluginId.entries()) {
-    // A group of pure no-ops (every accepted effect left the file where it
-    // was) changed nothing for this plugin — there is nothing to apply and
-    // no reason to rebuild it, whatever else the turn did.
-    if (
-      group.every(
-        effect => effect.resultFingerprint === effect.expectedFingerprint,
-      )
-    ) {
-      continue;
-    }
-
-    // The currency question, asked of the single authority: when the host's
-    // live instance already reflects the turn's final ACCEPTED fingerprint
-    // (constructed from it, or live-applied it), a reload would only churn
-    // a fresh instance. A host that is NOT current — e.g. a marker-lost
-    // turn whose reload failed or deferred — re-runs the reload and
-    // re-derives that decision durably.
-    if (
-      turnFinalAcceptedEffect !== undefined &&
+    // One rule, one primitive: skip only when the host's live instance
+    // already reflects this group — its own final accepted state (for a
+    // pure no-op group that IS the unchanged file) or the turn's final
+    // state (a host constructed at or after everything this turn applied).
+    // A host that reflects neither — e.g. an earlier reload failed and
+    // left it stale — re-runs the reload and re-derives its decision
+    // durably, so even a same-value update can heal a stale instance.
+    const groupFinalEffect = group[group.length - 1];
+    const hostReflects = (fingerprint: string | undefined): boolean =>
+      fingerprint !== undefined &&
       options.pluginHost.pluginConfigCurrentFor?.(
         groupPluginId,
-        turnFinalAcceptedEffect.resultFingerprint,
-      ) === true
+        fingerprint,
+      ) === true;
+
+    if (
+      hostReflects(groupFinalEffect?.resultFingerprint) ||
+      hostReflects(turnFinalAcceptedEffect?.resultFingerprint)
     ) {
       continue;
     }
