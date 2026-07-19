@@ -1834,6 +1834,59 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).toBe(false);
   });
 
+  it('skips the recovery rebuild when the tail effect conflicted at commit', async () => {
+    const live = await createLiveReloadLoopFixture('accepted-final');
+    const failingStore = createAfterTurnCommittedAppendFailingLogStore(
+      live.logStore,
+    );
+    // Two same-plugin live updates prepared against the SAME fingerprint:
+    // the first applies at commit, the second conflict-closes, so the file
+    // (and the live-applied instance) end at the first effect's result.
+    const staleSecondInput = {...live.updateInput, value: 'sharp'};
+    const crashResult = await runLocalUserMessageEvent({
+      event: createTestEvent('update tone twice', 'evt_accepted_final'),
+      session: live.session,
+      logStore: failingStore,
+      pluginHost: live.pluginHost,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
+          ],
+        },
+        {
+          toolCalls: [
+            {name: runtimePluginConfigUpdateToolName, input: staleSecondInput},
+          ],
+        },
+        {toolCalls: [{name: 'visible_reply', input: {text: 'updated'}}]},
+      ]),
+    });
+
+    expect(crashResult.status).toBe('completed');
+    if (crashResult.status !== 'completed') {
+      throw new Error('Expected the marker-losing turn to complete.');
+    }
+    expect(live.authoredTone()).toBe('warm');
+    expect(live.reloaderCalls()).toBe(1);
+
+    // A restarted host is built from the file at the last ACCEPTED effect's
+    // fingerprint; recovery must recognize that currency even though the
+    // terminal event's raw tail is the conflicted effect.
+    const restartedHost = live.createPluginHost();
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_accepted_final_followup'),
+      session: live.session,
+      logStore: live.logStore,
+      pluginHost: restartedHost,
+      roleModelAdapter: live.contextCaptureAdapter,
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(live.capturedContexts[0]).toContain('tone:warm');
+    expect(live.reloaderCalls()).toBe(1);
+  });
+
   it('retries at recovery a reload whose outcome was never made durable', async () => {
     const live = await createLiveReloadLoopFixture('undurable-reload', {
       reloader: {

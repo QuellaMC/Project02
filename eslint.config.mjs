@@ -58,21 +58,17 @@ export default tseslint.config(
   // seam-based extraction only (never size-motivated cuts), and a cohesive file that
   // genuinely needs to grow may raise its pin in its own commit with a stated reason.
   {
-    // Re-pinned +2 for the inventory/control host-state import split, then
-    // +57 across the live config-reload seam and its review hardening: state
-    // refs and method delegation (policy lives in src/plugins/host/reload.ts),
-    // superseded-instance retention with the disjoint at-most-once retire
-    // invariant, the confirmed config-update turn log wired at the
-    // tool-dispatch choke point, the pluginConfigCurrentFor currency signal
-    // (construction + live-applied fingerprints) recovery uses to skip
-    // redundant rebuilds, the turn-final fingerprint pass-through for
-    // multi-plugin turns, and the late-retirement disposer that gives
-    // post-terminal factory results immediate best-effort cleanup.
+    // Grown across the live config-reload seam and its review hardening
+    // (reload policy in src/plugins/host/reload.ts; retired-instance state
+    // machine extracted to src/plugins/host/instance-lifecycle.ts), which
+    // brought the pin back DOWN from its 1961 peak. Remaining bulk: state
+    // refs, reload/currency delegation, the confirmed config-update turn
+    // log, and the lifecycle wiring helpers.
     files: ['src/plugins/host/host.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1961, skipBlankLines: true, skipComments: true},
+        {max: 1946, skipBlankLines: true, skipComments: true},
       ],
     },
   },

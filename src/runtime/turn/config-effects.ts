@@ -40,37 +40,11 @@ export async function recoverPendingRuntimeConfigEffects(options: {
       continue;
     }
 
-    // A reload is skipped only when the RUNNING HOST is known to reflect
-    // the event's final config — constructed from it, or live-applied it in
-    // this process. A marker-lost turn whose reload failed or deferred has
-    // neither signal, so recovery re-runs the reload and re-derives that
-    // decision durably instead of silently closing the effect.
-    const terminalFinalEffect = terminalEffects[terminalEffects.length - 1];
-    const preAppliedEffectIds = new Set(
-      terminalFinalEffect === undefined
-        ? []
-        : pendingEffects
-            .filter(
-              effect =>
-                options.pluginHost.pluginConfigCurrentFor?.(
-                  effect.targetPluginId,
-                  terminalFinalEffect.resultFingerprint,
-                ) === true,
-            )
-            .map(effect => effect.effectId),
-    );
     const priorAcceptedEffectIds = new Set(
       terminalEffects
         .filter(effect => acceptedReconciledIds.has(effect.effectId))
         .map(effect => effect.effectId),
     );
-
-    // Effects reconciled in an earlier pass were applied in that pass, so
-    // they never count as newly applied by this one.
-    for (const effectId of priorAcceptedEffectIds) {
-      preAppliedEffectIds.add(effectId);
-    }
-
     const reconcileEvidence: RuntimePluginEvidenceSnapshot[] = [];
 
     for (const effect of pendingEffects) {
@@ -102,13 +76,14 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     // reload as ONE batch — including effects already reconciled by an
     // earlier pass — so a group the original commit would have refused
     // to live-apply (e.g. mixed live and session-scoped fields) defers
-    // here exactly the same way.
+    // here exactly the same way. Whether a reload is even needed is the
+    // apply layer's call: it alone knows the final ACCEPTED fingerprint
+    // and asks the host whether its instances already reflect it.
     const reload = await applyCompletedRuntimeConfigReloads({
       pluginHost: options.pluginHost,
       effects: terminalEffects,
       reconcileEvidence,
       priorAcceptedEffectIds,
-      preAppliedEffectIds,
     });
 
     options.logStore.appendRawEvent({
@@ -152,8 +127,6 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   readonly reconcileEvidence: readonly RuntimePluginEvidenceSnapshot[];
   /** Effects accepted by an earlier pass; they join the group for eligibility. */
   readonly priorAcceptedEffectIds?: ReadonlySet<string>;
-  /** Effects the authored file already carried before this pass replayed anything. */
-  readonly preAppliedEffectIds?: ReadonlySet<string>;
 }): Promise<{
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly failures: readonly string[];
@@ -199,14 +172,19 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
   const failures: string[] = [];
 
-  for (const group of effectsByPluginId.values()) {
-    // A group this pass did not move needs no reload: the running host was
-    // constructed at-or-after that config (or an earlier pass already made
-    // the reload decision), so a rebuild would only churn a fresh instance.
+  for (const [groupPluginId, group] of effectsByPluginId.entries()) {
+    // The single currency question, asked of the single authority: when the
+    // host's live instance already reflects the turn's final ACCEPTED
+    // fingerprint (constructed from it, or live-applied it), a reload would
+    // only churn a fresh instance. A host that is NOT current — e.g. a
+    // marker-lost turn whose reload failed or deferred — re-runs the reload
+    // and re-derives that decision durably.
     if (
-      group.every(
-        effect => options.preAppliedEffectIds?.has(effect.effectId) === true,
-      )
+      turnFinalAcceptedEffect !== undefined &&
+      options.pluginHost.pluginConfigCurrentFor?.(
+        groupPluginId,
+        turnFinalAcceptedEffect.resultFingerprint,
+      ) === true
     ) {
       continue;
     }

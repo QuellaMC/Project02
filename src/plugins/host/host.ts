@@ -100,6 +100,10 @@ import {
   type RuntimePluginConfigReloadHostResult,
   type RuntimePluginReloader,
 } from './reload.ts';
+import {
+  createRetiredRuntimePluginLifecycle,
+  type RetiredRuntimePluginLifecycle,
+} from './instance-lifecycle.ts';
 import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 
 export {runtimePluginId} from '../api/contract.ts';
@@ -272,13 +276,10 @@ type RuntimePluginHostState = {
   readonly enabledPlugins: readonly RuntimePlugin[];
   /** Current instances: identical to enabledPlugins until a live config reload swaps one. */
   readonly livePlugins: () => readonly RuntimePlugin[];
-  /** Instances replaced by live reloads; they still receive terminal lifecycle hooks. */
-  readonly supersededPlugins: () => readonly RuntimePlugin[];
+  /** Replaces the live instance sharing next's plugin id; pure list swap. */
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
-  /** Retains a never-serving instance (e.g. a guard-declined rebuild) for terminal hooks. */
-  readonly retirePlugin: (plugin: RuntimePlugin) => void;
   readonly recordLiveAppliedFingerprint: (
     pluginId: string,
     configFingerprint: string,
@@ -291,77 +292,64 @@ type RuntimePluginHostState = {
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
 };
 
-/**
- * Best-effort terminal cleanup for an instance that arrives AFTER the
- * terminal hooks already ran (e.g. a reload factory settling past its
- * timeout): the retired list will never be dispatched again, so the late
- * instance gets its terminal hooks immediately instead of a retired slot.
- */
-function createLateRetirementDisposer(config: {
-  readonly retirePlugin: (plugin: RuntimePlugin) => void;
+type HostRetiredLifecycle = RetiredRuntimePluginLifecycle<
+  {
+    readonly context: RuntimePluginContext;
+    readonly hookOptions: RuntimePluginSessionEndOptions | undefined;
+  },
+  {readonly context: RuntimePluginContext}
+>;
+
+function createHostRetiredLifecycle(config: {
+  readonly livePlugins: () => readonly RuntimePlugin[];
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-}): {
-  readonly retireOrDisposePlugin: (plugin: RuntimePlugin) => void;
-  readonly noteSessionEnd: (
-    context: RuntimePluginContext,
-    hookOptions?: RuntimePluginSessionEndOptions,
-  ) => void;
-  readonly noteShutdown: (context: RuntimePluginContext) => void;
-} {
-  let sessionEndContext: RuntimePluginContext | undefined;
-  let sessionEndHookOptions: RuntimePluginSessionEndOptions | undefined;
-  let shutdownContext: RuntimePluginContext | undefined;
-  const disposeLatePlugin = async (plugin: RuntimePlugin): Promise<void> => {
-    try {
-      if (sessionEndContext !== undefined) {
-        await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-          plugins: [plugin],
-          context: sessionEndContext,
-          accessByPluginId: config.accessByPluginId,
-          storeRoot: config.storeRoot,
-          sessionId: config.sessionId,
-          sessionIdentity: config.sessionIdentity,
-          createFileStore: config.createFileStore,
-          hookOptions: sessionEndHookOptions,
-        });
-      }
+}): HostRetiredLifecycle {
+  return createRetiredRuntimePluginLifecycle({
+    isLive: plugin => config.livePlugins().includes(plugin),
+    dispatchSessionEnd: (plugin, phase) =>
+      runRuntimePluginSessionEndHooksWithResolvedPermissions({
+        plugins: [plugin],
+        context: phase.context,
+        accessByPluginId: config.accessByPluginId,
+        storeRoot: config.storeRoot,
+        sessionId: config.sessionId,
+        sessionIdentity: config.sessionIdentity,
+        createFileStore: config.createFileStore,
+        hookOptions: phase.hookOptions,
+      }),
+    dispatchShutdown: (plugin, phase) =>
+      runRuntimePluginShutdownHooksWithResolvedPermissions({
+        plugins: [plugin],
+        context: phase.context,
+        accessByPluginId: config.accessByPluginId,
+        storeRoot: config.storeRoot,
+        sessionId: config.sessionId,
+        sessionIdentity: config.sessionIdentity,
+        createFileStore: config.createFileStore,
+      }),
+  });
+}
 
-      if (shutdownContext !== undefined) {
-        await runRuntimePluginShutdownHooksWithResolvedPermissions({
-          plugins: [plugin],
-          context: shutdownContext,
-          accessByPluginId: config.accessByPluginId,
-          storeRoot: config.storeRoot,
-          sessionId: config.sessionId,
-          sessionIdentity: config.sessionIdentity,
-          createFileStore: config.createFileStore,
-        });
-      }
-    } catch {
-      // Terminal cleanup for late instances is best-effort by contract.
+function createSwapWithRetirement(
+  swapEnabledPlugin: (next: RuntimePlugin) => RuntimePlugin | undefined,
+  retiredLifecycle: HostRetiredLifecycle,
+): (next: RuntimePlugin) => RuntimePlugin | undefined {
+  return next => {
+    const previous = swapEnabledPlugin(next);
+
+    if (previous === undefined) {
+      return undefined;
     }
-  };
 
-  return {
-    retireOrDisposePlugin: plugin => {
-      if (sessionEndContext === undefined && shutdownContext === undefined) {
-        config.retirePlugin(plugin);
-        return;
-      }
-
-      void disposeLatePlugin(plugin);
-    },
-    noteSessionEnd: (context, hookOptions) => {
-      sessionEndContext = context;
-      sessionEndHookOptions = hookOptions;
-    },
-    noteShutdown: context => {
-      shutdownContext ??= context;
-    },
+    // Live and retired stay disjoint: a resurrected instance gives up its
+    // retired slot, and the replaced one takes a slot at most once.
+    retiredLifecycle.unretire(next);
+    retiredLifecycle.retire(previous);
+    return previous;
   };
 }
 
@@ -374,9 +362,7 @@ export function createRuntimePluginHost(
     enabledIds,
     enabledPlugins,
     livePlugins,
-    supersededPlugins,
     swapEnabledPlugin,
-    retirePlugin,
     recordLiveAppliedFingerprint,
     liveAppliedFingerprintFor,
     confirmedConfigUpdates,
@@ -391,15 +377,18 @@ export function createRuntimePluginHost(
   });
   let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
-  const {retireOrDisposePlugin, noteSessionEnd, noteShutdown} =
-    createLateRetirementDisposer({
-      retirePlugin,
-      accessByPluginId,
-      storeRoot: options.storeRoot,
-      sessionId: options.sessionId,
-      sessionIdentity,
-      createFileStore: options.fileStore?.createFileStore,
-    });
+  const retiredLifecycle = createHostRetiredLifecycle({
+    livePlugins,
+    accessByPluginId,
+    storeRoot: options.storeRoot,
+    sessionId: options.sessionId,
+    sessionIdentity,
+    createFileStore: options.fileStore?.createFileStore,
+  });
+  const swapAndRetirePlugin = createSwapWithRetirement(
+    swapEnabledPlugin,
+    retiredLifecycle,
+  );
 
   return Object.freeze({
     registrySnapshot() {
@@ -471,8 +460,8 @@ export function createRuntimePluginHost(
         reloader: options.pluginReloader,
         pluginConfigControl,
         livePlugins,
-        swapEnabledPlugin,
-        retirePlugin: retireOrDisposePlugin,
+        swapEnabledPlugin: swapAndRetirePlugin,
+        retirePlugin: retiredLifecycle.retire,
         recordLiveAppliedFingerprint,
         ...(reloadOptions?.turnResultFingerprint === undefined
           ? {}
@@ -521,12 +510,14 @@ export function createRuntimePluginHost(
       } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context, hookOptions) {
-      noteSessionEnd(context, hookOptions);
       return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
         // Retired instances run BEFORE live ones: both sides of a swap share
         // one plugin id and store, so the live instance's terminal writes
         // must land last and win.
-        plugins: [...supersededPlugins(), ...livePlugins()],
+        plugins: [
+          ...retiredLifecycle.beginSessionEnd({context, hookOptions}),
+          ...livePlugins(),
+        ],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -537,9 +528,11 @@ export function createRuntimePluginHost(
       });
     },
     shutdown(context) {
-      noteShutdown(context);
       shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: [...supersededPlugins(), ...livePlugins()],
+        plugins: [
+          ...retiredLifecycle.beginShutdown({context}),
+          ...livePlugins(),
+        ],
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -603,18 +596,7 @@ function createRuntimePluginHostState(
         });
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
-  let supersededPlugins: readonly RuntimePlugin[] = Object.freeze([]);
   const liveAppliedFingerprintByPluginId = new Map<string, string>();
-  const retirePlugin = (plugin: RuntimePlugin): void => {
-    // At-most-once invariant across live + retired instances: a factory that
-    // hands back the still-live object (or the same reject twice) must not
-    // get that instance terminal lifecycle hooks a second time.
-    if (enabledPlugins.includes(plugin) || supersededPlugins.includes(plugin)) {
-      return;
-    }
-
-    supersededPlugins = Object.freeze([...supersededPlugins, plugin]);
-  };
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
   assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
@@ -685,7 +667,6 @@ function createRuntimePluginHostState(
     enabledPlugins,
     confirmedConfigUpdates,
     livePlugins: () => enabledPlugins,
-    supersededPlugins: () => supersededPlugins,
     swapEnabledPlugin: next => {
       const previous = enabledPlugins.find(
         plugin => plugin.manifest.id === next.manifest.id,
@@ -701,16 +682,8 @@ function createRuntimePluginHostState(
       allPlugins = Object.freeze(
         allPlugins.map(plugin => (plugin === previous ? next : plugin)),
       );
-      // Live and retired stay disjoint: an instance returning to live duty
-      // (e.g. a config-keyed factory cache handing back the earlier object)
-      // must give up its retired slot or terminal hooks would run twice.
-      supersededPlugins = Object.freeze(
-        supersededPlugins.filter(plugin => plugin !== next),
-      );
-      retirePlugin(previous);
       return previous;
     },
-    retirePlugin,
     recordLiveAppliedFingerprint: (pluginId, configFingerprint) => {
       liveAppliedFingerprintByPluginId.set(pluginId, configFingerprint);
     },

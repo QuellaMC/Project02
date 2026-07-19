@@ -609,6 +609,75 @@ describe('runtime plugin host live config reload', () => {
     }
   });
 
+  it('gives a late factory result the remaining terminal phases too', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const terminalLog: string[] = [];
+      const terminalManifest = createRuntimePluginManifest({
+        ...reloadFixtureManifest(),
+        declaredPlugins: [
+          'before_role_model_call',
+          'on_session_end',
+          'on_shutdown',
+        ],
+      });
+      const trackedPlugin = (label: string) =>
+        createRuntimePlugin({
+          manifest: terminalManifest,
+          lifecycleHooks: {
+            onSessionEnd() {
+              terminalLog.push(`${label}:sessionEnd`);
+              return {status: 'completed' as const, evidence: []};
+            },
+            onShutdown() {
+              terminalLog.push(`${label}:shutdown`);
+              return {status: 'completed' as const, evidence: []};
+            },
+          },
+        });
+      let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
+      const host = reloadHost({
+        initial: trackedPlugin('v1'),
+        reloader: {
+          reload: () =>
+            new Promise(resolve => {
+              settleLate = plugin => {
+                resolve({status: 'rebuilt', plugin});
+              };
+            }),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      await host.onSessionEnd(testPluginContext(), {
+        allowFileStoreWrites: false,
+      });
+      expect(terminalLog).toEqual(['v1:sessionEnd']);
+
+      // Settling between session end and shutdown: the late instance gets
+      // the phase it missed immediately AND stays registered for shutdown.
+      settleLate?.(trackedPlugin('late'));
+      await vi.runAllTimersAsync();
+      expect(terminalLog).toEqual(['v1:sessionEnd', 'late:sessionEnd']);
+
+      await host.shutdown(testPluginContext());
+      expect(terminalLog).toEqual([
+        'v1:sessionEnd',
+        'late:sessionEnd',
+        'late:shutdown',
+        'v1:shutdown',
+      ]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('defers when the host has no reloader', async () => {
     const host = reloadHost({});
 
