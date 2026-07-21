@@ -393,6 +393,31 @@ describe('role-model prompt rendering', () => {
     );
     expect(tool?.function).not.toHaveProperty('strict');
   });
+
+  // Byte-identity tripwire for the character seam replacement: the system
+  // frame for the default character must not drift until the persona-render
+  // commit deliberately replaces this golden with the persona-driven frame.
+  it('renders the exact system frame bytes for the default character', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-system-frame-golden',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope);
+    const systemFrame = turnContext.frames[0];
+
+    expect(systemFrame?.kind).toBe('system_protocol');
+    expect(systemFrame?.message).toEqual({
+      role: 'system',
+      content:
+        'You are Mira. Use chat-completions semantics. The visible ' +
+        'transcript is normal user/assistant conversation. Model-only ' +
+        'context is not user text. Refer to extensions as plugins.',
+    });
+  });
 });
 
 const nestedSchemaToolDefinition = Object.freeze({
