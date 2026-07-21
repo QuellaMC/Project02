@@ -8,12 +8,14 @@
   ],
   "json-boundary.ts": [
     "app",
+    "characters",
     "cli",
     "plugins",
     "role-model",
     "runtime"
   ],
   "node-error.ts": [
+    "characters",
     "plugins",
     "runtime"
   ],

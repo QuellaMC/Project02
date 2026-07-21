@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "project02.character.schema.json",
+  "title": "Project02 character package descriptor",
+  "description": "Authoring schema for project02.character.json. Mirrors the runtime validator (src/characters/api/package-descriptor.ts); intentionally strict about unknown keys so typos surface while editing. tests/unit/character-package-schema.test.ts keeps this file honest against the code validator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["format", "identity", "persona", "meta"],
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "format": {
+      "const": "project02.character.v1"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "displayName"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,127}$",
+          "description": "Stable character id; must equal the package folder name. Permanent once a store is bound to it."
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^\\S(.*\\S)?$",
+          "description": "Speaker name stamped on the character's messages. Renaming affects new sessions only; existing sessions keep their historical name."
+        }
+      }
+    },
+    "persona": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["system"],
+      "properties": {
+        "system": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 4000,
+            "pattern": "\\S",
+            "description": "One persona section rendered into the system frame, in order. Persona only — runtime protocol text is not overridable."
+          }
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version"],
+      "properties": {
+        "version": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+$",
+          "description": "Semantic version of the character content; recorded in turn evidence."
+        }
+      }
+    }
+  }
+}

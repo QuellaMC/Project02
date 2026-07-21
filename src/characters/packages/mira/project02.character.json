@@ -1,0 +1,14 @@
+{
+  "$schema": "../../../../schemas/project02.character.schema.json",
+  "format": "project02.character.v1",
+  "identity": {
+    "id": "mira",
+    "displayName": "Mira"
+  },
+  "persona": {
+    "system": ["You are Mira."]
+  },
+  "meta": {
+    "version": "1.0.0"
+  }
+}

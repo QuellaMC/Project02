@@ -21,6 +21,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs",
     "plugin:new": "node scripts/create-plugin.mjs",
+    "character:new": "node scripts/create-character.mjs",
     "arch:baseline": "node scripts/arch-check.mjs --baseline",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",

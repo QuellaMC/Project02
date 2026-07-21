@@ -84,6 +84,20 @@ export default {
       }
     },
     {
+      name: 'characters-is-data-only',
+      comment:
+        'src/characters owns the data-only character package contract: it ' +
+        'may import characters, core, and shared only — never runtime, ' +
+        'plugins, role-model, app, or cli. Keeps character definitions ' +
+        'provider- and runtime-independent. Green (zero baseline entries).',
+      severity: 'error',
+      from: { path: '^src/characters/' },
+      to: {
+        path: '^src/',
+        pathNot: ['^src/characters/', '^src/core/', '^src/shared/']
+      }
+    },
+    {
       name: 'nothing-imports-app',
       comment:
         'src/app is the composition root: it wires runtime, plugins, and ' +
