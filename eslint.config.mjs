@@ -143,9 +143,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/evidence/validation.ts'],
     rules: {
+      // Re-pinned +1 for the shared localUserSpeaker import (mechanical
+      // growth; replaces inline 'local-user'/'You' literals).
       'max-lines': [
         'error',
-        {max: 2119, skipBlankLines: true, skipComments: true},
+        {max: 2120, skipBlankLines: true, skipComments: true},
       ],
     },
   },

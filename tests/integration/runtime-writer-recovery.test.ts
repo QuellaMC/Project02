@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
@@ -26,7 +27,10 @@ describe('abandoned durable runtime writer recovery', () => {
       sessionId,
       createdAt: completedIdentity.createdAt,
     });
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     const initialLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
 
     await runLocalUserMessageEvent({
@@ -140,7 +144,10 @@ describe('abandoned durable runtime writer recovery', () => {
     ]);
     const abandonedTempPath = `${paths.sessionRoot}/.conversation.jsonl.2147483647.123e4567-e89b-42d3-a456-426614174000.tmp`;
     writeFileSync(abandonedTempPath, 'secret partial content', 'utf8');
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -205,7 +212,10 @@ describe('abandoned durable runtime writer recovery', () => {
     await expect(
       runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent('next input'),
-        session: createConversationSession({id: sessionId}),
+        session: createConversationSession({
+          id: sessionId,
+          character: testCharacterProfile,
+        }),
         logStore,
         pluginHost: createRuntimePluginHost(),
         agent: {reply: () => ({text: 'next reply'})},

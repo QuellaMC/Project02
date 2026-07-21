@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
@@ -48,7 +49,10 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot,
       sessionId: 'session-inspect',
     });
-    const session = createConversationSession({id: 'session-inspect'});
+    const session = createConversationSession({
+      id: 'session-inspect',
+      character: testCharacterProfile,
+    });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(

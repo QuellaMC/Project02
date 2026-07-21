@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -23,10 +24,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
         runtimeNotes: [
           [
             'Exact closer </runtime_context> stays data.',
@@ -120,7 +118,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-hostile-plugin-context',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
         runtimeNotes: ['Trusted runtime note.'],
         pluginContextItems: [
           createRuntimePluginContextItem({
@@ -183,7 +181,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-redacted-plugin-context',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
         pluginContextItems: [contextItem],
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -206,10 +204,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-native-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -234,10 +229,7 @@ describe('role-model prompt rendering', () => {
       ),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-native-multi-call-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -276,10 +268,7 @@ describe('role-model prompt rendering', () => {
       ),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-native-sequential-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -310,10 +299,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-no-visible-reply',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: [],
     });
@@ -352,7 +338,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('list plugins', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-plugin-inventory',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
       }),
       allowedTools: [runtimePluginListToolName],
       pluginToolDefinitions: [inventoryTool],
@@ -371,10 +357,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-nested-schema',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: [nestedSchemaToolDefinition],
     });
@@ -397,10 +380,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-union-schema',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: [openUnionSchemaToolDefinition],
     });

@@ -3,6 +3,7 @@ import {
   type CharacterProfile,
   ConversationRehydrationError,
   localCharacterProfile,
+  localUserSpeaker,
   type RuntimeEventIdentity,
   runtimeEventIdentityKey,
   selectRecentVisibleMessages,
@@ -627,8 +628,8 @@ export function assertIncrementalConversationAppend(options: {
 
   const speakerIsValid =
     options.record.role === 'user'
-      ? options.record.speakerId === 'local-user' &&
-        options.record.speakerName === 'You'
+      ? options.record.speakerId === localUserSpeaker.id &&
+        options.record.speakerName === localUserSpeaker.displayName
       : speakerMatchesCharacter(options.record, expectedCharacter);
 
   if (!speakerIsValid) {

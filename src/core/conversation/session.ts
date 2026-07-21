@@ -56,7 +56,11 @@ export type CharacterTurnOptions = {
 
 export const defaultRecentVisibleMessageLimit = 8;
 
-const localUserSpeaker = {
+// Single owner of the local user's speaker identity: session stamping,
+// restore validation, and durable-evidence validation all compare against
+// these values. The id is permanent; the display name becomes configurable
+// in a later slice.
+export const localUserSpeaker = {
   id: 'local-user',
   displayName: 'You',
 } as const;

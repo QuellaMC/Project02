@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
@@ -78,7 +79,7 @@ describe('runtime plugin hook result boundaries', () => {
         sessionId: 'session-hook-aggregate-boundary',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: {id: 'mira', displayName: 'Mira'},
+        character: testCharacterProfile,
       }),
     );
 

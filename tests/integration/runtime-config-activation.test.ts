@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
@@ -296,7 +297,10 @@ describe('runtime config activation planning', () => {
           createdAt: '2026-06-15T00:00:00.000Z',
         }),
       ),
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore,
       pluginHost: configured.host,
       agent: {

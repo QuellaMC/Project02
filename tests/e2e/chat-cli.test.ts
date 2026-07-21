@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
@@ -349,7 +350,10 @@ describe('chat CLI trace summary', () => {
         stderr += chunk;
       }),
       traceMode: true,
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore: createToolTraceFailingLogStore(
         'visible_reply_committed',
         backingLogStore,
@@ -1663,10 +1667,7 @@ describe('chat CLI plugin lifecycle', () => {
     expect(sessionEndContexts[0]).toMatchObject({
       sessionId: 'local-session',
       currentUserMessage: '/exit',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
@@ -1828,10 +1829,7 @@ describe('chat CLI plugin lifecycle', () => {
     expect(shutdownContexts).toHaveLength(1);
     expect(shutdownContexts[0]).toMatchObject({
       sessionId,
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     expect(shutdownContexts[0]?.deadlineAt).toBeGreaterThan(Date.now());
     expect(shutdownContexts[0]?.signal.aborted).toBe(false);
@@ -2179,7 +2177,10 @@ describe('chat CLI plugin lifecycle', () => {
       stdin: Readable.from([]),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore,
       pluginHost,
     });

@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import * as fs from 'node:fs';
 
 import {afterEach, describe, expect, it, vi} from 'vitest';
@@ -40,7 +41,10 @@ describe('file runtime log store evidence cache', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     const writer = createFileRuntimeLogStore({storeRoot, sessionId});
     await runTurn(session, writer, 0);
     let singleMutationCount = 0;
@@ -93,7 +97,10 @@ describe('file runtime log store evidence cache', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     const validationCounts = {cold: 0, incremental: 0};
     const logStore = createFileRuntimeLogStore({
       storeRoot,
@@ -157,7 +164,10 @@ describe('file runtime log store evidence cache', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     const writer = createFileRuntimeLogStore({storeRoot, sessionId});
     await runTurn(session, writer, 0);
     let coldValidations = 0;
@@ -222,7 +232,14 @@ describe('file runtime log store evidence cache', () => {
 
     try {
       staleStore.readSessionEvidence();
-      await runTurn(createConversationSession({id: sessionId}), writerStore, 0);
+      await runTurn(
+        createConversationSession({
+          id: sessionId,
+          character: testCharacterProfile,
+        }),
+        writerStore,
+        0,
+      );
       const firstTraceEntry = writerStore.traceEntries()[0];
 
       if (firstTraceEntry === undefined) {
@@ -261,7 +278,14 @@ describe('file runtime log store evidence cache', () => {
     }
 
     const currentStore = createFileRuntimeLogStore({storeRoot, sessionId});
-    await runTurn(createConversationSession({id: sessionId}), currentStore, 0);
+    await runTurn(
+      createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
+      currentStore,
+      0,
+    );
     const firstTraceEntry = currentStore.traceEntries()[0];
 
     if (firstTraceEntry === undefined) {

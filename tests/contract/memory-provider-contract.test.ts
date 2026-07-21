@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -677,10 +678,7 @@ function testContext() {
     sessionId: 'session-memory',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'remember this',
-    character: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    character: testCharacterProfile,
   });
 }
 
@@ -698,10 +696,7 @@ function afterTurnContext(
     sessionId: 'session-memory',
     eventType: 'USER_MESSAGE',
     currentUserMessage: options.currentUserMessage ?? 'remember this',
-    character: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    character: testCharacterProfile,
     committedAt: '2026-06-21T00:00:01.000Z',
     visibleMessages: [
       {

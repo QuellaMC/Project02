@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -19,6 +20,9 @@ type DeferredReply = {
 };
 
 describe('conversation core', () => {
+  // Deliberately the only bare createConversationSession() left in tests:
+  // it pins the current default-character behavior until the character
+  // becomes a required input in the seam-flip slice.
   it('creates a local session for the built-in character with an empty visible transcript', () => {
     const session = createConversationSession();
 
@@ -30,7 +34,9 @@ describe('conversation core', () => {
   });
 
   it('commits one normalized user message and one character reply for a successful turn', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent: CharacterAgent = {
       reply(input) {
         return {
@@ -67,7 +73,9 @@ describe('conversation core', () => {
   });
 
   it('allows multi-line character replies while keeping user input single-line', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent: CharacterAgent = {
       reply() {
         return {
@@ -88,7 +96,9 @@ describe('conversation core', () => {
   });
 
   it('passes recent visible transcript context to the character agent before committing the new turn', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const observedContexts: VisibleMessage[][] = [];
     const agent: CharacterAgent = {
       reply(input) {
@@ -124,7 +134,9 @@ describe('conversation core', () => {
   });
 
   it('serializes concurrent turns for one session before reading context and committing', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const observedMessages: string[] = [];
     const observedContexts: VisibleMessage[][] = [];
     const firstReply = createDeferredReply();
@@ -206,7 +218,9 @@ describe('conversation core', () => {
   });
 
   it('exposes the visible transcript as an immutable snapshot of core-committed messages', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent = createDeterministicCharacterAgent();
 
     const firstTurn = await runCharacterTurn(session, 'first', agent);
@@ -266,7 +280,9 @@ describe('conversation core', () => {
   });
 
   it('protects character identity from agent-side mutation before committing a turn', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent: CharacterAgent = {
       reply(input) {
         expect(Object.isFrozen(input.character)).toBe(true);
@@ -297,7 +313,9 @@ describe('conversation core', () => {
   });
 
   it('does not call the agent or change the transcript when user input is invalid', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const calls: Array<unknown> = [];
     const agent: CharacterAgent = {
       reply(input) {
@@ -316,7 +334,9 @@ describe('conversation core', () => {
   });
 
   it('continues later queued turns after an earlier queued turn fails validation', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const calls: string[] = [];
     const agent: CharacterAgent = {
       reply(input) {
@@ -350,6 +370,7 @@ describe('conversation core', () => {
 
   it('rehydrates a validated visible transcript and allocates later message IDs after restored records', async () => {
     const session = createConversationSession({
+      character: testCharacterProfile,
       visibleTranscript: [
         {
           id: 'local-session:message-1',
@@ -391,6 +412,7 @@ describe('conversation core', () => {
   it('rejects restored visible messages from a different session before creating a transcript', () => {
     expect(() =>
       createConversationSession({
+        character: testCharacterProfile,
         id: 'selected-session',
         visibleTranscript: [
           {
@@ -408,6 +430,7 @@ describe('conversation core', () => {
   it('rejects restored visible messages that would make the next message ID ambiguous', () => {
     expect(() =>
       createConversationSession({
+        character: testCharacterProfile,
         visibleTranscript: [
           {
             id: 'local-session:message-1',
@@ -431,6 +454,7 @@ describe('conversation core', () => {
   it('rejects restored visible messages that do not preserve user and character commit order', () => {
     expect(() =>
       createConversationSession({
+        character: testCharacterProfile,
         visibleTranscript: [
           {
             id: 'local-session:message-1',
@@ -447,6 +471,7 @@ describe('conversation core', () => {
   it('rejects restored visible transcripts that end before the paired character reply', () => {
     expect(() =>
       createConversationSession({
+        character: testCharacterProfile,
         visibleTranscript: [
           {
             id: 'local-session:message-1',
@@ -461,7 +486,9 @@ describe('conversation core', () => {
   });
 
   it('leaves the transcript unchanged when the character agent returns an invalid reply', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent: CharacterAgent = {
       reply() {
         return {
@@ -477,7 +504,9 @@ describe('conversation core', () => {
   });
 
   it('leaves the transcript unchanged when the character agent returns a malformed reply', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     // Bypass the static agent contract to exercise runtime boundary validation.
     const malformedReply = {} as CharacterAgentReply;
     const agent: CharacterAgent = {
@@ -496,7 +525,9 @@ describe('conversation core', () => {
   });
 
   it('leaves the transcript unchanged when the character agent fails', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent: CharacterAgent = {
       reply() {
         throw new Error('agent unavailable');
@@ -510,7 +541,9 @@ describe('conversation core', () => {
   });
 
   it('provides a deterministic local character agent that can use recent context', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const agent = createDeterministicCharacterAgent();
 
     await expect(

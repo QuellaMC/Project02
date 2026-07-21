@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {
   createRuntimePlugin,
@@ -907,10 +908,7 @@ describe('runtime plugin host catalog and routing', () => {
         sessionId: 'session-plugin-host',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        character: testCharacterProfile,
         committedAt: '2026-06-15T00:00:00.000Z',
         visibleMessages: [
           {
@@ -953,10 +951,7 @@ describe('runtime plugin host catalog and routing', () => {
         sessionId: 'session-plugin-host',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        character: testCharacterProfile,
         committedAt: '2026-06-15T00:00:00.000Z',
         visibleMessages: [
           {

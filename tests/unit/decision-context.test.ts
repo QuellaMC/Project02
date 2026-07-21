@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {buildUserTurnDecisionContext} from '../../src/role-model/api/decision-context.ts';
@@ -5,7 +6,6 @@ import {
   type CharacterAgent,
   createConversationSession,
   defaultRecentVisibleMessageLimit,
-  localCharacterProfile,
   runCharacterTurn,
   type VisibleMessage,
 } from '../../src/core/index.ts';
@@ -21,6 +21,7 @@ type MutableVisibleMessage = {
 describe('user-turn decision context builder', () => {
   it('builds an immutable fresh-session context with local identity and runtime notes', () => {
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-fresh',
     });
     const runtimeNotes = ['local USER_MESSAGE turn', 'recent visible only'];
@@ -34,7 +35,7 @@ describe('user-turn decision context builder', () => {
 
     expect(context).toEqual({
       sessionId: 'session-fresh',
-      characterSnapshot: localCharacterProfile,
+      characterSnapshot: testCharacterProfile,
       recentVisibleMessages: [],
       runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only'],
       pluginContextItems: [],
@@ -51,6 +52,7 @@ describe('user-turn decision context builder', () => {
 
   it('uses the same recent visible message selection as the deterministic chat path', async () => {
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-resumed',
       visibleTranscript: createVisibleTranscriptSeed('session-resumed', 5),
     });
@@ -89,6 +91,7 @@ describe('user-turn decision context builder', () => {
 
   it('honors an explicit recent message limit without reordering selected messages', () => {
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-limited',
       visibleTranscript: createVisibleTranscriptSeed('session-limited', 3),
     });
@@ -106,6 +109,7 @@ describe('user-turn decision context builder', () => {
 
   it('does not accept or duplicate the current user message in the context output', () => {
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-current-message',
     });
     const optionsWithCurrentMessage = {
@@ -128,6 +132,7 @@ describe('user-turn decision context builder', () => {
     const seedMessages = createVisibleTranscriptSeed('session-snapshots', 1);
     const runtimeNotes = ['immutable note'];
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-snapshots',
       visibleTranscript: seedMessages,
     });

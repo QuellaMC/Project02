@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
   mkdir,
   mkdtemp,
@@ -200,6 +201,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const logStore = createRuntimeLogStore();
     const originalSession = createConversationSession({
+      character: testCharacterProfile,
       id: 'mira-local',
     });
 

@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
@@ -1665,10 +1666,7 @@ function createNvidiaTestInputEnvelope(
     ),
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia',
-      characterSnapshot: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      characterSnapshot: testCharacterProfile,
       recentVisibleMessages: [
         {
           id: 'm1',
@@ -1719,10 +1717,7 @@ function createNvidiaAliasCollisionInputEnvelope() {
     ),
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia-alias',
-      characterSnapshot: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      characterSnapshot: testCharacterProfile,
     }),
     pluginToolDefinitions: [
       ...createDefaultRoleModelPluginToolDefinitions(),
@@ -1754,10 +1749,7 @@ function createNvidiaNoVisibleReplyInputEnvelope() {
     ),
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia-no-visible-reply',
-      characterSnapshot: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      characterSnapshot: testCharacterProfile,
     }),
     pluginToolDefinitions: [],
   });

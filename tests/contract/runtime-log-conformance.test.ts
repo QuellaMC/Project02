@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import type {CharacterProfile} from '../../src/core/index.ts';
@@ -38,10 +39,9 @@ const identity = {
   traceId: 'trace_runtime_log_conformance',
   createdAt: '2026-07-16T00:00:00.000Z',
 } as const;
-const miraCharacter = Object.freeze({
-  id: 'mira',
-  displayName: 'Mira',
-} satisfies CharacterProfile);
+const miraCharacter = Object.freeze(
+  testCharacterProfile satisfies CharacterProfile,
+);
 const novaCharacter = Object.freeze({
   id: 'nova',
   displayName: 'Nova',

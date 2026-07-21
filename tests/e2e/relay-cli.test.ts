@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
@@ -130,10 +131,7 @@ describe('relay CLI compatibility wrapper', () => {
     expect(shutdownCalls).toBe(1);
     expect(shutdownContexts).toHaveLength(1);
     expect(shutdownContexts[0]).toMatchObject({
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
       currentUserMessage: '',
     });
     expect(shutdownContexts[0]?.deadlineAt).toBeGreaterThan(Date.now());

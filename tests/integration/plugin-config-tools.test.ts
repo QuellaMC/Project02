@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
@@ -2110,10 +2111,7 @@ function testContext(identity: TestIdentityOverride = {}) {
     sessionId: 'session_plugin_config_test',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'inspect plugin config',
-    character: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    character: testCharacterProfile,
   });
 }
 

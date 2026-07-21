@@ -41,6 +41,7 @@ export {
   ConversationRehydrationError,
   createConversationSession,
   defaultRecentVisibleMessageLimit,
+  localUserSpeaker,
   normalizeCharacterAgentReply,
   rollbackLastCharacterTurn,
   runCharacterTurn,

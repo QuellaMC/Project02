@@ -1,3 +1,4 @@
+import {testCharacterProfile} from './character-fixtures.ts';
 import {
   createConversationSession,
   createRuntimeEventIdentity,
@@ -935,7 +936,10 @@ export async function createDurableCharacterStateHarness(sessionId: string) {
 
   return {
     storeRoot,
-    session: createConversationSession({id: sessionId}),
+    session: createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    }),
     logStore: createFileRuntimeLogStore({
       storeRoot,
       sessionId,

@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {mkdirSync, unlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {performance} from 'node:perf_hooks';
@@ -629,10 +630,7 @@ function createCharacterStateContext(options: {
       sessionId: options.sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     }),
     pluginId: characterStatePluginId,
     fileStore: options.fileStore,

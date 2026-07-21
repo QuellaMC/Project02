@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
@@ -543,7 +544,10 @@ describe('file runtime log store plugin tool event validation', () => {
         'hello',
         identity('evt_malformed_provider_exchange_rejection'),
       ),
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore,
       pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
       roleModelAdapter: createMalformedProviderExchangeAdapter(),
@@ -620,7 +624,10 @@ describe('file runtime log store plugin tool event validation', () => {
         'hello',
         identity('evt_provider_exchange_credential_redaction'),
       ),
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
       pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
       roleModelAdapter: createNvidiaRoleModelProviderAdapter({
@@ -773,6 +780,7 @@ describe('file runtime log store plugin tool event validation', () => {
       sessionId: 'session-multiline-visible',
     });
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-multiline-visible',
     });
     const result = await runLocalUserMessageEvent({
@@ -1033,6 +1041,7 @@ describe('file runtime log store plugin tool event validation', () => {
       sessionId: 'session-health-rejected',
     });
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-health-rejected',
     });
 
@@ -1109,6 +1118,7 @@ describe('file runtime log store plugin tool event validation', () => {
       sessionId: 'session-health-degraded-rejected',
     });
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'session-health-degraded-rejected',
     });
 
@@ -1380,7 +1390,10 @@ async function persistedDisallowedToolRejectionRecord(
       'try unknown',
       identity(`evt_${sessionId}`),
     ),
-    session: createConversationSession({id: sessionId}),
+    session: createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    }),
     logStore,
     pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
     roleModelAdapter: Object.freeze({
@@ -1546,10 +1559,7 @@ function legacySchema1PatchCompletedEvent(sessionId: string): object {
         },
         decisionContext: {
           sessionId,
-          characterSnapshot: {
-            id: 'mira',
-            displayName: 'Mira',
-          },
+          characterSnapshot: testCharacterProfile,
           recentVisibleMessages: [],
           runtimeNotes: [],
         },

@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {mkdtemp, readFile, readdir, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -41,8 +42,14 @@ describe('durable runtime session writer ownership', () => {
     if (rawEventsPath === undefined) {
       throw new Error('Expected durable runtime session paths.');
     }
-    const firstSession = createConversationSession({id: sessionId});
-    const secondSession = createConversationSession({id: sessionId});
+    const firstSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const secondSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     let releaseReply: (() => void) | undefined;
     const replyStarted = new Promise<void>(resolveStarted => {
       releaseReply = resolveStarted;
@@ -107,8 +114,14 @@ describe('durable runtime session writer ownership', () => {
       createdAt: '2026-07-11T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
-    const currentSession = createConversationSession({id: sessionId});
-    const staleSession = createConversationSession({id: sessionId});
+    const currentSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const staleSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(

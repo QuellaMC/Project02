@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -84,10 +85,7 @@ describe('plugin tool description redaction', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-plugin-tool-description-redaction',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: host.pluginToolDefinitions(),
     });

@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {
   createConversationSession,
@@ -34,7 +35,9 @@ import {
 
 describe('plugin-driven Character State tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
@@ -494,7 +497,10 @@ describe('plugin-driven Character State tool loop', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
@@ -584,10 +590,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     const call = Object.freeze({
       eventId: context.eventId,
@@ -657,10 +660,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     const originalCall = Object.freeze({
       eventId: context.eventId,
@@ -682,10 +682,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     const interveningCall = Object.freeze({
       eventId: interveningContext.eventId,
@@ -839,7 +836,9 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('isolates default in-memory Character State by session object', async () => {
-    const firstSession = createConversationSession();
+    const firstSession = createConversationSession({
+      character: testCharacterProfile,
+    });
     const firstLogStore = createRuntimeLogStore();
     const firstAdapter = createSequencedAdapter([
       {
@@ -871,7 +870,9 @@ describe('plugin-driven Character State tool loop', () => {
       roleModelAdapter: firstAdapter,
     });
 
-    const secondSession = createConversationSession();
+    const secondSession = createConversationSession({
+      character: testCharacterProfile,
+    });
     const secondLogStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
     const secondAdapter: RoleModelAdapter = Object.freeze({

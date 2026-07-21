@@ -1,3 +1,4 @@
+import {testCharacterProfile} from './character-fixtures.ts';
 import {readFileSync} from 'node:fs';
 import {expect} from 'vitest';
 import {createRuntimeEventIdentity} from '../../src/core/index.ts';
@@ -1592,10 +1593,7 @@ export function testPluginContext(
     sessionId: 'session-plugin-host',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'hello',
-    character: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    character: testCharacterProfile,
   });
 }
 
@@ -1610,10 +1608,7 @@ export function testPluginAfterTurnCommittedContext(
     sessionId: 'session-plugin-host',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'hello',
-    character: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    character: testCharacterProfile,
     committedAt: '2026-06-15T00:00:00.000Z',
     visibleMessages: [],
   });
