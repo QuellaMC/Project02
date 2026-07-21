@@ -58,35 +58,35 @@ const characterStatePatchInputContract = Object.freeze({
     Object.freeze({
       name: 'mood',
       description:
-        "Mira's internal current mood; assistant-owned, model-only, and not the user's mood.",
+        "The character's internal current mood; assistant-owned, model-only, and not the user's mood.",
       required: false,
       allowedValues: characterMoodValues,
     }),
     Object.freeze({
       name: 'energy',
       description:
-        "Mira's internal current energy; assistant-owned, model-only, and not the user's energy.",
+        "The character's internal current energy; assistant-owned, model-only, and not the user's energy.",
       required: false,
       allowedValues: characterEnergyValues,
     }),
     Object.freeze({
       name: 'attention',
       description:
-        "Mira's internal current attention; assistant-owned and model-only.",
+        "The character's internal current attention; assistant-owned and model-only.",
       required: false,
       allowedValues: characterAttentionValues,
     }),
     Object.freeze({
       name: 'currentActivity',
       description:
-        "Mira's internal current activity; assistant-owned and model-only.",
+        "The character's internal current activity; assistant-owned and model-only.",
       required: false,
       allowedValues: characterCurrentActivityValues,
     }),
     Object.freeze({
       name: 'socialOrientation',
       description:
-        "Mira's internal current social orientation; assistant-owned and model-only.",
+        "The character's internal current social orientation; assistant-owned and model-only.",
       required: false,
       allowedValues: characterSocialOrientationValues,
     }),
@@ -123,7 +123,7 @@ function createCharacterStatePluginFromManifest(
       Object.freeze({
         name: characterStatePatchModelToolName,
         description:
-          "Optionally patch Mira's internal Character State. This assistant-owned model-only state is not the user's mood, energy, attention, activity, or social orientation.",
+          "Optionally patch the character's internal Character State. This assistant-owned model-only state is not the user's mood, energy, attention, activity, or social orientation.",
         requiredForUserTurn: false,
         callLimit: {
           scope: 'user_turn',
@@ -149,7 +149,7 @@ function createCharacterStatePluginFromManifest(
               pluginId: characterStatePluginId,
               id: 'current',
               kind: 'runtime_note',
-              text: `Mira's internal Character State (assistant-owned, model-only; not user state): ${brief.text}`,
+              text: `${context.character.displayName}'s internal Character State (assistant-owned, model-only; not user state): ${brief.text}`,
               budget: {
                 estimatedTokens: 32,
                 priority: 90,

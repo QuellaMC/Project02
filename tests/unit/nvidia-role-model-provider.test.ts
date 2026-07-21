@@ -789,7 +789,7 @@ describe('NVIDIA role-model provider', () => {
     expect(
       tools.find(tool => tool.function.name === 'character_state_patch')
         ?.function.description,
-    ).toContain("Mira's internal Character State");
+    ).toContain("the character's internal Character State");
     expect(
       tools.find(tool => tool.function.name === 'runtime_plugin_list')?.function
         .parameters.additionalProperties,
