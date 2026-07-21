@@ -5,7 +5,6 @@ import {
   CharacterInputError,
   CharacterReplyValidationError,
   createConversationSession,
-  localCharacterProfile,
   runCharacterTurn,
   ConversationRehydrationError,
   type CharacterAgent,
@@ -20,17 +19,17 @@ type DeferredReply = {
 };
 
 describe('conversation core', () => {
-  // Deliberately the only bare createConversationSession() left in tests:
-  // it pins the current default-character behavior until the character
-  // becomes a required input in the seam-flip slice.
-  it('creates a local session for the built-in character with an empty visible transcript', () => {
-    const session = createConversationSession();
+  it('creates a local session for the provided character with an empty visible transcript', () => {
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
 
     expect(session).toEqual({
       id: 'local-session',
-      character: localCharacterProfile,
+      character: testCharacterProfile,
       visibleTranscript: [],
     });
+    expect(session.character).not.toBe(testCharacterProfile);
   });
 
   it('commits one normalized user message and one character reply for a successful turn', async () => {

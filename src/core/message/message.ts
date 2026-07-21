@@ -23,10 +23,3 @@ export function freezeCharacterProfile(
     displayName: character.displayName,
   } satisfies CharacterProfile);
 }
-
-// Documented domain default (migration plan keep-decision): the local
-// deployment persona referenced by durable-evidence validation.
-export const localCharacterProfile: CharacterProfile = freezeCharacterProfile({
-  id: 'mira',
-  displayName: 'Mira',
-});

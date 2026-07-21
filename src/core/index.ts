@@ -5,7 +5,6 @@
  */
 export {
   freezeCharacterProfile,
-  localCharacterProfile,
   visibleMessageRoleValues,
   type CharacterProfile,
   type VisibleMessage,

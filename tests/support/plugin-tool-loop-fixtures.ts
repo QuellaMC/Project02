@@ -194,7 +194,9 @@ export function createSequencedAdapter(
 }
 
 export function createConversationAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
+  logStore: RuntimeLogStore = createRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
+  }),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -266,7 +268,9 @@ export function createCharacterAppendFailingLogStore(
 }
 
 export function createRuntimeTurnCompletedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
+  logStore: RuntimeLogStore = createRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
+  }),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -280,8 +284,8 @@ export function createRuntimeTurnCompletedAppendFailingLogStore(
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -320,8 +324,8 @@ export function createRuntimeTurnCompletedAppendThenThrowLogStore(
 
       return stored;
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -359,8 +363,8 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
     appendRawEvent(record) {
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -381,7 +385,9 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
 }
 
 export function createAfterTurnCommittedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
+  logStore: RuntimeLogStore = createRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
+  }),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -395,8 +401,8 @@ export function createAfterTurnCommittedAppendFailingLogStore(
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -467,8 +473,8 @@ export function createToolCallFinishedAppendFailingLogStore(
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);

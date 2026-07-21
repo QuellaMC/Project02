@@ -1,4 +1,4 @@
-import type {ConversationSession} from '../../core/index.ts';
+import type {CharacterProfile, ConversationSession} from '../../core/index.ts';
 import type {RuntimeLogStore} from '../evidence/records.ts';
 import {
   createFileRuntimeLogStore,
@@ -19,6 +19,7 @@ export type DurableSessionSelection = {
   readonly storeRoot?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
+  readonly character: CharacterProfile;
 };
 
 export type DurableChatRuntime = {
@@ -42,6 +43,7 @@ export async function createDurableChatRuntime(
         const logStore = createFileRuntimeLogStore({
           ...storageOptions,
           sessionId: selectedSessionId,
+          boundCharacter: args.character,
         });
 
         logStore.readSessionEvidence();
@@ -68,6 +70,7 @@ export async function createDurableChatRuntime(
       ...storageOptions,
       sessionId,
       writerLockOwnerToken: ownerToken,
+      boundCharacter: args.character,
     });
     logStore.recoverAbandonedWriterEvidence?.();
 
@@ -75,10 +78,11 @@ export async function createDurableChatRuntime(
       session: await sessionStore.rehydrateConversationSession(sessionId, {
         conversationLogReader: {
           readConversationMessages() {
-            return readDurableConversationEvidence(logStore).messages;
+            return readDurableConversationEvidence(logStore, args.character)
+              .messages;
           },
           readConversationEvidence() {
-            return readDurableConversationEvidence(logStore);
+            return readDurableConversationEvidence(logStore, args.character);
           },
         },
       }),
@@ -93,11 +97,15 @@ export async function createDurableChatRuntime(
 
 export function readDurableConversationEvidence(
   logStore: RuntimeLogStore,
+  boundCharacter: CharacterProfile,
 ): LocalRuntimeSessionConversationEvidence {
   const evidence = logStore.readSessionEvidence().stored;
 
   return Object.freeze({
-    character: durableRuntimeSessionCharacterProfile(evidence),
+    // Existing sessions keep their evidence-derived profile (historical
+    // display name); the bound character applies to evidence-empty
+    // sessions only.
+    character: durableRuntimeSessionCharacterProfile(evidence, boundCharacter),
     messages: evidence.conversationMessages,
   } satisfies LocalRuntimeSessionConversationEvidence);
 }

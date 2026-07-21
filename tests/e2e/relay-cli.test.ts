@@ -28,11 +28,22 @@ import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('relay CLI compatibility wrapper', () => {
+  it('rejects a direct invocation without a session or character profile', async () => {
+    await expect(
+      runRelayCli(['hello'], {
+        pluginHost: createRuntimePluginHost(),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+      }),
+    ).rejects.toThrow('Relay requires a session or a character profile.');
+  });
+
   it('prints exactly one non-interactive reply line', async () => {
     let stdout = '';
     let stderr = '';
 
     const exitCode = await runRelayCli(['hello'], {
+      character: testCharacterProfile,
       pluginHost: createRuntimePluginHost(),
       stdout: collect(chunk => {
         stdout += chunk;
@@ -59,6 +70,7 @@ describe('relay CLI compatibility wrapper', () => {
     } satisfies RuntimePluginHost;
 
     const exitCode = await runRelayCli(['hello'], {
+      character: testCharacterProfile,
       pluginHost,
       stdout: collect(() => {}),
       stderr: collect(() => {}),
@@ -354,6 +366,7 @@ describe('relay CLI compatibility wrapper', () => {
     let stdout = '';
 
     const exitCode = await runRelayCli(['--', 'hello'], {
+      character: testCharacterProfile,
       pluginHost: createRuntimePluginHost(),
       stdout: collect(chunk => {
         stdout += chunk;
@@ -373,6 +386,7 @@ describe('relay CLI compatibility wrapper', () => {
       const observedMessages: string[] = [];
 
       const exitCode = await runRelayCli([message], {
+        character: testCharacterProfile,
         pluginHost: createRuntimePluginHost(),
         stdout: collect(chunk => {
           stdout += chunk;
@@ -395,6 +409,7 @@ describe('relay CLI compatibility wrapper', () => {
     let stderr = '';
 
     const exitCode = await runRelayCli([], {
+      character: testCharacterProfile,
       pluginHost: createRuntimePluginHost(),
       stdout: collect(chunk => {
         stdout += chunk;
@@ -413,6 +428,7 @@ describe('relay CLI compatibility wrapper', () => {
     let stderr = '';
 
     const exitCode = await runRelayCli(['hello\nthere'], {
+      character: testCharacterProfile,
       pluginHost: createRuntimePluginHost(),
       stdout: collect(() => {}),
       stderr: collect(chunk => {

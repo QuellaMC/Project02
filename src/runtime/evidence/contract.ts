@@ -69,6 +69,7 @@ export type RuntimeEvidenceIncrementalState = {
   readonly messageIdsByIdentity: Map<string, string[]>;
   roleModelCharacter: CharacterProfile | undefined;
   conversationCharacter: CharacterProfile | undefined;
+  readonly boundCharacter: CharacterProfile | undefined;
   openRawIdentity: string | undefined;
   openTurnConversationStart: number;
 };

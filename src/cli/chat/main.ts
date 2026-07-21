@@ -3,6 +3,7 @@ import {createInterface} from 'node:readline';
 
 import {
   type CharacterAgent,
+  type CharacterProfile,
   type ConversationSession,
   createConversationSession,
   createRuntimeEventIdentity,
@@ -52,6 +53,7 @@ import {
 } from '../../plugins/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
+  prepareProject02CharacterActivation,
   resolveRuntimeCliStartup,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginFactoryDefinition,
@@ -96,6 +98,7 @@ type ChatCliOptions = {
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
+  readonly characterProfile?: CharacterProfile;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
@@ -167,6 +170,18 @@ class ChatCliStartupError extends Error {
     super(message);
     this.name = 'ChatCliStartupError';
   }
+}
+
+function requiredChatCharacterProfile(
+  characterProfile: CharacterProfile | undefined,
+): CharacterProfile {
+  if (characterProfile === undefined) {
+    throw new ChatCliStartupError(
+      'Chat startup requires a session or a character profile.',
+    );
+  }
+
+  return characterProfile;
 }
 
 function createChatToolConfirmationBridge(
@@ -343,6 +358,20 @@ export async function runChatCliFromArgs(
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
+    const characterActivation = prepareProject02CharacterActivation({
+      storeRoot: runtimeArgs.storeRoot,
+    });
+
+    if (characterActivation.status === 'failed') {
+      throw new ChatCliUsageError(
+        `Character activation failed: ${
+          characterActivation.messages[0] ?? 'no character resolved.'
+        }`,
+      );
+    }
+    for (const warning of characterActivation.warnings) {
+      options.stderr.write(`Warning: ${warning}\n`);
+    }
     const toolConfirmationBridge =
       options.pluginHost === undefined
         ? createChatToolConfirmationBridge(options.toolConfirmationHandler)
@@ -370,6 +399,7 @@ export async function runChatCliFromArgs(
       parsedTraceMode: parsedArgs.traceMode,
       configuredHost,
       toolConfirmationBridge,
+      characterProfile: characterActivation.profile,
     });
   } catch (error: unknown) {
     if (isFormattedTerminalError(error)) {
@@ -388,13 +418,17 @@ async function runChatCliAfterConfiguredHost(options: {
   readonly parsedTraceMode: boolean;
   readonly configuredHost: ConfiguredChatPluginHost | undefined;
   readonly toolConfirmationBridge: ChatToolConfirmationBridge | undefined;
+  readonly characterProfile: CharacterProfile;
 }): Promise<number> {
   let durableRuntime: DurableChatRuntime;
   let pluginHost: RuntimePluginHost;
   let roleModelAdapter: RoleModelAdapter | undefined;
 
   try {
-    durableRuntime = await createDurableChatRuntime(options.runtimeArgs);
+    durableRuntime = await createDurableChatRuntime({
+      ...options.runtimeArgs,
+      character: options.characterProfile,
+    });
     const startupPluginHost =
       options.options.pluginHost ?? options.configuredHost?.host;
 
@@ -418,6 +452,7 @@ async function runChatCliAfterConfiguredHost(options: {
       await cleanupConfiguredChatPluginHostAfterStartupFailure({
         configuredHost: options.configuredHost,
         args: options.runtimeArgs,
+        character: options.characterProfile,
       });
     }
 
@@ -481,6 +516,7 @@ async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
 async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
   readonly args: ChatCliArgs;
+  readonly character: CharacterProfile;
 }): Promise<void> {
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
@@ -488,7 +524,7 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
       options.args.newSessionId ?? options.args.sessionId,
     ),
     currentUserMessage: startupFailurePluginCleanupMessage,
-    character: createConversationSession().character,
+    character: options.character,
     hookOptions: {allowFileStoreWrites: false},
   });
   await runBestEffortPluginShutdown({
@@ -497,7 +533,7 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
       options.args.newSessionId ?? options.args.sessionId,
     ),
     currentUserMessage: configuredPluginShutdownMessage,
-    character: createConversationSession().character,
+    character: options.character,
   });
 }
 
@@ -577,9 +613,17 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
 async function runChatCliWithActiveWriter(
   options: RunChatCliOptions,
 ): Promise<number> {
-  const session = options.session ?? createConversationSession();
+  const session =
+    options.session ??
+    createConversationSession({
+      character: requiredChatCharacterProfile(options.characterProfile),
+    });
   const logStore =
-    options.logStore ?? createRuntimeLogStore({sessionId: session.id});
+    options.logStore ??
+    createRuntimeLogStore({
+      sessionId: session.id,
+      boundCharacter: session.character,
+    });
   const pluginHost = options.pluginHost;
   const lines = createInterface({
     input: options.stdin,

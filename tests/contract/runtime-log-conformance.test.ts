@@ -335,7 +335,10 @@ async function createRuntimeLogStoreFixture(
 ): Promise<RuntimeLogStoreFixture> {
   if (backend === 'memory') {
     return {
-      logStore: createRuntimeLogStore({sessionId}),
+      logStore: createRuntimeLogStore({
+        sessionId,
+        boundCharacter: testCharacterProfile,
+      }),
       release: () => Promise.resolve(),
     };
   }
@@ -350,6 +353,7 @@ async function createRuntimeLogStoreFixture(
     storeRoot,
     sessionId,
     writerLockOwnerToken: ownerToken,
+    boundCharacter: testCharacterProfile,
   });
   const writerLease = await acquireLocalRuntimeSessionWriterLease({
     storeRoot,

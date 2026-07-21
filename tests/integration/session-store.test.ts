@@ -197,9 +197,31 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('fails rehydration when the reader lacks readConversationEvidence', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      conversationLogReader: {
+        readConversationMessages: () => [],
+      },
+      now: fixedClock(['2026-06-04T00:02:00.000Z']),
+    });
+
+    await store.createSession({sessionId: 'evidence-required'});
+
+    await expect(
+      store.rehydrateConversationSession('evidence-required'),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeSessionStoreError',
+      code: 'conversation_evidence_unavailable',
+    });
+  });
+
   it('rehydrates persisted visible conversation messages in order through the CT-02 reader seam', async () => {
     const storeRoot = await createTempStoreRoot();
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     const originalSession = createConversationSession({
       character: testCharacterProfile,
       id: 'mira-local',
@@ -780,6 +802,12 @@ function createConversationLogReader(
   return {
     readConversationMessages(sessionId) {
       return recordsBySessionId[sessionId] ?? [];
+    },
+    readConversationEvidence(sessionId) {
+      return {
+        character: testCharacterProfile,
+        messages: recordsBySessionId[sessionId] ?? [],
+      };
     },
   };
 }

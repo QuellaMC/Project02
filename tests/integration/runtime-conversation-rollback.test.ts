@@ -27,7 +27,11 @@ describe('runtime conversation rollback failures', () => {
       sessionId,
       createdAt: failedIdentity.createdAt,
     });
-    const underlying = createFileRuntimeLogStore({storeRoot, sessionId});
+    const underlying = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const appendFailure = new Error('user row persisted before append failed');
     const cleanupFailure = new Error('durable user-row rollback failed');
     let appendCount = 0;
@@ -87,7 +91,11 @@ describe('runtime conversation rollback failures', () => {
     expect((thrown as AggregateError).errors).toEqual([cleanupFailure]);
     expect(failedSession.visibleTranscript).toEqual([]);
 
-    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const recoveredSession = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -134,7 +142,11 @@ describe('runtime conversation rollback failures', () => {
       sessionId,
       createdAt: failedIdentity.createdAt,
     });
-    const underlying = createFileRuntimeLogStore({storeRoot, sessionId});
+    const underlying = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const appendFailure = new Error(
       'character row persisted before append failed',
     );
@@ -196,7 +208,11 @@ describe('runtime conversation rollback failures', () => {
     expect((thrown as AggregateError).errors).toEqual([cleanupFailure]);
     expect(failedSession.visibleTranscript).toEqual([]);
 
-    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const recoveredSession = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -238,7 +254,11 @@ describe('runtime conversation rollback failures', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const underlying = createFileRuntimeLogStore({storeRoot, sessionId});
+    const underlying = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     let appendCount = 0;
     const logStore = Object.freeze({
       ...(underlying.localRuntimeSessionPaths === undefined
@@ -289,7 +309,11 @@ describe('runtime conversation rollback failures', () => {
       }),
     ).rejects.toThrow('user append persisted then failed');
 
-    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     expect(reopened.conversationMessages()).toEqual([]);
     expect(reopened.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
@@ -301,7 +325,9 @@ describe('runtime conversation rollback failures', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const underlying = createRuntimeLogStore();
+    const underlying = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     let appendCount = 0;
     const logStore = Object.freeze({
       appendTrace: entry => underlying.appendTrace(entry),
@@ -346,7 +372,9 @@ describe('runtime conversation rollback failures', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const underlying = createRuntimeLogStore();
+    const underlying = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     let appendCount = 0;
     const logStore = Object.freeze({
       appendTrace(entry) {

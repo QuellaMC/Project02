@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -21,7 +22,7 @@ const identity = {
 
 describe('runtime log store', () => {
   it('appends trace entries in order and returns immutable snapshots', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const received: RuntimeTraceEntryInput = {
       ...identity,
       step: 'runtime_event_received',
@@ -60,7 +61,7 @@ describe('runtime log store', () => {
   });
 
   it('copies raw event records with source event and trace identity', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const received: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_event_received',
@@ -151,7 +152,7 @@ describe('runtime log store', () => {
   });
 
   it('deeply snapshots tool input and result evidence before storing it', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const nestedInput = {query: 'before'};
     const nestedOutput = {answer: 'before'};
     const started: RawEventLogRecordInput = {
@@ -207,7 +208,7 @@ describe('runtime log store', () => {
   });
 
   it('appends visible conversation records only through explicit committed-message inputs', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const userMessage: ConversationLogRecordInput = {
       ...identity,
       id: 'local-session:message-1',
@@ -252,7 +253,7 @@ describe('runtime log store', () => {
   });
 
   it('records failed raw rejections without adding visible conversation records', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const rejection: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_turn_rejected',
@@ -271,6 +272,92 @@ describe('runtime log store', () => {
 
     expect(store.rawEvents()).toEqual([received, rejection]);
     expect(store.conversationMessages()).toEqual([]);
+  });
+
+  it('rejects a conversation append when no character is expected, recorded, or bound', () => {
+    const store = createRuntimeLogStore();
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow(
+      'Conversation append requires a session character: none was expected, recorded, or store-bound.',
+    );
+  });
+
+  it('accepts an unanchored custom-character transcript only while the store is unbound', () => {
+    const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
+    const appendNovaTurn = (
+      store: ReturnType<typeof createRuntimeLogStore>,
+    ) => {
+      store.appendTrace({...identity, step: 'runtime_event_received'});
+      store.appendRawEvent({
+        ...identity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
+      });
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        },
+        novaProfile,
+      );
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-2',
+          role: 'character',
+          speakerId: 'nova',
+          speakerName: 'Nova',
+          text: 'hello back',
+          committedAt: '2026-06-04T00:00:02.000Z',
+        },
+        novaProfile,
+      );
+
+      return () =>
+        store.appendRawEvent({
+          ...identity,
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE',
+          status: 'completed',
+          visibleMessageIds: [
+            'local-session:message-1',
+            'local-session:message-2',
+          ],
+        });
+    };
+
+    const unboundStore = createRuntimeLogStore();
+    appendNovaTurn(unboundStore)();
+    expect(unboundStore.conversationMessages()).toHaveLength(2);
+
+    const boundStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+    expect(() => appendNovaTurn(boundStore)()).toThrow(
+      'A custom durable character speaker requires matching role-model character evidence.',
+    );
   });
 });
 

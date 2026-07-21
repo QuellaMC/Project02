@@ -865,7 +865,10 @@ describe('file runtime log store plugin tool event validation', () => {
           const evidence = durableStore.readSessionEvidence().stored;
 
           return {
-            character: durableRuntimeSessionCharacterProfile(evidence),
+            character: durableRuntimeSessionCharacterProfile(
+              evidence,
+              testCharacterProfile,
+            ),
             messages: evidence.conversationMessages,
           };
         },

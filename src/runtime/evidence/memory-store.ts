@@ -1,3 +1,4 @@
+import type {CharacterProfile} from '../../core/index.ts';
 import type {RuntimeLogStore} from './records.ts';
 import type {MutableDurableRuntimeSessionEvidence} from './contract.ts';
 import {createRuntimeSessionEvidenceSnapshot} from './recovery.ts';
@@ -10,7 +11,10 @@ import {createRuntimeEvidenceTransitionMachine} from './transition.ts';
  * shared derivation (one snapshot implementation, arch rule 7).
  */
 export function createRuntimeLogStore(
-  options: {readonly sessionId?: string} = {},
+  options: {
+    readonly sessionId?: string;
+    readonly boundCharacter?: CharacterProfile;
+  } = {},
 ): RuntimeLogStore {
   const evidence: MutableDurableRuntimeSessionEvidence = {
     traceEntries: [],
@@ -20,6 +24,9 @@ export function createRuntimeLogStore(
   const transitionMachine = createRuntimeEvidenceTransitionMachine({
     evidence,
     ...(options.sessionId === undefined ? {} : {sessionId: options.sessionId}),
+    ...(options.boundCharacter === undefined
+      ? {}
+      : {boundCharacter: options.boundCharacter}),
   });
 
   return Object.freeze({

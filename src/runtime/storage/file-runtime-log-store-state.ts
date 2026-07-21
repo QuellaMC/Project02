@@ -1,3 +1,4 @@
+import type {CharacterProfile} from '../../core/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -36,6 +37,7 @@ import {recoverAbandonedRuntimeWriterEvidence} from '../evidence/recovery.ts';
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
     readonly writerLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly boundCharacter?: CharacterProfile;
     readonly onEvidenceValidation?: (
       mode: 'cold_snapshot' | 'incremental_append',
     ) => void;
@@ -132,10 +134,16 @@ export class FileRuntimeLogStoreState {
         paths: this.paths,
         evidence: reconcileTerminalRawTraceEvidence(evidence),
         mode: 'public',
+        ...(this.options.boundCharacter === undefined
+          ? {}
+          : {boundCharacter: this.options.boundCharacter}),
       });
       this.transitionMachine = createRuntimeEvidenceTransitionMachine({
         evidence,
         sessionId: this.paths.sessionId,
+        ...(this.options.boundCharacter === undefined
+          ? {}
+          : {boundCharacter: this.options.boundCharacter}),
       });
     }
 

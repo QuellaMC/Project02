@@ -53,8 +53,12 @@ export type RuntimeEvidenceTransitionMachine = {
 export function createRuntimeEvidenceTransitionMachine(options: {
   readonly evidence: MutableDurableRuntimeSessionEvidence;
   readonly sessionId?: string;
+  readonly boundCharacter?: CharacterProfile;
 }): RuntimeEvidenceTransitionMachine {
-  const state = createRuntimeEvidenceIncrementalState(options.evidence);
+  const state = createRuntimeEvidenceIncrementalState(
+    options.evidence,
+    options.boundCharacter,
+  );
 
   return Object.freeze({
     state,

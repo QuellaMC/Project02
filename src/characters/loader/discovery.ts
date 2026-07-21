@@ -97,7 +97,13 @@ export function discoverCharacterPackages(options: {
     try {
       entries = readdirSync(source.root, {withFileTypes: true});
     } catch (error: unknown) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
+      // A missing root or a root that is not a directory both mean "no
+      // packages here"; a corrupt store surfaces through the storage
+      // layer's own diagnostics instead.
+      if (
+        isNodeErrorWithCode(error, 'ENOENT') ||
+        isNodeErrorWithCode(error, 'ENOTDIR')
+      ) {
         continue;
       }
 

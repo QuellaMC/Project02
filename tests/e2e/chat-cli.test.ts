@@ -44,6 +44,7 @@ describe('chat CLI folded top-level model text', () => {
   it('hides top-level model text by default', async () => {
     let stdout = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['hello\n/exit\n']),
       stdout: collect(chunk => {
@@ -56,12 +57,26 @@ describe('chat CLI folded top-level model text', () => {
     expect(exitCode).toBe(0);
     expect(stdout).not.toContain('folded model note');
   });
+
+  it('rejects a direct invocation without a session or character profile', async () => {
+    await expect(
+      runChatCli({
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+      }),
+    ).rejects.toThrow(
+      'Chat startup requires a session or a character profile.',
+    );
+  });
 });
 
 describe('chat CLI trace summary', () => {
   it('keeps provider and terminal tool evidence when terminal persistence fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['hello\n']),
       stdout: collect(() => {}),
@@ -117,6 +132,7 @@ describe('chat CLI trace summary', () => {
     let adapterRound = 0;
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -175,6 +191,7 @@ describe('chat CLI trace summary', () => {
   it('recovers requested calls from interim evidence when tool-start tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -217,6 +234,7 @@ describe('chat CLI trace summary', () => {
   it('keeps tool-only requested evidence when tool-start tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -253,6 +271,7 @@ describe('chat CLI trace summary', () => {
   it('keeps host-executed evidence when tool-finish tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -289,6 +308,7 @@ describe('chat CLI trace summary', () => {
   it('keeps interim requested evidence when interim tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -340,6 +360,7 @@ describe('chat CLI trace summary', () => {
     const backingLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot,
         sessionId,
@@ -443,6 +464,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['check plugins\n/exit\n']),
       stdout: collect(() => {}),
@@ -505,6 +527,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try an unavailable tool\n/exit\n']),
       stdout: collect(() => {}),
@@ -584,6 +607,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try invalid plugin arguments\n/exit\n']),
       stdout: collect(() => {}),
@@ -633,6 +657,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try an invalid state patch\n/exit\n']),
       stdout: collect(() => {}),
@@ -1655,6 +1680,7 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       stdin: Readable.from(['/exit\n']),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
@@ -2174,6 +2200,7 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       stdin: Readable.from([]),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
@@ -2260,6 +2287,7 @@ describe('chat CLI rejected-turn recovery', () => {
     let stderr = '';
     let invocations = 0;
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['first\nsecond\n/exit\n']),
       stdout: collect(chunk => {
@@ -2655,8 +2683,8 @@ function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -2704,8 +2732,8 @@ function createToolTraceFailingLogStore(
     appendRawEvent(record) {
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);

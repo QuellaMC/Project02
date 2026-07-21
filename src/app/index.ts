@@ -19,3 +19,8 @@ export {
   type RuntimePluginFactoryDefinition,
 } from './activation.ts';
 export {resolveRuntimeCliStartup} from './startup.ts';
+export {
+  defaultProject02CharacterId,
+  prepareProject02CharacterActivation,
+  type Project02CharacterActivation,
+} from './character.ts';

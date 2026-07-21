@@ -76,9 +76,12 @@ export default tseslint.config(
   {
     files: ['src/cli/chat/main.ts'],
     rules: {
+      // Re-pinned +33 for character activation wiring: startup character
+      // resolution, profile threading into the durable runtime and cleanup
+      // contexts, and the required-profile guard.
       'max-lines': [
         'error',
-        {max: 1079, skipBlankLines: true, skipComments: true},
+        {max: 1112, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -144,19 +147,24 @@ export default tseslint.config(
     files: ['src/runtime/evidence/validation.ts'],
     rules: {
       // Re-pinned +1 for the shared localUserSpeaker import (mechanical
-      // growth; replaces inline 'local-user'/'You' literals).
+      // growth; replaces inline 'local-user'/'You' literals), then +19 for
+      // bound-character injection: the expected-character chain guard, the
+      // unanchored-guard parameterization, and the placeholder profile for
+      // character-less restored transcripts.
       'max-lines': [
         'error',
-        {max: 2120, skipBlankLines: true, skipComments: true},
+        {max: 2139, skipBlankLines: true, skipComments: true},
       ],
     },
   },
   {
     files: ['src/runtime/storage/session-store.ts'],
     rules: {
+      // Re-pinned +3 for the evidence-required rehydration error (the
+      // session character is evidence-derived and has no default).
       'max-lines': [
         'error',
-        {max: 1004, skipBlankLines: true, skipComments: true},
+        {max: 1007, skipBlankLines: true, skipComments: true},
       ],
     },
   },

@@ -1,6 +1,5 @@
 import {
   freezeCharacterProfile,
-  localCharacterProfile,
   type CharacterProfile,
   type VisibleMessage,
 } from '../message/message.ts';
@@ -41,7 +40,7 @@ export type CharacterTurnResult = {
 
 export type ConversationSessionOptions = {
   readonly id?: string;
-  readonly character?: CharacterProfile;
+  readonly character: CharacterProfile;
   readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
@@ -91,12 +90,10 @@ export class ConversationRehydrationError extends Error {
 }
 
 export function createConversationSession(
-  options: ConversationSessionOptions = {},
+  options: ConversationSessionOptions,
 ): ConversationSession {
   const sessionId = options.id ?? defaultSessionId;
-  const character = freezeCharacterProfile(
-    options.character ?? localCharacterProfile,
-  );
+  const character = freezeCharacterProfile(options.character);
   const visibleTranscript = [
     ...validateRestoredVisibleTranscript({
       id: sessionId,
@@ -122,12 +119,10 @@ export function createConversationSession(
 }
 
 export function validateRestoredVisibleTranscript(
-  options: RestoredVisibleTranscriptValidationOptions = {},
+  options: RestoredVisibleTranscriptValidationOptions,
 ): readonly VisibleMessage[] {
   const sessionId = options.id ?? defaultSessionId;
-  const character = freezeCharacterProfile(
-    options.character ?? localCharacterProfile,
-  );
+  const character = freezeCharacterProfile(options.character);
 
   return Object.freeze(
     createInitialVisibleTranscript({

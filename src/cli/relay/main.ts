@@ -1,5 +1,6 @@
 import {
   type CharacterAgent,
+  type CharacterProfile,
   type ConversationSession,
   createConversationSession,
   createUserMessageRuntimeEvent,
@@ -11,6 +12,7 @@ import {createRuntimeLogStore} from '../../runtime/evidence/index.ts';
 import type {RuntimePluginHost} from '../../plugins/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
+  prepareProject02CharacterActivation,
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
@@ -30,6 +32,7 @@ type RelayCliOptions = {
   readonly pluginHost: RuntimePluginHost;
   readonly agent?: CharacterAgent;
   readonly session?: ConversationSession;
+  readonly character?: CharacterProfile;
 };
 
 type ConfiguredRelayCliOptions = {
@@ -51,13 +54,20 @@ export async function runRelayCli(
 ): Promise<number> {
   try {
     const message = readMessageArg(args);
-    const session = options.session ?? createConversationSession();
+    const session =
+      options.session ??
+      createConversationSession({
+        character: requiredRelayCharacter(options.character),
+      });
 
     try {
       const result = await runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent(message),
         session,
-        logStore: createRuntimeLogStore({sessionId: session.id}),
+        logStore: createRuntimeLogStore({
+          sessionId: session.id,
+          boundCharacter: session.character,
+        }),
         pluginHost: options.pluginHost,
         rawInput: message,
         ...(options.agent === undefined ? {} : {agent: options.agent}),
@@ -153,7 +163,25 @@ export async function runConfiguredRelayCli(
     return 1;
   }
 
-  const session = createConversationSession();
+  const characterActivation = prepareProject02CharacterActivation({
+    storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
+  });
+
+  if (characterActivation.status === 'failed') {
+    options.stderr.write(
+      `Error: ${
+        characterActivation.messages[0] ?? 'Character activation failed.'
+      }\n`,
+    );
+    return 1;
+  }
+  for (const warning of characterActivation.warnings) {
+    options.stderr.write(`Warning: ${warning}\n`);
+  }
+
+  const session = createConversationSession({
+    character: characterActivation.profile,
+  });
 
   try {
     return await runRelayCli(args, {
@@ -171,6 +199,16 @@ export async function runConfiguredRelayCli(
       character: session.character,
     });
   }
+}
+
+function requiredRelayCharacter(
+  character: CharacterProfile | undefined,
+): CharacterProfile {
+  if (character === undefined) {
+    throw new Error('Relay requires a session or a character profile.');
+  }
+
+  return character;
 }
 
 function readMessageArg(args: readonly string[]): string {

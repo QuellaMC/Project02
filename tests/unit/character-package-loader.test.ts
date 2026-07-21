@@ -86,6 +86,20 @@ describe('character package discovery', () => {
     );
   });
 
+  it('skips a root nested under a plain file without diagnostics', () => {
+    const root = createTestTempRoot();
+    const filePath = join(root, 'not-a-dir');
+
+    writeFileSync(filePath, 'plain file\n', 'utf8');
+
+    const discovery = discoverCharacterPackages({
+      sources: [{root: join(filePath, 'characters'), provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([]);
+  });
+
   it('skips a missing operator root without diagnostics', () => {
     const storeRoot = createTestTempRoot();
 

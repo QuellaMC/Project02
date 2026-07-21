@@ -46,6 +46,7 @@ describe('inspect CLI plugin evidence', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId: 'session-inspect',
     });

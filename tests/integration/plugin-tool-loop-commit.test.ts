@@ -298,6 +298,7 @@ async function createLiveReloadLoopFixture(
     character: testCharacterProfile,
   });
   const logStore = createFileRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
     storeRoot: fixture.storeRoot,
     sessionId: fixture.sessionId,
   });
@@ -385,7 +386,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
 
     await expect(
       Reflect.apply(runLocalUserMessageEventWithoutHost, undefined, [
@@ -417,7 +420,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     const adapter = createSequencedAdapter([
       {
         text: 'folded model note',
@@ -462,7 +467,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
@@ -505,7 +512,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const replyText = 'Authorization: Bearer committed-reply-secret';
     const adapter = createSequencedAdapter([
       {
@@ -587,6 +598,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
     const logStore = createConversationAppendFailingLogStore(
       createFileRuntimeLogStore({
+        boundCharacter: testCharacterProfile,
         storeRoot,
         sessionId,
       }),
@@ -654,6 +666,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const fileLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId,
     });
@@ -685,6 +698,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).rejects.toThrow('character append failed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId,
     });
@@ -701,7 +715,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     let visibleMessagesVisibleToHook = false;
     let terminalEventVisibleToHook = false;
     const pluginHost = createAfterTurnCommittedProbeHost(() => {
@@ -745,7 +761,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     const pluginHost = createAfterTurnCommittedProbeHost(() => {}, {
       status: 'failed',
       summary: 'After commit fixture failed.',
@@ -915,7 +933,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const fileLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const fileLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const logStore =
       createOneShotTerminalTraceAppendFailingLogStore(fileLogStore);
     const result = await runLocalUserMessageEvent({
@@ -938,7 +960,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
         },
       ]),
     });
-    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
 
     expect(result).toMatchObject({
       status: 'completed',
@@ -982,6 +1008,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
     const logStore = createRuntimeTurnCompletedAppendFailingLogStore(
       createFileRuntimeLogStore({
+        boundCharacter: testCharacterProfile,
         storeRoot,
         sessionId,
       }),
@@ -1050,7 +1077,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const fileLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const fileLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const logStore =
       createRuntimeTurnCompletedAppendThenThrowLogStore(fileLogStore);
     const pluginHost = createRuntimePluginHost({
@@ -1140,6 +1171,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
 
     const fileLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId,
     });
@@ -1174,6 +1206,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).rejects.toThrow('terminal raw event append failed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId,
     });
@@ -1254,6 +1287,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
     const logStore = createToolCallFinishedAppendFailingLogStore(
       createFileRuntimeLogStore({
+        boundCharacter: testCharacterProfile,
         storeRoot,
         sessionId,
       }),
@@ -1330,7 +1364,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const pluginHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
@@ -1472,6 +1510,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
     });
@@ -1544,6 +1583,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
     });
@@ -1745,6 +1785,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const fileLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
     });
@@ -1784,6 +1825,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).toBe(false);
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
     });
@@ -2327,6 +2369,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
     });
@@ -2464,7 +2507,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: fixture.sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     const pluginHost = createConfigEffectTestHost({fixture, session});
 
     await expect(
@@ -2542,7 +2587,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const baseHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
@@ -2629,7 +2678,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).not.toContain('preparedConfigEffect');
     expect(afterInterruptedCommit.fingerprint).toBe(before.fingerprint);
 
-    const reopenedLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+    });
     const restoredSession = createConversationSession({
       character: testCharacterProfile,
       id: sessionId,
@@ -2739,7 +2792,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createToolCallFinishedAppendFailingLogStore(
-      createFileRuntimeLogStore({storeRoot, sessionId}),
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        boundCharacter: testCharacterProfile,
+      }),
     );
     const pluginHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
@@ -2857,7 +2914,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createTurnCompletedAppendFailingLogStore(
-      createFileRuntimeLogStore({storeRoot, sessionId}),
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        boundCharacter: testCharacterProfile,
+      }),
     );
     const pluginHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
@@ -2947,6 +3008,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId,
     });
@@ -3022,6 +3084,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       character: testCharacterProfile,
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
       storeRoot,
       sessionId,
     });
