@@ -34,6 +34,7 @@ export {
   roleModelDuplicateToolCallRejectionReason,
   type RoleModelInputEnvelope,
   roleModelInvalidVisibleReplyRejectionReason,
+  type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
   type RoleModelMalformedAdapterRawOutputDetails,
   roleModelMalformedAdapterRawOutputDetails,

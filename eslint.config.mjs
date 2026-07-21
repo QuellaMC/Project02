@@ -80,10 +80,11 @@ export default tseslint.config(
       // resolution, profile threading, required-profile guard), +2 for
       // selecting the configured character id from resolved config, then
       // +13 for the configurable user display name (per-session prompt
-      // label, threading into the durable runtime and fallback session).
+      // label, threading into the durable runtime and fallback session),
+      // then +31 for persona/characterRef threading into the turn calls.
       'max-lines': [
         'error',
-        {max: 1127, skipBlankLines: true, skipComments: true},
+        {max: 1158, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -99,9 +100,11 @@ export default tseslint.config(
   {
     files: ['src/role-model/loop/loop.ts'],
     rules: {
+      // Re-pinned +7 for persona render options and characterRef stamping
+      // at ioSnapshot creation.
       'max-lines': [
         'error',
-        {max: 1485, skipBlankLines: true, skipComments: true},
+        {max: 1492, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -139,9 +142,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/storage/raw-event-codec.ts'],
     rules: {
+      // Re-pinned +23 for the additive characterRef decode on the
+      // role-model IO snapshot.
       'max-lines': [
         'error',
-        {max: 1672, skipBlankLines: true, skipComments: true},
+        {max: 1695, skipBlankLines: true, skipComments: true},
       ],
     },
   },

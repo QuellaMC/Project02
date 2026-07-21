@@ -10,6 +10,7 @@ import {
 import {runLocalUserMessageEvent} from '../../runtime/index.ts';
 import {createRuntimeLogStore} from '../../runtime/evidence/index.ts';
 import type {RuntimePluginHost} from '../../plugins/index.ts';
+import type {RoleModelCharacterRef} from '../../role-model/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
   prepareProject02CharacterActivation,
@@ -33,6 +34,8 @@ type RelayCliOptions = {
   readonly agent?: CharacterAgent;
   readonly session?: ConversationSession;
   readonly character?: CharacterProfile;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
 };
 
 type ConfiguredRelayCliOptions = {
@@ -71,6 +74,12 @@ export async function runRelayCli(
         }),
         pluginHost: options.pluginHost,
         rawInput: message,
+        ...(options.characterPersonaSections === undefined
+          ? {}
+          : {characterPersonaSections: options.characterPersonaSections}),
+        ...(options.characterRef === undefined
+          ? {}
+          : {characterRef: options.characterRef}),
         ...(options.agent === undefined ? {} : {agent: options.agent}),
       });
 
@@ -194,6 +203,8 @@ export async function runConfiguredRelayCli(
       stderr: options.stderr,
       pluginHost: configuredHost.host,
       session,
+      characterPersonaSections: characterActivation.personaSections,
+      characterRef: characterActivation.characterRef,
       ...(options.agent === undefined ? {} : {agent: options.agent}),
     });
   } finally {

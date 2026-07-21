@@ -1,4 +1,7 @@
-import {testCharacterProfile} from '../support/character-fixtures.ts';
+import {
+  testCharacterProfile,
+  writeTestCharacterPackage,
+} from '../support/character-fixtures.ts';
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
@@ -675,6 +678,63 @@ describe('chat CLI trace summary', () => {
       executedToolCalls: ['character_state.patch'],
       terminalToolCalls: ['visible_reply'],
     });
+  });
+});
+
+describe('chat CLI character selection', () => {
+  it('speaks as an operator-installed character selected by config', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-character-swap-');
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {character: 'zeta'},
+    });
+    writeTestCharacterPackage(storeRoot, {
+      id: 'zeta',
+      displayName: 'Zeta',
+      personaSections: ['You are Zeta, a fixture character.'],
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'zeta-session'],
+      {
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Zeta is ready.');
+    expect(stdout).toContain('Zeta:');
+  });
+
+  it('rejects an unknown configured character naming the discovered ids', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-character-missing-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {character: 'ghost'},
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'ghost-session'],
+      {
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Character "ghost" was not found');
+    expect(stderr).toContain('mira');
   });
 });
 

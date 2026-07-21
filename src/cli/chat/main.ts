@@ -63,7 +63,10 @@ import {
   RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
-import type {RoleModelAdapter} from '../../role-model/index.ts';
+import type {
+  RoleModelAdapter,
+  RoleModelCharacterRef,
+} from '../../role-model/index.ts';
 import {
   isLocalRuntimeTerminalError,
   type LocalRuntimeTerminalError,
@@ -99,6 +102,8 @@ type ChatCliOptions = {
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
   readonly characterProfile?: CharacterProfile;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
   readonly userDisplayName?: string;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
@@ -406,6 +411,8 @@ export async function runChatCliFromArgs(
       configuredHost,
       toolConfirmationBridge,
       characterProfile: characterActivation.profile,
+      characterPersonaSections: characterActivation.personaSections,
+      characterRef: characterActivation.characterRef,
       userDisplayName:
         startup.activationPlan.resolvedConfig.project02.userDisplayName,
     });
@@ -427,6 +434,8 @@ async function runChatCliAfterConfiguredHost(options: {
   readonly configuredHost: ConfiguredChatPluginHost | undefined;
   readonly toolConfirmationBridge: ChatToolConfirmationBridge | undefined;
   readonly characterProfile: CharacterProfile;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
   readonly userDisplayName?: string;
 }): Promise<number> {
   let durableRuntime: DurableChatRuntime;
@@ -477,6 +486,12 @@ async function runChatCliAfterConfiguredHost(options: {
       session: durableRuntime.session,
       logStore: durableRuntime.logStore,
       ...(roleModelAdapter === undefined ? {} : {roleModelAdapter}),
+      ...(options.characterPersonaSections === undefined
+        ? {}
+        : {characterPersonaSections: options.characterPersonaSections}),
+      ...(options.characterRef === undefined
+        ? {}
+        : {characterRef: options.characterRef}),
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
@@ -746,6 +761,14 @@ async function handleChatInputLine(options: {
       ...(options.options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.options.roleModelAdapter}),
+      ...(options.options.characterPersonaSections === undefined
+        ? {}
+        : {
+            characterPersonaSections: options.options.characterPersonaSections,
+          }),
+      ...(options.options.characterRef === undefined
+        ? {}
+        : {characterRef: options.options.characterRef}),
       pluginHost: options.pluginHost,
       onProgress(progressEvent) {
         writeRuntimeProgress(
@@ -907,6 +930,8 @@ type HandleUserMessageThroughRuntimeOptions = {
   readonly line: string;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
   readonly pluginHost: RuntimePluginHost;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
@@ -931,6 +956,12 @@ async function handleUserMessageThroughRuntime(
         ...(options.roleModelAdapter === undefined
           ? {}
           : {roleModelAdapter: options.roleModelAdapter}),
+        ...(options.characterPersonaSections === undefined
+          ? {}
+          : {characterPersonaSections: options.characterPersonaSections}),
+        ...(options.characterRef === undefined
+          ? {}
+          : {characterRef: options.characterRef}),
         pluginHost: options.pluginHost,
         ...(options.onProgress === undefined
           ? {}

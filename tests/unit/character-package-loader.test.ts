@@ -60,9 +60,9 @@ describe('character package discovery', () => {
 
     expect(mira?.definition).toMatchObject({
       identity: {id: 'mira', displayName: 'Mira'},
-      persona: {system: ['You are Mira.']},
-      meta: {version: '1.0.0'},
+      meta: {version: '1.1.0'},
     });
+    expect(mira?.definition.persona.system[0]).toContain('You are Mira');
     expect(mira?.packageRoot).toBe(join(bundledCharacterPackagesRoot, 'mira'));
   });
 

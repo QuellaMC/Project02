@@ -53,6 +53,7 @@ import {
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
+  type RoleModelCharacterRef,
   type RoleModelDecisionResult,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
@@ -214,6 +215,9 @@ export function createRoleModelIOSnapshot(
       options.rawOutputText,
       'Role-model adapter raw output',
     ),
+    ...(options.characterRef === undefined
+      ? {}
+      : {characterRef: freezeRoleModelCharacterRef(options.characterRef)}),
     ...(options.providerMetadata === undefined
       ? {}
       : {providerMetadata: freezeProviderMetadata(options.providerMetadata)}),
@@ -238,6 +242,29 @@ export function createParsedRoleModelDecisionSnapshot(
     sessionId: options.sessionId,
     result: freezeRoleModelDecisionResult(options.result),
   } satisfies ParsedRoleModelDecisionSnapshot);
+}
+
+function freezeRoleModelCharacterRef(
+  characterRef: RoleModelCharacterRef,
+): RoleModelCharacterRef {
+  return Object.freeze({
+    id: requiredCharacterRefText(characterRef.id, 'id'),
+    version: requiredCharacterRefText(characterRef.version, 'version'),
+    personaFingerprint: requiredCharacterRefText(
+      characterRef.personaFingerprint,
+      'personaFingerprint',
+    ),
+  } satisfies RoleModelCharacterRef);
+}
+
+function requiredCharacterRefText(value: string, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new TypeError(
+      `Role-model characterRef ${field} must be a non-empty string.`,
+    );
+  }
+
+  return value;
 }
 
 function freezeRuntimeEventIdentitySnapshot(

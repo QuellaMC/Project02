@@ -20,6 +20,7 @@ import {
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
   type RejectedRoleModelDecisionResult,
+  type RoleModelCharacterRef,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
@@ -104,6 +105,8 @@ export type RunRoleModelLoopOptions = {
     event: RoleModelInterimVisibleReplyEvent,
   ) => Promise<void> | void;
   readonly runtimePluginContext?: RuntimePluginContext;
+  readonly personaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
 };
 
 export type RoleModelPluginToolHost = {
@@ -284,6 +287,9 @@ async function invokeRoleModelLoopRound(options: {
   });
   const turnContext = renderRoleModelTurnContext(inputEnvelope, {
     additionalMessages: options.state.nativeAdditionalMessages,
+    ...(options.options.personaSections === undefined
+      ? {}
+      : {personaSections: options.options.personaSections}),
   });
   const rawOutput: unknown = await options.adapter.invoke(inputEnvelope, {
     turnContext,
@@ -299,6 +305,9 @@ async function invokeRoleModelLoopRound(options: {
     sessionId: options.sessionId,
     inputEnvelope,
     rawOutputText: rawOutputValidation.rawOutputText,
+    ...(options.options.characterRef === undefined
+      ? {}
+      : {characterRef: options.options.characterRef}),
     ...providerMetadataOption(rawOutputValidation.providerMetadata),
     ...providerExchangeOption(rawOutputValidation.providerExchange),
   });

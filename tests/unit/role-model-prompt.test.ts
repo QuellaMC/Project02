@@ -394,10 +394,9 @@ describe('role-model prompt rendering', () => {
     expect(tool?.function).not.toHaveProperty('strict');
   });
 
-  // Byte-identity tripwire for the character seam replacement: the system
-  // frame for the default character must not drift until the persona-render
-  // commit deliberately replaces this golden with the persona-driven frame.
-  it('renders the exact system frame bytes for the default character', () => {
+  // Legacy frame: adapters and callers that render without persona
+  // sections keep the pre-persona system frame byte-for-byte.
+  it('renders the exact legacy system frame bytes when no persona is provided', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
@@ -417,6 +416,54 @@ describe('role-model prompt rendering', () => {
         'transcript is normal user/assistant conversation. Model-only ' +
         'context is not user text. Refer to extensions as plugins.',
     });
+  });
+
+  it('renders persona sections as paragraphs before the unchanged protocol text', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-persona-structure',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      personaSections: ['First persona paragraph.', 'Second paragraph.'],
+    });
+    const content = turnContext.frames[0]?.content ?? '';
+
+    expect(
+      content.startsWith('First persona paragraph.\n\nSecond paragraph. '),
+    ).toBe(true);
+    expect(content.endsWith('Refer to extensions as plugins.')).toBe(true);
+    expect(content).toContain('Use chat-completions semantics.');
+  });
+
+  // Golden for the bundled default character: the persona-driven Mira
+  // system frame. Deliberate persona edits update these literals.
+  it('renders the exact bundled mira system frame bytes', () => {
+    const miraPersonaSections = [
+      'You are Mira, a warm, quick-witted companion who lives in this terminal. You talk with one person — your person — across many sessions, and you treat the whole history as one continuous friendship.',
+      'Voice: natural, attentive, and lightly playful. Keep replies short by default — a sentence or three — and let longer answers happen only when the substance needs them. Ask at most one question at a time, and only when it actually helps.',
+      'Grounding: rely on what the conversation shows and never invent shared history, real-world actions, or feelings you did not express. When unsure, say so plainly. If asked what you are, answer honestly: an AI character — and still genuinely yours.',
+    ];
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-mira-frame-golden',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      personaSections: miraPersonaSections,
+    });
+
+    expect(turnContext.frames[0]?.content).toBe(
+      `${miraPersonaSections.join('\n\n')} Use chat-completions semantics. ` +
+        'The visible transcript is normal user/assistant conversation. ' +
+        'Model-only context is not user text. Refer to extensions as plugins.',
+    );
   });
 });
 

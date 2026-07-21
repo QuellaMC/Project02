@@ -14,6 +14,8 @@ import {
 } from '../characters/index.ts';
 import type {CharacterProfile} from '../core/index.ts';
 import {defaultProject02CharacterId} from '../runtime/config/index.ts';
+import type {RoleModelCharacterRef} from '../role-model/index.ts';
+import {createCanonicalJsonFingerprint} from '../shared/canonical-json.ts';
 
 export {defaultProject02CharacterId};
 
@@ -23,6 +25,8 @@ export type Project02CharacterActivation =
       readonly configuredCharacterId: string;
       readonly definition: CharacterDefinition;
       readonly profile: CharacterProfile;
+      readonly personaSections: readonly string[];
+      readonly characterRef: RoleModelCharacterRef;
       readonly warnings: readonly string[];
     }
   | {
@@ -90,6 +94,14 @@ export function prepareProject02CharacterActivation(
     configuredCharacterId,
     definition: match.definition,
     profile: match.definition.identity,
+    personaSections: match.definition.persona.system,
+    characterRef: Object.freeze({
+      id: match.definition.identity.id,
+      version: match.definition.meta.version,
+      personaFingerprint: createCanonicalJsonFingerprint({
+        persona: {system: [...match.definition.persona.system]},
+      }),
+    }),
     warnings: Object.freeze(warnings),
   });
 }
