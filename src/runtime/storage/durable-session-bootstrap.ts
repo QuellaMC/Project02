@@ -1,4 +1,9 @@
-import type {CharacterProfile, ConversationSession} from '../../core/index.ts';
+import {
+  createUserSpeaker,
+  type CharacterProfile,
+  type ConversationSession,
+  type SpeakerIdentity,
+} from '../../core/index.ts';
 import type {RuntimeLogStore} from '../evidence/records.ts';
 import {
   createFileRuntimeLogStore,
@@ -22,6 +27,7 @@ export type DurableSessionSelection = {
   readonly sessionId?: string;
   readonly newSessionId?: string;
   readonly character: CharacterProfile;
+  readonly userDisplayName?: string;
 };
 
 export type DurableChatRuntime = {
@@ -38,6 +44,7 @@ export async function createDurableChatRuntime(
   );
   const storageOptions =
     args.storeRoot === undefined ? {} : {storeRoot: args.storeRoot};
+  const boundUserSpeaker = createUserSpeaker(args.userDisplayName);
   const bindingResult = await reconcileCharacterBinding({
     storageOptions,
     configuredCharacterId: args.character.id,
@@ -60,6 +67,7 @@ export async function createDurableChatRuntime(
           ...storageOptions,
           sessionId: selectedSessionId,
           boundCharacter: args.character,
+          boundUserSpeaker,
         });
 
         logStore.readSessionEvidence();
@@ -87,6 +95,7 @@ export async function createDurableChatRuntime(
       sessionId,
       writerLockOwnerToken: ownerToken,
       boundCharacter: args.character,
+      boundUserSpeaker,
     });
     logStore.recoverAbandonedWriterEvidence?.();
 
@@ -94,11 +103,18 @@ export async function createDurableChatRuntime(
       session: await sessionStore.rehydrateConversationSession(sessionId, {
         conversationLogReader: {
           readConversationMessages() {
-            return readDurableConversationEvidence(logStore, args.character)
-              .messages;
+            return readDurableConversationEvidence(
+              logStore,
+              args.character,
+              boundUserSpeaker,
+            ).messages;
           },
           readConversationEvidence() {
-            return readDurableConversationEvidence(logStore, args.character);
+            return readDurableConversationEvidence(
+              logStore,
+              args.character,
+              boundUserSpeaker,
+            );
           },
         },
       }),
@@ -166,14 +182,25 @@ async function deriveDurableStoreCharacterIds(storageOptions: {
 export function readDurableConversationEvidence(
   logStore: RuntimeLogStore,
   boundCharacter: CharacterProfile,
+  boundUserSpeaker?: SpeakerIdentity,
 ): LocalRuntimeSessionConversationEvidence {
   const evidence = logStore.readSessionEvidence().stored;
+  const recordedUserMessage = evidence.conversationMessages.find(
+    message => message.role === 'user',
+  );
 
   return Object.freeze({
-    // Existing sessions keep their evidence-derived profile (historical
-    // display name); the bound character applies to evidence-empty
-    // sessions only.
+    // Existing sessions keep their evidence-derived profiles (historical
+    // display names); the bound character and user speaker apply to
+    // evidence-empty sessions only.
     character: durableRuntimeSessionCharacterProfile(evidence, boundCharacter),
+    userSpeaker:
+      recordedUserMessage === undefined
+        ? (boundUserSpeaker ?? createUserSpeaker())
+        : Object.freeze({
+            id: recordedUserMessage.speakerId,
+            displayName: recordedUserMessage.speakerName,
+          } satisfies SpeakerIdentity),
     messages: evidence.conversationMessages,
   } satisfies LocalRuntimeSessionConversationEvidence);
 }

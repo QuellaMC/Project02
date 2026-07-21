@@ -15,6 +15,7 @@ import {
   createConversationSession,
   type CharacterProfile,
   type ConversationSession,
+  type SpeakerIdentity,
   type VisibleMessage,
 } from '../../core/index.ts';
 import {
@@ -71,6 +72,7 @@ export type LocalRuntimeSessionConversationLogReader = {
 
 export type LocalRuntimeSessionConversationEvidence = {
   readonly character: CharacterProfile;
+  readonly userSpeaker?: SpeakerIdentity;
   readonly messages: readonly ConversationLogRecord[];
 };
 
@@ -317,6 +319,9 @@ export function createLocalRuntimeSessionStore(
     return createConversationSession({
       id: metadata.sessionId,
       character: conversationEvidence.character,
+      ...(conversationEvidence.userSpeaker === undefined
+        ? {}
+        : {userDisplayName: conversationEvidence.userSpeaker.displayName}),
       visibleTranscript: conversationEvidence.messages.map(message =>
         toVisibleMessage(message),
       ),

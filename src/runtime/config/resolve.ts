@@ -8,6 +8,7 @@ import {storeRootForSelectedDefaultConfigPath} from './mutate.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
   defaultProject02CharacterId,
+  defaultProject02UserDisplayName,
   isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
@@ -51,9 +52,12 @@ export function resolveProject02RuntimeConfig(
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
   const character = config?.project02?.character ?? defaultProject02CharacterId;
+  const userDisplayName =
+    config?.project02?.userDisplayName ?? defaultProject02UserDisplayName;
   const project02 = Object.freeze({
     storeRoot,
     character,
+    userDisplayName,
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
     roleModelProvider,
   });

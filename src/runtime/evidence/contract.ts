@@ -3,7 +3,7 @@ import type {
   RawEventLogRecord,
   RuntimeTraceEntry,
 } from './records.ts';
-import type {CharacterProfile} from '../../core/index.ts';
+import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 
 export type RuntimeLogReadMode =
   'append' | 'appendTrace' | 'public' | 'publicDecode';
@@ -70,6 +70,8 @@ export type RuntimeEvidenceIncrementalState = {
   roleModelCharacter: CharacterProfile | undefined;
   conversationCharacter: CharacterProfile | undefined;
   readonly boundCharacter: CharacterProfile | undefined;
+  userSpeaker: SpeakerIdentity | undefined;
+  readonly boundUserSpeaker: SpeakerIdentity | undefined;
   openRawIdentity: string | undefined;
   openTurnConversationStart: number;
 };

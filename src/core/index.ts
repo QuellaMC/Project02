@@ -7,6 +7,7 @@ export {
   freezeCharacterProfile,
   visibleMessageRoleValues,
   type CharacterProfile,
+  type SpeakerIdentity,
   type VisibleMessage,
   type VisibleMessageRole,
 } from './message/message.ts';
@@ -39,6 +40,7 @@ export {
   CharacterReplyValidationError,
   ConversationRehydrationError,
   createConversationSession,
+  createUserSpeaker,
   defaultRecentVisibleMessageLimit,
   localUserSpeaker,
   normalizeCharacterAgentReply,

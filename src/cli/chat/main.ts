@@ -99,6 +99,7 @@ type ChatCliOptions = {
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
   readonly characterProfile?: CharacterProfile;
+  readonly userDisplayName?: string;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
@@ -149,8 +150,11 @@ const exitCommand = '/exit';
 const modelTextToggleCommand = '/model-text';
 const showModelTextCommand = '/show-model-text';
 const hideModelTextCommand = '/hide-model-text';
-const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
+
+function promptTextFor(session: ConversationSession): string {
+  return `${session.userSpeaker.displayName}: `;
+}
 const startupFailurePluginCleanupMessage =
   'chat startup failed before opening a durable session';
 const fatalFailurePluginCleanupMessage =
@@ -402,6 +406,8 @@ export async function runChatCliFromArgs(
       configuredHost,
       toolConfirmationBridge,
       characterProfile: characterActivation.profile,
+      userDisplayName:
+        startup.activationPlan.resolvedConfig.project02.userDisplayName,
     });
   } catch (error: unknown) {
     if (isFormattedTerminalError(error)) {
@@ -421,6 +427,7 @@ async function runChatCliAfterConfiguredHost(options: {
   readonly configuredHost: ConfiguredChatPluginHost | undefined;
   readonly toolConfirmationBridge: ChatToolConfirmationBridge | undefined;
   readonly characterProfile: CharacterProfile;
+  readonly userDisplayName?: string;
 }): Promise<number> {
   let durableRuntime: DurableChatRuntime;
   let pluginHost: RuntimePluginHost;
@@ -430,6 +437,9 @@ async function runChatCliAfterConfiguredHost(options: {
     durableRuntime = await createDurableChatRuntime({
       ...options.runtimeArgs,
       character: options.characterProfile,
+      ...(options.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: options.userDisplayName}),
     });
     const startupPluginHost =
       options.options.pluginHost ?? options.configuredHost?.host;
@@ -619,12 +629,16 @@ async function runChatCliWithActiveWriter(
     options.session ??
     createConversationSession({
       character: requiredChatCharacterProfile(options.characterProfile),
+      ...(options.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: options.userDisplayName}),
     });
   const logStore =
     options.logStore ??
     createRuntimeLogStore({
       sessionId: session.id,
       boundCharacter: session.character,
+      boundUserSpeaker: session.userSpeaker,
     });
   const pluginHost = options.pluginHost;
   const lines = createInterface({
@@ -644,7 +658,7 @@ async function runChatCliWithActiveWriter(
   let showNonCommittedTopLevelText = false;
 
   options.stdout.write(`${session.character.displayName} is ready.\n`);
-  options.stdout.write(promptText);
+  options.stdout.write(promptTextFor(session));
 
   try {
     for (;;) {
@@ -714,7 +728,7 @@ async function handleChatInputLine(options: {
     options.options.stdout.write(
       `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`,
     );
-    options.options.stdout.write(promptText);
+    options.options.stdout.write(promptTextFor(options.session));
     return {
       status: 'continue',
       showNonCommittedTopLevelText: nextModelTextVisibility,
@@ -757,7 +771,7 @@ async function handleChatInputLine(options: {
     return {status: 'exit', exitCode: 1};
   }
 
-  options.options.stdout.write(promptText);
+  options.options.stdout.write(promptTextFor(options.session));
   return {
     status: 'continue',
     showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,

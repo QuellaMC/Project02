@@ -359,6 +359,64 @@ describe('runtime log store', () => {
       'A custom durable character speaker requires matching role-model character evidence.',
     );
   });
+
+  it('stamps user messages against the bound user speaker and rejects drift', () => {
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      boundUserSpeaker: {id: 'local-user', displayName: 'Mike'},
+    });
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'Mike',
+      text: 'hello',
+      committedAt: '2026-06-04T00:00:01.000Z',
+    });
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
+      committedAt: '2026-06-04T00:00:02.000Z',
+    });
+
+    // Once recorded, the session's user speaker wins over later intent:
+    // one user speaker per session, mirroring the character rule.
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-3',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Michael',
+        text: 'renamed mid-session',
+        committedAt: '2026-06-04T00:00:03.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+  });
 });
 
 function createMinimalPluginTurnEvidence(

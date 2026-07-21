@@ -79,6 +79,23 @@ const project02ConfigFieldDefinitions = Object.freeze([
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.userDisplayName',
+    name: 'userDisplayName',
+    label: 'User display name',
+    description:
+      "Speaker name stamped on the local user's messages. Applies to new " +
+      'sessions; existing sessions keep their historical name.',
+    invalidValueCode: 'runtime_config_string_invalid',
+    invalidValueMessage: 'Runtime config field must be a non-empty string.',
+    required: false,
+    secret: false,
+    valueType: 'string',
+    defaultValueSummary: 'You',
+    redactionLabels: Object.freeze([]),
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
 ]);
 
 export function project02RuntimeConfigFieldDefinitions(): readonly Project02ConfigFieldDefinition[] {

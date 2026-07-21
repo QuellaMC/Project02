@@ -1,4 +1,4 @@
-import type {CharacterProfile} from '../../core/index.ts';
+import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 import type {RuntimeLogStore} from './records.ts';
 import type {MutableDurableRuntimeSessionEvidence} from './contract.ts';
 import {createRuntimeSessionEvidenceSnapshot} from './recovery.ts';
@@ -14,6 +14,7 @@ export function createRuntimeLogStore(
   options: {
     readonly sessionId?: string;
     readonly boundCharacter?: CharacterProfile;
+    readonly boundUserSpeaker?: SpeakerIdentity;
   } = {},
 ): RuntimeLogStore {
   const evidence: MutableDurableRuntimeSessionEvidence = {
@@ -27,6 +28,9 @@ export function createRuntimeLogStore(
     ...(options.boundCharacter === undefined
       ? {}
       : {boundCharacter: options.boundCharacter}),
+    ...(options.boundUserSpeaker === undefined
+      ? {}
+      : {boundUserSpeaker: options.boundUserSpeaker}),
   });
 
   return Object.freeze({

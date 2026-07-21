@@ -67,6 +67,7 @@ export async function runRelayCli(
         logStore: createRuntimeLogStore({
           sessionId: session.id,
           boundCharacter: session.character,
+          boundUserSpeaker: session.userSpeaker,
         }),
         pluginHost: options.pluginHost,
         rawInput: message,
@@ -183,6 +184,8 @@ export async function runConfiguredRelayCli(
 
   const session = createConversationSession({
     character: characterActivation.profile,
+    userDisplayName:
+      startup.activationPlan.resolvedConfig.project02.userDisplayName,
   });
 
   try {

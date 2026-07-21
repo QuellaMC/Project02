@@ -27,6 +27,7 @@ describe('conversation core', () => {
     expect(session).toEqual({
       id: 'local-session',
       character: testCharacterProfile,
+      userSpeaker: {id: 'local-user', displayName: 'You'},
       visibleTranscript: [],
     });
     expect(session.character).not.toBe(testCharacterProfile);

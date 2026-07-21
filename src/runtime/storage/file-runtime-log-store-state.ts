@@ -1,4 +1,4 @@
-import type {CharacterProfile} from '../../core/index.ts';
+import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -38,6 +38,7 @@ export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
     readonly writerLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
     readonly boundCharacter?: CharacterProfile;
+    readonly boundUserSpeaker?: SpeakerIdentity;
     readonly onEvidenceValidation?: (
       mode: 'cold_snapshot' | 'incremental_append',
     ) => void;
@@ -144,6 +145,9 @@ export class FileRuntimeLogStoreState {
         ...(this.options.boundCharacter === undefined
           ? {}
           : {boundCharacter: this.options.boundCharacter}),
+        ...(this.options.boundUserSpeaker === undefined
+          ? {}
+          : {boundUserSpeaker: this.options.boundUserSpeaker}),
       });
     }
 

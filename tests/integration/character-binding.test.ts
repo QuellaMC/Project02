@@ -32,6 +32,7 @@ function visibleReplyAdapter(text: string): RoleModelAdapter {
 async function runOneTurn(options: {
   readonly storeRoot: string;
   readonly character: {readonly id: string; readonly displayName: string};
+  readonly userDisplayName?: string;
   readonly sessionSelection:
     {readonly newSessionId: string} | {readonly sessionId: string};
   readonly message: string;
@@ -40,6 +41,9 @@ async function runOneTurn(options: {
   const runtime = await createDurableChatRuntime({
     storeRoot: options.storeRoot,
     character: options.character,
+    ...(options.userDisplayName === undefined
+      ? {}
+      : {userDisplayName: options.userDisplayName}),
     ...options.sessionSelection,
   });
 
@@ -267,5 +271,40 @@ describe('character binding through the durable runtime', () => {
     });
 
     expect(fresh.speakerNames).toEqual(['You', 'Mira Prime']);
+  });
+
+  it('keeps historical user display names for existing sessions and applies the configured one to new sessions', async () => {
+    const storeRoot = createTestTempRoot();
+
+    await runOneTurn({
+      storeRoot,
+      character: testCharacterProfile,
+      userDisplayName: 'Mike',
+      sessionSelection: {newSessionId: 'user-name-old'},
+      message: 'first',
+      reply: 'first reply',
+    });
+
+    const resumed = await runOneTurn({
+      storeRoot,
+      character: testCharacterProfile,
+      userDisplayName: 'Michael',
+      sessionSelection: {sessionId: 'user-name-old'},
+      message: 'second',
+      reply: 'second reply',
+    });
+
+    expect(resumed.speakerNames).toEqual(['Mike', 'Mira', 'Mike', 'Mira']);
+
+    const fresh = await runOneTurn({
+      storeRoot,
+      character: testCharacterProfile,
+      userDisplayName: 'Michael',
+      sessionSelection: {newSessionId: 'user-name-new'},
+      message: 'third',
+      reply: 'third reply',
+    });
+
+    expect(fresh.speakerNames).toEqual(['Michael', 'Mira']);
   });
 });

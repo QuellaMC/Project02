@@ -4,6 +4,7 @@ import {
   ConversationRehydrationError,
   localUserSpeaker,
   type RuntimeEventIdentity,
+  type SpeakerIdentity,
   runtimeEventIdentityKey,
   selectRecentVisibleMessages,
   validateRestoredVisibleTranscript,
@@ -105,6 +106,7 @@ export function deriveTerminalRawTraceEvidence(
 export function createRuntimeEvidenceIncrementalState(
   evidence: DurableRuntimeSessionEvidence,
   boundCharacter?: CharacterProfile,
+  boundUserSpeaker?: SpeakerIdentity,
 ): RuntimeEvidenceIncrementalState {
   const derivedTraceEntries = deriveTerminalRawTraceEvidence(evidence);
   const evidenceForValidation = reconcileTerminalRawTraceEvidence(evidence);
@@ -129,6 +131,8 @@ export function createRuntimeEvidenceIncrementalState(
       evidence.conversationMessages,
     ),
     boundCharacter,
+    userSpeaker: recordedUserSpeakerIdentity(evidence.conversationMessages),
+    boundUserSpeaker,
     openRawIdentity: undefined,
     openTurnConversationStart: evidence.conversationMessages.length,
   };
@@ -634,10 +638,14 @@ export function assertIncrementalConversationAppend(options: {
     }
   }
 
+  const expectedUserSpeaker =
+    options.state.userSpeaker ??
+    options.state.boundUserSpeaker ??
+    localUserSpeaker;
   const speakerIsValid =
     options.record.role === 'user'
-      ? options.record.speakerId === localUserSpeaker.id &&
-        options.record.speakerName === localUserSpeaker.displayName
+      ? options.record.speakerId === expectedUserSpeaker.id &&
+        options.record.speakerName === expectedUserSpeaker.displayName
       : speakerMatchesCharacter(options.record, expectedCharacter);
 
   if (!speakerIsValid) {
@@ -668,6 +676,12 @@ export function applyIncrementalConversationAppend(
       id: record.speakerId,
       displayName: record.speakerName,
     } satisfies CharacterProfile);
+  }
+  if (record.role === 'user' && state.userSpeaker === undefined) {
+    state.userSpeaker = Object.freeze({
+      id: record.speakerId,
+      displayName: record.speakerName,
+    } satisfies SpeakerIdentity);
   }
 }
 
@@ -1067,8 +1081,13 @@ export function assertDurableRuntimeSessionEvidence(options: {
     allowUnanchoredCustomCharacter: options.mode === 'appendConversation',
   });
 
+  const recordedUserSpeaker = recordedUserSpeakerIdentity(conversationMessages);
+
   assertRestoredConversationInvariants(options.paths, conversationMessages, {
     ...(character === undefined ? {} : {character}),
+    ...(recordedUserSpeaker === undefined
+      ? {}
+      : {userDisplayName: recordedUserSpeaker.displayName}),
     allowIncompleteFinalTurn: appendModeAllowsIncompleteConversationTurn({
       mode: options.mode,
       messages: conversationMessages,
@@ -1403,11 +1422,15 @@ function assertRestoredConversationInvariants(
   options: {
     readonly allowIncompleteFinalTurn?: boolean;
     readonly character?: CharacterProfile;
+    readonly userDisplayName?: string;
   } = {},
 ): void {
   try {
     validateRestoredVisibleTranscript({
       id: paths.sessionId,
+      ...(options.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: options.userDisplayName}),
       // The character is undefined only for transcripts with zero
       // character-role messages (it is derived from them), so the
       // placeholder below can never be consulted by a speaker check.
@@ -1474,6 +1497,38 @@ function recordedRoleModelCharacterProfile(
   }
 
   return recordedCharacter;
+}
+
+export function recordedUserSpeakerIdentity(
+  messages: readonly ConversationLogRecord[],
+): SpeakerIdentity | undefined {
+  let userSpeaker: SpeakerIdentity | undefined;
+
+  for (const message of messages) {
+    if (message.role !== 'user') {
+      continue;
+    }
+
+    const candidate = Object.freeze({
+      id: message.speakerId,
+      displayName: message.speakerName,
+    } satisfies SpeakerIdentity);
+
+    if (
+      userSpeaker !== undefined &&
+      (userSpeaker.id !== candidate.id ||
+        userSpeaker.displayName !== candidate.displayName)
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Durable user messages must identify one session user speaker.',
+      );
+    }
+
+    userSpeaker = candidate;
+  }
+
+  return userSpeaker;
 }
 
 function recordedConversationCharacterProfile(

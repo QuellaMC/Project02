@@ -56,6 +56,7 @@ export {
 } from './schema.ts';
 export {
   defaultProject02CharacterId,
+  defaultProject02UserDisplayName,
   roleModelProviderEnvVarName,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,

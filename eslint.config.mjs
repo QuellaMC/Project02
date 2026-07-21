@@ -77,11 +77,13 @@ export default tseslint.config(
     files: ['src/cli/chat/main.ts'],
     rules: {
       // Re-pinned +33 for character activation wiring (startup character
-      // resolution, profile threading, required-profile guard), then +2 for
-      // selecting the configured character id from resolved config.
+      // resolution, profile threading, required-profile guard), +2 for
+      // selecting the configured character id from resolved config, then
+      // +13 for the configurable user display name (per-session prompt
+      // label, threading into the durable runtime and fallback session).
       'max-lines': [
         'error',
-        {max: 1114, skipBlankLines: true, skipComments: true},
+        {max: 1127, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -147,13 +149,15 @@ export default tseslint.config(
     files: ['src/runtime/evidence/validation.ts'],
     rules: {
       // Re-pinned +1 for the shared localUserSpeaker import (mechanical
-      // growth; replaces inline 'local-user'/'You' literals), then +19 for
-      // bound-character injection: the expected-character chain guard, the
-      // unanchored-guard parameterization, and the placeholder profile for
-      // character-less restored transcripts.
+      // growth; replaces inline 'local-user'/'You' literals), +19 for
+      // bound-character injection (expected-character chain guard,
+      // unanchored-guard parameterization, character-less placeholder),
+      // then +45 for the session user speaker: recorded/bound user-speaker
+      // state, the one-user-speaker-per-session derivation, and restored
+      // transcripts validating against the recorded user display name.
       'max-lines': [
         'error',
-        {max: 2139, skipBlankLines: true, skipComments: true},
+        {max: 2184, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -161,12 +165,13 @@ export default tseslint.config(
     files: ['src/runtime/storage/session-store.ts'],
     rules: {
       // Re-pinned +3 for the evidence-required rehydration error (the
-      // session character is evidence-derived and has no default), then +2
-      // for allowlisting the character binding and packages entries in the
-      // store-initialization content check.
+      // session character is evidence-derived and has no default), +2 for
+      // allowlisting the character binding and packages entries in the
+      // store-initialization content check, then +5 for threading the
+      // evidence-derived user speaker through rehydration.
       'max-lines': [
         'error',
-        {max: 1009, skipBlankLines: true, skipComments: true},
+        {max: 1014, skipBlankLines: true, skipComments: true},
       ],
     },
   },
