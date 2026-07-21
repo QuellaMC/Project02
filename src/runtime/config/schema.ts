@@ -46,6 +46,23 @@ const project02ConfigFieldDefinitions = Object.freeze([
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
   Object.freeze({
+    path: 'project02.character',
+    name: 'character',
+    label: 'Character',
+    description:
+      'Selects one discovered character package; a store binds permanently ' +
+      'to this character id at first activation.',
+    invalidValueCode: 'runtime_config_string_invalid',
+    invalidValueMessage: 'Runtime config field must be a non-empty string.',
+    required: false,
+    secret: false,
+    valueType: 'string',
+    defaultValueSummary: 'mira',
+    redactionLabels: Object.freeze([]),
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
     path: 'project02.roleModelProvider',
     name: 'roleModelProvider',
     label: 'Role-model provider',

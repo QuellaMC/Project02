@@ -1,9 +1,8 @@
 /**
  * Composition-root character activation: resolves the runtime's one
- * character definition from the discovered character packages. The
- * configured id is hardwired to the bundled default until the
- * project02.character config field arrives; that slice swaps only the id
- * source. Diagnostics that concern other characters do not block
+ * character definition from the discovered character packages, selected
+ * by the project02.character config field (default: the bundled
+ * character). Diagnostics that concern other characters do not block
  * activation — they surface as warnings so a broken unrelated operator
  * package cannot take the runtime down.
  */
@@ -14,8 +13,9 @@ import {
   type CharacterPackageDiagnostic,
 } from '../characters/index.ts';
 import type {CharacterProfile} from '../core/index.ts';
+import {defaultProject02CharacterId} from '../runtime/config/index.ts';
 
-export const defaultProject02CharacterId = 'mira';
+export {defaultProject02CharacterId};
 
 export type Project02CharacterActivation =
   | {

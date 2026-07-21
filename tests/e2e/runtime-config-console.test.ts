@@ -340,7 +340,7 @@ describe('runtime config console UI', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        prompt: scriptedPrompt(['1', '3', '1', 'unsupported', 'nvidia', '1']),
+        prompt: scriptedPrompt(['1', '4', '1', 'unsupported', 'nvidia', '1']),
       },
     );
 
@@ -644,7 +644,7 @@ describe('runtime config console UI', () => {
         }),
         prompt: scriptedPrompt([
           '1',
-          '3',
+          '4',
           '1',
           'nvidia',
           {

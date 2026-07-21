@@ -76,12 +76,12 @@ export default tseslint.config(
   {
     files: ['src/cli/chat/main.ts'],
     rules: {
-      // Re-pinned +33 for character activation wiring: startup character
-      // resolution, profile threading into the durable runtime and cleanup
-      // contexts, and the required-profile guard.
+      // Re-pinned +33 for character activation wiring (startup character
+      // resolution, profile threading, required-profile guard), then +2 for
+      // selecting the configured character id from resolved config.
       'max-lines': [
         'error',
-        {max: 1112, skipBlankLines: true, skipComments: true},
+        {max: 1114, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -161,10 +161,12 @@ export default tseslint.config(
     files: ['src/runtime/storage/session-store.ts'],
     rules: {
       // Re-pinned +3 for the evidence-required rehydration error (the
-      // session character is evidence-derived and has no default).
+      // session character is evidence-derived and has no default), then +2
+      // for allowlisting the character binding and packages entries in the
+      // store-initialization content check.
       'max-lines': [
         'error',
-        {max: 1007, skipBlankLines: true, skipComments: true},
+        {max: 1009, skipBlankLines: true, skipComments: true},
       ],
     },
   },

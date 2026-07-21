@@ -441,7 +441,9 @@ function isRuntimeHomeControlEntry(
   return (
     entryPath === layout.configPath ||
     entryPath === layout.envPath ||
-    entryPath === layout.locksRoot
+    entryPath === layout.locksRoot ||
+    entryPath === layout.characterBindingPath ||
+    entryPath === layout.characterPackagesRoot
   );
 }
 

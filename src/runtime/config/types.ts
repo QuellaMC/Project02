@@ -41,10 +41,13 @@ export type RuntimeConfigValue =
 export type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
+export const defaultProject02CharacterId = 'mira';
+
 export type Project02HostConfig = Readonly<
   Record<string, RuntimeConfigValue | undefined>
 > & {
   readonly storeRoot?: string;
+  readonly character?: string;
   readonly defaultMemoryProvider?: string;
   readonly roleModelProvider?: Project02RoleModelProvider;
 };
@@ -124,6 +127,7 @@ export type ResolvedProject02RuntimeConfig = {
   readonly path?: string;
   readonly project02: {
     readonly storeRoot: string;
+    readonly character: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
   };
@@ -140,6 +144,7 @@ export type RuntimeConfigInspectShape = {
   readonly path?: string;
   readonly project02: {
     readonly storeRoot: string;
+    readonly character: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
   };

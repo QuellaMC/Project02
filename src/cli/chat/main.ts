@@ -360,6 +360,8 @@ export async function runChatCliFromArgs(
     validateDurableSessionArgs(runtimeArgs);
     const characterActivation = prepareProject02CharacterActivation({
       storeRoot: runtimeArgs.storeRoot,
+      configuredCharacterId:
+        startup.activationPlan.resolvedConfig.project02.character,
     });
 
     if (characterActivation.status === 'failed') {

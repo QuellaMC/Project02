@@ -44,6 +44,16 @@ export {
   type DurableChatRuntime,
   type DurableSessionSelection,
 } from './durable-session-bootstrap.ts';
+export {
+  characterBindingFileName,
+  characterBindingFormat,
+  characterBindingPath,
+  readCharacterBinding,
+  reconcileCharacterBinding,
+  type CharacterBinding,
+  type CharacterBindingReadResult,
+  type CharacterBindingReconcileResult,
+} from './character-binding.ts';
 export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
 export {
   acquireLocalRuntimeSessionWriterLease,

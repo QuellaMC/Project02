@@ -10,8 +10,10 @@ import {
   LocalRuntimeSessionStoreError,
   type LocalRuntimeSessionConversationEvidence,
 } from './session-store.ts';
+import type {LocalRuntimeSessionMetadata} from './layout-contract.ts';
 import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
+import {reconcileCharacterBinding} from './character-binding.ts';
 import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
 import {normalizeLocalRuntimeSessionId} from './layout-contract.ts';
 
@@ -36,6 +38,20 @@ export async function createDurableChatRuntime(
   );
   const storageOptions =
     args.storeRoot === undefined ? {} : {storeRoot: args.storeRoot};
+  const bindingResult = await reconcileCharacterBinding({
+    storageOptions,
+    configuredCharacterId: args.character.id,
+    deriveStoreCharacterIds: () =>
+      deriveDurableStoreCharacterIds(storageOptions),
+  });
+
+  if (bindingResult.status === 'rejected') {
+    throw new LocalRuntimeStorageContractError(
+      'character_binding_rejected',
+      bindingResult.message,
+    );
+  }
+
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,
     sessionReadinessValidator: {
@@ -93,6 +109,58 @@ export async function createDurableChatRuntime(
     await writerLease.release();
     throw error;
   }
+}
+
+/**
+ * Distinct character ids recorded across the store's sessions; consulted
+ * only while no binding exists, so legacy stores adopt their own history.
+ */
+async function deriveDurableStoreCharacterIds(storageOptions: {
+  readonly storeRoot?: string;
+}): Promise<readonly string[]> {
+  let sessions: readonly LocalRuntimeSessionMetadata[];
+
+  try {
+    sessions = await createLocalRuntimeSessionStore({
+      ...storageOptions,
+    }).listSessions();
+  } catch (error: unknown) {
+    if (
+      error instanceof LocalRuntimeStorageContractError &&
+      error.code === 'missing_file'
+    ) {
+      // Uninitialized store: nothing to adopt yet.
+      return Object.freeze([]);
+    }
+
+    throw error;
+  }
+
+  const characterIds = new Set<string>();
+
+  for (const metadata of sessions) {
+    const evidence = createFileRuntimeLogStore({
+      ...storageOptions,
+      sessionId: metadata.sessionId,
+    }).readSessionEvidence().stored;
+
+    for (const message of evidence.conversationMessages) {
+      if (message.role === 'character') {
+        characterIds.add(message.speakerId);
+      }
+    }
+    for (const rawEvent of evidence.rawEvents) {
+      const characterId =
+        rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
+          .characterSnapshot.id;
+
+      if (characterId !== undefined) {
+        characterIds.add(characterId);
+      }
+    }
+  }
+
+  return Object.freeze([...characterIds].sort());
 }
 
 export function readDurableConversationEvidence(

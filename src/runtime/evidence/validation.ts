@@ -1531,10 +1531,9 @@ function validateDurableCharacterProfiles(options: {
     options.conversationCharacter !== undefined &&
     options.roleModelCharacter === undefined &&
     options.boundCharacter !== undefined &&
-    !sameCharacterProfiles(
-      options.conversationCharacter,
-      options.boundCharacter,
-    ) &&
+    // Bound id only: display names are per-session historical facts, so a
+    // renamed character's old sessions stay readable under the same id.
+    options.conversationCharacter.id !== options.boundCharacter.id &&
     !options.allowUnanchoredCustomCharacter
   ) {
     throw new LocalRuntimeStorageContractError(

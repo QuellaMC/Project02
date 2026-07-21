@@ -55,6 +55,7 @@ export {
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
 export {
+  defaultProject02CharacterId,
   roleModelProviderEnvVarName,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,

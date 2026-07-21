@@ -7,6 +7,7 @@ import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import {storeRootForSelectedDefaultConfigPath} from './mutate.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
+  defaultProject02CharacterId,
   isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
@@ -49,8 +50,10 @@ export function resolveProject02RuntimeConfig(
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
+  const character = config?.project02?.character ?? defaultProject02CharacterId;
   const project02 = Object.freeze({
     storeRoot,
+    character,
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
     roleModelProvider,
   });

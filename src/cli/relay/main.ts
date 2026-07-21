@@ -165,6 +165,8 @@ export async function runConfiguredRelayCli(
 
   const characterActivation = prepareProject02CharacterActivation({
     storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
+    configuredCharacterId:
+      startup.activationPlan.resolvedConfig.project02.character,
   });
 
   if (characterActivation.status === 'failed') {

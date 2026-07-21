@@ -14,6 +14,7 @@ export const localRuntimeReadableStorageSchemaVersions: readonly LocalRuntimeRea
   Object.freeze([1, localRuntimeStorageSchemaVersion]);
 
 export type LocalRuntimeStorageContractErrorCode =
+  | 'character_binding_rejected'
   | 'concurrent_write'
   | 'invalid_session_id'
   | 'invalid_plugin_id'
@@ -49,6 +50,8 @@ export type LocalRuntimeStorageLayout = {
   readonly schemaPath: string;
   readonly locksRoot: string;
   readonly pluginPackagesRoot: string;
+  readonly characterPackagesRoot: string;
+  readonly characterBindingPath: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
 };
@@ -120,6 +123,13 @@ const locksDirectoryName = '.locks';
 
 const pluginsDirectoryName = 'plugins';
 
+// Same directory name as the characters loader's operator root
+// (src/characters/loader/discovery.ts); the loader cannot import runtime,
+// so the one-word literal is deliberately duplicated there.
+const charactersDirectoryName = 'characters';
+
+export const characterBindingFileName = 'character-binding.json';
+
 const traceFileName = 'trace.jsonl';
 
 const rawEventsFileName = 'raw-events.jsonl';
@@ -143,6 +153,8 @@ export function createLocalRuntimeStorageLayout(
     schemaPath: join(storeRoot, schemaFileName),
     locksRoot: join(storeRoot, locksDirectoryName),
     pluginPackagesRoot: join(storeRoot, pluginsDirectoryName),
+    characterPackagesRoot: join(storeRoot, charactersDirectoryName),
+    characterBindingPath: join(storeRoot, characterBindingFileName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot,
   } satisfies LocalRuntimeStorageLayout);

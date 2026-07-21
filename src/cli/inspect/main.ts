@@ -3,6 +3,8 @@ import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   createLocalRuntimeStorageLayout,
+  readCharacterBinding,
+  type CharacterBindingReadResult,
   type LocalRuntimeSessionMetadata,
   normalizeLocalRuntimeSessionId,
 } from '../../runtime/storage/index.ts';
@@ -65,6 +67,7 @@ type InspectCliArgs =
 
 type InspectSessionListOutput = {
   readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly characterBinding: CharacterBindingReadResult;
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
   readonly sessions: readonly LocalRuntimeSessionMetadata[];
@@ -72,6 +75,7 @@ type InspectSessionListOutput = {
 
 type InspectSessionOutput = {
   readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly characterBinding: CharacterBindingReadResult;
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
   readonly session: LocalRuntimeSessionMetadata;
@@ -254,6 +258,9 @@ async function writeSessionList(
     runtimeConfig: createRuntimeConfigInspectShape(
       runtimeConfig.resolvedConfig,
     ),
+    characterBinding: readCharacterBinding({
+      storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+    }),
     activationDiagnostics: Object.freeze([
       ...runtimeConfig.activation.diagnostics,
     ]),
@@ -283,6 +290,9 @@ async function writeSessionEvidence(
     runtimeConfig: createRuntimeConfigInspectShape(
       runtimeConfig.resolvedConfig,
     ),
+    characterBinding: readCharacterBinding({
+      storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+    }),
     activationDiagnostics: Object.freeze([
       ...runtimeConfig.activation.diagnostics,
     ]),
