@@ -151,11 +151,12 @@ export default tseslint.config(
   {
     files: ['src/runtime/config/mutate.ts'],
     rules: {
-      // Re-pinned +17 so the bootstrap path recognizes overlay-located
-      // config files and never seeds a store root into them.
+      // Re-pinned +27 so the locked write path enforces the overlay
+      // dialect: a candidate carrying a global-only field never lands
+      // in an overlay-located config file, whatever path selected it.
       'max-lines': [
         'error',
-        {max: 1233, skipBlankLines: true, skipComments: true},
+        {max: 1260, skipBlankLines: true, skipComments: true},
       ],
     },
   },
