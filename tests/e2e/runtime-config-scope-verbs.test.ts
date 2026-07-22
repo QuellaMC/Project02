@@ -413,6 +413,58 @@ describe('overlay files reached through --config directly', () => {
     expect(existsSync(dataRoot)).toBe(false);
   });
 
+  it('validates the owning home config even when --config aliases the overlay', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    // The overlay path is the mutation TARGET; the global layer must
+    // still come from the OWNING home, whose config is malformed.
+    writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      '--config',
+      overlayPath,
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('failed to load');
+    expect(existsSync(dataRoot)).toBe(false);
+  });
+
+  it('rejects a non-overlay file inside a character-data directory', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--config',
+      join(dataRoot, 'other.json'),
+      'set',
+      'project02.roleModelProvider',
+      'local',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('is not its overlay');
+    // No reader ever loads such a file; the write must not happen.
+    expect(existsSync(join(dataRoot, 'other.json'))).toBe(false);
+  });
+
   it('rejects global-only fields instead of writing them into the overlay', async () => {
     const homeRoot = createTestTempRoot('project02-scope-config-flag-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

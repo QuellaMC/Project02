@@ -14,7 +14,10 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
-import {createProject02HomeLayout} from '../storage/layout-contract.ts';
+import {
+  createProject02HomeLayout,
+  homeRootForCharacterDataDir,
+} from '../storage/layout-contract.ts';
 import {acquireLocalRuntimeMutationLockSync} from '../storage/mutation-lock.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
@@ -268,11 +271,12 @@ function withGlobalConfigLayerLock<T>(
     readonly globalDocument: Project02RuntimeConfig;
   }) => T,
 ): T {
+  const globalLayerLocation = scopedGlobalLayerLocation(options);
   const canonicalGlobalPath = canonicalRuntimeConfigMutationPath(
-    resolveRuntimeConfigControlTargetPath(options),
+    resolveRuntimeConfigControlTargetPath(globalLayerLocation),
   );
   const runWithLoadedConfig = () => {
-    const loadedConfig = loadProject02RuntimeConfig(options);
+    const loadedConfig = loadProject02RuntimeConfig(globalLayerLocation);
 
     assertGlobalConfigLoadableForCharacterScope(loadedConfig);
 
@@ -280,38 +284,15 @@ function withGlobalConfigLayerLock<T>(
       loadedConfig,
       globalDocument: createRuntimeConfigMutationBase({
         loadedConfig,
-        ...(options.configPath === undefined
+        ...(globalLayerLocation.configPath === undefined
           ? {}
-          : {configPath: options.configPath}),
-        ...(options.storeRoot === undefined
+          : {configPath: globalLayerLocation.configPath}),
+        ...(globalLayerLocation.storeRoot === undefined
           ? {}
-          : {storeRoot: options.storeRoot}),
+          : {storeRoot: globalLayerLocation.storeRoot}),
       }),
     });
   };
-  const preScope = deriveRuntimeConfigCharacterScope({
-    loadedConfig: loadProject02RuntimeConfig(options),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.characterId === undefined
-      ? {}
-      : {characterId: options.characterId}),
-  });
-  const scopeForPath = options.characterScope ?? preScope;
-
-  // A --config pointed directly at the overlay makes the "global" path
-  // the overlay itself; taking its lock here would deadlock against the
-  // mutation's own lock on the same file. The mutation lock alone
-  // covers that degenerate single-file case.
-  if (
-    scopeForPath !== undefined &&
-    canonicalGlobalPath ===
-      canonicalRuntimeConfigMutationPath(
-        characterOverlayConfigPath(scopeForPath.dataRoot),
-      )
-  ) {
-    return runWithLoadedConfig();
-  }
-
   const globalLock = acquireLocalRuntimeMutationLockSync({
     locksRoot: createProject02HomeLayout({
       homeRoot: dirname(canonicalGlobalPath),
@@ -324,6 +305,69 @@ function withGlobalConfigLayerLock<T>(
   } finally {
     globalLock.release();
   }
+}
+
+/**
+ * The location the scoped machinery reads its GLOBAL layer from. A
+ * --config pointed at the overlay itself is not a global layer — the
+ * overlay is the mutation TARGET — so the global document is re-pointed
+ * at the OWNING home. That also keeps the global-layer lock on the home
+ * config instead of the overlay file (which the mutation itself locks),
+ * so the aliased case cannot self-deadlock.
+ */
+function scopedGlobalLayerLocation(
+  options: ScopedRuntimeConfigLocation,
+): ScopedRuntimeConfigLocation {
+  if (options.configPath === undefined) {
+    return options;
+  }
+
+  const scope =
+    options.characterScope ??
+    deriveRuntimeConfigCharacterScope({
+      loadedConfig: loadProject02RuntimeConfig(options),
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+      ...(options.characterId === undefined
+        ? {}
+        : {characterId: options.characterId}),
+    });
+
+  if (
+    scope === undefined ||
+    canonicalRuntimeConfigMutationPath(options.configPath.trim()) !==
+      canonicalRuntimeConfigMutationPath(
+        characterOverlayConfigPath(scope.dataRoot),
+      )
+  ) {
+    return options;
+  }
+
+  return Object.freeze({
+    ...(options.env === undefined ? {} : {env: options.env}),
+    storeRoot: homeRootForCharacterDataDir(scope.dataRoot),
+    ...(options.characterId === undefined
+      ? {}
+      : {characterId: options.characterId}),
+    ...(options.characterScope === undefined
+      ? {}
+      : {characterScope: options.characterScope}),
+  });
+}
+
+/**
+ * Read-only preflight for CLI verbs: validates the global layer the
+ * scoped machinery will actually read (the OWNING home's config, even
+ * when --config aliases the overlay), before ensure materializes any
+ * durable character state.
+ */
+export function assertScopedGlobalLayerLoadable(
+  options: ScopedRuntimeConfigLocation,
+): void {
+  assertGlobalConfigLoadableForCharacterScope(
+    loadProject02RuntimeConfig(scopedGlobalLayerLocation(options)),
+  );
 }
 
 function verifyScopedExpectation(options: {

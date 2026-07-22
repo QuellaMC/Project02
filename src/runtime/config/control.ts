@@ -13,7 +13,10 @@ import {
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
-import {acquireLocalRuntimeMutationLockSync} from '../storage/mutation-lock.ts';
+import {
+  acquireLocalRuntimeMutationLockSync,
+  LocalRuntimeMutationLockBusyError,
+} from '../storage/mutation-lock.ts';
 import {
   characterOverlayConfigPath,
   deriveRuntimeConfigCharacterScope,
@@ -202,10 +205,7 @@ function withExpectationOverlayLock<T>(
       resourceKey: `runtime-control-file:${canonicalOverlayPath}`,
     });
   } catch (error: unknown) {
-    // A lock root that cannot exist means no concurrent scoped writer
-    // can be mid-write either; let the mutation surface the store
-    // problem with its own precise error instead of masking it here.
-    if (error instanceof LocalRuntimeStorageContractError) {
+    if (lockFailureProvesNoOverlayWriter(error)) {
       return run();
     }
 
@@ -217,6 +217,21 @@ function withExpectationOverlayLock<T>(
   } finally {
     overlayLock.release();
   }
+}
+
+/**
+ * True only for lock-acquisition failures that prove no scoped writer
+ * can hold the lock either (an uncreatable lock root in a hostile
+ * store); the mutation then surfaces the store problem with its own
+ * precise error. A BUSY lock proves the opposite — a scoped writer is
+ * active right now — so the expectation must abort instead of
+ * verifying unlocked and racing that writer's commit.
+ */
+export function lockFailureProvesNoOverlayWriter(error: unknown): boolean {
+  return (
+    error instanceof LocalRuntimeStorageContractError &&
+    !(error instanceof LocalRuntimeMutationLockBusyError)
+  );
 }
 
 function assertRuntimeConfigControlOperation(

@@ -6,6 +6,7 @@ import {describe, expect, it} from 'vitest';
 import {
   applyRuntimePluginConfigControlOperation,
   createLayeredRuntimeConfigFingerprint,
+  lockFailureProvesNoOverlayWriter,
   defaultRuntimeConfigPath,
   inspectRuntimePluginConfig,
   prepareRuntimePluginConfigControlOperation,
@@ -19,7 +20,11 @@ import {
   createRuntimePlugin,
   type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
-import {ensureCharacterDataStamp} from '../../src/runtime/storage/index.ts';
+import {
+  ensureCharacterDataStamp,
+  LocalRuntimeStorageContractError,
+} from '../../src/runtime/storage/index.ts';
+import {acquireLocalRuntimeMutationLockSync} from '../../src/runtime/storage/mutation-lock.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
@@ -457,6 +462,53 @@ describe('runtime plugin config control', () => {
       'Cannot update plugin config because the resulting config is invalid: Unknown config field "undeclaredSibling"',
     );
     expect(readConfigFile(fixture.configPath)).toEqual(invalidConfig);
+  });
+
+  it('aborts the layered expectation when the overlay lock is busy, and bypasses only setup failures', () => {
+    const root = createTestTempRoot('project02-overlay-lock-busy-');
+    const locksRoot = join(root, '.locks');
+    const held = acquireLocalRuntimeMutationLockSync({
+      locksRoot,
+      resourceKey: 'runtime-control-file:probe',
+    });
+
+    try {
+      // A busy lock proves a scoped writer is active: the expectation
+      // must abort rather than verify unlocked and race that writer.
+      expect(() =>
+        acquireLocalRuntimeMutationLockSync({
+          locksRoot,
+          resourceKey: 'runtime-control-file:probe',
+          waitTimeoutMs: 0,
+        }),
+      ).toThrow();
+
+      try {
+        acquireLocalRuntimeMutationLockSync({
+          locksRoot,
+          resourceKey: 'runtime-control-file:probe',
+          waitTimeoutMs: 0,
+        });
+        throw new Error('Expected the second acquisition to be busy.');
+      } catch (error: unknown) {
+        expect(lockFailureProvesNoOverlayWriter(error)).toBe(false);
+      }
+    } finally {
+      held.release();
+    }
+
+    // An uncreatable lock root proves no writer can hold it either.
+    expect(
+      lockFailureProvesNoOverlayWriter(
+        new LocalRuntimeStorageContractError(
+          'write_failed',
+          'Could not create the lock root.',
+        ),
+      ),
+    ).toBe(true);
+    expect(lockFailureProvesNoOverlayWriter(new Error('unrelated'))).toBe(
+      false,
+    );
   });
 
   it('routes a direct overlay secret set to the owning home env file', async () => {

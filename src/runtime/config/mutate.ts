@@ -12,6 +12,7 @@ import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {
   characterBindingFileName,
   characterDataDirectoryName,
+  createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
   homeRootForCharacterDataDir,
 } from '../storage/layout-contract.ts';
@@ -117,10 +118,16 @@ function applyRuntimeConfigMutationWithLocks(
     location.canonicalSelectedConfigPath,
   );
 
-  if (overlayLocatedTarget && options.characterScopeManaged !== true) {
-    assertOverlayLocatedTargetIsInitialized(
-      location.canonicalSelectedConfigPath,
-    );
+  if (options.characterScopeManaged !== true) {
+    if (overlayLocatedTarget) {
+      assertOverlayLocatedTargetIsInitialized(
+        location.canonicalSelectedConfigPath,
+      );
+    } else {
+      assertTargetNotInsideCharacterDataDir(
+        location.canonicalSelectedConfigPath,
+      );
+    }
   }
 
   const mutationLease = acquireRuntimeConfigMutationLease(location);
@@ -523,19 +530,52 @@ export function assertOverlayLocatedTargetIsInitialized(
   );
 }
 
-// Overlay locations are recognized structurally (a parent named
+// Character-data locations are recognized structurally (a parent named
 // character-data, the layout invariant) or by the binding stamp a
 // materialized data dir always carries.
+function characterDataLocationForConfigPath(
+  canonicalConfigPath: string,
+): string | undefined {
+  const containingDirectory = dirname(canonicalConfigPath);
+  const isDataLocation =
+    basename(dirname(containingDirectory)) === characterDataDirectoryName ||
+    existsSync(join(containingDirectory, characterBindingFileName));
+
+  return isDataLocation ? containingDirectory : undefined;
+}
+
+// The overlay is exactly the data directory's config.json (the layout
+// names it); any other file there is not a config target at all.
 export function selectedConfigPathIsCharacterOverlay(
   selectedConfigPath: string,
 ): boolean {
   const canonicalConfigPath =
     canonicalRuntimeConfigMutationPath(selectedConfigPath);
-  const containingDirectory = dirname(canonicalConfigPath);
+  const dataRoot = characterDataLocationForConfigPath(canonicalConfigPath);
 
   return (
-    basename(dirname(containingDirectory)) === characterDataDirectoryName ||
-    existsSync(join(containingDirectory, characterBindingFileName))
+    dataRoot !== undefined &&
+    canonicalConfigPath ===
+      createLocalRuntimeStorageLayout({storeRoot: dataRoot}).configPath
+  );
+}
+
+// A non-overlay file inside a character-data directory is not a valid
+// mutation target: no reader ever loads it, so a "successful" write
+// would change no effective config while reporting success.
+function assertTargetNotInsideCharacterDataDir(
+  canonicalConfigPath: string,
+): void {
+  const dataRoot = characterDataLocationForConfigPath(canonicalConfigPath);
+
+  if (dataRoot === undefined) {
+    return;
+  }
+
+  throw new RuntimeConfigMutationError(
+    `Config file "${canonicalConfigPath}" sits in a character-data ` +
+      'directory but is not its overlay; the overlay for this directory ' +
+      `is "${createLocalRuntimeStorageLayout({storeRoot: dataRoot}).configPath}".`,
   );
 }
 

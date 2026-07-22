@@ -2,8 +2,8 @@ import {
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
   applyScopedRuntimeConfigControlOperation,
-  assertGlobalConfigLoadableForCharacterScope,
   assertRuntimeConfigSecretScopeAllowed,
+  assertScopedGlobalLayerLoadable,
   assertScopedMutationOperationAllowed,
   createRuntimeConfigInspectShape,
   ensureCharacterDataDir,
@@ -379,7 +379,7 @@ async function runCharacterScopedRuntimeConfigCommand(
   // Dialect violations and a broken global layer fail before ensure
   // materializes the stamp or data marker for the character.
   assertScopedMutationOperationAllowed(command.operation);
-  assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
+  assertScopedGlobalLayerLoadable({...location, characterId});
   await ensureCharacterScopedMutationTarget(target);
 
   const result = applyScopedRuntimeConfigControlOperation({

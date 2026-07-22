@@ -13,6 +13,7 @@ export {
   type RuntimeLocationCliState,
 } from './env-file.ts';
 export {
+  lockFailureProvesNoOverlayWriter,
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
@@ -62,6 +63,7 @@ export {
 } from './character-data-init.ts';
 export {
   assertGlobalConfigLoadableForCharacterScope,
+  assertScopedGlobalLayerLoadable,
   assertScopedMutationOperationAllowed,
   applyScopedRuntimeConfigControlOperation,
   applyScopedRuntimePluginConfigControlOperation,
