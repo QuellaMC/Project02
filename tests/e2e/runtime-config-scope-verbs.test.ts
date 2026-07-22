@@ -203,6 +203,33 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
+  it('rejects a global-only field before creating any character state', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-preflight-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.character',
+      'nova',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain(
+      'Config field "project02.character" is global-only; set it in the ' +
+        'home config.json, not the character overlay.',
+    );
+    // The dialect violation failed before ensure ran: no stamp, no
+    // data directory, no home marker.
+    expect(existsSync(dataRoot)).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
   it('refuses to write into a data directory stamped for another character', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-stamp-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
@@ -257,6 +284,30 @@ describe('overlay files reached through --config directly', () => {
       version: 'project02.config.v2',
       project02: {roleModelProvider: 'local'},
     });
+  });
+
+  it('refuses a direct overlay write into an unstamped data directory', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--config',
+      overlayPath,
+      'set',
+      'project02.roleModelProvider',
+      'local',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('has no binding stamp');
+    // The guard runs before the mutation lock: the data directory was
+    // never created, not even its lock root.
+    expect(existsSync(dataRoot)).toBe(false);
   });
 
   it('rejects global-only fields instead of writing them into the overlay', async () => {

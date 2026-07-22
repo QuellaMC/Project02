@@ -14,6 +14,7 @@ import {
   characterDataDirectoryName,
   createProject02HomeLayout,
 } from '../storage/layout-contract.ts';
+import {readCharacterBinding} from '../storage/character-binding.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -54,6 +55,13 @@ export type ApplyRuntimeConfigMutationOptions = {
   readonly env?: NodeJS.ProcessEnv;
   readonly expectedFingerprint?: string;
   readonly storeRoot?: string;
+  /**
+   * Set by the character-scope mutation seam, which initializes the
+   * data directory (home guard plus binding stamp) before mutating.
+   * Direct path selection leaves this unset, so an overlay-located
+   * target must already carry a matching binding stamp.
+   */
+  readonly characterScopeManaged?: boolean;
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 };
@@ -104,6 +112,16 @@ function applyRuntimeConfigMutationWithLocks(
     options,
     anticipatedEnvPath,
   );
+  const overlayLocatedTarget = selectedConfigPathIsCharacterOverlay(
+    location.canonicalSelectedConfigPath,
+  );
+
+  if (overlayLocatedTarget && options.characterScopeManaged !== true) {
+    assertOverlayLocatedTargetIsInitialized(
+      location.canonicalSelectedConfigPath,
+    );
+  }
+
   const mutationLease = acquireRuntimeConfigMutationLease(location);
 
   try {
@@ -137,9 +155,7 @@ function applyRuntimeConfigMutationWithLocks(
       });
     }
 
-    if (
-      selectedConfigPathIsCharacterOverlay(location.canonicalSelectedConfigPath)
-    ) {
+    if (overlayLocatedTarget) {
       assertOverlayLocatedCandidateStaysCharacterScoped(
         candidate.preparedCandidate.config,
       );
@@ -437,6 +453,15 @@ function bootstrapRuntimeConfig(options: {
  * here: a --config pointed straight at the overlay gets the same field
  * allowlist as --character.
  */
+export function characterOverlayGlobalOnlyFieldMessage(
+  fieldPath: string,
+): string {
+  return (
+    `Config field "${fieldPath}" is global-only; set it in the home ` +
+    'config.json, not the character overlay.'
+  );
+}
+
 export function assertOverlayLocatedCandidateStaysCharacterScoped(
   candidate: Project02RuntimeConfig,
 ): void {
@@ -452,11 +477,48 @@ export function assertOverlayLocatedCandidateStaysCharacterScoped(
       section[field.name] !== undefined
     ) {
       throw new RuntimeConfigMutationError(
-        `Config field "${field.path}" is global-only; set it in the home ` +
-          'config.json, not the character overlay.',
+        characterOverlayGlobalOnlyFieldMessage(field.path),
       );
     }
   }
+}
+
+// The scoped seam stamps a data directory before writing into it; a
+// directly selected overlay path must find that stamp already present,
+// or the write would create durable character state the runtime later
+// refuses to open. Runs before the mutation lock so even the lock root
+// leaves no trace in an uninitialized directory.
+function assertOverlayLocatedTargetIsInitialized(
+  canonicalConfigPath: string,
+): void {
+  const dataRoot = dirname(canonicalConfigPath);
+  const directoryCharacterId = basename(dataRoot);
+  const read = readCharacterBinding({storeRoot: dataRoot});
+
+  if (
+    read.status === 'bound' &&
+    read.binding.characterId === directoryCharacterId
+  ) {
+    return;
+  }
+
+  if (read.status === 'bound') {
+    throw new RuntimeConfigMutationError(
+      `Character data directory "${dataRoot}" holds history for character ` +
+        `"${read.binding.characterId}"; its config file cannot be edited ` +
+        `as "${directoryCharacterId}".`,
+    );
+  }
+
+  if (read.status === 'malformed') {
+    throw new RuntimeConfigMutationError(read.message);
+  }
+
+  throw new RuntimeConfigMutationError(
+    `Config file "${canonicalConfigPath}" sits in a character-data ` +
+      'directory that has no binding stamp; run the command with ' +
+      `--character ${directoryCharacterId} to initialize it first.`,
+  );
 }
 
 // Overlay locations are recognized structurally (a parent named

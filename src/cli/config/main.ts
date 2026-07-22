@@ -3,6 +3,7 @@ import {
   applyRuntimePluginConfigControlOperation,
   applyScopedRuntimeConfigControlOperation,
   assertRuntimeConfigSecretScopeAllowed,
+  assertScopedMutationOperationAllowed,
   createRuntimeConfigInspectShape,
   ensureCharacterDataDir,
   defaultRuntimeConfigPath,
@@ -370,6 +371,9 @@ async function runCharacterScopedRuntimeConfigCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
+  // Dialect violations fail before ensure materializes the stamp or
+  // data marker for the character.
+  assertScopedMutationOperationAllowed(command.operation);
   await ensureCharacterScopedMutationTarget(target);
 
   const result = applyScopedRuntimeConfigControlOperation({

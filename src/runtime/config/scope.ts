@@ -36,6 +36,7 @@ import {
   applyRuntimeConfigMutation,
   assertOverlayLocatedCandidateStaysCharacterScoped,
   canonicalRuntimeConfigMutationPath,
+  characterOverlayGlobalOnlyFieldMessage,
   createRuntimeConfigMutationBase,
   prepareRuntimeConfigMutationCandidate,
   RuntimeConfigConflictError,
@@ -58,6 +59,7 @@ import {
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type RuntimeConfigCharacterScope,
+  type RuntimeConfigMutationOperation,
 } from './types.ts';
 
 export type RuntimeConfigMutationScopeSelector = 'global' | 'character';
@@ -191,6 +193,29 @@ export function applyScopedRuntimePluginConfigControlOperation(
  * overlay (the mutation machinery takes the overlay's own lock inside),
  * and no path takes them in the reverse order.
  */
+/**
+ * Deterministic preflight for character-scoped mutations: a dialect
+ * violation (global-only field) is rejected here, before any ensure
+ * step materializes a stamp or data marker for the character.
+ */
+export function assertScopedMutationOperationAllowed(
+  operation: RuntimeConfigMutationOperation,
+): void {
+  if (operation.kind !== 'set' && operation.kind !== 'unset') {
+    return;
+  }
+
+  const field = project02RuntimeConfigFieldDefinitions().find(
+    definition => definition.path === operation.path,
+  );
+
+  if (field !== undefined && !field.scopes.includes('character')) {
+    throw new RuntimeConfigMutationError(
+      characterOverlayGlobalOnlyFieldMessage(field.path),
+    );
+  }
+}
+
 function withGlobalConfigLayerLock<T>(
   options: ScopedRuntimeConfigLocation,
   run: (context: {
@@ -308,6 +333,9 @@ function applyCharacterScopedMutation(
       const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
       const result = applyRuntimeConfigMutation({
         configPath: overlayPath,
+        // This seam's callers initialize the data directory (home
+        // guard plus stamp) before mutating; see the option's doc.
+        characterScopeManaged: true,
         ...(options.env === undefined ? {} : {env: options.env}),
         operation: options.operation,
         ...(options.expectedFingerprint === undefined

@@ -183,6 +183,15 @@ function withExpectationOverlayLock<T>(
   const canonicalOverlayPath = canonicalRuntimeConfigMutationPath(
     characterOverlayConfigPath(characterScope.dataRoot),
   );
+
+  // A --config pointed directly at the overlay makes the "global" path
+  // the overlay itself; pre-locking it here would deadlock against the
+  // mutation's own lock on the same file. That single-file case is
+  // covered by the mutation lock alone.
+  if (resolveRuntimeConfigControlTargetPath(options) === canonicalOverlayPath) {
+    return run();
+  }
+
   let overlayLock: ReturnType<typeof acquireLocalRuntimeMutationLockSync>;
 
   try {

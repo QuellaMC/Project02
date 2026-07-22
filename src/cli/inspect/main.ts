@@ -1,4 +1,5 @@
-import {existsSync} from 'node:fs';
+import {existsSync, readdirSync} from 'node:fs';
+import {join} from 'node:path';
 
 import {readFlagValue} from '../shared/flags.ts';
 import type {CharacterProfile} from '../../core/index.ts';
@@ -8,7 +9,9 @@ import {
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
+  evaluateCharacterDataStamp,
   isMissingDefaultSessionStore,
+  LocalRuntimeStorageContractError,
   readCharacterBinding,
   type CharacterBindingReadResult,
   type LocalRuntimeSessionMetadata,
@@ -295,15 +298,20 @@ async function writeSessionList(
   } catch (error: unknown) {
     // An absent data directory — or one holding only control state
     // (binding stamp, overlay, locks) from a config-only workflow — has
-    // no sessions. Session artifacts without a listable catalog are
-    // corruption or foreign content, never an empty view.
+    // no sessions. Session artifacts without a listable catalog, or any
+    // entry outside the control allowlist while the data marker is
+    // missing, are corruption or foreign content, never an empty view.
     const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
     const hasSessionArtifacts =
       existsSync(layout.schemaPath) ||
       existsSync(layout.sessionCatalogPath) ||
       existsSync(layout.sessionsRoot);
 
-    if (!isMissingDefaultSessionStore(error) || hasSessionArtifacts) {
+    if (
+      !isMissingDefaultSessionStore(error) ||
+      hasSessionArtifacts ||
+      !dataDirHoldsOnlyControlEntries(dataRoot)
+    ) {
       throw error;
     }
   }
@@ -326,6 +334,31 @@ async function writeSessionList(
   } satisfies InspectSessionListOutput);
 }
 
+// Entries a control-only data directory may hold besides sessions:
+// the overlay config, the binding stamp, and the lock root.
+function dataDirHoldsOnlyControlEntries(dataRoot: string): boolean {
+  const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
+  let entries: readonly string[];
+
+  try {
+    entries = readdirSync(dataRoot);
+  } catch {
+    // An unreadable or absent root holds nothing durable to hide; the
+    // missing-store classification above already matched.
+    return true;
+  }
+
+  return entries.every(entry => {
+    const entryPath = join(dataRoot, entry);
+
+    return (
+      entryPath === layout.configPath ||
+      entryPath === layout.locksRoot ||
+      entryPath === layout.characterBindingPath
+    );
+  });
+}
+
 async function writeSessionEvidence(
   args: InspectCliArgs & {readonly mode: 'session'},
   stdout: NodeJS.WritableStream,
@@ -338,6 +371,21 @@ async function writeSessionEvidence(
       runtimeConfig.resolvedConfig.project02.character,
     ),
   };
+  // The binding holds at inspection: a data directory stamped for
+  // another character fails here exactly as durable chat does, even
+  // when the selected session carries no character evidence yet.
+  const stamp = evaluateCharacterDataStamp({
+    storageOptions: storage,
+    characterId: runtimeConfig.resolvedConfig.project02.character,
+  });
+
+  if (stamp?.status === 'rejected') {
+    throw new LocalRuntimeStorageContractError(
+      'character_binding_rejected',
+      stamp.message,
+    );
+  }
+
   const sessionStore = createLocalRuntimeSessionStore(storage);
   const session = await sessionStore.readSession(args.sessionId);
   // The binding holds at inspection too: foreign evidence copied into a

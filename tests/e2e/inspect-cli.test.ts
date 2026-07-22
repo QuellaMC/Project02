@@ -611,6 +611,70 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('reports a foreign entry in the data directory instead of an empty session list', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-foreign-entry-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A marker-less data directory holding anything outside the
+    // control allowlist is foreign or corrupt, never an empty view.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Error:');
+  });
+
+  it('rejects a session read when the binding stamp names another character', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-foreign-stamp-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A copied data directory: mira's path carries nova's stamp. The
+    // binding must hold at inspection even when the selected session
+    // carries no character evidence at all.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'nova',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--session', 'any-session'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('holds history for character "nova"');
+  });
+
   it('lists no sessions for a data directory holding only control state', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-control-only-');
     let stdout = '';

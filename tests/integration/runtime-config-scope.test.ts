@@ -7,6 +7,7 @@ import {structuredConfigPlugin} from '../support/runtime-config-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
+  applyRuntimeConfigControlOperation,
   applyScopedRuntimeConfigControlOperation,
   applyScopedRuntimePluginConfigControlOperation,
   characterOverlayConfigPath,
@@ -19,7 +20,10 @@ import {
   RuntimeConfigConflictError,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  characterDataDirPath,
+  ensureCharacterDataStamp,
+} from '../../src/runtime/storage/index.ts';
 
 function seededHome(): {
   readonly homeRoot: string;
@@ -399,6 +403,43 @@ describe('configured character id normalization', () => {
         scope: 'character',
       }).characterScope,
     ).toMatchObject({characterId: 'mira'});
+  });
+});
+
+describe('global control writes aimed directly at the overlay path', () => {
+  it('completes without pre-locking the overlay against itself', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+    const plugin = structuredConfigPlugin('scope.direct-overlay');
+
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const globalBefore = readFileSync(configPath, 'utf8');
+    // The "global" layer aliases the overlay here; the expectation
+    // pre-lock must not take the file lock the mutation itself needs.
+    const result = applyRuntimeConfigControlOperation({
+      configPath: overlayPath,
+      storeRoot: homeRoot,
+      env: {},
+      expectedFingerprint: inspectRuntimePluginConfig({
+        configPath: overlayPath,
+        storeRoot: homeRoot,
+        env: {},
+        manifest: plugin.manifest,
+        pluginManifests: [plugin.manifest],
+      }).fingerprint,
+      operation: {kind: 'plugin_enable', pluginId: 'scope.direct-overlay'},
+    });
+
+    expect(result.configPath).toBe(overlayPath);
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: runtimeConfigVersion,
+      plugins: {'scope.direct-overlay': {enabled: true}},
+    });
+    expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
   });
 });
 

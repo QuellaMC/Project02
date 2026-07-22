@@ -119,7 +119,7 @@ export async function ensureCharacterDataStamp(options: {
   readonly characterId: string;
   readonly now?: () => string;
 }): Promise<EnsureCharacterDataStampResult> {
-  const existing = evaluateExistingStamp(options);
+  const existing = evaluateCharacterDataStamp(options);
 
   if (existing !== undefined) {
     return existing;
@@ -132,7 +132,7 @@ export async function ensureCharacterDataStamp(options: {
   });
 
   try {
-    const reread = evaluateExistingStamp(options);
+    const reread = evaluateCharacterDataStamp(options);
 
     if (reread !== undefined) {
       return reread;
@@ -161,7 +161,12 @@ export async function ensureCharacterDataStamp(options: {
   });
 }
 
-function evaluateExistingStamp(options: {
+/**
+ * Read-only twin of ensureCharacterDataStamp: reports how an existing
+ * stamp relates to the requested character without ever writing one.
+ * Returns undefined when no stamp exists yet.
+ */
+export function evaluateCharacterDataStamp(options: {
   readonly storageOptions: LocalRuntimeStorageLayoutOptions;
   readonly characterId: string;
 }): EnsureCharacterDataStampResult | undefined {

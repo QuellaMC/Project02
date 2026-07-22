@@ -1,6 +1,7 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 
 import {describe, expect, it} from 'vitest';
 
@@ -403,6 +404,28 @@ describe('relay CLI compatibility wrapper', () => {
       expect(observedMessages).toEqual([message]);
     },
   );
+
+  it('rejects missing input before materializing any character state', async () => {
+    const homeRoot = createTestTempRoot('project02-relay-no-input-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    const exitCode = await runConfiguredRelayCli(['--store', homeRoot], {
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {},
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe('Error: Provide exactly one non-empty message.\n');
+    // Input validation ran before startup: no home marker and no
+    // character data directory were created.
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+  });
 
   it('rejects missing input with the existing one-line message error', async () => {
     let stdout = '';

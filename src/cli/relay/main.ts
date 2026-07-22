@@ -122,6 +122,20 @@ export async function runConfiguredRelayCli(
   options: ConfiguredRelayCliOptions,
 ): Promise<number> {
   const {location, messageArgs} = parseRelayLocationArgs(args);
+
+  // Reject malformed input before startup materializes any durable
+  // character state; runRelayCli re-validates for injected-host runs.
+  try {
+    readMessageArg(messageArgs);
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      options.stderr.write(`Error: ${error.message}\n`);
+      return 1;
+    }
+
+    throw error;
+  }
+
   let startup: Awaited<ReturnType<typeof resolveRuntimeCliStartup>>;
 
   try {

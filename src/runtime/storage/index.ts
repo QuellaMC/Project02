@@ -52,6 +52,7 @@ export {
   characterBindingFormat,
   characterBindingPath,
   ensureCharacterDataStamp,
+  evaluateCharacterDataStamp,
   readCharacterBinding,
   type CharacterBinding,
   type CharacterBindingReadResult,

@@ -61,6 +61,7 @@ export {
   type EnsureCharacterDataDirResult,
 } from './character-data-init.ts';
 export {
+  assertScopedMutationOperationAllowed,
   applyScopedRuntimeConfigControlOperation,
   applyScopedRuntimePluginConfigControlOperation,
   assertRuntimeConfigSecretScopeAllowed,
