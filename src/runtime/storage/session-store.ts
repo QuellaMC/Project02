@@ -361,6 +361,7 @@ async function ensureInitializedStore(
       filePath: layout.schemaPath,
       content: `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
           createdAt,
         }),
       )}\n`,
@@ -439,16 +440,18 @@ async function localRuntimeStoreHasExistingContent(
   }
 }
 
+// Entries a character-data directory may contain besides sessions: the
+// overlay config, the binding stamp, the data marker, and the lock root.
+// Anything else marks the directory as foreign and blocks initialization.
 function isRuntimeHomeControlEntry(
   layout: LocalRuntimeStorageLayout,
   entryPath: string,
 ): boolean {
   return (
     entryPath === layout.configPath ||
-    entryPath === layout.envPath ||
     entryPath === layout.locksRoot ||
     entryPath === layout.characterBindingPath ||
-    entryPath === layout.characterPackagesRoot
+    entryPath === layout.schemaPath
   );
 }
 
@@ -461,7 +464,19 @@ async function readStorageSchemaMarker(
     failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`,
   });
 
-  decodeStorageSchemaMarker(schema);
+  assertCharacterDataMarker(layout, decodeStorageSchemaMarker(schema));
+}
+
+function assertCharacterDataMarker(
+  layout: LocalRuntimeStorageLayout,
+  marker: ReturnType<typeof decodeStorageSchemaMarker>,
+): void {
+  if (marker.scope !== 'character-data') {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_schema_marker',
+      `Directory "${layout.storeRoot}" is a "${marker.scope}" directory, not a character data directory; select a character instead of the home itself.`,
+    );
+  }
 }
 
 async function readSessionCatalog(
@@ -531,7 +546,7 @@ function readStorageSchemaMarkerSync(layout: LocalRuntimeStorageLayout): void {
     failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`,
   });
 
-  decodeStorageSchemaMarker(schema);
+  assertCharacterDataMarker(layout, decodeStorageSchemaMarker(schema));
 }
 
 function readSessionCatalogEntrySync(

@@ -1,10 +1,10 @@
 /**
- * Store↔character binding: a store root binds permanently to one character
- * id at first durable activation. The binding file is written atomically
- * under the store mutation lock and is never rewritten; the id is
- * authoritative, while display names remain per-session historical facts.
- * The runtime deals in plain character-id strings here — it never imports
- * the characters module.
+ * Character data-dir stamp: each `character-data/<id>/` directory carries
+ * a binding file naming the one character whose history it holds. The
+ * directory path already encodes the id; the stamp is the tamper guard
+ * that survives directory renames and copies. Written atomically under
+ * the data dir's mutation lock and never rewritten; display names remain
+ * per-session historical facts, so the stamp carries the id only.
  */
 import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -51,7 +51,7 @@ export function readCharacterBinding(
   try {
     source = readFileSync(path, 'utf8');
   } catch (error: unknown) {
-    // ENOTDIR: the store root is not a directory; the storage layer owns
+    // ENOTDIR: the data root is not a directory; the storage layer owns
     // that diagnosis, so the binding reads as absent here.
     if (
       isNodeErrorWithCode(error, 'ENOENT') ||
@@ -96,86 +96,54 @@ export function readCharacterBinding(
   });
 }
 
-export type CharacterBindingReconcileResult =
+export type EnsureCharacterDataStampResult =
   | {
-      readonly status: 'bound';
+      readonly status: 'stamped';
       readonly characterId: string;
-      readonly adopted: 'already_bound' | 'fresh_store' | 'existing_history';
+      readonly created: boolean;
     }
   | {
       readonly status: 'rejected';
       readonly code:
-        | 'character_binding_mismatch'
-        | 'character_binding_malformed'
-        | 'store_character_mismatch';
+        'character_binding_mismatch' | 'character_binding_malformed';
       readonly message: string;
     };
 
 /**
- * Applies the binding decision table for a durable writer composition
- * root. `deriveStoreCharacterIds` runs only when no binding exists yet: it
- * reports every distinct character id recorded in the store's sessions so
- * legacy stores adopt their own history instead of the configured id
- * silently rebinding them.
+ * Creates the stamp on first use and verifies it afterwards. A mismatch
+ * means the directory's history belongs to another character (renamed or
+ * copied data dir) and is never adopted silently.
  */
-export async function reconcileCharacterBinding(options: {
-  readonly storageOptions?: LocalRuntimeStorageLayoutOptions;
-  readonly configuredCharacterId: string;
-  readonly deriveStoreCharacterIds: () => Promise<readonly string[]>;
+export async function ensureCharacterDataStamp(options: {
+  readonly storageOptions: LocalRuntimeStorageLayoutOptions;
+  readonly characterId: string;
   readonly now?: () => string;
-}): Promise<CharacterBindingReconcileResult> {
-  const storageOptions = options.storageOptions ?? {};
-  const layout = createLocalRuntimeStorageLayout(storageOptions);
-  const configuredCharacterId = options.configuredCharacterId;
-  const existing = evaluateExistingBinding({
-    storageOptions,
-    configuredCharacterId,
-  });
+}): Promise<EnsureCharacterDataStampResult> {
+  const existing = evaluateExistingStamp(options);
 
   if (existing !== undefined) {
     return existing;
   }
 
-  const storeCharacterIds = await options.deriveStoreCharacterIds();
-  const foreignIds = storeCharacterIds.filter(
-    characterId => characterId !== configuredCharacterId,
-  );
-
-  if (foreignIds.length > 0) {
-    return Object.freeze({
-      status: 'rejected',
-      code: 'store_character_mismatch',
-      message:
-        `Store "${layout.storeRoot}" contains history for character ` +
-        `${storeCharacterIds.map(id => `"${id}"`).join(', ')} but ` +
-        `project02.character is "${configuredCharacterId}". Set ` +
-        `project02.character to the store's character, or point ` +
-        `project02.storeRoot at a different store for ` +
-        `"${configuredCharacterId}".`,
-    });
-  }
-
+  const layout = createLocalRuntimeStorageLayout(options.storageOptions);
   const lock = await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
     resourceKey: characterBindingLockResourceKey,
   });
 
   try {
-    const reread = evaluateExistingBinding({
-      storageOptions,
-      configuredCharacterId,
-    });
+    const reread = evaluateExistingStamp(options);
 
     if (reread !== undefined) {
       return reread;
     }
 
     await atomicReplaceFile({
-      targetPath: characterBindingPath(storageOptions),
+      targetPath: characterBindingPath(options.storageOptions),
       content: `${JSON.stringify(
         {
           format: characterBindingFormat,
-          characterId: configuredCharacterId,
+          characterId: options.characterId,
           boundAt: (options.now ?? defaultBindingTimestamp)(),
         },
         null,
@@ -187,17 +155,16 @@ export async function reconcileCharacterBinding(options: {
   }
 
   return Object.freeze({
-    status: 'bound',
-    characterId: configuredCharacterId,
-    adopted:
-      storeCharacterIds.length === 0 ? 'fresh_store' : 'existing_history',
+    status: 'stamped',
+    characterId: options.characterId,
+    created: true,
   });
 }
 
-function evaluateExistingBinding(options: {
+function evaluateExistingStamp(options: {
   readonly storageOptions: LocalRuntimeStorageLayoutOptions;
-  readonly configuredCharacterId: string;
-}): CharacterBindingReconcileResult | undefined {
+  readonly characterId: string;
+}): EnsureCharacterDataStampResult | undefined {
   const layout = createLocalRuntimeStorageLayout(options.storageOptions);
   const read = readCharacterBinding(options.storageOptions);
 
@@ -210,11 +177,11 @@ function evaluateExistingBinding(options: {
   }
 
   if (read.status === 'bound') {
-    if (read.binding.characterId === options.configuredCharacterId) {
+    if (read.binding.characterId === options.characterId) {
       return Object.freeze({
-        status: 'bound',
+        status: 'stamped',
         characterId: read.binding.characterId,
-        adopted: 'already_bound',
+        created: false,
       });
     }
 
@@ -222,11 +189,11 @@ function evaluateExistingBinding(options: {
       status: 'rejected',
       code: 'character_binding_mismatch',
       message:
-        `Store "${layout.storeRoot}" is permanently bound to character ` +
-        `"${read.binding.characterId}"; project02.character is ` +
-        `"${options.configuredCharacterId}". Set project02.character back ` +
-        `to "${read.binding.characterId}", or point project02.storeRoot at ` +
-        `a different store for "${options.configuredCharacterId}".`,
+        `Character data directory "${layout.storeRoot}" holds history for ` +
+        `character "${read.binding.characterId}" but character ` +
+        `"${options.characterId}" was requested. Select character ` +
+        `"${read.binding.characterId}", or remove the copied directory and ` +
+        `let the runtime create a fresh one for "${options.characterId}".`,
     });
   }
 
@@ -239,7 +206,8 @@ function malformedBinding(path: string): CharacterBindingReadResult {
     message:
       `Character binding file "${path}" is unreadable or does not match ` +
       `format "${characterBindingFormat}". Restore it from backup; a ` +
-      "store's binding is permanent and is never rewritten by the runtime.",
+      "data directory's binding is permanent and is never rewritten by " +
+      'the runtime.',
   });
 }
 

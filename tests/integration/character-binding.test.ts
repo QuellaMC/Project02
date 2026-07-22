@@ -9,9 +9,10 @@ import {createUserMessageRuntimeEvent} from '../../src/core/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/index.ts';
 import {
   characterBindingPath,
+  characterDataDirPath,
   createDurableChatRuntime,
+  ensureCharacterDataStamp,
   readCharacterBinding,
-  reconcileCharacterBinding,
 } from '../../src/runtime/storage/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 
@@ -30,7 +31,7 @@ function visibleReplyAdapter(text: string): RoleModelAdapter {
 }
 
 async function runOneTurn(options: {
-  readonly storeRoot: string;
+  readonly homeRoot: string;
   readonly character: {readonly id: string; readonly displayName: string};
   readonly userDisplayName?: string;
   readonly sessionSelection:
@@ -39,13 +40,14 @@ async function runOneTurn(options: {
   readonly reply: string;
 }): Promise<{readonly speakerNames: readonly string[]}> {
   const runtime = await createDurableChatRuntime({
-    storeRoot: options.storeRoot,
+    homeRoot: options.homeRoot,
     character: options.character,
     ...(options.userDisplayName === undefined
       ? {}
       : {userDisplayName: options.userDisplayName}),
     ...options.sessionSelection,
   });
+  const dataRoot = characterDataDirPath(options.homeRoot, options.character.id);
 
   try {
     const result = await runLocalUserMessageEvent({
@@ -53,7 +55,7 @@ async function runOneTurn(options: {
       session: runtime.session,
       logStore: runtime.logStore,
       pluginHost: createDefaultProject02PluginHost({
-        storeRoot: options.storeRoot,
+        storeRoot: dataRoot,
         sessionId: runtime.session.id,
       }),
       roleModelAdapter: visibleReplyAdapter(options.reply),
@@ -71,22 +73,21 @@ async function runOneTurn(options: {
   }
 }
 
-describe('character binding decision table', () => {
-  it('binds a fresh store to the configured character and never rebinds', async () => {
-    const storeRoot = createTestTempRoot();
+describe('character data stamp', () => {
+  it('creates the stamp on first use and verifies it afterwards', async () => {
+    const dataRoot = createTestTempRoot();
 
-    const first = await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'mira',
-      deriveStoreCharacterIds: () => Promise.resolve([]),
+    const first = await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
     });
 
     expect(first).toMatchObject({
-      status: 'bound',
+      status: 'stamped',
       characterId: 'mira',
-      adopted: 'fresh_store',
+      created: true,
     });
-    expect(readCharacterBinding({storeRoot})).toMatchObject({
+    expect(readCharacterBinding({storeRoot: dataRoot})).toMatchObject({
       status: 'bound',
       binding: {
         format: 'project02.character-binding.v1',
@@ -94,145 +95,160 @@ describe('character binding decision table', () => {
       },
     });
 
-    const again = await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'mira',
-      deriveStoreCharacterIds: () => Promise.resolve([]),
+    const again = await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
     });
 
-    expect(again).toMatchObject({status: 'bound', adopted: 'already_bound'});
+    expect(again).toMatchObject({status: 'stamped', created: false});
   });
 
-  it('rejects a configured character that differs from the permanent binding, naming both ids and the recovery paths', async () => {
-    const storeRoot = createTestTempRoot();
+  it('rejects a data directory stamped for another character, naming both ids and the recovery', async () => {
+    const dataRoot = createTestTempRoot();
 
-    await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'nova',
-      deriveStoreCharacterIds: () => Promise.resolve([]),
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'nova',
     });
-    const bindingBefore = readFileSync(
-      characterBindingPath({storeRoot}),
+    const stampBefore = readFileSync(
+      characterBindingPath({storeRoot: dataRoot}),
       'utf8',
     );
-    const rejected = await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'mira',
-      deriveStoreCharacterIds: () => Promise.resolve([]),
+    const rejected = await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
     });
 
     expect(rejected.status).toBe('rejected');
     if (rejected.status !== 'rejected') {
-      throw new Error('Expected rejected reconcile.');
+      throw new Error('Expected rejected stamp.');
     }
 
     expect(rejected.code).toBe('character_binding_mismatch');
     expect(rejected.message).toContain('"nova"');
     expect(rejected.message).toContain('"mira"');
-    expect(rejected.message).toContain('Set project02.character back to');
-    expect(rejected.message).toContain('project02.storeRoot');
-    expect(readFileSync(characterBindingPath({storeRoot}), 'utf8')).toBe(
-      bindingBefore,
+    expect(rejected.message).toContain('Select character "nova"');
+    expect(
+      readFileSync(characterBindingPath({storeRoot: dataRoot}), 'utf8'),
+    ).toBe(stampBefore);
+  });
+
+  it('rejects a malformed stamp with the path, format, and restore guidance', async () => {
+    const dataRoot = createTestTempRoot();
+
+    writeFileSync(
+      characterBindingPath({storeRoot: dataRoot}),
+      '{broken',
+      'utf8',
     );
-  });
 
-  it('rejects adopting a legacy store whose history belongs to another character', async () => {
-    const storeRoot = createTestTempRoot();
-
-    const rejected = await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'mira',
-      deriveStoreCharacterIds: () => Promise.resolve(['nova']),
-    });
-
-    expect(rejected).toMatchObject({
-      status: 'rejected',
-      code: 'store_character_mismatch',
-    });
-    if (rejected.status !== 'rejected') {
-      throw new Error('Expected rejected reconcile.');
-    }
-
-    expect(rejected.message).toContain('"nova"');
-    expect(rejected.message).toContain('"mira"');
-    expect(readCharacterBinding({storeRoot})).toMatchObject({
-      status: 'absent',
-    });
-  });
-
-  it('adopts a legacy store whose history matches the configured character', async () => {
-    const storeRoot = createTestTempRoot();
-
-    const adopted = await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'mira',
-      deriveStoreCharacterIds: () => Promise.resolve(['mira']),
-    });
-
-    expect(adopted).toMatchObject({
-      status: 'bound',
-      adopted: 'existing_history',
-    });
-  });
-
-  it('rejects a malformed binding file with the path, format, and restore guidance', async () => {
-    const storeRoot = createTestTempRoot();
-
-    writeFileSync(characterBindingPath({storeRoot}), '{broken', 'utf8');
-
-    const rejected = await reconcileCharacterBinding({
-      storageOptions: {storeRoot},
-      configuredCharacterId: 'mira',
-      deriveStoreCharacterIds: () => Promise.resolve([]),
+    const rejected = await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
     });
 
     expect(rejected.status).toBe('rejected');
     if (rejected.status !== 'rejected') {
-      throw new Error('Expected rejected reconcile.');
+      throw new Error('Expected rejected stamp.');
     }
 
     expect(rejected.code).toBe('character_binding_malformed');
-    expect(rejected.message).toContain(characterBindingPath({storeRoot}));
+    expect(rejected.message).toContain(
+      characterBindingPath({storeRoot: dataRoot}),
+    );
     expect(rejected.message).toContain('project02.character-binding.v1');
     expect(rejected.message).toContain('Restore it from backup');
   });
 });
 
-describe('character binding through the durable runtime', () => {
-  it('binds on first activation, adopts legacy mira history, and blocks a different character', async () => {
-    const storeRoot = createTestTempRoot();
+describe('character data directories through the durable runtime', () => {
+  it('runs two characters out of one home with isolated data directories', async () => {
+    const homeRoot = createTestTempRoot();
+
+    const mira = await runOneTurn({
+      homeRoot,
+      character: testCharacterProfile,
+      sessionSelection: {newSessionId: 'shared-home'},
+      message: 'hello from mira side',
+      reply: 'mira here',
+    });
+    const nova = await runOneTurn({
+      homeRoot,
+      character: novaProfile,
+      sessionSelection: {newSessionId: 'shared-home'},
+      message: 'hello from nova side',
+      reply: 'nova here',
+    });
+
+    expect(mira.speakerNames).toEqual(['You', 'Mira']);
+    expect(nova.speakerNames).toEqual(['You', 'Nova']);
+    expect(
+      readCharacterBinding({
+        storeRoot: characterDataDirPath(homeRoot, 'mira'),
+      }),
+    ).toMatchObject({status: 'bound', binding: {characterId: 'mira'}});
+    expect(
+      readCharacterBinding({
+        storeRoot: characterDataDirPath(homeRoot, 'nova'),
+      }),
+    ).toMatchObject({status: 'bound', binding: {characterId: 'nova'}});
+
+    const miraResumed = await runOneTurn({
+      homeRoot,
+      character: testCharacterProfile,
+      sessionSelection: {sessionId: 'shared-home'},
+      message: 'still mira history only',
+      reply: 'mira remembers',
+    });
+
+    expect(miraResumed.speakerNames).toEqual(['You', 'Mira', 'You', 'Mira']);
+  });
+
+  it('recreates a missing stamp and rejects a tampered one', async () => {
+    const homeRoot = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {newSessionId: 'binding-e2e'},
+      sessionSelection: {newSessionId: 'stamp-life'},
       message: 'hello',
       reply: 'hello back',
     });
-    expect(readCharacterBinding({storeRoot})).toMatchObject({
-      status: 'bound',
-      binding: {characterId: 'mira'},
-    });
 
-    // Legacy adoption: remove the binding; the store's own history rebinds it.
-    rmSync(characterBindingPath({storeRoot}));
+    rmSync(characterBindingPath({storeRoot: dataRoot}));
     await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {sessionId: 'binding-e2e'},
+      sessionSelection: {sessionId: 'stamp-life'},
       message: 'again',
       reply: 'still here',
     });
-    expect(readCharacterBinding({storeRoot})).toMatchObject({
+    expect(readCharacterBinding({storeRoot: dataRoot})).toMatchObject({
       status: 'bound',
       binding: {characterId: 'mira'},
     });
 
+    // Simulate a copied/renamed directory: mira's data dir claims nova.
+    writeFileSync(
+      characterBindingPath({storeRoot: dataRoot}),
+      `${JSON.stringify(
+        {
+          format: 'project02.character-binding.v1',
+          characterId: 'nova',
+          boundAt: '2026-07-22T00:00:00.000Z',
+        },
+        null,
+        2,
+      )}\n`,
+      'utf8',
+    );
+
     await expect(
       createDurableChatRuntime({
-        storeRoot,
-        character: novaProfile,
-        newSessionId: 'nova-session',
+        homeRoot,
+        character: testCharacterProfile,
+        sessionId: 'stamp-life',
       }),
     ).rejects.toMatchObject({
       name: 'LocalRuntimeStorageContractError',
@@ -241,11 +257,11 @@ describe('character binding through the durable runtime', () => {
   });
 
   it('keeps historical display names for existing sessions after a rename and applies the new name to new sessions', async () => {
-    const storeRoot = createTestTempRoot();
+    const homeRoot = createTestTempRoot();
     const renamedMira = {id: 'mira', displayName: 'Mira Prime'} as const;
 
     await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: testCharacterProfile,
       sessionSelection: {newSessionId: 'rename-old'},
       message: 'first',
@@ -253,7 +269,7 @@ describe('character binding through the durable runtime', () => {
     });
 
     const resumed = await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: renamedMira,
       sessionSelection: {sessionId: 'rename-old'},
       message: 'second',
@@ -263,7 +279,7 @@ describe('character binding through the durable runtime', () => {
     expect(resumed.speakerNames).toEqual(['You', 'Mira', 'You', 'Mira']);
 
     const fresh = await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: renamedMira,
       sessionSelection: {newSessionId: 'rename-new'},
       message: 'third',
@@ -274,10 +290,10 @@ describe('character binding through the durable runtime', () => {
   });
 
   it('keeps historical user display names for existing sessions and applies the configured one to new sessions', async () => {
-    const storeRoot = createTestTempRoot();
+    const homeRoot = createTestTempRoot();
 
     await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: testCharacterProfile,
       userDisplayName: 'Mike',
       sessionSelection: {newSessionId: 'user-name-old'},
@@ -286,7 +302,7 @@ describe('character binding through the durable runtime', () => {
     });
 
     const resumed = await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: testCharacterProfile,
       userDisplayName: 'Michael',
       sessionSelection: {sessionId: 'user-name-old'},
@@ -297,7 +313,7 @@ describe('character binding through the durable runtime', () => {
     expect(resumed.speakerNames).toEqual(['Mike', 'Mira', 'Mike', 'Mira']);
 
     const fresh = await runOneTurn({
-      storeRoot,
+      homeRoot,
       character: testCharacterProfile,
       userDisplayName: 'Michael',
       sessionSelection: {newSessionId: 'user-name-new'},

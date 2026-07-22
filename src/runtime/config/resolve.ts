@@ -1,4 +1,7 @@
-import {createLocalRuntimeStorageLayout} from '../storage/layout-contract.ts';
+import {
+  characterDataDirPath,
+  createProject02HomeLayout,
+} from '../storage/layout-contract.ts';
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest,
@@ -118,9 +121,20 @@ export function resolveProject02RuntimeStoreRoot(options: {
     options.storeRoot ??
     storeRootForLoadedDefaultConfigPath(options.loadedConfig);
 
-  return createLocalRuntimeStorageLayout(
-    configuredStoreRoot === undefined ? {} : {storeRoot: configuredStoreRoot},
-  ).storeRoot;
+  return createProject02HomeLayout(
+    configuredStoreRoot === undefined ? {} : {homeRoot: configuredStoreRoot},
+  ).homeRoot;
+}
+
+// The per-character data directory every plugin file store and host
+// operation writes into; installed packages stay at the home level.
+export function characterDataRootForResolvedConfig(resolvedConfig: {
+  readonly project02: {readonly storeRoot: string; readonly character: string};
+}): string {
+  return characterDataDirPath(
+    resolvedConfig.project02.storeRoot,
+    resolvedConfig.project02.character,
+  );
 }
 
 export function storeRootForLoadedDefaultConfigPath(

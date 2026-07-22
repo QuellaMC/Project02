@@ -9,11 +9,13 @@ export {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
+  characterDataDirPath,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
+  createProject02HomeLayout,
   decodeStorageSchemaMarker,
   defaultLocalRuntimeSessionId,
-  defaultLocalRuntimeStoreRoot,
+  defaultProject02HomeRoot,
   encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
   localRuntimeReadableStorageSchemaVersions,
@@ -48,12 +50,16 @@ export {
   characterBindingFileName,
   characterBindingFormat,
   characterBindingPath,
+  ensureCharacterDataStamp,
   readCharacterBinding,
-  reconcileCharacterBinding,
   type CharacterBinding,
   type CharacterBindingReadResult,
-  type CharacterBindingReconcileResult,
+  type EnsureCharacterDataStampResult,
 } from './character-binding.ts';
+export {
+  ensureInitializedProject02Home,
+  type EnsureInitializedProject02HomeOptions,
+} from './home.ts';
 export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
 export {
   acquireLocalRuntimeSessionWriterLease,

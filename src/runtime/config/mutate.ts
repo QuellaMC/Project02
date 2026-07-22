@@ -9,7 +9,7 @@ import {
 import {basename, dirname, resolve} from 'node:path';
 
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
-import {createLocalRuntimeStorageLayout} from '../storage/layout-contract.ts';
+import {createProject02HomeLayout} from '../storage/layout-contract.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -157,8 +157,8 @@ function resolveRuntimeConfigMutationLocation(
   options: ApplyRuntimeConfigMutationOptions,
   anticipatedEnvPath: string | undefined,
 ): RuntimeConfigMutationLocation {
-  const locationLayout = createLocalRuntimeStorageLayout(
-    options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot},
+  const locationLayout = createProject02HomeLayout(
+    options.storeRoot === undefined ? {} : {homeRoot: options.storeRoot},
   );
   const env = options.env ?? process.env;
   const configPath =
@@ -253,10 +253,10 @@ function prepareLockedRuntimeConfigMutation(
   });
   const nextEffectiveStoreRoot =
     preparedCandidate.config.project02?.storeRoot ?? selectedStoreRoot;
-  const nextEffectiveLayout = createLocalRuntimeStorageLayout(
+  const nextEffectiveLayout = createProject02HomeLayout(
     nextEffectiveStoreRoot === undefined
       ? {}
-      : {storeRoot: nextEffectiveStoreRoot},
+      : {homeRoot: nextEffectiveStoreRoot},
   );
 
   return {
@@ -431,8 +431,7 @@ export function createRuntimeConfigMutationBase(options: {
     options.storeRoot === undefined
       ? selectedStoreRoot
       : canonicalRuntimeConfigMutationPath(
-          createLocalRuntimeStorageLayout({storeRoot: options.storeRoot})
-            .storeRoot,
+          createProject02HomeLayout({homeRoot: options.storeRoot}).homeRoot,
         );
 
   return bootstrapRuntimeConfig({
@@ -1192,8 +1191,11 @@ function acquireRuntimeControlPathLocks(
       try {
         leases.push(
           acquireLocalRuntimeMutationLockSync({
-            locksRoot: createLocalRuntimeStorageLayout({
-              storeRoot: dirname(path),
+            // Control-file locks live beside the file they guard: the
+            // home config locks at <home>/.locks, a character overlay at
+            // <dataRoot>/.locks. Both layouts agree on the .locks name.
+            locksRoot: createProject02HomeLayout({
+              homeRoot: dirname(path),
             }).locksRoot,
             resourceKey: `runtime-control-file:${path}`,
             waitTimeoutMs: Math.max(

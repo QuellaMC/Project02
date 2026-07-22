@@ -8,6 +8,7 @@
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {
+  characterDataRootForResolvedConfig,
   createRuntimeConfigFingerprint,
   createRuntimeConfigMutationBase,
   diagnosticsHaveErrors,
@@ -118,7 +119,7 @@ export function createConfiguredRuntimePluginReloader(options: {
       const plugin = await entry.load({
         pluginId: entry.manifest.id,
         manifest: entry.manifest,
-        storeRoot: freshResolvedConfig.project02.storeRoot,
+        storeRoot: characterDataRootForResolvedConfig(freshResolvedConfig),
         resolvedConfig:
           ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ?? {},
         redactedConfig:

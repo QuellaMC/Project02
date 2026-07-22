@@ -788,7 +788,7 @@ describe('runtime config CLI location selection', () => {
     },
     {
       args: ['--store', '   ', 'path'] as const,
-      message: 'Local runtime store root must be non-empty.',
+      message: 'Project02 home root must be a non-empty path.',
     },
   ])(
     'reports invalid runtime location for %j without throwing',

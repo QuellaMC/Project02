@@ -41,7 +41,7 @@ describe('Character State plugin', () => {
     const plugin = createProject02Plugin({
       pluginId: characterStatePluginId,
       manifest,
-      storeRoot: '.project02-runtime',
+      storeRoot: '.project02/character-data/mira',
       resolvedConfig: Object.freeze({}),
       redactedConfig: Object.freeze({}),
     });

@@ -152,6 +152,7 @@ describe('canonical timestamp boundaries', () => {
       'storage schema marker',
       () =>
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
           createdAt: nonCanonicalTimestamp,
         }),
     ],

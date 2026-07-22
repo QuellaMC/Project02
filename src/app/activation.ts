@@ -1,5 +1,5 @@
 import {
-  createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
   type RuntimePluginFileStoreProvider,
@@ -41,6 +41,7 @@ import {
   createRuntimeConfigFingerprint,
   createRuntimeConfigMutationBase,
   createRuntimePluginConfigControlCapability,
+  characterDataRootForResolvedConfig,
   diagnosticsHaveErrors,
   resolveProject02RuntimeConfig,
   resolveProject02RuntimeStoreRoot,
@@ -150,8 +151,8 @@ export function createRuntimePluginCatalogSnapshot(options: {
   readonly storeRoot?: string;
 }): RuntimePluginCatalogSnapshot {
   const storeRoot = resolveProject02RuntimeStoreRoot(options);
-  const operatorPackageRoot = createLocalRuntimeStorageLayout({
-    storeRoot,
+  const operatorPackageRoot = createProject02HomeLayout({
+    homeRoot: storeRoot,
   }).pluginPackagesRoot;
   const discovery = discoverRuntimePluginPackages({
     sources: [
@@ -439,7 +440,9 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
-        storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+        storeRoot: characterDataRootForResolvedConfig(
+          activationPlan.resolvedConfig,
+        ),
         fileStore: configuredRuntimePluginFileStoreProvider,
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
@@ -470,7 +473,9 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     host = createRuntimePluginHost({
       plugins,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
-      storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+      storeRoot: characterDataRootForResolvedConfig(
+        activationPlan.resolvedConfig,
+      ),
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
       toolConfirmationHandler: options.toolConfirmationHandler,
@@ -740,7 +745,7 @@ async function instantiateRuntimePluginPackages(options: {
       const plugin = await entry.load({
         pluginId: entry.manifest.id,
         manifest: entry.manifest,
-        storeRoot: options.resolvedConfig.project02.storeRoot,
+        storeRoot: characterDataRootForResolvedConfig(options.resolvedConfig),
         resolvedConfig:
           ownJsonRecordValue(
             options.resolvedConfig.pluginConfigs,
@@ -848,7 +853,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginSessionEndHooks({
       plugins: options.plugins,
       context,
-      storeRoot: options.resolvedConfig.project02.storeRoot,
+      storeRoot: characterDataRootForResolvedConfig(options.resolvedConfig),
       createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
       sessionIdentity: options.sessionIdentity,
@@ -865,7 +870,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginShutdownHooks({
       plugins: options.plugins,
       context,
-      storeRoot: options.resolvedConfig.project02.storeRoot,
+      storeRoot: characterDataRootForResolvedConfig(options.resolvedConfig),
       createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
       sessionIdentity: options.sessionIdentity,

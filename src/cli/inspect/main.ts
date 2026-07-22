@@ -2,7 +2,9 @@ import {readFlagValue} from '../shared/flags.ts';
 import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
-  createLocalRuntimeStorageLayout,
+  characterDataDirPath,
+  createProject02HomeLayout,
+  isMissingDefaultSessionStore,
   readCharacterBinding,
   type CharacterBindingReadResult,
   type LocalRuntimeSessionMetadata,
@@ -237,7 +239,7 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
 
 function validateInspectCliArgs(args: InspectCliArgs): void {
   if (args.storeRoot !== undefined) {
-    createLocalRuntimeStorageLayout({storeRoot: args.storeRoot});
+    createProject02HomeLayout({homeRoot: args.storeRoot});
   }
 
   if (args.mode === 'session') {
@@ -250,16 +252,32 @@ async function writeSessionList(
   runtimeConfig: Project02ConfiguredPluginActivation,
 ): Promise<void> {
   const sessionStore = createLocalRuntimeSessionStore({
-    storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+    storeRoot: characterDataDirPath(
+      runtimeConfig.resolvedConfig.project02.storeRoot,
+      runtimeConfig.resolvedConfig.project02.character,
+    ),
   });
-  const sessions = await sessionStore.listSessions();
+  let sessions: readonly LocalRuntimeSessionMetadata[] = [];
+
+  try {
+    sessions = await sessionStore.listSessions();
+  } catch (error: unknown) {
+    // A character whose data directory has not been created yet simply
+    // has no sessions; other storage errors still surface.
+    if (!isMissingDefaultSessionStore(error)) {
+      throw error;
+    }
+  }
 
   writeJson(stdout, {
     runtimeConfig: createRuntimeConfigInspectShape(
       runtimeConfig.resolvedConfig,
     ),
     characterBinding: readCharacterBinding({
-      storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+      storeRoot: characterDataDirPath(
+        runtimeConfig.resolvedConfig.project02.storeRoot,
+        runtimeConfig.resolvedConfig.project02.character,
+      ),
     }),
     activationDiagnostics: Object.freeze([
       ...runtimeConfig.activation.diagnostics,
@@ -275,7 +293,10 @@ async function writeSessionEvidence(
   runtimeConfig: Project02ConfiguredPluginActivation,
 ): Promise<void> {
   const storage = {
-    storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+    storeRoot: characterDataDirPath(
+      runtimeConfig.resolvedConfig.project02.storeRoot,
+      runtimeConfig.resolvedConfig.project02.character,
+    ),
   };
   const sessionStore = createLocalRuntimeSessionStore(storage);
   const session = await sessionStore.readSession(args.sessionId);
@@ -291,7 +312,10 @@ async function writeSessionEvidence(
       runtimeConfig.resolvedConfig,
     ),
     characterBinding: readCharacterBinding({
-      storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+      storeRoot: characterDataDirPath(
+        runtimeConfig.resolvedConfig.project02.storeRoot,
+        runtimeConfig.resolvedConfig.project02.character,
+      ),
     }),
     activationDiagnostics: Object.freeze([
       ...runtimeConfig.activation.diagnostics,

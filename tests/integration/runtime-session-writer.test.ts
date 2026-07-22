@@ -14,7 +14,10 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
-import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
+import {
+  characterDataDirPath,
+  LocalRuntimeStorageContractError,
+} from '../../src/runtime/storage/layout-contract.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
@@ -31,12 +34,20 @@ describe('durable runtime session writer ownership', () => {
   it('rejects a second active writer before it appends evidence', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'shared-writer-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
-    const secondLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+    });
+    const secondLogStore = createFileRuntimeLogStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+    });
     const rawEventsPath = logStore.localRuntimeSessionPaths?.rawEventsPath;
 
     if (rawEventsPath === undefined) {
@@ -109,11 +120,16 @@ describe('durable runtime session writer ownership', () => {
   it('rejects a stale in-memory transcript before starting a new turn', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'stale-writer-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+    });
     const currentSession = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -153,7 +169,9 @@ describe('durable runtime session writer ownership', () => {
   it('holds the writer lease for the full interactive chat process', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'interactive-writer-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
@@ -190,7 +208,9 @@ describe('durable runtime session writer ownership', () => {
       'parallel-writer-alpha',
       'parallel-writer-beta',
     ] as const;
-    const sessionStore = createLocalRuntimeSessionStore({storeRoot});
+    const sessionStore = createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    });
 
     for (const sessionId of sessionIds) {
       await sessionStore.createSession({

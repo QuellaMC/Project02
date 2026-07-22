@@ -2,6 +2,7 @@ import {readFileSync, realpathSync, statSync, symlinkSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
 import {
   createRuntimeConfigInspectShape,
@@ -1460,7 +1461,9 @@ describe('runtime config loading and resolution', () => {
     expect(memoryFactoryInputs).toEqual([
       {
         pluginId: 'memory.required',
-        storeRoot,
+        // Plugin state is character-scoped: factories receive the active
+        // character's data root, not the shared home.
+        storeRoot: characterDataDirPath(storeRoot, 'mira'),
         apiKeyValue: 'from-manifest-backed-factory',
         redactedApiKeyValue: '[redacted]',
       },
@@ -1570,7 +1573,9 @@ describe('runtime config loading and resolution', () => {
       env: {[envVar]: 'from-configured-store-root'},
     });
 
-    expect(factoryStoreRoot).toBe(configuredStoreRoot);
+    expect(factoryStoreRoot).toBe(
+      characterDataDirPath(configuredStoreRoot, 'mira'),
+    );
     expect(configured.resolvedConfig.project02.storeRoot).toBe(
       configuredStoreRoot,
     );

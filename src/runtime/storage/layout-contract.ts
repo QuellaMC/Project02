@@ -1,17 +1,25 @@
 import {join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
 
-export const defaultLocalRuntimeStoreRoot = '.project02-runtime';
+export const defaultProject02HomeRoot = '.project02';
 
 export const defaultLocalRuntimeSessionId = 'local-session';
 
-export const localRuntimeStorageSchemaVersion = 3;
+export const localRuntimeStorageSchemaVersion = 4;
 
 export type LocalRuntimeReadableStorageSchemaVersion =
-  1 | typeof localRuntimeStorageSchemaVersion;
+  typeof localRuntimeStorageSchemaVersion;
 
 export const localRuntimeReadableStorageSchemaVersions: readonly LocalRuntimeReadableStorageSchemaVersion[] =
-  Object.freeze([1, localRuntimeStorageSchemaVersion]);
+  Object.freeze([localRuntimeStorageSchemaVersion]);
+
+export const localRuntimeStorageScopeValues = Object.freeze([
+  'home',
+  'character-data',
+] as const);
+
+export type LocalRuntimeStorageScope =
+  (typeof localRuntimeStorageScopeValues)[number];
 
 export type LocalRuntimeStorageContractErrorCode =
   | 'character_binding_rejected'
@@ -43,14 +51,29 @@ export class LocalRuntimeStorageContractError extends Error {
   }
 }
 
-export type LocalRuntimeStorageLayout = {
-  readonly storeRoot: string;
+// The shared home: global config, secrets, installed packages, and the
+// per-character data directories. Exactly one lock family lives here
+// (runtime-control-file:* for the global config/.env writes).
+export type Project02HomeLayout = {
+  readonly homeRoot: string;
   readonly configPath: string;
   readonly envPath: string;
   readonly schemaPath: string;
   readonly locksRoot: string;
   readonly pluginPackagesRoot: string;
   readonly characterPackagesRoot: string;
+  readonly characterDataRoot: string;
+};
+
+// One character's data directory under <home>/character-data/<id>:
+// sessions, plugin state, the character-scoped config overlay, and the
+// binding stamp. Deliberately has no envPath or package roots so shared
+// concerns cannot be derived from a data root by accident.
+export type LocalRuntimeStorageLayout = {
+  readonly storeRoot: string;
+  readonly configPath: string;
+  readonly schemaPath: string;
+  readonly locksRoot: string;
   readonly characterBindingPath: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
@@ -75,6 +98,10 @@ export type LocalRuntimePluginPaths = {
   readonly pluginRoot: string;
 };
 
+export type Project02HomeLayoutOptions = {
+  readonly homeRoot?: string;
+};
+
 export type LocalRuntimeStorageLayoutOptions = {
   readonly storeRoot?: string;
 };
@@ -90,10 +117,12 @@ export type LocalRuntimePluginPathsOptions = LocalRuntimeSessionPathsOptions & {
 
 export type LocalRuntimeStorageSchemaMarker = {
   readonly schemaVersion: LocalRuntimeReadableStorageSchemaVersion;
+  readonly scope: LocalRuntimeStorageScope;
   readonly createdAt: string;
 };
 
 export type CreateLocalRuntimeStorageSchemaMarkerOptions = {
+  readonly scope: LocalRuntimeStorageScope;
   readonly createdAt: string;
 };
 
@@ -128,6 +157,8 @@ const pluginsDirectoryName = 'plugins';
 // so the one-word literal is deliberately duplicated there.
 const charactersDirectoryName = 'characters';
 
+const characterDataDirectoryName = 'character-data';
+
 export const characterBindingFileName = 'character-binding.json';
 
 const traceFileName = 'trace.jsonl';
@@ -140,20 +171,68 @@ const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 const pluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 
+// Character ids share the plugin-id syntax (and the characters module's
+// descriptor pattern, duplicated there because it cannot import runtime).
+const characterIdPattern = pluginIdPattern;
+
+export function createProject02HomeLayout(
+  options: Project02HomeLayoutOptions = {},
+): Project02HomeLayout {
+  const homeRoot = normalizeRootPath(
+    options.homeRoot ?? defaultProject02HomeRoot,
+    'Project02 home root',
+  );
+
+  return Object.freeze({
+    homeRoot,
+    configPath: join(homeRoot, configFileName),
+    envPath: join(homeRoot, envFileName),
+    schemaPath: join(homeRoot, schemaFileName),
+    locksRoot: join(homeRoot, locksDirectoryName),
+    pluginPackagesRoot: join(homeRoot, pluginsDirectoryName),
+    characterPackagesRoot: join(homeRoot, charactersDirectoryName),
+    characterDataRoot: join(homeRoot, characterDataDirectoryName),
+  } satisfies Project02HomeLayout);
+}
+
+export function characterDataDirPath(
+  homeRoot: string | undefined,
+  characterId: string,
+): string {
+  const home = createProject02HomeLayout(
+    homeRoot === undefined ? {} : {homeRoot},
+  );
+
+  return join(
+    home.characterDataRoot,
+    normalizeLocalRuntimeCharacterId(characterId),
+  );
+}
+
+export function normalizeLocalRuntimeCharacterId(characterId: string): string {
+  const normalized = characterId.trim();
+
+  if (!characterIdPattern.test(normalized)) {
+    throw new LocalRuntimeStorageContractError(
+      'invalid_plugin_id',
+      'Local runtime character ID must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
+    );
+  }
+
+  return normalized;
+}
+
 export function createLocalRuntimeStorageLayout(
   options: LocalRuntimeStorageLayoutOptions = {},
 ): LocalRuntimeStorageLayout {
-  const storeRoot = normalizeStoreRoot(options.storeRoot);
+  const storeRoot = normalizeRootPath(options.storeRoot, 'Character data root');
   const sessionsRoot = join(storeRoot, sessionsDirectoryName);
 
   return Object.freeze({
     storeRoot,
     configPath: join(storeRoot, configFileName),
-    envPath: join(storeRoot, envFileName),
     schemaPath: join(storeRoot, schemaFileName),
     locksRoot: join(storeRoot, locksDirectoryName),
-    pluginPackagesRoot: join(storeRoot, pluginsDirectoryName),
-    characterPackagesRoot: join(storeRoot, charactersDirectoryName),
     characterBindingPath: join(storeRoot, characterBindingFileName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot,
@@ -257,12 +336,24 @@ export function createLocalRuntimeStorageSchemaMarker(
 ): LocalRuntimeStorageSchemaMarker {
   return Object.freeze({
     schemaVersion: localRuntimeStorageSchemaVersion,
+    scope: requiredStorageScope(options.scope),
     createdAt: requiredCanonicalTimestamp(
       options.createdAt,
       'createdAt',
       'malformed_schema_marker',
     ),
   } satisfies LocalRuntimeStorageSchemaMarker);
+}
+
+function requiredStorageScope(value: unknown): LocalRuntimeStorageScope {
+  if (
+    typeof value !== 'string' ||
+    !localRuntimeStorageScopeValues.some(scope => scope === value)
+  ) {
+    throwMalformedSchemaMarker('scope');
+  }
+
+  return value as LocalRuntimeStorageScope;
 }
 
 export function encodeStorageSchemaMarker(
@@ -290,6 +381,7 @@ export function decodeStorageSchemaMarker(
 
   return Object.freeze({
     schemaVersion,
+    scope: requiredStorageScope(record['scope']),
     createdAt: requiredRecordCanonicalTimestamp(
       record,
       'createdAt',
@@ -306,17 +398,17 @@ function isLocalRuntimeReadableStorageSchemaVersion(
   );
 }
 
-function normalizeStoreRoot(storeRoot: string | undefined): string {
-  const normalizedStoreRoot = storeRoot?.trim() ?? defaultLocalRuntimeStoreRoot;
+function normalizeRootPath(root: string | undefined, label: string): string {
+  const normalized = root?.trim();
 
-  if (normalizedStoreRoot.length === 0) {
+  if (normalized === undefined || normalized.length === 0) {
     throw new LocalRuntimeStorageContractError(
       'malformed_schema_marker',
-      'Local runtime store root must be non-empty.',
+      `${label} must be a non-empty path.`,
     );
   }
 
-  return normalizedStoreRoot;
+  return normalized;
 }
 
 export function parseJsonObject(

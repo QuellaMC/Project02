@@ -689,7 +689,8 @@ describe('file runtime log store plugin tool event validation', () => {
     writeFileSync(
       createLocalRuntimeStorageLayout({storeRoot}).schemaPath,
       `${JSON.stringify({
-        schemaVersion: 1,
+        schemaVersion: 4,
+        scope: 'character-data',
         createdAt: '2026-06-15T00:00:00.000Z',
       })}\n`,
       'utf8',

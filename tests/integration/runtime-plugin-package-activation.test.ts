@@ -1,3 +1,4 @@
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
@@ -177,7 +178,9 @@ describe('configured runtime plugin package activation', () => {
     let inspectStdout = '';
     let inspectStderr = '';
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'cold-package-inspect',
       createdAt: '2026-07-15T00:00:00.000Z',
     });
@@ -426,7 +429,10 @@ describe('configured runtime plugin package activation', () => {
       input: {
         pluginId: manifest.id,
         manifest: {id: manifest.id},
-        storeRoot: configured.resolvedConfig.project02.storeRoot,
+        storeRoot: characterDataDirPath(
+          configured.resolvedConfig.project02.storeRoot,
+          'mira',
+        ),
         resolvedConfig: {
           label: {
             name: 'label',

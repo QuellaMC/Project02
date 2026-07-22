@@ -1,7 +1,7 @@
 import {existsSync, readFileSync, statSync} from 'node:fs';
 
 import {
-  createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
 import {
@@ -221,14 +221,14 @@ export function validateProject02RuntimeConfig(
 }
 
 export function defaultRuntimeConfigPath(storeRoot?: string): string {
-  return createLocalRuntimeStorageLayout(
-    storeRoot === undefined ? {} : {storeRoot},
+  return createProject02HomeLayout(
+    storeRoot === undefined ? {} : {homeRoot: storeRoot},
   ).configPath;
 }
 
 export function defaultRuntimeConfigEnvPath(storeRoot?: string): string {
-  return createLocalRuntimeStorageLayout(
-    storeRoot === undefined ? {} : {storeRoot},
+  return createProject02HomeLayout(
+    storeRoot === undefined ? {} : {homeRoot: storeRoot},
   ).envPath;
 }
 

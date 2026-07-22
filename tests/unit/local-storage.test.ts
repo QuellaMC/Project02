@@ -10,25 +10,54 @@ import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec
 import {decodeRuntimeTraceEntry} from '../../src/runtime/storage/trace-codec.ts';
 
 describe('local storage plugin schema', () => {
-  it('uses schema version 3 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(3);
-    expect(createLocalRuntimeSessionPaths()).not.toHaveProperty(
-      'characterStatePath',
-    );
+  it('uses scoped schema version 4 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(4);
+    expect(
+      createLocalRuntimeSessionPaths({storeRoot: 'store'}),
+    ).not.toHaveProperty('characterStatePath');
   });
 
-  it('decodes MVP-006 schema 1 markers as a compatible local store', () => {
+  it('round-trips scoped schema markers and rejects pre-split versions', () => {
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 1,
+          schemaVersion: 4,
+          scope: 'character-data',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       ),
     ).toEqual({
-      schemaVersion: 1,
+      schemaVersion: 4,
+      scope: 'character-data',
       createdAt: '2026-06-04T00:00:00.000Z',
     });
+    expect(
+      decodeStorageSchemaMarker(
+        JSON.stringify({
+          schemaVersion: 4,
+          scope: 'home',
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
+      ).scope,
+    ).toBe('home');
+    // Clean cut: pre-split single-store markers are not readable.
+    expect(() =>
+      decodeStorageSchemaMarker(
+        JSON.stringify({
+          schemaVersion: 3,
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
+      ),
+    ).toThrow(expect.objectContaining({code: 'unsupported_schema_version'}));
+    expect(() =>
+      decodeStorageSchemaMarker(
+        JSON.stringify({
+          schemaVersion: 4,
+          scope: 'other',
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
+      ),
+    ).toThrow(expect.objectContaining({code: 'malformed_schema_marker'}));
   });
 
   it('decodes plugin tool call records', () => {

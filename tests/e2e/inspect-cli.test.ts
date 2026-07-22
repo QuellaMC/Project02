@@ -1,3 +1,4 @@
+import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -41,13 +42,15 @@ import {createDefaultProject02PluginHost} from '../support/default-plugin-host.t
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-inspect',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       boundCharacter: testCharacterProfile,
-      storeRoot,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId: 'session-inspect',
     });
     const session = createConversationSession({
@@ -67,7 +70,7 @@ describe('inspect CLI plugin evidence', () => {
       session,
       logStore,
       pluginHost: createDefaultProject02PluginHost({
-        storeRoot,
+        storeRoot: characterDataDirPath(storeRoot, 'mira'),
         sessionId: 'session-inspect',
         sessionIdentity: session,
       }),
@@ -196,7 +199,9 @@ describe('inspect CLI plugin evidence', () => {
         },
       },
     });
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-config',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
@@ -269,7 +274,9 @@ describe('inspect CLI plugin evidence', () => {
       `${runtimeConfigEnvVarName}=${configPath}\n`,
       'utf8',
     );
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-cwd-config',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
@@ -331,7 +338,7 @@ describe('inspect CLI plugin evidence', () => {
       'utf8',
     );
     await createLocalRuntimeSessionStore({
-      storeRoot: selectedStoreRoot,
+      storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
     }).createSession({
       sessionId: 'session-selected-store',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -386,7 +393,7 @@ describe('inspect CLI plugin evidence', () => {
 
     mkdirSync(join(cwdRoot, '.env'));
     await createLocalRuntimeSessionStore({
-      storeRoot: selectedStoreRoot,
+      storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
     }).createSession({
       sessionId: 'session-selected-before-cwd-dotenv',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -455,7 +462,7 @@ describe('inspect CLI plugin evidence', () => {
 
     mkdirSync(join(cwdRoot, '.env'));
     await createLocalRuntimeSessionStore({
-      storeRoot: selectedStoreRoot,
+      storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
     }).createSession({
       sessionId: 'session-env-selected-before-cwd-dotenv',
       createdAt: '2026-06-22T00:00:00.000Z',
@@ -513,7 +520,9 @@ describe('inspect CLI plugin evidence', () => {
         },
       },
     });
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-custom-factory',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
@@ -615,7 +624,9 @@ describe('inspect CLI plugin evidence', () => {
         },
       },
     });
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-activation-before-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
@@ -681,7 +692,9 @@ describe('inspect CLI plugin evidence', () => {
         },
       },
     });
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-mixed-activation-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
@@ -748,7 +761,9 @@ describe('inspect CLI plugin evidence', () => {
         },
       },
     });
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-close',
       createdAt: '2026-06-22T00:00:00.000Z',
     });
@@ -812,7 +827,9 @@ describe('inspect CLI plugin evidence', () => {
         },
       },
     });
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'existing-session',
       createdAt: '2026-06-22T00:00:00.000Z',
     });
@@ -911,7 +928,9 @@ describe('inspect CLI plugin evidence', () => {
       `${envVar}=inspect-secret\n`,
       'utf8',
     );
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    }).createSession({
       sessionId: 'session-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });

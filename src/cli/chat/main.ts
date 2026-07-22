@@ -39,7 +39,7 @@ import {
   acquireLocalRuntimeSessionWriterLease,
   createDurableChatRuntime,
   createLocalRuntimeMutationLockOwnerToken,
-  createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
   type DurableChatRuntime,
   normalizeLocalRuntimeSessionId,
   runtimeLogStoreWithWriterOwner,
@@ -444,7 +444,15 @@ async function runChatCliAfterConfiguredHost(options: {
 
   try {
     durableRuntime = await createDurableChatRuntime({
-      ...options.runtimeArgs,
+      ...(options.runtimeArgs.storeRoot === undefined
+        ? {}
+        : {homeRoot: options.runtimeArgs.storeRoot}),
+      ...(options.runtimeArgs.sessionId === undefined
+        ? {}
+        : {sessionId: options.runtimeArgs.sessionId}),
+      ...(options.runtimeArgs.newSessionId === undefined
+        ? {}
+        : {newSessionId: options.runtimeArgs.newSessionId}),
       character: options.characterProfile,
       ...(options.userDisplayName === undefined
         ? {}
@@ -1265,7 +1273,7 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
 function validateDurableSessionArgs(args: ChatCliArgs): void {
   if (args.storeRoot !== undefined) {
-    createLocalRuntimeStorageLayout({storeRoot: args.storeRoot});
+    createProject02HomeLayout({homeRoot: args.storeRoot});
   }
 
   if (args.sessionId !== undefined) {

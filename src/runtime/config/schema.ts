@@ -20,13 +20,14 @@ const project02ConfigFieldDefinitions = Object.freeze([
     name: 'storeRoot',
     label: 'Runtime store root',
     description:
-      'Directory that owns sessions, logs, plugin data, config, and secrets.',
+      'The Project02 home: global config, secrets, installed packages, and ' +
+      'the per-character data directories.',
     invalidValueCode: 'runtime_config_string_invalid',
     invalidValueMessage: 'Runtime config field must be a non-empty string.',
     required: false,
     secret: false,
     valueType: 'path',
-    defaultValueSummary: '.project02-runtime',
+    defaultValueSummary: '.project02',
     redactionLabels: Object.freeze([]),
     agentMutable: false,
     reloadRequired: true,

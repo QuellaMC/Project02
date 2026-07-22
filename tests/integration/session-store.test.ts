@@ -40,19 +40,19 @@ import type {LocalRuntimeSessionConversationLogReader} from '../../src/runtime/s
 import {assertLocalRuntimeSessionReadable} from '../../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
-type RuntimeControlLayoutPath = 'configPath' | 'envPath';
+type RuntimeControlLayoutPath = 'configPath' | 'characterBindingPath';
 const symlinkedRuntimeControlFileCases = Object.freeze([
   {
     description: 'config.json',
     layoutPaths: ['configPath'],
   },
   {
-    description: '.env',
-    layoutPaths: ['envPath'],
+    description: 'character-binding.json',
+    layoutPaths: ['characterBindingPath'],
   },
   {
-    description: 'config.json and .env',
-    layoutPaths: ['configPath', 'envPath'],
+    description: 'config.json and character-binding.json',
+    layoutPaths: ['configPath', 'characterBindingPath'],
   },
 ] as const satisfies readonly {
   readonly description: string;
@@ -513,18 +513,13 @@ describe('local runtime session store', () => {
     );
   });
 
-  it('keeps MVP-006 schema 1 session catalogs readable through the current layout', async () => {
+  it('rejects pre-split schema 1 markers after the clean cut', async () => {
     const storeRoot = await createTempStoreRoot();
     const layout = createLocalRuntimeStorageLayout({storeRoot});
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'mira-local',
     });
-    const metadata = {
-      sessionId: 'mira-local',
-      createdAt: '2026-06-04T00:00:00.000Z',
-      updatedAt: '2026-06-04T00:00:00.000Z',
-    };
 
     await mkdir(paths.sessionRoot, {recursive: true});
     await writeFile(
@@ -535,36 +530,15 @@ describe('local runtime session store', () => {
       })}\n`,
       'utf8',
     );
-    await writeFile(
-      layout.sessionCatalogPath,
-      `${JSON.stringify(metadata)}\n`,
-      'utf8',
-    );
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       now: fixedClock(['2026-06-04T00:05:00.000Z']),
     });
 
-    await expect(store.listSessions()).resolves.toEqual([metadata]);
-    await expect(store.readSession('mira-local')).resolves.toEqual(metadata);
-    expect(
-      assertLocalRuntimeSessionReadable({
-        storeRoot,
-        sessionId: 'mira-local',
-      }),
-    ).toEqual(metadata);
-
-    await expect(store.selectSession('mira-local')).resolves.toEqual({
-      ...metadata,
-      updatedAt: '2026-06-04T00:05:00.000Z',
+    await expect(store.listSessions()).rejects.toMatchObject({
+      code: 'unsupported_schema_version',
     });
-    await expect(readFile(layout.schemaPath, 'utf8')).resolves.toBe(
-      `${JSON.stringify({
-        schemaVersion: 1,
-        createdAt: '2026-06-04T00:00:00.000Z',
-      })}\n`,
-    );
   });
 
   it('tolerates empty orphan session directories when the catalog was never created', async () => {
@@ -580,6 +554,7 @@ describe('local runtime session store', () => {
       layout.schemaPath,
       `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       )}\n`,
@@ -620,6 +595,7 @@ describe('local runtime session store', () => {
       layout.schemaPath,
       `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       )}\n`,
@@ -766,6 +742,24 @@ describe('local runtime session store', () => {
       );
     });
   }
+
+  it('refuses to initialize a character data directory containing a stray .env', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await writeFile(join(storeRoot, '.env'), 'API_KEY=nope\n', 'utf8');
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      now: fixedClock(['2026-06-04T00:02:00.000Z']),
+    });
+
+    await expect(
+      store.createSession({sessionId: 'fresh'}),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'missing_file',
+    });
+  });
 });
 
 async function createTempStoreRoot(): Promise<string> {

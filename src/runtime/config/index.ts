@@ -42,6 +42,7 @@ export {
 } from './mutate.ts';
 export {redactRuntimeConfigText, redactRuntimeConfigValue} from './redact.ts';
 export {
+  characterDataRootForResolvedConfig,
   diagnosticsHaveErrors,
   pluginHasConfigErrors,
   resolveProject02RuntimeConfig,

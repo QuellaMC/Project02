@@ -15,15 +15,16 @@ import {
   LocalRuntimeSessionStoreError,
   type LocalRuntimeSessionConversationEvidence,
 } from './session-store.ts';
-import type {LocalRuntimeSessionMetadata} from './layout-contract.ts';
+import {characterDataDirPath} from './layout-contract.ts';
 import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
-import {reconcileCharacterBinding} from './character-binding.ts';
+import {ensureCharacterDataStamp} from './character-binding.ts';
+import {ensureInitializedProject02Home} from './home.ts';
 import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
 import {normalizeLocalRuntimeSessionId} from './layout-contract.ts';
 
 export type DurableSessionSelection = {
-  readonly storeRoot?: string;
+  readonly homeRoot?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
   readonly character: CharacterProfile;
@@ -42,20 +43,21 @@ export async function createDurableChatRuntime(
   const sessionId = normalizeLocalRuntimeSessionId(
     args.newSessionId ?? args.sessionId,
   );
-  const storageOptions =
-    args.storeRoot === undefined ? {} : {storeRoot: args.storeRoot};
+  const home = await ensureInitializedProject02Home(
+    args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot},
+  );
+  const dataRoot = characterDataDirPath(home.homeRoot, args.character.id);
+  const storageOptions = {storeRoot: dataRoot};
   const boundUserSpeaker = createUserSpeaker(args.userDisplayName);
-  const bindingResult = await reconcileCharacterBinding({
+  const stampResult = await ensureCharacterDataStamp({
     storageOptions,
-    configuredCharacterId: args.character.id,
-    deriveStoreCharacterIds: () =>
-      deriveDurableStoreCharacterIds(storageOptions),
+    characterId: args.character.id,
   });
 
-  if (bindingResult.status === 'rejected') {
+  if (stampResult.status === 'rejected') {
     throw new LocalRuntimeStorageContractError(
       'character_binding_rejected',
-      bindingResult.message,
+      stampResult.message,
     );
   }
 
@@ -125,58 +127,6 @@ export async function createDurableChatRuntime(
     await writerLease.release();
     throw error;
   }
-}
-
-/**
- * Distinct character ids recorded across the store's sessions; consulted
- * only while no binding exists, so legacy stores adopt their own history.
- */
-async function deriveDurableStoreCharacterIds(storageOptions: {
-  readonly storeRoot?: string;
-}): Promise<readonly string[]> {
-  let sessions: readonly LocalRuntimeSessionMetadata[];
-
-  try {
-    sessions = await createLocalRuntimeSessionStore({
-      ...storageOptions,
-    }).listSessions();
-  } catch (error: unknown) {
-    if (
-      error instanceof LocalRuntimeStorageContractError &&
-      error.code === 'missing_file'
-    ) {
-      // Uninitialized store: nothing to adopt yet.
-      return Object.freeze([]);
-    }
-
-    throw error;
-  }
-
-  const characterIds = new Set<string>();
-
-  for (const metadata of sessions) {
-    const evidence = createFileRuntimeLogStore({
-      ...storageOptions,
-      sessionId: metadata.sessionId,
-    }).readSessionEvidence().stored;
-
-    for (const message of evidence.conversationMessages) {
-      if (message.role === 'character') {
-        characterIds.add(message.speakerId);
-      }
-    }
-    for (const rawEvent of evidence.rawEvents) {
-      const characterId =
-        rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
-          .characterSnapshot.id;
-
-      if (characterId !== undefined) {
-        characterIds.add(characterId);
-      }
-    }
-  }
-
-  return Object.freeze([...characterIds].sort());
 }
 
 export function readDurableConversationEvidence(
