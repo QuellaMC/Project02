@@ -16,6 +16,7 @@ import {
   askForFieldValue,
   askForNumber,
   cancelled,
+  ensureScopedConsoleCommitTarget,
   formatCurrentValue,
   previewAndCommitChange,
   runtimeConfigLocation,
@@ -113,7 +114,8 @@ async function stageProject02FieldChange(
     oldValue,
     newValue,
     reloadRequired: field.reloadRequired,
-    commit() {
+    async commit() {
+      await ensureScopedConsoleCommitTarget(snapshot.characterScope);
       applyScopedRuntimeConfigControlOperation({
         ...runtimeConfigLocation(context),
         ...(context.env === undefined ? {} : {env: context.env}),

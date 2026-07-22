@@ -341,3 +341,56 @@ describe('configured character id normalization', () => {
     ).toMatchObject({characterId: 'mira'});
   });
 });
+
+describe('global writes that move the character selection', () => {
+  it('reports the new character layer in the returned fingerprint', () => {
+    const homeRoot = createTestTempRoot('project02-scope-switch-');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // Give nova an overlay so the layers differ observably.
+    applyScopedRuntimeConfigControlOperation({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'character',
+      characterId: 'nova',
+      operation: {
+        kind: 'set',
+        path: 'project02.userDisplayName',
+        value: 'Nova User',
+      },
+    });
+
+    const loaded = loadProject02RuntimeConfig({storeRoot: homeRoot, env: {}});
+    const globalDocument = loaded.config;
+
+    if (globalDocument === undefined) {
+      throw new Error('Expected the seeded global config to load.');
+    }
+
+    const expected = createLayeredRuntimeConfigFingerprint({
+      globalConfig: globalDocument,
+      characterId: 'mira',
+      overlayConfig: null,
+    });
+    const switched = applyScopedRuntimeConfigControlOperation({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'global',
+      expectedFingerprint: expected,
+      operation: {kind: 'set', path: 'project02.character', value: 'nova'},
+    });
+
+    // The returned fingerprint is composed for the newly selected
+    // character's layer, ready to chain into the next scoped step.
+    expect(switched.fingerprint).toBe(
+      createLayeredRuntimeConfigFingerprint({
+        globalConfig: switched.config,
+        characterId: 'nova',
+        overlayConfig: {
+          version: runtimeConfigVersion,
+          project02: {userDisplayName: 'Nova User'},
+        },
+      }),
+    );
+  });
+});

@@ -17,6 +17,7 @@ import {
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
+import {ensureCharacterDataStamp} from '../../runtime/storage/index.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
   question(prompt: string): Promise<string | undefined>;
@@ -55,8 +56,30 @@ export type StagedRuntimeConfigChange = {
   readonly oldValue: RuntimeConfigValue | undefined;
   readonly newValue: RuntimeConfigValue | undefined;
   readonly reloadRequired: boolean;
-  commit(): void;
+  commit(): void | Promise<void>;
 };
+
+/**
+ * Commit-time preparation of a scoped console write: the binding stamp
+ * lands only when the user actually saves, so a read-only console
+ * session never creates durable character state.
+ */
+export async function ensureScopedConsoleCommitTarget(
+  characterScope: RuntimeConfigCharacterScope | undefined,
+): Promise<void> {
+  if (characterScope === undefined) {
+    return;
+  }
+
+  const stamp = await ensureCharacterDataStamp({
+    storageOptions: {storeRoot: characterScope.dataRoot},
+    characterId: characterScope.characterId,
+  });
+
+  if (stamp.status === 'rejected') {
+    throw new TypeError(stamp.message);
+  }
+}
 
 export const cancelled = Symbol('runtime-config-console-cancelled');
 
@@ -78,7 +101,7 @@ export async function previewAndCommitChange(
     return;
   }
 
-  change.commit();
+  await change.commit();
   writeLine(context.stdout, `Saved ${change.target}.`);
 
   if (change.reloadRequired) {

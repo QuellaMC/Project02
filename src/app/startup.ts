@@ -12,6 +12,7 @@ import {
 import {
   characterOverlaySeedDocument,
   enforceCharacterPluginExpectations,
+  validateCharacterOverlaySeedAgainstManifests,
 } from './character-plugins.ts';
 import {
   configuredProject02CharacterId,
@@ -30,6 +31,7 @@ import {
   type RuntimeConfigDiagnostic,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
+import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {LocalRuntimeStorageContractError} from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
@@ -186,6 +188,9 @@ async function resolveRuntimeCliActivationStartup(input: {
       options.factories === undefined
         ? createRuntimePluginCatalogSnapshot({
             loadedConfig,
+            ...(overlayLoadedConfig === undefined
+              ? {}
+              : {overlayConfig: overlayLoadedConfig}),
             ...(location.storeRoot === undefined
               ? {}
               : {storeRoot: location.storeRoot}),
@@ -234,6 +239,11 @@ async function resolveRuntimeCliActivationStartup(input: {
     const failure = await materializeCharacterDataDir({
       homeRoot,
       characterActivation,
+      pluginManifests: installedManifestsForSeedValidation({
+        options,
+        loadedConfig,
+        location,
+      }),
     });
 
     if (failure !== undefined) {
@@ -302,6 +312,34 @@ async function resolveRuntimeCliActivationStartup(input: {
 }
 
 /**
+ * The installed manifests a first-selection seed is judged against.
+ * Factories-injected runs use those manifests directly; otherwise one
+ * discovery pass runs before materialization (the plan's own catalog
+ * is built later, after the overlay exists, so its diagnostics can be
+ * classified against the merged view).
+ */
+function installedManifestsForSeedValidation(input: {
+  readonly options: RuntimeCliActivationStartupOptions;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly location: RuntimeLocationCliState;
+}): readonly RuntimePluginManifest[] {
+  if (input.options.factories !== undefined) {
+    return Object.values(input.options.factories).map(
+      definition => definition.manifest,
+    );
+  }
+
+  return Object.values(
+    createRuntimePluginCatalogSnapshot({
+      loadedConfig: input.loadedConfig,
+      ...(input.location.storeRoot === undefined
+        ? {}
+        : {storeRoot: input.location.storeRoot}),
+    }).catalogEntries,
+  ).map(entry => entry.manifest);
+}
+
+/**
  * Writer-side character-data initialization. Returns a failed
  * character activation instead of throwing so every character-shaped
  * problem exits through the same character_invalid status.
@@ -312,6 +350,7 @@ async function materializeCharacterDataDir(input: {
     Project02CharacterActivation,
     {status: 'resolved'}
   >;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
 }): Promise<
   Extract<Project02CharacterActivation, {status: 'failed'}> | undefined
 > {
@@ -326,6 +365,24 @@ async function materializeCharacterDataDir(input: {
       configuredCharacterId: characterId,
       messages: seed.messages,
     });
+  }
+
+  // A seed the installed manifests reject would poison the overlay
+  // permanently (the file is never re-materialized): fail the selection
+  // instead of writing it.
+  if (seed.status === 'seed') {
+    const seedIssues = validateCharacterOverlaySeedAgainstManifests({
+      document: seed.document,
+      pluginManifests: input.pluginManifests,
+    });
+
+    if (seedIssues.length > 0) {
+      return Object.freeze({
+        status: 'failed',
+        configuredCharacterId: characterId,
+        messages: seedIssues,
+      });
+    }
   }
 
   try {

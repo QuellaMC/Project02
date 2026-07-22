@@ -25,6 +25,7 @@ import {
   askForFieldValue,
   askForNumber,
   cancelled,
+  ensureScopedConsoleCommitTarget,
   formatInspectedFieldValue,
   previewAndCommitChange,
   runtimeConfigLocation,
@@ -191,7 +192,8 @@ async function stagePluginActivationChange(
     oldValue: enabled,
     newValue: nextEnabled,
     reloadRequired: true,
-    commit() {
+    async commit() {
+      await ensureScopedConsoleCommitTarget(characterScope);
       applyScopedRuntimeConfigControlOperation({
         ...runtimeConfigLocation(context),
         ...(context.env === undefined ? {} : {env: context.env}),
@@ -273,7 +275,8 @@ async function stagePluginFieldChange(
     oldValue,
     newValue,
     reloadRequired: field.reloadRequired !== false,
-    commit() {
+    async commit() {
+      await ensureScopedConsoleCommitTarget(characterScope);
       applyScopedRuntimePluginConfigControlOperation({
         ...runtimeConfigLocation(context),
         ...(context.runtimeEnv === undefined && context.env === undefined

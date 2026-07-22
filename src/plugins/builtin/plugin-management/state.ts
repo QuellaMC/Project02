@@ -15,6 +15,14 @@ export type RuntimePluginInventoryHostState = {
   >;
   readonly defaultEnabledPluginIds?: readonly string[];
   readonly configPath?: string;
+  /**
+   * The Project02 home root the global config layer lives under. The
+   * composition root records it even when no config file exists yet:
+   * the plugin host's own store root is the character DATA directory,
+   * and using that as a config location would read the overlay as the
+   * global layer.
+   */
+  readonly storeRoot?: string;
   readonly env?: NodeJS.ProcessEnv;
   /** Opaque overlay location; the composition root fills it in. */
   readonly characterScope?: RuntimeConfigCharacterScope;
@@ -163,6 +171,7 @@ function inventoryHostStateSnapshotFields(
           ]),
         }),
     ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
+    ...(state.storeRoot === undefined ? {} : {storeRoot: state.storeRoot}),
     ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
     ...(state.characterScope === undefined
       ? {}

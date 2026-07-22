@@ -41,11 +41,13 @@ import {
 
 function controlStateLocation(state: RuntimePluginConfigControlHostState): {
   readonly configPath?: string;
+  readonly storeRoot?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly characterScope?: RuntimeConfigCharacterScope;
 } {
   return {
     ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
+    ...(state.storeRoot === undefined ? {} : {storeRoot: state.storeRoot}),
     ...(state.env === undefined ? {} : {env: state.env}),
     ...(state.characterScope === undefined
       ? {}
@@ -142,14 +144,8 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
   const targetConfigPath = requiredRuntimePluginConfigControl(
     options.state,
   ).resolveTargetPath({
-    ...(options.state.configPath === undefined
-      ? {}
-      : {configPath: options.state.configPath}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.state.env === undefined ? {} : {env: options.state.env}),
-    ...(options.state.characterScope === undefined
-      ? {}
-      : {characterScope: options.state.characterScope}),
+    ...controlStateLocation(options.state),
   });
 
   if (targetConfigPath !== options.effect.targetConfigPath) {
@@ -183,10 +179,10 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
       actor: 'agent',
       expectedFingerprint: options.effect.expectedFingerprint,
       operation,
-      ...controlStateLocation(options.state),
       ...(options.storeRoot === undefined
         ? {}
         : {storeRoot: options.storeRoot}),
+      ...controlStateLocation(options.state),
     });
 
     if (
@@ -205,10 +201,10 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
       actor: 'agent',
       expectedFingerprint: options.effect.expectedFingerprint,
       operation,
-      ...controlStateLocation(options.state),
       ...(options.storeRoot === undefined
         ? {}
         : {storeRoot: options.storeRoot}),
+      ...controlStateLocation(options.state),
     });
 
     if (result.fingerprint !== options.effect.resultFingerprint) {
@@ -285,14 +281,8 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   const targetConfigPath = requiredRuntimePluginConfigControl(
     options.state,
   ).resolveTargetPath({
-    ...(options.state.configPath === undefined
-      ? {}
-      : {configPath: options.state.configPath}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.state.env === undefined ? {} : {env: options.state.env}),
-    ...(options.state.characterScope === undefined
-      ? {}
-      : {characterScope: options.state.characterScope}),
+    ...controlStateLocation(options.state),
   });
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
@@ -464,10 +454,10 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
       actor: 'agent',
       expectedFingerprint,
       operation,
-      ...controlStateLocation(options.state),
       ...(options.storeRoot === undefined
         ? {}
         : {storeRoot: options.storeRoot}),
+      ...controlStateLocation(options.state),
     });
 
     resultFingerprint = prepared.resultFingerprint;

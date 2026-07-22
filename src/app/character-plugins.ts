@@ -9,14 +9,63 @@
  * overridden.
  */
 import type {CharacterPluginExpectations} from '../characters/index.ts';
+import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {
   createRuntimeConfigDiagnostic,
+  resolveProject02RuntimeConfig,
   validateProject02RuntimeConfig,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type RuntimeConfigDiagnostic,
 } from '../runtime/config/index.ts';
 import type {RuntimePluginActivationResult} from './activation.ts';
+
+// Manifest-shape violations a seed must not persist: an unknown field
+// or a value the manifest rejects poisons the overlay until it is
+// hand-edited (the file is never re-materialized). Secret and
+// required-field resolution stay out — they depend on env and the
+// global layer, not on the package's defaults being well-formed.
+const seedBlockingDiagnosticCodes = new Set([
+  'runtime_config_unknown_plugin_config_field',
+  'runtime_config_value_type_invalid',
+  'runtime_config_secret_ref_for_non_secret',
+  'runtime_config_plaintext_secret_rejected',
+]);
+
+/**
+ * Judges a first-selection seed against the installed manifests before
+ * anything is written; ids without an installed manifest stay verbatim
+ * and are judged later by enforcement instead.
+ */
+export function validateCharacterOverlaySeedAgainstManifests(options: {
+  readonly document: Project02RuntimeConfig;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
+}): readonly string[] {
+  const resolved = resolveProject02RuntimeConfig({
+    loadedConfig: {
+      source: 'none',
+      config: options.document,
+      diagnostics: Object.freeze([]),
+    },
+    pluginManifests: options.pluginManifests,
+    validateInactivePluginConfigs: true,
+    env: {},
+  });
+
+  return Object.freeze(
+    resolved.diagnostics
+      .filter(
+        diagnostic =>
+          diagnostic.severity === 'error' &&
+          seedBlockingDiagnosticCodes.has(diagnostic.code),
+      )
+      .map(
+        diagnostic =>
+          `Character plugin defaults are rejected by the installed ` +
+          `plugin manifests: ${diagnostic.message}`,
+      ),
+  );
+}
 
 export type CharacterOverlaySeed =
   | {readonly status: 'none'}

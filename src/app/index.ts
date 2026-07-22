@@ -27,5 +27,6 @@ export {
 export {
   characterOverlaySeedDocument,
   enforceCharacterPluginExpectations,
+  validateCharacterOverlaySeedAgainstManifests,
   type CharacterOverlaySeed,
 } from './character-plugins.ts';

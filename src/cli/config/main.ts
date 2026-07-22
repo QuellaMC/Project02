@@ -78,25 +78,6 @@ export function runRuntimeConfigCliFromArgs(
       }
 
       assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
-
-      // A scoped console may write the character's first overlay; the
-      // binding stamp lands before any control-file lock.
-      const scopedConsoleEnsure =
-        parsedArgs.location.character === undefined
-          ? Promise.resolve()
-          : ensureCharacterScopedMutationTarget(
-              resolveRuntimeConfigScopeTarget({
-                ...(parsedArgs.location.configPath === undefined
-                  ? {}
-                  : {configPath: parsedArgs.location.configPath}),
-                ...(parsedArgs.location.storeRoot === undefined
-                  ? {}
-                  : {storeRoot: parsedArgs.location.storeRoot}),
-                ...(options.env === undefined ? {} : {env: options.env}),
-                scope: 'character',
-                characterId: parsedArgs.location.character,
-              }),
-            );
       const startup = await resolveRuntimeCliStartup({
         location: parsedArgs.location,
         ...(options.env === undefined ? {} : {env: options.env}),
@@ -106,22 +87,20 @@ export function runRuntimeConfigCliFromArgs(
         continueAfterActivationErrors: true,
       });
 
-      return scopedConsoleEnsure.then(() =>
-        runRuntimeConfigConsole({
-          stdout: options.stdout,
-          ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
-          env: startup.configEnv,
-          runtimeEnv:
-            startup.status === 'resolved'
-              ? startup.runtimeEnv
-              : startup.configEnv,
-          ...parsedArgs.location,
-          ...(options.factories === undefined
-            ? {}
-            : {factories: options.factories}),
-          ...(options.prompt === undefined ? {} : {prompt: options.prompt}),
-        }),
-      );
+      return await runRuntimeConfigConsole({
+        stdout: options.stdout,
+        ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
+        env: startup.configEnv,
+        runtimeEnv:
+          startup.status === 'resolved'
+            ? startup.runtimeEnv
+            : startup.configEnv,
+        ...parsedArgs.location,
+        ...(options.factories === undefined
+          ? {}
+          : {factories: options.factories}),
+        ...(options.prompt === undefined ? {} : {prompt: options.prompt}),
+      });
     })
     .catch((error: unknown) => handleRuntimeConfigCliError(error, options));
 }

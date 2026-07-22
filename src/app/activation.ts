@@ -153,8 +153,21 @@ const defaultRuntimePluginHostServiceEntries =
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
+  /**
+   * When present, package diagnostics are classified against the merged
+   * two-layer view: an overlay-enabled broken package is as much an
+   * error as a globally enabled one.
+   */
+  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
   const storeRoot = resolveProject02RuntimeStoreRoot(options);
+  const classificationConfig =
+    options.overlayConfig === undefined
+      ? options.loadedConfig
+      : mergedLoadedConfigForOverlay(
+          options.loadedConfig,
+          options.overlayConfig,
+        );
   const operatorPackageRoot = createProject02HomeLayout({
     homeRoot: storeRoot,
   }).pluginPackagesRoot;
@@ -227,7 +240,7 @@ export function createRuntimePluginCatalogSnapshot(options: {
       ...discovery.diagnostics.map(diagnostic =>
         runtimePluginPackageDiagnostic({
           diagnostic,
-          loadedConfig: options.loadedConfig,
+          loadedConfig: classificationConfig,
           discoveredPluginIds,
         }),
       ),
@@ -305,21 +318,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     );
   }
 
-  const composition =
-    options.factories === undefined
-      ? (options.catalogSnapshot ??
-        createRuntimePluginCatalogSnapshot({
-          loadedConfig: options.loadedConfig,
-          ...(options.storeRoot === undefined
-            ? {}
-            : {storeRoot: options.storeRoot}),
-        }))
-      : Object.freeze({
-          storeRoot: resolveProject02RuntimeStoreRoot(options),
-          ...composeRuntimePluginCatalog(options.factories),
-          packageProvenanceByPluginId: Object.freeze({}),
-          diagnostics: Object.freeze([]),
-        } satisfies RuntimePluginCatalogSnapshot);
+  const composition = activationCatalogComposition(options);
   const expectedStoreRoot = resolveProject02RuntimeStoreRoot(options);
 
   if (composition.storeRoot !== expectedStoreRoot) {
@@ -399,12 +398,46 @@ export function prepareConfiguredProject02PluginActivation(options: {
       ...(resolvedConfig.path === undefined
         ? {}
         : {configPath: resolvedConfig.path}),
+      // The home root rides along even when no config file exists yet:
+      // control operations must never fall back to the host's store
+      // root, which is the character data directory.
+      storeRoot: resolvedConfig.project02.storeRoot,
       ...(options.env === undefined
         ? {}
         : {env: Object.freeze({...options.env})}),
       ...(characterScope === undefined ? {} : {characterScope}),
     }),
   } satisfies PreparedProject02PluginActivationPlan);
+}
+
+function activationCatalogComposition(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
+  readonly storeRoot?: string;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
+}): RuntimePluginCatalogSnapshot {
+  if (options.factories !== undefined) {
+    return Object.freeze({
+      storeRoot: resolveProject02RuntimeStoreRoot(options),
+      ...composeRuntimePluginCatalog(options.factories),
+      packageProvenanceByPluginId: Object.freeze({}),
+      diagnostics: Object.freeze([]),
+    } satisfies RuntimePluginCatalogSnapshot);
+  }
+
+  return (
+    options.catalogSnapshot ??
+    createRuntimePluginCatalogSnapshot({
+      loadedConfig: options.loadedConfig,
+      ...(options.overlayConfig === undefined
+        ? {}
+        : {overlayConfig: options.overlayConfig}),
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+    })
+  );
 }
 
 function runtimePluginConfigActivationByPluginId(

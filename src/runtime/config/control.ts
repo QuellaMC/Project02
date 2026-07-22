@@ -7,7 +7,15 @@ import {
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
+import {dirname} from 'node:path';
+
 import {
+  createProject02HomeLayout,
+  LocalRuntimeStorageContractError,
+} from '../storage/layout-contract.ts';
+import {acquireLocalRuntimeMutationLockSync} from '../storage/mutation-lock.ts';
+import {
+  characterOverlayConfigPath,
   deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
@@ -62,52 +70,144 @@ export function applyRuntimeConfigControlOperation(options: {
   readonly operation: RuntimeConfigControlOperation;
 }): RuntimeConfigMutationResult {
   assertRuntimeConfigControlOperation(options.operation);
+  return applyGlobalTargetControlMutation(options);
+}
 
-  const layered =
-    options.expectedFingerprint === undefined
-      ? undefined
-      : verifyLayeredControlExpectation({
-          ...options,
-          expectedFingerprint: options.expectedFingerprint,
-        });
-  const result = applyRuntimeConfigMutation({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(layered === undefined
-      ? {}
-      : {expectedFingerprint: layered.globalFileFingerprint}),
-    operation: options.operation,
-  });
-  const characterScope =
-    layered === undefined
-      ? controlCharacterScope(
-          {
-            source: 'path',
-            path: result.configPath,
-            config: result.config,
-            diagnostics: Object.freeze([]),
-          },
-          options,
-        )
-      : layered.characterScope;
-  const overlayConfig =
-    layered === undefined
-      ? characterScope === undefined
+/**
+ * Shared core of the global-target control writes. A layered
+ * expectation is verified — and stays protected — under the active
+ * character's overlay control lock, so a concurrent scoped edit cannot
+ * land between the check and the global commit; the mutation machinery
+ * then takes the global file's own lock inside. (The scoped path locks
+ * global-then-overlay; a rare cross-scope race resolves through the
+ * lock wait timeout as a conflict, never a silent stale write.) The
+ * result fingerprint re-derives the scope from the committed document:
+ * a write that changes the selected character reports the new layer.
+ */
+function applyGlobalTargetControlMutation(options: {
+  readonly configPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly expectedFingerprint?: string;
+  readonly storeRoot?: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
+  readonly operation: Parameters<
+    typeof applyRuntimeConfigMutation
+  >[0]['operation'];
+  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
+}): RuntimeConfigMutationResult {
+  return withExpectationOverlayLock(options, () => {
+    const layered =
+      options.expectedFingerprint === undefined
         ? undefined
-        : loadCharacterOverlayForScope(characterScope)
-      : layered.overlayConfig;
+        : verifyLayeredControlExpectation({
+            ...options,
+            expectedFingerprint: options.expectedFingerprint,
+          });
+    const result = applyRuntimeConfigMutation({
+      ...(options.configPath === undefined
+        ? {}
+        : {configPath: options.configPath}),
+      ...(options.env === undefined ? {} : {env: options.env}),
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+      ...(layered === undefined
+        ? {}
+        : {expectedFingerprint: layered.globalFileFingerprint}),
+      ...(options.validateCandidate === undefined
+        ? {}
+        : {validateCandidate: options.validateCandidate}),
+      operation: options.operation,
+    });
+    const characterScope = controlCharacterScope(
+      {
+        source: 'path',
+        path: result.configPath,
+        config: result.config,
+        diagnostics: Object.freeze([]),
+      },
+      options,
+    );
+    const overlayConfig =
+      characterScope === undefined
+        ? undefined
+        : loadCharacterOverlayForScope(characterScope);
 
-  return Object.freeze({
-    ...result,
-    fingerprint: layeredControlFingerprint({
-      globalConfig: result.config,
-      characterScope,
-      overlayConfig,
-    }),
+    return Object.freeze({
+      ...result,
+      fingerprint: layeredControlFingerprint({
+        globalConfig: result.config,
+        characterScope,
+        overlayConfig,
+      }),
+    });
   });
+}
+
+/**
+ * Holds the active character's overlay control lock while a layered
+ * expectation authorizes a global write. Without an expectation there
+ * is nothing to protect and no lock is taken.
+ */
+function withExpectationOverlayLock<T>(
+  options: {
+    readonly configPath?: string;
+    readonly env?: NodeJS.ProcessEnv;
+    readonly expectedFingerprint?: string;
+    readonly storeRoot?: string;
+    readonly characterScope?: RuntimeConfigCharacterScope;
+  },
+  run: () => T,
+): T {
+  if (options.expectedFingerprint === undefined) {
+    return run();
+  }
+
+  const characterScope = controlCharacterScope(
+    loadProject02RuntimeConfig({
+      ...(options.configPath === undefined
+        ? {}
+        : {configPath: options.configPath}),
+      ...(options.env === undefined ? {} : {env: options.env}),
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+    }),
+    options,
+  );
+
+  if (characterScope === undefined) {
+    return run();
+  }
+
+  const canonicalOverlayPath = canonicalRuntimeConfigMutationPath(
+    characterOverlayConfigPath(characterScope.dataRoot),
+  );
+  let overlayLock: ReturnType<typeof acquireLocalRuntimeMutationLockSync>;
+
+  try {
+    overlayLock = acquireLocalRuntimeMutationLockSync({
+      locksRoot: createProject02HomeLayout({
+        homeRoot: dirname(canonicalOverlayPath),
+      }).locksRoot,
+      resourceKey: `runtime-control-file:${canonicalOverlayPath}`,
+    });
+  } catch (error: unknown) {
+    // A lock root that cannot exist means no concurrent scoped writer
+    // can be mid-write either; let the mutation surface the store
+    // problem with its own precise error instead of masking it here.
+    if (error instanceof LocalRuntimeStorageContractError) {
+      return run();
+    }
+
+    throw error;
+  }
+
+  try {
+    return run();
+  } finally {
+    overlayLock.release();
+  }
 }
 
 function assertRuntimeConfigControlOperation(
@@ -261,29 +361,11 @@ export function applyRuntimePluginConfigControlOperation(options: {
   readonly operation: RuntimePluginConfigFieldControlOperation;
 }): RuntimeConfigMutationResult {
   const mutation = runtimePluginConfigControlMutation(options);
-  const layered = verifyLayeredControlExpectation(options);
-  const result = applyRuntimeConfigMutation({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    // The layered expectation was verified against a snapshot; the
-    // mutation lock re-verifies the global file against that same
-    // snapshot's per-file fingerprint, so a concurrent writer still
-    // surfaces as a conflict.
-    expectedFingerprint: layered.globalFileFingerprint,
-    validateCandidate: mutation.validateCandidate,
-    operation: mutation.operation,
-  });
 
-  return Object.freeze({
-    ...result,
-    fingerprint: layeredControlFingerprint({
-      globalConfig: result.config,
-      characterScope: layered.characterScope,
-      overlayConfig: layered.overlayConfig,
-    }),
+  return applyGlobalTargetControlMutation({
+    ...options,
+    operation: mutation.operation,
+    validateCandidate: mutation.validateCandidate,
   });
 }
 

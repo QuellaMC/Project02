@@ -336,3 +336,36 @@ describe('materialization ordering', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 });
+
+describe('seed validation against installed manifests', () => {
+  it('refuses to persist a seed the installed manifests reject', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {
+        required: ['demo-config'],
+        config: {'demo-config': {misspelledTone: 'warm'}},
+      },
+    });
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      dataDir: 'materialize',
+    });
+
+    expect(startup.status).toBe('character_invalid');
+    if (startup.status !== 'character_invalid') {
+      throw new Error('Expected character_invalid.');
+    }
+    expect(
+      startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : '',
+    ).toContain('rejected by the installed plugin manifests');
+    expect(
+      existsSync(
+        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),
+      ),
+    ).toBe(false);
+  });
+});

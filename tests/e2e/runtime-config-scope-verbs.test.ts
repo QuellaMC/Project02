@@ -233,3 +233,26 @@ describe('overlay files reached through --config directly', () => {
     });
   });
 });
+
+describe('scoped console sessions', () => {
+  it('creates no durable character state when the UI is only opened and quit', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-ui-readonly-');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    const outcome = await runRuntimeConfigCliFromArgs(
+      ['--store', homeRoot, '--character', 'mira', 'ui'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        env: {},
+        prompt: {
+          question: () => Promise.resolve('q'),
+        },
+      },
+    );
+
+    expect(outcome).toBe(0);
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+  });
+});

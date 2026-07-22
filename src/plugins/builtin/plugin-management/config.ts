@@ -126,10 +126,13 @@ export function inspectRuntimePluginConfigForControl(options: {
             options.manifest.id,
           ),
         }),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     ...(options.state.configPath === undefined
       ? {}
       : {configPath: options.state.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.state.storeRoot === undefined
+      ? {}
+      : {storeRoot: options.state.storeRoot}),
     ...(options.state.env === undefined ? {} : {env: options.state.env}),
     ...(options.state.characterScope === undefined
       ? {}
