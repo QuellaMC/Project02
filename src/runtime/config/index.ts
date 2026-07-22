@@ -91,6 +91,7 @@ export {
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
 export {
+  configuredProject02CharacterId,
   defaultProject02CharacterId,
   defaultProject02UserDisplayName,
   roleModelProviderEnvVarName,

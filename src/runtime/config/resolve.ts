@@ -10,7 +10,7 @@ import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import {storeRootForSelectedDefaultConfigPath} from './mutate.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
-  defaultProject02CharacterId,
+  configuredProject02CharacterId,
   defaultProject02UserDisplayName,
   isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
@@ -54,7 +54,8 @@ export function resolveProject02RuntimeConfig(
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
-  const character = config?.project02?.character ?? defaultProject02CharacterId;
+  // Trimmed via the shared helper, mirroring userDisplayName below.
+  const character = configuredProject02CharacterId(config);
   // Trimmed at the resolve seam so an authored value with stray padding
   // never reaches the strict speaker constructor as a startup crash.
   const userDisplayName = (

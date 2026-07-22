@@ -197,24 +197,21 @@ describe('local runtime session store', () => {
     );
   });
 
-  it('fails rehydration when the reader lacks readConversationEvidence', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const store = createLocalRuntimeSessionStore({
-      storeRoot,
-      conversationLogReader: {
-        readConversationMessages: () => [],
-      },
-      now: fixedClock(['2026-06-04T00:02:00.000Z']),
-    });
+  it('requires readConversationEvidence from readers at the type level', () => {
+    // The home/character-data split made evidence mandatory: a reader
+    // without it is a compile-time migration, not a rehydrate call that
+    // fails at runtime. This fails to compile if the method becomes
+    // optional again.
+    type MessagesOnlyReader = {
+      readConversationMessages: () => readonly [];
+    };
+    type MessagesOnlyReaderIsAccepted =
+      MessagesOnlyReader extends LocalRuntimeSessionConversationLogReader
+        ? true
+        : false;
+    const messagesOnlyReaderIsAccepted: MessagesOnlyReaderIsAccepted = false;
 
-    await store.createSession({sessionId: 'evidence-required'});
-
-    await expect(
-      store.rehydrateConversationSession('evidence-required'),
-    ).rejects.toMatchObject({
-      name: 'LocalRuntimeSessionStoreError',
-      code: 'conversation_evidence_unavailable',
-    });
+    expect(messagesOnlyReaderIsAccepted).toBe(false);
   });
 
   it('rehydrates persisted visible conversation messages in order through the CT-02 reader seam', async () => {

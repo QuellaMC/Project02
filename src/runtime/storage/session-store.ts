@@ -45,7 +45,6 @@ import {
 } from './mutation-lock.ts';
 
 export type LocalRuntimeSessionStoreErrorCode =
-  | 'conversation_evidence_unavailable'
   | 'conversation_log_reader_unavailable'
   | 'session_already_exists'
   | 'session_not_found';
@@ -66,7 +65,11 @@ export type LocalRuntimeSessionConversationLogReader = {
   ):
     | Promise<readonly ConversationLogRecord[]>
     | readonly ConversationLogRecord[];
-  readConversationEvidence?(
+  // Required since the home/character-data split: the session character
+  // is derived from durable evidence and has no default, so a reader
+  // without evidence support is a compile-time error, not a rehydrate
+  // that fails at runtime.
+  readConversationEvidence(
     sessionId: string,
   ):
     | Promise<LocalRuntimeSessionConversationEvidence>
@@ -305,19 +308,7 @@ export function createLocalRuntimeSessionStore(
     }
 
     const conversationEvidence =
-      await conversationLogReader.readConversationEvidence?.(
-        metadata.sessionId,
-      );
-
-    if (conversationEvidence === undefined) {
-      throw new LocalRuntimeSessionStoreError(
-        'conversation_evidence_unavailable',
-        'Rehydrating a local runtime session requires a conversation log ' +
-          'reader with readConversationEvidence: the session character is ' +
-          'derived from durable evidence and has no default. Provide a ' +
-          'reader that implements readConversationEvidence.',
-      );
-    }
+      await conversationLogReader.readConversationEvidence(metadata.sessionId);
 
     return createConversationSession({
       id: metadata.sessionId,

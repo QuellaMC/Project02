@@ -75,6 +75,20 @@ describe('project02 home initialization', () => {
     ).rejects.toMatchObject({code: 'missing_file'});
   });
 
+  it('treats a reserved directory name with a file type as foreign', async () => {
+    const homeRoot = join(createTestTempRoot(), 'wrong-type-home');
+
+    mkdirSync(homeRoot, {recursive: true});
+    writeFileSync(join(homeRoot, 'character-data'), 'not a directory\n');
+
+    await expect(
+      ensureInitializedProject02Home({homeRoot}),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'missing_file',
+    });
+  });
+
   it('refuses to initialize a directory with foreign entries', async () => {
     const homeRoot = join(createTestTempRoot(), 'foreign-home');
 

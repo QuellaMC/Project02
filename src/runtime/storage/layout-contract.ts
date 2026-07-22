@@ -157,7 +157,7 @@ const pluginsDirectoryName = 'plugins';
 // so the one-word literal is deliberately duplicated there.
 const charactersDirectoryName = 'characters';
 
-const characterDataDirectoryName = 'character-data';
+export const characterDataDirectoryName = 'character-data';
 
 export const characterBindingFileName = 'character-binding.json';
 

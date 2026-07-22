@@ -6,10 +6,14 @@ import {
   realpathSync,
   unlinkSync,
 } from 'node:fs';
-import {basename, dirname, resolve} from 'node:path';
+import {basename, dirname, join, resolve} from 'node:path';
 
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
-import {createProject02HomeLayout} from '../storage/layout-contract.ts';
+import {
+  characterBindingFileName,
+  characterDataDirectoryName,
+  createProject02HomeLayout,
+} from '../storage/layout-contract.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -392,6 +396,13 @@ function bootstrapRuntimeConfig(options: {
   readonly selectedConfigPath: string;
   readonly storeRoot?: string;
 }): Project02RuntimeConfig {
+  // A config path inside a character-data directory is an overlay:
+  // seeding project02.storeRoot there would produce a document the
+  // overlay loader must reject as global-only.
+  if (selectedConfigPathIsCharacterOverlay(options.selectedConfigPath)) {
+    return {version: runtimeConfigVersion};
+  }
+
   if (options.storeRoot !== undefined) {
     return {
       version: runtimeConfigVersion,
@@ -409,6 +420,22 @@ function bootstrapRuntimeConfig(options: {
         version: runtimeConfigVersion,
         project02: Object.freeze({storeRoot: selectedStoreRoot}),
       };
+}
+
+// Overlay locations are recognized structurally (a parent named
+// character-data, the layout invariant) or by the binding stamp a
+// materialized data dir always carries.
+function selectedConfigPathIsCharacterOverlay(
+  selectedConfigPath: string,
+): boolean {
+  const canonicalConfigPath =
+    canonicalRuntimeConfigMutationPath(selectedConfigPath);
+  const containingDirectory = dirname(canonicalConfigPath);
+
+  return (
+    basename(dirname(containingDirectory)) === characterDataDirectoryName ||
+    existsSync(join(containingDirectory, characterBindingFileName))
+  );
 }
 
 export function createRuntimeConfigMutationBase(options: {

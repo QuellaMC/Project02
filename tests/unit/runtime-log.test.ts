@@ -360,6 +360,64 @@ describe('runtime log store', () => {
     );
   });
 
+  it('anchors a custom first user speaker when the store binds none', () => {
+    // A direct-runtime store may omit boundUserSpeaker while the
+    // session carries a custom display name: the first user record
+    // anchors the speaker (the id is never negotiable), and later
+    // records must match the anchor.
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'someone-else',
+        speakerName: 'Custom Name',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'Custom Name',
+      text: 'hello',
+      committedAt: '2026-06-04T00:00:01.000Z',
+    });
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
+      committedAt: '2026-06-04T00:00:02.000Z',
+    });
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-3',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Different Name',
+        text: 'again',
+        committedAt: '2026-06-04T00:00:03.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+  });
+
   it('stamps user messages against the bound user speaker and rejects drift', () => {
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,

@@ -638,14 +638,12 @@ export function assertIncrementalConversationAppend(options: {
     }
   }
 
-  const expectedUserSpeaker =
-    options.state.userSpeaker ??
-    options.state.boundUserSpeaker ??
-    localUserSpeaker;
   const speakerIsValid =
     options.record.role === 'user'
-      ? options.record.speakerId === expectedUserSpeaker.id &&
-        options.record.speakerName === expectedUserSpeaker.displayName
+      ? userRecordSpeakerIsValid(
+          options.record,
+          options.state.userSpeaker ?? options.state.boundUserSpeaker,
+        )
       : speakerMatchesCharacter(options.record, expectedCharacter);
 
   if (!speakerIsValid) {
@@ -654,6 +652,20 @@ export function assertIncrementalConversationAppend(options: {
       `Restored ${options.record.role} message speaker metadata is malformed.`,
     );
   }
+}
+
+// With no recorded and no store-bound user speaker, the first user
+// record anchors the session's speaker (a direct-runtime store may
+// carry a custom display name); the id is never negotiable.
+function userRecordSpeakerIsValid(
+  record: {readonly speakerId: string; readonly speakerName: string},
+  expectedUserSpeaker: SpeakerIdentity | undefined,
+): boolean {
+  return expectedUserSpeaker === undefined
+    ? record.speakerId === localUserSpeaker.id &&
+        record.speakerName.trim().length > 0
+    : record.speakerId === expectedUserSpeaker.id &&
+        record.speakerName === expectedUserSpeaker.displayName;
 }
 
 export function applyIncrementalConversationAppend(

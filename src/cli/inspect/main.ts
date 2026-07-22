@@ -1,4 +1,7 @@
+import {existsSync} from 'node:fs';
+
 import {readFlagValue} from '../shared/flags.ts';
+import type {CharacterProfile} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
@@ -150,6 +153,9 @@ export async function runInspectCliFromArgs(
       parsedArgs,
       options.stdout,
       startup.activationPlan,
+      startup.characterActivation.status === 'resolved'
+        ? startup.characterActivation.profile
+        : undefined,
     );
     return 0;
   } catch (error: unknown) {
@@ -276,20 +282,20 @@ async function writeSessionList(
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
 ): Promise<void> {
-  const sessionStore = createLocalRuntimeSessionStore({
-    storeRoot: characterDataDirPath(
-      runtimeConfig.resolvedConfig.project02.storeRoot,
-      runtimeConfig.resolvedConfig.project02.character,
-    ),
-  });
+  const dataRoot = characterDataDirPath(
+    runtimeConfig.resolvedConfig.project02.storeRoot,
+    runtimeConfig.resolvedConfig.project02.character,
+  );
+  const sessionStore = createLocalRuntimeSessionStore({storeRoot: dataRoot});
   let sessions: readonly LocalRuntimeSessionMetadata[] = [];
 
   try {
     sessions = await sessionStore.listSessions();
   } catch (error: unknown) {
-    // A character whose data directory has not been created yet simply
-    // has no sessions; other storage errors still surface.
-    if (!isMissingDefaultSessionStore(error)) {
+    // Only a character whose data directory does not exist yet reads as
+    // "no sessions". A directory that exists but cannot be listed is
+    // corruption or foreign content, never an empty view.
+    if (!isMissingDefaultSessionStore(error) || existsSync(dataRoot)) {
       throw error;
     }
   }
@@ -316,6 +322,7 @@ async function writeSessionEvidence(
   args: InspectCliArgs & {readonly mode: 'session'},
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
+  boundCharacter: CharacterProfile | undefined,
 ): Promise<void> {
   const storage = {
     storeRoot: characterDataDirPath(
@@ -325,9 +332,12 @@ async function writeSessionEvidence(
   };
   const sessionStore = createLocalRuntimeSessionStore(storage);
   const session = await sessionStore.readSession(args.sessionId);
+  // The binding holds at inspection too: foreign evidence copied into a
+  // bound data directory must fail here exactly as durable chat does.
   const logStore = createFileRuntimeLogStore({
     ...storage,
     sessionId: session.sessionId,
+    ...(boundCharacter === undefined ? {} : {boundCharacter}),
   });
   const evidence = logStore.readSessionEvidence();
   const {traceEntries, rawEvents, conversationMessages} = evidence.stored;

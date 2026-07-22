@@ -109,9 +109,15 @@ export function createConfiguredRuntimePluginReloader(options: {
       }
       const freshResolvedConfig = resolveLayeredProject02RuntimeConfig({
         loadedConfig: authoredState.loaded,
+        // The overlay's character id may be a flag override the global
+        // document knows nothing about; without it the rebuilt plugin
+        // would land in the wrong character-data directory.
         ...(authoredState.overlay === undefined
           ? {}
-          : {overlayConfig: authoredState.overlay}),
+          : {
+              overlayConfig: authoredState.overlay,
+              characterId: authoredState.overlay.characterId,
+            }),
         storeRoot: resolvedConfig.project02.storeRoot,
         pluginManifests,
         defaultEnabledPluginIds,

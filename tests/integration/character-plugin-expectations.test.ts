@@ -1,4 +1,4 @@
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -310,5 +310,29 @@ describe('first-selection materialization through startup', () => {
     expect(disabled?.message).toContain(
       'runtime-config --character seeded plugin enable demo-config',
     );
+  });
+});
+
+describe('materialization ordering', () => {
+  it('creates no durable state when the global config is invalid', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {required: ['demo-config']},
+    });
+
+    writeFileSync(
+      join(homeRoot, 'config.json'),
+      '{"version":"project02.config.v2","unknownField":true}\n',
+    );
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      dataDir: 'materialize',
+    });
+
+    expect(startup.status).toBe('config_invalid');
+    expect(existsSync(characterDataDirPath(homeRoot, 'seeded'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 });

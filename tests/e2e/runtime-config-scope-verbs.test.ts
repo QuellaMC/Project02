@@ -203,3 +203,33 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
   });
 });
+
+describe('overlay files reached through --config directly', () => {
+  it('never bootstraps a store root into an overlay-located config', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const set = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--config',
+      overlayPath,
+      'set',
+      'project02.roleModelProvider',
+      'local',
+    ]);
+
+    expect(set.code).toBe(0);
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: 'project02.config.v2',
+      project02: {roleModelProvider: 'local'},
+    });
+  });
+});

@@ -44,6 +44,23 @@ export type Project02RoleModelProvider =
 export const defaultProject02CharacterId = 'mira';
 export const defaultProject02UserDisplayName = 'You';
 
+/**
+ * The active character id for a loaded config: an explicit override
+ * (e.g. a --character flag) beats the authored selection beats the
+ * default. Trimmed here — the one seam every reader shares — so a
+ * padded authored value never becomes a false missing-character error.
+ */
+export function configuredProject02CharacterId(
+  config: Project02RuntimeConfig | undefined,
+  override?: string,
+): string {
+  return (
+    override ??
+    config?.project02?.character ??
+    defaultProject02CharacterId
+  ).trim();
+}
+
 export type Project02HostConfig = Readonly<
   Record<string, RuntimeConfigValue | undefined>
 > & {

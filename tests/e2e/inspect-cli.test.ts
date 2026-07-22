@@ -575,6 +575,40 @@ describe('inspect CLI plugin evidence', () => {
     );
   });
 
+  it('reports a corrupt character store instead of an empty session list', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-corrupt-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A data directory that exists but lost its schema marker while
+    // sessions/ still holds content: corruption or foreign data, never
+    // an "empty" view.
+    mkdirSync(join(dataRoot, 'sessions', 'lost-session'), {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'sessions', 'lost-session', 'raw-events.jsonl'),
+      '',
+    );
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toContain('Error:');
+  });
+
   it('reports config load errors before runtime env file errors', async () => {
     const storeRoot = createTestTempRoot(
       'project02-inspect-load-error-before-env-',

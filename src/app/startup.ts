@@ -14,8 +14,8 @@ import {
   enforceCharacterPluginExpectations,
 } from './character-plugins.ts';
 import {
+  configuredProject02CharacterId,
   defaultDotEnvForRuntimeLocation,
-  defaultProject02CharacterId,
   deriveRuntimeConfigCharacterScope,
   diagnosticsHaveErrors,
   ensureCharacterDataDir,
@@ -154,10 +154,10 @@ async function resolveRuntimeCliActivationStartup(input: {
 }): Promise<RuntimeCliStartupResult> {
   const {options, location, loadedConfig} = input;
   // Precedence: --character flag > configured character > default.
-  const activeCharacterId =
-    location.character ??
-    loadedConfig.config?.project02?.character ??
-    defaultProject02CharacterId;
+  const activeCharacterId = configuredProject02CharacterId(
+    loadedConfig.config,
+    location.character,
+  );
   const homeRoot = resolveProject02RuntimeStoreRoot({
     loadedConfig,
     ...(location.storeRoot === undefined
@@ -174,6 +174,59 @@ async function resolveRuntimeCliActivationStartup(input: {
       ...input.startupBase,
       status: 'character_invalid',
       characterActivation,
+    });
+  }
+
+  const buildPreEnvState = (
+    overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
+  ) => {
+    const overlayForPlan =
+      overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
+    const catalogSnapshot =
+      options.factories === undefined
+        ? createRuntimePluginCatalogSnapshot({
+            loadedConfig,
+            ...(location.storeRoot === undefined
+              ? {}
+              : {storeRoot: location.storeRoot}),
+          })
+        : undefined;
+
+    return {
+      overlayForPlan,
+      catalogSnapshot,
+      activationPlanBeforeRuntimeEnv: prepareActivationPlan({
+        loadedConfig,
+        characterActivation,
+        ...overlayForPlan,
+        location,
+        env: input.configEnv,
+        ...(options.factories === undefined
+          ? {}
+          : {factories: options.factories}),
+        ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
+      }),
+      base: {
+        ...input.startupBase,
+        characterActivation,
+        ...overlayForPlan,
+        ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
+      },
+    };
+  };
+
+  // An invalid global config must not create durable state: report it
+  // (with the overlay read-only for attribution) before the home,
+  // stamp, or first-selection seed would be written.
+  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
+    const invalidState = buildPreEnvState(
+      loadCharacterOverlayForStartup({loadedConfig, location}),
+    );
+
+    return Object.freeze({
+      ...invalidState.base,
+      status: 'config_invalid',
+      activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
     });
   }
 
@@ -196,32 +249,12 @@ async function resolveRuntimeCliActivationStartup(input: {
     loadedConfig,
     location,
   });
-  const overlayForPlan =
-    overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
-  const catalogSnapshot =
-    options.factories === undefined
-      ? createRuntimePluginCatalogSnapshot({
-          loadedConfig,
-          ...(location.storeRoot === undefined
-            ? {}
-            : {storeRoot: location.storeRoot}),
-        })
-      : undefined;
-  const activationPlanBeforeRuntimeEnv = prepareActivationPlan({
-    loadedConfig,
-    characterActivation,
-    ...overlayForPlan,
-    location,
-    env: input.configEnv,
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
-  });
-  const base = {
-    ...input.startupBase,
-    characterActivation,
-    ...overlayForPlan,
-    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
-  };
+  const {
+    overlayForPlan,
+    catalogSnapshot,
+    activationPlanBeforeRuntimeEnv,
+    base,
+  } = buildPreEnvState(overlayLoadedConfig);
 
   if (startupConfigHasErrors(loadedConfig, overlayLoadedConfig)) {
     return Object.freeze({

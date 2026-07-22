@@ -11,7 +11,10 @@ import {
   applyScopedRuntimePluginConfigControlOperation,
   characterOverlayConfigPath,
   createLayeredRuntimeConfigFingerprint,
+  createRuntimePluginConfigControlCapability,
+  inspectRuntimePluginConfig,
   loadProject02RuntimeConfig,
+  resolveProject02RuntimeConfig,
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
@@ -254,3 +257,87 @@ function resolveScopedExpected(homeRoot: string): string {
     overlayConfig: null,
   });
 }
+
+describe('character-scoped plugin control capability', () => {
+  it('routes agent tool updates at the active character overlay, never the home config', () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const plugin = structuredConfigPlugin('scope.capability');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'scope.capability': {
+          enabled: true,
+          config: {settings: {from: 'global'}, endpoints: ['global']},
+        },
+      },
+    });
+
+    const characterScope = {characterId: 'mira', dataRoot};
+    const capability = createRuntimePluginConfigControlCapability();
+    const fingerprint = inspectRuntimePluginConfig({
+      manifest: plugin.manifest,
+      pluginManifests: [plugin.manifest],
+      storeRoot: homeRoot,
+      env: {},
+      characterScope,
+    }).fingerprint;
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+    const globalBefore = readFileSync(configPath, 'utf8');
+    const prepared = capability.prepareOperation({
+      storeRoot: homeRoot,
+      env: {},
+      characterScope,
+      manifest: plugin.manifest,
+      actor: 'operator',
+      expectedFingerprint: fingerprint,
+      operation: {kind: 'set', fieldName: 'settings', value: {from: 'agent'}},
+    });
+
+    // Prepare is read-only and already names the overlay as the target.
+    expect(existsSync(overlayPath)).toBe(false);
+    expect(prepared.targetConfigPath).toBe(
+      capability.resolveTargetPath({storeRoot: homeRoot, characterScope}),
+    );
+
+    const applied = capability.applyOperation({
+      storeRoot: homeRoot,
+      env: {},
+      characterScope,
+      manifest: plugin.manifest,
+      actor: 'operator',
+      expectedFingerprint: fingerprint,
+      operation: {kind: 'set', fieldName: 'settings', value: {from: 'agent'}},
+    });
+
+    expect(applied.fingerprint).toBe(prepared.resultFingerprint);
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: runtimeConfigVersion,
+      plugins: {'scope.capability': {config: {settings: {from: 'agent'}}}},
+    });
+    expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
+  });
+});
+
+describe('configured character id normalization', () => {
+  it('trims a padded authored character id at every read seam', () => {
+    const homeRoot = createTestTempRoot('project02-scope-trim-');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: '  mira  '},
+    });
+
+    const resolved = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({storeRoot: homeRoot, env: {}}),
+      storeRoot: homeRoot,
+    });
+
+    expect(resolved.project02.character).toBe('mira');
+    expect(
+      resolveRuntimeConfigScopeTarget({
+        storeRoot: homeRoot,
+        env: {},
+        scope: 'character',
+      }).characterScope,
+    ).toMatchObject({characterId: 'mira'});
+  });
+});

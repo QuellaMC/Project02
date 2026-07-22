@@ -29,7 +29,7 @@ import {
 import {resolveProject02RuntimeStoreRoot} from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
 import {
-  defaultProject02CharacterId,
+  configuredProject02CharacterId,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
   type RuntimeConfigCharacterScope,
@@ -155,10 +155,10 @@ export function deriveRuntimeConfigCharacterScope(options: {
   readonly storeRoot?: string;
   readonly characterId?: string;
 }): RuntimeConfigCharacterScope | undefined {
-  const characterId =
-    options.characterId ??
-    options.loadedConfig.config?.project02?.character ??
-    defaultProject02CharacterId;
+  const characterId = configuredProject02CharacterId(
+    options.loadedConfig.config,
+    options.characterId,
+  );
 
   try {
     return Object.freeze({

@@ -14,10 +14,13 @@ import {mkdirSync, writeFileSync} from 'node:fs';
 import {dirname} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {createProject02HomeLayout} from '../storage/layout-contract.ts';
+import {acquireLocalRuntimeMutationLockSync} from '../storage/mutation-lock.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
+  prepareRuntimePluginConfigControlOperation,
   resolveRuntimeConfigControlTargetPath,
   runtimePluginConfigControlMutation,
   type RuntimeConfigControlOperation,
@@ -31,7 +34,9 @@ import {
 import {loadProject02RuntimeConfig} from './load.ts';
 import {
   applyRuntimeConfigMutation,
+  canonicalRuntimeConfigMutationPath,
   createRuntimeConfigMutationBase,
+  prepareRuntimeConfigMutationCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
   type RuntimeConfigMutationResult,
@@ -62,6 +67,12 @@ type ScopedRuntimeConfigLocation = {
   readonly storeRoot?: string;
   /** Explicit character id (e.g. --character); wins over the configured one. */
   readonly characterId?: string;
+  /**
+   * Full explicit scope (id + data root), e.g. from a plugin host's
+   * control state. Wins over any derivation: a host's storeRoot is the
+   * character DATA root, and re-deriving from it would nest the path.
+   */
+  readonly characterScope?: RuntimeConfigCharacterScope;
 };
 
 export type ResolvedRuntimeConfigScopeTarget = {
@@ -171,6 +182,75 @@ export function applyScopedRuntimePluginConfigControlOperation(
   });
 }
 
+/**
+ * Both layers loaded under the GLOBAL file's control lock: a scoped
+ * mutation's layered expectation is only meaningful if the global layer
+ * cannot move between the check and the overlay write, so the lock is
+ * held across verify + mutate. Ordering is always global before
+ * overlay (the mutation machinery takes the overlay's own lock inside),
+ * and no path takes them in the reverse order.
+ */
+function withGlobalConfigLayerLock<T>(
+  options: ScopedRuntimeConfigLocation,
+  run: (context: {
+    readonly loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>;
+    readonly globalDocument: Project02RuntimeConfig;
+  }) => T,
+): T {
+  const canonicalGlobalPath = canonicalRuntimeConfigMutationPath(
+    resolveRuntimeConfigControlTargetPath(options),
+  );
+  const globalLock = acquireLocalRuntimeMutationLockSync({
+    locksRoot: createProject02HomeLayout({
+      homeRoot: dirname(canonicalGlobalPath),
+    }).locksRoot,
+    resourceKey: `runtime-control-file:${canonicalGlobalPath}`,
+  });
+
+  try {
+    const loadedConfig = loadProject02RuntimeConfig(options);
+
+    return run({
+      loadedConfig,
+      globalDocument: createRuntimeConfigMutationBase({
+        loadedConfig,
+        ...(options.configPath === undefined
+          ? {}
+          : {configPath: options.configPath}),
+        ...(options.storeRoot === undefined
+          ? {}
+          : {storeRoot: options.storeRoot}),
+      }),
+    });
+  } finally {
+    globalLock.release();
+  }
+}
+
+function verifyScopedExpectation(options: {
+  readonly expectedFingerprint: string | undefined;
+  readonly globalDocument: Project02RuntimeConfig;
+  readonly characterScope: RuntimeConfigCharacterScope;
+  readonly overlay: LoadedProject02CharacterOverlayConfig;
+}): void {
+  if (options.expectedFingerprint === undefined) {
+    return;
+  }
+
+  const currentFingerprint = createLayeredRuntimeConfigFingerprint({
+    globalConfig: options.globalDocument,
+    characterId: options.characterScope.characterId,
+    overlayConfig: characterOverlayFingerprintLayer(options.overlay),
+  });
+
+  if (options.expectedFingerprint !== currentFingerprint) {
+    throw new RuntimeConfigConflictError(
+      'Runtime config changed before the mutation could be committed. ' +
+        `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
+    );
+  }
+}
+
 function applyCharacterScopedMutation(
   options: ScopedRuntimeConfigLocation & {
     readonly expectedFingerprint?: string;
@@ -183,71 +263,142 @@ function applyCharacterScopedMutation(
     ) => void;
   },
 ): RuntimeConfigMutationResult {
-  const loadedConfig = loadProject02RuntimeConfig(options);
-  const characterScope = requiredCharacterScope(loadedConfig, options);
-  const overlay = loadCharacterOverlayForScope(characterScope);
+  return withGlobalConfigLayerLock(
+    options,
+    ({loadedConfig, globalDocument}) => {
+      const characterScope = requiredCharacterScope(loadedConfig, options);
+      const overlay = loadCharacterOverlayForScope(characterScope);
 
-  assertOverlayMutable(overlay);
+      assertOverlayMutable(overlay);
+      verifyScopedExpectation({
+        expectedFingerprint: options.expectedFingerprint,
+        globalDocument,
+        characterScope,
+        overlay,
+      });
 
-  const globalDocument = createRuntimeConfigMutationBase({
-    loadedConfig,
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
+      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
+      const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
+      const result = applyRuntimeConfigMutation({
+        configPath: overlayPath,
+        ...(options.env === undefined ? {} : {env: options.env}),
+        operation: options.operation,
+        ...(options.expectedFingerprint === undefined
+          ? {}
+          : {expectedFingerprint: createRuntimeConfigFingerprint(overlayBase)}),
+        validateCandidate: candidate => {
+          assertOverlayCandidateStaysCharacterScoped(candidate);
+          options.validateCandidate?.(candidate, globalDocument);
+        },
+      });
 
-  if (options.expectedFingerprint !== undefined) {
-    const currentFingerprint = createLayeredRuntimeConfigFingerprint({
-      globalConfig: globalDocument,
-      characterId: characterScope.characterId,
-      overlayConfig: characterOverlayFingerprintLayer(overlay),
-    });
+      return Object.freeze({
+        ...result,
+        fingerprint: createLayeredRuntimeConfigFingerprint({
+          globalConfig: globalDocument,
+          characterId: characterScope.characterId,
+          overlayConfig: result.config,
+        }),
+      });
+    },
+  );
+}
 
-    if (options.expectedFingerprint !== currentFingerprint) {
-      throw new RuntimeConfigConflictError(
-        'Runtime config changed before the mutation could be committed. ' +
-          `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
-      );
-    }
+/**
+ * Read-only twin of the scoped apply: verifies the layered expectation
+ * and names the committed fingerprint and target path without writing
+ * anything — an absent overlay stays absent until the apply.
+ */
+export function prepareScopedRuntimePluginConfigControlOperation(
+  options: ScopedRuntimeConfigLocation & {
+    readonly scope: RuntimeConfigMutationScopeSelector;
+    readonly manifest: RuntimePluginManifest;
+    readonly actor: RuntimePluginConfigControlActor;
+    readonly expectedFingerprint: string;
+    readonly operation: RuntimePluginConfigFieldControlOperation;
+  },
+): {
+  readonly resultFingerprint: string;
+  readonly targetConfigPath: string;
+} {
+  if (options.scope === 'global') {
+    return prepareRuntimePluginConfigControlOperation(options);
   }
 
-  const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
-  const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
-  const result = applyRuntimeConfigMutation({
-    configPath: overlayPath,
-    ...(options.env === undefined ? {} : {env: options.env}),
-    operation: options.operation,
-    ...(options.expectedFingerprint === undefined
-      ? {}
-      : {expectedFingerprint: createRuntimeConfigFingerprint(overlayBase)}),
-    validateCandidate: candidate => {
-      assertOverlayCandidateStaysCharacterScoped(candidate);
-      options.validateCandidate?.(candidate, globalDocument);
-    },
-  });
+  if (options.operation.kind === 'secret_set') {
+    assertRuntimeConfigSecretScopeAllowed('character');
+  }
 
-  return Object.freeze({
-    ...result,
-    fingerprint: createLayeredRuntimeConfigFingerprint({
-      globalConfig: globalDocument,
-      characterId: characterScope.characterId,
-      overlayConfig: result.config,
-    }),
-  });
+  const mutation = runtimePluginConfigControlMutation(options);
+
+  return withGlobalConfigLayerLock(
+    options,
+    ({loadedConfig, globalDocument}) => {
+      const characterScope = requiredCharacterScope(loadedConfig, options);
+      const overlay = loadCharacterOverlayForScope(characterScope);
+
+      assertOverlayMutable(overlay);
+      verifyScopedExpectation({
+        expectedFingerprint: options.expectedFingerprint,
+        globalDocument,
+        characterScope,
+        overlay,
+      });
+
+      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
+      const overlayBase =
+        overlay.config ??
+        Object.freeze({
+          version: runtimeConfigVersion,
+        } satisfies Project02RuntimeConfig);
+      const prepared = prepareRuntimeConfigMutationCandidate({
+        loadedConfig: {
+          source: 'path',
+          path: overlayPath,
+          config: overlayBase,
+          diagnostics: Object.freeze([]),
+        },
+        configPath: overlayPath,
+        operation: mutation.operation,
+        validateCandidate: candidate => {
+          assertOverlayCandidateStaysCharacterScoped(candidate);
+          mutation.validateCandidate(
+            mergeCharacterOverlayDocument(globalDocument, candidate),
+          );
+        },
+      });
+
+      return Object.freeze({
+        resultFingerprint: createLayeredRuntimeConfigFingerprint({
+          globalConfig: globalDocument,
+          characterId: characterScope.characterId,
+          overlayConfig: prepared.config,
+        }),
+        targetConfigPath: canonicalRuntimeConfigMutationPath(overlayPath),
+      });
+    },
+  );
 }
 
 function requiredCharacterScope(
   loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>,
-  options: {readonly storeRoot?: string; readonly characterId?: string},
+  options: {
+    readonly storeRoot?: string;
+    readonly characterId?: string;
+    readonly characterScope?: RuntimeConfigCharacterScope;
+  },
 ): RuntimeConfigCharacterScope {
-  const characterScope = deriveRuntimeConfigCharacterScope({
-    loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.characterId === undefined
-      ? {}
-      : {characterId: options.characterId}),
-  });
+  const characterScope =
+    options.characterScope ??
+    deriveRuntimeConfigCharacterScope({
+      loadedConfig,
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+      ...(options.characterId === undefined
+        ? {}
+        : {characterId: options.characterId}),
+    });
 
   if (characterScope === undefined) {
     throw new RuntimeConfigMutationError(

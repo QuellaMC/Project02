@@ -12,6 +12,7 @@ import {
   applyScopedRuntimeConfigControlOperation,
   applyScopedRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
+  loadCharacterOverlayForScope,
   redactRuntimeConfigValue,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigValue,
@@ -297,6 +298,14 @@ function pluginCatalog(
 ): RuntimeConfigConsolePluginCatalog {
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: snapshot.loadedConfig,
+    // A scoped console judges activation for the selected character —
+    // the snapshot's scope may be a flag override the loaded config
+    // does not name.
+    ...(snapshot.characterScope === undefined
+      ? {}
+      : {
+          overlayConfig: loadCharacterOverlayForScope(snapshot.characterScope),
+        }),
     ...(context.storeRoot === undefined ? {} : {storeRoot: context.storeRoot}),
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}

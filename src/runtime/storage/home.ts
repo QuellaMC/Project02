@@ -5,6 +5,7 @@
  * per-character data dirs carry their own 'character-data' markers via
  * the session store's initialization path.
  */
+import type {Dirent} from 'node:fs';
 import {mkdir, readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
@@ -105,9 +106,7 @@ async function project02HomeHasForeignContent(
   }
 
   for (const entry of entries) {
-    if (
-      isProject02HomeControlEntry(layout, join(layout.homeRoot, entry.name))
-    ) {
+    if (isProject02HomeControlEntry(layout, entry)) {
       continue;
     }
 
@@ -132,18 +131,30 @@ async function project02HomeHasForeignContent(
 
 // Entries a Project02 home may contain: the global config and secrets,
 // the home lock root, installed plugin and character packages, the
-// per-character data root, and the home marker itself.
+// per-character data root, and the home marker itself. The directory
+// roots are type-checked — a regular file called character-data is
+// foreign, since adopting it would only defer to a raw mkdir failure.
+// The file entries stay name-based: their readers (config loader, env
+// reader, marker decode) report a wrong type far more precisely than
+// this guard could.
 function isProject02HomeControlEntry(
   layout: Project02HomeLayout,
-  entryPath: string,
+  entry: Dirent,
 ): boolean {
-  return (
-    entryPath === layout.configPath ||
-    entryPath === layout.envPath ||
+  const entryPath = join(layout.homeRoot, entry.name);
+
+  if (
     entryPath === layout.locksRoot ||
     entryPath === layout.pluginPackagesRoot ||
     entryPath === layout.characterPackagesRoot ||
-    entryPath === layout.characterDataRoot ||
+    entryPath === layout.characterDataRoot
+  ) {
+    return entry.isDirectory() || entry.isSymbolicLink();
+  }
+
+  return (
+    entryPath === layout.configPath ||
+    entryPath === layout.envPath ||
     entryPath === layout.schemaPath
   );
 }

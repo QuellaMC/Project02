@@ -12,11 +12,14 @@ import {
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
 } from './overlay.ts';
+import {
+  mergedLoadedConfigForOverlay,
+  resolveLayeredProject02RuntimeConfig,
+} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
 import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
-import {resolveLayeredProject02RuntimeConfig} from './resolve-layered.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
@@ -188,7 +191,12 @@ export function inspectRuntimePluginConfig(options: {
   });
 
   return createRuntimePluginConfigInspectShape({
-    loadedConfig,
+    // Authored values come from the merged view: a field authored only
+    // in the overlay must read as configured, not unset.
+    loadedConfig:
+      overlayConfig === undefined
+        ? loadedConfig
+        : mergedLoadedConfigForOverlay(loadedConfig, overlayConfig),
     resolvedConfig,
     manifest: options.manifest,
     ...(options.activation === undefined
