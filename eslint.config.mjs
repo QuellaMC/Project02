@@ -84,10 +84,11 @@ export default tseslint.config(
       // then +31 for persona/characterRef threading into the turn calls,
       // then +8 for the home/character-data split: explicit durable-session
       // selection (home root, character, user display name) replacing the
-      // runtime-args spread, and home-layout --store validation.
+      // runtime-args spread, and home-layout --store validation, then +4
+      // for character-origin attribution on config diagnostics.
       'max-lines': [
         'error',
-        {max: 1166, skipBlankLines: true, skipComments: true},
+        {max: 1170, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -183,10 +184,12 @@ export default tseslint.config(
       // store-initialization content check, then +5 for threading the
       // evidence-derived user speaker through rehydration, then +11 for
       // scoped schema markers (scope assertion on read, character-data
-      // scope on init) after the home/data guard split.
+      // scope on init) after the home/data guard split, then +13 to let
+      // the foreign-content guard skip a concurrent initializer's live
+      // atomic-replacement temp files.
       'max-lines': [
         'error',
-        {max: 1025, skipBlankLines: true, skipComments: true},
+        {max: 1038, skipBlankLines: true, skipComments: true},
       ],
     },
   },
