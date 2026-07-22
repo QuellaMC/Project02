@@ -43,6 +43,31 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('rejects check for an absent character dir under a symlinked root', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-link-empty-');
+    const outside = createTestTempRoot('project02-config-check-link-tgt-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // No mira/ exists yet anywhere: the symlinked root alone must
+    // fail read-only startup, exactly like the writers.
+    symlinkSync(outside, join(storeRoot, 'character-data'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
   it('rejects check when a marker-less data directory holds foreign content', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-foreign-');
     const dataRoot = join(storeRoot, 'character-data', 'mira');

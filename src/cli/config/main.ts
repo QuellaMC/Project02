@@ -26,11 +26,9 @@ import {
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
 import {
-  assertCharacterDataDirAdoptable,
+  assertCharacterDataDirReadable,
   assertProject02HomeAdoptable,
-  evaluateCharacterDataStamp,
   homeRootForCharacterDataDir,
-  LocalRuntimeStorageContractError,
 } from '../../runtime/storage/index.ts';
 import {
   resolveRuntimeCliStartup,
@@ -441,25 +439,13 @@ function writeCharacterScopedValue(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly path: string;
 }): number {
-  // The binding holds for reads too: a directory stamped for another
-  // character must not surface its overlay as this character's config,
-  // and an unadoptable directory (foreign content, symlink, wrong
-  // marker) must not have its overlay reported at all.
+  // The binding and adoptability rules hold for reads too: a directory
+  // stamped for another character, or one the writers would refuse,
+  // must not have its overlay reported as this character's config.
   if (options.target.characterScope !== undefined) {
-    const stamp = evaluateCharacterDataStamp({
+    assertCharacterDataDirReadable({
       storageOptions: {storeRoot: options.target.characterScope.dataRoot},
       characterId: options.target.characterScope.characterId,
-    });
-
-    if (stamp?.status === 'rejected') {
-      throw new LocalRuntimeStorageContractError(
-        'character_binding_rejected',
-        stamp.message,
-      );
-    }
-
-    assertCharacterDataDirAdoptable({
-      storeRoot: options.target.characterScope.dataRoot,
     });
   }
 

@@ -49,6 +49,7 @@ export {
 } from './durable-session-bootstrap.ts';
 export {
   assertCharacterDataDirAdoptable,
+  assertCharacterDataDirReadable,
   characterBindingFileName,
   characterBindingFormat,
   characterBindingPath,

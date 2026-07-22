@@ -37,9 +37,8 @@ import {existsSync} from 'node:fs';
 
 import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {
-  assertCharacterDataDirAdoptable,
+  assertCharacterDataDirReadable,
   characterDataDirPath,
-  evaluateCharacterDataStamp,
   LocalRuntimeStorageContractError,
 } from '../runtime/storage/index.ts';
 
@@ -492,26 +491,14 @@ function loadCharacterOverlayForStartup(options: {
     return undefined;
   }
 
-  // The binding holds for read-only startups too: a data directory
-  // stamped for another character must fail check and inspect exactly
-  // as durable materialization does, instead of reporting that
-  // directory's overlay as this character's config.
-  const stamp = evaluateCharacterDataStamp({
+  // The binding and adoptability rules hold for read-only startups
+  // too: a data directory stamped for another character, holding
+  // foreign content, or reached through a symlink must fail check and
+  // inspect exactly as durable materialization does.
+  assertCharacterDataDirReadable({
     storageOptions: {storeRoot: characterScope.dataRoot},
     characterId: characterScope.characterId,
   });
-
-  if (stamp?.status === 'rejected') {
-    throw new LocalRuntimeStorageContractError(
-      'character_binding_rejected',
-      stamp.message,
-    );
-  }
-
-  // Same adoptability rules the writers enforce: an unstamped
-  // directory with foreign content, a symlinked data root, or a
-  // wrong-scope marker must not have its overlay reported as config.
-  assertCharacterDataDirAdoptable({storeRoot: characterScope.dataRoot});
 
   return loadCharacterOverlayForScope(characterScope);
 }

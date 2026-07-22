@@ -8,10 +8,9 @@ import {
   createLocalRuntimeSessionStore,
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
+  assertCharacterDataDirReadable,
   createProject02HomeLayout,
-  evaluateCharacterDataStamp,
   isMissingDefaultSessionStore,
-  LocalRuntimeStorageContractError,
   readCharacterBinding,
   type CharacterBindingReadResult,
   type LocalRuntimeSessionMetadata,
@@ -340,24 +339,17 @@ async function writeSessionList(
   } satisfies InspectSessionListOutput);
 }
 
-// The binding holds at inspection: a data directory stamped for
-// another character fails read-only, exactly as durable chat does,
-// even when the inspected view carries no character evidence at all.
+// The binding and adoptability rules hold at inspection: a data
+// directory stamped for another character, or one the writers would
+// refuse, fails read-only exactly as durable chat does.
 function assertInspectedDataDirBinding(
   dataRoot: string,
   characterId: string,
 ): void {
-  const stamp = evaluateCharacterDataStamp({
+  assertCharacterDataDirReadable({
     storageOptions: {storeRoot: dataRoot},
     characterId,
   });
-
-  if (stamp?.status === 'rejected') {
-    throw new LocalRuntimeStorageContractError(
-      'character_binding_rejected',
-      stamp.message,
-    );
-  }
 }
 
 // Entries a control-only data directory may hold besides sessions:

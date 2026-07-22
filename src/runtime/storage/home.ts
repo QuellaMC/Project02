@@ -124,6 +124,24 @@ async function ensureRealCharacterDataRoot(
 }
 
 async function readProject02HomeMarker(layout: Project02HomeLayout) {
+  // The marker is the ownership guard itself: a symlinked marker would
+  // let any directory borrow another home's proof of initialization.
+  let markerStats;
+
+  try {
+    markerStats = await lstat(layout.schemaPath);
+  } catch {
+    markerStats = undefined;
+  }
+
+  if (markerStats?.isSymbolicLink() === true) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_schema_marker',
+      `Project02 home marker "${layout.schemaPath}" is a symlink; the ` +
+        'marker must be a regular file inside the home.',
+    );
+  }
+
   let source: string;
 
   try {

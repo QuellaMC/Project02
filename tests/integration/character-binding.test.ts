@@ -254,6 +254,41 @@ describe('character data directories through the durable runtime', () => {
     });
   });
 
+  it('refuses a data directory whose marker is only a borrowed symlink', async () => {
+    const homeRoot = createTestTempRoot();
+    const donorHome = createTestTempRoot();
+
+    // A REAL character-data marker in another store, borrowed via
+    // symlink next to foreign content, must not prove ownership.
+    await runOneTurn({
+      homeRoot: donorHome,
+      character: testCharacterProfile,
+      sessionSelection: {newSessionId: 'donor-session'},
+      message: 'donor turn',
+      reply: 'donor reply',
+    });
+
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+    symlinkSync(
+      join(characterDataDirPath(donorHome, 'mira'), 'schema.json'),
+      join(dataRoot, 'schema.json'),
+    );
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'borrowed-marker-attempt',
+      }),
+    ).rejects.toThrow('is a symlink');
+    expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
+      status: 'absent',
+    });
+  });
+
   it('refuses a symlinked data directory even when its target is already stamped', async () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();

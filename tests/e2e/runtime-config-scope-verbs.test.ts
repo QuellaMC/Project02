@@ -1,4 +1,10 @@
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -526,6 +532,37 @@ describe('overlay files reached through --config directly', () => {
       value: 'Global Name',
       origin: 'global',
     });
+  });
+
+  it('rejects a symlinked overlay path instead of writing its target', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const outside = createTestTempRoot('project02-scope-link-target-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const targetPath = join(outside, 'external.json');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(targetPath, {});
+    const targetBefore = readFileSync(targetPath, 'utf8');
+    symlinkSync(targetPath, characterOverlayConfigPath(dataRoot));
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--config',
+      characterOverlayConfigPath(dataRoot),
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('is a symlink');
+    // The overlay write must never escape the data directory.
+    expect(readFileSync(targetPath, 'utf8')).toBe(targetBefore);
   });
 
   it('rejects a non-overlay file inside a character-data directory', async () => {

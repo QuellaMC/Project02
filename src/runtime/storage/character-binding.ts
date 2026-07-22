@@ -6,7 +6,7 @@
  * the data dir's mutation lock and never rewritten; display names remain
  * per-session historical facts, so the stamp carries the id only.
  */
-import {existsSync, lstatSync, readdirSync, readFileSync} from 'node:fs';
+import {lstatSync, readdirSync, readFileSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -112,6 +112,31 @@ export function assertCharacterDataDirAdoptable(
   options: LocalRuntimeStorageLayoutOptions,
 ): void {
   const layout = createLocalRuntimeStorageLayout(options);
+
+  // The character-data ROOT must be real, and the check runs even when
+  // the per-character directory does not exist yet: a symlinked root
+  // would resolve every per-character directory outside the home at
+  // once, and read-only startups must refuse it exactly like writers.
+  const parentRoot = dirname(layout.storeRoot);
+
+  if (basename(parentRoot) === characterDataDirectoryName) {
+    let parentStats;
+
+    try {
+      parentStats = lstatSync(parentRoot);
+    } catch {
+      parentStats = undefined;
+    }
+
+    if (parentStats?.isSymbolicLink() === true) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Character data root "${parentRoot}" is a symlink; character ` +
+          'data must live inside the home.',
+      );
+    }
+  }
+
   let rootStats;
 
   try {
@@ -140,29 +165,25 @@ export function assertCharacterDataDirAdoptable(
     );
   }
 
-  // The character-data ROOT must be real too: a symlinked root would
-  // resolve every per-character directory outside the home at once.
-  const parentRoot = dirname(layout.storeRoot);
+  let markerStats;
 
-  if (basename(parentRoot) === characterDataDirectoryName) {
-    let parentStats;
-
-    try {
-      parentStats = lstatSync(parentRoot);
-    } catch {
-      parentStats = undefined;
-    }
-
-    if (parentStats?.isSymbolicLink() === true) {
-      throw new LocalRuntimeStorageContractError(
-        'missing_file',
-        `Character data root "${parentRoot}" is a symlink; character ` +
-          'data must live inside the home.',
-      );
-    }
+  try {
+    markerStats = lstatSync(layout.schemaPath);
+  } catch {
+    markerStats = undefined;
   }
 
-  if (existsSync(layout.schemaPath)) {
+  // A symlinked marker cannot prove ownership: it would let a foreign
+  // directory borrow another store's marker.
+  if (markerStats?.isSymbolicLink() === true) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_schema_marker',
+      `Data marker "${layout.schemaPath}" is a symlink; the marker ` +
+        'must be a regular file inside the data directory.',
+    );
+  }
+
+  if (markerStats !== undefined) {
     const marker = decodeStorageSchemaMarker(
       readFileSync(layout.schemaPath, 'utf8'),
     );
@@ -196,6 +217,27 @@ export function assertCharacterDataDirAdoptable(
         'character to it.',
     );
   }
+}
+
+/**
+ * Composite read-only guard for consumers about to READ character
+ * state: the binding stamp — if present — must name this character,
+ * and the directory must be adoptable (real, in-home, marker-honest).
+ */
+export function assertCharacterDataDirReadable(options: {
+  readonly storageOptions: LocalRuntimeStorageLayoutOptions;
+  readonly characterId: string;
+}): void {
+  const stamp = evaluateCharacterDataStamp(options);
+
+  if (stamp?.status === 'rejected') {
+    throw new LocalRuntimeStorageContractError(
+      'character_binding_rejected',
+      stamp.message,
+    );
+  }
+
+  assertCharacterDataDirAdoptable(options.storageOptions);
 }
 
 export type EnsureCharacterDataStampResult =

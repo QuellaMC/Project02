@@ -109,6 +109,21 @@ describe('project02 home initialization', () => {
     });
   });
 
+  it('rejects a symlinked home marker instead of trusting the home', async () => {
+    const homeRoot = createTestTempRoot('project02-home-marker-link-');
+    const donor = createTestTempRoot('project02-home-marker-donor-');
+
+    // A real marker elsewhere, borrowed via symlink, must not make a
+    // foreign directory read as initialized.
+    await ensureInitializedProject02Home({homeRoot: donor});
+    writeFileSync(join(homeRoot, 'notes.txt'), 'foreign\n');
+    symlinkSync(join(donor, 'schema.json'), join(homeRoot, 'schema.json'));
+
+    await expect(ensureInitializedProject02Home({homeRoot})).rejects.toThrow(
+      'is a symlink',
+    );
+  });
+
   it('treats a symlinked character-data root in a marker-less home as foreign', async () => {
     const homeRoot = createTestTempRoot('project02-home-symlink-');
     const outside = createTestTempRoot('project02-home-symlink-target-');

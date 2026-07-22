@@ -297,6 +297,28 @@ describe('configured runtime plugin package activation', () => {
     ).toBe('blocked');
   });
 
+  it('refuses to plan against an overlay in an unadoptable data directory', () => {
+    const storeRoot = createTestTempRoot('project02-package-foreign-overlay-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // Unstamped, with an overlay AND foreign content: durable startup
+    // refuses this directory, so the direct plan must not trust its
+    // overlay values either.
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+
+    expect(() =>
+      prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        storeRoot,
+      }),
+    ).toThrow('without a data marker');
+  });
+
   it('refuses direct host creation on a home the runtime would not adopt', async () => {
     const storeRoot = createTestTempRoot('project02-package-foreign-home-');
 

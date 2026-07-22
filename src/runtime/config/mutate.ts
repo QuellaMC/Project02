@@ -118,6 +118,8 @@ function applyRuntimeConfigMutationWithLocks(
     location.canonicalSelectedConfigPath,
   );
 
+  assertSelectedOverlayShapedPathIsNotSymlink(location.displayConfigPath);
+
   if (options.characterScopeManaged !== true) {
     if (overlayLocatedTarget) {
       assertOverlayLocatedTargetIsInitialized(
@@ -558,6 +560,40 @@ export function selectedConfigPathIsCharacterOverlay(
     canonicalConfigPath ===
       createLocalRuntimeStorageLayout({storeRoot: dataRoot}).configPath
   );
+}
+
+// Classification happens on the canonical (symlink-resolved) path, so
+// a symlinked overlay would otherwise escape it entirely and be
+// written as a plain global config wherever the link points. Judge the
+// path AS WRITTEN: a symlink sitting where an overlay belongs is never
+// a valid target.
+function assertSelectedOverlayShapedPathIsNotSymlink(
+  displayConfigPath: string,
+): void {
+  const writtenPath = resolve(displayConfigPath);
+  let stats;
+
+  try {
+    stats = lstatSync(writtenPath);
+  } catch {
+    return;
+  }
+
+  if (!stats.isSymbolicLink()) {
+    return;
+  }
+
+  const containingDirectory = dirname(writtenPath);
+  const isDataLocation =
+    basename(dirname(containingDirectory)) === characterDataDirectoryName ||
+    existsSync(join(containingDirectory, characterBindingFileName));
+
+  if (isDataLocation) {
+    throw new RuntimeConfigMutationError(
+      `Config file "${writtenPath}" is a symlink inside a character-data ` +
+        'directory; the overlay must be a regular file.',
+    );
+  }
 }
 
 // A non-overlay file inside a character-data directory is not a valid
