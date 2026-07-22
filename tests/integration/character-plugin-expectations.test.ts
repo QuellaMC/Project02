@@ -14,7 +14,10 @@ import {
   characterOverlayConfigPath,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  characterDataDirPath,
+  ensureCharacterDataStamp,
+} from '../../src/runtime/storage/index.ts';
 import type {RuntimePluginActivationResult} from '../../src/app/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -243,7 +246,12 @@ describe('first-selection materialization through startup', () => {
       plugins: {required: ['demo-config']},
     });
 
-    // Operator writes the overlay before ever selecting the character.
+    // Operator writes the overlay before ever selecting the character
+    // (the CLI verb stamps the data dir first, then mutates).
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'seeded')},
+      characterId: 'seeded',
+    });
     applyScopedRuntimeConfigControlOperation({
       storeRoot: homeRoot,
       env: {},

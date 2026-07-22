@@ -230,6 +230,60 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
+  it('rejects an invalid scoped value before creating any character state', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-value-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.roleModelProvider',
+      'nope',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain(
+      'Project02 roleModelProvider must be "local" or "nvidia".',
+    );
+    // The invalid value failed preflight, before ensure: no stamp, no
+    // data directory, no home marker.
+    expect(existsSync(dataRoot)).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('rejects a scoped read from a directory stamped for another character', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-read-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // A copied directory: mira's path claims nova, but carries an
+    // overlay a naive read would surface as mira's config.
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'nova',
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('holds history for character "nova"');
+  });
+
   it('refuses to bind a character to a marker-less directory holding foreign content', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-adopt-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

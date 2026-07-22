@@ -318,22 +318,12 @@ export function prepareConfiguredProject02PluginActivation(options: {
     );
   }
 
-  const composition = activationCatalogComposition(options);
-  const expectedStoreRoot = resolveProject02RuntimeStoreRoot(options);
-
-  if (composition.storeRoot !== expectedStoreRoot) {
-    throw new TypeError(
-      'Runtime plugin catalog snapshot does not match the resolved store root.',
-    );
-  }
-  const catalogEntries = Object.freeze({...composition.catalogEntries});
-  const pluginManifests = activationPluginManifests(catalogEntries);
-  const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
-  // One character scope and one overlay snapshot feed the layered
-  // resolve, the construction stamp, and the control state, so every
-  // downstream fingerprint site composes the same pair of documents. A
-  // supplied overlay is the scope authority: its character id may be a
-  // flag override the loaded config knows nothing about.
+  // One character scope and one overlay snapshot feed the catalog
+  // classification, the layered resolve, the construction stamp, and
+  // the control state, so every downstream site composes the same pair
+  // of documents — including direct callers that never went through
+  // startup. A supplied overlay is the scope authority: its character
+  // id may be a flag override the loaded config knows nothing about.
   const characterScope = deriveRuntimeConfigCharacterScope({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
@@ -346,6 +336,20 @@ export function prepareConfiguredProject02PluginActivation(options: {
     (characterScope === undefined
       ? undefined
       : loadCharacterOverlayForScope(characterScope));
+  const composition = activationCatalogComposition({
+    ...options,
+    ...(overlayConfig === undefined ? {} : {overlayConfig}),
+  });
+  const expectedStoreRoot = resolveProject02RuntimeStoreRoot(options);
+
+  if (composition.storeRoot !== expectedStoreRoot) {
+    throw new TypeError(
+      'Runtime plugin catalog snapshot does not match the resolved store root.',
+    );
+  }
+  const catalogEntries = Object.freeze({...composition.catalogEntries});
+  const pluginManifests = activationPluginManifests(catalogEntries);
+  const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
   const resolvedConfig = resolveLayeredProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
     ...(overlayConfig === undefined ? {} : {overlayConfig}),

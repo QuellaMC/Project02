@@ -1,4 +1,5 @@
-import {readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
@@ -202,6 +203,27 @@ describe('character data directories through the durable runtime', () => {
     });
 
     expect(miraResumed.speakerNames).toEqual(['You', 'Mira', 'You', 'Mira']);
+  });
+
+  it('refuses to adopt a marker-less data directory holding session artifacts', async () => {
+    const homeRoot = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    // A copied or corrupt tree: session artifacts without a data
+    // marker. Direct durable bootstrap must not stamp it.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'adoption-attempt',
+      }),
+    ).rejects.toThrow('without a data marker');
+    expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
+      status: 'absent',
+    });
   });
 
   it('recreates a missing stamp and rejects a tampered one', async () => {

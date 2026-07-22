@@ -297,6 +297,44 @@ describe('configured runtime plugin package activation', () => {
     ).toBe('blocked');
   });
 
+  it('fails closed when only the overlay enables a quarantined package on the direct activation path', () => {
+    const storeRoot = createTestTempRoot('project02-package-overlay-enabled-');
+    const manifest = testPackageManifest('operator.broken-overlay');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+
+    writeOperatorPackage({
+      storeRoot,
+      manifest,
+      entrySource: validOperatorEntrySource(),
+    });
+    writeFileSync(
+      join(storeRoot, 'plugins', manifest.id, 'project02.plugin.json'),
+      '{ malformed',
+      'utf8',
+    );
+    // The global config never mentions the plugin; only the overlay
+    // enables it. The direct path (no startup, no overlay argument)
+    // must still classify against the merged view.
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    const configured = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      storeRoot,
+    });
+
+    expect(configured.activation.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_plugin_package_invalid_descriptor',
+        pluginId: manifest.id,
+      }),
+    );
+  });
+
   it('fails closed when config enables the claimed id of a mismatched package', () => {
     const storeRoot = createTestTempRoot(
       'project02-package-mismatched-enabled-',

@@ -6,16 +6,18 @@
  * the data dir's mutation lock and never rewritten; display names remain
  * per-session historical facts, so the stamp carries the id only.
  */
-import {readFileSync} from 'node:fs';
+import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {atomicReplaceFile} from './atomic-file.ts';
 import {
+  characterBindingFileName,
   createLocalRuntimeStorageLayout,
+  LocalRuntimeStorageContractError,
+  type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
 } from './layout-contract.ts';
-import {characterBindingFileName} from './layout-contract.ts';
 import {acquireLocalRuntimeMutationLock} from './mutation-lock.ts';
 
 export const characterBindingFormat = 'project02.character-binding.v1';
@@ -96,6 +98,40 @@ export function readCharacterBinding(
   });
 }
 
+/**
+ * A marker-less directory may hold only control entries (overlay,
+ * binding stamp, lock root) before it is stamped. Anything else is
+ * another character's history or a foreign tree: stamping it would
+ * adopt that content under a permanent binding. A directory that has
+ * a data marker is left to the storage readers, which validate it.
+ */
+function assertCharacterDataDirAdoptable(
+  layout: LocalRuntimeStorageLayout,
+): void {
+  if (!existsSync(layout.storeRoot) || existsSync(layout.schemaPath)) {
+    return;
+  }
+
+  const foreignEntry = readdirSync(layout.storeRoot).find(entry => {
+    const entryPath = join(layout.storeRoot, entry);
+
+    return (
+      entryPath !== layout.configPath &&
+      entryPath !== layout.locksRoot &&
+      entryPath !== layout.characterBindingPath
+    );
+  });
+
+  if (foreignEntry !== undefined) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Character data directory "${layout.storeRoot}" holds ` +
+        `"${foreignEntry}" without a data marker; refusing to bind a ` +
+        'character to it.',
+    );
+  }
+}
+
 export type EnsureCharacterDataStampResult =
   | {
       readonly status: 'stamped';
@@ -126,6 +162,11 @@ export async function ensureCharacterDataStamp(options: {
   }
 
   const layout = createLocalRuntimeStorageLayout(options.storageOptions);
+
+  // Before the lock so even the lock root leaves no trace in a
+  // directory this refuses to adopt.
+  assertCharacterDataDirAdoptable(layout);
+
   const lock = await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
     resourceKey: characterBindingLockResourceKey,

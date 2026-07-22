@@ -22,7 +22,11 @@ import {
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
-import {homeRootForCharacterDataDir} from '../../runtime/storage/index.ts';
+import {
+  evaluateCharacterDataStamp,
+  homeRootForCharacterDataDir,
+  LocalRuntimeStorageContractError,
+} from '../../runtime/storage/index.ts';
 import {
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
@@ -395,6 +399,22 @@ function writeCharacterScopedValue(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly path: string;
 }): number {
+  // The binding holds for reads too: a directory stamped for another
+  // character must not surface its overlay as this character's config.
+  if (options.target.characterScope !== undefined) {
+    const stamp = evaluateCharacterDataStamp({
+      storageOptions: {storeRoot: options.target.characterScope.dataRoot},
+      characterId: options.target.characterScope.characterId,
+    });
+
+    if (stamp?.status === 'rejected') {
+      throw new LocalRuntimeStorageContractError(
+        'character_binding_rejected',
+        stamp.message,
+      );
+    }
+  }
+
   const overlay =
     options.target.characterScope === undefined
       ? undefined

@@ -45,9 +45,14 @@ function seededHome(): {
 }
 
 describe('scope-aware runtime config mutations', () => {
-  it('writes character-scoped fields to the overlay and only the overlay', () => {
+  it('writes character-scoped fields to the overlay and only the overlay', async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const globalBefore = readFileSync(configPath, 'utf8');
+
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
 
     const result = applyScopedRuntimeConfigControlOperation({
       storeRoot: homeRoot,
@@ -121,8 +126,35 @@ describe('scope-aware runtime config mutations', () => {
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
   });
 
-  it('enforces the layered expectation for scoped mutations', () => {
-    const {homeRoot} = seededHome();
+  it('refuses scoped writes into an unstamped data directory', () => {
+    const {homeRoot, dataRoot} = seededHome();
+
+    // The stamp is the proof that the guarded initializer ran; a bare
+    // library call against a fresh (or foreign) home must not create
+    // character state.
+    expect(() =>
+      applyScopedRuntimeConfigControlOperation({
+        storeRoot: homeRoot,
+        env: {},
+        scope: 'character',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'X',
+        },
+      }),
+    ).toThrow('has no binding stamp');
+    expect(existsSync(dataRoot)).toBe(false);
+  });
+
+  it('enforces the layered expectation for scoped mutations', async () => {
+    const {homeRoot, dataRoot} = seededHome();
+
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
     const freshExpected = applyScopedRuntimeConfigControlOperation({
       storeRoot: homeRoot,
       env: {},
@@ -162,9 +194,14 @@ describe('scope-aware runtime config mutations', () => {
     ).toThrow(RuntimeConfigConflictError);
   });
 
-  it('validates scoped plugin field candidates against the merged document', () => {
+  it('validates scoped plugin field candidates against the merged document', async () => {
     const homeRoot = createTestTempRoot('project02-config-scope-merged-');
     const plugin = structuredConfigPlugin('scope.merged');
+
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'mira')},
+      characterId: 'mira',
+    });
 
     // Global supplies both required fields; the overlay overrides one.
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
@@ -202,6 +239,10 @@ describe('scope-aware runtime config mutations', () => {
 
     writeRuntimeConfig(join(bareHome, 'config.json'), {
       plugins: {'scope.merged': {enabled: true}},
+    });
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: characterDataDirPath(bareHome, 'mira')},
+      characterId: 'mira',
     });
     expect(() =>
       applyScopedRuntimePluginConfigControlOperation({
@@ -263,9 +304,14 @@ function resolveScopedExpected(homeRoot: string): string {
 }
 
 describe('character-scoped plugin control capability', () => {
-  it('routes agent tool updates at the active character overlay, never the home config', () => {
+  it('routes agent tool updates at the active character overlay, never the home config', async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const plugin = structuredConfigPlugin('scope.capability');
+
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
 
     writeRuntimeConfig(configPath, {
       plugins: {
@@ -323,9 +369,14 @@ describe('character-scoped plugin control capability', () => {
 });
 
 describe('plugin inspection authored views', () => {
-  it('reports global-authored values when asked, without changing the layered fingerprint', () => {
+  it('reports global-authored values when asked, without changing the layered fingerprint', async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const plugin = structuredConfigPlugin('scope.authored-view');
+
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
 
     writeRuntimeConfig(configPath, {
       plugins: {
@@ -471,10 +522,14 @@ describe('global control writes aimed directly at the overlay path', () => {
 });
 
 describe('global writes that move the character selection', () => {
-  it('reports the new character layer in the returned fingerprint', () => {
+  it('reports the new character layer in the returned fingerprint', async () => {
     const homeRoot = createTestTempRoot('project02-scope-switch-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'nova')},
+      characterId: 'nova',
+    });
     // Give nova an overlay so the layers differ observably.
     applyScopedRuntimeConfigControlOperation({
       storeRoot: homeRoot,

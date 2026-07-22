@@ -15,15 +15,13 @@
  * file's presence is the marker. A file that already exists — seeded,
  * hand-written, or CLI-created, even empty — is never rewritten here.
  */
-import {existsSync, readdirSync} from 'node:fs';
-import {join} from 'node:path';
+import {existsSync} from 'node:fs';
 
 import {atomicReplaceFile} from '../storage/atomic-file.ts';
 import {ensureCharacterDataStamp} from '../storage/character-binding.ts';
 import {ensureInitializedProject02Home} from '../storage/home.ts';
 import {
   characterDataDirPath,
-  createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
@@ -39,39 +37,6 @@ export type EnsureCharacterDataDirResult = {
   readonly overlaySeeded: boolean;
 };
 
-/**
- * A marker-less directory may hold only control entries (overlay,
- * binding stamp, lock root) before it is stamped. Anything else is
- * another character's history or a foreign tree: stamping it would
- * adopt that content under a permanent binding. A directory that has
- * a data marker is left to the storage readers, which validate it.
- */
-function assertCharacterDataDirAdoptable(dataRoot: string): void {
-  const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
-
-  if (!existsSync(dataRoot) || existsSync(layout.schemaPath)) {
-    return;
-  }
-
-  const foreignEntry = readdirSync(dataRoot).find(entry => {
-    const entryPath = join(dataRoot, entry);
-
-    return (
-      entryPath !== layout.configPath &&
-      entryPath !== layout.locksRoot &&
-      entryPath !== layout.characterBindingPath
-    );
-  });
-
-  if (foreignEntry !== undefined) {
-    throw new LocalRuntimeStorageContractError(
-      'missing_file',
-      `Character data directory "${dataRoot}" holds "${foreignEntry}" ` +
-        'without a data marker; refusing to bind a character to it.',
-    );
-  }
-}
-
 export async function ensureCharacterDataDir(options: {
   readonly homeRoot?: string;
   readonly characterId: string;
@@ -82,9 +47,6 @@ export async function ensureCharacterDataDir(options: {
     options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot},
   );
   const dataRoot = characterDataDirPath(home.homeRoot, options.characterId);
-
-  assertCharacterDataDirAdoptable(dataRoot);
-
   const stamp = await ensureCharacterDataStamp({
     storageOptions: {storeRoot: dataRoot},
     characterId: options.characterId,

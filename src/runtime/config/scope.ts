@@ -35,6 +35,7 @@ import {loadProject02RuntimeConfig} from './load.ts';
 import {
   applyRuntimeConfigMutation,
   assertOverlayLocatedCandidateStaysCharacterScoped,
+  assertOverlayLocatedTargetIsInitialized,
   canonicalRuntimeConfigMutationPath,
   characterOverlayGlobalOnlyFieldMessage,
   createRuntimeConfigMutationBase,
@@ -53,6 +54,7 @@ import {
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
   project02RuntimeConfigFieldDefinitions,
+  runtimeConfigValueMatchesField,
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
 import {
@@ -210,9 +212,11 @@ export function assertGlobalConfigLoadableForCharacterScope(
 }
 
 /**
- * Deterministic preflight for character-scoped mutations: a dialect
- * violation (global-only field) is rejected here, before any ensure
- * step materializes a stamp or data marker for the character.
+ * Deterministic preflight for character-scoped mutations, mirroring
+ * the mutation machinery's own set/unset validation: an unknown path,
+ * a dialect violation (global-only field), or an invalid value is
+ * rejected here, before any ensure step materializes a stamp or data
+ * marker for the character.
  */
 export function assertScopedMutationOperationAllowed(
   operation: RuntimeConfigMutationOperation,
@@ -225,9 +229,26 @@ export function assertScopedMutationOperationAllowed(
     definition => definition.path === operation.path,
   );
 
-  if (field !== undefined && !field.scopes.includes('character')) {
+  if (field === undefined) {
+    throw new RuntimeConfigMutationError(
+      `Unsupported runtime config path: ${operation.path}.`,
+    );
+  }
+
+  if (!field.scopes.includes('character')) {
     throw new RuntimeConfigMutationError(
       characterOverlayGlobalOnlyFieldMessage(field.path),
+    );
+  }
+
+  if (
+    operation.kind === 'set' &&
+    (!runtimeConfigValueMatchesField(operation.value, field) ||
+      (typeof operation.value === 'string' &&
+        operation.value.trim().length === 0))
+  ) {
+    throw new RuntimeConfigMutationError(
+      `${field.invalidValueMessage} Path: ${operation.path}.`,
     );
   }
 }
@@ -345,6 +366,15 @@ function applyCharacterScopedMutation(
     options,
     ({loadedConfig, globalDocument}) => {
       const characterScope = requiredCharacterScope(loadedConfig, options);
+      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
+
+      // The stamp is the proof that the guarded initializer ran for
+      // this directory; without it no scoped write — not even from a
+      // plugin-control state — may create durable character state.
+      assertOverlayLocatedTargetIsInitialized(
+        canonicalRuntimeConfigMutationPath(overlayPath),
+      );
+
       const overlay = loadCharacterOverlayForScope(characterScope);
 
       assertOverlayMutable(overlay);
@@ -355,7 +385,6 @@ function applyCharacterScopedMutation(
         overlay,
       });
 
-      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
       const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
       const result = applyRuntimeConfigMutation({
         configPath: overlayPath,
@@ -416,6 +445,15 @@ export function prepareScopedRuntimePluginConfigControlOperation(
     options,
     ({loadedConfig, globalDocument}) => {
       const characterScope = requiredCharacterScope(loadedConfig, options);
+      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
+
+      // The stamp is the proof that the guarded initializer ran for
+      // this directory; without it no scoped write — not even from a
+      // plugin-control state — may create durable character state.
+      assertOverlayLocatedTargetIsInitialized(
+        canonicalRuntimeConfigMutationPath(overlayPath),
+      );
+
       const overlay = loadCharacterOverlayForScope(characterScope);
 
       assertOverlayMutable(overlay);
@@ -426,7 +464,6 @@ export function prepareScopedRuntimePluginConfigControlOperation(
         overlay,
       });
 
-      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
       const overlayBase =
         overlay.config ??
         Object.freeze({
@@ -508,20 +545,7 @@ function assertOverlayMutable(
 function assertCharacterScopedControlOperation(
   operation: RuntimeConfigControlOperation,
 ): void {
-  if (operation.kind !== 'set' && operation.kind !== 'unset') {
-    return;
-  }
-
-  const field = project02RuntimeConfigFieldDefinitions().find(
-    candidate => candidate.path === operation.path,
-  );
-
-  if (field !== undefined && !field.scopes.includes('character')) {
-    throw new RuntimeConfigMutationError(
-      `Config field "${field.path}" is global-only; set it in the home ` +
-        'config.json, not the character overlay.',
-    );
-  }
+  assertScopedMutationOperationAllowed(operation);
 }
 
 /**

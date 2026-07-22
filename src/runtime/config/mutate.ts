@@ -13,6 +13,7 @@ import {
   characterBindingFileName,
   characterDataDirectoryName,
   createProject02HomeLayout,
+  homeRootForCharacterDataDir,
 } from '../storage/layout-contract.ts';
 import {readCharacterBinding} from '../storage/character-binding.ts';
 import {
@@ -487,8 +488,9 @@ export function assertOverlayLocatedCandidateStaysCharacterScoped(
 // directly selected overlay path must find that stamp already present,
 // or the write would create durable character state the runtime later
 // refuses to open. Runs before the mutation lock so even the lock root
-// leaves no trace in an uninitialized directory.
-function assertOverlayLocatedTargetIsInitialized(
+// leaves no trace in an uninitialized directory. The character-scope
+// seam runs the same assertion itself before creating an overlay.
+export function assertOverlayLocatedTargetIsInitialized(
   canonicalConfigPath: string,
 ): void {
   const dataRoot = dirname(canonicalConfigPath);
@@ -618,6 +620,20 @@ export function storeRootForSelectedDefaultConfigPath(
 ): string | undefined {
   const canonicalConfigPath =
     canonicalRuntimeConfigMutationPath(selectedConfigPath);
+
+  // An overlay is not a home's default config: store resolution — and
+  // with it every env write — must land in the OWNING home, never
+  // inside the data directory (which deliberately has no env file).
+  if (selectedConfigPathIsCharacterOverlay(canonicalConfigPath)) {
+    try {
+      return homeRootForCharacterDataDir(dirname(canonicalConfigPath));
+    } catch {
+      // A stamped directory outside any character-data parent names no
+      // home; claim none instead of aliasing the data dir as one.
+      return undefined;
+    }
+  }
+
   const candidateStoreRoot = dirname(canonicalConfigPath);
   const defaultConfigPath = defaultRuntimeConfigPath(candidateStoreRoot);
 
