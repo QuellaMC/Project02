@@ -87,10 +87,10 @@ export default tseslint.config(
       // runtime-args spread, and home-layout --store validation, then +4
       // for character-origin attribution on config diagnostics, then +5
       // for consuming startup's shared character activation and its
-      // character_invalid status.
+      // character_invalid status, then +3 for the --character flag.
       'max-lines': [
         'error',
-        {max: 1175, skipBlankLines: true, skipComments: true},
+        {max: 1178, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -134,12 +134,14 @@ export default tseslint.config(
     // factory inputs, and construction-cleanup contexts, then +10 for the
     // layered flip: one derived character scope and overlay snapshot feeds
     // the layered resolve, the construction stamp, and the control state,
-    // then +4 to hand the enablement ladder the merged two-layer view.
+    // then +4 to hand the enablement ladder the merged two-layer view,
+    // then +6 for the active-character override: a supplied overlay is
+    // the scope authority and stamps its id into the resolved config.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1174, skipBlankLines: true, skipComments: true},
+        {max: 1180, skipBlankLines: true, skipComments: true},
       ],
     },
   },
