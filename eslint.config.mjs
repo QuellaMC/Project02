@@ -85,10 +85,12 @@ export default tseslint.config(
       // then +8 for the home/character-data split: explicit durable-session
       // selection (home root, character, user display name) replacing the
       // runtime-args spread, and home-layout --store validation, then +4
-      // for character-origin attribution on config diagnostics.
+      // for character-origin attribution on config diagnostics, then +5
+      // for consuming startup's shared character activation and its
+      // character_invalid status.
       'max-lines': [
         'error',
-        {max: 1170, skipBlankLines: true, skipComments: true},
+        {max: 1175, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -131,12 +133,13 @@ export default tseslint.config(
     // data root from resolved config and threading it to host construction,
     // factory inputs, and construction-cleanup contexts, then +10 for the
     // layered flip: one derived character scope and overlay snapshot feeds
-    // the layered resolve, the construction stamp, and the control state.
+    // the layered resolve, the construction stamp, and the control state,
+    // then +4 to hand the enablement ladder the merged two-layer view.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1170, skipBlankLines: true, skipComments: true},
+        {max: 1174, skipBlankLines: true, skipComments: true},
       ],
     },
   },
