@@ -142,12 +142,14 @@ export default tseslint.config(
     // against the merged view, the home root recorded in the plugin
     // config-control state, and the catalog composition extracted, then
     // +3 so the direct activation path derives the character scope and
-    // overlay before catalog composition classifies packages.
+    // overlay before catalog composition classifies packages, then +5
+    // so direct host creation runs the guarded character-data
+    // initializer before any plugin file store is exposed.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1206, skipBlankLines: true, skipComments: true},
+        {max: 1211, skipBlankLines: true, skipComments: true},
       ],
     },
   },
