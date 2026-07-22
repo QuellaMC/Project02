@@ -51,9 +51,18 @@ export {
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
 export {
+  mergeCharacterOverlayDocument,
   resolveLayeredProject02RuntimeConfig,
   type ResolveLayeredProject02RuntimeConfigOptions,
 } from './resolve-layered.ts';
+export {
+  applyScopedRuntimeConfigControlOperation,
+  applyScopedRuntimePluginConfigControlOperation,
+  assertRuntimeConfigSecretScopeAllowed,
+  resolveRuntimeConfigScopeTarget,
+  type ResolvedRuntimeConfigScopeTarget,
+  type RuntimeConfigMutationScopeSelector,
+} from './scope.ts';
 export {
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,

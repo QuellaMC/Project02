@@ -65,7 +65,12 @@ export function resolveLayeredProject02RuntimeConfig(
   });
 }
 
-function mergeCharacterOverlayDocument(
+/**
+ * Merges one overlay document over the global document; exported for
+ * scope-aware candidate validation, which must judge exactly what the
+ * layered resolver would see.
+ */
+export function mergeCharacterOverlayDocument(
   globalDocument: Project02RuntimeConfig | undefined,
   overlayDocument: Project02RuntimeConfig,
 ): Project02RuntimeConfig {

@@ -9,10 +9,11 @@ import type {
   RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
 import {
-  applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
+  applyScopedRuntimeConfigControlOperation,
+  applyScopedRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
   redactRuntimeConfigValue,
+  type RuntimeConfigCharacterScope,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,
   type RuntimePluginConfigFieldInspectShape,
@@ -85,6 +86,9 @@ export async function runPluginConfigSection(
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
+    ...(snapshot.characterScope === undefined
+      ? {}
+      : {characterScope: snapshot.characterScope}),
     manifest,
     pluginManifests: manifests,
     ...(activation === undefined ? {} : {activation}),
@@ -118,6 +122,7 @@ export async function runPluginConfigSection(
       manifest,
       inspected.enabled,
       inspected.fingerprint,
+      snapshot.characterScope,
     );
 
     if (change !== undefined) {
@@ -144,6 +149,7 @@ export async function runPluginConfigSection(
     field,
     inspectedField,
     inspected.fingerprint,
+    snapshot.characterScope,
   );
 
   if (change !== undefined) {
@@ -156,6 +162,7 @@ async function stagePluginActivationChange(
   manifest: RuntimePluginManifest,
   enabled: boolean,
   fingerprint: string,
+  characterScope: RuntimeConfigCharacterScope | undefined,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Enable');
   writeLine(context.stdout, '2) Disable');
@@ -184,9 +191,13 @@ async function stagePluginActivationChange(
     newValue: nextEnabled,
     reloadRequired: true,
     commit() {
-      applyRuntimeConfigControlOperation({
+      applyScopedRuntimeConfigControlOperation({
         ...runtimeConfigLocation(context),
         ...(context.env === undefined ? {} : {env: context.env}),
+        scope: characterScope === undefined ? 'global' : 'character',
+        ...(characterScope === undefined
+          ? {}
+          : {characterId: characterScope.characterId}),
         expectedFingerprint: fingerprint,
         operation: {
           kind: nextEnabled ? 'plugin_enable' : 'plugin_disable',
@@ -203,6 +214,7 @@ async function stagePluginFieldChange(
   field: RuntimePluginConfigField,
   inspectedField: RuntimePluginConfigFieldInspectShape,
   fingerprint: string,
+  characterScope: RuntimeConfigCharacterScope | undefined,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Set');
   if (!field.required) {
@@ -261,11 +273,15 @@ async function stagePluginFieldChange(
     newValue,
     reloadRequired: field.reloadRequired !== false,
     commit() {
-      applyRuntimePluginConfigControlOperation({
+      applyScopedRuntimePluginConfigControlOperation({
         ...runtimeConfigLocation(context),
         ...(context.runtimeEnv === undefined && context.env === undefined
           ? {}
           : {env: context.runtimeEnv ?? context.env}),
+        scope: characterScope === undefined ? 'global' : 'character',
+        ...(characterScope === undefined
+          ? {}
+          : {characterId: characterScope.characterId}),
         manifest,
         actor: 'operator',
         expectedFingerprint: fingerprint,

@@ -449,7 +449,7 @@ function runtimeConfigControlTargetPathFromLoaded(options: {
   );
 }
 
-function runtimePluginConfigControlMutation(options: {
+export function runtimePluginConfigControlMutation(options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly storeRoot?: string;
   readonly manifest: RuntimePluginManifest;

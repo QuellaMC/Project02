@@ -6,6 +6,8 @@ import {
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
+  runtimeConfigVersion,
+  type Project02RuntimeConfig,
 } from '../../runtime/config/index.ts';
 import {
   askForNumber,
@@ -47,6 +49,12 @@ export async function runRuntimeConfigConsole(
     const snapshot = loadConsoleSnapshot(context);
 
     writeLine(context.stdout, 'Project02 Runtime Config');
+    if (snapshot.characterScope !== undefined) {
+      writeLine(
+        context.stdout,
+        `Scope: character ${snapshot.characterScope.characterId} (overlay)`,
+      );
+    }
     writeDiagnostics(context.stdout, snapshot.diagnostics);
     writeLine(context.stdout, '1) Project02');
     writeLine(context.stdout, '2) Plugins');
@@ -110,7 +118,32 @@ function loadConsoleSnapshot(
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
+    ...(context.character === undefined
+      ? {}
+      : {characterId: context.character}),
   });
+
+  if (context.character !== undefined && characterScope === undefined) {
+    throw new TypeError(
+      'Cannot open the config console: the character scope is unavailable ' +
+        'for this store root.',
+    );
+  }
+
+  const overlay =
+    characterScope === undefined
+      ? undefined
+      : loadCharacterOverlayForScope(characterScope);
+  const overlayError = overlay?.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (context.character !== undefined && overlayError !== undefined) {
+    throw new TypeError(
+      'Cannot open config console because the character overlay is ' +
+        `invalid: ${overlayError.message}`,
+    );
+  }
 
   return Object.freeze({
     loadedConfig: loaded,
@@ -120,11 +153,16 @@ function loadConsoleSnapshot(
     fingerprint: layeredRuntimeConfigFingerprintForScope({
       globalConfig: config,
       characterScope,
-      overlay:
-        characterScope === undefined
-          ? undefined
-          : loadCharacterOverlayForScope(characterScope),
+      overlay,
     }),
+    ...(context.character === undefined || characterScope === undefined
+      ? {}
+      : {
+          characterScope,
+          scopedConfig:
+            overlay?.config ??
+            ({version: runtimeConfigVersion} satisfies Project02RuntimeConfig),
+        }),
   });
 }
 

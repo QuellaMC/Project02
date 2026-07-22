@@ -4,12 +4,12 @@
  * snapshot's fingerprint.
  */
 import {
-  applyRuntimeConfigControlOperation,
+  applyScopedRuntimeConfigControlOperation,
   getRedactedRuntimeConfigValueAtPath,
   project02RuntimeConfigFieldDefinitions,
   redactRuntimeConfigValue,
   type Project02ConfigFieldDefinition,
-  type RuntimeConfigMutationOperation,
+  type RuntimeConfigControlOperation,
   type RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
 import {
@@ -29,13 +29,21 @@ export async function runProject02ConfigSection(
   context: RuntimeConfigConsoleContext,
   snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<void> {
-  const fields = project02RuntimeConfigFieldDefinitions();
+  // Character scope edits the overlay: only character-scoped fields
+  // appear, and current values come from the overlay document.
+  const fields =
+    snapshot.characterScope === undefined
+      ? project02RuntimeConfigFieldDefinitions()
+      : project02RuntimeConfigFieldDefinitions().filter(field =>
+          field.scopes.includes('character'),
+        );
+  const displayConfig = snapshot.scopedConfig ?? snapshot.config;
 
   writeLine(context.stdout, '');
   writeLine(context.stdout, 'Project02');
   fields.forEach((field, index) => {
     const currentValue = getRedactedRuntimeConfigValueAtPath(
-      snapshot.config,
+      displayConfig,
       field.path,
     );
 
@@ -80,10 +88,10 @@ async function stageProject02FieldChange(
   }
 
   const oldValue = getRedactedRuntimeConfigValueAtPath(
-    snapshot.config,
+    snapshot.scopedConfig ?? snapshot.config,
     field.path,
   );
-  let operation: RuntimeConfigMutationOperation;
+  let operation: RuntimeConfigControlOperation;
   let newValue: RuntimeConfigValue | undefined;
 
   if (action === 2) {
@@ -106,9 +114,13 @@ async function stageProject02FieldChange(
     newValue,
     reloadRequired: field.reloadRequired,
     commit() {
-      applyRuntimeConfigControlOperation({
+      applyScopedRuntimeConfigControlOperation({
         ...runtimeConfigLocation(context),
         ...(context.env === undefined ? {} : {env: context.env}),
+        scope: snapshot.characterScope === undefined ? 'global' : 'character',
+        ...(snapshot.characterScope === undefined
+          ? {}
+          : {characterId: snapshot.characterScope.characterId}),
         expectedFingerprint: snapshot.fingerprint,
         operation,
       });

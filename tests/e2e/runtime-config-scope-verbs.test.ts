@@ -1,0 +1,205 @@
+import {existsSync, readFileSync} from 'node:fs';
+import {join} from 'node:path';
+
+import {describe, expect, it} from 'vitest';
+
+import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
+import {
+  characterDataDirPath,
+  ensureCharacterDataStamp,
+} from '../../src/runtime/storage/index.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {collect} from '../support/streams.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
+
+async function runConfigCli(args: readonly string[]): Promise<{
+  readonly code: number;
+  readonly stdout: string;
+  readonly stderr: string;
+}> {
+  let stdout = '';
+  let stderr = '';
+  const code = await runRuntimeConfigCliFromArgs(args, {
+    stdout: collect(chunk => {
+      stdout += chunk;
+    }),
+    stderr: collect(chunk => {
+      stderr += chunk;
+    }),
+    env: {},
+  });
+
+  return {code, stdout, stderr};
+}
+
+describe('runtime-config --character verbs', () => {
+  it('routes set/unset/get/path at the named character overlay', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+    });
+
+    const set = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Overlay Name',
+    ]);
+
+    expect(set.code).toBe(0);
+    expect(JSON.parse(set.stdout)).toMatchObject({configPath: overlayPath});
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: 'project02.config.v2',
+      project02: {userDisplayName: 'Overlay Name'},
+    });
+    // First scoped write stamps the data dir for its character.
+    expect(
+      JSON.parse(
+        readFileSync(join(dataRoot, 'character-binding.json'), 'utf8'),
+      ),
+    ).toMatchObject({characterId: 'mira'});
+
+    const scopedGet = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(JSON.parse(scopedGet.stdout)).toEqual({
+      value: 'Overlay Name',
+      origin: 'character',
+    });
+
+    const path = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'path',
+    ]);
+
+    expect(path.stdout.trim()).toBe(overlayPath);
+
+    const unset = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'unset',
+      'project02.userDisplayName',
+    ]);
+
+    expect(unset.code).toBe(0);
+
+    const fallthroughGet = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(JSON.parse(fallthroughGet.stdout)).toEqual({
+      value: 'Global Name',
+      origin: 'global',
+    });
+  });
+
+  it('rejects global-only fields, secrets, env-path, and check under --character', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-reject-');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    const globalOnly = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.character',
+      'nova',
+    ]);
+
+    expect(globalOnly.code).toBe(1);
+    expect(globalOnly.stderr).toContain('global-only');
+    expect(
+      existsSync(
+        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'mira')),
+      ),
+    ).toBe(false);
+
+    const secret = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'secret',
+      'set',
+      'demo-config',
+      'apiKey',
+      'MY_SECRET',
+    ]);
+
+    expect(secret.code).toBe(1);
+    expect(secret.stderr).toContain('Secrets are shared across characters');
+
+    const envPath = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'env-path',
+    ]);
+
+    expect(envPath.code).toBe(1);
+    expect(envPath.stderr).toContain('shared across characters');
+
+    const check = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'check',
+    ]);
+
+    expect(check.code).toBe(1);
+    expect(check.stderr).toContain('--character does not apply to check');
+  });
+
+  it('refuses to write into a data directory stamped for another character', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-stamp-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // Simulate a copied directory: mira's path already claims nova.
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'nova',
+    });
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'X',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('holds history for character "nova"');
+    expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
+  });
+});

@@ -10,6 +10,8 @@ import {
   runtimeConfigValueMatchesField,
   type createRuntimeConfigMutationBase,
   type loadProject02RuntimeConfig,
+  type Project02RuntimeConfig,
+  type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigValue,
   type RuntimePluginConfigFieldInspectShape,
@@ -27,6 +29,8 @@ export type RuntimeConfigConsoleOptions = {
   readonly runtimeEnv?: NodeJS.ProcessEnv;
   readonly configPath?: string;
   readonly storeRoot?: string;
+  /** Present when the console operates on one character's overlay. */
+  readonly character?: string;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
@@ -40,6 +44,10 @@ export type RuntimeConfigConsoleSnapshot = {
   readonly config: ReturnType<typeof createRuntimeConfigMutationBase>;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
+  /** Set when the console operates on one character's overlay. */
+  readonly characterScope?: RuntimeConfigCharacterScope;
+  /** The overlay document the scoped sections display and edit. */
+  readonly scopedConfig?: Project02RuntimeConfig;
 };
 
 export type StagedRuntimeConfigChange = {

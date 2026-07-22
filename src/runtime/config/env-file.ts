@@ -9,13 +9,17 @@ import {
 } from './types.ts';
 
 /**
- * A runtime location selected by the operator (store root and/or config
- * path). CLI flag parsing produces this shape (src/cli/runtime-location.ts);
- * startup and env-file resolution consume it.
+ * A runtime location selected by the operator (store root, config
+ * path, and/or character). CLI flag parsing produces this shape
+ * (src/cli/shared/runtime-location-flags.ts); startup, env-file
+ * resolution, and scope-aware config verbs consume it. The character
+ * selects a config scope or an active character; env-file resolution
+ * ignores it (secrets are shared).
  */
 export type RuntimeLocationCliState = {
   readonly storeRoot?: string;
   readonly configPath?: string;
+  readonly character?: string;
 };
 
 export class RuntimeEnvFileError extends Error {

@@ -1,0 +1,352 @@
+/**
+ * Scope-aware runtime config mutations: the same control operations,
+ * targeted at either the global config.json or one character's
+ * overlay. Global scope delegates to the existing control functions
+ * unchanged. Character scope rejects global-only fields and secret
+ * operations, verifies the caller's layered expectation across both
+ * authored documents, and then runs the untouched per-file mutation
+ * machinery against the overlay file — never the global one, and never
+ * through the global bootstrap (which would seed a store root into the
+ * overlay): an absent overlay is first materialized as a minimal
+ * versioned document.
+ */
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {dirname} from 'node:path';
+
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
+import {
+  applyRuntimeConfigControlOperation,
+  applyRuntimePluginConfigControlOperation,
+  resolveRuntimeConfigControlTargetPath,
+  runtimePluginConfigControlMutation,
+  type RuntimeConfigControlOperation,
+  type RuntimePluginConfigControlActor,
+  type RuntimePluginConfigFieldControlOperation,
+} from './control.ts';
+import {
+  createLayeredRuntimeConfigFingerprint,
+  createRuntimeConfigFingerprint,
+} from './fingerprint.ts';
+import {loadProject02RuntimeConfig} from './load.ts';
+import {
+  applyRuntimeConfigMutation,
+  createRuntimeConfigMutationBase,
+  RuntimeConfigConflictError,
+  RuntimeConfigMutationError,
+  type RuntimeConfigMutationResult,
+} from './mutate.ts';
+import {
+  characterOverlayConfigPath,
+  characterOverlayFingerprintLayer,
+  deriveRuntimeConfigCharacterScope,
+  loadCharacterOverlayForScope,
+  type LoadedProject02CharacterOverlayConfig,
+} from './overlay.ts';
+import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
+import {
+  project02RuntimeConfigFieldDefinitions,
+  type Project02ConfigFieldDefinition,
+} from './schema.ts';
+import {
+  runtimeConfigVersion,
+  type Project02RuntimeConfig,
+  type RuntimeConfigCharacterScope,
+} from './types.ts';
+
+export type RuntimeConfigMutationScopeSelector = 'global' | 'character';
+
+type ScopedRuntimeConfigLocation = {
+  readonly configPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly storeRoot?: string;
+  /** Explicit character id (e.g. --character); wins over the configured one. */
+  readonly characterId?: string;
+};
+
+export type ResolvedRuntimeConfigScopeTarget = {
+  readonly scope: RuntimeConfigMutationScopeSelector;
+  /** The file this scope's mutations write. */
+  readonly configPath: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
+  /** project02.* fields this scope may author. */
+  readonly allowedProject02Fields: readonly Project02ConfigFieldDefinition[];
+  readonly secretOpsAllowed: boolean;
+};
+
+/**
+ * Names the file, field allowlist, and secret policy for one scope.
+ * Character scope requires a derivable character (configured id +
+ * resolvable home); anything else is a usage error, not a fallback.
+ */
+export function resolveRuntimeConfigScopeTarget(
+  options: ScopedRuntimeConfigLocation & {
+    readonly scope: RuntimeConfigMutationScopeSelector;
+  },
+): ResolvedRuntimeConfigScopeTarget {
+  const loadedConfig = loadProject02RuntimeConfig(options);
+
+  if (options.scope === 'global') {
+    return Object.freeze({
+      scope: 'global',
+      configPath: resolveRuntimeConfigControlTargetPath(options),
+      allowedProject02Fields: project02RuntimeConfigFieldDefinitions(),
+      secretOpsAllowed: true,
+    });
+  }
+
+  const characterScope = requiredCharacterScope(loadedConfig, options);
+
+  return Object.freeze({
+    scope: 'character',
+    configPath: characterOverlayConfigPath(characterScope.dataRoot),
+    characterScope,
+    allowedProject02Fields: project02RuntimeConfigFieldDefinitions().filter(
+      field => field.scopes.includes('character'),
+    ),
+    secretOpsAllowed: false,
+  });
+}
+
+export function assertRuntimeConfigSecretScopeAllowed(
+  scope: RuntimeConfigMutationScopeSelector,
+): void {
+  if (scope === 'character') {
+    throw new RuntimeConfigMutationError(
+      'Secrets are shared across characters; run the secret command ' +
+        'without --character.',
+    );
+  }
+}
+
+export function applyScopedRuntimeConfigControlOperation(
+  options: ScopedRuntimeConfigLocation & {
+    readonly scope: RuntimeConfigMutationScopeSelector;
+    readonly expectedFingerprint?: string;
+    readonly operation: RuntimeConfigControlOperation;
+  },
+): RuntimeConfigMutationResult {
+  if (options.scope === 'global') {
+    return applyRuntimeConfigControlOperation(options);
+  }
+
+  assertCharacterScopedControlOperation(options.operation);
+
+  return applyCharacterScopedMutation({
+    ...options,
+    operation: options.operation,
+  });
+}
+
+export function applyScopedRuntimePluginConfigControlOperation(
+  options: ScopedRuntimeConfigLocation & {
+    readonly scope: RuntimeConfigMutationScopeSelector;
+    readonly manifest: RuntimePluginManifest;
+    readonly actor: RuntimePluginConfigControlActor;
+    readonly expectedFingerprint: string;
+    readonly operation: RuntimePluginConfigFieldControlOperation;
+  },
+): RuntimeConfigMutationResult {
+  if (options.scope === 'global') {
+    return applyRuntimePluginConfigControlOperation(options);
+  }
+
+  if (options.operation.kind === 'secret_set') {
+    assertRuntimeConfigSecretScopeAllowed('character');
+  }
+
+  const mutation = runtimePluginConfigControlMutation(options);
+
+  return applyCharacterScopedMutation({
+    ...options,
+    operation: mutation.operation,
+    // The manifest-aware candidate validation must see what the runtime
+    // will actually resolve: the overlay candidate merged over the
+    // current global document, not the sparse overlay alone.
+    validateCandidate: (candidate, globalDocument) => {
+      mutation.validateCandidate(
+        mergeCharacterOverlayDocument(globalDocument, candidate),
+      );
+    },
+  });
+}
+
+function applyCharacterScopedMutation(
+  options: ScopedRuntimeConfigLocation & {
+    readonly expectedFingerprint?: string;
+    readonly operation: Parameters<
+      typeof applyRuntimeConfigMutation
+    >[0]['operation'];
+    readonly validateCandidate?: (
+      candidate: Project02RuntimeConfig,
+      globalDocument: Project02RuntimeConfig,
+    ) => void;
+  },
+): RuntimeConfigMutationResult {
+  const loadedConfig = loadProject02RuntimeConfig(options);
+  const characterScope = requiredCharacterScope(loadedConfig, options);
+  const overlay = loadCharacterOverlayForScope(characterScope);
+
+  assertOverlayMutable(overlay);
+
+  const globalDocument = createRuntimeConfigMutationBase({
+    loadedConfig,
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  });
+
+  if (options.expectedFingerprint !== undefined) {
+    const currentFingerprint = createLayeredRuntimeConfigFingerprint({
+      globalConfig: globalDocument,
+      characterId: characterScope.characterId,
+      overlayConfig: characterOverlayFingerprintLayer(overlay),
+    });
+
+    if (options.expectedFingerprint !== currentFingerprint) {
+      throw new RuntimeConfigConflictError(
+        'Runtime config changed before the mutation could be committed. ' +
+          `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
+      );
+    }
+  }
+
+  const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
+  const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
+  const result = applyRuntimeConfigMutation({
+    configPath: overlayPath,
+    ...(options.env === undefined ? {} : {env: options.env}),
+    operation: options.operation,
+    ...(options.expectedFingerprint === undefined
+      ? {}
+      : {expectedFingerprint: createRuntimeConfigFingerprint(overlayBase)}),
+    validateCandidate: candidate => {
+      assertOverlayCandidateStaysCharacterScoped(candidate);
+      options.validateCandidate?.(candidate, globalDocument);
+    },
+  });
+
+  return Object.freeze({
+    ...result,
+    fingerprint: createLayeredRuntimeConfigFingerprint({
+      globalConfig: globalDocument,
+      characterId: characterScope.characterId,
+      overlayConfig: result.config,
+    }),
+  });
+}
+
+function requiredCharacterScope(
+  loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>,
+  options: {readonly storeRoot?: string; readonly characterId?: string},
+): RuntimeConfigCharacterScope {
+  const characterScope = deriveRuntimeConfigCharacterScope({
+    loadedConfig,
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.characterId === undefined
+      ? {}
+      : {characterId: options.characterId}),
+  });
+
+  if (characterScope === undefined) {
+    throw new RuntimeConfigMutationError(
+      'Character scope is unavailable: the configured character id or ' +
+        'store root does not form a character-data path.',
+    );
+  }
+
+  return characterScope;
+}
+
+function assertOverlayMutable(
+  overlay: LoadedProject02CharacterOverlayConfig,
+): void {
+  const blocking = overlay.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (blocking !== undefined) {
+    throw new RuntimeConfigMutationError(
+      `Cannot mutate the character overlay because it failed to load: ${blocking.message}`,
+    );
+  }
+}
+
+function assertCharacterScopedControlOperation(
+  operation: RuntimeConfigControlOperation,
+): void {
+  if (operation.kind !== 'set' && operation.kind !== 'unset') {
+    return;
+  }
+
+  const field = project02RuntimeConfigFieldDefinitions().find(
+    candidate => candidate.path === operation.path,
+  );
+
+  if (field !== undefined && !field.scopes.includes('character')) {
+    throw new RuntimeConfigMutationError(
+      `Config field "${field.path}" is global-only; set it in the home ` +
+        'config.json, not the character overlay.',
+    );
+  }
+}
+
+// Defense in depth behind the operation allowlist: no candidate carrying
+// a global-only field is ever written to an overlay file.
+function assertOverlayCandidateStaysCharacterScoped(
+  candidate: Project02RuntimeConfig,
+): void {
+  const section = candidate.project02;
+
+  if (section === undefined) {
+    return;
+  }
+
+  for (const field of project02RuntimeConfigFieldDefinitions()) {
+    if (
+      !field.scopes.includes('character') &&
+      section[field.name] !== undefined
+    ) {
+      throw new RuntimeConfigMutationError(
+        `Config field "${field.path}" is global-only; set it in the home ` +
+          'config.json, not the character overlay.',
+      );
+    }
+  }
+}
+
+/**
+ * Materializes an absent overlay as the minimal versioned document so
+ * the mutation base never routes through the global bootstrap. Losing
+ * the creation race to a sibling is fine: the mutation lock serializes
+ * the writes that follow.
+ */
+function ensureMinimalOverlayDocument(
+  overlayPath: string,
+  overlay: LoadedProject02CharacterOverlayConfig,
+): Project02RuntimeConfig {
+  if (overlay.config !== undefined) {
+    return overlay.config;
+  }
+
+  const minimalDocument = Object.freeze({
+    version: runtimeConfigVersion,
+  } satisfies Project02RuntimeConfig);
+
+  mkdirSync(dirname(overlayPath), {recursive: true});
+
+  try {
+    writeFileSync(
+      overlayPath,
+      `${JSON.stringify(minimalDocument, null, 2)}\n`,
+      {flag: 'wx'},
+    );
+  } catch (error: unknown) {
+    if (!isNodeErrorWithCode(error, 'EEXIST')) {
+      throw error;
+    }
+  }
+
+  return minimalDocument;
+}

@@ -70,6 +70,28 @@ export function parseRuntimeLocationFlag(options: {
     };
   }
 
+  if (arg === '--character') {
+    if (options.state.character !== undefined) {
+      throw new RuntimeLocationCliUsageError(
+        '--character can only be provided once.',
+      );
+    }
+
+    return {
+      status: 'matched',
+      nextIndex: options.index + 1,
+      state: {
+        ...options.state,
+        character: readFlagValue(
+          options.args,
+          options.index,
+          '--character',
+          message => new RuntimeLocationCliUsageError(message),
+        ),
+      },
+    };
+  }
+
   return {
     status: 'unmatched',
   };

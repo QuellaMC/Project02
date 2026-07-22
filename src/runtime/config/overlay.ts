@@ -144,16 +144,19 @@ export function characterOverlayFingerprintLayer(
 
 /**
  * The character scope every authored-fingerprint site shares: character
- * id from the loaded global config (or the default) and its data
- * directory under the resolved home. Undefined when the configured id
- * or store root cannot form a data path — that state fails elsewhere
- * with its own diagnostic, and fingerprints stay single-layer.
+ * id from the loaded global config (or the default; an explicit
+ * characterId — e.g. a --character flag — wins over both) and its data
+ * directory under the resolved home. Undefined when the id or store
+ * root cannot form a data path — that state fails elsewhere with its
+ * own diagnostic, and fingerprints stay single-layer.
  */
 export function deriveRuntimeConfigCharacterScope(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
+  readonly characterId?: string;
 }): RuntimeConfigCharacterScope | undefined {
   const characterId =
+    options.characterId ??
     options.loadedConfig.config?.project02?.character ??
     defaultProject02CharacterId;
 
