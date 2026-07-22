@@ -140,12 +140,14 @@ export default tseslint.config(
     // the scope authority and stamps its id into the resolved config,
     // then +23 for review hardening: catalog diagnostics classified
     // against the merged view, the home root recorded in the plugin
-    // config-control state, and the catalog composition extracted.
+    // config-control state, and the catalog composition extracted, then
+    // +3 so the direct activation path derives the character scope and
+    // overlay before catalog composition classifies packages.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1203, skipBlankLines: true, skipComments: true},
+        {max: 1206, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -154,10 +156,11 @@ export default tseslint.config(
     rules: {
       // Re-pinned +43 so a directly selected overlay target must carry
       // a matching binding stamp before any lock or write touches the
-      // data directory (review round five).
+      // data directory (review round five), then +8 so an overlay
+      // path's store resolution names the OWNING home for env writes.
       'max-lines': [
         'error',
-        {max: 1303, skipBlankLines: true, skipComments: true},
+        {max: 1311, skipBlankLines: true, skipComments: true},
       ],
     },
   },
