@@ -16,6 +16,7 @@ import {
 } from '../shared/terminal-errors.ts';
 import {
   createRuntimeConfigInspectShape,
+  runtimeConfigDiagnosticAttribution,
   RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
@@ -116,9 +117,17 @@ export async function runInspectCliFromArgs(
     });
 
     if (startup.status === 'config_invalid') {
+      const configError =
+        startup.activationPlan.resolvedConfig.diagnostics.find(
+          diagnostic => diagnostic.severity === 'error',
+        );
+
       throw new InspectCliUsageError(
-        startup.loadedConfig.diagnostics[0]?.message ??
-          'Runtime config is invalid.',
+        configError === undefined
+          ? 'Runtime config is invalid.'
+          : `${runtimeConfigDiagnosticAttribution(configError)}${
+              configError.message
+            }`,
       );
     }
 

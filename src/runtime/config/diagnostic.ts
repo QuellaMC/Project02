@@ -1,7 +1,28 @@
 import type {
   RuntimeConfigDiagnostic,
+  RuntimeConfigDiagnosticOrigin,
   RuntimeConfigDiagnosticPluginMetadata,
 } from './types.ts';
+
+export function withRuntimeConfigDiagnosticOrigin(
+  diagnostic: RuntimeConfigDiagnostic,
+  origin: RuntimeConfigDiagnosticOrigin,
+): RuntimeConfigDiagnostic {
+  return Object.freeze({...diagnostic, origin});
+}
+
+/**
+ * CLI-facing attribution prefix naming the character overlay a
+ * diagnostic came from; global-document diagnostics render bare.
+ */
+export function runtimeConfigDiagnosticAttribution(
+  diagnostic: RuntimeConfigDiagnostic,
+): string {
+  return diagnostic.origin?.scope === 'character' &&
+    diagnostic.origin.characterId !== undefined
+    ? `[character ${diagnostic.origin.characterId}] `
+    : '';
+}
 
 export function createRuntimeConfigDiagnostic(
   severity: RuntimeConfigDiagnostic['severity'],

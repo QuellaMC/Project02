@@ -19,6 +19,7 @@ import {
 } from '../../app/index.ts';
 import {
   diagnosticsHaveErrors,
+  runtimeConfigDiagnosticAttribution,
   RuntimeEnvFileError,
 } from '../../runtime/config/index.ts';
 import {
@@ -139,7 +140,7 @@ export async function runConfiguredRelayCli(
 
   const startupDiagnostic = (
     startup.status === 'config_invalid'
-      ? startup.loadedConfig.diagnostics
+      ? startup.activationPlan.resolvedConfig.diagnostics
       : startup.activationPlan.activation.diagnostics
   ).find(item => item.severity === 'error');
 
@@ -149,10 +150,13 @@ export async function runConfiguredRelayCli(
   ) {
     options.stderr.write(
       `Error: ${
-        startupDiagnostic?.message ??
-        (startup.status === 'config_invalid'
-          ? 'Runtime config is invalid.'
-          : 'Runtime plugin activation failed.')
+        startupDiagnostic === undefined
+          ? startup.status === 'config_invalid'
+            ? 'Runtime config is invalid.'
+            : 'Runtime plugin activation failed.'
+          : `${runtimeConfigDiagnosticAttribution(startupDiagnostic)}${
+              startupDiagnostic.message
+            }`
       }\n`,
     );
     return 1;

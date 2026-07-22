@@ -2,6 +2,7 @@ import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 
 import {
   project02RoleModelProviderValues,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
 } from './types.ts';
 
@@ -12,7 +13,16 @@ export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly invalidValueMessage: string;
   readonly agentMutable: false;
   readonly reloadRequired: boolean;
+  readonly scopes: readonly RuntimeConfigFieldScope[];
 };
+
+const globalOnlyFieldScopes = Object.freeze([
+  'global',
+] satisfies RuntimeConfigFieldScope[]);
+const characterScopedFieldScopes = Object.freeze([
+  'global',
+  'character',
+] satisfies RuntimeConfigFieldScope[]);
 
 const project02ConfigFieldDefinitions = Object.freeze([
   Object.freeze({
@@ -29,6 +39,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     valueType: 'path',
     defaultValueSummary: '.project02',
     redactionLabels: Object.freeze([]),
+    scopes: globalOnlyFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -43,6 +54,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'string',
     redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -60,6 +72,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     valueType: 'string',
     defaultValueSummary: 'mira',
     redactionLabels: Object.freeze([]),
+    scopes: globalOnlyFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -77,6 +90,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     defaultValueSummary: 'local',
     allowedValues: Object.freeze([...project02RoleModelProviderValues]),
     redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -94,6 +108,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     valueType: 'string',
     defaultValueSummary: 'You',
     redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),

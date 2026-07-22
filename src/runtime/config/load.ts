@@ -85,37 +85,17 @@ export function loadProject02RuntimeConfig(
     } satisfies LoadedProject02RuntimeConfig);
   }
 
-  const readResult = readRuntimeConfigSource(location.path);
+  const document = readProject02RuntimeConfigDocument(location.path);
 
-  if (readResult.status === 'rejected') {
+  if (document.status === 'rejected') {
     return Object.freeze({
       source: location.source,
       path: location.path,
-      diagnostics: [readResult.diagnostic],
+      diagnostics: [document.diagnostic],
     } satisfies LoadedProject02RuntimeConfig);
   }
 
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(readResult.source) as unknown;
-  } catch (error: unknown) {
-    return Object.freeze({
-      source: location.source,
-      path: location.path,
-      diagnostics: [
-        createRuntimeConfigDiagnostic(
-          'error',
-          'runtime_config_malformed_json',
-          `Runtime config file is not valid JSON: ${
-            error instanceof Error ? error.message : 'unknown parse error'
-          }.`,
-        ),
-      ],
-    } satisfies LoadedProject02RuntimeConfig);
-  }
-
-  const accepted = validateProject02RuntimeConfig(parsed);
+  const accepted = validateProject02RuntimeConfig(document.value);
 
   return Object.freeze({
     source: location.source,
@@ -123,6 +103,43 @@ export function loadProject02RuntimeConfig(
     ...(accepted.config === undefined ? {} : {config: accepted.config}),
     diagnostics: accepted.diagnostics,
   } satisfies LoadedProject02RuntimeConfig);
+}
+
+/**
+ * Reads and parses one runtime config document (size caps + JSON parse),
+ * shared by the global loader and the character overlay loader. Existence
+ * checks stay with the callers: an absent file means different things to
+ * each of them.
+ */
+export function readProject02RuntimeConfigDocument(path: string):
+  | {readonly status: 'accepted'; readonly value: unknown}
+  | {
+      readonly status: 'rejected';
+      readonly diagnostic: RuntimeConfigDiagnostic;
+    } {
+  const readResult = readRuntimeConfigSource(path);
+
+  if (readResult.status === 'rejected') {
+    return readResult;
+  }
+
+  try {
+    return {
+      status: 'accepted',
+      value: JSON.parse(readResult.source) as unknown,
+    };
+  } catch (error: unknown) {
+    return {
+      status: 'rejected',
+      diagnostic: createRuntimeConfigDiagnostic(
+        'error',
+        'runtime_config_malformed_json',
+        `Runtime config file is not valid JSON: ${
+          error instanceof Error ? error.message : 'unknown parse error'
+        }.`,
+      ),
+    };
+  }
 }
 
 function readRuntimeConfigSource(path: string):

@@ -106,6 +106,8 @@ export function resolveProject02RuntimeConfig(
       effectiveFingerprintInput({
         config,
         storeRoot,
+        character,
+        userDisplayName,
         redactedPluginConfigs,
       }),
     ),
@@ -635,6 +637,8 @@ function nestedSecretValuePath(
 function effectiveFingerprintInput(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly storeRoot: string;
+  readonly character: string;
+  readonly userDisplayName: string;
   readonly redactedPluginConfigs: Readonly<
     Record<string, RedactedPluginRuntimeConfig>
   >;
@@ -645,6 +649,8 @@ function effectiveFingerprintInput(options: {
     version: options.config?.version ?? 'none',
     project02: Object.freeze({
       storeRoot: options.storeRoot,
+      character: options.character,
+      userDisplayName: options.userDisplayName,
       defaultMemoryProvider:
         options.config?.project02?.defaultMemoryProvider ?? null,
       roleModelProvider:

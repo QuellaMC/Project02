@@ -1,4 +1,8 @@
-export {createRuntimeConfigDiagnostic} from './diagnostic.ts';
+export {
+  createRuntimeConfigDiagnostic,
+  runtimeConfigDiagnosticAttribution,
+  withRuntimeConfigDiagnosticOrigin,
+} from './diagnostic.ts';
 export {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
@@ -31,8 +35,18 @@ export {
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   maxProject02RuntimeConfigBytes,
+  readProject02RuntimeConfigDocument,
   validateProject02RuntimeConfig,
 } from './load.ts';
+export {
+  characterOverlayConfigPath,
+  loadProject02CharacterOverlayConfig,
+  type LoadedProject02CharacterOverlayConfig,
+} from './overlay.ts';
+export {
+  resolveLayeredProject02RuntimeConfig,
+  type ResolveLayeredProject02RuntimeConfigOptions,
+} from './resolve-layered.ts';
 export {
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
@@ -63,9 +77,13 @@ export {
   runtimeConfigVersion,
   runtimeControlEnvVarNames,
   type LoadedProject02RuntimeConfig,
+  type Project02HostConfig,
   type Project02RuntimeConfig,
+  type Project02RuntimePluginConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
+  type RuntimeConfigDiagnosticOrigin,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigInspectShape,
   type RedactedPluginRuntimeConfig,
   type ResolvedPluginRuntimeConfig,

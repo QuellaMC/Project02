@@ -6,6 +6,7 @@
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   redactRuntimeConfigText,
+  runtimeConfigDiagnosticAttribution,
   runtimeConfigValueMatchesField,
   type createRuntimeConfigMutationBase,
   type loadProject02RuntimeConfig,
@@ -244,7 +245,9 @@ export function writeDiagnostics(
   for (const diagnostic of diagnostics) {
     writeLine(
       stdout,
-      `- ${diagnostic.severity}: ${redactRuntimeConfigText(diagnostic.message)}`,
+      `- ${diagnostic.severity}: ${runtimeConfigDiagnosticAttribution(
+        diagnostic,
+      )}${redactRuntimeConfigText(diagnostic.message)}`,
     );
   }
 }

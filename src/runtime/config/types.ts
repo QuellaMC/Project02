@@ -68,11 +68,25 @@ export type Project02RuntimePluginConfig = {
 export type RuntimeConfigSource = 'none' | 'default' | 'path' | 'env';
 export type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
 
+export type RuntimeConfigFieldScope = 'global' | 'character';
+
+/**
+ * Which config document a diagnostic came from. Global-document
+ * diagnostics carry no origin; character-overlay diagnostics name the
+ * character and overlay path so CLI output can attribute them.
+ */
+export type RuntimeConfigDiagnosticOrigin = {
+  readonly scope: RuntimeConfigFieldScope;
+  readonly characterId?: string;
+  readonly path?: string;
+};
+
 type RuntimeConfigDiagnosticBase = {
   readonly severity: RuntimeConfigDiagnosticSeverity;
   readonly code: string;
   readonly message: string;
   readonly path?: string;
+  readonly origin?: RuntimeConfigDiagnosticOrigin;
 };
 
 export type RuntimeConfigDiagnostic =

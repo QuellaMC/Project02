@@ -60,6 +60,7 @@ import {
 } from '../../app/index.ts';
 import {
   diagnosticsHaveErrors,
+  runtimeConfigDiagnosticAttribution,
   RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
@@ -326,8 +327,10 @@ export async function runChatCliFromArgs(
     });
 
     if (startup.status === 'config_invalid') {
+      // Resolved-config diagnostics carry both layers, so a character
+      // overlay error surfaces here with its attribution.
       assertNoRuntimeConfigErrors(
-        startup.loadedConfig.diagnostics,
+        startup.activationPlan.resolvedConfig.diagnostics,
         'Runtime config is invalid',
       );
       throw new ChatCliUsageError('Runtime config is invalid.');
@@ -610,7 +613,10 @@ function formatRuntimeConfigDiagnosticError(
       ? diagnostic.code
       : `${diagnostic.code} at ${diagnostic.path}`;
 
-  return `${messagePrefix}: ${diagnostic.message} (${diagnosticLocation})`;
+  return (
+    `${messagePrefix}: ${runtimeConfigDiagnosticAttribution(diagnostic)}` +
+    `${diagnostic.message} (${diagnosticLocation})`
+  );
 }
 
 export async function runChatCli(options: RunChatCliOptions): Promise<number> {

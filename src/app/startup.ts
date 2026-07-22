@@ -7,14 +7,19 @@ import {
 } from './activation.ts';
 import {
   defaultDotEnvForRuntimeLocation,
+  defaultProject02CharacterId,
   diagnosticsHaveErrors,
+  loadProject02CharacterOverlayConfig,
   loadProject02RuntimeConfig,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
+  resolveProject02RuntimeStoreRoot,
   shouldReadDefaultDotEnvForRuntimeLocation,
+  type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
+import {characterDataDirPath} from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;
@@ -45,6 +50,7 @@ type RuntimeCliStartupBase = {
 type RuntimeCliConfigStartupResult = RuntimeCliStartupBase;
 
 type RuntimeCliActivationStartupBase = RuntimeCliStartupBase & {
+  readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
   readonly activationPlan: PreparedProject02PluginActivationPlan;
 };
@@ -94,6 +100,12 @@ export function resolveRuntimeCliStartup(
     return Object.freeze(startupBase);
   }
 
+  const overlayLoadedConfig = loadCharacterOverlayForStartup({
+    loadedConfig,
+    location,
+  });
+  const overlayForPlan =
+    overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
   const catalogSnapshot =
     options.factories === undefined
       ? createRuntimePluginCatalogSnapshot({
@@ -105,6 +117,7 @@ export function resolveRuntimeCliStartup(
       : undefined;
   const activationPlanBeforeRuntimeEnv = prepareActivationPlan({
     loadedConfig,
+    ...overlayForPlan,
     location,
     env: configEnv,
     ...(options.factories === undefined ? {} : {factories: options.factories}),
@@ -112,10 +125,11 @@ export function resolveRuntimeCliStartup(
   });
   const base = {
     ...startupBase,
+    ...overlayForPlan,
     ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
   };
 
-  if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
+  if (startupConfigHasErrors(loadedConfig, overlayLoadedConfig)) {
     return Object.freeze({
       ...base,
       status: 'config_invalid',
@@ -144,6 +158,7 @@ export function resolveRuntimeCliStartup(
   });
   const activationPlan = prepareActivationPlan({
     loadedConfig,
+    ...overlayForPlan,
     location,
     env: runtimeEnv,
     ...(options.factories === undefined ? {} : {factories: options.factories}),
@@ -156,6 +171,49 @@ export function resolveRuntimeCliStartup(
     runtimeEnv,
     activationPlan,
   });
+}
+
+function startupConfigHasErrors(
+  loadedConfig: LoadedProject02RuntimeConfig,
+  overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
+): boolean {
+  return (
+    diagnosticsHaveErrors(loadedConfig.diagnostics) ||
+    (overlayLoadedConfig !== undefined &&
+      diagnosticsHaveErrors(overlayLoadedConfig.diagnostics))
+  );
+}
+
+/**
+ * The overlay location derives from the loaded global config alone: the
+ * home root plus the configured character id. A store root or character
+ * id the storage layer rejects fails startup later with its own
+ * diagnostic; the overlay simply does not exist for it.
+ */
+function loadCharacterOverlayForStartup(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly location: RuntimeLocationCliState;
+}): LoadedProject02CharacterOverlayConfig | undefined {
+  const characterId =
+    options.loadedConfig.config?.project02?.character ??
+    defaultProject02CharacterId;
+  let dataRoot: string;
+
+  try {
+    dataRoot = characterDataDirPath(
+      resolveProject02RuntimeStoreRoot({
+        loadedConfig: options.loadedConfig,
+        ...(options.location.storeRoot === undefined
+          ? {}
+          : {storeRoot: options.location.storeRoot}),
+      }),
+      characterId,
+    );
+  } catch {
+    return undefined;
+  }
+
+  return loadProject02CharacterOverlayConfig({dataRoot, characterId});
 }
 
 function resolveCwdDotEnv(options: {
@@ -200,6 +258,7 @@ function loadRuntimeEnv(options: {
 
 function prepareActivationPlan(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly location: RuntimeLocationCliState;
   readonly env: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
@@ -207,6 +266,9 @@ function prepareActivationPlan(options: {
 }): PreparedProject02PluginActivationPlan {
   return prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
+    ...(options.overlayLoadedConfig === undefined
+      ? {}
+      : {overlayConfig: options.overlayLoadedConfig}),
     ...(options.location.storeRoot === undefined
       ? {}
       : {storeRoot: options.location.storeRoot}),

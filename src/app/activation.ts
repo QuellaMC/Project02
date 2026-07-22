@@ -43,9 +43,10 @@ import {
   createRuntimePluginConfigControlCapability,
   characterDataRootForResolvedConfig,
   diagnosticsHaveErrors,
-  resolveProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfig,
   resolveProject02RuntimeStoreRoot,
   runtimeConfigDiagnosticMatchesPlugin,
+  type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
@@ -285,6 +286,7 @@ function composeRuntimePluginCatalog(
 
 export function prepareConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   readonly storeRoot?: string;
   readonly strictUnknownPlugins?: boolean;
   readonly env?: NodeJS.ProcessEnv;
@@ -325,8 +327,11 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const catalogEntries = Object.freeze({...composition.catalogEntries});
   const pluginManifests = activationPluginManifests(catalogEntries);
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
-  const resolvedConfig = resolveProject02RuntimeConfig({
+  const resolvedConfig = resolveLayeredProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
+    ...(options.overlayConfig === undefined
+      ? {}
+      : {overlayConfig: options.overlayConfig}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests,
     defaultEnabledPluginIds,
