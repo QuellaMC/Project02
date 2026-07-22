@@ -39,6 +39,30 @@ const installedSecretFactories = Object.freeze({
 });
 
 describe('runtime config CLI mutation and storage', () => {
+  it('refuses to author global config into a home the runtime would not adopt', async () => {
+    const storeRoot = createTestTempRoot('project02-config-foreign-home-');
+    let stderr = '';
+
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.userDisplayName', 'Bob'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    // The runtime would refuse this directory; authoritative settings
+    // must not be written into it.
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
   it('seeds explicit store roots into newly created store configs', async () => {
     const storeRoot = createTestTempRoot('project02-config-cli-store-seed-');
     const seededStoreRoot = realpathSync.native(storeRoot);

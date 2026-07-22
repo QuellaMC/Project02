@@ -1,4 +1,10 @@
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -101,6 +107,30 @@ describe('project02 home initialization', () => {
       name: 'LocalRuntimeStorageContractError',
       code: 'missing_file',
     });
+  });
+
+  it('treats a symlinked character-data root in a marker-less home as foreign', async () => {
+    const homeRoot = createTestTempRoot('project02-home-symlink-');
+    const outside = createTestTempRoot('project02-home-symlink-target-');
+
+    symlinkSync(outside, join(homeRoot, 'character-data'));
+
+    await expect(ensureInitializedProject02Home({homeRoot})).rejects.toThrow(
+      'contains foreign entries',
+    );
+  });
+
+  it('rejects an initialized home whose character-data root became a symlink', async () => {
+    const homeRoot = createTestTempRoot('project02-home-symlink-swap-');
+    const outside = createTestTempRoot('project02-home-symlink-swap-target-');
+
+    await ensureInitializedProject02Home({homeRoot});
+    rmSync(join(homeRoot, 'character-data'), {recursive: true});
+    symlinkSync(outside, join(homeRoot, 'character-data'));
+
+    await expect(ensureInitializedProject02Home({homeRoot})).rejects.toThrow(
+      'not a real directory',
+    );
   });
 
   it('rejects a character-data directory offered as a home', async () => {

@@ -297,6 +297,24 @@ describe('configured runtime plugin package activation', () => {
     ).toBe('blocked');
   });
 
+  it('refuses direct host creation on a home the runtime would not adopt', async () => {
+    const storeRoot = createTestTempRoot('project02-package-foreign-home-');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const plan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      storeRoot,
+    });
+
+    // Direct callers get the same guarded materialization startup
+    // runs: no plugin file store may write under this data root.
+    await expect(
+      createConfiguredProject02PluginHostFromPlan({activationPlan: plan}),
+    ).rejects.toThrow('contains foreign entries');
+  });
+
   it('fails closed when only the overlay enables a quarantined package on the direct activation path', () => {
     const storeRoot = createTestTempRoot('project02-package-overlay-enabled-');
     const manifest = testPackageManifest('operator.broken-overlay');

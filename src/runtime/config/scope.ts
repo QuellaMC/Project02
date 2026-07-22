@@ -429,6 +429,29 @@ function applyCharacterScopedMutation(
         overlay,
       });
 
+      // Validate the candidate against a synthetic base BEFORE an
+      // absent overlay is materialized: a rejected edit must not leave
+      // a fresh overlay behind (that would move the layered
+      // fingerprint for a failed change).
+      prepareRuntimeConfigMutationCandidate({
+        loadedConfig: {
+          source: 'path',
+          path: overlayPath,
+          config:
+            overlay.config ??
+            Object.freeze({
+              version: runtimeConfigVersion,
+            } satisfies Project02RuntimeConfig),
+          diagnostics: Object.freeze([]),
+        },
+        configPath: overlayPath,
+        operation: options.operation,
+        validateCandidate: candidate => {
+          assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
+          options.validateCandidate?.(candidate, globalDocument);
+        },
+      });
+
       const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
       const result = applyRuntimeConfigMutation({
         configPath: overlayPath,

@@ -16,6 +16,42 @@ import {
 } from '../support/runtime-config-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
+  it('rejects check when the data directory is stamped for another character', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-stamp-');
+    const dataRoot = join(storeRoot, 'character-data', 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A copied directory: mira's path claims nova but carries an
+    // overlay a naive read-only check would report as mira's config.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'nova',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('holds history for character "nova"');
+  });
+
   it('reports activation warnings from runtime config check', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-');
     let stdout = '';

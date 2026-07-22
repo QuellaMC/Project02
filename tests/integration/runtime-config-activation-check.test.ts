@@ -929,22 +929,21 @@ describe('runtime config activation checks and construction', () => {
     ]);
   });
 
-  it('preserves factory errors when the configured construction cleanup store is unusable', async () => {
+  it('fails closed on an unusable store before any factory or cleanup runs', async () => {
     const configRoot = createTestTempRoot(
       'project02-config-factory-invalid-store-cleanup-',
     );
     const invalidStoreRoot = join(configRoot, 'store-root-file');
     const configPath = join(configRoot, 'config.json');
     const cleanupContexts: RuntimePluginContext[] = [];
-    const cleanupFileStoreAvailable: boolean[] = [];
     const cleanupPlugin = fileStoreSessionEndPlugin(
       'first.cleanup',
       context => {
         cleanupContexts.push(context);
-        cleanupFileStoreAvailable.push(context.fileStore !== undefined);
       },
     );
     const failingPlugin = firstPartyPlugin('later.failure');
+    let factoryCalls = 0;
 
     writeFileSync(invalidStoreRoot, 'not a runtime store directory\n', 'utf8');
     writeRuntimeConfig(configPath, {
@@ -958,6 +957,8 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
+    // The guarded initializer rejects the unusable store with its own
+    // precise error before any factory can construct against it.
     await expect(
       createConfiguredProject02PluginHost({
         loadedConfig: loadProject02RuntimeConfig({configPath}),
@@ -965,11 +966,15 @@ describe('runtime config activation checks and construction', () => {
         factories: {
           [cleanupPlugin.manifest.id]: {
             manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin,
+            create: () => {
+              factoryCalls += 1;
+              return cleanupPlugin;
+            },
           },
           [failingPlugin.manifest.id]: {
             manifest: failingPlugin.manifest,
             create: () => {
+              factoryCalls += 1;
               throw new Error(
                 'later manifest-backed factory failed with unusable store',
               );
@@ -977,12 +982,10 @@ describe('runtime config activation checks and construction', () => {
           },
         },
       }),
-    ).rejects.toThrow(
-      'later manifest-backed factory failed with unusable store',
-    );
+    ).rejects.toThrow('Could not read Project02 home marker');
 
+    expect(factoryCalls).toBe(0);
     expect(cleanupContexts).toHaveLength(0);
-    expect(cleanupFileStoreAvailable).toEqual([]);
   });
 
   it('cleans up created plugins when host construction fails after factories succeed', async () => {

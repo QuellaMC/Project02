@@ -16,6 +16,7 @@ import {
   runtimeConfigDiagnosticAttribution,
   RuntimeConfigMutationError,
   runtimeConfigEnvPathForLocation,
+  runtimeConfigEnvVarName,
   RuntimeEnvFileError,
   storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
@@ -23,6 +24,7 @@ import {
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
 import {
+  assertProject02HomeAdoptable,
   evaluateCharacterDataStamp,
   homeRootForCharacterDataDir,
   LocalRuntimeStorageContractError,
@@ -139,7 +141,11 @@ async function runRuntimeConfigCliFromArgsSync(
       );
     }
 
-    return runRuntimeConfigDocumentCommand(parsedArgs, options, cwdDotEnv);
+    return await runRuntimeConfigDocumentCommand(
+      parsedArgs,
+      options,
+      cwdDotEnv,
+    );
   } catch (error: unknown) {
     return handleRuntimeConfigCliError(error, options);
   }
@@ -211,6 +217,8 @@ async function runRuntimePluginSecretSetCommand(
     );
   }
 
+  await assertMutationHomeAdoptable(parsedArgs.location, startup.configEnv);
+
   const result = applyRuntimePluginSecretSetCommand({
     location: parsedArgs.location,
     runtimeEnv:
@@ -223,11 +231,11 @@ async function runRuntimePluginSecretSetCommand(
   return 0;
 }
 
-function runRuntimeConfigDocumentCommand(
+async function runRuntimeConfigDocumentCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
-): number {
+): Promise<number> {
   const startup = resolveRuntimeCliStartup({
     stage: 'config',
     location: parsedArgs.location,
@@ -279,6 +287,8 @@ function runRuntimeConfigDocumentCommand(
   if (parsed.command.kind === 'check' || parsed.command.kind === 'secret_set') {
     throw new TypeError('Runtime config command routing drifted.');
   }
+
+  await assertMutationHomeAdoptable(parsed.location, startup.configEnv);
 
   const result = applyRuntimeConfigControlOperation({
     ...parsed.location,
@@ -391,6 +401,27 @@ async function runCharacterScopedRuntimeConfigCommand(
 
   writeRuntimeConfigMutationResult(options.stdout, result);
   return 0;
+}
+
+/**
+ * A global mutation authors settings for a home; refuse a directory
+ * the runtime would not adopt. Explicit --config and env-selected
+ * paths are standalone config files with no home semantics.
+ */
+async function assertMutationHomeAdoptable(
+  location: RuntimeLocationCliState,
+  configEnv: NodeJS.ProcessEnv,
+): Promise<void> {
+  if (
+    location.configPath !== undefined ||
+    (configEnv[runtimeConfigEnvVarName] ?? '').trim() !== ''
+  ) {
+    return;
+  }
+
+  await assertProject02HomeAdoptable(
+    location.storeRoot === undefined ? {} : {homeRoot: location.storeRoot},
+  );
 }
 
 function writeCharacterScopedValue(options: {

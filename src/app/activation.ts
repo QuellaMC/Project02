@@ -37,6 +37,7 @@ import {
 } from '../plugins/package-loader/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
+  ensureCharacterDataDir,
   createRuntimeConfigDiagnostic,
   createRuntimeConfigMutationBase,
   createRuntimePluginConfigControlCapability,
@@ -530,6 +531,15 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       pluginConfigControl: activationPlan.pluginConfigControl,
     } satisfies Project02ConfiguredPluginHost);
   }
+
+  // Direct callers get the same guarded materialization startup runs:
+  // a foreign home or mismatched binding stamp fails here before any
+  // plugin file store could write under the data root. Startup-created
+  // homes pass idempotently.
+  await ensureCharacterDataDir({
+    homeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+    characterId: activationPlan.resolvedConfig.project02.character,
+  });
 
   const plugins = await instantiateRuntimePluginPackages({
     catalogEntries,

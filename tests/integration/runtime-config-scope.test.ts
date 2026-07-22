@@ -259,6 +259,13 @@ describe('scope-aware runtime config mutations', () => {
         },
       }),
     ).toThrow('Cannot update plugin config');
+    // The rejected candidate must not leave a fresh overlay behind:
+    // that would move the layered fingerprint for a failed change.
+    expect(
+      existsSync(
+        characterOverlayConfigPath(characterDataDirPath(bareHome, 'mira')),
+      ),
+    ).toBe(false);
   });
 
   it('names the overlay file and character allowlist as the scope target', () => {

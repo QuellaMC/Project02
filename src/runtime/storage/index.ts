@@ -59,6 +59,7 @@ export {
   type EnsureCharacterDataStampResult,
 } from './character-binding.ts';
 export {
+  assertProject02HomeAdoptable,
   ensureInitializedProject02Home,
   type EnsureInitializedProject02HomeOptions,
 } from './home.ts';

@@ -6,7 +6,7 @@
  * the session store's initialization path.
  */
 import type {Dirent} from 'node:fs';
-import {mkdir, readdir, readFile} from 'node:fs/promises';
+import {lstat, mkdir, readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -33,17 +33,13 @@ export async function ensureInitializedProject02Home(
   options: EnsureInitializedProject02HomeOptions = {},
 ): Promise<Project02HomeLayout> {
   const layout = createProject02HomeLayout(options);
+
+  await assertProject02HomeAdoptable(options);
+
   const marker = await readProject02HomeMarker(layout);
 
   if (marker === undefined) {
-    if (await project02HomeHasForeignContent(layout)) {
-      throw new LocalRuntimeStorageContractError(
-        'missing_file',
-        `Project02 home "${layout.homeRoot}" contains foreign entries and no home marker; choose an empty or existing Project02 home directory.`,
-      );
-    }
-
-    await mkdir(layout.characterDataRoot, {recursive: true});
+    await ensureRealCharacterDataRoot(layout);
     await atomicReplaceFile({
       targetPath: layout.schemaPath,
       content: `${encodeStorageSchemaMarker(
@@ -57,15 +53,74 @@ export async function ensureInitializedProject02Home(
     return layout;
   }
 
+  await ensureRealCharacterDataRoot(layout);
+  return layout;
+}
+
+/**
+ * Read-only twin of the initializer's refusals: a marker-less home
+ * holding foreign entries, or a marker naming another scope, is
+ * rejected without creating anything. Global config writes use this
+ * before authoring settings into a directory the runtime would refuse
+ * to adopt.
+ */
+export async function assertProject02HomeAdoptable(
+  options: Project02HomeLayoutOptions = {},
+): Promise<void> {
+  const layout = createProject02HomeLayout(options);
+  const marker = await readProject02HomeMarker(layout);
+
+  if (marker === undefined) {
+    if (await project02HomeHasForeignContent(layout)) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Project02 home "${layout.homeRoot}" contains foreign entries and no home marker; choose an empty or existing Project02 home directory.`,
+      );
+    }
+
+    return;
+  }
+
   if (marker.scope !== 'home') {
     throw new LocalRuntimeStorageContractError(
       'malformed_schema_marker',
       `Directory "${layout.homeRoot}" is a "${marker.scope}" directory, not a Project02 home; point --store at the home that contains it.`,
     );
   }
+}
 
-  await mkdir(layout.characterDataRoot, {recursive: true});
-  return layout;
+/**
+ * Character data must live inside the home: a symlinked data root
+ * would put binding stamps and session history outside the home this
+ * guard just validated.
+ */
+async function ensureRealCharacterDataRoot(
+  layout: Project02HomeLayout,
+): Promise<void> {
+  let stats;
+
+  try {
+    stats = await lstat(layout.characterDataRoot);
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      await mkdir(layout.characterDataRoot, {recursive: true});
+      return;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect the character-data root: ${layout.characterDataRoot}.`,
+    );
+  }
+
+  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Project02 home "${layout.homeRoot}" has a character-data entry ` +
+        'that is not a real directory; character data must live inside ' +
+        'the home.',
+    );
+  }
 }
 
 async function readProject02HomeMarker(layout: Project02HomeLayout) {
@@ -143,11 +198,16 @@ function isProject02HomeControlEntry(
 ): boolean {
   const entryPath = join(layout.homeRoot, entry.name);
 
+  if (entryPath === layout.characterDataRoot) {
+    // Never a symlink: a linked data root would carry binding stamps
+    // and session history outside the home this guard validates.
+    return entry.isDirectory();
+  }
+
   if (
     entryPath === layout.locksRoot ||
     entryPath === layout.pluginPackagesRoot ||
-    entryPath === layout.characterPackagesRoot ||
-    entryPath === layout.characterDataRoot
+    entryPath === layout.characterPackagesRoot
   ) {
     return entry.isDirectory() || entry.isSymbolicLink();
   }

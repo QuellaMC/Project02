@@ -37,6 +37,7 @@ import {existsSync} from 'node:fs';
 import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {
   characterDataDirPath,
+  evaluateCharacterDataStamp,
   LocalRuntimeStorageContractError,
 } from '../runtime/storage/index.ts';
 
@@ -461,9 +462,27 @@ function loadCharacterOverlayForStartup(options: {
       : {characterId: options.location.character}),
   });
 
-  return characterScope === undefined
-    ? undefined
-    : loadCharacterOverlayForScope(characterScope);
+  if (characterScope === undefined) {
+    return undefined;
+  }
+
+  // The binding holds for read-only startups too: a data directory
+  // stamped for another character must fail check and inspect exactly
+  // as durable materialization does, instead of reporting that
+  // directory's overlay as this character's config.
+  const stamp = evaluateCharacterDataStamp({
+    storageOptions: {storeRoot: characterScope.dataRoot},
+    characterId: characterScope.characterId,
+  });
+
+  if (stamp?.status === 'rejected') {
+    throw new LocalRuntimeStorageContractError(
+      'character_binding_rejected',
+      stamp.message,
+    );
+  }
+
+  return loadCharacterOverlayForScope(characterScope);
 }
 
 function resolveCwdDotEnv(options: {
