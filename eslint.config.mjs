@@ -148,9 +148,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/config/mutate.ts'],
     rules: {
+      // Re-pinned +17 so the bootstrap path recognizes overlay-located
+      // config files and never seeds a store root into them.
       'max-lines': [
         'error',
-        {max: 1216, skipBlankLines: true, skipComments: true},
+        {max: 1233, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -175,10 +177,12 @@ export default tseslint.config(
       // then +45 for the session user speaker: recorded/bound user-speaker
       // state, the one-user-speaker-per-session derivation, and restored
       // transcripts validating against the recorded user display name,
-      // then +1 to extend the bound-character check to anchored evidence.
+      // then +1 to extend the bound-character check to anchored evidence,
+      // then +8 to anchor a custom first user speaker when the store
+      // binds none (direct-runtime stores with custom display names).
       'max-lines': [
         'error',
-        {max: 2185, skipBlankLines: true, skipComments: true},
+        {max: 2193, skipBlankLines: true, skipComments: true},
       ],
     },
   },
