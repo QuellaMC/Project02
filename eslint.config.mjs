@@ -157,10 +157,12 @@ export default tseslint.config(
       // Re-pinned +43 so a directly selected overlay target must carry
       // a matching binding stamp before any lock or write touches the
       // data directory (review round five), then +8 so an overlay
-      // path's store resolution names the OWNING home for env writes.
+      // path's store resolution names the OWNING home for env writes,
+      // then +30 so only the data directory's config.json counts as an
+      // overlay and any other file there is rejected as a target.
       'max-lines': [
         'error',
-        {max: 1311, skipBlankLines: true, skipComments: true},
+        {max: 1341, skipBlankLines: true, skipComments: true},
       ],
     },
   },
