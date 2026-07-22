@@ -78,9 +78,7 @@ export class FileRuntimeLogStoreState {
     }
 
     assertLocalRuntimeSessionReadable({
-      ...(this.options.storeRoot === undefined
-        ? {}
-        : {storeRoot: this.options.storeRoot}),
+      storeRoot: this.options.storeRoot,
       sessionId: this.paths.sessionId,
     });
     this.sessionReadabilityChecked = true;

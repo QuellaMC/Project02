@@ -88,8 +88,10 @@ export async function runPluginConfigSection(
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
+    // An unscoped console stages global-file edits: its authored view
+    // must not present overlay-authored values as editable here.
     ...(snapshot.characterScope === undefined
-      ? {}
+      ? {authoredView: 'global' as const}
       : {characterScope: snapshot.characterScope}),
     manifest,
     pluginManifests: manifests,

@@ -34,7 +34,7 @@ export type CharacterBindingReadResult =
   | {readonly status: 'malformed'; readonly message: string};
 
 export function characterBindingPath(
-  options: LocalRuntimeStorageLayoutOptions = {},
+  options: LocalRuntimeStorageLayoutOptions,
 ): string {
   return join(
     createLocalRuntimeStorageLayout(options).storeRoot,
@@ -43,7 +43,7 @@ export function characterBindingPath(
 }
 
 export function readCharacterBinding(
-  options: LocalRuntimeStorageLayoutOptions = {},
+  options: LocalRuntimeStorageLayoutOptions,
 ): CharacterBindingReadResult {
   const path = characterBindingPath(options);
   let source: string;

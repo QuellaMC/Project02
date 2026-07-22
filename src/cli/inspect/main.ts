@@ -6,6 +6,7 @@ import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   characterDataDirPath,
+  createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
   isMissingDefaultSessionStore,
   readCharacterBinding,
@@ -292,10 +293,17 @@ async function writeSessionList(
   try {
     sessions = await sessionStore.listSessions();
   } catch (error: unknown) {
-    // Only a character whose data directory does not exist yet reads as
-    // "no sessions". A directory that exists but cannot be listed is
+    // An absent data directory — or one holding only control state
+    // (binding stamp, overlay, locks) from a config-only workflow — has
+    // no sessions. Session artifacts without a listable catalog are
     // corruption or foreign content, never an empty view.
-    if (!isMissingDefaultSessionStore(error) || existsSync(dataRoot)) {
+    const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
+    const hasSessionArtifacts =
+      existsSync(layout.schemaPath) ||
+      existsSync(layout.sessionCatalogPath) ||
+      existsSync(layout.sessionsRoot);
+
+    if (!isMissingDefaultSessionStore(error) || hasSessionArtifacts) {
       throw error;
     }
   }

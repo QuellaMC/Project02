@@ -138,7 +138,7 @@ const defaultClock = (): string => new Date().toISOString();
 const sessionDirectoryReconciliationConcurrency = 16;
 
 export async function acquireLocalRuntimeSessionWriterLease(
-  options: AcquireLocalRuntimeSessionWriterLeaseOptions = {},
+  options: AcquireLocalRuntimeSessionWriterLeaseOptions,
 ): Promise<LocalRuntimeMutationLockLease> {
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
@@ -157,7 +157,7 @@ export async function acquireLocalRuntimeSessionWriterLease(
 }
 
 export function assertLocalRuntimeSessionReadable(
-  options: AssertLocalRuntimeSessionReadableOptions = {},
+  options: AssertLocalRuntimeSessionReadableOptions,
 ): LocalRuntimeSessionMetadata {
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
@@ -179,7 +179,7 @@ export function assertLocalRuntimeSessionReadable(
 }
 
 export function createLocalRuntimeSessionStore(
-  options: CreateLocalRuntimeSessionStoreOptions = {},
+  options: CreateLocalRuntimeSessionStoreOptions,
 ): LocalRuntimeSessionStore {
   const layout = createLocalRuntimeStorageLayout(options);
   const now = options.now ?? defaultClock;

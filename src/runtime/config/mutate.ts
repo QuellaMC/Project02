@@ -45,6 +45,7 @@ import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
   type Project02ConfigFieldDefinition,
   project02RuntimeConfigFieldDefinition,
+  project02RuntimeConfigFieldDefinitions,
   runtimeConfigValueMatchesField,
 } from './schema.ts';
 
@@ -134,6 +135,14 @@ function applyRuntimeConfigMutationWithLocks(
         retryCount,
         mutationLease,
       });
+    }
+
+    if (
+      selectedConfigPathIsCharacterOverlay(location.canonicalSelectedConfigPath)
+    ) {
+      assertOverlayLocatedCandidateStaysCharacterScoped(
+        candidate.preparedCandidate.config,
+      );
     }
 
     writeLockedRuntimeConfigMutation(options.operation, location, candidate);
@@ -422,10 +431,38 @@ function bootstrapRuntimeConfig(options: {
       };
 }
 
+/**
+ * A candidate written to an overlay-located file must stay within the
+ * character-scoped dialect regardless of which flag routed the write
+ * here: a --config pointed straight at the overlay gets the same field
+ * allowlist as --character.
+ */
+export function assertOverlayLocatedCandidateStaysCharacterScoped(
+  candidate: Project02RuntimeConfig,
+): void {
+  const section = candidate.project02;
+
+  if (section === undefined) {
+    return;
+  }
+
+  for (const field of project02RuntimeConfigFieldDefinitions()) {
+    if (
+      !field.scopes.includes('character') &&
+      section[field.name] !== undefined
+    ) {
+      throw new RuntimeConfigMutationError(
+        `Config field "${field.path}" is global-only; set it in the home ` +
+          'config.json, not the character overlay.',
+      );
+    }
+  }
+}
+
 // Overlay locations are recognized structurally (a parent named
 // character-data, the layout invariant) or by the binding stamp a
 // materialized data dir always carries.
-function selectedConfigPathIsCharacterOverlay(
+export function selectedConfigPathIsCharacterOverlay(
   selectedConfigPath: string,
 ): boolean {
   const canonicalConfigPath =

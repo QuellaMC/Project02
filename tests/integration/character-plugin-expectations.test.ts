@@ -368,4 +368,38 @@ describe('seed validation against installed manifests', () => {
       ),
     ).toBe(false);
   });
+
+  it('skips seed validation once an overlay exists, so a corrected overlay recovers a broken package', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {
+        required: ['demo-config'],
+        config: {'demo-config': {misspelledTone: 'warm'}},
+      },
+    });
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+
+    // The operator repaired the package's broken defaults by hand: the
+    // overlay enables the required plugin with a valid config. The dead
+    // seed must not keep blocking startup.
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+    const overlayBytes = readFileSync(
+      characterOverlayConfigPath(dataRoot),
+      'utf8',
+    );
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      dataDir: 'materialize',
+    });
+
+    expect(startup.status).toBe('resolved');
+    expect(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')).toBe(
+      overlayBytes,
+    );
+  });
 });

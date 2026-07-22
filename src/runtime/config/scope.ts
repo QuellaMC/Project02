@@ -34,6 +34,7 @@ import {
 import {loadProject02RuntimeConfig} from './load.ts';
 import {
   applyRuntimeConfigMutation,
+  assertOverlayLocatedCandidateStaysCharacterScoped,
   canonicalRuntimeConfigMutationPath,
   createRuntimeConfigMutationBase,
   prepareRuntimeConfigMutationCandidate,
@@ -200,14 +201,7 @@ function withGlobalConfigLayerLock<T>(
   const canonicalGlobalPath = canonicalRuntimeConfigMutationPath(
     resolveRuntimeConfigControlTargetPath(options),
   );
-  const globalLock = acquireLocalRuntimeMutationLockSync({
-    locksRoot: createProject02HomeLayout({
-      homeRoot: dirname(canonicalGlobalPath),
-    }).locksRoot,
-    resourceKey: `runtime-control-file:${canonicalGlobalPath}`,
-  });
-
-  try {
+  const runWithLoadedConfig = () => {
     const loadedConfig = loadProject02RuntimeConfig(options);
 
     return run({
@@ -222,6 +216,39 @@ function withGlobalConfigLayerLock<T>(
           : {storeRoot: options.storeRoot}),
       }),
     });
+  };
+  const preScope = deriveRuntimeConfigCharacterScope({
+    loadedConfig: loadProject02RuntimeConfig(options),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.characterId === undefined
+      ? {}
+      : {characterId: options.characterId}),
+  });
+  const scopeForPath = options.characterScope ?? preScope;
+
+  // A --config pointed directly at the overlay makes the "global" path
+  // the overlay itself; taking its lock here would deadlock against the
+  // mutation's own lock on the same file. The mutation lock alone
+  // covers that degenerate single-file case.
+  if (
+    scopeForPath !== undefined &&
+    canonicalGlobalPath ===
+      canonicalRuntimeConfigMutationPath(
+        characterOverlayConfigPath(scopeForPath.dataRoot),
+      )
+  ) {
+    return runWithLoadedConfig();
+  }
+
+  const globalLock = acquireLocalRuntimeMutationLockSync({
+    locksRoot: createProject02HomeLayout({
+      homeRoot: dirname(canonicalGlobalPath),
+    }).locksRoot,
+    resourceKey: `runtime-control-file:${canonicalGlobalPath}`,
+  });
+
+  try {
+    return runWithLoadedConfig();
   } finally {
     globalLock.release();
   }
@@ -287,7 +314,7 @@ function applyCharacterScopedMutation(
           ? {}
           : {expectedFingerprint: createRuntimeConfigFingerprint(overlayBase)}),
         validateCandidate: candidate => {
-          assertOverlayCandidateStaysCharacterScoped(candidate);
+          assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
           options.validateCandidate?.(candidate, globalDocument);
         },
       });
@@ -361,7 +388,7 @@ export function prepareScopedRuntimePluginConfigControlOperation(
         configPath: overlayPath,
         operation: mutation.operation,
         validateCandidate: candidate => {
-          assertOverlayCandidateStaysCharacterScoped(candidate);
+          assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
           mutation.validateCandidate(
             mergeCharacterOverlayDocument(globalDocument, candidate),
           );
@@ -440,30 +467,6 @@ function assertCharacterScopedControlOperation(
       `Config field "${field.path}" is global-only; set it in the home ` +
         'config.json, not the character overlay.',
     );
-  }
-}
-
-// Defense in depth behind the operation allowlist: no candidate carrying
-// a global-only field is ever written to an overlay file.
-function assertOverlayCandidateStaysCharacterScoped(
-  candidate: Project02RuntimeConfig,
-): void {
-  const section = candidate.project02;
-
-  if (section === undefined) {
-    return;
-  }
-
-  for (const field of project02RuntimeConfigFieldDefinitions()) {
-    if (
-      !field.scopes.includes('character') &&
-      section[field.name] !== undefined
-    ) {
-      throw new RuntimeConfigMutationError(
-        `Config field "${field.path}" is global-only; set it in the home ` +
-          'config.json, not the character overlay.',
-      );
-    }
   }
 }
 

@@ -4,6 +4,7 @@ import {
   applyScopedRuntimeConfigControlOperation,
   assertRuntimeConfigSecretScopeAllowed,
   createRuntimeConfigInspectShape,
+  ensureCharacterDataDir,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
@@ -19,7 +20,7 @@ import {
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
-import {ensureCharacterDataStamp} from '../../runtime/storage/index.ts';
+import {homeRootForCharacterDataDir} from '../../runtime/storage/index.ts';
 import {
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
@@ -424,10 +425,11 @@ function writeCharacterScopedValue(options: {
 }
 
 /**
- * Binding stamp before control-file lock, per the storage lock order: a
- * scoped mutation may be the first write into a fresh character-data
- * directory, and a copied directory must be rejected before any config
- * lands in it.
+ * Home guard, then binding stamp, then the control-file lock inside
+ * the mutation — the same order the writer CLIs use. A scoped mutation
+ * may be the first write into a fresh character-data directory; a
+ * foreign --store directory or a copied data dir must be rejected
+ * before any config lands in it.
  */
 async function ensureCharacterScopedMutationTarget(
   target: ResolvedRuntimeConfigScopeTarget,
@@ -436,14 +438,10 @@ async function ensureCharacterScopedMutationTarget(
     return;
   }
 
-  const stamp = await ensureCharacterDataStamp({
-    storageOptions: {storeRoot: target.characterScope.dataRoot},
+  await ensureCharacterDataDir({
+    homeRoot: homeRootForCharacterDataDir(target.characterScope.dataRoot),
     characterId: target.characterScope.characterId,
   });
-
-  if (stamp.status === 'rejected') {
-    throw new RuntimeConfigCliUsageError(stamp.message);
-  }
 }
 
 async function resolveRuntimeConfigCliActivationStartup(options: {

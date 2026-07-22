@@ -318,6 +318,66 @@ describe('character-scoped plugin control capability', () => {
   });
 });
 
+describe('plugin inspection authored views', () => {
+  it('reports global-authored values when asked, without changing the layered fingerprint', () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const plugin = structuredConfigPlugin('scope.authored-view');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'scope.authored-view': {
+          enabled: true,
+          config: {settings: {from: 'global'}, endpoints: ['global']},
+        },
+      },
+    });
+    const base = {
+      manifest: plugin.manifest,
+      pluginManifests: [plugin.manifest],
+      storeRoot: homeRoot,
+      env: {},
+    };
+
+    applyScopedRuntimePluginConfigControlOperation({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'character',
+      characterId: 'mira',
+      manifest: plugin.manifest,
+      actor: 'operator',
+      expectedFingerprint: inspectRuntimePluginConfig(base).fingerprint,
+      operation: {
+        kind: 'set',
+        fieldName: 'settings',
+        value: {from: 'overlay'},
+      },
+    });
+    const merged = inspectRuntimePluginConfig(base);
+    const globalView = inspectRuntimePluginConfig({
+      ...base,
+      authoredView: 'global',
+    });
+    const authoredSettings = (
+      inspected: ReturnType<typeof inspectRuntimePluginConfig>,
+    ) => inspected.fields.find(field => field.name === 'settings')?.authored;
+
+    // The merged view surfaces the overlay rung; the global view is for
+    // surfaces that stage global-file edits and must not present the
+    // overlay-authored value as editable.
+    expect(authoredSettings(merged)).toMatchObject({
+      configured: true,
+      value: {from: 'overlay'},
+    });
+    expect(authoredSettings(globalView)).toMatchObject({
+      configured: true,
+      value: {from: 'global'},
+    });
+    // Both views fingerprint the same layered document.
+    expect(globalView.fingerprint).toBe(merged.fingerprint);
+    expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(true);
+  });
+});
+
 describe('configured character id normalization', () => {
   it('trims a padded authored character id at every read seam', () => {
     const homeRoot = createTestTempRoot('project02-scope-trim-');

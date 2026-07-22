@@ -5,6 +5,7 @@
  */
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
+  ensureCharacterDataDir,
   redactRuntimeConfigText,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigValueMatchesField,
@@ -17,7 +18,7 @@ import {
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
-import {ensureCharacterDataStamp} from '../../runtime/storage/index.ts';
+import {homeRootForCharacterDataDir} from '../../runtime/storage/index.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
   question(prompt: string): Promise<string | undefined>;
@@ -60,9 +61,10 @@ export type StagedRuntimeConfigChange = {
 };
 
 /**
- * Commit-time preparation of a scoped console write: the binding stamp
- * lands only when the user actually saves, so a read-only console
- * session never creates durable character state.
+ * Commit-time preparation of a scoped console write: home guard and
+ * binding stamp land only when the user actually saves, so a read-only
+ * console session never creates durable character state and a foreign
+ * --store directory is rejected before any config lands in it.
  */
 export async function ensureScopedConsoleCommitTarget(
   characterScope: RuntimeConfigCharacterScope | undefined,
@@ -71,14 +73,10 @@ export async function ensureScopedConsoleCommitTarget(
     return;
   }
 
-  const stamp = await ensureCharacterDataStamp({
-    storageOptions: {storeRoot: characterScope.dataRoot},
+  await ensureCharacterDataDir({
+    homeRoot: homeRootForCharacterDataDir(characterScope.dataRoot),
     characterId: characterScope.characterId,
   });
-
-  if (stamp.status === 'rejected') {
-    throw new TypeError(stamp.message);
-  }
 }
 
 export const cancelled = Symbol('runtime-config-console-cancelled');

@@ -1,4 +1,4 @@
-import {join} from 'node:path';
+import {basename, dirname, join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
 
 export const defaultProject02HomeRoot = '.project02';
@@ -103,7 +103,13 @@ export type Project02HomeLayoutOptions = {
 };
 
 export type LocalRuntimeStorageLayoutOptions = {
-  readonly storeRoot?: string;
+  /**
+   * The character DATA directory this store lives in. Required at the
+   * type level since the home/character-data split: there is no
+   * meaningful default — a caller must always know which character's
+   * directory it operates on.
+   */
+  readonly storeRoot: string;
 };
 
 export type LocalRuntimeSessionPathsOptions =
@@ -195,6 +201,24 @@ export function createProject02HomeLayout(
   } satisfies Project02HomeLayout);
 }
 
+/**
+ * Inverse of characterDataDirPath: the home a character-data directory
+ * belongs to. Throws when the path is not shaped like one, so callers
+ * cannot silently treat an arbitrary directory as a data dir.
+ */
+export function homeRootForCharacterDataDir(dataRoot: string): string {
+  const parent = dirname(dataRoot);
+
+  if (basename(parent) !== characterDataDirectoryName) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Directory "${dataRoot}" is not a character-data directory.`,
+    );
+  }
+
+  return dirname(parent);
+}
+
 export function characterDataDirPath(
   homeRoot: string | undefined,
   characterId: string,
@@ -223,7 +247,7 @@ export function normalizeLocalRuntimeCharacterId(characterId: string): string {
 }
 
 export function createLocalRuntimeStorageLayout(
-  options: LocalRuntimeStorageLayoutOptions = {},
+  options: LocalRuntimeStorageLayoutOptions,
 ): LocalRuntimeStorageLayout {
   const storeRoot = normalizeRootPath(options.storeRoot, 'Character data root');
   const sessionsRoot = join(storeRoot, sessionsDirectoryName);
@@ -240,7 +264,7 @@ export function createLocalRuntimeStorageLayout(
 }
 
 export function createLocalRuntimeSessionPaths(
-  options: LocalRuntimeSessionPathsOptions = {},
+  options: LocalRuntimeSessionPathsOptions,
 ): LocalRuntimeSessionPaths {
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);

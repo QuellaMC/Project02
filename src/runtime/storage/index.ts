@@ -33,6 +33,7 @@ export {
   type LocalRuntimeStorageContractErrorCode,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
+  homeRootForCharacterDataDir,
   type LocalRuntimeStorageSchemaMarker,
 } from './layout-contract.ts';
 export {

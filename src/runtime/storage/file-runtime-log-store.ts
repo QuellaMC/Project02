@@ -21,7 +21,7 @@ export {
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 
 export function createFileRuntimeLogStore(
-  options: CreateFileRuntimeLogStoreOptions = {},
+  options: CreateFileRuntimeLogStoreOptions,
 ): RuntimeLogStore {
   const state = new FileRuntimeLogStoreState(options);
   const {paths, writerLockOwnerToken} = state;

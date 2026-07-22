@@ -15,6 +15,7 @@ import {
   validateCharacterOverlaySeedAgainstManifests,
 } from './character-plugins.ts';
 import {
+  characterOverlayConfigPath,
   configuredProject02CharacterId,
   defaultDotEnvForRuntimeLocation,
   deriveRuntimeConfigCharacterScope,
@@ -31,8 +32,13 @@ import {
   type RuntimeConfigDiagnostic,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
+import {existsSync} from 'node:fs';
+
 import type {RuntimePluginManifest} from '../plugins/index.ts';
-import {LocalRuntimeStorageContractError} from '../runtime/storage/index.ts';
+import {
+  characterDataDirPath,
+  LocalRuntimeStorageContractError,
+} from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;
@@ -355,11 +361,21 @@ async function materializeCharacterDataDir(input: {
   Extract<Project02CharacterActivation, {status: 'failed'}> | undefined
 > {
   const characterId = input.characterActivation.profile.id;
-  const seed = characterOverlaySeedDocument(
-    input.characterActivation.definition.plugins,
+  // An existing overlay wins outright: the seed will not be written, so
+  // its package defaults must not be judged either — an operator's
+  // corrected overlay stays the recovery path for a broken package.
+  const overlayExists = existsSync(
+    characterOverlayConfigPath(
+      characterDataDirPath(input.homeRoot, characterId),
+    ),
   );
+  const seed = overlayExists
+    ? undefined
+    : characterOverlaySeedDocument(
+        input.characterActivation.definition.plugins,
+      );
 
-  if (seed.status === 'invalid') {
+  if (seed !== undefined && seed.status === 'invalid') {
     return Object.freeze({
       status: 'failed',
       configuredCharacterId: characterId,
@@ -370,7 +386,7 @@ async function materializeCharacterDataDir(input: {
   // A seed the installed manifests reject would poison the overlay
   // permanently (the file is never re-materialized): fail the selection
   // instead of writing it.
-  if (seed.status === 'seed') {
+  if (seed !== undefined && seed.status === 'seed') {
     const seedIssues = validateCharacterOverlaySeedAgainstManifests({
       document: seed.document,
       pluginManifests: input.pluginManifests,
@@ -389,7 +405,9 @@ async function materializeCharacterDataDir(input: {
     await ensureCharacterDataDir({
       homeRoot: input.homeRoot,
       characterId,
-      ...(seed.status === 'seed' ? {seedDocument: seed.document} : {}),
+      ...(seed !== undefined && seed.status === 'seed'
+        ? {seedDocument: seed.document}
+        : {}),
     });
   } catch (error: unknown) {
     // Only a binding rejection is character-shaped (wrong character for

@@ -1,4 +1,5 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
+import {ensureCharacterDataStamp} from '../../src/runtime/storage/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -23,6 +24,7 @@ import {
 } from '../../src/role-model/index.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
+  applyScopedRuntimeConfigControlOperation,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
@@ -607,6 +609,48 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
     expect(stderr).toContain('Error:');
+  });
+
+  it('lists no sessions for a data directory holding only control state', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-control-only-');
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A config-only workflow leaves a binding stamp, an overlay, and
+    // locks — but no session artifacts. That is an empty view, not a
+    // corrupt store.
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: characterDataDirPath(storeRoot, 'mira')},
+      characterId: 'mira',
+    });
+    applyScopedRuntimeConfigControlOperation({
+      storeRoot,
+      env: {},
+      scope: 'character',
+      characterId: 'mira',
+      operation: {
+        kind: 'set',
+        path: 'project02.userDisplayName',
+        value: 'Config Only',
+      },
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      sessions: [],
+      characterBinding: {status: 'bound'},
+    });
   });
 
   it('reports config load errors before runtime env file errors', async () => {

@@ -253,6 +253,13 @@ export function inspectRuntimePluginConfig(options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly storeRoot?: string;
   readonly characterScope?: RuntimeConfigCharacterScope;
+  /**
+   * Which layer the authored values report from. 'merged' (default) is
+   * the layered truth; 'global' is for surfaces that stage global-file
+   * edits and must not present overlay-authored values as editable.
+   * The fingerprint stays layered either way.
+   */
+  readonly authoredView?: 'merged' | 'global';
   readonly manifest: RuntimePluginManifest;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly activation?: RuntimePluginConfigActivationInspectShape;
@@ -291,10 +298,10 @@ export function inspectRuntimePluginConfig(options: {
   });
 
   return createRuntimePluginConfigInspectShape({
-    // Authored values come from the merged view: a field authored only
-    // in the overlay must read as configured, not unset.
+    // Authored values come from the merged view by default: a field
+    // authored only in the overlay must read as configured, not unset.
     loadedConfig:
-      overlayConfig === undefined
+      overlayConfig === undefined || options.authoredView === 'global'
         ? loadedConfig
         : mergedLoadedConfigForOverlay(loadedConfig, overlayConfig),
     resolvedConfig,
