@@ -1,8 +1,10 @@
 import {createInterface} from 'node:readline/promises';
 
 import {
-  createRuntimeConfigFingerprint,
   createRuntimeConfigMutationBase,
+  deriveRuntimeConfigCharacterScope,
+  layeredRuntimeConfigFingerprintForScope,
+  loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
 } from '../../runtime/config/index.ts';
 import {
@@ -102,12 +104,27 @@ function loadConsoleSnapshot(
     loadedConfig: loaded,
     ...runtimeConfigLocation(context),
   });
+  const location = runtimeConfigLocation(context);
+  const characterScope = deriveRuntimeConfigCharacterScope({
+    loadedConfig: loaded,
+    ...(location.storeRoot === undefined
+      ? {}
+      : {storeRoot: location.storeRoot}),
+  });
 
   return Object.freeze({
     loadedConfig: loaded,
     config,
     diagnostics: Object.freeze(diagnostics),
-    fingerprint: createRuntimeConfigFingerprint(config),
+    // Same layered composition the control operations verify against.
+    fingerprint: layeredRuntimeConfigFingerprintForScope({
+      globalConfig: config,
+      characterScope,
+      overlay:
+        characterScope === undefined
+          ? undefined
+          : loadCharacterOverlayForScope(characterScope),
+    }),
   });
 }
 

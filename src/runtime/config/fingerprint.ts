@@ -7,6 +7,30 @@ export function createRuntimeConfigFingerprint(
   return createCanonicalJsonFingerprint(secretSafeFingerprintValue(value));
 }
 
+/**
+ * Authored-config fingerprint across both layers: the global document
+ * plus the active character's overlay document (null when the overlay
+ * file is absent — deliberately distinct from an empty document). The
+ * envelope also makes a layered fingerprint of a global document differ
+ * from that document's per-file fingerprint, so a layered currency gate
+ * can never be satisfied with a single-file value.
+ */
+export function createLayeredRuntimeConfigFingerprint(options: {
+  readonly globalConfig: Project02RuntimeConfig;
+  readonly characterId: string;
+  readonly overlayConfig: RuntimeConfigValue | Project02RuntimeConfig | null;
+}): string {
+  return createCanonicalJsonFingerprint(
+    secretSafeFingerprintValue({
+      layers: {
+        global: options.globalConfig,
+        character: options.overlayConfig,
+      },
+      characterId: options.characterId,
+    }),
+  );
+}
+
 function secretSafeFingerprintValue(value: unknown): unknown {
   if (
     value === null ||

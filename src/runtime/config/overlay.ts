@@ -10,20 +10,32 @@
  */
 import {existsSync} from 'node:fs';
 
-import {createLocalRuntimeStorageLayout} from '../storage/layout-contract.ts';
+import {
+  characterDataDirPath,
+  createLocalRuntimeStorageLayout,
+} from '../storage/layout-contract.ts';
 import {
   createRuntimeConfigDiagnostic,
   withRuntimeConfigDiagnosticOrigin,
 } from './diagnostic.ts';
 import {
+  createLayeredRuntimeConfigFingerprint,
+  createRuntimeConfigFingerprint,
+} from './fingerprint.ts';
+import {
   readProject02RuntimeConfigDocument,
   validateProject02RuntimeConfig,
 } from './load.ts';
+import {resolveProject02RuntimeStoreRoot} from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
-import type {
-  Project02RuntimeConfig,
-  RuntimeConfigDiagnostic,
-  RuntimeConfigDiagnosticOrigin,
+import {
+  defaultProject02CharacterId,
+  type LoadedProject02RuntimeConfig,
+  type Project02RuntimeConfig,
+  type RuntimeConfigCharacterScope,
+  type RuntimeConfigDiagnostic,
+  type RuntimeConfigDiagnosticOrigin,
+  type RuntimeConfigValue,
 } from './types.ts';
 
 export type LoadedProject02CharacterOverlayConfig = {
@@ -111,6 +123,80 @@ function loadedOverlay(options: {
       ),
     ),
   } satisfies LoadedProject02CharacterOverlayConfig);
+}
+
+/**
+ * The overlay's contribution to the layered authored fingerprint: the
+ * document itself, null when the file is absent, and an unreadable
+ * sentinel when the file exists but cannot be trusted — each state must
+ * fingerprint differently so currency gates decline on any overlay
+ * change.
+ */
+export function characterOverlayFingerprintLayer(
+  overlay: LoadedProject02CharacterOverlayConfig,
+): Project02RuntimeConfig | RuntimeConfigValue | null {
+  if (overlay.source === 'none') {
+    return null;
+  }
+
+  return overlay.config ?? Object.freeze({$overlayUnreadable: true});
+}
+
+/**
+ * The character scope every authored-fingerprint site shares: character
+ * id from the loaded global config (or the default) and its data
+ * directory under the resolved home. Undefined when the configured id
+ * or store root cannot form a data path — that state fails elsewhere
+ * with its own diagnostic, and fingerprints stay single-layer.
+ */
+export function deriveRuntimeConfigCharacterScope(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly storeRoot?: string;
+}): RuntimeConfigCharacterScope | undefined {
+  const characterId =
+    options.loadedConfig.config?.project02?.character ??
+    defaultProject02CharacterId;
+
+  try {
+    return Object.freeze({
+      characterId,
+      dataRoot: characterDataDirPath(
+        resolveProject02RuntimeStoreRoot(options),
+        characterId,
+      ),
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export function loadCharacterOverlayForScope(
+  scope: RuntimeConfigCharacterScope,
+): LoadedProject02CharacterOverlayConfig {
+  return loadProject02CharacterOverlayConfig({
+    dataRoot: scope.dataRoot,
+    characterId: scope.characterId,
+  });
+}
+
+/**
+ * The one authored-fingerprint composition every consumer shares:
+ * layered over the global document and the overlay snapshot when a
+ * character scope exists, the plain per-file fingerprint otherwise —
+ * so any two sites comparing fingerprints compose them identically.
+ */
+export function layeredRuntimeConfigFingerprintForScope(options: {
+  readonly globalConfig: Project02RuntimeConfig;
+  readonly characterScope: RuntimeConfigCharacterScope | undefined;
+  readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
+}): string {
+  return options.characterScope === undefined || options.overlay === undefined
+    ? createRuntimeConfigFingerprint(options.globalConfig)
+    : createLayeredRuntimeConfigFingerprint({
+        globalConfig: options.globalConfig,
+        characterId: options.characterScope.characterId,
+        overlayConfig: characterOverlayFingerprintLayer(options.overlay),
+      });
 }
 
 // Checked against the raw document so a global-only field is named even

@@ -7,19 +7,17 @@ import {
 } from './activation.ts';
 import {
   defaultDotEnvForRuntimeLocation,
-  defaultProject02CharacterId,
+  deriveRuntimeConfigCharacterScope,
   diagnosticsHaveErrors,
-  loadProject02CharacterOverlayConfig,
+  loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
-  resolveProject02RuntimeStoreRoot,
   shouldReadDefaultDotEnvForRuntimeLocation,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
-import {characterDataDirPath} from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;
@@ -194,26 +192,16 @@ function loadCharacterOverlayForStartup(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly location: RuntimeLocationCliState;
 }): LoadedProject02CharacterOverlayConfig | undefined {
-  const characterId =
-    options.loadedConfig.config?.project02?.character ??
-    defaultProject02CharacterId;
-  let dataRoot: string;
+  const characterScope = deriveRuntimeConfigCharacterScope({
+    loadedConfig: options.loadedConfig,
+    ...(options.location.storeRoot === undefined
+      ? {}
+      : {storeRoot: options.location.storeRoot}),
+  });
 
-  try {
-    dataRoot = characterDataDirPath(
-      resolveProject02RuntimeStoreRoot({
-        loadedConfig: options.loadedConfig,
-        ...(options.location.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.location.storeRoot}),
-      }),
-      characterId,
-    );
-  } catch {
-    return undefined;
-  }
-
-  return loadProject02CharacterOverlayConfig({dataRoot, characterId});
+  return characterScope === undefined
+    ? undefined
+    : loadCharacterOverlayForScope(characterScope);
 }
 
 function resolveCwdDotEnv(options: {

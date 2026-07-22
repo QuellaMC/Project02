@@ -131,6 +131,9 @@ export function inspectRuntimePluginConfigForControl(options: {
       : {configPath: options.state.configPath}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     ...(options.state.env === undefined ? {} : {env: options.state.env}),
+    ...(options.state.characterScope === undefined
+      ? {}
+      : {characterScope: options.state.characterScope}),
   });
 }
 

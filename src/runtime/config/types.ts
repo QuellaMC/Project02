@@ -71,6 +71,16 @@ export type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
 export type RuntimeConfigFieldScope = 'global' | 'character';
 
 /**
+ * Where a config-control consumer finds the active character's overlay:
+ * the character id and its character-data directory. Threaded from
+ * activation so every authored-fingerprint site reads the same pair.
+ */
+export type RuntimeConfigCharacterScope = {
+  readonly characterId: string;
+  readonly dataRoot: string;
+};
+
+/**
  * Which config document a diagnostic came from. Global-document
  * diagnostics carry no origin; character-overlay diagnostics name the
  * character and overlay path so CLI output can attribute them.

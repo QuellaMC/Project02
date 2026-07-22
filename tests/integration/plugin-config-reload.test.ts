@@ -1,5 +1,5 @@
-import {writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {mkdirSync, writeFileSync} from 'node:fs';
+import {dirname, join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
@@ -152,6 +152,79 @@ describe('configured runtime plugin reloader', () => {
 
     expect(hostService.status).toBe('declined');
     expect(unknown.status).toBe('declined');
+  });
+
+  it('keeps the construction stamp, inspection, and reloader on one layered fingerprint across both authored files', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-reload-overlay-');
+    const configPath = join(storeRoot, 'config.json');
+    const overlayPath = join(
+      storeRoot,
+      'character-data',
+      'mira',
+      'config.json',
+    );
+
+    writeRuntimeConfig(configPath, {
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+    mkdirSync(dirname(overlayPath), {recursive: true});
+    writeRuntimeConfig(overlayPath, {
+      plugins: {'demo-config': {config: {tone: 'formal'}}},
+    });
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      storeRoot,
+      env: {},
+    });
+
+    // One currency chain: the plan's construction stamp equals what the
+    // inspection path hands the model as expectedFingerprint.
+    const inspectedFingerprint = authoredFingerprint({
+      activationPlan,
+      configPath,
+      storeRoot,
+    });
+
+    expect(activationPlan.authoredConfigFingerprint).toBe(inspectedFingerprint);
+    expect(activationPlan.pluginConfigControl.characterScope).toMatchObject({
+      characterId: 'mira',
+    });
+    // The overlay layer already governs the resolved value.
+    expect(
+      activationPlan.resolvedConfig.pluginConfigs['demo-config']?.['tone'],
+    ).toMatchObject({value: 'formal'});
+
+    const reloader = createConfiguredRuntimePluginReloader({activationPlan});
+    const rebuilt = await reloader.reload('demo-config', {
+      expectedFingerprint: inspectedFingerprint,
+    });
+
+    if (rebuilt.status !== 'rebuilt') {
+      throw new Error(`Expected rebuilt, got ${rebuilt.status}`);
+    }
+    expect(await demoConfigContextText(rebuilt.plugin)).toContain(
+      'formal tone',
+    );
+
+    // An overlay edit after approval is a moved authored config: the
+    // reload declines instead of rebuilding from a stale layer pair.
+    writeRuntimeConfig(overlayPath, {
+      plugins: {'demo-config': {config: {tone: 'pirate'}}},
+    });
+
+    const tampered = await reloader.reload('demo-config', {
+      expectedFingerprint: inspectedFingerprint,
+    });
+
+    if (tampered.status !== 'declined') {
+      throw new Error(`Expected declined, got ${tampered.status}`);
+    }
+    expect(tampered.reason).toContain('moved past');
   });
 
   it('declines when the authored config moved past the approved update', async () => {

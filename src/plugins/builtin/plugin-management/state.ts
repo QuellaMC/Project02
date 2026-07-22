@@ -2,6 +2,7 @@ import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {RuntimePluginManifest} from '../../api/types.ts';
 import type {RuntimePluginConfigActivationInspectShape} from '../../../runtime/config/index.ts';
 import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
+import type {RuntimeConfigCharacterScope} from '../../../runtime/config/index.ts';
 
 /**
  * Manifest inventory a host can serve without any config mutation
@@ -15,6 +16,8 @@ export type RuntimePluginInventoryHostState = {
   readonly defaultEnabledPluginIds?: readonly string[];
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
+  /** Opaque overlay location; the composition root fills it in. */
+  readonly characterScope?: RuntimeConfigCharacterScope;
 };
 
 /**
@@ -161,6 +164,9 @@ function inventoryHostStateSnapshotFields(
         }),
     ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
     ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
+    ...(state.characterScope === undefined
+      ? {}
+      : {characterScope: Object.freeze({...state.characterScope})}),
   };
 }
 

@@ -38,11 +38,13 @@ import {
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
   createRuntimeConfigDiagnostic,
-  createRuntimeConfigFingerprint,
   createRuntimeConfigMutationBase,
   createRuntimePluginConfigControlCapability,
   characterDataRootForResolvedConfig,
+  deriveRuntimeConfigCharacterScope,
   diagnosticsHaveErrors,
+  layeredRuntimeConfigFingerprintForScope,
+  loadCharacterOverlayForScope,
   resolveLayeredProject02RuntimeConfig,
   resolveProject02RuntimeStoreRoot,
   runtimeConfigDiagnosticMatchesPlugin,
@@ -327,11 +329,21 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const catalogEntries = Object.freeze({...composition.catalogEntries});
   const pluginManifests = activationPluginManifests(catalogEntries);
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
+  // One character scope and one overlay snapshot feed the layered
+  // resolve, the construction stamp, and the control state, so every
+  // downstream fingerprint site composes the same pair of documents.
+  const characterScope = deriveRuntimeConfigCharacterScope({
+    loadedConfig: options.loadedConfig,
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  });
+  const overlayConfig =
+    options.overlayConfig ??
+    (characterScope === undefined
+      ? undefined
+      : loadCharacterOverlayForScope(characterScope));
   const resolvedConfig = resolveLayeredProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
-    ...(options.overlayConfig === undefined
-      ? {}
-      : {overlayConfig: options.overlayConfig}),
+    ...(overlayConfig === undefined ? {} : {overlayConfig}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests,
     defaultEnabledPluginIds,
@@ -345,21 +357,24 @@ export function prepareConfiguredProject02PluginActivation(options: {
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
   });
+  const globalMutationBase = createRuntimeConfigMutationBase({
+    loadedConfig: options.loadedConfig,
+    ...(resolvedConfig.path === undefined
+      ? {}
+      : {configPath: resolvedConfig.path}),
+    storeRoot: resolvedConfig.project02.storeRoot,
+  });
 
   return Object.freeze({
     catalogEntries,
     packageProvenanceByPluginId: composition.packageProvenanceByPluginId,
     resolvedConfig,
     activation,
-    authoredConfigFingerprint: createRuntimeConfigFingerprint(
-      createRuntimeConfigMutationBase({
-        loadedConfig: options.loadedConfig,
-        ...(resolvedConfig.path === undefined
-          ? {}
-          : {configPath: resolvedConfig.path}),
-        storeRoot: resolvedConfig.project02.storeRoot,
-      }),
-    ),
+    authoredConfigFingerprint: layeredRuntimeConfigFingerprintForScope({
+      globalConfig: globalMutationBase,
+      characterScope,
+      overlay: overlayConfig,
+    }),
     pluginConfigControl: Object.freeze({
       pluginManifests,
       control: createRuntimePluginConfigControlCapability(),
@@ -373,6 +388,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
       ...(options.env === undefined
         ? {}
         : {env: Object.freeze({...options.env})}),
+      ...(characterScope === undefined ? {} : {characterScope}),
     }),
   } satisfies PreparedProject02PluginActivationPlan);
 }

@@ -5,7 +5,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   applyRuntimePluginConfigControlOperation,
-  createRuntimeConfigFingerprint,
+  createLayeredRuntimeConfigFingerprint,
   defaultRuntimeConfigPath,
   inspectRuntimePluginConfig,
   prepareRuntimePluginConfigControlOperation,
@@ -112,7 +112,11 @@ describe('runtime plugin config control', () => {
       },
     });
     expect(inspected.fingerprint).toBe(
-      createRuntimeConfigFingerprint(authoredConfig),
+      createLayeredRuntimeConfigFingerprint({
+        globalConfig: authoredConfig,
+        characterId: 'mira',
+        overlayConfig: null,
+      }),
     );
     expect(inspectedWithChangedSecret.fingerprint).toBe(inspected.fingerprint);
     expect(
@@ -437,7 +441,11 @@ describe('runtime plugin config control', () => {
         env: {},
         manifest: fixture.manifest,
         actor: 'agent',
-        expectedFingerprint: createRuntimeConfigFingerprint(invalidConfig),
+        expectedFingerprint: createLayeredRuntimeConfigFingerprint({
+          globalConfig: invalidConfig,
+          characterId: 'mira',
+          overlayConfig: null,
+        }),
         operation: {
           kind: 'set',
           fieldName: 'label',
@@ -514,7 +522,11 @@ describe('runtime plugin config control', () => {
     const prepared = prepareRuntimePluginConfigControlOperation(options);
 
     expect(prepared.resultFingerprint).toBe(
-      createRuntimeConfigFingerprint(expectedConfig),
+      createLayeredRuntimeConfigFingerprint({
+        globalConfig: expectedConfig,
+        characterId: 'mira',
+        overlayConfig: null,
+      }),
     );
     expect(readFileSync(fixture.configPath, 'utf8')).toBe(originalConfigText);
 
@@ -543,7 +555,11 @@ describe('runtime plugin config control', () => {
 
     expect(existsSync(configPath)).toBe(false);
     expect(inspected.fingerprint).toBe(
-      createRuntimeConfigFingerprint(bootstrapBase),
+      createLayeredRuntimeConfigFingerprint({
+        globalConfig: bootstrapBase,
+        characterId: 'mira',
+        overlayConfig: null,
+      }),
     );
 
     const result = applyRuntimePluginConfigControlOperation({

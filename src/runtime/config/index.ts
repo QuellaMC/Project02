@@ -24,7 +24,10 @@ export {
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigControlCapability,
 } from './plugin-control-capability.ts';
-export {createRuntimeConfigFingerprint} from './fingerprint.ts';
+export {
+  createLayeredRuntimeConfigFingerprint,
+  createRuntimeConfigFingerprint,
+} from './fingerprint.ts';
 export {
   createRuntimeConfigInspectShape,
   inspectConfiguredPlugins,
@@ -40,6 +43,10 @@ export {
 } from './load.ts';
 export {
   characterOverlayConfigPath,
+  characterOverlayFingerprintLayer,
+  deriveRuntimeConfigCharacterScope,
+  layeredRuntimeConfigFingerprintForScope,
+  loadCharacterOverlayForScope,
   loadProject02CharacterOverlayConfig,
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
@@ -81,6 +88,7 @@ export {
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type ResolvedProject02RuntimeConfig,
+  type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticOrigin,
   type RuntimeConfigFieldScope,

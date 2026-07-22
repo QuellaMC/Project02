@@ -9,11 +9,12 @@ import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {
   characterDataRootForResolvedConfig,
-  createRuntimeConfigFingerprint,
   createRuntimeConfigMutationBase,
   diagnosticsHaveErrors,
+  layeredRuntimeConfigFingerprintForScope,
+  loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfig,
   runtimeConfigDiagnosticMatchesPlugin,
 } from '../runtime/config/index.ts';
 import type {
@@ -55,8 +56,12 @@ export function createConfiguredRuntimePluginReloader(options: {
         };
       }
 
-      const loadAuthoredConfig = () =>
-        loadProject02RuntimeConfig({
+      // Both authored files back the currency gate: the global config
+      // and, when the plan carries a character scope, that character's
+      // overlay. Re-read together so an overlay edit between approval
+      // and rebuild declines exactly like a global edit.
+      const loadAuthoredState = () => {
+        const loaded = loadProject02RuntimeConfig({
           ...(pluginConfigControl.configPath === undefined
             ? {}
             : {configPath: pluginConfigControl.configPath}),
@@ -68,20 +73,33 @@ export function createConfiguredRuntimePluginReloader(options: {
             : {env: pluginConfigControl.env}),
           storeRoot: resolvedConfig.project02.storeRoot,
         });
+
+        return {
+          loaded,
+          overlay:
+            pluginConfigControl.characterScope === undefined
+              ? undefined
+              : loadCharacterOverlayForScope(
+                  pluginConfigControl.characterScope,
+                ),
+        };
+      };
       const authoredFingerprintOf = (
-        loaded: ReturnType<typeof loadProject02RuntimeConfig>,
+        state: ReturnType<typeof loadAuthoredState>,
       ) =>
-        createRuntimeConfigFingerprint(
-          createRuntimeConfigMutationBase({
-            loadedConfig: loaded,
+        layeredRuntimeConfigFingerprintForScope({
+          globalConfig: createRuntimeConfigMutationBase({
+            loadedConfig: state.loaded,
             ...(pluginConfigControl.configPath === undefined
               ? {}
               : {configPath: pluginConfigControl.configPath}),
             storeRoot: resolvedConfig.project02.storeRoot,
           }),
-        );
-      const loadedConfig = loadAuthoredConfig();
-      const authoredFingerprint = authoredFingerprintOf(loadedConfig);
+          characterScope: pluginConfigControl.characterScope,
+          overlay: state.overlay,
+        });
+      const authoredState = loadAuthoredState();
+      const authoredFingerprint = authoredFingerprintOf(authoredState);
 
       if (authoredFingerprint !== reloadOptions.expectedFingerprint) {
         return {
@@ -89,8 +107,11 @@ export function createConfiguredRuntimePluginReloader(options: {
           reason: `the authored config moved past the approved update for plugin "${pluginId}"`,
         };
       }
-      const freshResolvedConfig = resolveProject02RuntimeConfig({
-        loadedConfig,
+      const freshResolvedConfig = resolveLayeredProject02RuntimeConfig({
+        loadedConfig: authoredState.loaded,
+        ...(authoredState.overlay === undefined
+          ? {}
+          : {overlayConfig: authoredState.overlay}),
         storeRoot: resolvedConfig.project02.storeRoot,
         pluginManifests,
         defaultEnabledPluginIds,
@@ -156,7 +177,7 @@ export function createConfiguredRuntimePluginReloader(options: {
       // from the older snapshot would silently serve stale config. Re-check
       // after the load, exactly like the pre-load check.
       if (
-        authoredFingerprintOf(loadAuthoredConfig()) !==
+        authoredFingerprintOf(loadAuthoredState()) !==
         reloadOptions.expectedFingerprint
       ) {
         return {

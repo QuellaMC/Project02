@@ -3,13 +3,20 @@ import {
   canonicalRuntimeConfigMutationPath,
   createRuntimeConfigMutationBase,
   prepareRuntimeConfigMutationCandidate,
+  RuntimeConfigConflictError,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
+import {
+  deriveRuntimeConfigCharacterScope,
+  layeredRuntimeConfigFingerprintForScope,
+  loadCharacterOverlayForScope,
+} from './overlay.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
 import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
+import {resolveLayeredProject02RuntimeConfig} from './resolve-layered.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
@@ -24,6 +31,7 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
+  RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
   RuntimePluginConfigActivationInspectShape,
@@ -47,10 +55,56 @@ export function applyRuntimeConfigControlOperation(options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly expectedFingerprint?: string;
   readonly storeRoot?: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
   readonly operation: RuntimeConfigControlOperation;
 }): RuntimeConfigMutationResult {
   assertRuntimeConfigControlOperation(options.operation);
-  return applyRuntimeConfigMutation(options);
+
+  const layered =
+    options.expectedFingerprint === undefined
+      ? undefined
+      : verifyLayeredControlExpectation({
+          ...options,
+          expectedFingerprint: options.expectedFingerprint,
+        });
+  const result = applyRuntimeConfigMutation({
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(layered === undefined
+      ? {}
+      : {expectedFingerprint: layered.globalFileFingerprint}),
+    operation: options.operation,
+  });
+  const characterScope =
+    layered === undefined
+      ? controlCharacterScope(
+          {
+            source: 'path',
+            path: result.configPath,
+            config: result.config,
+            diagnostics: Object.freeze([]),
+          },
+          options,
+        )
+      : layered.characterScope;
+  const overlayConfig =
+    layered === undefined
+      ? characterScope === undefined
+        ? undefined
+        : loadCharacterOverlayForScope(characterScope)
+      : layered.overlayConfig;
+
+  return Object.freeze({
+    ...result,
+    fingerprint: layeredControlFingerprint({
+      globalConfig: result.config,
+      characterScope,
+      overlayConfig,
+    }),
+  });
 }
 
 function assertRuntimeConfigControlOperation(
@@ -95,6 +149,7 @@ export function inspectRuntimePluginConfig(options: {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly storeRoot?: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
   readonly manifest: RuntimePluginManifest;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly activation?: RuntimePluginConfigActivationInspectShape;
@@ -107,12 +162,18 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
+  const characterScope = controlCharacterScope(loadedConfig, options);
+  const overlayConfig =
+    characterScope === undefined
+      ? undefined
+      : loadCharacterOverlayForScope(characterScope);
   const manifests = manifestsIncludingTarget(
     options.manifest,
     options.pluginManifests,
   );
-  const resolvedConfig = resolveProject02RuntimeConfig({
+  const resolvedConfig = resolveLayeredProject02RuntimeConfig({
     loadedConfig,
+    ...(overlayConfig === undefined ? {} : {overlayConfig}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests: manifests,
     validateInactivePluginConfigs: true,
@@ -136,7 +197,48 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.defaultEnabled === undefined
       ? {}
       : {defaultEnabled: options.defaultEnabled}),
-    fingerprint: createRuntimeConfigFingerprint(mutationBase),
+    fingerprint: layeredControlFingerprint({
+      globalConfig: mutationBase,
+      characterScope,
+      overlayConfig,
+    }),
+  });
+}
+
+/**
+ * The character scope a control operation fingerprints against: the
+ * explicit scope threaded from activation when present, else the same
+ * derivation activation itself uses. Every stamp/inspect/prepare/apply
+ * site composes fingerprints through this one pair.
+ */
+function controlCharacterScope(
+  loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>,
+  options: {
+    readonly storeRoot?: string;
+    readonly characterScope?: RuntimeConfigCharacterScope;
+  },
+): RuntimeConfigCharacterScope | undefined {
+  return (
+    options.characterScope ??
+    deriveRuntimeConfigCharacterScope({
+      loadedConfig,
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+    })
+  );
+}
+
+function layeredControlFingerprint(options: {
+  readonly globalConfig: Project02RuntimeConfig;
+  readonly characterScope: RuntimeConfigCharacterScope | undefined;
+  readonly overlayConfig:
+    ReturnType<typeof loadCharacterOverlayForScope> | undefined;
+}): string {
+  return layeredRuntimeConfigFingerprintForScope({
+    globalConfig: options.globalConfig,
+    characterScope: options.characterScope,
+    overlay: options.overlayConfig,
   });
 }
 
@@ -144,29 +246,101 @@ export function applyRuntimePluginConfigControlOperation(options: {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly storeRoot?: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly expectedFingerprint: string;
   readonly operation: RuntimePluginConfigFieldControlOperation;
 }): RuntimeConfigMutationResult {
   const mutation = runtimePluginConfigControlMutation(options);
-
-  return applyRuntimeConfigMutation({
+  const layered = verifyLayeredControlExpectation(options);
+  const result = applyRuntimeConfigMutation({
     ...(options.configPath === undefined
       ? {}
       : {configPath: options.configPath}),
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    expectedFingerprint: options.expectedFingerprint,
+    // The layered expectation was verified against a snapshot; the
+    // mutation lock re-verifies the global file against that same
+    // snapshot's per-file fingerprint, so a concurrent writer still
+    // surfaces as a conflict.
+    expectedFingerprint: layered.globalFileFingerprint,
     validateCandidate: mutation.validateCandidate,
     operation: mutation.operation,
   });
+
+  return Object.freeze({
+    ...result,
+    fingerprint: layeredControlFingerprint({
+      globalConfig: result.config,
+      characterScope: layered.characterScope,
+      overlayConfig: layered.overlayConfig,
+    }),
+  });
+}
+
+/**
+ * Verifies a caller's layered expected fingerprint against the current
+ * pair of authored documents and hands back the global file's per-file
+ * fingerprint for the mutation lock plus the overlay snapshot the
+ * result fingerprint composes with.
+ */
+function verifyLayeredControlExpectation(options: {
+  readonly configPath?: string;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly storeRoot?: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
+  readonly expectedFingerprint: string;
+}): {
+  readonly globalFileFingerprint: string;
+  readonly characterScope: RuntimeConfigCharacterScope | undefined;
+  readonly overlayConfig:
+    ReturnType<typeof loadCharacterOverlayForScope> | undefined;
+} {
+  const loadedConfig = loadProject02RuntimeConfig({
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  });
+  const characterScope = controlCharacterScope(loadedConfig, options);
+  const overlayConfig =
+    characterScope === undefined
+      ? undefined
+      : loadCharacterOverlayForScope(characterScope);
+  const globalConfig = createRuntimeConfigMutationBase({
+    loadedConfig,
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  });
+  const currentFingerprint = layeredControlFingerprint({
+    globalConfig,
+    characterScope,
+    overlayConfig,
+  });
+
+  if (options.expectedFingerprint !== currentFingerprint) {
+    throw new RuntimeConfigConflictError(
+      'Runtime config changed before the mutation could be committed. ' +
+        `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
+    );
+  }
+
+  return {
+    globalFileFingerprint: createRuntimeConfigFingerprint(globalConfig),
+    characterScope,
+    overlayConfig,
+  };
 }
 
 export function prepareRuntimePluginConfigControlOperation(options: {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly storeRoot?: string;
+  readonly characterScope?: RuntimeConfigCharacterScope;
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly expectedFingerprint: string;
@@ -182,20 +356,51 @@ export function prepareRuntimePluginConfigControlOperation(options: {
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
+  const characterScope = controlCharacterScope(loadedConfig, options);
+  const overlayConfig =
+    characterScope === undefined
+      ? undefined
+      : loadCharacterOverlayForScope(characterScope);
+  const globalConfig = createRuntimeConfigMutationBase({
+    loadedConfig,
+    ...(options.configPath === undefined
+      ? {}
+      : {configPath: options.configPath}),
+    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  });
+  const currentFingerprint = layeredControlFingerprint({
+    globalConfig,
+    characterScope,
+    overlayConfig,
+  });
+
+  if (options.expectedFingerprint !== currentFingerprint) {
+    throw new RuntimeConfigConflictError(
+      'Runtime config changed before the mutation could be committed. ' +
+        `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
+    );
+  }
+
   const mutation = runtimePluginConfigControlMutation(options);
+  // The layered expectation was already verified on this exact loaded
+  // snapshot, so the candidate preparation runs without its own
+  // per-file expectation.
   const prepared = prepareRuntimeConfigMutationCandidate({
     loadedConfig,
     ...(options.configPath === undefined
       ? {}
       : {configPath: options.configPath}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    expectedFingerprint: options.expectedFingerprint,
     validateCandidate: mutation.validateCandidate,
     operation: mutation.operation,
   });
 
   return Object.freeze({
-    resultFingerprint: prepared.fingerprint,
+    resultFingerprint: layeredControlFingerprint({
+      globalConfig: prepared.config,
+      characterScope,
+      overlayConfig,
+    }),
     targetConfigPath: runtimeConfigControlTargetPathFromLoaded({
       ...(loadedConfig.path === undefined
         ? {}
