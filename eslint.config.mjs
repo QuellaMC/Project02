@@ -136,12 +136,15 @@ export default tseslint.config(
     // the layered resolve, the construction stamp, and the control state,
     // then +4 to hand the enablement ladder the merged two-layer view,
     // then +6 for the active-character override: a supplied overlay is
-    // the scope authority and stamps its id into the resolved config.
+    // the scope authority and stamps its id into the resolved config,
+    // then +23 for review hardening: catalog diagnostics classified
+    // against the merged view, the home root recorded in the plugin
+    // config-control state, and the catalog composition extracted.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1180, skipBlankLines: true, skipComments: true},
+        {max: 1203, skipBlankLines: true, skipComments: true},
       ],
     },
   },
