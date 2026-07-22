@@ -151,12 +151,12 @@ export default tseslint.config(
   {
     files: ['src/runtime/config/mutate.ts'],
     rules: {
-      // Re-pinned +27 so the locked write path enforces the overlay
-      // dialect: a candidate carrying a global-only field never lands
-      // in an overlay-located config file, whatever path selected it.
+      // Re-pinned +43 so a directly selected overlay target must carry
+      // a matching binding stamp before any lock or write touches the
+      // data directory (review round five).
       'max-lines': [
         'error',
-        {max: 1260, skipBlankLines: true, skipComments: true},
+        {max: 1303, skipBlankLines: true, skipComments: true},
       ],
     },
   },
