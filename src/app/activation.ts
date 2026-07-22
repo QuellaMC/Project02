@@ -45,6 +45,7 @@ import {
   diagnosticsHaveErrors,
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
+  mergedLoadedConfigForOverlay,
   resolveLayeredProject02RuntimeConfig,
   resolveProject02RuntimeStoreRoot,
   runtimeConfigDiagnosticMatchesPlugin,
@@ -353,7 +354,12 @@ export function prepareConfiguredProject02PluginActivation(options: {
     pluginManifests,
     defaultEnabledPluginIds,
     resolvedConfig,
-    loadedConfig: options.loadedConfig,
+    // The enablement ladder judges the merged view, so an overlay's
+    // explicit enabled rung carries the same weight as a global one.
+    loadedConfig:
+      overlayConfig === undefined
+        ? options.loadedConfig
+        : mergedLoadedConfigForOverlay(options.loadedConfig, overlayConfig),
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
   });

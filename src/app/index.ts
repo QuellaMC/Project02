@@ -24,3 +24,8 @@ export {
   prepareProject02CharacterActivation,
   type Project02CharacterActivation,
 } from './character.ts';
+export {
+  characterOverlaySeedDocument,
+  enforceCharacterPluginExpectations,
+  type CharacterOverlaySeed,
+} from './character-plugins.ts';

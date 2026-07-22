@@ -108,13 +108,21 @@ export async function runInspectCliFromArgs(
         : options.env;
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
-    const startup = resolveRuntimeCliStartup({
+    const startup = await resolveRuntimeCliStartup({
       location: parsedArgs,
       ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
     });
+
+    if (startup.status === 'character_invalid') {
+      throw new InspectCliUsageError(
+        (startup.characterActivation.status === 'failed'
+          ? startup.characterActivation.messages[0]
+          : undefined) ?? 'Character activation failed.',
+      );
+    }
 
     if (startup.status === 'config_invalid') {
       const configError =

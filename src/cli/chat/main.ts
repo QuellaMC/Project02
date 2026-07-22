@@ -53,7 +53,6 @@ import {
 } from '../../plugins/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
-  prepareProject02CharacterActivation,
   resolveRuntimeCliStartup,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginFactoryDefinition,
@@ -317,14 +316,26 @@ export async function runChatCliFromArgs(
 ): Promise<number> {
   try {
     const parsedArgs = parseChatCliArgs(args);
-    const startup = resolveRuntimeCliStartup({
+    const startup = await resolveRuntimeCliStartup({
       location: parsedArgs,
       ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
       continueAfterActivationErrors: options.pluginHost !== undefined,
+      dataDir: 'materialize',
     });
+
+    if (startup.status === 'character_invalid') {
+      throw new ChatCliUsageError(
+        `Character activation failed: ${
+          startup.characterActivation.status === 'failed'
+            ? (startup.characterActivation.messages[0] ??
+              'no character resolved.')
+            : 'no character resolved.'
+        }`,
+      );
+    }
 
     if (startup.status === 'config_invalid') {
       // Resolved-config diagnostics carry both layers, so a character
@@ -351,7 +362,7 @@ export async function runChatCliFromArgs(
         selectChatProvider(
           parsedArgs.provider,
           runtimeEnv,
-          startup.loadedConfig.config?.project02?.roleModelProvider,
+          startup.activationPlan.resolvedConfig.project02.roleModelProvider,
         ),
       ),
     } satisfies ChatCliArgs;
@@ -370,17 +381,14 @@ export async function runChatCliFromArgs(
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
-    const characterActivation = prepareProject02CharacterActivation({
-      storeRoot: runtimeArgs.storeRoot,
-      configuredCharacterId:
-        startup.activationPlan.resolvedConfig.project02.character,
-    });
 
-    if (characterActivation.status === 'failed') {
+    // Character activation already ran inside startup, before any
+    // plugin resources were constructed.
+    const characterActivation = startup.characterActivation;
+
+    if (characterActivation.status !== 'resolved') {
       throw new ChatCliUsageError(
-        `Character activation failed: ${
-          characterActivation.messages[0] ?? 'no character resolved.'
-        }`,
+        'Character activation failed: no character resolved.',
       );
     }
     for (const warning of characterActivation.warnings) {

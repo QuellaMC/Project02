@@ -13,7 +13,6 @@ import type {RuntimePluginHost} from '../../plugins/index.ts';
 import type {RoleModelCharacterRef} from '../../role-model/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
-  prepareProject02CharacterActivation,
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
@@ -120,14 +119,15 @@ export async function runConfiguredRelayCli(
   args: readonly string[],
   options: ConfiguredRelayCliOptions,
 ): Promise<number> {
-  let startup: ReturnType<typeof resolveRuntimeCliStartup>;
+  let startup: Awaited<ReturnType<typeof resolveRuntimeCliStartup>>;
 
   try {
-    startup = resolveRuntimeCliStartup({
+    startup = await resolveRuntimeCliStartup({
       ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
+      dataDir: 'materialize',
     });
   } catch (error: unknown) {
     if (error instanceof RuntimeEnvFileError) {
@@ -136,6 +136,19 @@ export async function runConfiguredRelayCli(
     }
 
     throw error;
+  }
+
+  // Character activation ran inside startup, before any plugin
+  // resources were constructed.
+  if (startup.status === 'character_invalid') {
+    options.stderr.write(
+      `Error: ${
+        (startup.characterActivation.status === 'failed'
+          ? startup.characterActivation.messages[0]
+          : undefined) ?? 'Character activation failed.'
+      }\n`,
+    );
+    return 1;
   }
 
   const startupDiagnostic = (
@@ -162,21 +175,10 @@ export async function runConfiguredRelayCli(
     return 1;
   }
 
-  // Character activation runs before plugin-host construction so a bad
-  // character selection never leaves constructed plugin resources without
-  // their shutdown hooks.
-  const characterActivation = prepareProject02CharacterActivation({
-    storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
-    configuredCharacterId:
-      startup.activationPlan.resolvedConfig.project02.character,
-  });
+  const characterActivation = startup.characterActivation;
 
-  if (characterActivation.status === 'failed') {
-    options.stderr.write(
-      `Error: ${
-        characterActivation.messages[0] ?? 'Character activation failed.'
-      }\n`,
-    );
+  if (characterActivation.status !== 'resolved') {
+    options.stderr.write('Error: Character activation failed.\n');
     return 1;
   }
   for (const warning of characterActivation.warnings) {

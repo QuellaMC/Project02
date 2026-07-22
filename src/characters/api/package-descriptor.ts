@@ -19,6 +19,12 @@ export const maxCharacterPersonaSectionLength = 4000;
 const characterIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 const maxCharacterDisplayNameLength = 128;
 const characterVersionPattern = /^\d+\.\d+\.\d+$/u;
+// Kept in lockstep with the plugin id rules (plugins/api manifest
+// validation and the storage layout contract); the characters module
+// must not import either, so the pattern is duplicated here on purpose.
+const characterPluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+
+export const maxCharacterPluginExpectations = 32;
 
 const characterPackageDescriptorFields = new Set([
   '$schema',
@@ -26,10 +32,12 @@ const characterPackageDescriptorFields = new Set([
   'identity',
   'persona',
   'meta',
+  'plugins',
 ]);
 const characterIdentityFields = new Set(['id', 'displayName']);
 const characterPersonaFields = new Set(['system']);
 const characterMetaFields = new Set(['version']);
+const characterPluginsFields = new Set(['required', 'recommended', 'config']);
 
 export type CharacterPersona = {
   readonly system: readonly string[];
@@ -39,10 +47,24 @@ export type CharacterMeta = {
   readonly version: string;
 };
 
+/**
+ * Plugins a character declares: required ids block activation when
+ * missing or disabled, recommended ids only warn, and config carries
+ * per-plugin defaults seeded into the character's overlay on first
+ * selection. Shape-only here — whether a plugin id exists is judged by
+ * the app layer against the installed catalog.
+ */
+export type CharacterPluginExpectations = {
+  readonly required: readonly string[];
+  readonly recommended: readonly string[];
+  readonly config: Readonly<Record<string, Readonly<Record<string, unknown>>>>;
+};
+
 export type CharacterDefinition = {
   readonly identity: CharacterProfile;
   readonly persona: CharacterPersona;
   readonly meta: CharacterMeta;
+  readonly plugins?: CharacterPluginExpectations;
 };
 
 export type CharacterPackageDescriptorIssue = {
@@ -50,7 +72,8 @@ export type CharacterPackageDescriptorIssue = {
     | 'invalid_descriptor'
     | 'invalid_identity'
     | 'invalid_persona'
-    | 'invalid_meta';
+    | 'invalid_meta'
+    | 'invalid_plugins';
   readonly message: string;
 };
 
@@ -109,12 +132,21 @@ export function parseCharacterPackageDescriptor(
     return metaResult;
   }
 
+  const pluginsResult = parseCharacterPlugins(descriptor['plugins']);
+
+  if (pluginsResult.status === 'rejected') {
+    return pluginsResult;
+  }
+
   return Object.freeze({
     status: 'accepted',
     definition: Object.freeze({
       identity: identityResult.identity,
       persona: personaResult.persona,
       meta: metaResult.meta,
+      ...(pluginsResult.plugins === undefined
+        ? {}
+        : {plugins: pluginsResult.plugins}),
     } satisfies CharacterDefinition),
   });
 }
@@ -283,6 +315,137 @@ function parseCharacterMeta(value: unknown): CharacterMetaParseResult {
     status: 'accepted',
     meta: Object.freeze({version} satisfies CharacterMeta),
   });
+}
+
+type CharacterPluginsParseResult =
+  | {
+      readonly status: 'accepted';
+      readonly plugins: CharacterPluginExpectations | undefined;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly issue: CharacterPackageDescriptorIssue;
+    };
+
+function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
+  if (value === undefined) {
+    return Object.freeze({status: 'accepted', plugins: undefined});
+  }
+
+  if (!isRecord(value)) {
+    return rejectedDescriptor(
+      'invalid_plugins',
+      'Character package plugins must be an object.',
+    );
+  }
+
+  const unknownField = Object.keys(value)
+    .sort(compareDescriptorText)
+    .find(field => !characterPluginsFields.has(field));
+
+  if (unknownField !== undefined) {
+    return rejectedDescriptor(
+      'invalid_plugins',
+      `Character package plugins contains unknown field "${unknownField}".`,
+    );
+  }
+
+  const required = parseCharacterPluginIdList(value['required'], 'required');
+
+  if (!Array.isArray(required)) {
+    return required;
+  }
+
+  const recommended = parseCharacterPluginIdList(
+    value['recommended'],
+    'recommended',
+  );
+
+  if (!Array.isArray(recommended)) {
+    return recommended;
+  }
+
+  const rawConfig = value['config'];
+
+  if (rawConfig !== undefined && !isRecord(rawConfig)) {
+    return rejectedDescriptor(
+      'invalid_plugins',
+      'Character package plugins.config must be an object keyed by plugin id.',
+    );
+  }
+
+  const config: Record<string, Readonly<Record<string, unknown>>> = {};
+
+  for (const [pluginId, pluginConfig] of Object.entries(rawConfig ?? {})) {
+    if (!characterPluginIdPattern.test(pluginId)) {
+      return rejectedDescriptor(
+        'invalid_plugins',
+        `Character package plugins.config key "${pluginId}" is not a valid plugin id.`,
+      );
+    }
+
+    if (!isRecord(pluginConfig)) {
+      return rejectedDescriptor(
+        'invalid_plugins',
+        `Character package plugins.config["${pluginId}"] must be an object.`,
+      );
+    }
+
+    config[pluginId] = Object.freeze({...pluginConfig});
+  }
+
+  return Object.freeze({
+    status: 'accepted',
+    plugins: Object.freeze({
+      required: Object.freeze(required),
+      recommended: Object.freeze(recommended),
+      config: Object.freeze(config),
+    } satisfies CharacterPluginExpectations),
+  });
+}
+
+function parseCharacterPluginIdList(
+  value: unknown,
+  fieldName: 'required' | 'recommended',
+):
+  | string[]
+  | {
+      readonly status: 'rejected';
+      readonly issue: CharacterPackageDescriptorIssue;
+    } {
+  if (value === undefined) {
+    return [];
+  }
+
+  if (!Array.isArray(value) || value.length > maxCharacterPluginExpectations) {
+    return rejectedDescriptor(
+      'invalid_plugins',
+      `Character package plugins.${fieldName} must be an array of at most ` +
+        `${String(maxCharacterPluginExpectations)} plugin ids.`,
+    );
+  }
+
+  const pluginIds: string[] = [];
+
+  for (const entry of value) {
+    if (typeof entry !== 'string' || !characterPluginIdPattern.test(entry)) {
+      return rejectedDescriptor(
+        'invalid_plugins',
+        `Character package plugins.${fieldName} entries must be valid plugin ids.`,
+      );
+    }
+
+    if (pluginIds.includes(entry)) {
+      return rejectedDescriptor(
+        'invalid_plugins',
+        `Character package plugins.${fieldName} lists plugin "${entry}" more than once.`,
+      );
+    }
+
+    pluginIds.push(entry);
+  }
+
+  return pluginIds;
 }
 
 function rejectedDescriptor(

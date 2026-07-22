@@ -72,6 +72,7 @@ export type CharacterPackageDiagnostic = {
     | 'invalid_identity'
     | 'invalid_persona'
     | 'invalid_meta'
+    | 'invalid_plugins'
     | 'package_id_mismatch'
     | 'duplicate_character_id';
   readonly message: string;

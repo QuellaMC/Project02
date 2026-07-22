@@ -334,7 +334,7 @@ describe('layered runtime config resolution', () => {
 });
 
 describe('startup with a character overlay', () => {
-  it('resolves the overlay for the configured character before activation', () => {
+  it('resolves the overlay for the configured character before activation', async () => {
     const homeRoot = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
@@ -346,13 +346,16 @@ describe('startup with a character overlay', () => {
       project02: {userDisplayName: 'Overlay Name'},
     });
 
-    const startup = resolveRuntimeCliStartup({
+    const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
       factories: {},
     });
 
     expect(startup.status).toBe('resolved');
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected a plugin activation plan.');
+    }
     expect(startup.overlayLoadedConfig).toMatchObject({
       scope: 'character',
       characterId: 'mira',
@@ -363,30 +366,51 @@ describe('startup with a character overlay', () => {
     ).toBe('Overlay Name');
   });
 
-  it('blocks startup on an overlay error with character attribution', () => {
+  it('blocks startup on an overlay error with character attribution', async () => {
     const homeRoot = createTestTempRoot();
-    const dataRoot = characterDataDirPath(homeRoot, 'nova');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     mkdirSync(dataRoot, {recursive: true});
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {character: 'nova'},
-    });
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       project02: {storeRoot: '/elsewhere'},
     });
 
-    const startup = resolveRuntimeCliStartup({
+    const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
       factories: {},
     });
 
     expect(startup.status).toBe('config_invalid');
-    expect(startup.overlayLoadedConfig?.characterId).toBe('nova');
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected a plugin activation plan.');
+    }
+    expect(startup.overlayLoadedConfig?.characterId).toBe('mira');
     expect(
       startup.activationPlan.resolvedConfig.diagnostics.filter(
         diagnostic => diagnostic.code === 'runtime_config_field_global_only',
       ),
-    ).toMatchObject([{origin: {characterId: 'nova'}}]);
+    ).toMatchObject([{origin: {characterId: 'mira'}}]);
+  });
+
+  it('fails startup as character_invalid for an unknown configured character', async () => {
+    const homeRoot = createTestTempRoot();
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'nova'},
+    });
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      factories: {},
+    });
+
+    expect(startup.status).toBe('character_invalid');
+    if (startup.status !== 'character_invalid') {
+      throw new Error('Expected character_invalid.');
+    }
+    expect(startup.characterActivation).toMatchObject({status: 'failed'});
   });
 });

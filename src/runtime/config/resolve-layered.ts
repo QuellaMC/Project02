@@ -43,26 +43,40 @@ export function resolveLayeredProject02RuntimeConfig(
     return resolveProject02RuntimeConfig(globalOptions);
   }
 
-  const globalDocument = globalOptions.loadedConfig.config;
+  return resolveProject02RuntimeConfig({
+    ...globalOptions,
+    loadedConfig: mergedLoadedConfigForOverlay(
+      globalOptions.loadedConfig,
+      overlayConfig,
+    ),
+  });
+}
+
+/**
+ * The loaded-config view over both layers: the merged document plus the
+ * combined diagnostics, with the global path kept. The resolver and the
+ * activation ladder both judge this one shape, so an overlay's explicit
+ * enablement rung carries the same weight as a global one.
+ */
+export function mergedLoadedConfigForOverlay(
+  loadedConfig: LoadedProject02RuntimeConfig,
+  overlayConfig: LoadedProject02CharacterOverlayConfig,
+): LoadedProject02RuntimeConfig {
+  const globalDocument = loadedConfig.config;
   const merged =
     overlayConfig.config === undefined
       ? globalDocument
       : mergeCharacterOverlayDocument(globalDocument, overlayConfig.config);
 
-  return resolveProject02RuntimeConfig({
-    ...globalOptions,
-    loadedConfig: Object.freeze({
-      source: globalOptions.loadedConfig.source,
-      ...(globalOptions.loadedConfig.path === undefined
-        ? {}
-        : {path: globalOptions.loadedConfig.path}),
-      ...(merged === undefined ? {} : {config: merged}),
-      diagnostics: Object.freeze([
-        ...globalOptions.loadedConfig.diagnostics,
-        ...overlayConfig.diagnostics,
-      ]),
-    } satisfies LoadedProject02RuntimeConfig),
-  });
+  return Object.freeze({
+    source: loadedConfig.source,
+    ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
+    ...(merged === undefined ? {} : {config: merged}),
+    diagnostics: Object.freeze([
+      ...loadedConfig.diagnostics,
+      ...overlayConfig.diagnostics,
+    ]),
+  } satisfies LoadedProject02RuntimeConfig);
 }
 
 /**

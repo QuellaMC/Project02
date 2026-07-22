@@ -85,12 +85,75 @@ describe('character package descriptor schema parity', () => {
     });
   });
 
+  it('accepts a plugins block through both the schema and the code validator', () => {
+    const descriptor = {
+      ...validDescriptor(),
+      plugins: {
+        required: ['character-state'],
+        recommended: ['demo-config'],
+        config: {'demo-config': {tone: 'warm'}},
+      },
+    };
+
+    expect(
+      validateAgainstSchema(descriptor),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseCharacterPackageDescriptor(descriptor)).toMatchObject({
+      status: 'accepted',
+      definition: {
+        plugins: {
+          required: ['character-state'],
+          recommended: ['demo-config'],
+          config: {'demo-config': {tone: 'warm'}},
+        },
+      },
+    });
+  });
+
   it.each([
     [
       'an unknown descriptor key',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
         style: {mode: 'rewrite'},
+      }),
+    ],
+    [
+      'an unknown plugins key',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {required: [], autoInstall: true},
+      }),
+    ],
+    [
+      'a duplicated required plugin id',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {required: ['demo-config', 'demo-config']},
+      }),
+    ],
+    [
+      'an invalid plugin id',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {recommended: ['9starts-with-digit']},
+      }),
+    ],
+    [
+      'a non-object plugin config default',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {config: {'demo-config': 'warm'}},
+      }),
+    ],
+    [
+      'too many required plugins',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {
+          required: Array.from({length: 33}, (_, index) => `p${String(index)}`),
+        },
       }),
     ],
     [

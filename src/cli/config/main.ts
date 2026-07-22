@@ -63,7 +63,7 @@ export function runRuntimeConfigCliFromArgs(
   options: RuntimeConfigCliOptions,
 ): Promise<number> {
   return Promise.resolve()
-    .then(() => {
+    .then(async () => {
       const parsedArgs = parseRuntimeConfigCliArgs(args);
 
       if (
@@ -97,7 +97,7 @@ export function runRuntimeConfigCliFromArgs(
                 characterId: parsedArgs.location.character,
               }),
             );
-      const startup = resolveRuntimeCliStartup({
+      const startup = await resolveRuntimeCliStartup({
         location: parsedArgs.location,
         ...(options.env === undefined ? {} : {env: options.env}),
         ...(options.factories === undefined
@@ -126,15 +126,15 @@ export function runRuntimeConfigCliFromArgs(
     .catch((error: unknown) => handleRuntimeConfigCliError(error, options));
 }
 
-function runRuntimeConfigCliFromArgsSync(
+async function runRuntimeConfigCliFromArgsSync(
   args: readonly string[],
   options: RuntimeConfigCliOptions,
-): number {
+): Promise<number> {
   try {
     const parsedArgs = parseRuntimeConfigCliArgs(args);
 
     if (parsedArgs.commandArgs[0] === 'check') {
-      return runRuntimeConfigCheckCommand(parsedArgs, options);
+      return await runRuntimeConfigCheckCommand(parsedArgs, options);
     }
 
     const secretSetCommand =
@@ -146,7 +146,11 @@ function runRuntimeConfigCliFromArgsSync(
     );
 
     if (secretSetCommand) {
-      return runRuntimePluginSecretSetCommand(parsedArgs, options, cwdDotEnv);
+      return await runRuntimePluginSecretSetCommand(
+        parsedArgs,
+        options,
+        cwdDotEnv,
+      );
     }
 
     return runRuntimeConfigDocumentCommand(parsedArgs, options, cwdDotEnv);
@@ -155,11 +159,11 @@ function runRuntimeConfigCliFromArgsSync(
   }
 }
 
-function runRuntimeConfigCheckCommand(
+async function runRuntimeConfigCheckCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
-): number {
-  const startup = resolveRuntimeCliStartup({
+): Promise<number> {
+  const startup = await resolveRuntimeCliStartup({
     location: parsedArgs.location,
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.factories === undefined ? {} : {factories: options.factories}),
@@ -171,6 +175,14 @@ function runRuntimeConfigCheckCommand(
 
   if (command.kind !== 'check') {
     throw new TypeError('Runtime config check command parsing drifted.');
+  }
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
   }
 
   writeJson(options.stdout, {
@@ -186,12 +198,12 @@ function runRuntimeConfigCheckCommand(
     : 0;
 }
 
-function runRuntimePluginSecretSetCommand(
+async function runRuntimePluginSecretSetCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
-): number {
-  const startup = resolveRuntimeConfigCliActivationStartup({
+): Promise<number> {
+  const startup = await resolveRuntimeConfigCliActivationStartup({
     parsedArgs,
     options,
     cwdDotEnv,
@@ -203,6 +215,14 @@ function runRuntimePluginSecretSetCommand(
 
   if (command.kind !== 'secret_set') {
     throw new TypeError('Runtime config secret-set command parsing drifted.');
+  }
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
   }
 
   const result = applyRuntimePluginSecretSetCommand({
@@ -447,13 +467,13 @@ async function ensureCharacterScopedMutationTarget(
   }
 }
 
-function resolveRuntimeConfigCliActivationStartup(options: {
+async function resolveRuntimeConfigCliActivationStartup(options: {
   readonly parsedArgs: RuntimeConfigCliParsedArgs;
   readonly options: RuntimeConfigCliOptions;
   readonly cwdDotEnv: 'always' | 'auto';
-}): ReturnType<typeof resolveRuntimeCliStartup> {
+}): Promise<Awaited<ReturnType<typeof resolveRuntimeCliStartup>>> {
   try {
-    return resolveRuntimeCliStartup({
+    return await resolveRuntimeCliStartup({
       location: options.parsedArgs.location,
       cwdDotEnv: options.cwdDotEnv,
       ...(options.options.factories === undefined

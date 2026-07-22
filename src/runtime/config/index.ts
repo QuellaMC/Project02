@@ -52,9 +52,14 @@ export {
 } from './overlay.ts';
 export {
   mergeCharacterOverlayDocument,
+  mergedLoadedConfigForOverlay,
   resolveLayeredProject02RuntimeConfig,
   type ResolveLayeredProject02RuntimeConfigOptions,
 } from './resolve-layered.ts';
+export {
+  ensureCharacterDataDir,
+  type EnsureCharacterDataDirResult,
+} from './character-data-init.ts';
 export {
   applyScopedRuntimeConfigControlOperation,
   applyScopedRuntimePluginConfigControlOperation,
