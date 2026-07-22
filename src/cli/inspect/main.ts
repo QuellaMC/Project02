@@ -290,6 +290,12 @@ async function writeSessionList(
     runtimeConfig.resolvedConfig.project02.storeRoot,
     runtimeConfig.resolvedConfig.project02.character,
   );
+
+  assertInspectedDataDirBinding(
+    dataRoot,
+    runtimeConfig.resolvedConfig.project02.character,
+  );
+
   const sessionStore = createLocalRuntimeSessionStore({storeRoot: dataRoot});
   let sessions: readonly LocalRuntimeSessionMetadata[] = [];
 
@@ -334,6 +340,26 @@ async function writeSessionList(
   } satisfies InspectSessionListOutput);
 }
 
+// The binding holds at inspection: a data directory stamped for
+// another character fails read-only, exactly as durable chat does,
+// even when the inspected view carries no character evidence at all.
+function assertInspectedDataDirBinding(
+  dataRoot: string,
+  characterId: string,
+): void {
+  const stamp = evaluateCharacterDataStamp({
+    storageOptions: {storeRoot: dataRoot},
+    characterId,
+  });
+
+  if (stamp?.status === 'rejected') {
+    throw new LocalRuntimeStorageContractError(
+      'character_binding_rejected',
+      stamp.message,
+    );
+  }
+}
+
 // Entries a control-only data directory may hold besides sessions:
 // the overlay config, the binding stamp, and the lock root.
 function dataDirHoldsOnlyControlEntries(dataRoot: string): boolean {
@@ -371,20 +397,10 @@ async function writeSessionEvidence(
       runtimeConfig.resolvedConfig.project02.character,
     ),
   };
-  // The binding holds at inspection: a data directory stamped for
-  // another character fails here exactly as durable chat does, even
-  // when the selected session carries no character evidence yet.
-  const stamp = evaluateCharacterDataStamp({
-    storageOptions: storage,
-    characterId: runtimeConfig.resolvedConfig.project02.character,
-  });
-
-  if (stamp?.status === 'rejected') {
-    throw new LocalRuntimeStorageContractError(
-      'character_binding_rejected',
-      stamp.message,
-    );
-  }
+  assertInspectedDataDirBinding(
+    storage.storeRoot,
+    runtimeConfig.resolvedConfig.project02.character,
+  );
 
   const sessionStore = createLocalRuntimeSessionStore(storage);
   const session = await sessionStore.readSession(args.sessionId);

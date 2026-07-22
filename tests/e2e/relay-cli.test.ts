@@ -405,6 +405,78 @@ describe('relay CLI compatibility wrapper', () => {
     },
   );
 
+  it('treats everything after the separator as message content', async () => {
+    const homeRoot = createTestTempRoot('project02-relay-separator-');
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+    // The message itself looks like a location flag; the separator
+    // must stop location parsing.
+    const exitCode = await runConfiguredRelayCli(
+      ['--store', homeRoot, '--', '--store'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+        agent: createEchoAgent([]),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(stdout).toBe('Mira: heard --store\n');
+  });
+
+  it('formats malformed location flags as one-line errors', async () => {
+    let stdout = '';
+    let stderr = '';
+
+    const exitCode = await runConfiguredRelayCli(['--store'], {
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {},
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stdout).toBe('');
+    expect(stderr).toMatch(/^Error: /);
+    expect(stderr).toContain('--store');
+  });
+
+  it('formats storage errors from startup materialization', async () => {
+    const homeRoot = createTestTempRoot('project02-relay-foreign-store-');
+    let stderr = '';
+
+    writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runConfiguredRelayCli(
+      ['--store', homeRoot, 'hello'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toBe(
+      'Error: Local runtime store is missing required files.\n',
+    );
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+  });
+
   it('rejects missing input before materializing any character state', async () => {
     const homeRoot = createTestTempRoot('project02-relay-no-input-');
     let stderr = '';

@@ -1,4 +1,4 @@
-import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -228,6 +228,55 @@ describe('runtime-config --character verbs', () => {
     // data directory, no home marker.
     expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('refuses to bind a character to a marker-less directory holding foreign content', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-adopt-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // A copied or corrupt tree: session artifacts without a data
+    // marker. Stamping it would adopt that history permanently.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'X',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+    expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
+  });
+
+  it('rejects scoped writes while the home config cannot load', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-invalid-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('failed to load');
+    // The broken global layer was detected before ensure: no stamp,
+    // no data directory.
+    expect(existsSync(dataRoot)).toBe(false);
   });
 
   it('refuses to write into a data directory stamped for another character', async () => {

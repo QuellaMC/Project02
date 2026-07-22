@@ -317,6 +317,11 @@ export async function runChatCliFromArgs(
 ): Promise<number> {
   try {
     const parsedArgs = parseChatCliArgs(args);
+
+    // Invalid session ids (and a malformed --store) fail here, before
+    // startup materializes any durable character state.
+    validateDurableSessionArgs(parsedArgs);
+
     const startup = await resolveRuntimeCliStartup({
       location: parsedArgs,
       ...(options.env === undefined ? {} : {env: options.env}),

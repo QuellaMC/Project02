@@ -641,6 +641,37 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('rejects a session list when the binding stamp names another character', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-foreign-list-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'nova',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('holds history for character "nova"');
+  });
+
   it('rejects a session read when the binding stamp names another character', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-foreign-stamp-');
     const dataRoot = characterDataDirPath(storeRoot, 'mira');

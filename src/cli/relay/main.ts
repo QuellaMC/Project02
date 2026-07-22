@@ -25,8 +25,15 @@ import {
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
 } from '../../plugins/host/index.ts';
-import {parseRuntimeLocationFlag} from '../shared/runtime-location-flags.ts';
+import {
+  parseRuntimeLocationFlag,
+  RuntimeLocationCliUsageError,
+} from '../shared/runtime-location-flags.ts';
 import type {RuntimeLocationCliState} from '../shared/runtime-location-flags.ts';
+import {
+  formatCliTerminalErrorMessage,
+  isLocalRuntimeTerminalError,
+} from '../shared/terminal-errors.ts';
 import {isMainModule} from '../shared/main-module.ts';
 
 type RelayCliOptions = {
@@ -121,20 +128,13 @@ export async function runConfiguredRelayCli(
   args: readonly string[],
   options: ConfiguredRelayCliOptions,
 ): Promise<number> {
-  const {location, messageArgs} = parseRelayLocationArgs(args);
+  const invocation = configuredRelayInvocation(args, options.stderr);
 
-  // Reject malformed input before startup materializes any durable
-  // character state; runRelayCli re-validates for injected-host runs.
-  try {
-    readMessageArg(messageArgs);
-  } catch (error: unknown) {
-    if (error instanceof OneLineMessageValidationError) {
-      options.stderr.write(`Error: ${error.message}\n`);
-      return 1;
-    }
-
-    throw error;
+  if (typeof invocation === 'number') {
+    return invocation;
   }
+
+  const {location, messageArgs} = invocation;
 
   let startup: Awaited<ReturnType<typeof resolveRuntimeCliStartup>>;
 
@@ -150,6 +150,11 @@ export async function runConfiguredRelayCli(
   } catch (error: unknown) {
     if (error instanceof RuntimeEnvFileError) {
       options.stderr.write(`Error: ${error.message}\n`);
+      return 1;
+    }
+
+    if (isLocalRuntimeTerminalError(error)) {
+      options.stderr.write(`Error: ${formatCliTerminalErrorMessage(error)}\n`);
       return 1;
     }
 
@@ -254,6 +259,44 @@ function requiredRelayCharacter(
   return character;
 }
 
+/**
+ * Parse and input validation for the configured relay, formatted like
+ * every other relay failure. Rejecting malformed flags or messages
+ * here keeps startup — and its durable materialization — from running
+ * on invalid invocations; runRelayCli re-validates for injected-host
+ * runs. Returns an exit code when the invocation is malformed.
+ */
+function configuredRelayInvocation(
+  args: readonly string[],
+  stderr: NodeJS.WritableStream,
+): ReturnType<typeof parseRelayLocationArgs> | number {
+  let parsed: ReturnType<typeof parseRelayLocationArgs>;
+
+  try {
+    parsed = parseRelayLocationArgs(args);
+  } catch (error: unknown) {
+    if (error instanceof RuntimeLocationCliUsageError) {
+      stderr.write(`Error: ${error.message}\n`);
+      return 1;
+    }
+
+    throw error;
+  }
+
+  try {
+    readMessageArg(parsed.messageArgs);
+  } catch (error: unknown) {
+    if (error instanceof OneLineMessageValidationError) {
+      stderr.write(`Error: ${error.message}\n`);
+      return 1;
+    }
+
+    throw error;
+  }
+
+  return parsed;
+}
+
 function parseRelayLocationArgs(args: readonly string[]): {
   readonly location: RuntimeLocationCliState;
   readonly messageArgs: readonly string[];
@@ -266,6 +309,13 @@ function parseRelayLocationArgs(args: readonly string[]): {
 
     if (arg === undefined) {
       continue;
+    }
+
+    // Everything after the separator is message content, even when it
+    // looks like a location flag; readMessageArg strips the separator.
+    if (arg === '--') {
+      messageArgs.push(...args.slice(index));
+      break;
     }
 
     const locationResult = parseRuntimeLocationFlag({

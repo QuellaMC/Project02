@@ -2,6 +2,7 @@ import {
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
   applyScopedRuntimeConfigControlOperation,
+  assertGlobalConfigLoadableForCharacterScope,
   assertRuntimeConfigSecretScopeAllowed,
   assertScopedMutationOperationAllowed,
   createRuntimeConfigInspectShape,
@@ -371,9 +372,10 @@ async function runCharacterScopedRuntimeConfigCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
-  // Dialect violations fail before ensure materializes the stamp or
-  // data marker for the character.
+  // Dialect violations and a broken global layer fail before ensure
+  // materializes the stamp or data marker for the character.
   assertScopedMutationOperationAllowed(command.operation);
+  assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
   await ensureCharacterScopedMutationTarget(target);
 
   const result = applyScopedRuntimeConfigControlOperation({

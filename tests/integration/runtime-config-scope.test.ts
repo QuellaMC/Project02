@@ -1,4 +1,4 @@
-import {existsSync, readFileSync} from 'node:fs';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -403,6 +403,33 @@ describe('configured character id normalization', () => {
         scope: 'character',
       }).characterScope,
     ).toMatchObject({characterId: 'mira'});
+  });
+});
+
+describe('scoped writes over a broken global layer', () => {
+  it('rejects the mutation instead of merging against a synthetic global document', () => {
+    const homeRoot = createTestTempRoot('project02-scope-invalid-global-');
+
+    writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
+
+    expect(() =>
+      applyScopedRuntimeConfigControlOperation({
+        storeRoot: homeRoot,
+        env: {},
+        scope: 'character',
+        characterId: 'mira',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Bob',
+        },
+      }),
+    ).toThrow(/failed to load/);
+    expect(
+      existsSync(
+        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'mira')),
+      ),
+    ).toBe(false);
   });
 });
 

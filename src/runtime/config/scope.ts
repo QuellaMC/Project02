@@ -57,6 +57,7 @@ import {
 } from './schema.ts';
 import {
   runtimeConfigVersion,
+  type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigMutationOperation,
@@ -186,13 +187,28 @@ export function applyScopedRuntimePluginConfigControlOperation(
 }
 
 /**
- * Both layers loaded under the GLOBAL file's control lock: a scoped
- * mutation's layered expectation is only meaningful if the global layer
- * cannot move between the check and the overlay write, so the lock is
- * held across verify + mutate. Ordering is always global before
- * overlay (the mutation machinery takes the overlay's own lock inside),
- * and no path takes them in the reverse order.
+ * An overlay is one layer of the layered config: it cannot be verified
+ * or merged against a global file that failed to load. A missing
+ * default file is fine (defaults apply); anything else blocks the
+ * scoped change before durable state is touched.
  */
+export function assertGlobalConfigLoadableForCharacterScope(
+  loadedConfig: LoadedProject02RuntimeConfig,
+): void {
+  const blockingDiagnostic = loadedConfig.diagnostics.find(
+    diagnostic =>
+      diagnostic.severity === 'error' &&
+      diagnostic.code !== 'runtime_config_missing',
+  );
+
+  if (blockingDiagnostic !== undefined) {
+    throw new RuntimeConfigMutationError(
+      'Cannot change character-scoped config because the home config ' +
+        `failed to load: ${blockingDiagnostic.message}`,
+    );
+  }
+}
+
 /**
  * Deterministic preflight for character-scoped mutations: a dialect
  * violation (global-only field) is rejected here, before any ensure
@@ -216,6 +232,14 @@ export function assertScopedMutationOperationAllowed(
   }
 }
 
+/**
+ * Both layers loaded under the GLOBAL file's control lock: a scoped
+ * mutation's layered expectation is only meaningful if the global layer
+ * cannot move between the check and the overlay write, so the lock is
+ * held across verify + mutate. Ordering is always global before
+ * overlay (the mutation machinery takes the overlay's own lock inside),
+ * and no path takes them in the reverse order.
+ */
 function withGlobalConfigLayerLock<T>(
   options: ScopedRuntimeConfigLocation,
   run: (context: {
@@ -228,6 +252,8 @@ function withGlobalConfigLayerLock<T>(
   );
   const runWithLoadedConfig = () => {
     const loadedConfig = loadProject02RuntimeConfig(options);
+
+    assertGlobalConfigLoadableForCharacterScope(loadedConfig);
 
     return run({
       loadedConfig,

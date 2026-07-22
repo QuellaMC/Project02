@@ -724,6 +724,35 @@ describe('chat CLI character selection', () => {
     expect(stdout).toContain('Zeta:');
   });
 
+  it('rejects an invalid session id before materializing any character state', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-bad-session-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'bad/session'],
+      {
+        stdin: Readable.from([]),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      'Local runtime session ID must use only letters, numbers, dots, ' +
+        'underscores, or hyphens.',
+    );
+    // Session args were validated before startup: no home marker and
+    // no character data directory were created.
+    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
+  });
+
   it('rejects an unknown configured character naming the discovered ids', async () => {
     const storeRoot = createTestTempRoot('project02-chat-character-missing-');
     let stderr = '';
