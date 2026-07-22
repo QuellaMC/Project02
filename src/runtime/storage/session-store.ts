@@ -34,7 +34,10 @@ import {
 } from './layout-contract.ts';
 import {isRecord} from './layout-contract.ts';
 import type {ConversationLogRecord} from '../evidence/records.ts';
-import {atomicReplaceFile} from './atomic-file.ts';
+import {
+  atomicReplaceFile,
+  isLiveAtomicReplacementForAnyTarget,
+} from './atomic-file.ts';
 import {
   acquireLocalRuntimeMutationLock,
   type LocalRuntimeMutationLockLease,
@@ -420,6 +423,19 @@ async function localRuntimeStoreHasExistingContent(
       if (
         isRuntimeHomeControlEntry(layout, entryPath) &&
         (entry.isFile() || entry.isSymbolicLink() || entry.isDirectory())
+      ) {
+        continue;
+      }
+
+      // A concurrent initializer's half-written control file is not
+      // foreign content; its rename lands before that sibling proceeds.
+      if (
+        entry.isFile() &&
+        isLiveAtomicReplacementForAnyTarget(entry.name, [
+          layout.configPath,
+          layout.characterBindingPath,
+          layout.schemaPath,
+        ])
       ) {
         continue;
       }

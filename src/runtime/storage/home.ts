@@ -9,7 +9,10 @@ import {mkdir, readdir, readFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
-import {atomicReplaceFile} from './atomic-file.ts';
+import {
+  atomicReplaceFile,
+  isLiveAtomicReplacementForAnyTarget,
+} from './atomic-file.ts';
 import {
   createLocalRuntimeStorageSchemaMarker,
   createProject02HomeLayout,
@@ -103,10 +106,25 @@ async function project02HomeHasForeignContent(
 
   for (const entry of entries) {
     if (
-      !isProject02HomeControlEntry(layout, join(layout.homeRoot, entry.name))
+      isProject02HomeControlEntry(layout, join(layout.homeRoot, entry.name))
     ) {
-      return true;
+      continue;
     }
+
+    // A concurrent initializer's half-written control file is not
+    // foreign content; its rename lands before that sibling proceeds.
+    if (
+      entry.isFile() &&
+      isLiveAtomicReplacementForAnyTarget(entry.name, [
+        layout.configPath,
+        layout.envPath,
+        layout.schemaPath,
+      ])
+    ) {
+      continue;
+    }
+
+    return true;
   }
 
   return false;

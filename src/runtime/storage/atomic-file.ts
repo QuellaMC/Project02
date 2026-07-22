@@ -183,6 +183,23 @@ export function isAbandonedAtomicReplacementFile(fileName: string): boolean {
   return identity !== undefined && !processIsAlive(identity.ownerPid);
 }
 
+/**
+ * True when an entry is an in-flight atomic replacement for one of the
+ * given control files. Directory-initialization guards use this so a
+ * sibling process mid-write never reads as foreign content; abandoned
+ * replacements (dead owner) stay foreign.
+ */
+export function isLiveAtomicReplacementForAnyTarget(
+  fileName: string,
+  targetPaths: readonly string[],
+): boolean {
+  return (
+    targetPaths.some(targetPath =>
+      atomicReplacementFileBelongsToTarget(fileName, targetPath),
+    ) && !isAbandonedAtomicReplacementFile(fileName)
+  );
+}
+
 async function chmodIfSupported(path: string, mode: number): Promise<void> {
   try {
     await chmod(path, mode);

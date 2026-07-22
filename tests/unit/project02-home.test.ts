@@ -40,6 +40,41 @@ describe('project02 home initialization', () => {
     ).resolves.toMatchObject({homeRoot: layout.homeRoot});
   });
 
+  it('tolerates a live in-flight marker replacement but not an abandoned one', async () => {
+    const homeRoot = join(createTestTempRoot(), 'racing-home');
+
+    // A sibling process mid-initialization: its atomic replacement for
+    // the home marker is in flight and its pid is alive.
+    mkdirSync(homeRoot, {recursive: true});
+    writeFileSync(
+      join(
+        homeRoot,
+        `.schema.json.${String(process.pid)}.` +
+          '0f0e0d0c-0b0a-4908-8706-050403020100.tmp',
+      ),
+      '{}',
+    );
+
+    await expect(
+      ensureInitializedProject02Home({homeRoot}),
+    ).resolves.toMatchObject({homeRoot});
+
+    const abandonedRoot = join(createTestTempRoot(), 'abandoned-home');
+
+    mkdirSync(abandonedRoot, {recursive: true});
+    writeFileSync(
+      join(
+        abandonedRoot,
+        '.schema.json.999999999.0f0e0d0c-0b0a-4908-8706-050403020100.tmp',
+      ),
+      '{}',
+    );
+
+    await expect(
+      ensureInitializedProject02Home({homeRoot: abandonedRoot}),
+    ).rejects.toMatchObject({code: 'missing_file'});
+  });
+
   it('refuses to initialize a directory with foreign entries', async () => {
     const homeRoot = join(createTestTempRoot(), 'foreign-home');
 
