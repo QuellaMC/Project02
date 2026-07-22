@@ -865,10 +865,12 @@ describe('file runtime log store plugin tool event validation', () => {
           const evidence = durableStore.readSessionEvidence().stored;
 
           return {
-            character: durableRuntimeSessionCharacterProfile(
-              evidence,
-              testCharacterProfile,
-            ),
+            // The reader's bound character matches this store's custom
+            // character; a foreign bound profile is rejected by design.
+            character: durableRuntimeSessionCharacterProfile(evidence, {
+              id: 'nova',
+              displayName: 'Nova',
+            }),
             messages: evidence.conversationMessages,
           };
         },

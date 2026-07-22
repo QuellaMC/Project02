@@ -158,21 +158,9 @@ export async function runConfiguredRelayCli(
     return 1;
   }
 
-  let configuredHost: Awaited<
-    ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
-  >;
-
-  try {
-    configuredHost = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: startup.activationPlan,
-    });
-  } catch {
-    options.stderr.write(
-      'Error: Runtime plugin construction failed before relay startup.\n',
-    );
-    return 1;
-  }
-
+  // Character activation runs before plugin-host construction so a bad
+  // character selection never leaves constructed plugin resources without
+  // their shutdown hooks.
   const characterActivation = prepareProject02CharacterActivation({
     storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
     configuredCharacterId:
@@ -189,6 +177,21 @@ export async function runConfiguredRelayCli(
   }
   for (const warning of characterActivation.warnings) {
     options.stderr.write(`Warning: ${warning}\n`);
+  }
+
+  let configuredHost: Awaited<
+    ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
+  >;
+
+  try {
+    configuredHost = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: startup.activationPlan,
+    });
+  } catch {
+    options.stderr.write(
+      'Error: Runtime plugin construction failed before relay startup.\n',
+    );
+    return 1;
   }
 
   const session = createConversationSession({

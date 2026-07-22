@@ -56,6 +56,22 @@ describe('runtime config loading and resolution', () => {
     expect(resolved.diagnostics).toEqual([]);
   });
 
+  it('trims authored user display names so speaker construction never crashes', () => {
+    const storeRoot = createTestTempRoot('project02-config-user-name-');
+    const configPath = join(storeRoot, 'config.json');
+
+    writeRuntimeConfig(configPath, {
+      project02: {userDisplayName: '  Mike  '},
+    });
+
+    const resolved = resolveProject02RuntimeConfig({
+      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      storeRoot,
+    });
+
+    expect(resolved.project02.userDisplayName).toBe('Mike');
+  });
+
   it('loads explicit config before env config', () => {
     const root = createTestTempRoot('project02-config-precedence-');
     const explicitPath = join(root, 'explicit.json');

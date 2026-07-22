@@ -101,10 +101,11 @@ export default tseslint.config(
     files: ['src/role-model/loop/loop.ts'],
     rules: {
       // Re-pinned +7 for persona render options and characterRef stamping
-      // at ioSnapshot creation.
+      // at ioSnapshot creation, then +8 for the characterRef-vs-decision-
+      // context identity guard at loop entry.
       'max-lines': [
         'error',
-        {max: 1492, skipBlankLines: true, skipComments: true},
+        {max: 1500, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -159,10 +160,11 @@ export default tseslint.config(
       // unanchored-guard parameterization, character-less placeholder),
       // then +45 for the session user speaker: recorded/bound user-speaker
       // state, the one-user-speaker-per-session derivation, and restored
-      // transcripts validating against the recorded user display name.
+      // transcripts validating against the recorded user display name,
+      // then +1 to extend the bound-character check to anchored evidence.
       'max-lines': [
         'error',
-        {max: 2184, skipBlankLines: true, skipComments: true},
+        {max: 2185, skipBlankLines: true, skipComments: true},
       ],
     },
   },

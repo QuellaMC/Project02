@@ -1582,22 +1582,26 @@ function validateDurableCharacterProfiles(options: {
     );
   }
 
+  const derivedCharacter =
+    options.roleModelCharacter ?? options.conversationCharacter;
+
   if (
-    options.conversationCharacter !== undefined &&
-    options.roleModelCharacter === undefined &&
+    derivedCharacter !== undefined &&
     options.boundCharacter !== undefined &&
     // Bound id only: display names are per-session historical facts, so a
     // renamed character's old sessions stay readable under the same id.
-    options.conversationCharacter.id !== options.boundCharacter.id &&
+    // Anchoring does not exempt foreign evidence: a session copied in from
+    // another character's store must not open under this binding.
+    derivedCharacter.id !== options.boundCharacter.id &&
     !options.allowUnanchoredCustomCharacter
   ) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      'A custom durable character speaker requires matching role-model character evidence.',
+      'Durable character evidence must match the store-bound character.',
     );
   }
 
-  return options.roleModelCharacter ?? options.conversationCharacter;
+  return derivedCharacter;
 }
 
 function assertIncrementalCharacterEvidence(

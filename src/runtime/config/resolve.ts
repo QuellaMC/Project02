@@ -52,8 +52,11 @@ export function resolveProject02RuntimeConfig(
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
   const character = config?.project02?.character ?? defaultProject02CharacterId;
-  const userDisplayName =
-    config?.project02?.userDisplayName ?? defaultProject02UserDisplayName;
+  // Trimmed at the resolve seam so an authored value with stray padding
+  // never reaches the strict speaker constructor as a startup crash.
+  const userDisplayName = (
+    config?.project02?.userDisplayName ?? defaultProject02UserDisplayName
+  ).trim();
   const project02 = Object.freeze({
     storeRoot,
     character,

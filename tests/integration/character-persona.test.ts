@@ -81,6 +81,58 @@ describe('character persona through the role-model loop', () => {
     expect(committed?.roleModelIOSnapshot?.characterRef).toEqual(characterRef);
   });
 
+  it('rejects committing a turn for a foreign character on a bound store even with role-model anchoring', async () => {
+    const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
+    const session = createConversationSession({
+      character: novaProfile,
+      id: 'foreign-anchored',
+    });
+    const logStore = createRuntimeLogStore({
+      sessionId: session.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('hello'),
+        session,
+        logStore,
+        pluginHost: createDefaultProject02PluginHost(),
+        roleModelAdapter: capturingVisibleReplyAdapter([]),
+      }),
+    ).rejects.toThrow(
+      'Durable character evidence must match the store-bound character.',
+    );
+  });
+
+  it('rejects a characterRef whose id differs from the decision-context character', async () => {
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: 'persona-ref-mismatch',
+    });
+    const logStore = createRuntimeLogStore({
+      sessionId: session.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('hello'),
+        session,
+        logStore,
+        pluginHost: createDefaultProject02PluginHost(),
+        roleModelAdapter: capturingVisibleReplyAdapter([]),
+        characterRef: {
+          id: 'nova',
+          version: '1.0.0',
+          personaFingerprint: 'fp-foreign',
+        },
+      }),
+    ).rejects.toThrow(
+      'Role-model characterRef id must match the decision-context character.',
+    );
+  });
+
   it('keeps records without characterRef decoding as before', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,

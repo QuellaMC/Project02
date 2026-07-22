@@ -356,7 +356,7 @@ describe('runtime log store', () => {
       boundCharacter: testCharacterProfile,
     });
     expect(() => appendNovaTurn(boundStore)()).toThrow(
-      'A custom durable character speaker requires matching role-model character evidence.',
+      'Durable character evidence must match the store-bound character.',
     );
   });
 

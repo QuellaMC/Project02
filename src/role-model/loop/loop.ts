@@ -177,6 +177,15 @@ export const defaultRoleModelMaxToolRounds = 99;
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions,
 ): Promise<RoleModelLoopExecutionResult> {
+  if (
+    options.characterRef !== undefined &&
+    options.characterRef.id !== options.decisionContext.characterSnapshot.id
+  ) {
+    throw new TypeError(
+      'Role-model characterRef id must match the decision-context character.',
+    );
+  }
+
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
   const maxToolRounds = normalizeMaxToolRounds(options.maxToolRounds);
   const identity = createSnapshotIdentity(options.event);
