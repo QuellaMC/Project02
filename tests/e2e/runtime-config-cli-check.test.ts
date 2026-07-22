@@ -1,4 +1,4 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -16,6 +16,33 @@ import {
 } from '../support/runtime-config-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
+  it('rejects check when the character-data root is a symlink', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-root-link-');
+    const outside = createTestTempRoot('project02-config-check-root-target-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(join(outside, 'mira'), {recursive: true});
+    writeRuntimeConfig(join(outside, 'mira', 'config.json'), {
+      project02: {userDisplayName: 'Outside Name'},
+    });
+    symlinkSync(outside, join(storeRoot, 'character-data'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
   it('rejects check when a marker-less data directory holds foreign content', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-foreign-');
     const dataRoot = join(storeRoot, 'character-data', 'mira');

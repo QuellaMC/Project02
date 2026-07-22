@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -251,6 +252,34 @@ describe('character data directories through the durable runtime', () => {
     expect(readCharacterBinding({storeRoot: outside})).toEqual({
       status: 'absent',
     });
+  });
+
+  it('refuses a symlinked data directory even when its target is already stamped', async () => {
+    const homeRoot = createTestTempRoot();
+    const outside = createTestTempRoot();
+
+    // The target carries a matching stamp: trusting it would move
+    // locks and session files outside the selected home.
+    writeFileSync(
+      join(outside, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'mira',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
+    symlinkSync(outside, characterDataDirPath(homeRoot, 'mira'));
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'stamped-symlink-attempt',
+      }),
+    ).rejects.toThrow('is a symlink');
+    expect(existsSync(join(outside, 'sessions.jsonl'))).toBe(false);
+    expect(existsSync(join(outside, '.locks'))).toBe(false);
   });
 
   it('refuses to bind a directory whose data marker names another scope', async () => {

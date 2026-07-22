@@ -2,6 +2,7 @@ import {
   applyRuntimeConfigControlOperation,
   applyRuntimePluginConfigControlOperation,
   applyScopedRuntimeConfigControlOperation,
+  assertGlobalConfigLoadableForCharacterScope,
   assertRuntimeConfigSecretScopeAllowed,
   assertScopedGlobalLayerLoadable,
   assertScopedMutationOperationAllowed,
@@ -25,6 +26,7 @@ import {
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
 import {
+  assertCharacterDataDirAdoptable,
   assertProject02HomeAdoptable,
   evaluateCharacterDataStamp,
   homeRootForCharacterDataDir,
@@ -375,12 +377,18 @@ async function runCharacterScopedRuntimeConfigCommand(
 
   if (command.kind === 'get') {
     assertRuntimeConfigLoaded(startup.loadedConfig);
+
+    // The global fallback comes from the OWNING home even when
+    // --config aliases the overlay itself — and a home that cannot
+    // load rejects the read, exactly like check and scoped writes.
+    const globalLayer = loadScopedGlobalLayerConfig({...location, characterId});
+
+    assertGlobalConfigLoadableForCharacterScope(globalLayer);
+
     return writeCharacterScopedValue({
       stdout: options.stdout,
       target,
-      // The global fallback comes from the OWNING home even when
-      // --config aliases the overlay itself.
-      loadedConfig: loadScopedGlobalLayerConfig({...location, characterId}),
+      loadedConfig: globalLayer,
       path: command.path,
     });
   }
@@ -434,7 +442,9 @@ function writeCharacterScopedValue(options: {
   readonly path: string;
 }): number {
   // The binding holds for reads too: a directory stamped for another
-  // character must not surface its overlay as this character's config.
+  // character must not surface its overlay as this character's config,
+  // and an unadoptable directory (foreign content, symlink, wrong
+  // marker) must not have its overlay reported at all.
   if (options.target.characterScope !== undefined) {
     const stamp = evaluateCharacterDataStamp({
       storageOptions: {storeRoot: options.target.characterScope.dataRoot},
@@ -447,6 +457,10 @@ function writeCharacterScopedValue(options: {
         stamp.message,
       );
     }
+
+    assertCharacterDataDirAdoptable({
+      storeRoot: options.target.characterScope.dataRoot,
+    });
   }
 
   const overlay =

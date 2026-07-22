@@ -256,6 +256,61 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
+  it('rejects a scoped read from an unadoptable unstamped directory', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-read-adopt-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // Unstamped with an overlay AND foreign content: writers refuse
+    // this directory, so a read must not surface its overlay either.
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+  });
+
+  it('rejects a scoped get through an overlay alias while the home cannot load', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-get-invalid-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {
+      project02: {userDisplayName: 'Overlay Name'},
+    });
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      '--config',
+      overlayPath,
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('failed to load');
+  });
+
   it('rejects a scoped read from a directory stamped for another character', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-read-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

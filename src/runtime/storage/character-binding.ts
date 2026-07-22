@@ -7,12 +7,13 @@
  * per-session historical facts, so the stamp carries the id only.
  */
 import {existsSync, lstatSync, readdirSync, readFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {basename, dirname, join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {atomicReplaceFile} from './atomic-file.ts';
 import {
   characterBindingFileName,
+  characterDataDirectoryName,
   createLocalRuntimeStorageLayout,
   decodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
@@ -139,6 +140,28 @@ export function assertCharacterDataDirAdoptable(
     );
   }
 
+  // The character-data ROOT must be real too: a symlinked root would
+  // resolve every per-character directory outside the home at once.
+  const parentRoot = dirname(layout.storeRoot);
+
+  if (basename(parentRoot) === characterDataDirectoryName) {
+    let parentStats;
+
+    try {
+      parentStats = lstatSync(parentRoot);
+    } catch {
+      parentStats = undefined;
+    }
+
+    if (parentStats?.isSymbolicLink() === true) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Character data root "${parentRoot}" is a symlink; character ` +
+          'data must live inside the home.',
+      );
+    }
+  }
+
   if (existsSync(layout.schemaPath)) {
     const marker = decodeStorageSchemaMarker(
       readFileSync(layout.schemaPath, 'utf8'),
@@ -198,6 +221,12 @@ export async function ensureCharacterDataStamp(options: {
   readonly characterId: string;
   readonly now?: () => string;
 }): Promise<EnsureCharacterDataStampResult> {
+  // Adoptability first: an existing stamp inside a symlinked or
+  // wrong-scope directory must not be trusted, and the guard runs
+  // before the lock so even the lock root leaves no trace in a
+  // directory this refuses to adopt.
+  assertCharacterDataDirAdoptable(options.storageOptions);
+
   const existing = evaluateCharacterDataStamp(options);
 
   if (existing !== undefined) {
@@ -205,10 +234,6 @@ export async function ensureCharacterDataStamp(options: {
   }
 
   const layout = createLocalRuntimeStorageLayout(options.storageOptions);
-
-  // Before the lock so even the lock root leaves no trace in a
-  // directory this refuses to adopt.
-  assertCharacterDataDirAdoptable(options.storageOptions);
 
   const lock = await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
