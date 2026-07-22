@@ -62,6 +62,7 @@ export {
   type EnsureCharacterDataDirResult,
 } from './character-data-init.ts';
 export {
+  loadScopedGlobalLayerConfig,
   assertGlobalConfigLoadableForCharacterScope,
   assertScopedGlobalLayerLoadable,
   assertScopedMutationOperationAllowed,

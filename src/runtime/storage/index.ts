@@ -48,6 +48,7 @@ export {
   type DurableSessionSelection,
 } from './durable-session-bootstrap.ts';
 export {
+  assertCharacterDataDirAdoptable,
   characterBindingFileName,
   characterBindingFormat,
   characterBindingPath,

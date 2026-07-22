@@ -16,6 +16,36 @@ import {
 } from '../support/runtime-config-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
+  it('rejects check when a marker-less data directory holds foreign content', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-foreign-');
+    const dataRoot = join(storeRoot, 'character-data', 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // An unstamped directory with an overlay AND foreign content: the
+    // first durable run would refuse it, so check must not report its
+    // overlay as the effective config.
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
   it('rejects check when the data directory is stamped for another character', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-stamp-');
     const dataRoot = join(storeRoot, 'character-data', 'mira');

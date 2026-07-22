@@ -1,4 +1,10 @@
-import {mkdirSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -12,6 +18,8 @@ import {
   characterBindingPath,
   characterDataDirPath,
   createDurableChatRuntime,
+  createLocalRuntimeStorageSchemaMarker,
+  encodeStorageSchemaMarker,
   ensureCharacterDataStamp,
   readCharacterBinding,
 } from '../../src/runtime/storage/index.ts';
@@ -221,6 +229,52 @@ describe('character data directories through the durable runtime', () => {
         newSessionId: 'adoption-attempt',
       }),
     ).rejects.toThrow('without a data marker');
+    expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
+      status: 'absent',
+    });
+  });
+
+  it('refuses to bind through a symlinked character data directory', async () => {
+    const homeRoot = createTestTempRoot();
+    const outside = createTestTempRoot();
+
+    mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
+    symlinkSync(outside, characterDataDirPath(homeRoot, 'mira'));
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'symlink-attempt',
+      }),
+    ).rejects.toThrow('is a symlink');
+    expect(readCharacterBinding({storeRoot: outside})).toEqual({
+      status: 'absent',
+    });
+  });
+
+  it('refuses to bind a directory whose data marker names another scope', async () => {
+    const homeRoot = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'schema.json'),
+      `${encodeStorageSchemaMarker(
+        createLocalRuntimeStorageSchemaMarker({
+          scope: 'home',
+          createdAt: '2026-07-23T00:00:00.000Z',
+        }),
+      )}\n`,
+    );
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'wrong-scope-attempt',
+      }),
+    ).rejects.toThrow('not a character data directory');
     expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
       status: 'absent',
     });

@@ -1,4 +1,5 @@
 import {
+  composeRuntimePluginCatalog,
   createRuntimePluginCatalogSnapshot,
   prepareConfiguredProject02PluginActivation,
   type PreparedProject02PluginActivationPlan,
@@ -36,6 +37,7 @@ import {existsSync} from 'node:fs';
 
 import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {
+  assertCharacterDataDirAdoptable,
   characterDataDirPath,
   evaluateCharacterDataStamp,
   LocalRuntimeStorageContractError,
@@ -242,6 +244,28 @@ async function resolveRuntimeCliActivationStartup(input: {
     });
   }
 
+  // An invalid pre-existing overlay must not create durable state
+  // either: read it before the home marker, stamp, or seed would be
+  // written. Materialization may create the overlay afterwards, so
+  // the post-materialize load below stays authoritative.
+  const preexistingOverlay = loadCharacterOverlayForStartup({
+    loadedConfig,
+    location,
+  });
+
+  if (
+    preexistingOverlay !== undefined &&
+    diagnosticsHaveErrors(preexistingOverlay.diagnostics)
+  ) {
+    const invalidState = buildPreEnvState(preexistingOverlay);
+
+    return Object.freeze({
+      ...invalidState.base,
+      status: 'config_invalid',
+      activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
+    });
+  }
+
   if (options.dataDir === 'materialize') {
     const failure = await materializeCharacterDataDir({
       homeRoot,
@@ -331,9 +355,11 @@ function installedManifestsForSeedValidation(input: {
   readonly location: RuntimeLocationCliState;
 }): readonly RuntimePluginManifest[] {
   if (input.options.factories !== undefined) {
-    return Object.values(input.options.factories).map(
-      definition => definition.manifest,
-    );
+    // The composed catalog, not the raw factories: host-owned service
+    // manifests join the set exactly as they will during activation.
+    return Object.values(
+      composeRuntimePluginCatalog(input.options.factories).catalogEntries,
+    ).map(entry => entry.manifest);
   }
 
   return Object.values(
@@ -481,6 +507,11 @@ function loadCharacterOverlayForStartup(options: {
       stamp.message,
     );
   }
+
+  // Same adoptability rules the writers enforce: an unstamped
+  // directory with foreign content, a symlinked data root, or a
+  // wrong-scope marker must not have its overlay reported as config.
+  assertCharacterDataDirAdoptable({storeRoot: characterScope.dataRoot});
 
   return loadCharacterOverlayForScope(characterScope);
 }

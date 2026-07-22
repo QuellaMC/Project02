@@ -345,6 +345,31 @@ describe('materialization ordering', () => {
   });
 });
 
+describe('materialization ordering for pre-existing overlays', () => {
+  it('reports an invalid pre-existing overlay without creating durable state', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {required: ['demo-config']},
+    });
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'config.json'), '{not json\n');
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      dataDir: 'materialize',
+    });
+
+    expect(startup.status).toBe('config_invalid');
+    // The invalid overlay was read before materialization: no home
+    // marker, no binding stamp, no seed.
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+  });
+});
+
 describe('seed validation against installed manifests', () => {
   it('refuses to persist a seed the installed manifests reject', async () => {
     const homeRoot = homeWithCharacter({
@@ -370,6 +395,30 @@ describe('seed validation against installed manifests', () => {
         ? startup.characterActivation.messages[0]
         : '',
     ).toContain('rejected by the installed plugin manifests');
+    expect(
+      existsSync(
+        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),
+      ),
+    ).toBe(false);
+  });
+
+  it('judges seeds against host-service manifests in factories-injected runs', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {config: {'runtime.plugin': {nope: true}}},
+    });
+
+    // The composed catalog adds host-owned services; a seed carrying an
+    // unknown field for one must fail before materialization, not
+    // later during activation with the invalid overlay left behind.
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      factories: {},
+      dataDir: 'materialize',
+    });
+
+    expect(startup.status).toBe('character_invalid');
     expect(
       existsSync(
         characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),

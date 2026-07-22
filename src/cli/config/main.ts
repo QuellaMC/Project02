@@ -12,6 +12,7 @@ import {
   getRedactedRuntimeConfigValueAtPath,
   inspectRuntimePluginConfig,
   loadCharacterOverlayForScope,
+  loadScopedGlobalLayerConfig,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticAttribution,
   RuntimeConfigMutationError,
@@ -377,7 +378,9 @@ async function runCharacterScopedRuntimeConfigCommand(
     return writeCharacterScopedValue({
       stdout: options.stdout,
       target,
-      loadedConfig: startup.loadedConfig,
+      // The global fallback comes from the OWNING home even when
+      // --config aliases the overlay itself.
+      loadedConfig: loadScopedGlobalLayerConfig({...location, characterId}),
       path: command.path,
     });
   }

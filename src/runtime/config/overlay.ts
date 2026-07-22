@@ -8,7 +8,7 @@
  * 'overlay' — so an overlay can never reach the global resolvers or
  * re-derive a store root from its own path.
  */
-import {existsSync} from 'node:fs';
+import {existsSync, lstatSync} from 'node:fs';
 
 import {
   characterDataDirPath,
@@ -73,6 +73,25 @@ export function loadProject02CharacterOverlayConfig(options: {
     characterId: options.characterId,
     path,
   });
+
+  // The overlay must live inside the stamped data directory: a
+  // symlinked file would let authored settings live outside it.
+  if (lstatSync(path).isSymbolicLink()) {
+    return loadedOverlay({
+      ...options,
+      path,
+      origin,
+      diagnostics: [
+        createRuntimeConfigDiagnostic(
+          'error',
+          'runtime_config_overlay_symlink',
+          `Character overlay "${path}" is a symlink; the overlay must ` +
+            'be a regular file inside the character-data directory.',
+        ),
+      ],
+    });
+  }
+
   const document = readProject02RuntimeConfigDocument(path);
 
   if (document.status === 'rejected') {

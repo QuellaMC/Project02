@@ -439,6 +439,40 @@ describe('overlay files reached through --config directly', () => {
     expect(existsSync(dataRoot)).toBe(false);
   });
 
+  it('reads the owning home global fallback when --config aliases the overlay', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+    });
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {});
+
+    const scopedGet = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      '--config',
+      overlayPath,
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(scopedGet.code).toBe(0);
+    // The overlay omits the field; the fallback must come from the
+    // OWNING home config, not the overlay read as a global layer.
+    expect(JSON.parse(scopedGet.stdout)).toEqual({
+      value: 'Global Name',
+      origin: 'global',
+    });
+  });
+
   it('rejects a non-overlay file inside a character-data directory', async () => {
     const homeRoot = createTestTempRoot('project02-scope-config-flag-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

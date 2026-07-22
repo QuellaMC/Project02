@@ -250,7 +250,7 @@ export function createRuntimePluginCatalogSnapshot(options: {
   } satisfies RuntimePluginCatalogSnapshot);
 }
 
-function composeRuntimePluginCatalog(
+export function composeRuntimePluginCatalog(
   factories: Readonly<Record<string, RuntimePluginFactoryDefinition>>,
 ): {
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;

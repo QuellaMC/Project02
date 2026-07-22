@@ -1,4 +1,4 @@
-import {mkdirSync} from 'node:fs';
+import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -65,6 +65,30 @@ function loadedOverlay(options: {
 }
 
 describe('character overlay config loader', () => {
+  it('rejects a symlinked overlay file with an error diagnostic', () => {
+    const dataRoot = createTestTempRoot('project02-overlay-symlink-');
+    const outside = createTestTempRoot('project02-overlay-symlink-target-');
+    const realConfig = join(outside, 'external.json');
+
+    writeFileSync(realConfig, '{"version":"project02.config.v2"}\n');
+    symlinkSync(realConfig, join(dataRoot, 'config.json'));
+
+    const loaded = loadProject02CharacterOverlayConfig({
+      dataRoot,
+      characterId: 'mira',
+    });
+
+    expect(loaded.config).toBeUndefined();
+    expect(loaded.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_overlay_symlink',
+        }),
+      ]),
+    );
+  });
+
   it('treats an absent overlay file as valid and empty', () => {
     const overlay = loadProject02CharacterOverlayConfig({
       dataRoot: overlayDataRoot(),

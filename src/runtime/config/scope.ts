@@ -357,6 +357,16 @@ function scopedGlobalLayerLocation(
 }
 
 /**
+ * The global layer a scoped read composes against: the OWNING home's
+ * config, even when --config aliases the overlay itself.
+ */
+export function loadScopedGlobalLayerConfig(
+  options: ScopedRuntimeConfigLocation,
+): LoadedProject02RuntimeConfig {
+  return loadProject02RuntimeConfig(scopedGlobalLayerLocation(options));
+}
+
+/**
  * Read-only preflight for CLI verbs: validates the global layer the
  * scoped machinery will actually read (the OWNING home's config, even
  * when --config aliases the overlay), before ensure materializes any

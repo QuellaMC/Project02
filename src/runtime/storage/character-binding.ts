@@ -6,7 +6,7 @@
  * the data dir's mutation lock and never rewritten; display names remain
  * per-session historical facts, so the stamp carries the id only.
  */
-import {existsSync, readdirSync, readFileSync} from 'node:fs';
+import {existsSync, lstatSync, readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -14,8 +14,8 @@ import {atomicReplaceFile} from './atomic-file.ts';
 import {
   characterBindingFileName,
   createLocalRuntimeStorageLayout,
+  decodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
-  type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
 } from './layout-contract.ts';
 import {acquireLocalRuntimeMutationLock} from './mutation-lock.ts';
@@ -99,16 +99,59 @@ export function readCharacterBinding(
 }
 
 /**
- * A marker-less directory may hold only control entries (overlay,
- * binding stamp, lock root) before it is stamped. Anything else is
- * another character's history or a foreign tree: stamping it would
- * adopt that content under a permanent binding. A directory that has
- * a data marker is left to the storage readers, which validate it.
+ * A character data directory is adoptable when it is a real directory
+ * (never a symlink out of the home), its data marker — if present —
+ * decodes to the character-data scope, and a marker-less directory
+ * holds only control entries (overlay, binding stamp, lock root).
+ * Anything else is another character's history or a foreign tree:
+ * stamping or authoring config there would adopt that content under a
+ * permanent binding. Read-only; creates nothing.
  */
-function assertCharacterDataDirAdoptable(
-  layout: LocalRuntimeStorageLayout,
+export function assertCharacterDataDirAdoptable(
+  options: LocalRuntimeStorageLayoutOptions,
 ): void {
-  if (!existsSync(layout.storeRoot) || existsSync(layout.schemaPath)) {
+  const layout = createLocalRuntimeStorageLayout(options);
+  let rootStats;
+
+  try {
+    rootStats = lstatSync(layout.storeRoot);
+  } catch (error: unknown) {
+    // ENOTDIR: an ancestor is not a directory; the storage layer owns
+    // that diagnosis with a more precise error than this guard could.
+    if (
+      isNodeErrorWithCode(error, 'ENOENT') ||
+      isNodeErrorWithCode(error, 'ENOTDIR')
+    ) {
+      return;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Could not inspect character data directory: ${layout.storeRoot}.`,
+    );
+  }
+
+  if (rootStats.isSymbolicLink()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Character data directory "${layout.storeRoot}" is a symlink; ` +
+        'character data must live inside the home.',
+    );
+  }
+
+  if (existsSync(layout.schemaPath)) {
+    const marker = decodeStorageSchemaMarker(
+      readFileSync(layout.schemaPath, 'utf8'),
+    );
+
+    if (marker.scope !== 'character-data') {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_schema_marker',
+        `Directory "${layout.storeRoot}" is a "${marker.scope}" ` +
+          'directory, not a character data directory.',
+      );
+    }
+
     return;
   }
 
@@ -165,7 +208,7 @@ export async function ensureCharacterDataStamp(options: {
 
   // Before the lock so even the lock root leaves no trace in a
   // directory this refuses to adopt.
-  assertCharacterDataDirAdoptable(layout);
+  assertCharacterDataDirAdoptable(options.storageOptions);
 
   const lock = await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
