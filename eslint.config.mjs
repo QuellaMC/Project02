@@ -144,12 +144,14 @@ export default tseslint.config(
     // +3 so the direct activation path derives the character scope and
     // overlay before catalog composition classifies packages, then +5
     // so direct host creation runs the guarded character-data
-    // initializer before any plugin file store is exposed.
+    // initializer before any plugin file store is exposed, then +11 so
+    // the direct path's auto-loaded overlay passes the same read
+    // guards (stamp + adoptability) startup applies.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1211, skipBlankLines: true, skipComments: true},
+        {max: 1222, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -161,10 +163,12 @@ export default tseslint.config(
       // data directory (review round five), then +8 so an overlay
       // path's store resolution names the OWNING home for env writes,
       // then +30 so only the data directory's config.json counts as an
-      // overlay and any other file there is rejected as a target.
+      // overlay and any other file there is rejected as a target, then
+      // +25 so a symlink sitting where an overlay belongs is rejected
+      // as written, before canonicalization can route it elsewhere.
       'max-lines': [
         'error',
-        {max: 1341, skipBlankLines: true, skipComments: true},
+        {max: 1366, skipBlankLines: true, skipComments: true},
       ],
     },
   },
