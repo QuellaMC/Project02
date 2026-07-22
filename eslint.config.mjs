@@ -81,10 +81,13 @@ export default tseslint.config(
       // selecting the configured character id from resolved config, then
       // +13 for the configurable user display name (per-session prompt
       // label, threading into the durable runtime and fallback session),
-      // then +31 for persona/characterRef threading into the turn calls.
+      // then +31 for persona/characterRef threading into the turn calls,
+      // then +8 for the home/character-data split: explicit durable-session
+      // selection (home root, character, user display name) replacing the
+      // runtime-args spread, and home-layout --store validation.
       'max-lines': [
         'error',
-        {max: 1158, skipBlankLines: true, skipComments: true},
+        {max: 1166, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -122,12 +125,15 @@ export default tseslint.config(
   {
     // Re-pinned +2 to inject the plugin reloader capability into the host,
     // then +13 to stamp the plan with its authored-config fingerprint and
-    // hand it to the host as the construction-currency signal recovery uses.
+    // hand it to the host as the construction-currency signal recovery uses,
+    // then +13 for the home/character-data split: deriving the per-character
+    // data root from resolved config and threading it to host construction,
+    // factory inputs, and construction-cleanup contexts.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1147, skipBlankLines: true, skipComments: true},
+        {max: 1160, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -175,10 +181,12 @@ export default tseslint.config(
       // session character is evidence-derived and has no default), +2 for
       // allowlisting the character binding and packages entries in the
       // store-initialization content check, then +5 for threading the
-      // evidence-derived user speaker through rehydration.
+      // evidence-derived user speaker through rehydration, then +11 for
+      // scoped schema markers (scope assertion on read, character-data
+      // scope on init) after the home/data guard split.
       'max-lines': [
         'error',
-        {max: 1014, skipBlankLines: true, skipComments: true},
+        {max: 1025, skipBlankLines: true, skipComments: true},
       ],
     },
   },
