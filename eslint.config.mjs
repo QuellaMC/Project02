@@ -129,12 +129,14 @@ export default tseslint.config(
     // hand it to the host as the construction-currency signal recovery uses,
     // then +13 for the home/character-data split: deriving the per-character
     // data root from resolved config and threading it to host construction,
-    // factory inputs, and construction-cleanup contexts.
+    // factory inputs, and construction-cleanup contexts, then +10 for the
+    // layered flip: one derived character scope and overlay snapshot feeds
+    // the layered resolve, the construction stamp, and the control state.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1160, skipBlankLines: true, skipComments: true},
+        {max: 1170, skipBlankLines: true, skipComments: true},
       ],
     },
   },
