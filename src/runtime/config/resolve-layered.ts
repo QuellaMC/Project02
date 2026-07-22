@@ -26,29 +26,59 @@ import {
 export type ResolveLayeredProject02RuntimeConfigOptions =
   ResolveProject02RuntimeConfigOptions & {
     readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
+    /**
+     * Active character override (e.g. a --character flag): stamped into
+     * the merged document's project02.character so the resolved config
+     * — data root, fingerprint, everything downstream — follows the
+     * flag, not the authored global selection.
+     */
+    readonly characterId?: string;
   };
 
 export function resolveLayeredProject02RuntimeConfig(
   options: ResolveLayeredProject02RuntimeConfigOptions,
 ): ResolvedProject02RuntimeConfig {
-  const {overlayConfig, ...globalOptions} = options;
+  const {overlayConfig, characterId, ...globalOptions} = options;
 
-  // No overlay file and nothing to report: the layered resolve is the
-  // global resolve, fingerprint included.
+  // No overlay file, no override, nothing to report: the layered
+  // resolve is the global resolve, fingerprint included.
   if (
-    overlayConfig === undefined ||
-    (overlayConfig.config === undefined &&
-      overlayConfig.diagnostics.length === 0)
+    (overlayConfig === undefined ||
+      (overlayConfig.config === undefined &&
+        overlayConfig.diagnostics.length === 0)) &&
+    characterId === undefined
   ) {
     return resolveProject02RuntimeConfig(globalOptions);
   }
 
+  const merged =
+    overlayConfig === undefined
+      ? globalOptions.loadedConfig
+      : mergedLoadedConfigForOverlay(globalOptions.loadedConfig, overlayConfig);
+
   return resolveProject02RuntimeConfig({
     ...globalOptions,
-    loadedConfig: mergedLoadedConfigForOverlay(
-      globalOptions.loadedConfig,
-      overlayConfig,
-    ),
+    loadedConfig:
+      characterId === undefined
+        ? merged
+        : withActiveCharacter(merged, characterId),
+  });
+}
+
+function withActiveCharacter(
+  loadedConfig: LoadedProject02RuntimeConfig,
+  characterId: string,
+): LoadedProject02RuntimeConfig {
+  return Object.freeze({
+    ...loadedConfig,
+    config: Object.freeze({
+      version: runtimeConfigVersion,
+      ...loadedConfig.config,
+      project02: Object.freeze({
+        ...loadedConfig.config?.project02,
+        character: characterId,
+      }),
+    } satisfies Project02RuntimeConfig),
   });
 }
 

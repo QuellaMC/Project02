@@ -153,8 +153,11 @@ async function resolveRuntimeCliActivationStartup(input: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): Promise<RuntimeCliStartupResult> {
   const {options, location, loadedConfig} = input;
+  // Precedence: --character flag > configured character > default.
   const activeCharacterId =
-    loadedConfig.config?.project02?.character ?? defaultProject02CharacterId;
+    location.character ??
+    loadedConfig.config?.project02?.character ??
+    defaultProject02CharacterId;
   const homeRoot = resolveProject02RuntimeStoreRoot({
     loadedConfig,
     ...(location.storeRoot === undefined
@@ -345,6 +348,9 @@ function loadCharacterOverlayForStartup(options: {
     ...(options.location.storeRoot === undefined
       ? {}
       : {storeRoot: options.location.storeRoot}),
+    ...(options.location.character === undefined
+      ? {}
+      : {characterId: options.location.character}),
   });
 
   return characterScope === undefined

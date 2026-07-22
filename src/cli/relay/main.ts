@@ -25,6 +25,8 @@ import {
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
 } from '../../plugins/host/index.ts';
+import {parseRuntimeLocationFlag} from '../shared/runtime-location-flags.ts';
+import type {RuntimeLocationCliState} from '../shared/runtime-location-flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
 
 type RelayCliOptions = {
@@ -119,10 +121,12 @@ export async function runConfiguredRelayCli(
   args: readonly string[],
   options: ConfiguredRelayCliOptions,
 ): Promise<number> {
+  const {location, messageArgs} = parseRelayLocationArgs(args);
   let startup: Awaited<ReturnType<typeof resolveRuntimeCliStartup>>;
 
   try {
     startup = await resolveRuntimeCliStartup({
+      location,
       ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
@@ -207,7 +211,7 @@ export async function runConfiguredRelayCli(
   });
 
   try {
-    return await runRelayCli(args, {
+    return await runRelayCli(messageArgs, {
       stdout: options.stdout,
       stderr: options.stderr,
       pluginHost: configuredHost.host,
@@ -234,6 +238,38 @@ function requiredRelayCharacter(
   }
 
   return character;
+}
+
+function parseRelayLocationArgs(args: readonly string[]): {
+  readonly location: RuntimeLocationCliState;
+  readonly messageArgs: readonly string[];
+} {
+  let location: RuntimeLocationCliState = {};
+  const messageArgs: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+
+    if (arg === undefined) {
+      continue;
+    }
+
+    const locationResult = parseRuntimeLocationFlag({
+      args,
+      index,
+      state: location,
+    });
+
+    if (locationResult.status === 'matched') {
+      location = locationResult.state;
+      index = locationResult.nextIndex;
+      continue;
+    }
+
+    messageArgs.push(arg);
+  }
+
+  return {location, messageArgs};
 }
 
 function readMessageArg(args: readonly string[]): string {

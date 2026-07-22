@@ -60,11 +60,13 @@ type InspectCliArgs =
       readonly mode: 'sessions';
       readonly storeRoot?: string;
       readonly configPath?: string;
+      readonly character?: string;
     }
   | {
       readonly mode: 'session';
       readonly storeRoot?: string;
       readonly configPath?: string;
+      readonly character?: string;
       readonly sessionId: string;
     };
 
@@ -235,6 +237,9 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       ...(location.configPath === undefined
         ? {}
         : {configPath: location.configPath}),
+      ...(location.character === undefined
+        ? {}
+        : {character: location.character}),
     } satisfies InspectCliArgs;
   }
 
@@ -251,6 +256,9 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     ...(location.configPath === undefined
       ? {}
       : {configPath: location.configPath}),
+    ...(location.character === undefined
+      ? {}
+      : {character: location.character}),
   } satisfies InspectCliArgs;
 }
 

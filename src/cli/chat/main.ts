@@ -120,6 +120,7 @@ type ChatCliArgs = {
   readonly provider?: ChatProviderName;
   readonly storeRoot?: string;
   readonly configPath?: string;
+  readonly character?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
 };
@@ -1274,6 +1275,9 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   return {
     traceMode,
     ...providerOption(provider),
+    ...(location.character === undefined
+      ? {}
+      : {character: location.character}),
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),

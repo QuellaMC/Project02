@@ -332,10 +332,15 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
   // One character scope and one overlay snapshot feed the layered
   // resolve, the construction stamp, and the control state, so every
-  // downstream fingerprint site composes the same pair of documents.
+  // downstream fingerprint site composes the same pair of documents. A
+  // supplied overlay is the scope authority: its character id may be a
+  // flag override the loaded config knows nothing about.
   const characterScope = deriveRuntimeConfigCharacterScope({
     loadedConfig: options.loadedConfig,
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    ...(options.overlayConfig === undefined
+      ? {}
+      : {characterId: options.overlayConfig.characterId}),
   });
   const overlayConfig =
     options.overlayConfig ??
@@ -345,6 +350,9 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const resolvedConfig = resolveLayeredProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
     ...(overlayConfig === undefined ? {} : {overlayConfig}),
+    ...(options.overlayConfig === undefined
+      ? {}
+      : {characterId: options.overlayConfig.characterId}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests,
     defaultEnabledPluginIds,
