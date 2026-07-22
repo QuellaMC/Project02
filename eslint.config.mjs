@@ -87,10 +87,11 @@ export default tseslint.config(
       // runtime-args spread, and home-layout --store validation, then +4
       // for character-origin attribution on config diagnostics, then +5
       // for consuming startup's shared character activation and its
-      // character_invalid status, then +3 for the --character flag.
+      // character_invalid status, then +3 for the --character flag, then
+      // +1 to validate session args before startup materializes state.
       'max-lines': [
         'error',
-        {max: 1178, skipBlankLines: true, skipComments: true},
+        {max: 1179, skipBlankLines: true, skipComments: true},
       ],
     },
   },
