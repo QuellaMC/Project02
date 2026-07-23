@@ -15,7 +15,11 @@ import {
   LocalRuntimeSessionStoreError,
   type LocalRuntimeSessionConversationEvidence,
 } from './session-store.ts';
-import {characterDataDirPath} from './layout-contract.ts';
+import {
+  characterDataDirPath,
+  createProject02HomeLayout,
+} from './layout-contract.ts';
+import {assertCharacterDataDirAdoptable} from './character-binding.ts';
 import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
 import {ensureCharacterDataStamp} from './character-binding.ts';
@@ -43,6 +47,18 @@ export async function createDurableChatRuntime(
   const sessionId = normalizeLocalRuntimeSessionId(
     args.newSessionId ?? args.sessionId,
   );
+  // Preflight the data directory before the home initializer writes
+  // the home marker: a rejected bootstrap must not leave durable home
+  // state behind.
+  assertCharacterDataDirAdoptable({
+    storeRoot: characterDataDirPath(
+      createProject02HomeLayout(
+        args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot},
+      ).homeRoot,
+      args.character.id,
+    ),
+  });
+
   const home = await ensureInitializedProject02Home(
     args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot},
   );

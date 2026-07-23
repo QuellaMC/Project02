@@ -374,11 +374,10 @@ async function runCharacterScopedRuntimeConfigCommand(
   }
 
   if (command.kind === 'get') {
-    assertRuntimeConfigLoaded(startup.loadedConfig);
-
     // The global fallback comes from the OWNING home even when
     // --config aliases the overlay itself — and a home that cannot
-    // load rejects the read, exactly like check and scoped writes.
+    // load rejects the read, exactly like check and scoped writes. An
+    // absent overlay is fine: it simply contributes no character layer.
     const globalLayer = loadScopedGlobalLayerConfig({...location, characterId});
 
     assertGlobalConfigLoadableForCharacterScope(globalLayer);
@@ -395,10 +394,12 @@ async function runCharacterScopedRuntimeConfigCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
-  // Dialect violations and a broken global layer fail before ensure
-  // materializes the stamp or data marker for the character.
+  // Dialect violations, a broken global layer, and an existing invalid
+  // overlay all fail before ensure materializes the stamp or data
+  // marker for the character.
   assertScopedMutationOperationAllowed(command.operation);
   assertScopedGlobalLayerLoadable({...location, characterId});
+  assertExistingOverlayLoadable(target);
   await ensureCharacterScopedMutationTarget(target);
 
   const result = applyScopedRuntimeConfigControlOperation({
@@ -491,6 +492,30 @@ function writeCharacterScopedValue(options: {
  * foreign --store directory or a copied data dir must be rejected
  * before any config lands in it.
  */
+/**
+ * An existing overlay that cannot load rejects the scoped edit before
+ * ensure materializes anything; the mutation would only fail on it
+ * afterwards, leaving a fresh stamp behind for a rejected change.
+ */
+function assertExistingOverlayLoadable(
+  target: ResolvedRuntimeConfigScopeTarget,
+): void {
+  if (target.characterScope === undefined) {
+    return;
+  }
+
+  const overlay = loadCharacterOverlayForScope(target.characterScope);
+  const overlayError = overlay.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (overlayError !== undefined) {
+    throw new RuntimeConfigCliUsageError(
+      `${runtimeConfigDiagnosticAttribution(overlayError)}${overlayError.message}`,
+    );
+  }
+}
+
 async function ensureCharacterScopedMutationTarget(
   target: ResolvedRuntimeConfigScopeTarget,
 ): Promise<void> {

@@ -30,6 +30,10 @@ const seedBlockingDiagnosticCodes = new Set([
   'runtime_config_value_type_invalid',
   'runtime_config_secret_ref_for_non_secret',
   'runtime_config_plaintext_secret_rejected',
+  // Reserved control env vars are manifest-independent shape errors
+  // too: a seed referencing one would block activation the moment the
+  // overlay lands.
+  'runtime_config_reserved_control_env_var',
 ]);
 
 /**

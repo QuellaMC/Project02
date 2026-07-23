@@ -49,6 +49,26 @@ export function readCharacterBinding(
   options: LocalRuntimeStorageLayoutOptions,
 ): CharacterBindingReadResult {
   const path = characterBindingPath(options);
+
+  // The stamp is the permanent binding proof: a symlinked stamp would
+  // let that proof live outside the store and change independently.
+  let stampStats;
+
+  try {
+    stampStats = lstatSync(path);
+  } catch {
+    stampStats = undefined;
+  }
+
+  if (stampStats?.isSymbolicLink() === true) {
+    return Object.freeze({
+      status: 'malformed',
+      message:
+        `Character binding "${path}" is a symlink; the stamp must be a ` +
+        'regular file inside the data directory.',
+    });
+  }
+
   let source: string;
 
   try {
@@ -135,6 +155,13 @@ export function assertCharacterDataDirAdoptable(
           'data must live inside the home.',
       );
     }
+
+    if (parentStats !== undefined && !parentStats.isDirectory()) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Character data root "${parentRoot}" is not a directory.`,
+      );
+    }
   }
 
   let rootStats;
@@ -162,6 +189,13 @@ export function assertCharacterDataDirAdoptable(
       'missing_file',
       `Character data directory "${layout.storeRoot}" is a symlink; ` +
         'character data must live inside the home.',
+    );
+  }
+
+  if (!rootStats.isDirectory()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Character data directory "${layout.storeRoot}" is not a directory.`,
     );
   }
 

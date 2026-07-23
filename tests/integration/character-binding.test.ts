@@ -233,6 +233,9 @@ describe('character data directories through the durable runtime', () => {
     expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
       status: 'absent',
     });
+    // The data dir was preflighted before the home initializer ran:
+    // no home marker was written for the rejected bootstrap.
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
   it('refuses to bind through a symlinked character data directory', async () => {
@@ -252,6 +255,34 @@ describe('character data directories through the durable runtime', () => {
     expect(readCharacterBinding({storeRoot: outside})).toEqual({
       status: 'absent',
     });
+  });
+
+  it('refuses a binding stamp that is only a symlink to an external proof', async () => {
+    const homeRoot = createTestTempRoot();
+    const outside = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeFileSync(
+      join(outside, 'external-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'mira',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    mkdirSync(dataRoot, {recursive: true});
+    symlinkSync(
+      join(outside, 'external-binding.json'),
+      join(dataRoot, 'character-binding.json'),
+    );
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'linked-stamp-attempt',
+      }),
+    ).rejects.toThrow('is a symlink');
   });
 
   it('refuses a data directory whose marker is only a borrowed symlink', async () => {

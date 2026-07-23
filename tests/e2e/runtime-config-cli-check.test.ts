@@ -43,6 +43,29 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('rejects check when the character-data root is a regular file', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-root-file-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeFileSync(join(storeRoot, 'character-data'), 'not a directory\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    // A formatted storage refusal, never a raw ENOTDIR stack trace.
+    expect(stderr).toMatch(/^Error: /);
+  });
+
   it('rejects check for an absent character dir under a symlinked root', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-link-empty-');
     const outside = createTestTempRoot('project02-config-check-link-tgt-');

@@ -5,6 +5,7 @@ import {
   readlinkSync,
   readFileSync,
   realpathSync,
+  rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
@@ -12,6 +13,7 @@ import {
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {applyRuntimeConfigMutation} from '../../src/runtime/config/mutate.ts';
+import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   defaultRuntimeConfigPath,
@@ -39,6 +41,30 @@ const installedSecretFactories = Object.freeze({
 });
 
 describe('runtime config CLI mutation and storage', () => {
+  it('refuses global config writes when an initialized home cannot hold character data', async () => {
+    const storeRoot = createTestTempRoot('project02-config-home-data-file-');
+    let stderr = '';
+
+    await ensureInitializedProject02Home({homeRoot: storeRoot});
+    rmSync(join(storeRoot, 'character-data'), {recursive: true});
+    writeFileSync(join(storeRoot, 'character-data'), 'not a directory\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.userDisplayName', 'Bob'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
   it('refuses to author global config into a home the runtime would not adopt', async () => {
     const storeRoot = createTestTempRoot('project02-config-foreign-home-');
     let stderr = '';

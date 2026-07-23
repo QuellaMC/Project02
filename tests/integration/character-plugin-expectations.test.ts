@@ -12,6 +12,7 @@ import type {CharacterPluginExpectations} from '../../src/characters/index.ts';
 import {
   applyScopedRuntimeConfigControlOperation,
   characterOverlayConfigPath,
+  runtimeConfigEnvVarName,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
 import {
@@ -395,6 +396,30 @@ describe('seed validation against installed manifests', () => {
         ? startup.characterActivation.messages[0]
         : '',
     ).toContain('rejected by the installed plugin manifests');
+    expect(
+      existsSync(
+        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a seed that references a reserved control env var', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {
+        config: {'demo-config': {apiKey: {$env: runtimeConfigEnvVarName}}},
+      },
+    });
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      dataDir: 'materialize',
+    });
+
+    // The reserved-ref seed must fail before the overlay lands, not
+    // block activation forever afterwards.
+    expect(startup.status).toBe('character_invalid');
     expect(
       existsSync(
         characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),

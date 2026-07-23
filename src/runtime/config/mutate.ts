@@ -16,7 +16,10 @@ import {
   createProject02HomeLayout,
   homeRootForCharacterDataDir,
 } from '../storage/layout-contract.ts';
-import {readCharacterBinding} from '../storage/character-binding.ts';
+import {
+  assertCharacterDataDirAdoptable,
+  readCharacterBinding,
+} from '../storage/character-binding.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -504,6 +507,12 @@ export function assertOverlayLocatedTargetIsInitialized(
 ): void {
   const dataRoot = dirname(canonicalConfigPath);
   const directoryCharacterId = basename(dataRoot);
+
+  // The stamp alone is not enough: the directory must also pass the
+  // full adoptability rules (real directory, honest marker), or the
+  // write would land in a store durable startup refuses.
+  assertCharacterDataDirAdoptable({storeRoot: dataRoot});
+
   const read = readCharacterBinding({storeRoot: dataRoot});
 
   if (
@@ -571,27 +580,35 @@ function assertSelectedOverlayShapedPathIsNotSymlink(
   displayConfigPath: string,
 ): void {
   const writtenPath = resolve(displayConfigPath);
-  let stats;
-
-  try {
-    stats = lstatSync(writtenPath);
-  } catch {
-    return;
-  }
-
-  if (!stats.isSymbolicLink()) {
-    return;
-  }
-
   const containingDirectory = dirname(writtenPath);
   const isDataLocation =
     basename(dirname(containingDirectory)) === characterDataDirectoryName ||
     existsSync(join(containingDirectory, characterBindingFileName));
 
-  if (isDataLocation) {
+  if (!isDataLocation) {
+    return;
+  }
+
+  // Every level judged as written: the overlay file, its directory,
+  // and the character-data root. Any symlink among them would let
+  // canonicalization route the write outside the home.
+  const symlinkedComponent = [
+    writtenPath,
+    containingDirectory,
+    dirname(containingDirectory),
+  ].find(component => {
+    try {
+      return lstatSync(component).isSymbolicLink();
+    } catch {
+      return false;
+    }
+  });
+
+  if (symlinkedComponent !== undefined) {
     throw new RuntimeConfigMutationError(
-      `Config file "${writtenPath}" is a symlink inside a character-data ` +
-        'directory; the overlay must be a regular file.',
+      `Config path "${symlinkedComponent}" is a symlink; a character ` +
+        'overlay and its directories must be regular entries inside ' +
+        'the home.',
     );
   }
 }

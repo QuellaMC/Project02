@@ -87,6 +87,11 @@ export async function assertProject02HomeAdoptable(
       `Directory "${layout.homeRoot}" is a "${marker.scope}" directory, not a Project02 home; point --store at the home that contains it.`,
     );
   }
+
+  // An initialized home is only usable if character data can actually
+  // live in it: a file or symlink at the character-data root would be
+  // rejected the moment a writer starts.
+  await assertRealCharacterDataRootIfPresent(layout);
 }
 
 /**
@@ -97,14 +102,23 @@ export async function assertProject02HomeAdoptable(
 async function ensureRealCharacterDataRoot(
   layout: Project02HomeLayout,
 ): Promise<void> {
+  const state = await assertRealCharacterDataRootIfPresent(layout);
+
+  if (state === 'absent') {
+    await mkdir(layout.characterDataRoot, {recursive: true});
+  }
+}
+
+async function assertRealCharacterDataRootIfPresent(
+  layout: Project02HomeLayout,
+): Promise<'absent' | 'present'> {
   let stats;
 
   try {
     stats = await lstat(layout.characterDataRoot);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
-      await mkdir(layout.characterDataRoot, {recursive: true});
-      return;
+      return 'absent';
     }
 
     throw new LocalRuntimeStorageContractError(
@@ -121,6 +135,8 @@ async function ensureRealCharacterDataRoot(
         'the home.',
     );
   }
+
+  return 'present';
 }
 
 async function readProject02HomeMarker(layout: Project02HomeLayout) {

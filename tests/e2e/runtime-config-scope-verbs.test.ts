@@ -345,6 +345,31 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain('holds history for character "nova"');
   });
 
+  it('rejects a scoped edit over an existing invalid overlay before ensure', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-bad-overlay-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(characterOverlayConfigPath(dataRoot), '{not json\n');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    // The invalid overlay failed the edit before ensure: no stamp, no
+    // home marker.
+    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
   it('refuses to bind a character to a marker-less directory holding foreign content', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-adopt-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
@@ -528,6 +553,71 @@ describe('overlay files reached through --config directly', () => {
     expect(scopedGet.code).toBe(0);
     // The overlay omits the field; the fallback must come from the
     // OWNING home config, not the overlay read as a global layer.
+    expect(JSON.parse(scopedGet.stdout)).toEqual({
+      value: 'Global Name',
+      origin: 'global',
+    });
+  });
+
+  it('rejects a symlinked data directory instead of writing its stamped target', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const outside = createTestTempRoot('project02-scope-dir-link-target-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // The external target even carries a matching stamp: following the
+    // link would write character config outside the home.
+    writeFileSync(
+      join(outside, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'mira',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
+    symlinkSync(outside, dataRoot);
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--config',
+      characterOverlayConfigPath(dataRoot),
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(existsSync(join(outside, 'config.json'))).toBe(false);
+  });
+
+  it('reads the global fallback when the aliased overlay is absent', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+    });
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    // No overlay file exists; the aliased get must still fall back to
+    // the owning home instead of failing on the missing selection.
+    const scopedGet = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      '--config',
+      characterOverlayConfigPath(dataRoot),
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(scopedGet.code).toBe(0);
     expect(JSON.parse(scopedGet.stdout)).toEqual({
       value: 'Global Name',
       origin: 'global',
