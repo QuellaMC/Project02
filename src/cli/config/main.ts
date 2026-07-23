@@ -252,6 +252,12 @@ async function runRuntimeConfigDocumentCommand(
     ),
   };
 
+  // Reads and writes alike treat a --store selection as a home; a
+  // directory the runtime would not adopt is refused before any value
+  // is reported or written. Standalone --config and env-selected
+  // paths keep their file semantics.
+  await assertCommandHomeAdoptable(parsed.location, startup.configEnv);
+
   if (parsed.command.kind === 'path') {
     options.stdout.write(
       `${
@@ -289,8 +295,6 @@ async function runRuntimeConfigDocumentCommand(
   if (parsed.command.kind === 'check' || parsed.command.kind === 'secret_set') {
     throw new TypeError('Runtime config command routing drifted.');
   }
-
-  await assertCommandHomeAdoptable(parsed.location, startup.configEnv);
 
   const result = applyRuntimeConfigControlOperation({
     ...parsed.location,
@@ -381,7 +385,13 @@ async function runCharacterScopedRuntimeConfigCommand(
     // character layer.
     await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
 
-    const globalLayer = loadScopedGlobalLayerConfig({...location, characterId});
+    const globalLayer = loadScopedGlobalLayerConfig({
+      ...location,
+      characterId,
+      ...(target.characterScope === undefined
+        ? {}
+        : {characterScope: target.characterScope}),
+    });
 
     assertGlobalConfigLoadableForCharacterScope(globalLayer);
 
@@ -401,14 +411,26 @@ async function runCharacterScopedRuntimeConfigCommand(
   // overlay all fail before ensure materializes the stamp or data
   // marker for the character.
   assertScopedMutationOperationAllowed(command.operation);
-  assertScopedGlobalLayerLoadable({...location, characterId});
+  assertScopedGlobalLayerLoadable({
+    ...location,
+    characterId,
+    ...(target.characterScope === undefined
+      ? {}
+      : {characterScope: target.characterScope}),
+  });
   assertExistingOverlayLoadable(target);
   await ensureCharacterScopedMutationTarget(target);
 
+  // The resolved scope rides along explicitly: with only an overlay
+  // --config and no global file yet, a fresh derivation inside the
+  // apply would fall back to the default home and miss this target.
   const result = applyScopedRuntimeConfigControlOperation({
     ...location,
     scope: 'character',
     characterId,
+    ...(target.characterScope === undefined
+      ? {}
+      : {characterScope: target.characterScope}),
     operation: command.operation,
   });
 

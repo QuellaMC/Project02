@@ -5,7 +5,8 @@ import {
   deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
-  loadProject02RuntimeConfig,
+  loadScopedGlobalLayerConfig,
+  type RuntimeConfigDiagnostic,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
 } from '../../runtime/config/index.ts';
@@ -78,15 +79,14 @@ export async function runRuntimeConfigConsole(
   }
 }
 
-function loadConsoleSnapshot(
-  context: RuntimeConfigConsoleContext,
-): RuntimeConfigConsoleSnapshot {
-  const loaded = loadProject02RuntimeConfig({
-    ...runtimeConfigLocation(context),
-    ...(context.env === undefined ? {} : {env: context.env}),
-  });
-  let blockingDiagnostic: (typeof loaded.diagnostics)[number] | undefined;
-  const diagnostics: (typeof loaded.diagnostics)[number][] = [];
+function consoleLoadDiagnostics(loaded: {
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+}): {
+  readonly diagnostics: RuntimeConfigDiagnostic[];
+  readonly blockingDiagnostic: RuntimeConfigDiagnostic | undefined;
+} {
+  let blockingDiagnostic: RuntimeConfigDiagnostic | undefined;
+  const diagnostics: RuntimeConfigDiagnostic[] = [];
 
   for (const diagnostic of loaded.diagnostics) {
     if (diagnostic.code !== 'runtime_config_missing') {
@@ -101,6 +101,24 @@ function loadConsoleSnapshot(
       blockingDiagnostic = diagnostic;
     }
   }
+
+  return {diagnostics, blockingDiagnostic};
+}
+
+function loadConsoleSnapshot(
+  context: RuntimeConfigConsoleContext,
+): RuntimeConfigConsoleSnapshot {
+  // The owning home's global layer, even when --config aliases the
+  // overlay itself: the snapshot's fingerprint must compose the same
+  // pair of documents the commit path verifies against.
+  const loaded = loadScopedGlobalLayerConfig({
+    ...runtimeConfigLocation(context),
+    ...(context.env === undefined ? {} : {env: context.env}),
+    ...(context.character === undefined
+      ? {}
+      : {characterId: context.character}),
+  });
+  const {diagnostics, blockingDiagnostic} = consoleLoadDiagnostics(loaded);
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(

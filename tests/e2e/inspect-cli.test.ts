@@ -764,6 +764,45 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('holds history for character "nova"');
   });
 
+  it('composes the owning home when --config aliases an absent overlay', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-alias-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Home Name'},
+    });
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    // The overlay path is the selection, but no overlay exists: the
+    // global layer must come from the owning home instead of failing
+    // on the missing file.
+    const exitCode = await runInspectCliFromArgs(
+      [
+        '--store',
+        storeRoot,
+        '--character',
+        'mira',
+        '--config',
+        join(dataRoot, 'config.json'),
+        '--sessions',
+      ],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({sessions: []});
+  });
+
   it('lists no sessions for a data directory holding only control state', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-control-only-');
     let stdout = '';

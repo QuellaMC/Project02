@@ -108,6 +108,30 @@ describe('runtime config CLI mutation and storage', () => {
     expect(readFileSync(targetPath, 'utf8')).toBe('');
   });
 
+  it('refuses to read config values from a home the runtime would not adopt', async () => {
+    const storeRoot = createTestTempRoot('project02-config-foreign-read-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'get', 'project02.userDisplayName'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
   it('refuses global writes when the home lock root is a symlink', async () => {
     const storeRoot = createTestTempRoot('project02-config-home-lock-link-');
     const outside = createTestTempRoot('project02-config-lock-target-');

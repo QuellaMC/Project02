@@ -606,6 +606,38 @@ describe('overlay files reached through --config directly', () => {
     expect(existsSync(dataRoot)).toBe(false);
   });
 
+  it('applies a scoped write selected only by the overlay path', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-only-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    // No --store and no global config.json: the owning home derives
+    // from the overlay path alone, and the resolved scope must ride
+    // into the apply instead of a fresh default-home derivation.
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {});
+
+    const set = await runConfigCli([
+      '--character',
+      'mira',
+      '--config',
+      overlayPath,
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(set.code).toBe(0);
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: 'project02.config.v2',
+      project02: {userDisplayName: 'Bob'},
+    });
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
+  });
+
   it('reads the owning home global fallback when --config aliases the overlay', async () => {
     const homeRoot = createTestTempRoot('project02-scope-config-flag-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

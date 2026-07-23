@@ -6,7 +6,10 @@ import {describe, expect, it} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {ensureConsoleCommitTarget} from '../../src/cli/config/console-shared.ts';
-import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  characterDataDirPath,
+  ensureCharacterDataStamp,
+} from '../../src/runtime/storage/index.ts';
 import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
 import type {RuntimePlugin} from '../../src/plugins/api/types.ts';
 import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
@@ -58,6 +61,51 @@ describe('runtime config console UI', () => {
     ).rejects.toThrow();
     expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('saves a scoped edit when --config aliases the overlay', async () => {
+    const homeRoot = createTestTempRoot('project02-console-alias-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = join(dataRoot, 'config.json');
+    let stdout = '';
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {roleModelProvider: 'local'},
+    });
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {});
+
+    // The snapshot must fingerprint the owning home's global layer +
+    // the overlay — the same pair the commit verifies — or the save
+    // would conflict without any concurrent edit.
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      [
+        '--store',
+        homeRoot,
+        '--character',
+        'mira',
+        '--config',
+        overlayPath,
+        'ui',
+      ],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {},
+        prompt: scriptedPrompt(['1', '3', '1', 'Aliased Name', '1']),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Saved project02.userDisplayName.');
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toMatchObject({
+      project02: {userDisplayName: 'Aliased Name'},
+    });
   });
 
   it('exits cleanly when the default prompt reaches stdin EOF', async () => {

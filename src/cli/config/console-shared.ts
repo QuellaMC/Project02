@@ -106,6 +106,7 @@ export async function ensureConsoleCommitTarget(
     ...runtimeConfigLocation(context),
     ...(context.env === undefined ? {} : {env: context.env}),
     characterId: characterScope.characterId,
+    characterScope,
   });
 
   const overlay = loadCharacterOverlayForScope(characterScope);
