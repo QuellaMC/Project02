@@ -41,7 +41,6 @@ import {
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
 import {
-  assertCharacterDataDirReadable,
   assertProject02HomeAdoptable,
   ensureCharacterDataDir,
   LocalRuntimeStorageContractError,
@@ -671,15 +670,10 @@ function loadCharacterOverlayForStartup(options: {
     return undefined;
   }
 
-  // The marker and adoptability rules hold for read-only startups too:
-  // a data directory marked for another character, holding
-  // foreign content, or reached through a symlink must fail check and
-  // inspect exactly as durable materialization does.
-  assertCharacterDataDirReadable({
-    storageOptions: {storeRoot: characterScope.dataRoot},
-    characterId: characterScope.characterId,
-  });
-
+  // The guarded loader holds the marker and adoptability rules for
+  // read-only startups too: a data directory marked for another
+  // character, holding foreign content, or reached through a symlink
+  // fails check and inspect exactly as durable materialization does.
   return loadCharacterOverlayForScope(characterScope);
 }
 

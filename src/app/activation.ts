@@ -1,5 +1,4 @@
 import {
-  assertCharacterDataDirReadable,
   createProject02HomeLayout,
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
@@ -49,7 +48,6 @@ import {
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeConfig,
-  type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
   type RuntimePluginConfigActivationInspectShape,
 } from '../runtime/config/index.ts';
@@ -148,22 +146,6 @@ const configuredPluginConstructionCleanupOptions = Object.freeze({
 } satisfies RuntimePluginSessionEndOptions);
 const selectedAsDefaultMemoryProviderReason =
   'selected_as_default_memory_provider';
-/**
- * The direct activation path loads the overlay with the same read
- * guards startup uses: a mismatched marker or unadoptable directory
- * must not have its overlay reported as this character's config.
- * A supplied overlay skips this — its provider already guarded it.
- */
-function guardedOverlayForScope(
-  characterScope: RuntimeConfigCharacterScope,
-): LoadedProject02CharacterOverlayConfig {
-  assertCharacterDataDirReadable({
-    storageOptions: {storeRoot: characterScope.dataRoot},
-    characterId: characterScope.characterId,
-  });
-
-  return loadCharacterOverlayForScope(characterScope);
-}
 
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -323,7 +305,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     options.overlayConfig ??
     (characterScope === undefined
       ? undefined
-      : guardedOverlayForScope(characterScope));
+      : loadCharacterOverlayForScope(characterScope));
   const composition = activationCatalogComposition({
     ...options,
     ...(overlayConfig === undefined ? {} : {overlayConfig}),

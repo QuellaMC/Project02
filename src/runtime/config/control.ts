@@ -8,9 +8,10 @@ import {
 } from './mutate.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import {existsSync} from 'node:fs';
-import {dirname} from 'node:path';
+import {basename, dirname, resolve} from 'node:path';
 
 import {
+  characterDataDirectoryName,
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
@@ -79,6 +80,41 @@ export function applyGlobalRuntimeConfigControlMutation(options: {
             ...options,
             expectedFingerprint: options.expectedFingerprint,
           });
+
+    // The layered verify above reads the overlay through the guarded
+    // loader. Without an expectation nothing has checked the active
+    // character's data directory yet, and the result fingerprint reads
+    // its overlay only after the write commits — so a rebound or
+    // unreadable directory must fail the mutation before the write.
+    // A selection inside a character-data directory is the aliased
+    // overlay flow instead: the mutation machinery owns its precise
+    // marker and symlink rejections there.
+    if (layered === undefined) {
+      const loadedConfig = loadProject02RuntimeConfig({
+        ...(options.configPath === undefined
+          ? {}
+          : {configPath: options.configPath}),
+        ...(options.env === undefined ? {} : {env: options.env}),
+        ...(options.storeRoot === undefined
+          ? {}
+          : {storeRoot: options.storeRoot}),
+      });
+      const selectedPath =
+        loadedConfig.path ??
+        options.configPath ??
+        defaultRuntimeConfigPath(options.storeRoot);
+      const preWriteScope = selectedPathIsOverlayShapedAsWritten(selectedPath)
+        ? undefined
+        : controlCharacterScope(loadedConfig, options);
+
+      if (preWriteScope !== undefined) {
+        assertCharacterDataDirReadable({
+          storageOptions: {storeRoot: preWriteScope.dataRoot},
+          characterId: preWriteScope.characterId,
+        });
+      }
+    }
+
     const result = applyRuntimeConfigMutation({
       ...(options.configPath === undefined
         ? {}
@@ -118,6 +154,16 @@ export function applyGlobalRuntimeConfigControlMutation(options: {
       }),
     });
   });
+}
+
+// Judged AS WRITTEN (not symlink-canonicalized), matching the mutation
+// machinery's own overlay-shape classification: a symlink sitting where
+// an overlay belongs must reach its precise rejection, not a scope
+// guard's generic one.
+function selectedPathIsOverlayShapedAsWritten(selectedPath: string): boolean {
+  const written = resolve(selectedPath.trim());
+
+  return basename(dirname(dirname(written))) === characterDataDirectoryName;
 }
 
 /**
@@ -280,17 +326,9 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const characterScope = controlCharacterScope(loadedConfig, options);
-
-  // The identity and adoptability rules hold for control reads too: a
-  // data directory rebound to another character must not feed its
-  // overlay into model-visible plugin config.
-  if (characterScope !== undefined) {
-    assertCharacterDataDirReadable({
-      storageOptions: {storeRoot: characterScope.dataRoot},
-      characterId: characterScope.characterId,
-    });
-  }
-
+  // The guarded overlay loader enforces the identity and adoptability
+  // rules for control reads too: a data directory rebound to another
+  // character must not feed its overlay into model-visible config.
   const overlayConfig =
     characterScope === undefined
       ? undefined

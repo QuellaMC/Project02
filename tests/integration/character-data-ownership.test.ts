@@ -27,6 +27,11 @@ import {
   requireCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 import {acquireLocalRuntimeMutationLock} from '../../src/runtime/storage/mutation-lock.ts';
+import {
+  applyRuntimeConfigControlOperation,
+  resolveRuntimeConfigScopeTarget,
+} from '../../src/runtime/config/index.ts';
+import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 
 const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
@@ -292,6 +297,83 @@ describe('character data ownership marker', () => {
 
     await initializationRejection;
     expect(existsSync(layout.schemaPath)).toBe(false);
+  });
+});
+
+describe('layered config control against a rebound character-data directory', () => {
+  function homeWithForeignMiraDataDir(): {
+    readonly homeRoot: string;
+    readonly configPath: string;
+  } {
+    const homeRoot = createTestTempRoot();
+    const configPath = join(homeRoot, 'config.json');
+
+    writeRuntimeConfig(configPath, {
+      project02: {storeRoot: homeRoot, character: 'mira'},
+    });
+
+    // Simulate a copied/renamed directory: mira's data dir claims nova
+    // and carries nova's overlay.
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('nova'));
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      plugins: {demo_config: {enabled: true}},
+    });
+
+    return {homeRoot, configPath};
+  }
+
+  it('refuses a global mutation instead of fingerprinting the foreign overlay', () => {
+    const {homeRoot, configPath} = homeWithForeignMiraDataDir();
+    const target = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'global',
+    });
+    const configBefore = readFileSync(configPath, 'utf8');
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Probe',
+          },
+        },
+      }),
+    ).toThrow(expect.objectContaining({code: 'character_identity_mismatch'}));
+    expect(readFileSync(configPath, 'utf8')).toBe(configBefore);
+  });
+
+  it('refuses a layered expectation before comparing fingerprints', () => {
+    const {homeRoot, configPath} = homeWithForeignMiraDataDir();
+    const target = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'global',
+    });
+    const configBefore = readFileSync(configPath, 'utf8');
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target,
+        expectedFingerprint: 'sha256:not-even-compared',
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Probe',
+          },
+        },
+      }),
+    ).toThrow(expect.objectContaining({code: 'character_identity_mismatch'}));
+    expect(readFileSync(configPath, 'utf8')).toBe(configBefore);
   });
 });
 

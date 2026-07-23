@@ -14,6 +14,7 @@ import {
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
 } from '../storage/layout-contract.ts';
+import {assertCharacterDataDirReadable} from '../storage/character-data.ts';
 import {
   createRuntimeConfigDiagnostic,
   withRuntimeConfigDiagnosticOrigin,
@@ -202,9 +203,22 @@ export function deriveRuntimeConfigCharacterScope(options: {
   }
 }
 
+/**
+ * The one guarded overlay read: wherever a scope's overlay feeds
+ * config, fingerprints, or inspection, the identity and adoptability
+ * rules hold first — a data directory rebound to another character,
+ * holding foreign content, or reached through a symlink must never
+ * have its overlay reported as this character's config. An absent or
+ * marker-less (still adoptable) directory loads as an absent overlay.
+ */
 export function loadCharacterOverlayForScope(
   scope: RuntimeConfigCharacterScope,
 ): LoadedProject02CharacterOverlayConfig {
+  assertCharacterDataDirReadable({
+    storageOptions: {storeRoot: scope.dataRoot},
+    characterId: scope.characterId,
+  });
+
   return loadProject02CharacterOverlayConfig({
     dataRoot: scope.dataRoot,
     characterId: scope.characterId,

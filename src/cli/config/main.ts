@@ -18,7 +18,6 @@ import {
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
 import {
-  assertCharacterDataDirReadable,
   assertProject02HomeAdoptable,
   assertRealHomeEnvFile,
 } from '../../runtime/storage/index.ts';
@@ -628,16 +627,10 @@ function writeCharacterScopedValue(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly path: string;
 }): number {
-  // The identity and adoptability rules hold for reads too: a directory
-  // marked for another character, or one the writers would refuse,
-  // must not have its overlay reported as this character's config.
-  if (options.target.characterScope !== undefined) {
-    assertCharacterDataDirReadable({
-      storageOptions: {storeRoot: options.target.characterScope.dataRoot},
-      characterId: options.target.characterScope.characterId,
-    });
-  }
-
+  // The guarded loader holds the identity and adoptability rules for
+  // reads too: a directory marked for another character, or one the
+  // writers would refuse, must not report its overlay as this
+  // character's config.
   const overlay =
     options.target.characterScope === undefined
       ? undefined
