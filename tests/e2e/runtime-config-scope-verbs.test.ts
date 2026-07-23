@@ -606,6 +606,35 @@ describe('overlay files reached through --config directly', () => {
     expect(existsSync(dataRoot)).toBe(false);
   });
 
+  it('keeps plain file semantics for a standalone overlay --config read', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-plain-config-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Home Name'},
+    });
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {
+      project02: {userDisplayName: 'Overlay Name'},
+    });
+
+    // Without --character, an explicit --config is a plain file
+    // selection: reads and writes target the same file.
+    const get = await runConfigCli([
+      '--config',
+      overlayPath,
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(get.code).toBe(0);
+    expect(JSON.parse(get.stdout)).toBe('Overlay Name');
+  });
+
   it('applies a scoped write selected only by the overlay path', async () => {
     const homeRoot = createTestTempRoot('project02-scope-config-only-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

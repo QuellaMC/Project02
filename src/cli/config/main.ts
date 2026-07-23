@@ -221,6 +221,16 @@ async function runRuntimePluginSecretSetCommand(
 
   await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
 
+  // An explicitly selected config that IS a home's default config.json
+  // derives that home's .env for the secret write; the env file must
+  // be a real in-home file even though the guard above skipped the
+  // explicit selection.
+  const envHome = storeRootForLoadedDefaultConfigPath(startup.loadedConfig);
+
+  if (envHome !== undefined) {
+    await assertRealHomeEnvFile({homeRoot: envHome});
+  }
+
   const result = applyRuntimePluginSecretSetCommand({
     location: parsedArgs.location,
     runtimeEnv:
@@ -448,9 +458,13 @@ async function assertCommandHomeAdoptable(
   location: RuntimeLocationCliState,
   configEnv: NodeJS.ProcessEnv,
 ): Promise<void> {
+  // The env-selected file only governs when nothing narrower does:
+  // with --store supplied, the loader ignores the env var, so the
+  // selected home must still pass the guard.
   if (
     location.configPath !== undefined ||
-    (configEnv[runtimeConfigEnvVarName] ?? '').trim() !== ''
+    (location.storeRoot === undefined &&
+      (configEnv[runtimeConfigEnvVarName] ?? '').trim() !== '')
   ) {
     return;
   }

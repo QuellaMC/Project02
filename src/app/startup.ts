@@ -23,6 +23,7 @@ import {
   diagnosticsHaveErrors,
   ensureCharacterDataDir,
   loadCharacterOverlayForScope,
+  loadProject02RuntimeConfig,
   loadRuntimeConfigEnvFile,
   loadScopedGlobalLayerConfig,
   readDefaultDotEnvFile,
@@ -119,16 +120,20 @@ export function resolveRuntimeCliStartup(
     mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
   const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
-  // The scoped-global-layer load: when --config aliases the character
-  // overlay itself, the global layer comes from the OWNING home and
-  // the overlay composes separately, matching the scoped config verbs.
-  const loadedConfig = loadScopedGlobalLayerConfig({
-    ...location,
-    env: configEnv,
-    ...(location.character === undefined
-      ? {}
-      : {characterId: location.character}),
-  });
+  // The scoped-global-layer load: when a character is explicitly
+  // requested and --config aliases that character's overlay, the
+  // global layer comes from the OWNING home and the overlay composes
+  // separately, matching the scoped config verbs. Without --character,
+  // an explicit --config keeps plain file semantics so reads and
+  // writes target the same file.
+  const loadedConfig =
+    location.character === undefined
+      ? loadProject02RuntimeConfig({...location, env: configEnv})
+      : loadScopedGlobalLayerConfig({
+          ...location,
+          env: configEnv,
+          characterId: location.character,
+        });
   const startupBase = {
     location,
     cwdDotEnv,

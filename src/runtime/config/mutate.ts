@@ -123,6 +123,16 @@ function applyRuntimeConfigMutationWithLocks(
 
   assertSelectedOverlayShapedPathIsNotSymlink(location.displayConfigPath);
 
+  // Secrets are shared across characters: their references are
+  // authored in the home config.json, never in a character overlay —
+  // matching the --character secret-scope rejection.
+  if (overlayLocatedTarget && options.operation.kind === 'secret_set') {
+    throw new RuntimeConfigMutationError(
+      'Secrets are shared across characters; author them in the home ' +
+        'config.json, not a character overlay.',
+    );
+  }
+
   if (options.characterScopeManaged !== true) {
     if (overlayLocatedTarget) {
       assertOverlayLocatedTargetIsInitialized(

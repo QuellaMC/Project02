@@ -65,6 +65,77 @@ describe('runtime config CLI mutation and storage', () => {
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
 
+  it('keeps the --store home guard when the config env var is set', async () => {
+    const storeRoot = createTestTempRoot('project02-config-envvar-store-');
+    const elsewhere = createTestTempRoot('project02-config-envvar-file-');
+    const envSelectedPath = join(elsewhere, 'selected.json');
+    let stderr = '';
+
+    // With --store supplied the loader ignores the env var, so the
+    // selected home must still pass the guard.
+    writeRuntimeConfig(envSelectedPath, {});
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.userDisplayName', 'Bob'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {[runtimeConfigEnvVarName]: envSelectedPath},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
+  it('refuses secret writes through an explicit home config with a symlinked env', async () => {
+    const storeRoot = createTestTempRoot('project02-config-explicit-env-link-');
+    const outside = createTestTempRoot('project02-config-explicit-env-target-');
+    const targetPath = join(outside, 'external.env');
+    let stderr = '';
+
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'mem0-local': {
+          enabled: true,
+          config: {apiKey: {$env: 'MEM0_API_KEY'}},
+        },
+      },
+    });
+    writeFileSync(targetPath, '');
+    symlinkSync(targetPath, join(storeRoot, '.env'));
+
+    // The explicit --config IS the home's default config: the derived
+    // env file must still be a real in-home file.
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      [
+        '--config',
+        configPath,
+        'secret',
+        'set',
+        'mem0-local',
+        'apiKey',
+        'MEM0_API_KEY',
+      ],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        factories: installedSecretFactories,
+        env: {MEM0_API_KEY: 'stored-secret'},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(readFileSync(targetPath, 'utf8')).toBe('');
+  });
+
   it('refuses secret writes when the home env file is a symlink', async () => {
     const storeRoot = createTestTempRoot('project02-config-env-link-');
     const outside = createTestTempRoot('project02-config-env-link-target-');

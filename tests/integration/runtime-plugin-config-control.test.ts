@@ -511,7 +511,7 @@ describe('runtime plugin config control', () => {
     );
   });
 
-  it('routes a direct overlay secret set to the owning home env file', async () => {
+  it('rejects a direct overlay secret set entirely', async () => {
     const homeRoot = createTestTempRoot('project02-plugin-overlay-secret-');
     const dataRoot = join(homeRoot, 'character-data', 'mira');
     const overlayPath = join(dataRoot, 'config.json');
@@ -522,42 +522,32 @@ describe('runtime plugin config control', () => {
       characterId: 'mira',
     });
 
-    // No --store equivalent: the overlay path alone must name its
-    // OWNING home for the env write, never the data directory. The
-    // candidate validation resolves the required secret from env.
+    // Secrets are shared across characters: their references are
+    // authored in the home config.json, never a character overlay.
     const env = {OVERLAY_SECRET_VAR: 'overlay-secret-value'};
-    const inspected = inspectRuntimePluginConfig({
-      configPath: overlayPath,
-      env,
-      manifest: plugin.manifest,
-    });
-    const result = applyRuntimePluginConfigControlOperation({
-      configPath: overlayPath,
-      env,
-      manifest: plugin.manifest,
-      actor: 'operator',
-      expectedFingerprint: inspected.fingerprint,
-      operation: {
-        kind: 'secret_set',
-        fieldName: 'apiKey',
-        envVar: 'OVERLAY_SECRET_VAR',
-        secretValue: 'overlay-secret-value',
-      },
-    });
 
-    expect(result.envPath).toBe(join(realpathSync(homeRoot), '.env'));
-    expect(existsSync(join(homeRoot, '.env'))).toBe(true);
-    expect(existsSync(join(dataRoot, '.env'))).toBe(false);
-    expect(readFileSync(join(homeRoot, '.env'), 'utf8')).toContain(
-      'OVERLAY_SECRET_VAR="overlay-secret-value"',
-    );
-    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toMatchObject({
-      plugins: {
-        'operator.overlay-secret': {
-          config: {apiKey: {$env: 'OVERLAY_SECRET_VAR'}},
+    expect(() =>
+      applyRuntimePluginConfigControlOperation({
+        configPath: overlayPath,
+        env,
+        manifest: plugin.manifest,
+        actor: 'operator',
+        expectedFingerprint: inspectRuntimePluginConfig({
+          configPath: overlayPath,
+          env,
+          manifest: plugin.manifest,
+        }).fingerprint,
+        operation: {
+          kind: 'secret_set',
+          fieldName: 'apiKey',
+          envVar: 'OVERLAY_SECRET_VAR',
+          secretValue: 'overlay-secret-value',
         },
-      },
-    });
+      }),
+    ).toThrow('Secrets are shared across characters');
+    expect(existsSync(overlayPath)).toBe(false);
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
+    expect(existsSync(join(dataRoot, '.env'))).toBe(false);
   });
 
   it('rejects a mutation bound to a stale authored fingerprint', () => {

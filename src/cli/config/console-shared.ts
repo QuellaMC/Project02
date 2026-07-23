@@ -86,9 +86,13 @@ export async function ensureConsoleCommitTarget(
   characterScope: RuntimeConfigCharacterScope | undefined,
 ): Promise<void> {
   if (characterScope === undefined) {
+    // The env-selected file only governs when nothing narrower does:
+    // with --store supplied, the loader ignores the env var, so the
+    // selected home must still pass the guard.
     if (
       context.configPath !== undefined ||
-      ((context.env ?? {})[runtimeConfigEnvVarName] ?? '').trim() !== ''
+      (context.storeRoot === undefined &&
+        ((context.env ?? {})[runtimeConfigEnvVarName] ?? '').trim() !== '')
     ) {
       return;
     }

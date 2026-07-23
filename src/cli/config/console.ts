@@ -5,6 +5,7 @@ import {
   deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
+  loadProject02RuntimeConfig,
   loadScopedGlobalLayerConfig,
   type RuntimeConfigDiagnostic,
   runtimeConfigVersion,
@@ -108,16 +109,22 @@ function consoleLoadDiagnostics(loaded: {
 function loadConsoleSnapshot(
   context: RuntimeConfigConsoleContext,
 ): RuntimeConfigConsoleSnapshot {
-  // The owning home's global layer, even when --config aliases the
-  // overlay itself: the snapshot's fingerprint must compose the same
-  // pair of documents the commit path verifies against.
-  const loaded = loadScopedGlobalLayerConfig({
-    ...runtimeConfigLocation(context),
-    ...(context.env === undefined ? {} : {env: context.env}),
-    ...(context.character === undefined
-      ? {}
-      : {characterId: context.character}),
-  });
+  // The owning home's global layer when a character is explicitly
+  // requested and --config aliases its overlay: the snapshot's
+  // fingerprint must compose the same pair of documents the commit
+  // path verifies against. Without --character, an explicit --config
+  // keeps plain file semantics.
+  const loaded =
+    context.character === undefined
+      ? loadProject02RuntimeConfig({
+          ...runtimeConfigLocation(context),
+          ...(context.env === undefined ? {} : {env: context.env}),
+        })
+      : loadScopedGlobalLayerConfig({
+          ...runtimeConfigLocation(context),
+          ...(context.env === undefined ? {} : {env: context.env}),
+          characterId: context.character,
+        });
   const {diagnostics, blockingDiagnostic} = consoleLoadDiagnostics(loaded);
 
   if (blockingDiagnostic !== undefined) {

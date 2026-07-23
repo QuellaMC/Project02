@@ -12,7 +12,10 @@ import {
 } from '../../src/runtime/storage/index.ts';
 import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
 import type {RuntimePlugin} from '../../src/plugins/api/types.ts';
-import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
+import {
+  runtimeConfigEnvVarName,
+  runtimeConfigVersion,
+} from '../../src/runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../src/app/index.ts';
 import {
   requiredDottedConfigPlugin,
@@ -41,6 +44,26 @@ describe('runtime config console UI', () => {
     ).rejects.toThrow();
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
     expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+  });
+
+  it('keeps the --store console guard when the config env var is set', async () => {
+    const homeRoot = createTestTempRoot('project02-console-envvar-store-');
+    const elsewhere = createTestTempRoot('project02-console-envvar-file-');
+    const envSelectedPath = join(elsewhere, 'selected.json');
+
+    writeRuntimeConfig(envSelectedPath, {});
+    writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    await expect(
+      ensureConsoleCommitTarget(
+        {
+          storeRoot: homeRoot,
+          env: {[runtimeConfigEnvVarName]: envSelectedPath},
+        },
+        undefined,
+      ),
+    ).rejects.toThrow();
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
   });
 
   it('revalidates scoped layers before a console save materializes state', async () => {
