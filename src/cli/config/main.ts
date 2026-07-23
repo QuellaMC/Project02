@@ -219,7 +219,7 @@ async function runRuntimePluginSecretSetCommand(
     );
   }
 
-  await assertMutationHomeAdoptable(parsedArgs.location, startup.configEnv);
+  await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
 
   const result = applyRuntimePluginSecretSetCommand({
     location: parsedArgs.location,
@@ -290,7 +290,7 @@ async function runRuntimeConfigDocumentCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
-  await assertMutationHomeAdoptable(parsed.location, startup.configEnv);
+  await assertCommandHomeAdoptable(parsed.location, startup.configEnv);
 
   const result = applyRuntimeConfigControlOperation({
     ...parsed.location,
@@ -375,10 +375,12 @@ async function runCharacterScopedRuntimeConfigCommand(
   }
 
   if (command.kind === 'get') {
-    // The global fallback comes from the OWNING home even when
-    // --config aliases the overlay itself — and a home that cannot
-    // load rejects the read, exactly like check and scoped writes. An
-    // absent overlay is fine: it simply contributes no character layer.
+    // The home must be adoptable and its global layer loadable before
+    // a scoped read reports any value — exactly like check and scoped
+    // writes. An absent overlay is fine: it simply contributes no
+    // character layer.
+    await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
+
     const globalLayer = loadScopedGlobalLayerConfig({...location, characterId});
 
     assertGlobalConfigLoadableForCharacterScope(globalLayer);
@@ -415,11 +417,12 @@ async function runCharacterScopedRuntimeConfigCommand(
 }
 
 /**
- * A global mutation authors settings for a home; refuse a directory
- * the runtime would not adopt. Explicit --config and env-selected
- * paths are standalone config files with no home semantics.
+ * A command that treats the selected store as a home — mutations and
+ * scoped reads alike — refuses a directory the runtime would not
+ * adopt. Explicit --config and env-selected paths are standalone
+ * config files with no home semantics.
  */
-async function assertMutationHomeAdoptable(
+async function assertCommandHomeAdoptable(
   location: RuntimeLocationCliState,
   configEnv: NodeJS.ProcessEnv,
 ): Promise<void> {

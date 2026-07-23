@@ -1,7 +1,7 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {ensureCharacterDataStamp} from '../../src/runtime/storage/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -659,6 +659,43 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
+    expect(stderr).toContain('Error:');
+  });
+
+  it('rejects a session list when the session catalog is a symlink', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-catalog-link-');
+    const outside = createTestTempRoot('project02-inspect-catalog-target-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'mira',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    writeFileSync(join(outside, 'external-catalog.jsonl'), '');
+    symlinkSync(
+      join(outside, 'external-catalog.jsonl'),
+      join(dataRoot, 'sessions.jsonl'),
+    );
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
     expect(stderr).toContain('Error:');
   });
 

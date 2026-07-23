@@ -262,6 +262,54 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
+  it('rejects a scoped get from a foreign home even with no data directory', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-get-foreign-');
+
+    // A valid config next to foreign content: check and scoped set
+    // refuse this home, so a scoped get must not report the global
+    // fallback from it either.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+    });
+    writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+  });
+
+  it('rejects a scoped edit when the binding stamp is a directory', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-stamp-dir-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // An allowlisted control NAME with the wrong type must fail the
+    // preflight, before the home initializer writes the home marker.
+    mkdirSync(join(dataRoot, 'character-binding.json'), {recursive: true});
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
   it('rejects a scoped read from an unadoptable unstamped directory', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-read-adopt-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

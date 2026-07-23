@@ -233,6 +233,13 @@ export function assertCharacterDataDirAdoptable(
   assertRealDataControlRoot(layout.locksRoot, 'Lock root');
   assertRealDataControlRoot(layout.sessionsRoot, 'Sessions root');
 
+  // Control FILES too: the session catalog, binding stamp, and overlay
+  // are durable character state; a symlink or wrong type there either
+  // reads foreign data or fails only after durable home state exists.
+  assertRealDataControlFile(layout.sessionCatalogPath, 'Session catalog');
+  assertRealDataControlFile(layout.characterBindingPath, 'Character binding');
+  assertRealDataControlFile(layout.configPath, 'Character overlay');
+
   if (markerStats !== undefined) {
     const marker = decodeStorageSchemaMarker(
       readFileSync(layout.schemaPath, 'utf8'),
@@ -276,6 +283,31 @@ export function assertCharacterDataDirAdoptable(
       `Character data directory "${layout.storeRoot}" holds ` +
         `"${foreignEntry}" without a data marker; refusing to bind a ` +
         'character to it.',
+    );
+  }
+}
+
+function assertRealDataControlFile(filePath: string, label: string): void {
+  let stats;
+
+  try {
+    stats = lstatSync(filePath);
+  } catch {
+    return;
+  }
+
+  if (stats.isSymbolicLink()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `${label} "${filePath}" is a symlink; it must live inside the ` +
+        'data directory.',
+    );
+  }
+
+  if (!stats.isFile()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `${label} "${filePath}" is not a regular file.`,
     );
   }
 }
