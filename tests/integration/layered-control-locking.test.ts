@@ -97,7 +97,10 @@ describe('layered control lock ordering', () => {
 
     // Both must complete: the shared canonical order serializes them
     // instead of letting opposite acquisition orders mutually wait out
-    // the lock timeout as "storage busy".
+    // the lock timeout as "storage busy". When the scoped write commits
+    // first, the global child's stale expectation resolves as a clean
+    // fingerprint conflict — the serialized outcome — which its script
+    // accepts; a storage-busy timeout still fails it.
     await Promise.all(children);
   }, 30_000);
 });
@@ -148,14 +151,20 @@ const barrieredGlobalExpectationMutationScript = [
   'const target = resolveRuntimeConfigScopeTarget({',
   "  storeRoot: process.argv[1], env: {}, scope: 'global',",
   '});',
-  'applyRuntimeConfigControlOperation({',
-  '  target,',
-  '  expectedFingerprint: process.argv[3],',
-  '  request: {',
-  "    kind: 'document',",
-  "    operation: { kind: 'set', path: 'project02.userDisplayName', value: 'Global' },",
-  '  },',
-  '});',
+  'try {',
+  '  applyRuntimeConfigControlOperation({',
+  '    target,',
+  '    expectedFingerprint: process.argv[3],',
+  '    request: {',
+  "      kind: 'document',",
+  "      operation: { kind: 'set', path: 'project02.userDisplayName', value: 'Global' },",
+  '    },',
+  '  });',
+  '} catch (error) {',
+  '  // A stale expectation after the scoped writer committed first is',
+  '  // the serialized outcome; only a storage-busy timeout may fail.',
+  "  if (error?.code !== 'runtime_config_conflict') throw error;",
+  '}',
 ].join('\n');
 
 const barrieredCharacterMutationScript = [
