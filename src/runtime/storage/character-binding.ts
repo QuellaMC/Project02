@@ -217,6 +217,19 @@ export function assertCharacterDataDirAdoptable(
     );
   }
 
+  if (markerStats !== undefined && !markerStats.isFile()) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_schema_marker',
+      `Data marker "${layout.schemaPath}" is not a regular file.`,
+    );
+  }
+
+  // Runtime control roots are part of the write boundary: a symlinked
+  // lock or sessions root would coordinate or store durable state
+  // outside the home.
+  assertRealDataControlRoot(layout.locksRoot, 'Lock root');
+  assertRealDataControlRoot(layout.sessionsRoot, 'Sessions root');
+
   if (markerStats !== undefined) {
     const marker = decodeStorageSchemaMarker(
       readFileSync(layout.schemaPath, 'utf8'),
@@ -249,6 +262,31 @@ export function assertCharacterDataDirAdoptable(
       `Character data directory "${layout.storeRoot}" holds ` +
         `"${foreignEntry}" without a data marker; refusing to bind a ` +
         'character to it.',
+    );
+  }
+}
+
+function assertRealDataControlRoot(rootPath: string, label: string): void {
+  let stats;
+
+  try {
+    stats = lstatSync(rootPath);
+  } catch {
+    return;
+  }
+
+  if (stats.isSymbolicLink()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `${label} "${rootPath}" is a symlink; it must live inside the ` +
+        'data directory.',
+    );
+  }
+
+  if (!stats.isDirectory()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `${label} "${rootPath}" is not a directory.`,
     );
   }
 }

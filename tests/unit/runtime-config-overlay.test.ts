@@ -65,6 +65,30 @@ function loadedOverlay(options: {
 }
 
 describe('character overlay config loader', () => {
+  it('rejects a dangling overlay symlink instead of reading it as absent', () => {
+    const dataRoot = createTestTempRoot('project02-overlay-dangling-');
+
+    symlinkSync(
+      join(dataRoot, 'missing-target.json'),
+      join(dataRoot, 'config.json'),
+    );
+
+    const loaded = loadProject02CharacterOverlayConfig({
+      dataRoot,
+      characterId: 'mira',
+    });
+
+    expect(loaded.source).toBe('overlay');
+    expect(loaded.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_overlay_symlink',
+        }),
+      ]),
+    );
+  });
+
   it('rejects a symlinked overlay file with an error diagnostic', () => {
     const dataRoot = createTestTempRoot('project02-overlay-symlink-');
     const outside = createTestTempRoot('project02-overlay-symlink-target-');

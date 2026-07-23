@@ -8,7 +8,7 @@
  * 'overlay' — so an overlay can never reach the global resolvers or
  * re-derive a store root from its own path.
  */
-import {existsSync, lstatSync} from 'node:fs';
+import {lstatSync} from 'node:fs';
 
 import {
   characterDataDirPath,
@@ -59,7 +59,17 @@ export function loadProject02CharacterOverlayConfig(options: {
 }): LoadedProject02CharacterOverlayConfig {
   const path = characterOverlayConfigPath(options.dataRoot);
 
-  if (!existsSync(path)) {
+  // lstat, not existence: a dangling symlink is a non-regular overlay
+  // entry, never an absent overlay.
+  let overlayStats;
+
+  try {
+    overlayStats = lstatSync(path);
+  } catch {
+    overlayStats = undefined;
+  }
+
+  if (overlayStats === undefined) {
     return Object.freeze({
       scope: 'character',
       characterId: options.characterId,
@@ -76,7 +86,7 @@ export function loadProject02CharacterOverlayConfig(options: {
 
   // The overlay must live inside the stamped data directory: a
   // symlinked file would let authored settings live outside it.
-  if (lstatSync(path).isSymbolicLink()) {
+  if (overlayStats.isSymbolicLink()) {
     return loadedOverlay({
       ...options,
       path,

@@ -65,6 +65,58 @@ describe('runtime config CLI mutation and storage', () => {
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
 
+  it('refuses global writes when the home lock root is a symlink', async () => {
+    const storeRoot = createTestTempRoot('project02-config-home-lock-link-');
+    const outside = createTestTempRoot('project02-config-lock-target-');
+    let stderr = '';
+
+    symlinkSync(outside, join(storeRoot, '.locks'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.userDisplayName', 'Bob'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+  });
+
+  it('refuses global writes when the home config file is a symlink', async () => {
+    const storeRoot = createTestTempRoot('project02-config-home-cfg-link-');
+    const outside = createTestTempRoot('project02-config-cfg-target-');
+    const targetPath = join(outside, 'external-config.json');
+    let stderr = '';
+
+    writeRuntimeConfig(targetPath, {
+      project02: {userDisplayName: 'External'},
+    });
+    const targetBefore = readFileSync(targetPath, 'utf8');
+    symlinkSync(targetPath, join(storeRoot, 'config.json'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.userDisplayName', 'Bob'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    // Authored config never moves outside the validated home.
+    expect(readFileSync(targetPath, 'utf8')).toBe(targetBefore);
+  });
+
   it('refuses to author global config into a home the runtime would not adopt', async () => {
     const storeRoot = createTestTempRoot('project02-config-foreign-home-');
     let stderr = '';

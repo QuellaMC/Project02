@@ -18,7 +18,10 @@
 import {existsSync} from 'node:fs';
 
 import {atomicReplaceFile} from '../storage/atomic-file.ts';
-import {ensureCharacterDataStamp} from '../storage/character-binding.ts';
+import {
+  assertCharacterDataDirAdoptable,
+  ensureCharacterDataStamp,
+} from '../storage/character-binding.ts';
 import {ensureInitializedProject02Home} from '../storage/home.ts';
 import {
   characterDataDirPath,
@@ -43,6 +46,18 @@ export async function ensureCharacterDataDir(options: {
   readonly seedDocument?: Project02RuntimeConfig;
   readonly now?: () => string;
 }): Promise<EnsureCharacterDataDirResult> {
+  // Preflight the data directory before the home initializer writes
+  // the home marker: a rejected scoped write must not leave durable
+  // home state behind.
+  assertCharacterDataDirAdoptable({
+    storeRoot: characterDataDirPath(
+      createProject02HomeLayout(
+        options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot},
+      ).homeRoot,
+      options.characterId,
+    ),
+  });
+
   const home = await ensureInitializedProject02Home(
     options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot},
   );

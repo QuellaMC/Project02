@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
@@ -255,6 +256,41 @@ describe('character data directories through the durable runtime', () => {
     expect(readCharacterBinding({storeRoot: outside})).toEqual({
       status: 'absent',
     });
+  });
+
+  it('refuses a stamped data directory whose sessions root is a symlink', async () => {
+    const homeRoot = createTestTempRoot();
+    const outside = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'mira',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    writeFileSync(
+      join(dataRoot, 'schema.json'),
+      `${encodeStorageSchemaMarker(
+        createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
+          createdAt: '2026-07-23T00:00:00.000Z',
+        }),
+      )}\n`,
+    );
+    symlinkSync(outside, join(dataRoot, 'sessions'));
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        newSessionId: 'linked-sessions-attempt',
+      }),
+    ).rejects.toThrow('Sessions root');
+    expect(readdirSync(outside)).toEqual([]);
   });
 
   it('refuses a binding stamp that is only a symlink to an external proof', async () => {

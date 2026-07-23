@@ -89,9 +89,10 @@ export async function assertProject02HomeAdoptable(
   }
 
   // An initialized home is only usable if character data can actually
-  // live in it: a file or symlink at the character-data root would be
-  // rejected the moment a writer starts.
+  // live in it — and if its own control entries are real: a symlinked
+  // lock root or config file would route writes outside the home.
   await assertRealCharacterDataRootIfPresent(layout);
+  await assertRealHomeControlEntries(layout);
 }
 
 /**
@@ -106,6 +107,35 @@ async function ensureRealCharacterDataRoot(
 
   if (state === 'absent') {
     await mkdir(layout.characterDataRoot, {recursive: true});
+  }
+}
+
+async function assertRealHomeControlEntries(
+  layout: Project02HomeLayout,
+): Promise<void> {
+  for (const entry of [
+    {path: layout.locksRoot, kind: 'directory' as const, label: 'lock root'},
+    {path: layout.configPath, kind: 'file' as const, label: 'config file'},
+  ]) {
+    let stats;
+
+    try {
+      stats = await lstat(entry.path);
+    } catch {
+      continue;
+    }
+
+    if (
+      stats.isSymbolicLink() ||
+      (entry.kind === 'directory' ? !stats.isDirectory() : !stats.isFile())
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Project02 home "${layout.homeRoot}" has a ${entry.label} that ` +
+          `is not a real ${entry.kind}; home control state must live ` +
+          'inside the home.',
+      );
+    }
   }
 }
 
@@ -232,25 +262,31 @@ function isProject02HomeControlEntry(
 ): boolean {
   const entryPath = join(layout.homeRoot, entry.name);
 
-  if (entryPath === layout.characterDataRoot) {
-    // Never a symlink: a linked data root would carry binding stamps
-    // and session history outside the home this guard validates.
+  if (
+    entryPath === layout.characterDataRoot ||
+    entryPath === layout.locksRoot
+  ) {
+    // Never symlinks: a linked data root would carry character state
+    // outside the home, and a linked lock root would coordinate this
+    // home's writes through foreign control state.
     return entry.isDirectory();
   }
 
   if (
-    entryPath === layout.locksRoot ||
     entryPath === layout.pluginPackagesRoot ||
     entryPath === layout.characterPackagesRoot
   ) {
+    // Installed packages may be intentionally linked in.
     return entry.isDirectory() || entry.isSymbolicLink();
   }
 
-  return (
-    entryPath === layout.configPath ||
-    entryPath === layout.envPath ||
-    entryPath === layout.schemaPath
-  );
+  if (entryPath === layout.configPath) {
+    // Authored global config must live inside the home: mutations
+    // canonicalize through links and would rewrite the target.
+    return entry.isFile();
+  }
+
+  return entryPath === layout.envPath || entryPath === layout.schemaPath;
 }
 
 function defaultHomeClock(): string {

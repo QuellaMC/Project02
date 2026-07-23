@@ -43,6 +43,30 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('rejects check when the data marker is a directory', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-marker-dir-');
+    const dataRoot = join(storeRoot, 'character-data', 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(join(dataRoot, 'schema.json'), {recursive: true});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    // A formatted storage refusal, never a raw EISDIR stack trace.
+    expect(stderr).toMatch(/^Error: /);
+  });
+
   it('rejects check when the character-data root is a regular file', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-root-file-');
     let stderr = '';

@@ -345,6 +345,37 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain('holds history for character "nova"');
   });
 
+  it('rejects a scoped edit when the data lock root is a symlink', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-lock-link-');
+    const outside = createTestTempRoot('project02-scope-lock-target-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'mira',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    symlinkSync(outside, join(dataRoot, '.locks'));
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+  });
+
   it('rejects a scoped edit over an existing invalid overlay before ensure', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-bad-overlay-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
@@ -394,6 +425,8 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain('Error:');
     expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
+    // The data dir was preflighted before the home initializer ran.
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
   it('rejects scoped writes while the home config cannot load', async () => {
