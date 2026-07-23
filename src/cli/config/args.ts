@@ -158,9 +158,15 @@ function envHasNonEmptyValue(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name]?.length ?? 0) > 0;
 }
 
+/**
+ * Env is consulted only by `secret set`, which reads the secret value
+ * from the named variable; every other command parses without it, so
+ * surfaces that reject secret commands up front can parse before any
+ * environment staging.
+ */
 export function parseRuntimeConfigCommand(
   args: readonly string[],
-  env: NodeJS.ProcessEnv,
+  env?: NodeJS.ProcessEnv,
 ): RuntimeConfigCliArgs['command'] {
   const command = args[0];
 
@@ -252,6 +258,12 @@ export function parseRuntimeConfigCommand(
   }
 
   if (command === 'secret' && args[1] === 'set') {
+    if (env === undefined) {
+      throw new RuntimeConfigCliUsageError(
+        'secret set requires the runtime environment to read the secret from.',
+      );
+    }
+
     const envVar = requiredArg(args, 4, 'secret set requires an env var.');
     const secretValue = env[envVar];
 

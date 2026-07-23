@@ -415,19 +415,11 @@ async function runCharacterScopedRuntimeConfigCommand(
 
   assertCharacterScopedRawCommandAllowed(parsedArgs.commandArgs);
 
-  const configStartup = resolveRuntimeCliStartup({
-    stage: 'config',
-    location: parsedArgs.location,
-    cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
-      parsedArgs,
-      options.env ?? process.env,
-    ),
-    ...(options.env === undefined ? {} : {env: options.env}),
-  });
-  const command = parseRuntimeConfigCommand(
-    parsedArgs.commandArgs,
-    configStartup.configEnv,
-  );
+  // Secret commands were rejected above and no remaining verb consults
+  // the environment while parsing, so the command parses before the one
+  // activation startup — the config-stage pre-startup this route used
+  // to run existed only to stage env for parsing.
+  const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
 
   assertCharacterScopedParsedCommandAllowed(command);
   const characterConfigRequest =

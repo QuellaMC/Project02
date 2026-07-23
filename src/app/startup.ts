@@ -62,11 +62,6 @@ type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage?: 'activation';
   readonly continueAfterActivationErrors?: boolean;
   /**
-   * Retained for caller compatibility. Character selection now always
-   * materializes package config, including inspect and config reads.
-   */
-  readonly dataDir?: 'materialize' | 'readonly';
-  /**
    * Optional first scoped edit. The initializer composes it with
    * package materialization and commits one locked overlay candidate.
    */

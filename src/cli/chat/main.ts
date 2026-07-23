@@ -329,7 +329,6 @@ export async function runChatCliFromArgs(
         ? {}
         : {factories: options.factories}),
       continueAfterActivationErrors: options.pluginHost !== undefined,
-      dataDir: 'materialize',
     });
 
     if (startup.status === 'character_invalid') {

@@ -145,7 +145,6 @@ export async function runConfiguredRelayCli(
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
-      dataDir: 'materialize',
     });
   } catch (error: unknown) {
     if (error instanceof RuntimeEnvFileError) {

@@ -274,7 +274,6 @@ describe('first-selection materialization through startup', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(startup.status).toBe('resolved');
@@ -309,7 +308,6 @@ describe('first-selection materialization through startup', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(startup.status).toBe('resolved');
@@ -340,7 +338,6 @@ describe('first-selection materialization through startup', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
@@ -395,7 +392,6 @@ describe('first-selection materialization through startup', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(readFileSync(overlayPath, 'utf8')).not.toBe(cliWrittenBytes);
@@ -431,7 +427,6 @@ describe('first-selection materialization through startup', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(startup.status).toBe('activation_blocked_before_runtime_env');
@@ -620,7 +615,6 @@ describe('materialization ordering', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(startup.status).toBe('config_invalid');
@@ -695,7 +689,6 @@ describe('materialization ordering for pre-existing overlays', () => {
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
     expect(startup.status).toBe('config_invalid');
