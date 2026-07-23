@@ -165,10 +165,12 @@ export default tseslint.config(
       // then +30 so only the data directory's config.json counts as an
       // overlay and any other file there is rejected as a target, then
       // +25 so a symlink sitting where an overlay belongs is rejected
-      // as written, before canonicalization can route it elsewhere.
+      // as written, before canonicalization can route it elsewhere,
+      // then +10 so direct overlay targets pass the full adoptability
+      // guard and every as-written path component is symlink-checked.
       'max-lines': [
         'error',
-        {max: 1366, skipBlankLines: true, skipComments: true},
+        {max: 1376, skipBlankLines: true, skipComments: true},
       ],
     },
   },
