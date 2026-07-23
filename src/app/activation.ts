@@ -2,7 +2,8 @@ import {
   createProject02HomeLayout,
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
-  ensureCharacterDataDir,
+  LocalRuntimeStorageContractError,
+  requireCharacterDataMarker,
   type RuntimePluginFileStoreProvider,
 } from '../runtime/storage/index.ts';
 import {
@@ -530,14 +531,13 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     } satisfies Project02ConfiguredPluginHost);
   }
 
-  // Direct callers get the same guarded materialization startup runs:
-  // a foreign home or mismatched identity marker fails here before any
-  // plugin file store could write under the data root. Startup-created
-  // homes pass idempotently.
-  await ensureCharacterDataDir({
-    homeRoot: activationPlan.resolvedConfig.project02.storeRoot,
-    characterId: activationPlan.resolvedConfig.project02.character,
-  });
+  // Host construction is downstream of character initialization: it
+  // asserts the guarded initializer already ran (identity marker
+  // present and matching) and never creates durable character state
+  // itself — a direct caller on an uninitialized home used to get a
+  // partially initialized character with no package defaults and no
+  // diagnostics.
+  assertCharacterRuntimeInitialized(activationPlan.resolvedConfig);
 
   const plugins = await instantiateRuntimePluginPackages({
     catalogEntries,
@@ -583,6 +583,34 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
     pluginConfigControl: activationPlan.pluginConfigControl,
   } satisfies Project02ConfiguredPluginHost);
+}
+
+function assertCharacterRuntimeInitialized(
+  resolvedConfig: ResolvedProject02RuntimeConfig,
+): void {
+  try {
+    requireCharacterDataMarker({
+      storageOptions: {
+        storeRoot: characterDataRootForResolvedConfig(resolvedConfig),
+      },
+      characterId: resolvedConfig.project02.character,
+    });
+  } catch (error: unknown) {
+    if (
+      error instanceof LocalRuntimeStorageContractError &&
+      error.code === 'missing_file'
+    ) {
+      throw new TypeError(
+        `Character "${resolvedConfig.project02.character}" is not ` +
+          'initialized in this home. Run the character initializer ' +
+          '(initializeProject02CharacterRuntime, or any project02 CLI ' +
+          'startup) before constructing the plugin host.',
+        {cause: error},
+      );
+    }
+
+    throw error;
+  }
 }
 
 export function resolveRuntimePluginActivation(options: {

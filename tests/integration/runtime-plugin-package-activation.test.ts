@@ -1,5 +1,5 @@
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -17,6 +17,7 @@ import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.
 import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
+  initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
 import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
@@ -24,6 +25,7 @@ import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {collect} from '../support/streams.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 
 describe('configured runtime plugin package activation', () => {
   it('builds the default catalog from bundled packages and bootstrap services', () => {
@@ -94,6 +96,8 @@ describe('configured runtime plugin package activation', () => {
       entrySource: "throw new Error('disabled operator entry was imported');\n",
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -329,11 +333,18 @@ describe('configured runtime plugin package activation', () => {
       storeRoot,
     });
 
-    // Direct callers get the same guarded materialization startup
-    // runs: no plugin file store may write under this data root.
+    // Host construction never creates durable character state: on an
+    // unadopted home it refuses because the initializer has not run.
     await expect(
       createConfiguredProject02PluginHostFromPlan({activationPlan: plan}),
-    ).rejects.toThrow('contains foreign entries');
+    ).rejects.toThrow('is not initialized in this home');
+    expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
+
+    // The initializer itself is where the home guard lives: it refuses
+    // to adopt the foreign home instead of marking it.
+    await expect(
+      initializeProject02CharacterRuntime({location: {storeRoot}, env: {}}),
+    ).rejects.toThrow('foreign entries');
   });
 
   it('fails closed when only the overlay enables a quarantined package on the direct activation path', () => {
@@ -483,6 +494,8 @@ describe('configured runtime plugin package activation', () => {
         },
       },
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),

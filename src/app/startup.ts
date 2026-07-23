@@ -126,6 +126,65 @@ type RuntimeCliStartupResult =
       readonly runtimeEnv: NodeJS.ProcessEnv;
     });
 
+/**
+ * The one character-runtime initializer for embedded consumers: runs
+ * the exact CLI startup sequence — character activation, guarded
+ * character-data materialization with package-config defaults, layered
+ * activation planning — and throws on any non-resolved outcome instead
+ * of returning CLI statuses. Host construction is downstream of this:
+ * createConfiguredProject02PluginHostFromPlan refuses uninitialized
+ * character state instead of creating it.
+ */
+export async function initializeProject02CharacterRuntime(
+  options: RuntimeCliStartupCommonOptions & {
+    readonly continueAfterActivationErrors?: boolean;
+  } = {},
+): Promise<{
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+  readonly activationPlan: PreparedProject02PluginActivationPlan;
+  readonly runtimeEnv: NodeJS.ProcessEnv;
+}> {
+  const startup = await resolveRuntimeCliStartup({...options});
+
+  if (
+    startup.status === 'character_invalid' ||
+    startup.characterActivation.status !== 'resolved'
+  ) {
+    throw new TypeError(
+      'Character activation failed: ' +
+        (startup.characterActivation.status === 'failed'
+          ? (startup.characterActivation.messages[0] ??
+            'no character resolved.')
+          : 'no character resolved.'),
+    );
+  }
+
+  if (startup.status !== 'resolved') {
+    const blocking =
+      startup.activationPlan.activation.diagnostics.find(
+        diagnostic => diagnostic.severity === 'error',
+      ) ??
+      startup.loadedConfig.diagnostics.find(
+        diagnostic => diagnostic.severity === 'error',
+      );
+
+    throw new TypeError(
+      `Character runtime initialization failed (${startup.status}): ${
+        blocking?.message ?? 'invalid runtime config.'
+      }`,
+    );
+  }
+
+  return Object.freeze({
+    characterActivation: startup.characterActivation,
+    activationPlan: startup.activationPlan,
+    runtimeEnv: startup.runtimeEnv,
+  });
+}
+
 export function resolveRuntimeCliStartup(
   options: RuntimeCliConfigStartupOptions,
 ): RuntimeCliConfigStartupResult;

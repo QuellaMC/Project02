@@ -1,5 +1,5 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {writeFileSync} from 'node:fs';
+import {existsSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -12,6 +12,7 @@ import {
 import {
   createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
+  initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
 import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
@@ -37,6 +38,7 @@ import {
   requiredSecretAndEndpointPlugin,
   requiredSecretPlugin,
 } from '../support/runtime-config-activation-fixtures.ts';
+import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 import {
   pluginDiscoveryPluginSummaries,
   testIdentity,
@@ -51,6 +53,8 @@ describe('runtime config activation planning', () => {
     );
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -78,29 +82,53 @@ describe('runtime config activation planning', () => {
     );
   });
 
-  it('keeps direct host activation aligned with manifest-default plugins', async () => {
+  it('refuses direct host construction on an uninitialized character home', async () => {
     const storeRoot = createTestTempRoot(
-      'project02-config-host-defaults-aligned-',
+      'project02-config-host-uninitialized-',
     );
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+    // Host construction is downstream of character initialization: it
+    // must refuse — not silently create — uninitialized character
+    // state, which previously produced a host with no package defaults
+    // and no diagnostics.
+    await expect(
+      createConfiguredProject02PluginHost({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
+    ).rejects.toThrow('is not initialized in this home');
+    expect(existsSync(join(storeRoot, 'character-data', 'mira'))).toBe(false);
+  });
+
+  it('matches shared-startup activation when constructing after the initializer', async () => {
+    const storeRoot = createTestTempRoot('project02-config-host-parity-');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const initialized = await initializeProject02CharacterRuntime({
+      location: {storeRoot},
+      env: {},
+    });
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: initialized.activationPlan,
     });
 
-    expect(configured.activation.enabledPluginIds).toEqual(
-      configured.host.enabledPluginIds(),
-    );
+    // The initializer materialized the character package: the direct
+    // host now carries the same package-authored enablement the CLI
+    // startup produces, instead of a divergent manifest-defaults-only
+    // plugin system.
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      characterStatePluginId,
     ]);
+    expect(configured.activation.enabledPluginIds).toEqual(
+      configured.host.enabledPluginIds(),
+    );
     expect(
-      configured.activation.plugins
-        .filter(plugin => plugin.enabled)
-        .map(plugin => plugin.pluginId),
-    ).toEqual(configured.host.enabledPluginIds());
+      existsSync(join(storeRoot, 'character-data', 'mira', 'config.json')),
+    ).toBe(true);
     expect(configured.host.pluginToolDefinitions()).toContainEqual(
       expect.objectContaining({
         pluginId: runtimePluginId,
@@ -171,6 +199,8 @@ describe('runtime config activation planning', () => {
         },
       },
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -280,6 +310,8 @@ describe('runtime config activation planning', () => {
         },
       },
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -408,6 +440,8 @@ describe('runtime config activation planning', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
       strictUnknownPlugins: true,
@@ -453,6 +487,8 @@ describe('runtime config activation planning', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
       factories: {
@@ -488,6 +524,8 @@ describe('runtime config activation planning', () => {
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
     });
@@ -510,6 +548,8 @@ describe('runtime config activation planning', () => {
     let factoryCalls = 0;
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -543,6 +583,8 @@ describe('runtime config activation planning', () => {
     const plugin = fileStoreSessionEndPlugin(characterStatePluginId, () => {});
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -582,6 +624,8 @@ describe('runtime config activation planning', () => {
     };
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -675,6 +719,8 @@ describe('runtime config activation planning', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.typo',
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
@@ -904,6 +950,8 @@ describe('runtime config activation planning', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),
       env: {
@@ -1011,6 +1059,8 @@ describe('runtime config activation planning', () => {
         },
       },
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({storeRoot}),

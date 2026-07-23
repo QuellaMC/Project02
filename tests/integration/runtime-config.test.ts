@@ -27,6 +27,7 @@ import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   activationPluginById,
+  initializeCharacterDataForHost,
   memoryProviderPlugin,
   nonHostScopedActivationPlugins,
   requiredDottedConfigPlugin,
@@ -937,20 +938,19 @@ describe('runtime config loading and resolution', () => {
       'memory.manifest-default-secret',
       envVar,
     );
-    const configPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-manifest-env-default-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          [plugin.manifest.id]: {
-            enabled: true,
-          },
+    const storeRoot = createTestTempRoot(
+      'project02-config-manifest-env-default-',
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
         },
       },
-    );
+    });
     const factoryInputs: unknown[] = [];
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({configPath}),
@@ -1303,23 +1303,21 @@ describe('runtime config loading and resolution', () => {
 
   it('keeps explicitly disabled plugins disabled even when their config is incomplete', async () => {
     const plugin = requiredSecretPlugin();
-    const configPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-disable-invalid-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          'memory.required': {
-            enabled: false,
-            config: {
-              misspelledApiKey: 'ignored',
-            },
+    const storeRoot = createTestTempRoot('project02-config-disable-invalid-');
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'memory.required': {
+          enabled: false,
+          config: {
+            misspelledApiKey: 'ignored',
           },
         },
       },
-    );
+    });
     let factoryCalls = 0;
+
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({configPath}),
       factories: {
@@ -1360,22 +1358,20 @@ describe('runtime config loading and resolution', () => {
     process.env[envVar] = '';
 
     try {
-      const configPath = writeRuntimeConfig(
-        join(
-          createTestTempRoot('project02-config-supplied-env-'),
-          'config.json',
-        ),
-        {
-          plugins: {
-            'memory.required': {
-              enabled: true,
-              config: {
-                apiKey: {$env: envVar},
-              },
+      const storeRoot = createTestTempRoot('project02-config-supplied-env-');
+      const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+        plugins: {
+          'memory.required': {
+            enabled: true,
+            config: {
+              apiKey: {$env: envVar},
             },
           },
         },
-      );
+      });
+
+      await initializeCharacterDataForHost(storeRoot);
+
       const configured = await createConfiguredProject02PluginHost({
         loadedConfig: loadProject02RuntimeConfig({configPath}),
         factories: {
@@ -1431,6 +1427,8 @@ describe('runtime config loading and resolution', () => {
       readonly apiKeyValue: unknown;
       readonly redactedApiKeyValue: unknown;
     }> = [];
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({configPath}),
@@ -1561,6 +1559,8 @@ describe('runtime config loading and resolution', () => {
       },
     );
     let factoryStoreRoot: string | undefined;
+
+    await initializeCharacterDataForHost(configuredStoreRoot);
 
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig: loadProject02RuntimeConfig({configPath}),

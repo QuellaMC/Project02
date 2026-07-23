@@ -30,6 +30,7 @@ import {
   requiredSecretPlugin,
   sessionEndPlugin,
 } from '../support/runtime-config-activation-fixtures.ts';
+import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 
 describe('runtime config activation checks and construction', () => {
   it('reports host-owned default access during check for the default Character State factory', async () => {
@@ -711,6 +712,8 @@ describe('runtime config activation checks and construction', () => {
 
     const loadedConfig = loadProject02RuntimeConfig({configPath});
 
+    await initializeCharacterDataForHost(storeRoot);
+
     await expect(
       createConfiguredProject02PluginHost({
         loadedConfig,
@@ -758,6 +761,8 @@ describe('runtime config activation checks and construction', () => {
     });
 
     const loadedConfig = loadProject02RuntimeConfig({configPath});
+
+    await initializeCharacterDataForHost(storeRoot);
 
     await expect(
       createConfiguredProject02PluginHost({
@@ -833,6 +838,8 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     await expect(
       createConfiguredProject02PluginHost({
         loadedConfig: loadProject02RuntimeConfig({configPath}),
@@ -903,6 +910,8 @@ describe('runtime config activation checks and construction', () => {
         },
       },
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     await expect(
       createConfiguredProject02PluginHost({
@@ -1045,6 +1054,8 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     await expect(
       createConfiguredProject02PluginHost({
         loadedConfig: loadProject02RuntimeConfig({configPath}),
@@ -1108,6 +1119,8 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     await expect(
       createConfiguredProject02PluginHost({
         loadedConfig: loadProject02RuntimeConfig({configPath}),
@@ -1150,6 +1163,8 @@ describe('runtime config activation checks and construction', () => {
     });
 
     const loadedConfig = loadProject02RuntimeConfig({configPath});
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHost({
       loadedConfig,
       env: {

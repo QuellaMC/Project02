@@ -5,6 +5,19 @@ import {
   hostScopedFirstPartyRuntimePluginIds,
   runtimePluginContractVersion,
 } from '../../src/plugins/index.ts';
+import {ensureCharacterDataDir} from '../../src/runtime/storage/index.ts';
+
+/**
+ * Marks the character's data directory initialized so a host can be
+ * constructed directly: host construction asserts the initializer ran
+ * and never creates durable character state itself.
+ */
+export async function initializeCharacterDataForHost(
+  storeRoot: string,
+  characterId = 'mira',
+): Promise<void> {
+  await ensureCharacterDataDir({homeRoot: storeRoot, characterId});
+}
 
 export function requiredSecretPlugin(id = 'memory.required') {
   return createRuntimePlugin({
