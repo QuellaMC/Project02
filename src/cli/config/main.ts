@@ -1,19 +1,11 @@
 import {
   applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
-  applyScopedRuntimeConfigControlOperation,
   assertGlobalConfigLoadableForCharacterScope,
-  assertRuntimeConfigSecretScopeAllowed,
-  assertScopedGlobalLayerLoadable,
-  assertScopedMutationOperationAllowed,
   createRuntimeConfigInspectShape,
-  ensureCharacterDataDir,
   defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
-  inspectRuntimePluginConfig,
   loadCharacterOverlayForScope,
-  loadScopedGlobalLayerConfig,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticAttribution,
   RuntimeConfigMutationError,
@@ -29,7 +21,6 @@ import {
   assertCharacterDataDirReadable,
   assertProject02HomeAdoptable,
   assertRealHomeEnvFile,
-  homeRootForCharacterDataDir,
 } from '../../runtime/storage/index.ts';
 import {
   resolveRuntimeCliStartup,
@@ -68,6 +59,16 @@ type RuntimeConfigCliOptions = {
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
+
+type RuntimeConfigCliMutationOperation = Extract<
+  RuntimeConfigCliArgs['command'],
+  {readonly kind: 'mutate'}
+>['operation'];
+
+type CharacterScopedRuntimeCliStartup = Exclude<
+  Awaited<ReturnType<typeof resolveRuntimeCliStartup>>,
+  {readonly status: 'character_invalid'}
+>;
 
 export function runRuntimeConfigCliFromArgs(
   args: readonly string[],
@@ -245,7 +246,7 @@ async function runRuntimeConfigDocumentCommand(
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
 ): Promise<number> {
-  const startup = resolveRuntimeCliStartup({
+  const configStartup = resolveRuntimeCliStartup({
     stage: 'config',
     location: parsedArgs.location,
     cwdDotEnv,
@@ -255,7 +256,7 @@ async function runRuntimeConfigDocumentCommand(
     location: parsedArgs.location,
     command: parseRuntimeConfigCommand(
       parsedArgs.commandArgs,
-      startup.configEnv,
+      configStartup.configEnv,
     ),
   };
 
@@ -263,12 +264,12 @@ async function runRuntimeConfigDocumentCommand(
   // directory the runtime would not adopt is refused before any value
   // is reported or written. Standalone --config and env-selected
   // paths keep their file semantics.
-  await assertCommandHomeAdoptable(parsed.location, startup.configEnv);
+  await assertCommandHomeAdoptable(parsed.location, configStartup.configEnv);
 
   if (parsed.command.kind === 'path') {
     options.stdout.write(
       `${
-        startup.loadedConfig.path ??
+        configStartup.loadedConfig.path ??
         defaultRuntimeConfigPath(parsed.location.storeRoot)
       }\n`,
     );
@@ -276,10 +277,10 @@ async function runRuntimeConfigDocumentCommand(
   }
 
   if (parsed.command.kind === 'env_path') {
-    assertRuntimeConfigLoadedForEnvPath(startup.loadedConfig);
+    assertRuntimeConfigLoadedForEnvPath(configStartup.loadedConfig);
     options.stdout.write(
       `${runtimeConfigEnvPathForLocation({
-        loadedConfig: startup.loadedConfig,
+        loadedConfig: configStartup.loadedConfig,
         ...(parsed.location.storeRoot === undefined
           ? {}
           : {storeRoot: parsed.location.storeRoot}),
@@ -289,9 +290,9 @@ async function runRuntimeConfigDocumentCommand(
   }
 
   if (parsed.command.kind === 'get') {
-    assertRuntimeConfigLoaded(startup.loadedConfig);
+    assertRuntimeConfigLoaded(configStartup.loadedConfig);
     const value = getRedactedRuntimeConfigValueAtPath(
-      startup.loadedConfig.config,
+      configStartup.loadedConfig.config,
       parsed.command.path,
     );
 
@@ -303,13 +304,98 @@ async function runRuntimeConfigDocumentCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
-  const result = applyRuntimeConfigControlOperation({
+  if (isPluginActivationOperation(parsed.command.operation)) {
+    return runManifestAwarePluginActivation({
+      parsedArgs,
+      options,
+      cwdDotEnv,
+      operation: parsed.command.operation,
+    });
+  }
+
+  const target = resolveRuntimeConfigScopeTarget({
     ...parsed.location,
-    env: startup.configEnv,
-    operation: parsed.command.operation,
+    env: configStartup.configEnv,
+    scope: 'global',
+  });
+  const result = applyRuntimeConfigControlOperation({
+    target,
+    request: {
+      kind: 'document',
+      operation: parsed.command.operation,
+    },
   });
 
   writeRuntimeConfigMutationResult(options.stdout, result);
+  return 0;
+}
+
+function isPluginActivationOperation(
+  operation: RuntimeConfigCliMutationOperation,
+): operation is Extract<
+  typeof operation,
+  {readonly kind: 'plugin_enable' | 'plugin_disable'}
+> {
+  return (
+    operation.kind === 'plugin_enable' || operation.kind === 'plugin_disable'
+  );
+}
+
+async function runManifestAwarePluginActivation(options: {
+  readonly parsedArgs: RuntimeConfigCliParsedArgs;
+  readonly options: RuntimeConfigCliOptions;
+  readonly cwdDotEnv: 'always' | 'auto';
+  readonly operation: Extract<
+    Extract<
+      RuntimeConfigCliArgs['command'],
+      {readonly kind: 'mutate'}
+    >['operation'],
+    {readonly kind: 'plugin_enable' | 'plugin_disable'}
+  >;
+}): Promise<number> {
+  const startup = await resolveRuntimeConfigCliActivationStartup({
+    parsedArgs: options.parsedArgs,
+    options: options.options,
+    cwdDotEnv: options.cwdDotEnv,
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
+  }
+
+  const definition = ownJsonRecordValue(
+    startup.activationPlan.catalogEntries,
+    options.operation.pluginId,
+  );
+
+  if (
+    definition === undefined ||
+    definition.manifest.id !== options.operation.pluginId
+  ) {
+    throw new RuntimeConfigCliUsageError(
+      `Plugin "${options.operation.pluginId}" is not installed.`,
+    );
+  }
+
+  const target = resolveRuntimeConfigScopeTarget({
+    ...options.parsedArgs.location,
+    env: startup.configEnv,
+    scope: 'global',
+  });
+  const result = applyRuntimeConfigControlOperation({
+    target,
+    request: {
+      kind: 'plugin_activation',
+      manifest: definition.manifest,
+      enabled: options.operation.kind === 'plugin_enable',
+    },
+  });
+
+  writeRuntimeConfigMutationResult(options.options.stdout, result);
   return 0;
 }
 
@@ -328,16 +414,9 @@ async function runCharacterScopedRuntimeConfigCommand(
     throw new TypeError('Character-scoped command routing drifted.');
   }
 
-  // Before command parsing: secret set reads its env var during parse,
-  // and the scope rejection must come first.
-  if (
-    parsedArgs.commandArgs[0] === 'secret' &&
-    parsedArgs.commandArgs[1] === 'set'
-  ) {
-    assertRuntimeConfigSecretScopeAllowed('character');
-  }
+  assertCharacterScopedRawCommandAllowed(parsedArgs.commandArgs);
 
-  const startup = resolveRuntimeCliStartup({
+  const configStartup = resolveRuntimeCliStartup({
     stage: 'config',
     location: parsedArgs.location,
     cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
@@ -348,8 +427,36 @@ async function runCharacterScopedRuntimeConfigCommand(
   });
   const command = parseRuntimeConfigCommand(
     parsedArgs.commandArgs,
-    startup.configEnv,
+    configStartup.configEnv,
   );
+
+  assertCharacterScopedParsedCommandAllowed(command);
+  const characterConfigRequest =
+    characterConfigStartupRequestForCommand(command);
+  const startup = await resolveRuntimeCliStartup({
+    location: parsedArgs.location,
+    cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
+      parsedArgs,
+      options.env ?? process.env,
+    ),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
+    continueAfterActivationErrors: true,
+    ...(characterConfigRequest === undefined ? {} : {characterConfigRequest}),
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
+  }
+
+  if (command.kind !== 'check') {
+    assertScopedStartupConfigReadable(startup);
+  }
+
   const location = {
     ...(parsedArgs.location.configPath === undefined
       ? {}
@@ -359,26 +466,89 @@ async function runCharacterScopedRuntimeConfigCommand(
       : {storeRoot: parsedArgs.location.storeRoot}),
     env: startup.configEnv,
   };
+  const target = resolveRuntimeConfigScopeTarget({
+    ...location,
+    scope: 'character',
+    characterId,
+    ...(startup.activationPlan.pluginConfigControl.characterScope === undefined
+      ? {}
+      : {
+          characterScope:
+            startup.activationPlan.pluginConfigControl.characterScope,
+        }),
+  });
 
-  if (command.kind === 'check') {
+  return writeCharacterScopedRuntimeConfigResult({
+    stdout: options.stdout,
+    command,
+    startup,
+    target,
+  });
+}
+
+function assertCharacterScopedRawCommandAllowed(
+  commandArgs: readonly string[],
+): void {
+  // Secret set reads its env var during parsing, so scope rejection
+  // intentionally comes first.
+  if (commandArgs[0] === 'secret' && commandArgs[1] === 'set') {
     throw new RuntimeConfigCliUsageError(
-      '--character does not apply to check; check always evaluates the ' +
-        'layered config.',
+      'Secrets are shared across characters; run the secret command ' +
+        'without --character.',
     );
   }
+}
 
+function assertCharacterScopedParsedCommandAllowed(
+  command: RuntimeConfigCliArgs['command'],
+): void {
   if (command.kind === 'env_path') {
     throw new RuntimeConfigCliUsageError(
       'The secrets env file is shared across characters; run env-path ' +
         'without --character.',
     );
   }
+}
 
-  const target = resolveRuntimeConfigScopeTarget({
-    ...location,
-    scope: 'character',
-    characterId,
-  });
+function characterConfigStartupRequestForCommand(
+  command: RuntimeConfigCliArgs['command'],
+) {
+  if (command.kind !== 'mutate') {
+    return undefined;
+  }
+
+  return isPluginActivationOperation(command.operation)
+    ? {
+        kind: 'plugin_activation' as const,
+        pluginId: command.operation.pluginId,
+        enabled: command.operation.kind === 'plugin_enable',
+      }
+    : {
+        kind: 'document' as const,
+        operation: command.operation,
+      };
+}
+
+function writeCharacterScopedRuntimeConfigResult(options: {
+  readonly stdout: NodeJS.WritableStream;
+  readonly command: RuntimeConfigCliArgs['command'];
+  readonly startup: CharacterScopedRuntimeCliStartup;
+  readonly target: ResolvedRuntimeConfigScopeTarget;
+}): number {
+  const {command, startup, target} = options;
+
+  if (command.kind === 'check') {
+    writeJson(options.stdout, {
+      runtimeConfig: createRuntimeConfigInspectShape(
+        startup.activationPlan.resolvedConfig,
+      ),
+      activationDiagnostics: startup.activationPlan.activation.diagnostics,
+      plugins: startup.activationPlan.activation.plugins,
+    });
+    return diagnosticsHaveErrors(startup.activationPlan.activation.diagnostics)
+      ? 1
+      : 0;
+  }
 
   if (command.kind === 'path') {
     options.stdout.write(`${target.configPath}\n`);
@@ -386,26 +556,10 @@ async function runCharacterScopedRuntimeConfigCommand(
   }
 
   if (command.kind === 'get') {
-    // The home must be adoptable and its global layer loadable before
-    // a scoped read reports any value — exactly like check and scoped
-    // writes. An absent overlay is fine: it simply contributes no
-    // character layer.
-    await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
-
-    const globalLayer = loadScopedGlobalLayerConfig({
-      ...location,
-      characterId,
-      ...(target.characterScope === undefined
-        ? {}
-        : {characterScope: target.characterScope}),
-    });
-
-    assertGlobalConfigLoadableForCharacterScope(globalLayer);
-
     return writeCharacterScopedValue({
       stdout: options.stdout,
       target,
-      loadedConfig: globalLayer,
+      loadedConfig: startup.loadedConfig,
       path: command.path,
     });
   }
@@ -414,35 +568,29 @@ async function runCharacterScopedRuntimeConfigCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
-  // Dialect violations, a broken global layer, and an existing invalid
-  // overlay all fail before ensure materializes the stamp or data
-  // marker for the character.
-  assertScopedMutationOperationAllowed(command.operation);
-  assertScopedGlobalLayerLoadable({
-    ...location,
-    characterId,
-    ...(target.characterScope === undefined
-      ? {}
-      : {characterScope: target.characterScope}),
-  });
-  assertExistingOverlayLoadable(target);
-  await ensureCharacterScopedMutationTarget(target);
+  const result = startup.characterConfigMutation;
 
-  // The resolved scope rides along explicitly: with only an overlay
-  // --config and no global file yet, a fresh derivation inside the
-  // apply would fall back to the default home and miss this target.
-  const result = applyScopedRuntimeConfigControlOperation({
-    ...location,
-    scope: 'character',
-    characterId,
-    ...(target.characterScope === undefined
-      ? {}
-      : {characterScope: target.characterScope}),
-    operation: command.operation,
-  });
+  if (result === undefined) {
+    throw new TypeError('Character config mutation did not commit.');
+  }
 
   writeRuntimeConfigMutationResult(options.stdout, result);
   return 0;
+}
+
+function assertScopedStartupConfigReadable(
+  startup: CharacterScopedRuntimeCliStartup,
+): void {
+  assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
+  const blocking = startup.activationPlan.resolvedConfig.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (blocking !== undefined) {
+    throw new RuntimeConfigCliUsageError(
+      `${runtimeConfigDiagnosticAttribution(blocking)}${blocking.message}`,
+    );
+  }
 }
 
 /**
@@ -480,8 +628,8 @@ function writeCharacterScopedValue(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly path: string;
 }): number {
-  // The binding and adoptability rules hold for reads too: a directory
-  // stamped for another character, or one the writers would refuse,
+  // The identity and adoptability rules hold for reads too: a directory
+  // marked for another character, or one the writers would refuse,
   // must not have its overlay reported as this character's config.
   if (options.target.characterScope !== undefined) {
     assertCharacterDataDirReadable({
@@ -523,50 +671,6 @@ function writeCharacterScopedValue(options: {
           : 'none',
   });
   return 0;
-}
-
-/**
- * Home guard, then binding stamp, then the control-file lock inside
- * the mutation — the same order the writer CLIs use. A scoped mutation
- * may be the first write into a fresh character-data directory; a
- * foreign --store directory or a copied data dir must be rejected
- * before any config lands in it.
- */
-/**
- * An existing overlay that cannot load rejects the scoped edit before
- * ensure materializes anything; the mutation would only fail on it
- * afterwards, leaving a fresh stamp behind for a rejected change.
- */
-function assertExistingOverlayLoadable(
-  target: ResolvedRuntimeConfigScopeTarget,
-): void {
-  if (target.characterScope === undefined) {
-    return;
-  }
-
-  const overlay = loadCharacterOverlayForScope(target.characterScope);
-  const overlayError = overlay.diagnostics.find(
-    diagnostic => diagnostic.severity === 'error',
-  );
-
-  if (overlayError !== undefined) {
-    throw new RuntimeConfigCliUsageError(
-      `${runtimeConfigDiagnosticAttribution(overlayError)}${overlayError.message}`,
-    );
-  }
-}
-
-async function ensureCharacterScopedMutationTarget(
-  target: ResolvedRuntimeConfigScopeTarget,
-): Promise<void> {
-  if (target.characterScope === undefined) {
-    return;
-  }
-
-  await ensureCharacterDataDir({
-    homeRoot: homeRootForCharacterDataDir(target.characterScope.dataRoot),
-    characterId: target.characterScope.characterId,
-  });
 }
 
 async function resolveRuntimeConfigCliActivationStartup(options: {
@@ -622,23 +726,24 @@ function applyRuntimePluginSecretSetCommand(options: {
     ...options.runtimeEnv,
     [options.operation.envVar]: options.operation.secretValue,
   };
-  const inspected = inspectRuntimePluginConfig({
+  const target = resolveRuntimeConfigScopeTarget({
     ...options.location,
     env: runtimeEnv,
-    manifest: definition.manifest,
+    scope: 'global',
   });
 
-  return applyRuntimePluginConfigControlOperation({
-    ...options.location,
-    env: runtimeEnv,
-    manifest: definition.manifest,
-    actor: 'operator',
-    expectedFingerprint: inspected.fingerprint,
-    operation: {
-      kind: 'secret_set',
-      fieldName: options.operation.fieldName,
-      envVar: options.operation.envVar,
-      secretValue: options.operation.secretValue,
+  return applyRuntimeConfigControlOperation({
+    target,
+    request: {
+      kind: 'plugin_config',
+      manifest: definition.manifest,
+      actor: 'operator',
+      fieldOperation: {
+        kind: 'secret_set',
+        fieldName: options.operation.fieldName,
+        envVar: options.operation.envVar,
+        secretValue: options.operation.secretValue,
+      },
     },
   });
 }

@@ -6,20 +6,16 @@ import {
   realpathSync,
   unlinkSync,
 } from 'node:fs';
-import {basename, dirname, join, resolve} from 'node:path';
+import {basename, dirname, resolve} from 'node:path';
 
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {
-  characterBindingFileName,
   characterDataDirectoryName,
   createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
   homeRootForCharacterDataDir,
 } from '../storage/layout-contract.ts';
-import {
-  assertCharacterDataDirAdoptable,
-  readCharacterBinding,
-} from '../storage/character-binding.ts';
+import {assertCharacterDataDirReadable} from '../storage/character-data.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -62,12 +58,20 @@ export type ApplyRuntimeConfigMutationOptions = {
   readonly storeRoot?: string;
   /**
    * Set by the character-scope mutation seam, which initializes the
-   * data directory (home guard plus binding stamp) before mutating.
+   * data directory (home guard plus identity marker) before mutating.
    * Direct path selection leaves this unset, so an overlay-located
-   * target must already carry a matching binding stamp.
+   * target must already carry a matching identity marker.
    */
   readonly characterScopeManaged?: boolean;
-  readonly operation: RuntimeConfigMutationOperation;
+  readonly operation?: RuntimeConfigMutationOperation;
+  /**
+   * Pure base transform applied under the config-file lock before the
+   * optional user operation. Character package materialization uses
+   * this so defaults and a first edit form one atomic candidate.
+   */
+  readonly transformBase?: (
+    config: Project02RuntimeConfig,
+  ) => Project02RuntimeConfig;
   readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 };
 
@@ -105,6 +109,10 @@ export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
 export function applyRuntimeConfigMutation(
   options: ApplyRuntimeConfigMutationOptions,
 ): RuntimeConfigMutationResult {
+  if (options.operation === undefined && options.transformBase === undefined) {
+    throw new TypeError('Config mutation requires an operation or transform.');
+  }
+
   return applyRuntimeConfigMutationWithLocks(options);
 }
 
@@ -126,7 +134,7 @@ function applyRuntimeConfigMutationWithLocks(
   // Secrets are shared across characters: their references are
   // authored in the home config.json, never in a character overlay —
   // matching the --character secret-scope rejection.
-  if (overlayLocatedTarget && options.operation.kind === 'secret_set') {
+  if (overlayLocatedTarget && options.operation?.kind === 'secret_set') {
     throw new RuntimeConfigMutationError(
       'Secrets are shared across characters; author them in the home ' +
         'config.json, not a character overlay.',
@@ -300,8 +308,13 @@ function prepareLockedRuntimeConfigMutation(
     configPath: location.configPath,
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     expectedFingerprint: options.expectedFingerprint,
-    operation: options.operation,
-    validateCandidate: options.validateCandidate,
+    ...(options.operation === undefined ? {} : {operation: options.operation}),
+    ...(options.transformBase === undefined
+      ? {}
+      : {transformBase: options.transformBase}),
+    ...(options.validateCandidate === undefined
+      ? {}
+      : {validateCandidate: options.validateCandidate}),
   });
   const nextEffectiveStoreRoot =
     preparedCandidate.config.project02?.storeRoot ?? selectedStoreRoot;
@@ -324,11 +337,11 @@ function prepareLockedRuntimeConfigMutation(
 }
 
 function secretMutationRetryEnvPath(
-  operation: RuntimeConfigMutationOperation,
+  operation: RuntimeConfigMutationOperation | undefined,
   location: RuntimeConfigMutationLocation,
   candidate: LockedRuntimeConfigMutation,
 ): string | undefined {
-  if (operation.kind !== 'secret_set') {
+  if (operation?.kind !== 'secret_set') {
     return undefined;
   }
 
@@ -344,11 +357,11 @@ function secretMutationRetryEnvPath(
 }
 
 function writeLockedRuntimeConfigMutation(
-  operation: RuntimeConfigMutationOperation,
+  operation: RuntimeConfigMutationOperation | undefined,
   location: RuntimeConfigMutationLocation,
   candidate: LockedRuntimeConfigMutation,
 ): void {
-  if (operation.kind !== 'secret_set') {
+  if (operation?.kind !== 'secret_set') {
     writeJsonAtomic(
       location.canonicalSelectedConfigPath,
       candidate.preparedCandidate.config,
@@ -506,8 +519,8 @@ export function assertOverlayLocatedCandidateStaysCharacterScoped(
   }
 }
 
-// The scoped seam stamps a data directory before writing into it; a
-// directly selected overlay path must find that stamp already present,
+// The scoped seam marks a data directory before writing into it; a
+// directly selected overlay path must find that marker already present,
 // or the write would create durable character state the runtime later
 // refuses to open. Runs before the mutation lock so even the lock root
 // leaves no trace in an uninitialized directory. The character-scope
@@ -518,49 +531,30 @@ export function assertOverlayLocatedTargetIsInitialized(
   const dataRoot = dirname(canonicalConfigPath);
   const directoryCharacterId = basename(dataRoot);
 
-  // The stamp alone is not enough: the directory must also pass the
-  // full adoptability rules (real directory, honest marker), or the
-  // write would land in a store durable startup refuses.
-  assertCharacterDataDirAdoptable({storeRoot: dataRoot});
+  const marker = assertCharacterDataDirReadable({
+    storageOptions: {storeRoot: dataRoot},
+    characterId: directoryCharacterId,
+  });
 
-  const read = readCharacterBinding({storeRoot: dataRoot});
-
-  if (
-    read.status === 'bound' &&
-    read.binding.characterId === directoryCharacterId
-  ) {
+  if (marker !== undefined) {
     return;
-  }
-
-  if (read.status === 'bound') {
-    throw new RuntimeConfigMutationError(
-      `Character data directory "${dataRoot}" holds history for character ` +
-        `"${read.binding.characterId}"; its config file cannot be edited ` +
-        `as "${directoryCharacterId}".`,
-    );
-  }
-
-  if (read.status === 'malformed') {
-    throw new RuntimeConfigMutationError(read.message);
   }
 
   throw new RuntimeConfigMutationError(
     `Config file "${canonicalConfigPath}" sits in a character-data ` +
-      'directory that has no binding stamp; run the command with ' +
+      'directory that has no identity marker; run the command with ' +
       `--character ${directoryCharacterId} to initialize it first.`,
   );
 }
 
-// Character-data locations are recognized structurally (a parent named
-// character-data, the layout invariant) or by the binding stamp a
-// materialized data dir always carries.
+// Character-data locations are recognized by the one layout invariant:
+// the config file's parent lives directly under character-data.
 function characterDataLocationForConfigPath(
   canonicalConfigPath: string,
 ): string | undefined {
   const containingDirectory = dirname(canonicalConfigPath);
   const isDataLocation =
-    basename(dirname(containingDirectory)) === characterDataDirectoryName ||
-    existsSync(join(containingDirectory, characterBindingFileName));
+    basename(dirname(containingDirectory)) === characterDataDirectoryName;
 
   return isDataLocation ? containingDirectory : undefined;
 }
@@ -592,8 +586,7 @@ function assertSelectedOverlayShapedPathIsNotSymlink(
   const writtenPath = resolve(displayConfigPath);
   const containingDirectory = dirname(writtenPath);
   const isDataLocation =
-    basename(dirname(containingDirectory)) === characterDataDirectoryName ||
-    existsSync(join(containingDirectory, characterBindingFileName));
+    basename(dirname(containingDirectory)) === characterDataDirectoryName;
 
   if (!isDataLocation) {
     return;
@@ -678,7 +671,10 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   readonly configPath?: string;
   readonly storeRoot?: string;
   readonly expectedFingerprint?: string | undefined;
-  readonly operation: RuntimeConfigMutationOperation;
+  readonly operation?: RuntimeConfigMutationOperation;
+  readonly transformBase?: (
+    config: Project02RuntimeConfig,
+  ) => Project02RuntimeConfig;
   readonly validateCandidate?:
     ((config: Project02RuntimeConfig) => void) | undefined;
 }): PreparedRuntimeConfigMutationCandidate {
@@ -706,8 +702,11 @@ export function prepareRuntimeConfigMutationCandidate(options: {
     );
   }
 
+  const base = options.transformBase?.(currentConfig) ?? currentConfig;
   const config = validateMutatedRuntimeConfig(
-    mutateConfig(currentConfig, options.operation),
+    options.operation === undefined
+      ? base
+      : mutateConfig(base, options.operation),
   );
 
   options.validateCandidate?.(config);
@@ -731,7 +730,7 @@ export function storeRootForSelectedDefaultConfigPath(
     try {
       return homeRootForCharacterDataDir(dirname(canonicalConfigPath));
     } catch {
-      // A stamped directory outside any character-data parent names no
+      // A marked directory outside any character-data parent names no
       // home; claim none instead of aliasing the data dir as one.
       return undefined;
     }

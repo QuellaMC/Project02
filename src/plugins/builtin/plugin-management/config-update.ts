@@ -40,12 +40,14 @@ import {
 } from './state.ts';
 
 function controlStateLocation(state: RuntimePluginConfigControlHostState): {
+  readonly scope: 'global' | 'character';
   readonly configPath?: string;
   readonly storeRoot?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly characterScope?: RuntimeConfigCharacterScope;
 } {
   return {
+    scope: state.characterScope === undefined ? 'global' : 'character',
     ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
     ...(state.storeRoot === undefined ? {} : {storeRoot: state.storeRoot}),
     ...(state.env === undefined ? {} : {env: state.env}),
@@ -141,14 +143,14 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     actor: 'agent',
     operation,
   });
-  const targetConfigPath = requiredRuntimePluginConfigControl(
+  const target = requiredRuntimePluginConfigControl(
     options.state,
-  ).resolveTargetPath({
+  ).resolveTarget({
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     ...controlStateLocation(options.state),
   });
 
-  if (targetConfigPath !== options.effect.targetConfigPath) {
+  if (target.canonicalConfigPath !== options.effect.targetConfigPath) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
       `Prepared config effect "${options.effect.effectId}" targets another runtime config path.`,
     );
@@ -175,14 +177,14 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     const prepared = requiredRuntimePluginConfigControl(
       options.state,
     ).prepareOperation({
-      manifest,
-      actor: 'agent',
+      target,
       expectedFingerprint: options.effect.expectedFingerprint,
-      operation,
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...controlStateLocation(options.state),
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: operation,
+      },
     });
 
     if (
@@ -197,14 +199,14 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     const result = requiredRuntimePluginConfigControl(
       options.state,
     ).applyOperation({
-      manifest,
-      actor: 'agent',
+      target,
       expectedFingerprint: options.effect.expectedFingerprint,
-      operation,
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...controlStateLocation(options.state),
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: operation,
+      },
     });
 
     if (result.fingerprint !== options.effect.resultFingerprint) {
@@ -278,9 +280,9 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
     return false;
   }
 
-  const targetConfigPath = requiredRuntimePluginConfigControl(
+  const target = requiredRuntimePluginConfigControl(
     options.state,
-  ).resolveTargetPath({
+  ).resolveTarget({
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     ...controlStateLocation(options.state),
   });
@@ -291,7 +293,7 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   });
 
   return !(
-    targetConfigPath !== options.effect.targetConfigPath ||
+    target.canonicalConfigPath !== options.effect.targetConfigPath ||
     inspection.fingerprint !== options.effect.expectedFingerprint
   );
 }
@@ -447,17 +449,25 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   let targetConfigPath: string;
 
   try {
-    const prepared = requiredRuntimePluginConfigControl(
+    const target = requiredRuntimePluginConfigControl(
       options.state,
-    ).prepareOperation({
-      manifest,
-      actor: 'agent',
-      expectedFingerprint,
-      operation,
+    ).resolveTarget({
       ...(options.storeRoot === undefined
         ? {}
         : {storeRoot: options.storeRoot}),
       ...controlStateLocation(options.state),
+    });
+    const prepared = requiredRuntimePluginConfigControl(
+      options.state,
+    ).prepareOperation({
+      target,
+      expectedFingerprint,
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: operation,
+      },
     });
 
     resultFingerprint = prepared.resultFingerprint;

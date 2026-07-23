@@ -22,6 +22,7 @@
       "handle_tool_call"
     ],
     "config": {
+      "scope": "character_only",
       "fields": []
     },
     "localTrustLevel": "first_party",
@@ -40,7 +41,7 @@
       }
     },
     "activation": {
-      "defaultEnabled": true,
+      "defaultEnabled": false,
       "reasons": [
         "built_in_character_state"
       ]

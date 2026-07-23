@@ -44,6 +44,7 @@ export function createMemoryProviderRuntimePlugin(
       },
       declaredPlugins: memoryProviderDeclarations(provider),
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'trusted_adapter',

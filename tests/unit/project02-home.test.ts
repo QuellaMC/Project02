@@ -1,4 +1,5 @@
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
   rmSync,
@@ -14,6 +15,7 @@ import {
   createProject02HomeLayout,
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
+import {acquireLocalRuntimeMutationLock} from '../../src/runtime/storage/mutation-lock.ts';
 
 describe('project02 home initialization', () => {
   it('initializes a fresh home with a scoped marker and the character-data root', async () => {
@@ -169,4 +171,77 @@ describe('project02 home initialization', () => {
       code: 'malformed_schema_marker',
     });
   });
+
+  it('rejects another scope that wins the marker initialization race', async () => {
+    const homeRoot = join(createTestTempRoot(), 'raced-home-scope');
+    const layout = createProject02HomeLayout({homeRoot});
+    const heldMarkerLock = await acquireLocalRuntimeMutationLock({
+      locksRoot: layout.locksRoot,
+      resourceKey: 'storage-schema',
+    });
+    const initialization = ensureInitializedProject02Home({homeRoot});
+    const initializationRejection = expect(
+      initialization,
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'malformed_schema_marker',
+    });
+
+    try {
+      await waitForPath(layout.characterDataRoot);
+      writeFileSync(
+        layout.schemaPath,
+        `${JSON.stringify({
+          schemaVersion: 4,
+          scope: 'character-data',
+          characterId: 'mira',
+          createdAt: '2026-07-23T00:00:00.000Z',
+        })}\n`,
+      );
+    } finally {
+      await heldMarkerLock.release();
+    }
+
+    await initializationRejection;
+  });
+
+  it('refuses foreign content added while waiting to mark a home', async () => {
+    const homeRoot = join(createTestTempRoot(), 'raced-foreign-home');
+    const layout = createProject02HomeLayout({homeRoot});
+    const heldMarkerLock = await acquireLocalRuntimeMutationLock({
+      locksRoot: layout.locksRoot,
+      resourceKey: 'storage-schema',
+    });
+    const initialization = ensureInitializedProject02Home({homeRoot});
+    const initializationRejection = expect(
+      initialization,
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'missing_file',
+    });
+
+    try {
+      await waitForPath(layout.characterDataRoot);
+      writeFileSync(join(homeRoot, 'notes.txt'), 'foreign\n');
+    } finally {
+      await heldMarkerLock.release();
+    }
+
+    await initializationRejection;
+    expect(existsSync(layout.schemaPath)).toBe(false);
+  });
 });
+
+async function waitForPath(path: string): Promise<void> {
+  const deadline = Date.now() + 1_000;
+
+  while (!existsSync(path)) {
+    if (Date.now() >= deadline) {
+      throw new Error(`Timed out waiting for path: ${path}`);
+    }
+
+    await new Promise<void>(resolve => {
+      setTimeout(resolve, 1);
+    });
+  }
+}

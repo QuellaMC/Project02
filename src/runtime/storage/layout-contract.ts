@@ -22,7 +22,7 @@ export type LocalRuntimeStorageScope =
   (typeof localRuntimeStorageScopeValues)[number];
 
 export type LocalRuntimeStorageContractErrorCode =
-  | 'character_binding_rejected'
+  | 'character_identity_mismatch'
   | 'concurrent_write'
   | 'invalid_session_id'
   | 'invalid_plugin_id'
@@ -66,15 +66,14 @@ export type Project02HomeLayout = {
 };
 
 // One character's data directory under <home>/character-data/<id>:
-// sessions, plugin state, the character-scoped config overlay, and the
-// binding stamp. Deliberately has no envPath or package roots so shared
+// sessions, plugin state, the character-scoped config overlay, and one
+// identity-bearing schema marker. Deliberately has no envPath or package roots so shared
 // concerns cannot be derived from a data root by accident.
 export type LocalRuntimeStorageLayout = {
   readonly storeRoot: string;
   readonly configPath: string;
   readonly schemaPath: string;
   readonly locksRoot: string;
-  readonly characterBindingPath: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
 };
@@ -121,16 +120,35 @@ export type LocalRuntimePluginPathsOptions = LocalRuntimeSessionPathsOptions & {
   readonly pluginId: string;
 };
 
-export type LocalRuntimeStorageSchemaMarker = {
+export type LocalRuntimeHomeStorageSchemaMarker = {
   readonly schemaVersion: LocalRuntimeReadableStorageSchemaVersion;
-  readonly scope: LocalRuntimeStorageScope;
+  readonly scope: 'home';
   readonly createdAt: string;
 };
 
-export type CreateLocalRuntimeStorageSchemaMarkerOptions = {
-  readonly scope: LocalRuntimeStorageScope;
+export type LocalRuntimeCharacterDataStorageSchemaMarker = {
+  readonly schemaVersion: LocalRuntimeReadableStorageSchemaVersion;
+  readonly scope: 'character-data';
+  readonly characterId: string;
   readonly createdAt: string;
+  readonly materializedCharacterPackageVersion?: string;
 };
+
+export type LocalRuntimeStorageSchemaMarker =
+  | LocalRuntimeHomeStorageSchemaMarker
+  | LocalRuntimeCharacterDataStorageSchemaMarker;
+
+export type CreateLocalRuntimeStorageSchemaMarkerOptions =
+  | {
+      readonly scope: 'home';
+      readonly createdAt: string;
+    }
+  | {
+      readonly scope: 'character-data';
+      readonly characterId: string;
+      readonly createdAt: string;
+      readonly materializedCharacterPackageVersion?: string;
+    };
 
 export type LocalRuntimeSessionMetadata = {
   readonly sessionId: string;
@@ -164,8 +182,6 @@ const pluginsDirectoryName = 'plugins';
 const charactersDirectoryName = 'characters';
 
 export const characterDataDirectoryName = 'character-data';
-
-export const characterBindingFileName = 'character-binding.json';
 
 const traceFileName = 'trace.jsonl';
 
@@ -257,7 +273,6 @@ export function createLocalRuntimeStorageLayout(
     configPath: join(storeRoot, configFileName),
     schemaPath: join(storeRoot, schemaFileName),
     locksRoot: join(storeRoot, locksDirectoryName),
-    characterBindingPath: join(storeRoot, characterBindingFileName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot,
   } satisfies LocalRuntimeStorageLayout);
@@ -358,15 +373,34 @@ export function createLocalRuntimeSessionMetadata(
 export function createLocalRuntimeStorageSchemaMarker(
   options: CreateLocalRuntimeStorageSchemaMarkerOptions,
 ): LocalRuntimeStorageSchemaMarker {
-  return Object.freeze({
+  const common = {
     schemaVersion: localRuntimeStorageSchemaVersion,
-    scope: requiredStorageScope(options.scope),
     createdAt: requiredCanonicalTimestamp(
       options.createdAt,
       'createdAt',
       'malformed_schema_marker',
     ),
-  } satisfies LocalRuntimeStorageSchemaMarker);
+  } as const;
+
+  if (options.scope === 'home') {
+    return Object.freeze({
+      ...common,
+      scope: 'home',
+    } satisfies LocalRuntimeHomeStorageSchemaMarker);
+  }
+
+  return Object.freeze({
+    ...common,
+    scope: 'character-data',
+    characterId: normalizeLocalRuntimeCharacterId(options.characterId),
+    ...(options.materializedCharacterPackageVersion === undefined
+      ? {}
+      : {
+          materializedCharacterPackageVersion: requiredCharacterPackageVersion(
+            options.materializedCharacterPackageVersion,
+          ),
+        }),
+  } satisfies LocalRuntimeCharacterDataStorageSchemaMarker);
 }
 
 function requiredStorageScope(value: unknown): LocalRuntimeStorageScope {
@@ -403,15 +437,63 @@ export function decodeStorageSchemaMarker(
     );
   }
 
-  return Object.freeze({
+  const scope = requiredStorageScope(record['scope']);
+  const common = {
     schemaVersion,
-    scope: requiredStorageScope(record['scope']),
     createdAt: requiredRecordCanonicalTimestamp(
       record,
       'createdAt',
       'malformed_schema_marker',
     ),
-  } satisfies LocalRuntimeStorageSchemaMarker);
+  } as const;
+
+  if (scope === 'home') {
+    return Object.freeze({
+      ...common,
+      scope,
+    } satisfies LocalRuntimeHomeStorageSchemaMarker);
+  }
+
+  const characterId = record['characterId'];
+  const materializedCharacterPackageVersion =
+    record['materializedCharacterPackageVersion'];
+
+  if (
+    typeof characterId !== 'string' ||
+    !characterIdPattern.test(characterId)
+  ) {
+    throwMalformedSchemaMarker('characterId');
+  }
+
+  if (
+    materializedCharacterPackageVersion !== undefined &&
+    (typeof materializedCharacterPackageVersion !== 'string' ||
+      !characterPackageVersionPattern.test(materializedCharacterPackageVersion))
+  ) {
+    throwMalformedSchemaMarker('materializedCharacterPackageVersion');
+  }
+
+  return Object.freeze({
+    ...common,
+    scope,
+    characterId,
+    ...(materializedCharacterPackageVersion === undefined
+      ? {}
+      : {materializedCharacterPackageVersion}),
+  } satisfies LocalRuntimeCharacterDataStorageSchemaMarker);
+}
+
+const characterPackageVersionPattern = /^\d+\.\d+\.\d+$/u;
+
+function requiredCharacterPackageVersion(value: string): string {
+  if (!characterPackageVersionPattern.test(value)) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_schema_marker',
+      'Materialized character package version must be a semantic version like "1.0.0".',
+    );
+  }
+
+  return value;
 }
 
 function isLocalRuntimeReadableStorageSchemaVersion(

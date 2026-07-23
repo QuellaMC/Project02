@@ -13,6 +13,8 @@ import {
   type ResolveProject02RuntimeConfigOptions,
 } from './resolve.ts';
 import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
+import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
+import {withRuntimeConfigDiagnosticOrigin} from './diagnostic.ts';
 import {
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
@@ -55,13 +57,46 @@ export function resolveLayeredProject02RuntimeConfig(
     overlayConfig === undefined
       ? globalOptions.loadedConfig
       : mergedLoadedConfigForOverlay(globalOptions.loadedConfig, overlayConfig);
+  const manifests = globalOptions.pluginManifests ?? [];
+  const scopeDiagnostics =
+    overlayConfig === undefined
+      ? runtimePluginScopeDiagnostics({
+          config: globalOptions.loadedConfig.config,
+          manifests,
+          authoredScope: 'global',
+        })
+      : [
+          ...runtimePluginScopeDiagnostics({
+            config: globalOptions.loadedConfig.config,
+            manifests,
+            authoredScope: 'global',
+          }),
+          ...runtimePluginScopeDiagnostics({
+            config: overlayConfig.config,
+            manifests,
+            authoredScope: 'character',
+          }).map(diagnostic =>
+            withRuntimeConfigDiagnosticOrigin(diagnostic, {
+              scope: 'character',
+              characterId: overlayConfig.characterId,
+              ...(overlayConfig.path === undefined
+                ? {}
+                : {path: overlayConfig.path}),
+            }),
+          ),
+        ];
+  const scopedMerged = Object.freeze({
+    ...merged,
+    diagnostics: Object.freeze([...merged.diagnostics, ...scopeDiagnostics]),
+  } satisfies LoadedProject02RuntimeConfig);
 
   return resolveProject02RuntimeConfig({
     ...globalOptions,
+    skipPluginScopeValidation: true,
     loadedConfig:
       characterId === undefined
-        ? merged
-        : withActiveCharacter(merged, characterId),
+        ? scopedMerged
+        : withActiveCharacter(scopedMerged, characterId),
   });
 }
 

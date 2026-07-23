@@ -553,6 +553,7 @@ export function createHealthRejectingPlugin() {
       },
       declaredPlugins: ['health'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -615,6 +616,7 @@ export function createHandleFileStoreWritePlugin(
           ? ['tool_provider', 'handle_tool_call']
           : ['tool_provider', 'handle_tool_call', 'health'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -765,6 +767,7 @@ export function createAfterTurnCommittedProbeHost(
           },
           declaredPlugins: ['after_turn_committed'],
           config: {
+            scope: 'global_with_character_overrides',
             fields: [],
           },
           localTrustLevel: 'test_fixture',
@@ -844,6 +847,7 @@ export function createPluginStoreRevisionFixtureHost() {
           },
           declaredPlugins: ['tool_provider', 'handle_tool_call'],
           config: {
+            scope: 'global_with_character_overrides',
             fields: [],
           },
           localTrustLevel: 'test_fixture',
@@ -935,7 +939,10 @@ export function transactionIdentityFromContext(context: {
 export async function createDurableCharacterStateHarness(sessionId: string) {
   const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-  await createLocalRuntimeSessionStore({storeRoot}).createSession({
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: testCharacterProfile.id,
+  }).createSession({
     sessionId,
     createdAt: '2026-06-15T00:00:00.000Z',
   });
@@ -947,6 +954,8 @@ export async function createDurableCharacterStateHarness(sessionId: string) {
       character: testCharacterProfile,
     }),
     logStore: createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     }),

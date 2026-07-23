@@ -63,7 +63,7 @@ describe('runtime config activation checks and construction', () => {
     );
   });
 
-  it('does not default-enable caller-supplied real Character State factories during check', async () => {
+  it('applies package-authored Character State enablement to caller-supplied factories during check', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-check-character-state-real-factory-',
     );
@@ -98,15 +98,15 @@ describe('runtime config activation checks and construction', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        activationStatus: 'disabled',
-        enabled: false,
+        activationStatus: 'active',
+        enabled: true,
         requestedAccess: {file_store: 'write', model_input: 'write'},
-        grantedAccess: {},
+        grantedAccess: {file_store: 'write', model_input: 'write'},
       }),
     );
   });
 
-  it('does not infer Character State check default access from exact manifest matches', async () => {
+  it('applies package-authored Character State enablement to exact manifest matches', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-check-character-state-exact-manifest-',
     );
@@ -147,15 +147,15 @@ describe('runtime config activation checks and construction', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        activationStatus: 'disabled',
-        enabled: false,
+        activationStatus: 'active',
+        enabled: true,
         requestedAccess: {file_store: 'write', model_input: 'write'},
-        grantedAccess: {},
+        grantedAccess: {file_store: 'write', model_input: 'write'},
       }),
     );
   });
 
-  it('does not infer Character State check default access from same-id manifest spoofs', async () => {
+  it('applies package-authored enablement by stable plugin id to injected manifests', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-check-character-state-spoof-',
     );
@@ -191,10 +191,10 @@ describe('runtime config activation checks and construction', () => {
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        activationStatus: 'disabled',
-        enabled: false,
+        activationStatus: 'active',
+        enabled: true,
         requestedAccess: {file_store: 'write'},
-        grantedAccess: {},
+        grantedAccess: {file_store: 'write'},
       }),
     );
   });
@@ -325,11 +325,15 @@ describe('runtime config activation checks and construction', () => {
     expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id',
     );
-    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
     expect(
-      nonHostScopedActivationPlugins(output).map(
-        plugin => plugin.activationStatus,
-      ),
+      enabledNonHostScopedActivationPlugins(output)
+        .filter(plugin => plugin.pluginId === 'optional.duplicate')
+        .map(plugin => plugin.pluginId),
+    ).toEqual([]);
+    expect(
+      nonHostScopedActivationPlugins(output)
+        .filter(plugin => plugin.pluginId === 'optional.duplicate')
+        .map(plugin => plugin.activationStatus),
     ).toEqual(['disabled', 'disabled']);
   });
 
@@ -455,11 +459,15 @@ describe('runtime config activation checks and construction', () => {
     expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id',
     );
-    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([]);
     expect(
-      nonHostScopedActivationPlugins(output).map(
-        plugin => plugin.activationStatus,
-      ),
+      enabledNonHostScopedActivationPlugins(output)
+        .filter(plugin => plugin.pluginId === 'disabled.duplicate')
+        .map(plugin => plugin.pluginId),
+    ).toEqual([]);
+    expect(
+      nonHostScopedActivationPlugins(output)
+        .filter(plugin => plugin.pluginId === 'disabled.duplicate')
+        .map(plugin => plugin.activationStatus),
     ).toEqual(['disabled', 'disabled']);
   });
 
@@ -534,7 +542,11 @@ describe('runtime config activation checks and construction', () => {
     expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
       'runtime_config_duplicate_plugin_manifest_id',
     );
-    expect(enabledNonHostScopedActivationPlugins(output)).toEqual([
+    expect(
+      enabledNonHostScopedActivationPlugins(output).filter(plugin =>
+        plugin.pluginId.startsWith('memory.'),
+      ),
+    ).toEqual([
       expect.objectContaining({
         pluginId: 'memory.selected',
       }),

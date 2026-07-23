@@ -101,6 +101,33 @@ describe('plugin package descriptor schema parity', () => {
       }),
     ],
     [
+      'a missing config scope',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+        const config = {...(manifest['config'] as Record<string, unknown>)};
+
+        delete config['scope'];
+        return {...descriptor, manifest: {...manifest, config}};
+      },
+    ],
+    [
+      'an unsupported config scope',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+
+        return {
+          ...descriptor,
+          manifest: {
+            ...manifest,
+            config: {
+              ...(manifest['config'] as Record<string, unknown>),
+              scope: 'sometimes_global',
+            },
+          },
+        };
+      },
+    ],
+    [
       'a secret agent-mutable config field',
       (descriptor: Record<string, unknown>) => {
         const manifest = descriptor['manifest'] as Record<string, unknown>;
@@ -111,6 +138,7 @@ describe('plugin package descriptor schema parity', () => {
           manifest: {
             ...manifest,
             config: {
+              scope: 'global_with_character_overrides',
               fields: [
                 ...config.fields,
                 {

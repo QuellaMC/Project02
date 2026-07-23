@@ -57,6 +57,11 @@ Declared in `manifest.config.fields`; the same declarations drive runtime
 resolution, the operator console, and the model-facing
 `runtime.plugin.config` tools.
 
+- `config.scope: "global_with_character_overrides"` allows global
+  enablement and non-secret settings plus character overrides.
+- `config.scope: "character_only"` keeps enablement and non-secret
+  settings in character packages and overlays. Its
+  `activation.defaultEnabled` must be `false`.
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
 - `secret: true` fields accept only `{"$env": "VAR"}` references in config;
@@ -71,10 +76,12 @@ resolution, the operator console, and the model-facing
 ## Activation
 
 `activation.defaultEnabled: true` activates the package on every store with
-no configuration; use it only for product-essential plugins. Demo and
+no configuration; use it only for product-essential
+`global_with_character_overrides` plugins. Character-only, demo, and
 optional plugins ship `false` and are enabled per store:
-`pnpm runtime-config ui` → Plugins → your plugin → Enable, or
-`plugins.<id>.enabled: true` in the store's `config.json`.
+`pnpm runtime-config ui` → Plugins → your plugin → Enable. A
+character-only plugin is enabled with `--character <id>` or by that
+character's package; it is rejected from the home `config.json`.
 
 ## Testing a package
 

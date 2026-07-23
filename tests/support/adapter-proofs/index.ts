@@ -857,6 +857,7 @@ function createRuntimePluginManifestForAdapter(options: {
     },
     declaredPlugins: options.declaredPlugins,
     config: {
+      scope: 'global_with_character_overrides',
       fields: options.configFields,
       ...(options.configFingerprint === undefined
         ? {}

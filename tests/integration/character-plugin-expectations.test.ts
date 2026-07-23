@@ -4,20 +4,20 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {
-  characterOverlaySeedDocument,
   enforceCharacterPluginExpectations,
   resolveRuntimeCliStartup,
 } from '../../src/app/index.ts';
 import type {CharacterPluginExpectations} from '../../src/characters/index.ts';
 import {
-  applyScopedRuntimeConfigControlOperation,
+  applyRuntimeConfigControlOperation,
   characterOverlayConfigPath,
-  runtimeConfigEnvVarName,
-  runtimeConfigVersion,
+  resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
-  ensureCharacterDataStamp,
+  createLocalRuntimeStorageLayout,
+  decodeStorageSchemaMarker,
+  ensureCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 import type {RuntimePluginActivationResult} from '../../src/app/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
@@ -48,10 +48,30 @@ function activationWithEnabled(
 /** Seeds a home whose operator character declares a plugins block. */
 function homeWithCharacter(options: {
   readonly characterId: string;
+  readonly version?: string;
   readonly plugins?: Readonly<Record<string, unknown>>;
 }): string {
   const homeRoot = createTestTempRoot('project02-char-plugins-');
-  const packageRoot = join(homeRoot, 'characters', options.characterId);
+
+  writeCharacterPackage({
+    homeRoot,
+    characterId: options.characterId,
+    version: options.version ?? '1.0.0',
+    ...(options.plugins === undefined ? {} : {plugins: options.plugins}),
+  });
+  writeRuntimeConfig(join(homeRoot, 'config.json'), {
+    project02: {character: options.characterId},
+  });
+  return homeRoot;
+}
+
+function writeCharacterPackage(options: {
+  readonly homeRoot: string;
+  readonly characterId: string;
+  readonly version: string;
+  readonly plugins?: Readonly<Record<string, unknown>>;
+}): void {
+  const packageRoot = join(options.homeRoot, 'characters', options.characterId);
 
   mkdirSync(packageRoot, {recursive: true});
   writeFileSync(
@@ -64,69 +84,14 @@ function homeWithCharacter(options: {
           displayName: 'Seeded Character',
         },
         persona: {system: ['You are a seeded fixture character.']},
-        meta: {version: '1.0.0'},
+        meta: {version: options.version},
         ...(options.plugins === undefined ? {} : {plugins: options.plugins}),
       },
       null,
       2,
     )}\n`,
   );
-  writeRuntimeConfig(join(homeRoot, 'config.json'), {
-    project02: {character: options.characterId},
-  });
-  return homeRoot;
 }
-
-describe('character overlay seed document', () => {
-  it('builds one sorted enabled rung per required and recommended plugin', () => {
-    const seed = characterOverlaySeedDocument(
-      expectations({
-        required: ['zeta-plugin', 'character-state'],
-        recommended: ['demo-config', 'character-state'],
-        config: {
-          'demo-config': {tone: 'formal'},
-          'config-only-plugin': {setting: 1},
-        },
-      }),
-    );
-
-    expect(seed).toEqual({
-      status: 'seed',
-      document: {
-        version: runtimeConfigVersion,
-        plugins: {
-          'character-state': {enabled: true},
-          'config-only-plugin': {config: {setting: 1}},
-          'demo-config': {enabled: true, config: {tone: 'formal'}},
-          'zeta-plugin': {enabled: true},
-        },
-      },
-    });
-  });
-
-  it('produces no seed without expectations and reports invalid defaults', () => {
-    expect(characterOverlaySeedDocument(undefined)).toEqual({status: 'none'});
-    expect(
-      characterOverlaySeedDocument(
-        expectations({required: [], recommended: [], config: {}}),
-      ),
-    ).toEqual({status: 'none'});
-
-    const invalid = characterOverlaySeedDocument(
-      expectations({
-        config: {'demo-config': {apiKey: {$env: ''}}},
-      }),
-    );
-
-    expect(invalid.status).toBe('invalid');
-    if (invalid.status !== 'invalid') {
-      throw new Error('Expected invalid seed.');
-    }
-    expect(invalid.messages[0]).toContain(
-      'Character plugin defaults do not form a valid config document',
-    );
-  });
-});
 
 describe('character plugin enforcement', () => {
   it('escalates required plugins and only warns for recommended ones', () => {
@@ -164,54 +129,206 @@ describe('character plugin enforcement', () => {
 });
 
 describe('first-selection materialization through startup', () => {
-  it('seeds the overlay once and keeps it byte-identical afterwards', async () => {
+  it('writes a versioned minimal overlay even when the package declares no plugins', async () => {
+    const homeRoot = homeWithCharacter({characterId: 'seeded'});
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+
+    await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({version: 'project02.config.v2'});
+    expect(
+      decodeStorageSchemaMarker(
+        readFileSync(
+          createLocalRuntimeStorageLayout({storeRoot: dataRoot}).schemaPath,
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      schemaVersion: 4,
+      materializedCharacterPackageVersion: '1.0.0',
+    });
+  });
+
+  it('writes only package overrides and keeps absent fields inherited from global config', async () => {
     const homeRoot = homeWithCharacter({
       characterId: 'seeded',
       plugins: {
-        required: ['demo-config'],
-        config: {'demo-config': {tone: 'formal'}},
+        recommended: ['demo-config'],
+        config: {'demo-config': {tone: 'warm'}},
       },
+    });
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'seeded'},
+      plugins: {
+        'demo-config': {
+          enabled: false,
+          config: {tone: 'formal', signoff: 'Global One'},
+        },
+      },
+    });
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+    const first = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({
+      version: 'project02.config.v2',
+      plugins: {
+        'demo-config': {enabled: true, config: {tone: 'warm'}},
+      },
+    });
+    if (first.status !== 'resolved') {
+      throw new Error('Expected the package override to activate.');
+    }
+    expect(
+      first.activationPlan.resolvedConfig.pluginConfigs['demo-config'],
+    ).toMatchObject({
+      tone: {value: 'warm'},
+      signoff: {value: 'Global One'},
+    });
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'seeded'},
+      plugins: {
+        'demo-config': {
+          enabled: false,
+          config: {tone: 'pirate', signoff: 'Global Two'},
+        },
+      },
+    });
+    const second = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+
+    if (second.status !== 'resolved') {
+      throw new Error('Expected inherited global changes to resolve.');
+    }
+    expect(
+      second.activationPlan.resolvedConfig.pluginConfigs['demo-config'],
+    ).toMatchObject({
+      tone: {value: 'warm'},
+      signoff: {value: 'Global Two'},
+    });
+  });
+
+  it('keeps config-only and unknown plugin defaults without implicitly enabling them', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {
+        config: {
+          'demo-config': {tone: 'warm'},
+          'future-plugin': {mode: 'later'},
+        },
+      },
+    });
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      continueAfterActivationErrors: true,
+    });
+
+    expect(startup.status).toBe('resolved');
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({
+      version: 'project02.config.v2',
+      plugins: {
+        'demo-config': {config: {tone: 'warm'}},
+        'future-plugin': {config: {mode: 'later'}},
+      },
+    });
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected a plugin activation plan.');
+    }
+    expect(
+      startup.activationPlan.activation.diagnostics.filter(
+        diagnostic =>
+          diagnostic.code === 'character_package_plugin_auto_enabled',
+      ),
+    ).toEqual([]);
+  });
+
+  it('materializes required enablement above a global disable', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {required: ['demo-config']},
+    });
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'seeded'},
+      plugins: {'demo-config': {enabled: false}},
     });
     const overlayPath = characterOverlayConfigPath(
       characterDataDirPath(homeRoot, 'seeded'),
     );
 
-    const first = await resolveRuntimeCliStartup({
+    const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
       dataDir: 'materialize',
     });
 
-    expect(first.status).toBe('resolved');
-    if (first.status !== 'resolved') {
-      throw new Error('Expected a resolved startup.');
-    }
+    expect(startup.status).toBe('resolved');
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
-      version: runtimeConfigVersion,
-      plugins: {'demo-config': {enabled: true, config: {tone: 'formal'}}},
+      version: 'project02.config.v2',
+      plugins: {'demo-config': {enabled: true}},
     });
-    // The materialized overlay already governs this same startup.
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected a plugin activation plan.');
+    }
     expect(
-      first.activationPlan.resolvedConfig.pluginConfigs['demo-config']?.[
-        'tone'
-      ],
-    ).toMatchObject({value: 'formal'});
-    expect(first.activationPlan.activation.enabledPluginIds).toContain(
-      'demo-config',
-    );
-
-    // Second selection: the file is the marker; nothing is rewritten.
-    const bytesAfterFirst = readFileSync(overlayPath, 'utf8');
-
-    await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot},
-      env: {},
-      dataDir: 'materialize',
-    });
-    expect(readFileSync(overlayPath, 'utf8')).toBe(bytesAfterFirst);
+      startup.activationPlan.activation.diagnostics.filter(
+        diagnostic =>
+          diagnostic.code === 'character_package_plugin_auto_enabled',
+      ),
+    ).toHaveLength(1);
   });
 
-  it('seeds unknown plugin ids verbatim and then blocks on the missing requirement', async () => {
+  it('materializes recommended enablement above a global disable', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {recommended: ['demo-config']},
+    });
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'seeded'},
+      plugins: {'demo-config': {enabled: false}},
+    });
+    const overlayPath = characterOverlayConfigPath(
+      characterDataDirPath(homeRoot, 'seeded'),
+    );
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      dataDir: 'materialize',
+    });
+
+    expect(startup.status).toBe('resolved');
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: 'project02.config.v2',
+      plugins: {'demo-config': {enabled: true}},
+    });
+    if (startup.status !== 'resolved') {
+      throw new Error('Expected startup to continue after a recommendation.');
+    }
+    expect(
+      startup.activationPlan.activation.diagnostics.filter(
+        diagnostic =>
+          diagnostic.code === 'character_package_plugin_auto_enabled',
+      ),
+    ).toHaveLength(1);
+  });
+
+  it('persists intended enablement and blocks a missing required plugin', async () => {
     const homeRoot = homeWithCharacter({
       characterId: 'seeded',
       plugins: {required: ['not-installed-plugin']},
@@ -227,7 +344,7 @@ describe('first-selection materialization through startup', () => {
     });
 
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
-      version: runtimeConfigVersion,
+      version: 'project02.config.v2',
       plugins: {'not-installed-plugin': {enabled: true}},
     });
     expect(startup.status).toBe('activation_blocked_before_runtime_env');
@@ -241,27 +358,33 @@ describe('first-selection materialization through startup', () => {
     ).toHaveLength(1);
   });
 
-  it('never overwrites an overlay the CLI created first, and enforcement still reports', async () => {
+  it('fills missing package entries without overwriting an earlier scoped edit', async () => {
     const homeRoot = homeWithCharacter({
       characterId: 'seeded',
       plugins: {required: ['demo-config']},
     });
 
     // Operator writes the overlay before ever selecting the character
-    // (the CLI verb stamps the data dir first, then mutates).
-    await ensureCharacterDataStamp({
+    // (the CLI verb marks the data dir first, then mutates).
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'seeded')},
       characterId: 'seeded',
     });
-    applyScopedRuntimeConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'character',
       characterId: 'seeded',
-      operation: {
-        kind: 'set',
-        path: 'project02.userDisplayName',
-        value: 'Early Bird',
+    });
+    applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Early Bird',
+        },
       },
     });
 
@@ -275,16 +398,20 @@ describe('first-selection materialization through startup', () => {
       dataDir: 'materialize',
     });
 
-    // The CLI-authored overlay wins: no package seed on top of it, so
-    // demo-config never got its enabled rung and enforcement says so.
-    expect(readFileSync(overlayPath, 'utf8')).toBe(cliWrittenBytes);
-    expect(startup.status).toBe('activation_blocked_before_runtime_env');
+    expect(readFileSync(overlayPath, 'utf8')).not.toBe(cliWrittenBytes);
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: 'project02.config.v2',
+      project02: {userDisplayName: 'Early Bird'},
+      plugins: {'demo-config': {enabled: true}},
+    });
+    expect(startup.status).toBe('resolved');
     if (startup.status === 'character_invalid') {
       throw new Error('Expected a plugin activation plan.');
     }
     expect(
       startup.activationPlan.activation.diagnostics.filter(
-        diagnostic => diagnostic.code === 'character_required_plugin_disabled',
+        diagnostic =>
+          diagnostic.code === 'character_package_plugin_auto_enabled',
       ),
     ).toHaveLength(1);
   });
@@ -325,6 +452,159 @@ describe('first-selection materialization through startup', () => {
   });
 });
 
+describe('package-version missing-only upgrades', () => {
+  it('does nothing at the same version, then fills only missing fields and enablement after a version bump', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      version: '1.0.0',
+      plugins: {
+        recommended: ['demo-config'],
+        config: {
+          'demo-config': {
+            tone: 'warm',
+            signoff: 'First',
+            operatorNote: 'Keep me',
+          },
+        },
+      },
+    });
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+    writeRuntimeConfig(overlayPath, {
+      plugins: {
+        'demo-config': {
+          config: {
+            tone: 'playful',
+            operatorNote: 'User-owned',
+          },
+        },
+      },
+    });
+    const sameVersionBytes = readFileSync(overlayPath, 'utf8');
+
+    await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+    expect(readFileSync(overlayPath, 'utf8')).toBe(sameVersionBytes);
+
+    writeCharacterPackage({
+      homeRoot,
+      characterId: 'seeded',
+      version: '2.0.0',
+      plugins: {
+        recommended: ['demo-config'],
+        config: {
+          'demo-config': {
+            tone: 'formal',
+            signoff: 'Returned on upgrade',
+          },
+        },
+      },
+    });
+    const upgraded = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
+      version: 'project02.config.v2',
+      plugins: {
+        'demo-config': {
+          enabled: true,
+          config: {
+            tone: 'playful',
+            operatorNote: 'User-owned',
+            signoff: 'Returned on upgrade',
+          },
+        },
+      },
+    });
+    if (upgraded.status !== 'resolved') {
+      throw new Error('Expected upgraded package config to resolve.');
+    }
+    expect(
+      upgraded.activationPlan.activation.diagnostics.filter(
+        diagnostic =>
+          diagnostic.code === 'character_package_plugin_auto_enabled',
+      ),
+    ).toHaveLength(1);
+    expect(
+      decodeStorageSchemaMarker(
+        readFileSync(
+          createLocalRuntimeStorageLayout({storeRoot: dataRoot}).schemaPath,
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({materializedCharacterPackageVersion: '2.0.0'});
+  });
+});
+
+describe('concurrent materialization and first edits', () => {
+  it('serializes package defaults and preserves both first scoped edits', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {
+        required: ['demo-config'],
+        config: {'demo-config': {tone: 'warm'}},
+      },
+    });
+    const dataRoot = characterDataDirPath(homeRoot, 'seeded');
+
+    const startups = await Promise.all([
+      resolveRuntimeCliStartup({
+        location: {storeRoot: homeRoot},
+        env: {},
+        characterConfigRequest: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'First Editor',
+          },
+        },
+      }),
+      resolveRuntimeCliStartup({
+        location: {storeRoot: homeRoot},
+        env: {},
+        characterConfigRequest: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.roleModelProvider',
+            value: 'local',
+          },
+        },
+      }),
+    ]);
+
+    expect(startups.map(startup => startup.status)).toEqual([
+      'resolved',
+      'resolved',
+    ]);
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({
+      version: 'project02.config.v2',
+      project02: {
+        userDisplayName: 'First Editor',
+        roleModelProvider: 'local',
+      },
+      plugins: {
+        'demo-config': {
+          enabled: true,
+          config: {tone: 'warm'},
+        },
+      },
+    });
+  });
+});
+
 describe('materialization ordering', () => {
   it('creates no durable state when the global config is invalid', async () => {
     const homeRoot = homeWithCharacter({
@@ -344,6 +624,58 @@ describe('materialization ordering', () => {
     });
 
     expect(startup.status).toBe('config_invalid');
+    expect(existsSync(characterDataDirPath(homeRoot, 'seeded'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('creates no durable state when a known package field has the wrong type', async () => {
+    const homeRoot = homeWithCharacter({
+      characterId: 'seeded',
+      plugins: {
+        config: {'demo-config': {tone: 42}},
+      },
+    });
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+
+    expect(startup.status).toBe('config_invalid');
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected config-invalid materialization planning.');
+    }
+    expect(startup.activationPlan.activation.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'character_package_plugin_config_invalid',
+        severity: 'error',
+      }),
+    );
+    expect(existsSync(characterDataDirPath(homeRoot, 'seeded'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('creates no durable state for global enablement of a character-only plugin', async () => {
+    const homeRoot = homeWithCharacter({characterId: 'seeded'});
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'seeded'},
+      plugins: {'character-state': {enabled: true}},
+    });
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+    });
+
+    expect(startup.status).toBe('config_invalid');
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected config-invalid scope policy.');
+    }
+    expect(startup.activationPlan.resolvedConfig.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'runtime_config_character_only_plugin_enabled_globally',
+        severity: 'error',
+      }),
+    );
     expect(existsSync(characterDataDirPath(homeRoot, 'seeded'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
@@ -368,123 +700,36 @@ describe('materialization ordering for pre-existing overlays', () => {
 
     expect(startup.status).toBe('config_invalid');
     // The invalid overlay was read before materialization: no home
-    // marker, no binding stamp, no seed.
+    // home marker or character data marker.
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
-    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
-  });
-});
-
-describe('seed validation against installed manifests', () => {
-  it('refuses to persist a seed the installed manifests reject', async () => {
-    const homeRoot = homeWithCharacter({
-      characterId: 'seeded',
-      plugins: {
-        required: ['demo-config'],
-        config: {'demo-config': {misspelledTone: 'warm'}},
-      },
-    });
-
-    const startup = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot},
-      env: {},
-      dataDir: 'materialize',
-    });
-
-    expect(startup.status).toBe('character_invalid');
-    if (startup.status !== 'character_invalid') {
-      throw new Error('Expected character_invalid.');
-    }
-    expect(
-      startup.characterActivation.status === 'failed'
-        ? startup.characterActivation.messages[0]
-        : '',
-    ).toContain('rejected by the installed plugin manifests');
-    expect(
-      existsSync(
-        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),
-      ),
-    ).toBe(false);
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
   });
 
-  it('refuses a seed that references a reserved control env var', async () => {
-    const homeRoot = homeWithCharacter({
-      characterId: 'seeded',
-      plugins: {
-        config: {'demo-config': {apiKey: {$env: runtimeConfigEnvVarName}}},
-      },
-    });
-
-    const startup = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot},
-      env: {},
-      dataDir: 'materialize',
-    });
-
-    // The reserved-ref seed must fail before the overlay lands, not
-    // block activation forever afterwards.
-    expect(startup.status).toBe('character_invalid');
-    expect(
-      existsSync(
-        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),
-      ),
-    ).toBe(false);
-  });
-
-  it('judges seeds against host-service manifests in factories-injected runs', async () => {
-    const homeRoot = homeWithCharacter({
-      characterId: 'seeded',
-      plugins: {config: {'runtime.plugin': {nope: true}}},
-    });
-
-    // The composed catalog adds host-owned services; a seed carrying an
-    // unknown field for one must fail before materialization, not
-    // later during activation with the invalid overlay left behind.
-    const startup = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot},
-      env: {},
-      factories: {},
-      dataDir: 'materialize',
-    });
-
-    expect(startup.status).toBe('character_invalid');
-    expect(
-      existsSync(
-        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'seeded')),
-      ),
-    ).toBe(false);
-  });
-
-  it('skips seed validation once an overlay exists, so a corrected overlay recovers a broken package', async () => {
-    const homeRoot = homeWithCharacter({
-      characterId: 'seeded',
-      plugins: {
-        required: ['demo-config'],
-        config: {'demo-config': {misspelledTone: 'warm'}},
-      },
-    });
+  it('rejects an installed-manifest type error in an existing overlay before marker writes', async () => {
+    const homeRoot = homeWithCharacter({characterId: 'seeded'});
     const dataRoot = characterDataDirPath(homeRoot, 'seeded');
 
-    // The operator repaired the package's broken defaults by hand: the
-    // overlay enables the required plugin with a valid config. The dead
-    // seed must not keep blocking startup.
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
-      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+      plugins: {'demo-config': {config: {tone: 42}}},
     });
-    const overlayBytes = readFileSync(
-      characterOverlayConfigPath(dataRoot),
-      'utf8',
-    );
 
     const startup = await resolveRuntimeCliStartup({
       location: {storeRoot: homeRoot},
       env: {},
-      dataDir: 'materialize',
     });
 
-    expect(startup.status).toBe('resolved');
-    expect(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')).toBe(
-      overlayBytes,
+    expect(startup.status).toBe('config_invalid');
+    if (startup.status === 'character_invalid') {
+      throw new Error('Expected config-invalid overlay policy.');
+    }
+    expect(startup.activationPlan.resolvedConfig.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'runtime_config_value_type_invalid',
+        severity: 'error',
+      }),
     );
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
   });
 });

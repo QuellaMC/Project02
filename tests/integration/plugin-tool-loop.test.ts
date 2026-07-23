@@ -160,6 +160,8 @@ describe('plugin-driven Character State tool loop', () => {
     expect(result.status).toBe('completed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -258,6 +260,8 @@ describe('plugin-driven Character State tool loop', () => {
     }
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -377,6 +381,8 @@ describe('plugin-driven Character State tool loop', () => {
     expect(result.status).toBe('completed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -492,7 +498,10 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-health-rejected';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -502,6 +511,8 @@ describe('plugin-driven Character State tool loop', () => {
       character: testCharacterProfile,
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -565,7 +576,10 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-idempotent';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -635,7 +649,10 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-idempotent-replay';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });

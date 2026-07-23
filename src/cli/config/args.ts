@@ -9,9 +9,21 @@ import {
   type RuntimeLocationCliState,
 } from '../shared/runtime-location-flags.ts';
 import type {
-  RuntimeConfigControlOperation,
+  RuntimeConfigMutationOperation,
   RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
+
+type RuntimeConfigCliMutationOperation = Extract<
+  RuntimeConfigMutationOperation,
+  {
+    readonly kind:
+      | 'set'
+      | 'unset'
+      | 'plugin_enable'
+      | 'plugin_disable'
+      | 'default_memory_provider';
+  }
+>;
 
 export class RuntimeConfigCliUsageError extends Error {
   constructor(message: string) {
@@ -29,7 +41,7 @@ export type RuntimeConfigCliArgs = {
     | {readonly kind: 'get'; readonly path: string}
     | {
         readonly kind: 'mutate';
-        readonly operation: RuntimeConfigControlOperation;
+        readonly operation: RuntimeConfigCliMutationOperation;
       }
     | {
         readonly kind: 'secret_set';

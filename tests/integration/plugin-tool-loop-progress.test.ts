@@ -87,7 +87,10 @@ describe('plugin-driven tool loop progress and evidence', () => {
   it('shows interim visible_reply before executable tools without committing it', async () => {
     const sessionId = 'session-interim-visible-reload';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -95,7 +98,12 @@ describe('plugin-driven tool loop progress and evidence', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot,
+      sessionId,
+    });
     const progress: unknown[] = [];
     const adapter = createSequencedAdapter([
       {
@@ -138,6 +146,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
 
     expect(result.status).toBe('completed');
     const reloadedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -319,6 +329,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toBe(false);
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });

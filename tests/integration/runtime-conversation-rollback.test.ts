@@ -23,13 +23,17 @@ describe('runtime conversation rollback failures', () => {
       traceId: 'trace_failed_user_row_rollback',
       createdAt: '2026-07-11T00:00:00.000Z',
     } as const;
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: failedIdentity.createdAt,
     });
     const underlying = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const appendFailure = new Error('user row persisted before append failed');
@@ -94,6 +98,7 @@ describe('runtime conversation rollback failures', () => {
     const reopened = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const recoveredSession = createConversationSession({
@@ -138,13 +143,17 @@ describe('runtime conversation rollback failures', () => {
       traceId: 'trace_failed_character_row_rollback',
       createdAt: '2026-07-11T00:00:00.000Z',
     } as const;
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: failedIdentity.createdAt,
     });
     const underlying = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const appendFailure = new Error(
@@ -211,6 +220,7 @@ describe('runtime conversation rollback failures', () => {
     const reopened = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const recoveredSession = createConversationSession({
@@ -250,13 +260,17 @@ describe('runtime conversation rollback failures', () => {
   it('closes durable raw evidence when the first conversation append persists before throwing', async () => {
     const storeRoot = createTestTempRoot('project02-first-append-rollback-');
     const sessionId = 'first-append-post-write-failure';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
     const underlying = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     let appendCount = 0;
@@ -312,6 +326,7 @@ describe('runtime conversation rollback failures', () => {
     const reopened = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     expect(reopened.conversationMessages()).toEqual([]);

@@ -91,7 +91,12 @@ describe('character package descriptor schema parity', () => {
       plugins: {
         required: ['character-state'],
         recommended: ['demo-config'],
-        config: {'demo-config': {tone: 'warm'}},
+        config: {
+          'demo-config': {
+            tone: 'warm',
+            settings: {style: ['short', 'friendly']},
+          },
+        },
       },
     };
 
@@ -105,7 +110,12 @@ describe('character package descriptor schema parity', () => {
         plugins: {
           required: ['character-state'],
           recommended: ['demo-config'],
-          config: {'demo-config': {tone: 'warm'}},
+          config: {
+            'demo-config': {
+              tone: 'warm',
+              settings: {style: ['short', 'friendly']},
+            },
+          },
         },
       },
     });
@@ -141,7 +151,35 @@ describe('character package descriptor schema parity', () => {
       }),
     ],
     [
-      'a non-object plugin config default',
+      'a secret env reference in plugin defaults',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {
+          config: {'demo-config': {apiKey: {$env: 'DEMO_API_KEY'}}},
+        },
+      }),
+    ],
+    [
+      'a nested plaintext-secret marker in plugin defaults',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {
+          config: {
+            'demo-config': {
+              nested: {
+                token: {
+                  $plaintextSecret: 'nope',
+                  allowPlaintextSecret: true,
+                  justification: 'still not package-safe',
+                },
+              },
+            },
+          },
+        },
+      }),
+    ],
+    [
+      'a non-object plugin config entry',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
         plugins: {config: {'demo-config': 'warm'}},

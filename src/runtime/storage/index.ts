@@ -31,6 +31,8 @@ export {
   type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions,
   type LocalRuntimeStorageContractErrorCode,
+  type LocalRuntimeCharacterDataStorageSchemaMarker,
+  type LocalRuntimeHomeStorageSchemaMarker,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
   homeRootForCharacterDataDir,
@@ -51,16 +53,12 @@ export {
 export {
   assertCharacterDataDirAdoptable,
   assertCharacterDataDirReadable,
-  characterBindingFileName,
-  characterBindingFormat,
-  characterBindingPath,
-  ensureCharacterDataStamp,
-  evaluateCharacterDataStamp,
-  readCharacterBinding,
-  type CharacterBinding,
-  type CharacterBindingReadResult,
-  type EnsureCharacterDataStampResult,
-} from './character-binding.ts';
+  ensureCharacterDataDir,
+  ensureCharacterDataMarker,
+  recordMaterializedCharacterPackageVersion,
+  requireCharacterDataMarker,
+  type EnsureCharacterDataMarkerResult,
+} from './character-data.ts';
 export {
   assertProject02HomeAdoptable,
   assertRealHomeEnvFile,

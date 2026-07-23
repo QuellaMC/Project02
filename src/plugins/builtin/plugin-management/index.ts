@@ -153,6 +153,7 @@ export function createRuntimePluginManagementPluginManifest() {
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [],
     },
     localTrustLevel: 'first_party',

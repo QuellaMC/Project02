@@ -9,11 +9,11 @@ import type {
   RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
 import {
-  applyScopedRuntimeConfigControlOperation,
-  applyScopedRuntimePluginConfigControlOperation,
+  applyRuntimeConfigControlOperation,
   inspectRuntimePluginConfig,
   loadCharacterOverlayForScope,
   redactRuntimeConfigValue,
+  resolveRuntimeConfigScopeTarget,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,
@@ -196,17 +196,25 @@ async function stagePluginActivationChange(
     reloadRequired: true,
     async commit() {
       await ensureConsoleCommitTarget(context, characterScope);
-      applyScopedRuntimeConfigControlOperation({
+      const target = resolveRuntimeConfigScopeTarget({
         ...runtimeConfigLocation(context),
         ...(context.env === undefined ? {} : {env: context.env}),
         scope: characterScope === undefined ? 'global' : 'character',
         ...(characterScope === undefined
           ? {}
-          : {characterId: characterScope.characterId}),
+          : {
+              characterId: characterScope.characterId,
+              characterScope,
+            }),
+      });
+
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fingerprint,
-        operation: {
-          kind: nextEnabled ? 'plugin_enable' : 'plugin_disable',
-          pluginId: manifest.id,
+        request: {
+          kind: 'plugin_activation',
+          manifest,
+          enabled: nextEnabled,
         },
       });
     },
@@ -279,19 +287,28 @@ async function stagePluginFieldChange(
     reloadRequired: field.reloadRequired !== false,
     async commit() {
       await ensureConsoleCommitTarget(context, characterScope);
-      applyScopedRuntimePluginConfigControlOperation({
+      const runtimeEnv = context.runtimeEnv ?? context.env;
+      const target = resolveRuntimeConfigScopeTarget({
         ...runtimeConfigLocation(context),
-        ...(context.runtimeEnv === undefined && context.env === undefined
-          ? {}
-          : {env: context.runtimeEnv ?? context.env}),
+        ...(runtimeEnv === undefined ? {} : {env: runtimeEnv}),
         scope: characterScope === undefined ? 'global' : 'character',
         ...(characterScope === undefined
           ? {}
-          : {characterId: characterScope.characterId}),
-        manifest,
-        actor: 'operator',
+          : {
+              characterId: characterScope.characterId,
+              characterScope,
+            }),
+      });
+
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fingerprint,
-        operation,
+        request: {
+          kind: 'plugin_config',
+          manifest,
+          actor: 'operator',
+          fieldOperation: operation,
+        },
       });
     },
   };

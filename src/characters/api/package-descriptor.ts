@@ -50,9 +50,9 @@ export type CharacterMeta = {
 /**
  * Plugins a character declares: required ids block activation when
  * missing or disabled, recommended ids only warn, and config carries
- * per-plugin defaults seeded into the character's overlay on first
- * selection. Shape-only here — whether a plugin id exists is judged by
- * the app layer against the installed catalog.
+ * package-authored defaults for the character overlay. Shape-only here
+ * — whether a plugin id or field exists is judged by the app layer
+ * against the installed catalog.
  */
 export type CharacterPluginExpectations = {
   readonly required: readonly string[];
@@ -376,7 +376,9 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
 
   const config: Record<string, Readonly<Record<string, unknown>>> = {};
 
-  for (const [pluginId, pluginConfig] of Object.entries(rawConfig ?? {})) {
+  for (const [pluginId, pluginConfig] of Object.entries(rawConfig ?? {}).sort(
+    ([left], [right]) => compareDescriptorText(left, right),
+  )) {
     if (!characterPluginIdPattern.test(pluginId)) {
       return rejectedDescriptor(
         'invalid_plugins',
@@ -391,7 +393,16 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
       );
     }
 
-    config[pluginId] = Object.freeze({...pluginConfig});
+    const parsedConfig = parseCharacterPluginConfigObject(
+      pluginConfig,
+      `plugins.config["${pluginId}"]`,
+    );
+
+    if (parsedConfig.status === 'rejected') {
+      return parsedConfig;
+    }
+
+    config[pluginId] = parsedConfig.value;
   }
 
   return Object.freeze({
@@ -402,6 +413,106 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
       config: Object.freeze(config),
     } satisfies CharacterPluginExpectations),
   });
+}
+
+function parseCharacterPluginConfigObject(
+  value: Record<string, unknown>,
+  path: string,
+):
+  | {
+      readonly status: 'accepted';
+      readonly value: Readonly<Record<string, unknown>>;
+    }
+  | {
+      readonly status: 'rejected';
+      readonly issue: CharacterPackageDescriptorIssue;
+    } {
+  if (
+    Object.hasOwn(value, '$env') ||
+    Object.hasOwn(value, '$plaintextSecret') ||
+    Object.hasOwn(value, 'allowPlaintextSecret')
+  ) {
+    return rejectedDescriptor(
+      'invalid_plugins',
+      `Character package ${path} must not contain secret references or plaintext-secret markers.`,
+    );
+  }
+
+  const parsed: Record<string, unknown> = {};
+
+  for (const [key, fieldValue] of Object.entries(value).sort(
+    ([left], [right]) => compareDescriptorText(left, right),
+  )) {
+    const accepted = parseCharacterPluginConfigValue(
+      fieldValue,
+      `${path}.${key}`,
+    );
+
+    if (accepted.status === 'rejected') {
+      return accepted;
+    }
+
+    parsed[key] = accepted.value;
+  }
+
+  return {status: 'accepted', value: Object.freeze(parsed)};
+}
+
+function parseCharacterPluginConfigValue(
+  value: unknown,
+  path: string,
+):
+  | {readonly status: 'accepted'; readonly value: unknown}
+  | {
+      readonly status: 'rejected';
+      readonly issue: CharacterPackageDescriptorIssue;
+    } {
+  if (
+    value === null ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return {status: 'accepted', value};
+  }
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value)
+      ? {status: 'accepted', value}
+      : rejectedDescriptor(
+          'invalid_plugins',
+          `Character package ${path} must be valid JSON.`,
+        );
+  }
+
+  if (Array.isArray(value)) {
+    const accepted: unknown[] = [];
+
+    for (const [index, entry] of value.entries()) {
+      const parsed = parseCharacterPluginConfigValue(
+        entry,
+        `${path}[${String(index)}]`,
+      );
+
+      if (parsed.status === 'rejected') {
+        return parsed;
+      }
+
+      accepted.push(parsed.value);
+    }
+
+    return {status: 'accepted', value: Object.freeze(accepted)};
+  }
+
+  if (isRecord(value)) {
+    const parsed = parseCharacterPluginConfigObject(value, path);
+
+    return parsed;
+  }
+
+  return rejectedDescriptor(
+    'invalid_plugins',
+    `Character package ${path} must be valid JSON.`,
+  );
 }
 
 function parseCharacterPluginIdList(

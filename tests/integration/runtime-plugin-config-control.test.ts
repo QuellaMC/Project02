@@ -4,13 +4,15 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {
-  applyRuntimePluginConfigControlOperation,
+  applyRuntimeConfigControlOperation,
   createLayeredRuntimeConfigFingerprint,
   lockFailureProvesNoOverlayWriter,
   defaultRuntimeConfigPath,
   inspectRuntimePluginConfig,
-  prepareRuntimePluginConfigControlOperation,
+  prepareRuntimeConfigControlOperation,
+  resolveRuntimeConfigScopeTarget,
   RuntimeConfigConflictError,
+  runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type RuntimePluginConfigFieldInspectShape,
@@ -21,7 +23,7 @@ import {
   type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
 import {
-  ensureCharacterDataStamp,
+  ensureCharacterDataMarker,
   LocalRuntimeStorageContractError,
 } from '../../src/runtime/storage/index.ts';
 import {acquireLocalRuntimeMutationLockSync} from '../../src/runtime/storage/mutation-lock.ts';
@@ -33,6 +35,43 @@ const fixturePluginId = 'config.control.fixture';
 const fixtureSecretEnvVar = 'PROJECT02_FIXTURE_API_KEY';
 
 describe('runtime plugin config control', () => {
+  it('resolves one coherent control target from one selected config snapshot', () => {
+    const firstRoot = createTestTempRoot('project02-control-target-first-');
+    const secondRoot = createTestTempRoot('project02-control-target-second-');
+    const firstConfigPath = writeRuntimeConfig(
+      join(firstRoot, 'config.json'),
+      {},
+    );
+    const secondConfigPath = writeRuntimeConfig(
+      join(secondRoot, 'config.json'),
+      {},
+    );
+    const env: NodeJS.ProcessEnv = {};
+    let selectionReads = 0;
+
+    Object.defineProperty(env, runtimeConfigEnvVarName, {
+      enumerable: true,
+      get: () => {
+        selectionReads += 1;
+        return selectionReads === 1 ? firstConfigPath : secondConfigPath;
+      },
+    });
+
+    const target = resolveRuntimeConfigScopeTarget({
+      env,
+      scope: 'global',
+    });
+
+    expect(selectionReads).toBe(1);
+    expect(target).toMatchObject({
+      scope: 'global',
+      configPath: firstConfigPath,
+      canonicalConfigPath: realpathSync.native(firstConfigPath),
+      globalConfigPath: firstConfigPath,
+      homeRoot: realpathSync.native(firstRoot),
+    });
+  });
+
   it('inspects declared metadata with redacted authored and effective values plus an authored fingerprint', () => {
     const root = createTestTempRoot('project02-plugin-config-inspect-');
     const configPath = join(root, 'config.json');
@@ -172,17 +211,24 @@ describe('runtime plugin config control', () => {
 
   it('lets an agent exactly set and unset an agent-mutable field', () => {
     const fixture = createSeededControlFixture();
-
-    const setResult = applyRuntimePluginConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       configPath: fixture.configPath,
       env: {},
-      manifest: fixture.manifest,
-      actor: 'agent',
+      scope: 'global',
+    });
+
+    const setResult = applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: fixture.fingerprint,
-      operation: {
-        kind: 'set',
-        fieldName: 'label',
-        value: 'after',
+      request: {
+        kind: 'plugin_config',
+        manifest: fixture.manifest,
+        actor: 'agent',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'label',
+          value: 'after',
+        },
       },
     });
     const expectedAfterSet: Project02RuntimeConfig = {
@@ -207,15 +253,17 @@ describe('runtime plugin config control', () => {
     expect(setResult.config).toEqual(expectedAfterSet);
     expect(readConfigFile(fixture.configPath)).toEqual(expectedAfterSet);
 
-    const unsetResult = applyRuntimePluginConfigControlOperation({
-      configPath: fixture.configPath,
-      env: {},
-      manifest: fixture.manifest,
-      actor: 'agent',
+    const unsetResult = applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: setResult.fingerprint,
-      operation: {
-        kind: 'unset',
-        fieldName: 'label',
+      request: {
+        kind: 'plugin_config',
+        manifest: fixture.manifest,
+        actor: 'agent',
+        fieldOperation: {
+          kind: 'unset',
+          fieldName: 'label',
+        },
       },
     });
     const expectedAfterUnset: Project02RuntimeConfig = {
@@ -242,18 +290,25 @@ describe('runtime plugin config control', () => {
 
   it('rejects fields not declared by the target plugin', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'set',
-          fieldName: 'unknownField',
-          value: 'ignored',
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'unknownField',
+            value: 'ignored',
+          },
         },
       }),
     ).toThrow(
@@ -265,17 +320,24 @@ describe('runtime plugin config control', () => {
 
   it('rejects unsetting a required field', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'unset',
-          fieldName: 'mode',
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'unset',
+            fieldName: 'mode',
+          },
         },
       }),
     ).toThrow('Required plugin config field "mode" cannot be unset.');
@@ -284,18 +346,25 @@ describe('runtime plugin config control', () => {
 
   it('rejects agent mutation when the field is not agent-mutable', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'set',
-          fieldName: 'operatorOnly',
-          value: true,
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'operatorOnly',
+            value: true,
+          },
         },
       }),
     ).toThrow(
@@ -306,18 +375,25 @@ describe('runtime plugin config control', () => {
 
   it('rejects secret field mutation even when the value is only an env reference', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'set',
-          fieldName: 'apiKey',
-          value: {$env: 'ATTACKER_SELECTED_SECRET'},
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'apiKey',
+            value: {$env: 'ATTACKER_SELECTED_SECRET'},
+          },
         },
       }),
     ).toThrow(
@@ -328,6 +404,11 @@ describe('runtime plugin config control', () => {
 
   it('rejects values with the wrong type or outside declared allowed values', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     for (const [operation, message] of [
       [
@@ -356,13 +437,15 @@ describe('runtime plugin config control', () => {
       ],
     ] as const) {
       expect(() =>
-        applyRuntimePluginConfigControlOperation({
-          configPath: fixture.configPath,
-          env: {},
-          manifest: fixture.manifest,
-          actor: 'agent',
+        applyRuntimeConfigControlOperation({
+          target,
           expectedFingerprint: fixture.fingerprint,
-          operation,
+          request: {
+            kind: 'plugin_config',
+            manifest: fixture.manifest,
+            actor: 'agent',
+            fieldOperation: operation,
+          },
         }),
       ).toThrow(message);
     }
@@ -372,20 +455,27 @@ describe('runtime plugin config control', () => {
 
   it('rejects nested env references in non-secret structured fields', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'set',
-          fieldName: 'settings',
-          value: {
-            authentication: {
-              token: {$env: 'NESTED_SECRET'},
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'settings',
+            value: {
+              authentication: {
+                token: {$env: 'NESTED_SECRET'},
+              },
             },
           },
         },
@@ -398,20 +488,27 @@ describe('runtime plugin config control', () => {
 
   it('rejects credential-shaped values that would be hidden in the approval preview', () => {
     const fixture = createSeededControlFixture();
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'set',
-          fieldName: 'settings',
-          value: {
-            authentication: {
-              token: 'agent-chosen-secret',
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'settings',
+            value: {
+              authentication: {
+                token: 'agent-chosen-secret',
+              },
             },
           },
         },
@@ -440,22 +537,29 @@ describe('runtime plugin config control', () => {
     };
 
     writeRuntimeConfig(fixture.configPath, {plugins: invalidConfig.plugins});
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: fixture.configPath,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: createLayeredRuntimeConfigFingerprint({
           globalConfig: invalidConfig,
           characterId: 'mira',
           overlayConfig: null,
         }),
-        operation: {
-          kind: 'set',
-          fieldName: 'label',
-          value: 'after',
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'label',
+            value: 'after',
+          },
         },
       }),
     ).toThrow(
@@ -517,7 +621,7 @@ describe('runtime plugin config control', () => {
     const plugin = requiredSecretPlugin('operator.rebind-inspect');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -533,11 +637,12 @@ describe('runtime plugin config control', () => {
     // Rebound after the fact: model-visible config must not come from
     // a store the runtime would refuse.
     writeFileSync(
-      join(dataRoot, 'character-binding.json'),
+      join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'nova',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
 
@@ -556,7 +661,7 @@ describe('runtime plugin config control', () => {
     const overlayPath = join(dataRoot, 'config.json');
     const plugin = requiredSecretPlugin('operator.overlay-secret');
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -564,23 +669,30 @@ describe('runtime plugin config control', () => {
     // Secrets are shared across characters: their references are
     // authored in the home config.json, never a character overlay.
     const env = {OVERLAY_SECRET_VAR: 'overlay-secret-value'};
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: overlayPath,
+      env,
+      scope: 'character',
+    });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: overlayPath,
-        env,
-        manifest: plugin.manifest,
-        actor: 'operator',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: inspectRuntimePluginConfig({
           configPath: overlayPath,
           env,
           manifest: plugin.manifest,
         }).fingerprint,
-        operation: {
-          kind: 'secret_set',
-          fieldName: 'apiKey',
-          envVar: 'OVERLAY_SECRET_VAR',
-          secretValue: 'overlay-secret-value',
+        request: {
+          kind: 'plugin_config',
+          manifest: plugin.manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'secret_set',
+            fieldName: 'apiKey',
+            envVar: 'OVERLAY_SECRET_VAR',
+            secretValue: 'overlay-secret-value',
+          },
         },
       }),
     ).toThrow('Secrets are shared across characters');
@@ -591,30 +703,39 @@ describe('runtime plugin config control', () => {
 
   it('rejects a mutation bound to a stale authored fingerprint', () => {
     const fixture = createSeededControlFixture();
-    const committed = applyRuntimePluginConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       configPath: fixture.configPath,
       env: {},
-      manifest: fixture.manifest,
-      actor: 'agent',
+      scope: 'global',
+    });
+    const committed = applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: fixture.fingerprint,
-      operation: {
-        kind: 'set',
-        fieldName: 'label',
-        value: 'committed',
+      request: {
+        kind: 'plugin_config',
+        manifest: fixture.manifest,
+        actor: 'agent',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'label',
+          value: 'committed',
+        },
       },
     });
 
     expect(() =>
-      applyRuntimePluginConfigControlOperation({
-        configPath: fixture.configPath,
-        env: {},
-        manifest: fixture.manifest,
-        actor: 'agent',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fixture.fingerprint,
-        operation: {
-          kind: 'set',
-          fieldName: 'label',
-          value: 'stale-write',
+        request: {
+          kind: 'plugin_config',
+          manifest: fixture.manifest,
+          actor: 'agent',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'label',
+            value: 'stale-write',
+          },
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
@@ -637,20 +758,27 @@ describe('runtime plugin config control', () => {
         },
       },
     };
-    const options = {
+    const target = resolveRuntimeConfigScopeTarget({
       configPath: fixture.configPath,
       env: {},
-      manifest: fixture.manifest,
-      actor: 'agent' as const,
+      scope: 'global',
+    });
+    const options = {
+      target,
       expectedFingerprint: fixture.fingerprint,
-      operation: {
-        kind: 'set' as const,
-        fieldName: 'label',
-        value: 'prepared',
+      request: {
+        kind: 'plugin_config' as const,
+        manifest: fixture.manifest,
+        actor: 'agent' as const,
+        fieldOperation: {
+          kind: 'set' as const,
+          fieldName: 'label',
+          value: 'prepared',
+        },
       },
     };
 
-    const prepared = prepareRuntimePluginConfigControlOperation(options);
+    const prepared = prepareRuntimeConfigControlOperation(options);
 
     expect(prepared.resultFingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
@@ -661,7 +789,7 @@ describe('runtime plugin config control', () => {
     );
     expect(readFileSync(fixture.configPath, 'utf8')).toBe(originalConfigText);
 
-    const committed = applyRuntimePluginConfigControlOperation(options);
+    const committed = applyRuntimeConfigControlOperation(options);
 
     expect(committed.fingerprint).toBe(prepared.resultFingerprint);
     expect(committed.config).toEqual(expectedConfig);
@@ -693,16 +821,22 @@ describe('runtime plugin config control', () => {
       }),
     );
 
-    const result = applyRuntimePluginConfigControlOperation({
-      storeRoot,
-      env: {},
-      manifest,
-      actor: 'agent',
+    const result = applyRuntimeConfigControlOperation({
+      target: resolveRuntimeConfigScopeTarget({
+        storeRoot,
+        env: {},
+        scope: 'global',
+      }),
       expectedFingerprint: inspected.fingerprint,
-      operation: {
-        kind: 'set',
-        fieldName: 'mode',
-        value: 'local',
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'mode',
+          value: 'local',
+        },
       },
     });
     const expectedConfig: Project02RuntimeConfig = {
@@ -732,6 +866,7 @@ function configControlManifest(
       displayName: 'Config Control Fixture',
       description: 'Schema-aware config control fixture.',
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'mode',

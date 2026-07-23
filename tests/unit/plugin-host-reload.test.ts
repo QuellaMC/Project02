@@ -38,6 +38,7 @@ function reloadFixtureManifest(): RuntimePluginManifest {
     },
     declaredPlugins: ['before_role_model_call', 'on_session_end'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'tone',

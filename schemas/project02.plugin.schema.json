@@ -110,8 +110,15 @@
         "config": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["fields"],
+          "required": ["scope", "fields"],
           "properties": {
+            "scope": {
+              "enum": [
+                "global_with_character_overrides",
+                "character_only"
+              ],
+              "description": "Whether enablement and non-secret settings may be authored globally with character overrides, or only in character/package config. Secrets always remain global."
+            },
             "fields": {
               "type": "array",
               "items": {"$ref": "#/definitions/configField"}

@@ -1,12 +1,5 @@
 import {readFileSync, readdirSync, statSync, type Dirent} from 'node:fs';
-import {
-  mkdir,
-  readFile,
-  readdir,
-  rmdir,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import {mkdir, readFile, readdir, rmdir, stat} from 'node:fs/promises';
 import {join} from 'node:path';
 import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -22,9 +15,6 @@ import {
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
-  createLocalRuntimeStorageSchemaMarker,
-  decodeStorageSchemaMarker,
-  encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,
   type LocalRuntimeSessionMetadata,
@@ -34,10 +24,12 @@ import {
 } from './layout-contract.ts';
 import {isRecord} from './layout-contract.ts';
 import type {ConversationLogRecord} from '../evidence/records.ts';
+import {atomicReplaceFile} from './atomic-file.ts';
 import {
-  atomicReplaceFile,
-  isLiveAtomicReplacementForAnyTarget,
-} from './atomic-file.ts';
+  assertCharacterDataDirReadable,
+  ensureCharacterDataMarker,
+  requireCharacterDataMarker,
+} from './character-data.ts';
 import {
   acquireLocalRuntimeMutationLock,
   type LocalRuntimeMutationLockLease,
@@ -88,6 +80,7 @@ export type LocalRuntimeSessionReadinessValidator = {
 
 export type CreateLocalRuntimeSessionStoreOptions =
   LocalRuntimeStorageLayoutOptions & {
+    readonly characterId: string;
     readonly now?: () => string;
     readonly conversationLogReader?: LocalRuntimeSessionConversationLogReader;
     readonly sessionReadinessValidator?: LocalRuntimeSessionReadinessValidator;
@@ -96,6 +89,7 @@ export type CreateLocalRuntimeSessionStoreOptions =
 export type AssertLocalRuntimeSessionReadableOptions =
   LocalRuntimeStorageLayoutOptions & {
     readonly sessionId?: string;
+    readonly characterId?: string;
   };
 
 export type CreateLocalRuntimeSessionOptions = {
@@ -162,7 +156,12 @@ export function assertLocalRuntimeSessionReadable(
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
 
-  readStorageSchemaMarkerSync(layout);
+  requireCharacterDataMarker({
+    storageOptions: options,
+    ...(options.characterId === undefined
+      ? {}
+      : {characterId: options.characterId}),
+  });
 
   const metadata = readSessionCatalogEntrySync(layout, sessionId);
 
@@ -182,6 +181,7 @@ export function createLocalRuntimeSessionStore(
   options: CreateLocalRuntimeSessionStoreOptions,
 ): LocalRuntimeSessionStore {
   const layout = createLocalRuntimeStorageLayout(options);
+  const characterId = options.characterId;
   const now = options.now ?? defaultClock;
   const configuredConversationLogReader = options.conversationLogReader;
   const configuredSessionReadinessValidator = options.sessionReadinessValidator;
@@ -193,7 +193,7 @@ export function createLocalRuntimeSessionStore(
     const createdAt = sessionOptions.createdAt ?? now();
 
     return await withSessionCatalogMutationLock(layout, async () => {
-      await ensureInitializedStore(layout, createdAt);
+      await ensureInitializedStore(layout, characterId, createdAt);
 
       const sessions = await readSessionCatalog(layout);
       if (sessions.has(sessionId)) {
@@ -229,7 +229,14 @@ export function createLocalRuntimeSessionStore(
   async function listSessions(): Promise<
     readonly LocalRuntimeSessionMetadata[]
   > {
-    await readStorageSchemaMarker(layout);
+    const marker = assertCharacterDataDirReadable({
+      storageOptions: options,
+      characterId,
+    });
+
+    if (marker === undefined) {
+      return Object.freeze([]);
+    }
 
     const sessions = [...(await readSessionCatalog(layout)).values()];
 
@@ -243,7 +250,10 @@ export function createLocalRuntimeSessionStore(
   ): Promise<LocalRuntimeSessionMetadata> {
     const normalizedSessionId = normalizeLocalRuntimeSessionId(sessionId);
 
-    await readStorageSchemaMarker(layout);
+    requireCharacterDataMarker({
+      storageOptions: options,
+      characterId,
+    });
 
     const metadata = await readSessionCatalogEntry(layout, normalizedSessionId);
 
@@ -264,7 +274,10 @@ export function createLocalRuntimeSessionStore(
     const normalizedSessionId = normalizeLocalRuntimeSessionId(sessionId);
 
     return await withSessionCatalogMutationLock(layout, async () => {
-      await readStorageSchemaMarker(layout);
+      requireCharacterDataMarker({
+        storageOptions: options,
+        characterId,
+      });
       const sessions = await readSessionCatalog(layout);
       const existing = sessions.get(normalizedSessionId);
 
@@ -334,35 +347,21 @@ export function createLocalRuntimeSessionStore(
 
 async function ensureInitializedStore(
   layout: LocalRuntimeStorageLayout,
+  characterId: string,
   createdAt: string,
 ): Promise<void> {
-  const storeHasExistingContent =
-    await localRuntimeStoreHasExistingContent(layout);
+  const marker = assertCharacterDataDirReadable({
+    storageOptions: {storeRoot: layout.storeRoot},
+    characterId,
+  });
 
-  try {
-    await readStorageSchemaMarker(layout);
-  } catch (error: unknown) {
-    if (!isLocalRuntimeStorageErrorCode(error, 'missing_file')) {
-      throw error;
-    }
-
-    if (storeHasExistingContent) {
-      throw error;
-    }
-
+  if (marker === undefined) {
     await createStoreRoot(layout);
-    await writeStorageFile({
-      filePath: layout.schemaPath,
-      content: `${encodeStorageSchemaMarker(
-        createLocalRuntimeStorageSchemaMarker({
-          scope: 'character-data',
-          createdAt,
-        }),
-      )}\n`,
-      failureMessage: `Could not write local runtime storage schema marker: ${layout.schemaPath}.`,
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: layout.storeRoot},
+      characterId,
+      now: () => createdAt,
     });
-    await createSessionsRoot(layout);
-    return;
   }
 
   await createSessionsRoot(layout);
@@ -390,98 +389,6 @@ async function createStoreRoot(
     throw new LocalRuntimeStorageContractError(
       'write_failed',
       `Could not prepare local runtime store root: ${layout.storeRoot}.`,
-    );
-  }
-}
-
-async function localRuntimeStoreHasExistingContent(
-  layout: LocalRuntimeStorageLayout,
-): Promise<boolean> {
-  try {
-    const entries = await readdir(layout.storeRoot, {withFileTypes: true});
-
-    for (const entry of entries) {
-      const entryPath = join(layout.storeRoot, entry.name);
-
-      if (entry.isDirectory() && entryPath === layout.sessionsRoot) {
-        if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
-          return true;
-        }
-
-        continue;
-      }
-
-      if (
-        isRuntimeHomeControlEntry(layout, entryPath) &&
-        (entry.isFile() || entry.isSymbolicLink() || entry.isDirectory())
-      ) {
-        continue;
-      }
-
-      // A concurrent initializer's half-written control file is not
-      // foreign content; its rename lands before that sibling proceeds.
-      if (
-        entry.isFile() &&
-        isLiveAtomicReplacementForAnyTarget(entry.name, [
-          layout.configPath,
-          layout.characterBindingPath,
-          layout.schemaPath,
-        ])
-      ) {
-        continue;
-      }
-
-      return true;
-    }
-
-    return false;
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return false;
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not inspect local runtime store root: ${layout.storeRoot}.`,
-    );
-  }
-}
-
-// Entries a character-data directory may contain besides sessions: the
-// overlay config, the binding stamp, the data marker, and the lock root.
-// Anything else marks the directory as foreign and blocks initialization.
-function isRuntimeHomeControlEntry(
-  layout: LocalRuntimeStorageLayout,
-  entryPath: string,
-): boolean {
-  return (
-    entryPath === layout.configPath ||
-    entryPath === layout.locksRoot ||
-    entryPath === layout.characterBindingPath ||
-    entryPath === layout.schemaPath
-  );
-}
-
-async function readStorageSchemaMarker(
-  layout: LocalRuntimeStorageLayout,
-): Promise<void> {
-  const schema = await readStorageFile({
-    filePath: layout.schemaPath,
-    missingFileCode: 'missing_file',
-    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`,
-  });
-
-  assertCharacterDataMarker(layout, decodeStorageSchemaMarker(schema));
-}
-
-function assertCharacterDataMarker(
-  layout: LocalRuntimeStorageLayout,
-  marker: ReturnType<typeof decodeStorageSchemaMarker>,
-): void {
-  if (marker.scope !== 'character-data') {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_schema_marker',
-      `Directory "${layout.storeRoot}" is a "${marker.scope}" directory, not a character data directory; select a character instead of the home itself.`,
     );
   }
 }
@@ -544,16 +451,6 @@ async function readSessionCatalogEntry(
 
   await assertSessionDirectoryReadableAsync(layout, sessionId);
   return metadata;
-}
-
-function readStorageSchemaMarkerSync(layout: LocalRuntimeStorageLayout): void {
-  const schema = readStorageFileSync({
-    filePath: layout.schemaPath,
-    missingFileCode: 'missing_file',
-    failureMessage: `Could not read local runtime storage schema marker: ${layout.schemaPath}.`,
-  });
-
-  assertCharacterDataMarker(layout, decodeStorageSchemaMarker(schema));
 }
 
 function readSessionCatalogEntrySync(
@@ -1144,65 +1041,6 @@ function errorFromUnknown(error: unknown): Error {
     : new Error('Local runtime session catalog rewrite failed.', {
         cause: error,
       });
-}
-
-async function readStorageFile(options: {
-  readonly filePath: string;
-  readonly missingFileCode: 'missing_file';
-  readonly failureMessage: string;
-}): Promise<string> {
-  try {
-    return await readFile(options.filePath, 'utf8');
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      throw new LocalRuntimeStorageContractError(
-        options.missingFileCode,
-        `Required local runtime storage file is missing: ${options.filePath}.`,
-      );
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      options.failureMessage,
-    );
-  }
-}
-
-function readStorageFileSync(options: {
-  readonly filePath: string;
-  readonly missingFileCode: 'missing_file';
-  readonly failureMessage: string;
-}): string {
-  try {
-    return readFileSync(options.filePath, 'utf8');
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      throw new LocalRuntimeStorageContractError(
-        options.missingFileCode,
-        `Required local runtime storage file is missing: ${options.filePath}.`,
-      );
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      options.failureMessage,
-    );
-  }
-}
-
-async function writeStorageFile(options: {
-  readonly filePath: string;
-  readonly content: string;
-  readonly failureMessage: string;
-}): Promise<void> {
-  try {
-    await writeFile(options.filePath, options.content, 'utf8');
-  } catch {
-    throw new LocalRuntimeStorageContractError(
-      'write_failed',
-      options.failureMessage,
-    );
-  }
 }
 
 function isLocalRuntimeStorageErrorCode(

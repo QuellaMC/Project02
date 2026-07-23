@@ -9,21 +9,15 @@ import {
   createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
 } from './file-runtime-log-store.ts';
-import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError,
   type LocalRuntimeSessionConversationEvidence,
 } from './session-store.ts';
-import {
-  characterDataDirPath,
-  createProject02HomeLayout,
-} from './layout-contract.ts';
-import {assertCharacterDataDirAdoptable} from './character-binding.ts';
+import {LocalRuntimeStorageContractError} from './layout-contract.ts';
+import {ensureCharacterDataDir} from './character-data.ts';
 import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
-import {ensureCharacterDataStamp} from './character-binding.ts';
-import {ensureInitializedProject02Home} from './home.ts';
 import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
 import {normalizeLocalRuntimeSessionId} from './layout-contract.ts';
 
@@ -47,35 +41,15 @@ export async function createDurableChatRuntime(
   const sessionId = normalizeLocalRuntimeSessionId(
     args.newSessionId ?? args.sessionId,
   );
-  // Preflight the data directory before the home initializer writes
-  // the home marker: a rejected bootstrap must not leave durable home
-  // state behind.
-  assertCharacterDataDirAdoptable({
-    storeRoot: characterDataDirPath(
-      createProject02HomeLayout(
-        args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot},
-      ).homeRoot,
-      args.character.id,
-    ),
-  });
-
-  const home = await ensureInitializedProject02Home(
-    args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot},
-  );
-  const dataRoot = characterDataDirPath(home.homeRoot, args.character.id);
-  const storageOptions = {storeRoot: dataRoot};
-  const boundUserSpeaker = createUserSpeaker(args.userDisplayName);
-  const stampResult = await ensureCharacterDataStamp({
-    storageOptions,
+  const dataRoot = await ensureCharacterDataDir({
+    ...(args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot}),
     characterId: args.character.id,
   });
-
-  if (stampResult.status === 'rejected') {
-    throw new LocalRuntimeStorageContractError(
-      'character_binding_rejected',
-      stampResult.message,
-    );
-  }
+  const storageOptions = {
+    storeRoot: dataRoot,
+    characterId: args.character.id,
+  };
+  const boundUserSpeaker = createUserSpeaker(args.userDisplayName);
 
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,

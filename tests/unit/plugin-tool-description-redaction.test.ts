@@ -176,6 +176,7 @@ function credentialDescriptionManifest() {
     },
     declaredPlugins: ['tool_provider'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'memory_api_key',

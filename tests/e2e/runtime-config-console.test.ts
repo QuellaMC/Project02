@@ -8,7 +8,7 @@ import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {ensureConsoleCommitTarget} from '../../src/cli/config/console-shared.ts';
 import {
   characterDataDirPath,
-  ensureCharacterDataStamp,
+  ensureCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
 import type {RuntimePlugin} from '../../src/plugins/api/types.ts';
@@ -72,7 +72,7 @@ describe('runtime config console UI', () => {
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     // The overlay went bad after the console opened: the save must
-    // fail before ensure writes the home marker or binding stamp.
+    // fail before ensure writes either storage marker.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'config.json'), '{not json\n');
 
@@ -82,7 +82,7 @@ describe('runtime config console UI', () => {
         {characterId: 'mira', dataRoot},
       ),
     ).rejects.toThrow();
-    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
@@ -95,7 +95,7 @@ describe('runtime config console UI', () => {
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {roleModelProvider: 'local'},
     });
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });

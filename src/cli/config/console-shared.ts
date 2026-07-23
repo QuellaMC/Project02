@@ -6,7 +6,6 @@
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   assertScopedGlobalLayerLoadable,
-  ensureCharacterDataDir,
   loadCharacterOverlayForScope,
   redactRuntimeConfigText,
   RuntimeConfigMutationError,
@@ -25,6 +24,7 @@ import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
 import {
   assertProject02HomeAdoptable,
   assertRealHomeEnvFile,
+  ensureCharacterDataDir,
   homeRootForCharacterDataDir,
 } from '../../runtime/storage/index.ts';
 
@@ -69,13 +69,13 @@ export type StagedRuntimeConfigChange = {
 };
 
 /**
- * Commit-time preparation of a console write: guards and the binding
- * stamp land only when the user actually saves, so a read-only console
+ * Commit-time preparation of a console write: guards and the identity
+ * marker land only when the user actually saves, so a read-only console
  * session never creates durable state. Unscoped commits refuse a home
  * the runtime would not adopt (explicit --config and env-selected
  * paths keep standalone-file semantics); scoped commits re-validate
  * the layers the save mutates — exactly as the non-UI verbs do —
- * before ensure materializes the stamp or marker.
+ * before ensure materializes the marker.
  */
 export async function ensureConsoleCommitTarget(
   context: {

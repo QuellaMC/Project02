@@ -25,7 +25,7 @@ describe('runtime plugin hook result boundaries', () => {
           sourceSystem: 'test',
         },
         declaredPlugins: ['before_role_model_call'],
-        config: {fields: []},
+        config: {scope: 'global_with_character_overrides', fields: []},
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,

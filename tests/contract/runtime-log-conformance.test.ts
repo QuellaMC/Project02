@@ -344,7 +344,10 @@ async function createRuntimeLogStoreFixture(
   }
 
   const storeRoot = createTestTempRoot('project02-log-conformance-');
-  await createLocalRuntimeSessionStore({storeRoot}).createSession({
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: testCharacterProfile.id,
+  }).createSession({
     sessionId,
     createdAt: identity.createdAt,
   });
@@ -352,6 +355,7 @@ async function createRuntimeLogStoreFixture(
   const logStore = createFileRuntimeLogStore({
     storeRoot,
     sessionId,
+    characterId: testCharacterProfile.id,
     writerLockOwnerToken: ownerToken,
     boundCharacter: testCharacterProfile,
   });

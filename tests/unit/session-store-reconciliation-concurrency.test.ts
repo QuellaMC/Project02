@@ -74,7 +74,10 @@ describe('local runtime session catalog reconciliation concurrency', () => {
 
   it('caps concurrent session-directory point reads at 16', async () => {
     const storeRoot = await createTempStoreRoot();
-    const store = createLocalRuntimeSessionStore({storeRoot});
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    });
 
     for (let index = 0; index < 17; index += 1) {
       await store.createSession({

@@ -6,7 +6,7 @@ import {
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
-  loadScopedGlobalLayerConfig,
+  resolveScopedGlobalLayerLocation,
   type RuntimeConfigDiagnostic,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -120,11 +120,13 @@ function loadConsoleSnapshot(
           ...runtimeConfigLocation(context),
           ...(context.env === undefined ? {} : {env: context.env}),
         })
-      : loadScopedGlobalLayerConfig({
-          ...runtimeConfigLocation(context),
-          ...(context.env === undefined ? {} : {env: context.env}),
-          characterId: context.character,
-        });
+      : loadProject02RuntimeConfig(
+          resolveScopedGlobalLayerLocation({
+            ...runtimeConfigLocation(context),
+            ...(context.env === undefined ? {} : {env: context.env}),
+            characterId: context.character,
+          }),
+        );
   const {diagnostics, blockingDiagnostic} = consoleLoadDiagnostics(loaded);
 
   if (blockingDiagnostic !== undefined) {

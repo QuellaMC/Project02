@@ -3,14 +3,13 @@ import {
   createProject02HomeLayout,
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
+  ensureCharacterDataDir,
   type RuntimePluginFileStoreProvider,
 } from '../runtime/storage/index.ts';
 import {
   createRuntimePluginContext,
   createRuntimePluginHost,
-  defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds,
-  isHostOwnedFirstPartyRuntimePluginId,
   isHostScopedFirstPartyRuntimePluginId,
   runRuntimePluginSessionEndHooks,
   runRuntimePluginShutdownHooks,
@@ -21,12 +20,9 @@ import {
   type RuntimePluginCatalogEntry,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
-  type RuntimePluginFactoryDefinition as RuntimePluginFactoryDefinitionContract,
-  type RuntimePluginFactoryFunction,
   type RuntimePluginHost,
   type RuntimePluginKind,
   type RuntimePluginManifest,
-  type RuntimePluginPackageCatalogEntry,
   type RuntimePluginSessionEndOptions,
   type RuntimePluginToolConfirmationHandler,
 } from '../plugins/index.ts';
@@ -38,7 +34,6 @@ import {
 } from '../plugins/package-loader/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
-  ensureCharacterDataDir,
   createRuntimeConfigDiagnostic,
   createRuntimeConfigMutationBase,
   createRuntimePluginConfigControlCapability,
@@ -60,14 +55,17 @@ import {
 } from '../runtime/config/index.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {createConfiguredRuntimePluginReloader} from './plugin-reload.ts';
+import {
+  composeRuntimePluginCatalog,
+  defaultRuntimePluginHostServiceEntries,
+  type RuntimePluginFactoryDefinition,
+} from './plugin-catalog.ts';
 
 export type {
   RuntimePluginFactoryFunction,
   RuntimePluginFactoryInput,
 } from '../plugins/index.ts';
-
-export type RuntimePluginFactoryDefinition =
-  RuntimePluginFactoryDefinitionContract<RuntimePluginFactoryFunction>;
+export type {RuntimePluginFactoryDefinition} from './plugin-catalog.ts';
 
 export type RuntimePluginActivationStatus = 'active' | 'disabled' | 'blocked';
 
@@ -150,12 +148,9 @@ const configuredPluginConstructionCleanupOptions = Object.freeze({
 } satisfies RuntimePluginSessionEndOptions);
 const selectedAsDefaultMemoryProviderReason =
   'selected_as_default_memory_provider';
-const defaultRuntimePluginHostServiceEntries =
-  defaultRuntimePluginHostServiceCatalogEntries();
-
 /**
  * The direct activation path loads the overlay with the same read
- * guards startup uses: a mismatched stamp or unadoptable directory
+ * guards startup uses: a mismatched marker or unadoptable directory
  * must not have its overlay reported as this character's config.
  * A supplied overlay skips this — its provider already guarded it.
  */
@@ -173,6 +168,14 @@ function guardedOverlayForScope(
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly storeRoot?: string;
+  /**
+   * Test or embedding overrides extend the discovered catalog instead of
+   * replacing it. Character-package requirements must keep seeing bundled
+   * and operator-installed plugins on every startup path.
+   */
+  readonly factoryOverrides?: Readonly<
+    Record<string, RuntimePluginFactoryDefinition>
+  >;
   /**
    * When present, package diagnostics are classified against the merged
    * two-layer view: an overlay-enabled broken package is as much an
@@ -223,15 +226,24 @@ export function createRuntimePluginCatalogSnapshot(options: {
       ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
     ),
   );
-  const catalogEntries = Object.freeze({
+  const discoveredCatalogEntries = {
     ...defaultRuntimePluginHostServiceEntries,
     ...Object.fromEntries(
       ordinaryPackages.map(item => [item.manifest.id, item]),
     ),
+  };
+  const factoryCatalog =
+    options.factoryOverrides === undefined
+      ? undefined
+      : composeRuntimePluginCatalog(options.factoryOverrides);
+  const catalogEntries = Object.freeze({
+    ...discoveredCatalogEntries,
+    ...factoryCatalog?.catalogEntries,
   });
   const discoveredPluginIds = new Set([
     ...ordinaryPackages.map(item => item.manifest.id),
     ...Object.keys(defaultRuntimePluginHostServiceEntries),
+    ...Object.keys(options.factoryOverrides ?? {}),
   ]);
   const defaultEnabledPluginIds = new Set<string>();
 
@@ -249,6 +261,12 @@ export function createRuntimePluginCatalogSnapshot(options: {
     ) {
       defaultEnabledPluginIds.add(item.manifest.id);
     }
+  }
+  for (const pluginId of Object.keys(options.factoryOverrides ?? {})) {
+    defaultEnabledPluginIds.delete(pluginId);
+  }
+  for (const pluginId of factoryCatalog?.defaultEnabledPluginIds ?? []) {
+    defaultEnabledPluginIds.add(pluginId);
   }
 
   return Object.freeze({
@@ -269,62 +287,12 @@ export function createRuntimePluginCatalogSnapshot(options: {
   } satisfies RuntimePluginCatalogSnapshot);
 }
 
-export function composeRuntimePluginCatalog(
-  factories: Readonly<Record<string, RuntimePluginFactoryDefinition>>,
-): {
-  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
-  readonly defaultEnabledPluginIds: readonly string[];
-} {
-  const packageEntries = Object.fromEntries(
-    Object.entries(factories)
-      .filter(([pluginId]) => !isHostScopedFirstPartyRuntimePluginId(pluginId))
-      .map(([pluginId, definition]) => [
-        pluginId,
-        Object.freeze({
-          catalogKind: 'package',
-          manifest: definition.manifest,
-          load: input => definition.create(input),
-        } satisfies RuntimePluginPackageCatalogEntry),
-      ]),
-  );
-  const catalogEntries = Object.freeze({
-    ...defaultRuntimePluginHostServiceEntries,
-    ...packageEntries,
-  });
-  const defaultEnabledPluginIds = new Set<string>();
-
-  for (const [pluginId, definition] of Object.entries(
-    defaultRuntimePluginHostServiceEntries,
-  )) {
-    if (
-      pluginId === definition.manifest.id &&
-      isHostOwnedFirstPartyRuntimePluginId(pluginId) &&
-      definition.manifest.activation.defaultEnabled
-    ) {
-      defaultEnabledPluginIds.add(pluginId);
-    }
-  }
-  for (const [pluginId, definition] of Object.entries(packageEntries)) {
-    if (
-      pluginId === definition.manifest.id &&
-      !isHostOwnedFirstPartyRuntimePluginId(pluginId) &&
-      definition.manifest.activation.defaultEnabled
-    ) {
-      defaultEnabledPluginIds.add(pluginId);
-    }
-  }
-
-  return Object.freeze({
-    catalogEntries,
-    defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds]),
-  });
-}
-
 export function prepareConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   readonly storeRoot?: string;
   readonly strictUnknownPlugins?: boolean;
+  readonly validateInactivePluginConfigs?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
@@ -339,7 +307,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
   }
 
   // One character scope and one overlay snapshot feed the catalog
-  // classification, the layered resolve, the construction stamp, and
+  // classification, the layered resolve, the construction snapshot, and
   // the control state, so every downstream site composes the same pair
   // of documents — including direct callers that never went through
   // startup. A supplied overlay is the scope authority: its character
@@ -379,6 +347,8 @@ export function prepareConfiguredProject02PluginActivation(options: {
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     pluginManifests,
     defaultEnabledPluginIds,
+    validateInactivePluginConfigs:
+      options.validateInactivePluginConfigs === true,
     ...(options.env === undefined ? {} : {env: options.env}),
   });
   const activation = resolveRuntimePluginActivation({
@@ -552,7 +522,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   }
 
   // Direct callers get the same guarded materialization startup runs:
-  // a foreign home or mismatched binding stamp fails here before any
+  // a foreign home or mismatched identity marker fails here before any
   // plugin file store could write under the data root. Startup-created
   // homes pass idempotently.
   await ensureCharacterDataDir({

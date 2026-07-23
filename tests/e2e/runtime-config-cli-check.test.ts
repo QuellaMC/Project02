@@ -144,7 +144,7 @@ describe('runtime config CLI reads and checks', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // An unstamped directory with an overlay AND foreign content: the
+    // A marker-less directory with an overlay AND foreign content: the
     // first durable run would refuse it, so check must not report its
     // overlay as the effective config.
     mkdirSync(dataRoot, {recursive: true});
@@ -168,8 +168,8 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toContain('Error:');
   });
 
-  it('rejects check when the data directory is stamped for another character', async () => {
-    const storeRoot = createTestTempRoot('project02-config-check-stamp-');
+  it('rejects check when the data directory is marked for another character', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-marker-');
     const dataRoot = join(storeRoot, 'character-data', 'mira');
     let stderr = '';
 
@@ -178,11 +178,12 @@ describe('runtime config CLI reads and checks', () => {
     // overlay a naive read-only check would report as mira's config.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
-      join(dataRoot, 'character-binding.json'),
+      join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'nova',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
     writeRuntimeConfig(join(dataRoot, 'config.json'), {

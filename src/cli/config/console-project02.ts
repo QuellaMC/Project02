@@ -4,10 +4,11 @@
  * snapshot's fingerprint.
  */
 import {
-  applyScopedRuntimeConfigControlOperation,
+  applyRuntimeConfigControlOperation,
   getRedactedRuntimeConfigValueAtPath,
   project02RuntimeConfigFieldDefinitions,
   redactRuntimeConfigValue,
+  resolveRuntimeConfigScopeTarget,
   type Project02ConfigFieldDefinition,
   type RuntimeConfigControlOperation,
   type RuntimeConfigValue,
@@ -116,15 +117,22 @@ async function stageProject02FieldChange(
     reloadRequired: field.reloadRequired,
     async commit() {
       await ensureConsoleCommitTarget(context, snapshot.characterScope);
-      applyScopedRuntimeConfigControlOperation({
+      const target = resolveRuntimeConfigScopeTarget({
         ...runtimeConfigLocation(context),
         ...(context.env === undefined ? {} : {env: context.env}),
         scope: snapshot.characterScope === undefined ? 'global' : 'character',
         ...(snapshot.characterScope === undefined
           ? {}
-          : {characterId: snapshot.characterScope.characterId}),
+          : {
+              characterId: snapshot.characterScope.characterId,
+              characterScope: snapshot.characterScope,
+            }),
+      });
+
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: snapshot.fingerprint,
-        operation,
+        request: {kind: 'document', operation},
       });
     },
   };

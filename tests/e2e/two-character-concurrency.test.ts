@@ -1,10 +1,17 @@
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
-import {existsSync, mkdirSync, readdirSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -131,6 +138,28 @@ describe('two characters from one home', () => {
           name.includes('session'),
         ),
     ).toBe(false);
+    expect(
+      JSON.parse(
+        readFileSync(
+          characterOverlayConfigPath(characterDataDirPath(homeRoot, 'mira')),
+          'utf8',
+        ),
+      ),
+    ).toEqual({
+      version: 'project02.config.v2',
+      plugins: {'character-state': {enabled: true}},
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          characterOverlayConfigPath(characterDataDirPath(homeRoot, 'nova')),
+          'utf8',
+        ),
+      ),
+    ).toEqual({version: 'project02.config.v2'});
+    expect(
+      JSON.parse(readFileSync(join(homeRoot, 'config.json'), 'utf8')),
+    ).toEqual({version: 'project02.config.v2'});
   }, 60_000);
 
   it('still lease-blocks a same-character double start', async () => {

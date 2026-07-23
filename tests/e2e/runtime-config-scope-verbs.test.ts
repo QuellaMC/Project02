@@ -13,7 +13,8 @@ import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
-  ensureCharacterDataStamp,
+  ensureCharacterDataMarker,
+  requireCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
@@ -64,13 +65,22 @@ describe('runtime-config --character verbs', () => {
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
       version: 'project02.config.v2',
       project02: {userDisplayName: 'Overlay Name'},
+      plugins: {
+        'character-state': {enabled: true},
+      },
     });
-    // First scoped write stamps the data dir for its character.
-    expect(
-      JSON.parse(
-        readFileSync(join(dataRoot, 'character-binding.json'), 'utf8'),
-      ),
-    ).toMatchObject({characterId: 'mira'});
+    // First scoped write initializes the data dir for its character.
+    const marker = requireCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    expect(marker).toMatchObject({
+      schemaVersion: 4,
+      scope: 'character-data',
+      characterId: 'mira',
+      materializedCharacterPackageVersion: '1.1.0',
+    });
+    expect(Number.isNaN(Date.parse(marker.createdAt))).toBe(false);
 
     const scopedGet = await runConfigCli([
       '--store',
@@ -122,7 +132,7 @@ describe('runtime-config --character verbs', () => {
     });
   });
 
-  it('rejects global-only fields, secrets, env-path, and check under --character', async () => {
+  it('rejects global-only fields, secrets, and env-path while check materializes under --character', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-reject-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
@@ -179,8 +189,34 @@ describe('runtime-config --character verbs', () => {
       'check',
     ]);
 
-    expect(check.code).toBe(1);
-    expect(check.stderr).toContain('--character does not apply to check');
+    expect(check.code).toBe(0);
+    expect(check.stderr).toBe('');
+    const checkOutput = JSON.parse(check.stdout) as {
+      readonly plugins: readonly {
+        readonly pluginId: string;
+        readonly enabled: boolean;
+        readonly activationStatus: string;
+      }[];
+    };
+    expect(
+      checkOutput.plugins.find(plugin => plugin.pluginId === 'character-state'),
+    ).toMatchObject({
+      enabled: true,
+      activationStatus: 'active',
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          characterOverlayConfigPath(characterDataDirPath(homeRoot, 'mira')),
+          'utf8',
+        ),
+      ),
+    ).toEqual({
+      version: 'project02.config.v2',
+      plugins: {
+        'character-state': {enabled: true},
+      },
+    });
   });
 
   it('refuses to write character data into a directory that is not a Project02 home', async () => {
@@ -230,7 +266,7 @@ describe('runtime-config --character verbs', () => {
       'Config field "project02.character" is global-only; set it in the ' +
         'home config.json, not the character overlay.',
     );
-    // The dialect violation failed before ensure ran: no stamp, no
+    // The dialect violation failed before ensure ran: no data marker, no
     // data directory, no home marker.
     expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
@@ -256,7 +292,7 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain(
       'Project02 roleModelProvider must be "local" or "nvidia".',
     );
-    // The invalid value failed preflight, before ensure: no stamp, no
+    // The invalid value failed preflight, before ensure: no data marker, no
     // data directory, no home marker.
     expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
@@ -286,14 +322,14 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain('Error:');
   });
 
-  it('rejects a scoped edit when the binding stamp is a directory', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-verbs-stamp-dir-');
+  it('rejects a scoped edit when the data marker is a directory', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-marker-dir-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     // An allowlisted control NAME with the wrong type must fail the
     // preflight, before the home initializer writes the home marker.
-    mkdirSync(join(dataRoot, 'character-binding.json'), {recursive: true});
+    mkdirSync(join(dataRoot, 'schema.json'), {recursive: true});
 
     const rejected = await runConfigCli([
       '--store',
@@ -310,12 +346,12 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
-  it('rejects a scoped read from an unadoptable unstamped directory', async () => {
+  it('rejects a scoped read from an unadoptable unmarked directory', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-read-adopt-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // Unstamped with an overlay AND foreign content: writers refuse
+    // Unmarked with an overlay AND foreign content: writers refuse
     // this directory, so a read must not surface its overlay either.
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
@@ -342,7 +378,7 @@ describe('runtime-config --character verbs', () => {
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
     writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -365,14 +401,14 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain('failed to load');
   });
 
-  it('rejects a scoped read from a directory stamped for another character', async () => {
+  it('rejects a scoped read from a directory marked for another character', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-read-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     // A copied directory: mira's path claims nova, but carries an
     // overlay a naive read would surface as mira's config.
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'nova',
     });
@@ -401,11 +437,12 @@ describe('runtime-config --character verbs', () => {
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
-      join(dataRoot, 'character-binding.json'),
+      join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'mira',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
     symlinkSync(outside, join(dataRoot, '.locks'));
@@ -443,19 +480,19 @@ describe('runtime-config --character verbs', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    // The invalid overlay failed the edit before ensure: no stamp, no
+    // The invalid overlay failed the edit before ensure: no data marker, no
     // home marker.
-    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
-  it('refuses to bind a character to a marker-less directory holding foreign content', async () => {
+  it('refuses to initialize a marker-less directory holding foreign content', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-adopt-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     // A copied or corrupt tree: session artifacts without a data
-    // marker. Stamping it would adopt that history permanently.
+    // marker. Marking it would adopt that history permanently.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
 
@@ -471,7 +508,7 @@ describe('runtime-config --character verbs', () => {
 
     expect(rejected.code).toBe(1);
     expect(rejected.stderr).toContain('Error:');
-    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
     // The data dir was preflighted before the home initializer ran.
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
@@ -495,18 +532,18 @@ describe('runtime-config --character verbs', () => {
 
     expect(rejected.code).toBe(1);
     expect(rejected.stderr).toContain('failed to load');
-    // The broken global layer was detected before ensure: no stamp,
+    // The broken global layer was detected before ensure: no data marker,
     // no data directory.
     expect(existsSync(dataRoot)).toBe(false);
   });
 
-  it('refuses to write into a data directory stamped for another character', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-verbs-stamp-');
+  it('refuses to write into a data directory marked for another character', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-marker-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     // Simulate a copied directory: mira's path already claims nova.
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'nova',
     });
@@ -534,7 +571,7 @@ describe('overlay files reached through --config directly', () => {
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -556,7 +593,7 @@ describe('overlay files reached through --config directly', () => {
     });
   });
 
-  it('refuses a direct overlay write into an unstamped data directory', async () => {
+  it('refuses a direct overlay write into an unmarked data directory', async () => {
     const homeRoot = createTestTempRoot('project02-scope-config-flag-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = characterOverlayConfigPath(dataRoot);
@@ -574,7 +611,7 @@ describe('overlay files reached through --config directly', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('has no binding stamp');
+    expect(rejected.stderr).toContain('has no identity marker');
     // The guard runs before the mutation lock: the data directory was
     // never created, not even its lock root.
     expect(existsSync(dataRoot)).toBe(false);
@@ -611,7 +648,7 @@ describe('overlay files reached through --config directly', () => {
     const miraRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: miraRoot},
       characterId: 'mira',
     });
@@ -645,7 +682,7 @@ describe('overlay files reached through --config directly', () => {
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {userDisplayName: 'Home Name'},
     });
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -674,7 +711,7 @@ describe('overlay files reached through --config directly', () => {
     // No --store and no global config.json: the owning home derives
     // from the overlay path alone, and the resolved scope must ride
     // into the apply instead of a fresh default-home derivation.
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -694,6 +731,9 @@ describe('overlay files reached through --config directly', () => {
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
       version: 'project02.config.v2',
       project02: {userDisplayName: 'Bob'},
+      plugins: {
+        'character-state': {enabled: true},
+      },
     });
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
   });
@@ -706,7 +746,7 @@ describe('overlay files reached through --config directly', () => {
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {userDisplayName: 'Global Name'},
     });
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -732,20 +772,21 @@ describe('overlay files reached through --config directly', () => {
     });
   });
 
-  it('rejects a symlinked data directory instead of writing its stamped target', async () => {
+  it('rejects a symlinked data directory instead of writing its marked target', async () => {
     const homeRoot = createTestTempRoot('project02-scope-config-flag-');
     const outside = createTestTempRoot('project02-scope-dir-link-target-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // The external target even carries a matching stamp: following the
+    // The external target even carries a matching marker: following the
     // link would write character config outside the home.
     writeFileSync(
-      join(outside, 'character-binding.json'),
+      join(outside, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'mira',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
     mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
@@ -772,7 +813,7 @@ describe('overlay files reached through --config directly', () => {
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {userDisplayName: 'Global Name'},
     });
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -804,7 +845,7 @@ describe('overlay files reached through --config directly', () => {
     const targetPath = join(outside, 'external.json');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -833,7 +874,7 @@ describe('overlay files reached through --config directly', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -860,7 +901,7 @@ describe('overlay files reached through --config directly', () => {
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -909,6 +950,9 @@ describe('overlay files reached through --config directly', () => {
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
       version: 'project02.config.v2',
       project02: {userDisplayName: 'Overlay Name'},
+      plugins: {
+        'character-state': {enabled: true},
+      },
     });
     expect(readFileSync(join(homeRoot, 'config.json'), 'utf8')).toBe(
       globalBefore,
@@ -917,7 +961,7 @@ describe('overlay files reached through --config directly', () => {
 });
 
 describe('scoped console sessions', () => {
-  it('creates no durable character state when the UI is only opened and quit', async () => {
+  it('materializes character config when the UI is opened and quit', async () => {
     const homeRoot = createTestTempRoot('project02-scope-ui-readonly-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
@@ -935,6 +979,23 @@ describe('scoped console sessions', () => {
     );
 
     expect(outcome).toBe(0);
-    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({
+      version: 'project02.config.v2',
+      plugins: {
+        'character-state': {enabled: true},
+      },
+    });
+    expect(
+      requireCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).toMatchObject({
+      materializedCharacterPackageVersion: '1.1.0',
+    });
   });
 });

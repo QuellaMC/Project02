@@ -36,6 +36,7 @@ import {recoverAbandonedRuntimeWriterEvidence} from '../evidence/recovery.ts';
 
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
+    readonly characterId: string;
     readonly writerLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
     readonly boundCharacter?: CharacterProfile;
     readonly boundUserSpeaker?: SpeakerIdentity;
@@ -61,6 +62,16 @@ export class FileRuntimeLogStoreState {
   private temporaryFilesScavenged = false;
 
   constructor(options: FileRuntimeLogStoreStateOptions) {
+    if (
+      options.boundCharacter !== undefined &&
+      options.boundCharacter.id !== options.characterId
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'character_identity_mismatch',
+        `File runtime log store character "${options.characterId}" does not match bound character "${options.boundCharacter.id}".`,
+      );
+    }
+
     this.options = options;
     this.paths = createLocalRuntimeSessionPaths(options);
     this.locksRoot = createLocalRuntimeStorageLayout({
@@ -80,6 +91,7 @@ export class FileRuntimeLogStoreState {
     assertLocalRuntimeSessionReadable({
       storeRoot: this.options.storeRoot,
       sessionId: this.paths.sessionId,
+      characterId: this.options.characterId,
     });
     this.sessionReadabilityChecked = true;
   }
@@ -96,6 +108,8 @@ export class FileRuntimeLogStoreState {
   }
 
   readStoredEvidence(): MutableDurableRuntimeSessionEvidence {
+    this.assertSessionReadable();
+
     if (this.writerIsActive() && !this.temporaryFilesScavenged) {
       scavengeAbandonedRuntimeEvidenceTemporaryFiles(this.paths);
       this.temporaryFilesScavenged = true;
@@ -136,6 +150,9 @@ export class FileRuntimeLogStoreState {
         ...(this.options.boundCharacter === undefined
           ? {}
           : {boundCharacter: this.options.boundCharacter}),
+        ...(this.options.boundUserSpeaker === undefined
+          ? {}
+          : {boundUserSpeaker: this.options.boundUserSpeaker}),
       });
       this.transitionMachine = createRuntimeEvidenceTransitionMachine({
         evidence,
@@ -235,6 +252,12 @@ export class FileRuntimeLogStoreState {
       const recovered = recoverAbandonedRuntimeWriterEvidence({
         paths: this.paths,
         evidence,
+        ...(this.options.boundCharacter === undefined
+          ? {}
+          : {boundCharacter: this.options.boundCharacter}),
+        ...(this.options.boundUserSpeaker === undefined
+          ? {}
+          : {boundUserSpeaker: this.options.boundUserSpeaker}),
       });
 
       if (recovered === undefined) {

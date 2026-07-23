@@ -259,11 +259,12 @@ describe('configured runtime plugin reloader', () => {
     // The data dir is rebound to another character after approval:
     // the reload must fail exactly as startup would refuse the store.
     writeFileSync(
-      join(dirname(overlayPath), 'character-binding.json'),
+      join(dirname(overlayPath), 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'nova',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
 

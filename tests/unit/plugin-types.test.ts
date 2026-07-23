@@ -930,6 +930,7 @@ describe('runtime plugin config metadata', () => {
         },
         declaredPlugins: ['plugin_discovery'],
         config: {
+          scope: 'global_with_character_overrides',
           fields: [
             {
               name: 'backend',
@@ -996,6 +997,7 @@ describe('runtime plugin config metadata', () => {
       createRuntimePluginManifest(
         runtimePluginManifestFixture({
           config: {
+            scope: 'global_with_character_overrides',
             fields: [
               {
                 name: 'apiKey',
@@ -1030,6 +1032,7 @@ function runtimePluginManifestFixture(
     },
     declaredPlugins: ['plugin_discovery'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [],
     },
     localTrustLevel: 'test_fixture',

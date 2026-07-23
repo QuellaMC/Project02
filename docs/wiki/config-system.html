@@ -18,9 +18,10 @@
     <h1>Project02 Config System</h1>
 
     <p>
-      Project02 owns one small, versioned JSON config document. It separates host settings
-      from plugin settings, while sharing one loader, schema, redaction, inspection, and
-      mutation path across the CLI, console UI, runtime activation, and model-facing tools.
+      Project02 owns one versioned global JSON document plus one optional overlay per character.
+      It separates host settings from plugin settings, while sharing one loader, schema,
+      redaction, inspection, and target-aware mutation path across the CLI, console UI, runtime
+      activation, and model-facing tools.
       The config engine stays under <code>src/runtime/config</code>; model-facing plugin
       operations are adapters over that shared boundary rather than a second config system.
     </p>
@@ -30,12 +31,12 @@
       host validates it, the user approves it, and the locked runtime mutation service commits it.
     </p>
 
-    <h2>Canonical authored document</h2>
+    <h2>Canonical global document</h2>
 
     <pre><code>{
   "version": "project02.config.v2",
   "project02": {
-    "storeRoot": ".project02-runtime",
+    "storeRoot": ".project02",
     "defaultMemoryProvider": "memory.example",
     "roleModelProvider": "local"
   },
@@ -61,7 +62,7 @@
     <h2>One schema and three representations</h2>
 
     <ul>
-      <li><strong>Authored:</strong> the operator-owned JSON document. Defaults are not written into it automatically.</li>
+      <li><strong>Authored:</strong> the operator-owned global document and selected character overlay. Manifest defaults are not copied into either.</li>
       <li><strong>Resolved:</strong> validated values, defaults, environment references, sources, and diagnostics used by the host.</li>
       <li><strong>Redacted:</strong> the only representation available to normal inspect output, the console, and model tools.</li>
     </ul>
@@ -74,14 +75,52 @@
       never agent-mutable.
     </p>
 
-    <h2>Location and precedence</h2>
+    <h2>Global location and layered precedence</h2>
 
     <ol>
       <li>An explicit <code>--config</code> path.</li>
       <li>An explicit <code>--store</code> root and its <code>config.json</code>.</li>
       <li><code>PROJECT02_RUNTIME_CONFIG</code>.</li>
-      <li>The default <code>.project02-runtime/config.json</code>.</li>
+      <li>The default <code>.project02/config.json</code>.</li>
     </ol>
+
+    <p>
+      Character selection is <code>--character</code>, then
+      <code>project02.character</code>, then <code>mira</code>. Its overlay lives at
+      <code>&lt;home&gt;/character-data/&lt;id&gt;/config.json</code>. Effective values resolve in
+      this order:
+    </p>
+
+    <pre><code>character overlay &gt; global config &gt; plugin manifest defaults</code></pre>
+
+    <p>
+      An absent character field keeps inheriting future global changes; global values are never
+      copied into the overlay. On first selection, the character package contributes only its
+      plugin declarations and non-secret defaults. On a package-version change, Project02 adds
+      currently missing package fields and never changes or removes existing character values.
+    </p>
+
+    <h2>Plugin config scopes</h2>
+
+    <p>
+      Every plugin manifest declares <code>config.scope</code>. One shared validator applies this
+      policy to raw config loading, CLI and console writes, package defaults, and approved model
+      writes.
+    </p>
+
+    <table>
+      <thead><tr><th>Policy</th><th>Global config</th><th>Character package or overlay</th></tr></thead>
+      <tbody>
+        <tr><td><code>global_with_character_overrides</code></td><td>Enablement and non-secret fields allowed.</td><td>Enablement and non-secret overrides allowed.</td></tr>
+        <tr><td><code>character_only</code></td><td>Enablement and non-secret fields rejected.</td><td>Enablement and non-secret fields allowed.</td></tr>
+      </tbody>
+    </table>
+
+    <p>
+      Secret fields and <code>$env</code> references are always global-only. A character-only plugin
+      may read a global secret reference, but its enablement and non-secret settings stay with the
+      character. <code>character-state</code> uses this policy.
+    </p>
 
     <p>
       For role-model selection, an explicit CLI flag wins over the runtime environment, which
@@ -114,6 +153,13 @@
       <li><code>pnpm runtime-config -- ui</code> opens the schema-driven terminal editor.</li>
       <li>Existing scriptable set, unset, plugin activation, memory-provider, and secret commands remain compatible.</li>
     </ul>
+
+    <p>
+      Add <code>--character &lt;id&gt;</code> to target an overlay. Character-targeted
+      <code>path</code>, <code>get</code>, <code>check</code>, mutation, and UI commands all run the
+      same initializer, so even a read may intentionally create or upgrade the selected overlay.
+      Secrets remain shared and reject <code>--character</code>.
+    </p>
 
     <p>
       The terminal editor stages one change, shows a redacted old/new preview, and requires
@@ -232,7 +278,8 @@
 
     <p>
       Package provenance is host-owned rather than manifest-owned. Bundled Character State is the
-      reference ordinary package and retains its first-party default. Operator packages remain disabled
+      reference ordinary package; the Mira package enables it in Mira's overlay rather than through a
+      global manifest default. Operator packages remain disabled
       until explicitly enabled and cannot gain bundled trust or default activation by copying manifest
       fields. Enabled packages execute trusted Node code in the Project02 process; plugin permissions
       constrain host services and model exposure, not direct Node capabilities.

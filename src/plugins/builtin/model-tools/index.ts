@@ -56,6 +56,7 @@ export function createFirstPartyModelToolsPluginManifest(): RuntimePluginManifes
     },
     declaredPlugins: ['tool_provider'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [],
     },
     localTrustLevel: 'first_party',

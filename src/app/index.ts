@@ -25,8 +25,7 @@ export {
   type Project02CharacterActivation,
 } from './character.ts';
 export {
-  characterOverlaySeedDocument,
   enforceCharacterPluginExpectations,
-  validateCharacterOverlaySeedAgainstManifests,
-  type CharacterOverlaySeed,
+  planCharacterPackagePluginMaterialization,
+  type CharacterPackagePluginMaterializationPlan,
 } from './character-plugins.ts';

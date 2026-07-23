@@ -6,23 +6,23 @@
  * the session store's initialization path.
  */
 import type {Dirent} from 'node:fs';
-import {lstat, mkdir, readdir, readFile} from 'node:fs/promises';
+import {lstat, mkdir, readdir} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
-import {
-  atomicReplaceFile,
-  isLiveAtomicReplacementForAnyTarget,
-} from './atomic-file.ts';
+import {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 import {
   createLocalRuntimeStorageSchemaMarker,
   createProject02HomeLayout,
-  decodeStorageSchemaMarker,
-  encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
+  type LocalRuntimeStorageSchemaMarker,
   type Project02HomeLayout,
   type Project02HomeLayoutOptions,
 } from './layout-contract.ts';
+import {
+  ensureStorageSchemaMarker,
+  readStorageSchemaMarker,
+} from './schema-marker.ts';
 
 export type EnsureInitializedProject02HomeOptions =
   Project02HomeLayoutOptions & {
@@ -36,19 +36,21 @@ export async function ensureInitializedProject02Home(
 
   await assertProject02HomeAdoptable(options);
 
-  const marker = await readProject02HomeMarker(layout);
+  const marker = readStorageSchemaMarker(layout);
 
   if (marker === undefined) {
     await ensureRealCharacterDataRoot(layout);
-    await atomicReplaceFile({
-      targetPath: layout.schemaPath,
-      content: `${encodeStorageSchemaMarker(
-        createLocalRuntimeStorageSchemaMarker({
-          scope: 'home',
-          createdAt: (options.now ?? defaultHomeClock)(),
-        }),
-      )}\n`,
-    });
+    const result = await ensureStorageSchemaMarker(
+      layout,
+      createLocalRuntimeStorageSchemaMarker({
+        scope: 'home',
+        createdAt: (options.now ?? defaultHomeClock)(),
+      }),
+      async () => {
+        await assertProject02HomeAdoptable(options);
+      },
+    );
+    assertProject02HomeMarker(layout, result.marker);
 
     return layout;
   }
@@ -68,7 +70,7 @@ export async function assertProject02HomeAdoptable(
   options: Project02HomeLayoutOptions = {},
 ): Promise<void> {
   const layout = createProject02HomeLayout(options);
-  const marker = await readProject02HomeMarker(layout);
+  const marker = readStorageSchemaMarker(layout);
 
   if (marker === undefined) {
     if (await project02HomeHasForeignContent(layout)) {
@@ -81,12 +83,7 @@ export async function assertProject02HomeAdoptable(
     return;
   }
 
-  if (marker.scope !== 'home') {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_schema_marker',
-      `Directory "${layout.homeRoot}" is a "${marker.scope}" directory, not a Project02 home; point --store at the home that contains it.`,
-    );
-  }
+  assertProject02HomeMarker(layout, marker);
 
   // An initialized home is only usable if character data can actually
   // live in it — and if its own control entries are real: a symlinked
@@ -95,9 +92,21 @@ export async function assertProject02HomeAdoptable(
   await assertRealHomeControlEntries(layout);
 }
 
+function assertProject02HomeMarker(
+  layout: Project02HomeLayout,
+  marker: LocalRuntimeStorageSchemaMarker,
+): void {
+  if (marker.scope !== 'home') {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_schema_marker',
+      `Directory "${layout.homeRoot}" is a "${marker.scope}" directory, not a Project02 home; point --store at the home that contains it.`,
+    );
+  }
+}
+
 /**
  * Character data must live inside the home: a symlinked data root
- * would put binding stamps and session history outside the home this
+ * would put identity markers and session history outside the home this
  * guard just validated.
  */
 async function ensureRealCharacterDataRoot(
@@ -195,48 +204,6 @@ async function assertRealCharacterDataRootIfPresent(
   }
 
   return 'present';
-}
-
-async function readProject02HomeMarker(layout: Project02HomeLayout) {
-  // The marker is the ownership guard itself: a symlinked marker would
-  // let any directory borrow another home's proof of initialization.
-  let markerStats;
-
-  try {
-    markerStats = await lstat(layout.schemaPath);
-  } catch {
-    markerStats = undefined;
-  }
-
-  if (markerStats?.isSymbolicLink() === true) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_schema_marker',
-      `Project02 home marker "${layout.schemaPath}" is a symlink; the ` +
-        'marker must be a regular file inside the home.',
-    );
-  }
-
-  let source: string;
-
-  try {
-    source = await readFile(layout.schemaPath, 'utf8');
-  } catch (error: unknown) {
-    // ENOTDIR: the home root is not a directory; the storage layer
-    // owns that diagnosis with a more precise error than this guard.
-    if (
-      isNodeErrorWithCode(error, 'ENOENT') ||
-      isNodeErrorWithCode(error, 'ENOTDIR')
-    ) {
-      return undefined;
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not read Project02 home marker: ${layout.schemaPath}.`,
-    );
-  }
-
-  return decodeStorageSchemaMarker(source.trim());
 }
 
 async function project02HomeHasForeignContent(

@@ -1306,7 +1306,7 @@ describe('runtime config CLI mutation and storage', () => {
     expect(stderr).not.toContain('EEXIST');
   });
 
-  it('reports env secret write failures and rolls back the config update', async () => {
+  it('rejects an invalid resolved home before mutating a secret', async () => {
     const configRoot = createTestTempRoot('project02-config-env-blocked-');
     const blockedStoreRoot = join(configRoot, 'not-a-directory');
     const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
@@ -1343,22 +1343,15 @@ describe('runtime config CLI mutation and storage', () => {
     ).toBe(1);
 
     expect(stdout).toBe('');
-    expect(stderr).toBe(
-      `Error: Could not write runtime config env file at ${join(blockedStoreRoot, '.env')}.\n`,
-    );
-    expect(stderr).not.toContain('EEXIST');
+    expect(stderr).toBe('Error: Local runtime store could not be read.\n');
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
-  it('preserves dangling config symlinks when secret env write rollback removes a created target', async () => {
+  it('preserves dangling config symlinks when the selected home is invalid', async () => {
     const configRoot = createTestTempRoot(
       'project02-config-env-blocked-dangling-link-',
     );
     const blockedStoreRoot = join(configRoot, 'not-a-directory');
-    const canonicalBlockedStoreRoot = join(
-      realpathSync.native(configRoot),
-      'not-a-directory',
-    );
     const targetName = 'target.json';
     const targetPath = join(configRoot, targetName);
     const configPath = join(configRoot, 'linked.json');
@@ -1399,9 +1392,7 @@ describe('runtime config CLI mutation and storage', () => {
     ).toBe(1);
 
     expect(stdout).toBe('');
-    expect(stderr).toBe(
-      `Error: Could not write runtime config env file at ${join(canonicalBlockedStoreRoot, '.env')}.\n`,
-    );
+    expect(stderr).toBe('Error: Local runtime store could not be read.\n');
     expect(existsSync(configPath)).toBe(false);
     expect(existsSync(targetPath)).toBe(false);
     expect(lstatSync(configPath).isSymbolicLink()).toBe(true);

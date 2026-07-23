@@ -17,17 +17,36 @@ import {createDefaultProject02PluginHost} from '../support/default-plugin-host.t
 import {createUserMessageRuntimeEvent} from '../../src/core/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/index.ts';
 import {
-  characterBindingPath,
   characterDataDirPath,
   createDurableChatRuntime,
+  createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
   encodeStorageSchemaMarker,
-  ensureCharacterDataStamp,
-  readCharacterBinding,
+  ensureCharacterDataMarker,
+  assertCharacterDataDirReadable,
+  requireCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
+import {acquireLocalRuntimeMutationLock} from '../../src/runtime/storage/mutation-lock.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 
 const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
+
+function schemaPath(dataRoot: string): string {
+  return join(dataRoot, 'schema.json');
+}
+
+function characterDataMarkerBytes(
+  characterId: string,
+  createdAt = '2026-07-23T00:00:00.000Z',
+): string {
+  return `${encodeStorageSchemaMarker(
+    createLocalRuntimeStorageSchemaMarker({
+      scope: 'character-data',
+      characterId,
+      createdAt,
+    }),
+  )}\n`;
+}
 
 function visibleReplyAdapter(text: string): RoleModelAdapter {
   return {
@@ -84,91 +103,195 @@ async function runOneTurn(options: {
   }
 }
 
-describe('character data stamp', () => {
-  it('creates the stamp on first use and verifies it afterwards', async () => {
+describe('character data ownership marker', () => {
+  it('creates the marker on first use and verifies it afterwards', async () => {
     const dataRoot = createTestTempRoot();
 
-    const first = await ensureCharacterDataStamp({
+    const first = await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
+      now: () => '2026-07-23T00:00:00.000Z',
     });
 
-    expect(first).toMatchObject({
-      status: 'stamped',
-      characterId: 'mira',
+    expect(first).toEqual({
       created: true,
-    });
-    expect(readCharacterBinding({storeRoot: dataRoot})).toMatchObject({
-      status: 'bound',
-      binding: {
-        format: 'project02.character-binding.v1',
+      marker: {
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'mira',
+        createdAt: '2026-07-23T00:00:00.000Z',
       },
     });
+    expect(
+      requireCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).toEqual({
+      schemaVersion: 4,
+      scope: 'character-data',
+      characterId: 'mira',
+      createdAt: '2026-07-23T00:00:00.000Z',
+    });
 
-    const again = await ensureCharacterDataStamp({
+    const again = await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
 
-    expect(again).toMatchObject({status: 'stamped', created: false});
+    expect(again).toMatchObject({
+      created: false,
+      marker: {scope: 'character-data', characterId: 'mira'},
+    });
   });
 
-  it('rejects a data directory stamped for another character, naming both ids and the recovery', async () => {
+  it('rejects a data directory marked for another character without changing the marker', async () => {
     const dataRoot = createTestTempRoot();
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'nova',
+      now: () => '2026-07-23T00:00:00.000Z',
     });
-    const stampBefore = readFileSync(
-      characterBindingPath({storeRoot: dataRoot}),
-      'utf8',
-    );
-    const rejected = await ensureCharacterDataStamp({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
+    const markerBefore = readFileSync(schemaPath(dataRoot), 'utf8');
+
+    await expect(
+      ensureCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'character_identity_mismatch',
     });
-
-    expect(rejected.status).toBe('rejected');
-    if (rejected.status !== 'rejected') {
-      throw new Error('Expected rejected stamp.');
-    }
-
-    expect(rejected.code).toBe('character_binding_mismatch');
-    expect(rejected.message).toContain('"nova"');
-    expect(rejected.message).toContain('"mira"');
-    expect(rejected.message).toContain('Select character "nova"');
-    expect(
-      readFileSync(characterBindingPath({storeRoot: dataRoot}), 'utf8'),
-    ).toBe(stampBefore);
+    await expect(
+      ensureCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).rejects.toThrow('"nova"');
+    await expect(
+      ensureCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).rejects.toThrow('"mira"');
+    expect(readFileSync(schemaPath(dataRoot), 'utf8')).toBe(markerBefore);
   });
 
-  it('rejects a malformed stamp with the path, format, and restore guidance', async () => {
+  it('returns the validated marker from the readable character-data seam', async () => {
     const dataRoot = createTestTempRoot();
 
-    writeFileSync(
-      characterBindingPath({storeRoot: dataRoot}),
-      '{broken',
-      'utf8',
-    );
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'nova',
+      now: () => '2026-07-23T00:00:00.000Z',
+    });
 
-    const rejected = await ensureCharacterDataStamp({
+    expect(
+      assertCharacterDataDirReadable({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'nova',
+      }),
+    ).toMatchObject({
+      scope: 'character-data',
+      characterId: 'nova',
+    });
+    expect(() =>
+      assertCharacterDataDirReadable({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        code: 'character_identity_mismatch',
+      }),
+    );
+  });
+
+  it('refuses to read a marker through a symlinked character data directory', () => {
+    const homeRoot = createTestTempRoot();
+    const outside = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeFileSync(schemaPath(outside), characterDataMarkerBytes('mira'));
+    mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
+    symlinkSync(outside, dataRoot);
+
+    expect(() =>
+      requireCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).toThrow('must be a real directory');
+  });
+
+  it('reports a character-data root nested below a file as unreadable', async () => {
+    const parentRoot = createTestTempRoot();
+    const homeRoot = join(parentRoot, 'home-file');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeFileSync(homeRoot, 'not a directory\n');
+
+    await expect(
+      ensureCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'read_failed',
+      message: `Could not inspect the character-data root: ${join(
+        homeRoot,
+        'character-data',
+      )}.`,
+    });
+    expect(existsSync(schemaPath(dataRoot))).toBe(false);
+  });
+
+  it('rejects a malformed marker without replacing it', async () => {
+    const dataRoot = createTestTempRoot();
+
+    writeFileSync(schemaPath(dataRoot), '{broken', 'utf8');
+
+    await expect(
+      ensureCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'malformed_schema_marker',
+    });
+    expect(readFileSync(schemaPath(dataRoot), 'utf8')).toBe('{broken');
+  });
+
+  it('refuses foreign content added while waiting to mark character data', async () => {
+    const dataRoot = createTestTempRoot();
+    const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
+    const heldMarkerLock = await acquireLocalRuntimeMutationLock({
+      locksRoot: layout.locksRoot,
+      resourceKey: 'storage-schema',
+    });
+    const initialization = ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
+    const initializationRejection = expect(
+      initialization,
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'missing_file',
+    });
 
-    expect(rejected.status).toBe('rejected');
-    if (rejected.status !== 'rejected') {
-      throw new Error('Expected rejected stamp.');
+    try {
+      writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+    } finally {
+      await heldMarkerLock.release();
     }
 
-    expect(rejected.code).toBe('character_binding_malformed');
-    expect(rejected.message).toContain(
-      characterBindingPath({storeRoot: dataRoot}),
-    );
-    expect(rejected.message).toContain('project02.character-binding.v1');
-    expect(rejected.message).toContain('Restore it from backup');
+    await initializationRejection;
+    expect(existsSync(layout.schemaPath)).toBe(false);
   });
 });
 
@@ -194,15 +317,21 @@ describe('character data directories through the durable runtime', () => {
     expect(mira.speakerNames).toEqual(['You', 'Mira']);
     expect(nova.speakerNames).toEqual(['You', 'Nova']);
     expect(
-      readCharacterBinding({
-        storeRoot: characterDataDirPath(homeRoot, 'mira'),
+      requireCharacterDataMarker({
+        storageOptions: {
+          storeRoot: characterDataDirPath(homeRoot, 'mira'),
+        },
+        characterId: 'mira',
       }),
-    ).toMatchObject({status: 'bound', binding: {characterId: 'mira'}});
+    ).toMatchObject({scope: 'character-data', characterId: 'mira'});
     expect(
-      readCharacterBinding({
-        storeRoot: characterDataDirPath(homeRoot, 'nova'),
+      requireCharacterDataMarker({
+        storageOptions: {
+          storeRoot: characterDataDirPath(homeRoot, 'nova'),
+        },
+        characterId: 'nova',
       }),
-    ).toMatchObject({status: 'bound', binding: {characterId: 'nova'}});
+    ).toMatchObject({scope: 'character-data', characterId: 'nova'});
 
     const miraResumed = await runOneTurn({
       homeRoot,
@@ -220,7 +349,7 @@ describe('character data directories through the durable runtime', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     // A copied or corrupt tree: session artifacts without a data
-    // marker. Direct durable bootstrap must not stamp it.
+    // marker. Direct durable bootstrap must not mark it.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
 
@@ -231,15 +360,13 @@ describe('character data directories through the durable runtime', () => {
         newSessionId: 'adoption-attempt',
       }),
     ).rejects.toThrow('without a data marker');
-    expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
-      status: 'absent',
-    });
+    expect(existsSync(schemaPath(dataRoot))).toBe(false);
     // The data dir was preflighted before the home initializer ran:
     // no home marker was written for the rejected bootstrap.
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
-  it('refuses to bind through a symlinked character data directory', async () => {
+  it('refuses to adopt through a symlinked character data directory', async () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();
 
@@ -252,10 +379,13 @@ describe('character data directories through the durable runtime', () => {
         character: testCharacterProfile,
         newSessionId: 'symlink-attempt',
       }),
-    ).rejects.toThrow('is a symlink');
-    expect(readCharacterBinding({storeRoot: outside})).toEqual({
-      status: 'absent',
-    });
+    ).rejects.toThrow('must be a real directory');
+    expect(
+      assertCharacterDataDirReadable({
+        storageOptions: {storeRoot: outside},
+        characterId: 'mira',
+      }),
+    ).toBeUndefined();
   });
 
   it('tolerates a live sibling marker replacement during first adoption', async () => {
@@ -273,37 +403,24 @@ describe('character data directories through the durable runtime', () => {
       '',
     );
 
-    const stamped = await ensureCharacterDataStamp({
+    const marked = await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
 
-    expect(stamped).toMatchObject({status: 'stamped', created: true});
+    expect(marked).toMatchObject({
+      created: true,
+      marker: {scope: 'character-data', characterId: 'mira'},
+    });
   });
 
-  it('refuses a stamped data directory whose sessions root is a symlink', async () => {
+  it('refuses a marked data directory whose sessions root is a symlink', async () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     mkdirSync(dataRoot, {recursive: true});
-    writeFileSync(
-      join(dataRoot, 'character-binding.json'),
-      `${JSON.stringify({
-        format: 'project02.character-binding.v1',
-        characterId: 'mira',
-        boundAt: '2026-07-23T00:00:00.000Z',
-      })}\n`,
-    );
-    writeFileSync(
-      join(dataRoot, 'schema.json'),
-      `${encodeStorageSchemaMarker(
-        createLocalRuntimeStorageSchemaMarker({
-          scope: 'character-data',
-          createdAt: '2026-07-23T00:00:00.000Z',
-        }),
-      )}\n`,
-    );
+    writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('mira'));
     symlinkSync(outside, join(dataRoot, 'sessions'));
 
     await expect(
@@ -316,32 +433,25 @@ describe('character data directories through the durable runtime', () => {
     expect(readdirSync(outside)).toEqual([]);
   });
 
-  it('refuses a binding stamp that is only a symlink to an external proof', async () => {
+  it('refuses a character data marker that is only a symlink to an external proof', async () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeFileSync(
-      join(outside, 'external-binding.json'),
-      `${JSON.stringify({
-        format: 'project02.character-binding.v1',
-        characterId: 'mira',
-        boundAt: '2026-07-23T00:00:00.000Z',
-      })}\n`,
+      join(outside, 'external-schema.json'),
+      characterDataMarkerBytes('mira'),
     );
     mkdirSync(dataRoot, {recursive: true});
-    symlinkSync(
-      join(outside, 'external-binding.json'),
-      join(dataRoot, 'character-binding.json'),
-    );
+    symlinkSync(join(outside, 'external-schema.json'), schemaPath(dataRoot));
 
     await expect(
       createDurableChatRuntime({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'linked-stamp-attempt',
+        newSessionId: 'linked-marker-attempt',
       }),
-    ).rejects.toThrow('is a symlink');
+    ).rejects.toThrow('must be a regular file');
   });
 
   it('refuses a data directory whose marker is only a borrowed symlink', async () => {
@@ -373,26 +483,22 @@ describe('character data directories through the durable runtime', () => {
         character: testCharacterProfile,
         newSessionId: 'borrowed-marker-attempt',
       }),
-    ).rejects.toThrow('is a symlink');
-    expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
-      status: 'absent',
-    });
+    ).rejects.toThrow('must be a regular file');
+    expect(() =>
+      assertCharacterDataDirReadable({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).toThrow('must be a regular file');
   });
 
-  it('refuses a symlinked data directory even when its target is already stamped', async () => {
+  it('refuses a symlinked data directory even when its target is already marked', async () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();
 
-    // The target carries a matching stamp: trusting it would move
+    // The target carries a matching marker: trusting it would move
     // locks and session files outside the selected home.
-    writeFileSync(
-      join(outside, 'character-binding.json'),
-      `${JSON.stringify({
-        format: 'project02.character-binding.v1',
-        characterId: 'mira',
-        boundAt: '2026-07-23T00:00:00.000Z',
-      })}\n`,
-    );
+    writeFileSync(schemaPath(outside), characterDataMarkerBytes('mira'));
     mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
     symlinkSync(outside, characterDataDirPath(homeRoot, 'mira'));
 
@@ -400,14 +506,14 @@ describe('character data directories through the durable runtime', () => {
       createDurableChatRuntime({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'stamped-symlink-attempt',
+        newSessionId: 'marked-symlink-attempt',
       }),
-    ).rejects.toThrow('is a symlink');
+    ).rejects.toThrow('must be a real directory');
     expect(existsSync(join(outside, 'sessions.jsonl'))).toBe(false);
     expect(existsSync(join(outside, '.locks'))).toBe(false);
   });
 
-  it('refuses to bind a directory whose data marker names another scope', async () => {
+  it('refuses a directory whose data marker names another scope', async () => {
     const homeRoot = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
@@ -429,60 +535,55 @@ describe('character data directories through the durable runtime', () => {
         newSessionId: 'wrong-scope-attempt',
       }),
     ).rejects.toThrow('not a character data directory');
-    expect(readCharacterBinding({storeRoot: dataRoot})).toEqual({
-      status: 'absent',
-    });
+    expect(() =>
+      assertCharacterDataDirReadable({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: 'LocalRuntimeStorageContractError',
+        code: 'malformed_schema_marker',
+      }),
+    );
   });
 
-  it('recreates a missing stamp and rejects a tampered one', async () => {
+  it('refuses to recreate a missing marker over history and rejects a marker copied from another character', async () => {
     const homeRoot = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     await runOneTurn({
       homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {newSessionId: 'stamp-life'},
+      sessionSelection: {newSessionId: 'marker-life'},
       message: 'hello',
       reply: 'hello back',
     });
 
-    rmSync(characterBindingPath({storeRoot: dataRoot}));
-    await runOneTurn({
-      homeRoot,
-      character: testCharacterProfile,
-      sessionSelection: {sessionId: 'stamp-life'},
-      message: 'again',
-      reply: 'still here',
-    });
-    expect(readCharacterBinding({storeRoot: dataRoot})).toMatchObject({
-      status: 'bound',
-      binding: {characterId: 'mira'},
-    });
+    rmSync(schemaPath(dataRoot));
+    await expect(
+      runOneTurn({
+        homeRoot,
+        character: testCharacterProfile,
+        sessionSelection: {sessionId: 'marker-life'},
+        message: 'again',
+        reply: 'still here',
+      }),
+    ).rejects.toThrow('without a data marker');
+    expect(existsSync(schemaPath(dataRoot))).toBe(false);
 
     // Simulate a copied/renamed directory: mira's data dir claims nova.
-    writeFileSync(
-      characterBindingPath({storeRoot: dataRoot}),
-      `${JSON.stringify(
-        {
-          format: 'project02.character-binding.v1',
-          characterId: 'nova',
-          boundAt: '2026-07-22T00:00:00.000Z',
-        },
-        null,
-        2,
-      )}\n`,
-      'utf8',
-    );
+    writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('nova'));
 
     await expect(
       createDurableChatRuntime({
         homeRoot,
         character: testCharacterProfile,
-        sessionId: 'stamp-life',
+        sessionId: 'marker-life',
       }),
     ).rejects.toMatchObject({
       name: 'LocalRuntimeStorageContractError',
-      code: 'character_binding_rejected',
+      code: 'character_identity_mismatch',
     });
   });
 

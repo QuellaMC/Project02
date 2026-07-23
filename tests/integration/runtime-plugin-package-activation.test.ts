@@ -50,10 +50,10 @@ describe('configured runtime plugin package activation', () => {
     );
 
     expect(characterState).toMatchObject({
-      enabled: true,
-      activationStatus: 'active',
+      enabled: false,
+      activationStatus: 'disabled',
     });
-    expect(characterState?.activationReasons).toContain('enabled_by_default');
+    expect(characterState?.activationReasons).toContain('not_enabled');
     expect(configured.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
@@ -112,9 +112,7 @@ describe('configured runtime plugin package activation', () => {
       activationStatus: 'disabled',
     });
     expect(operatorPackage?.activationReasons).toContain('not_enabled');
-    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
-      characterStatePluginId,
-    ]);
+    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([]);
   });
 
   it('does not let an operator default claim trigger required-config validation', () => {
@@ -165,8 +163,8 @@ describe('configured runtime plugin package activation', () => {
         plugin => plugin.pluginId === characterStatePluginId,
       ),
     ).toMatchObject({
-      enabled: true,
-      activationStatus: 'active',
+      enabled: false,
+      activationStatus: 'disabled',
     });
   });
 
@@ -180,6 +178,7 @@ describe('configured runtime plugin package activation', () => {
 
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'cold-package-inspect',
       createdAt: '2026-07-15T00:00:00.000Z',
@@ -253,7 +252,7 @@ describe('configured runtime plugin package activation', () => {
       configured.activation.plugins.find(
         plugin => plugin.pluginId === characterStatePluginId,
       )?.enabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('fails closed when config explicitly enables a quarantined operator package', () => {
@@ -302,7 +301,7 @@ describe('configured runtime plugin package activation', () => {
     const dataRoot = characterDataDirPath(storeRoot, 'mira');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // Unstamped, with an overlay AND foreign content: durable startup
+    // Marker-less, with an overlay AND foreign content: durable startup
     // refuses this directory, so the direct plan must not trust its
     // overlay values either.
     mkdirSync(dataRoot, {recursive: true});
@@ -443,7 +442,7 @@ describe('configured runtime plugin package activation', () => {
       configured.activation.plugins.find(
         plugin => plugin.pluginId === characterStatePluginId,
       )?.enabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('imports an enabled operator package once with resolved and redacted config', async () => {
@@ -532,7 +531,7 @@ describe('configured runtime plugin package activation', () => {
       },
     });
     expect(configured.plugins.map(plugin => plugin.manifest.id).sort()).toEqual(
-      [characterStatePluginId, manifest.id].sort(),
+      [manifest.id],
     );
     expect(activationPlan.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
@@ -600,7 +599,10 @@ function testPackageManifest(
       hostContractVersions: [runtimePluginContractVersion],
     },
     declaredPlugins: ['plugin_discovery'],
-    config: {fields: options.configFields ?? []},
+    config: {
+      scope: 'global_with_character_overrides',
+      fields: options.configFields ?? [],
+    },
     localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,

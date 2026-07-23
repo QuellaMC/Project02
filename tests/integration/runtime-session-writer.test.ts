@@ -36,6 +36,7 @@ describe('durable runtime session writer ownership', () => {
     const sessionId = 'shared-writer-session';
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
@@ -43,10 +44,14 @@ describe('durable runtime session writer ownership', () => {
     const logStore = createFileRuntimeLogStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
     });
     const secondLogStore = createFileRuntimeLogStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
     });
     const rawEventsPath = logStore.localRuntimeSessionPaths?.rawEventsPath;
 
@@ -122,6 +127,7 @@ describe('durable runtime session writer ownership', () => {
     const sessionId = 'stale-writer-session';
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
@@ -129,6 +135,8 @@ describe('durable runtime session writer ownership', () => {
     const logStore = createFileRuntimeLogStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
     });
     const currentSession = createConversationSession({
       id: sessionId,
@@ -171,6 +179,7 @@ describe('durable runtime session writer ownership', () => {
     const sessionId = 'interactive-writer-session';
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
@@ -210,6 +219,7 @@ describe('durable runtime session writer ownership', () => {
     ] as const;
     const sessionStore = createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     });
 
     for (const sessionId of sessionIds) {

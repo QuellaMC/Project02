@@ -5,6 +5,7 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
 import {
+  characterOverlayConfigPath,
   createRuntimeConfigInspectShape,
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
@@ -528,6 +529,7 @@ describe('runtime config loading and resolution', () => {
     const manifest = {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides' as const,
         fields: [
           {
             name: 'apiKey',
@@ -636,6 +638,7 @@ describe('runtime config loading and resolution', () => {
     const manifest = {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides' as const,
         fields: [
           {
             name: 'apiKey',
@@ -851,6 +854,7 @@ describe('runtime config loading and resolution', () => {
         {
           plugins: {
             [plugin.manifest.id]: {
+              enabled: true,
               config: {
                 apiKey: 'plaintext-secret',
               },
@@ -865,6 +869,7 @@ describe('runtime config loading and resolution', () => {
         {
           ...plugin.manifest,
           config: {
+            scope: 'global_with_character_overrides',
             fields: [
               {
                 name: 'apiKey',
@@ -1760,7 +1765,7 @@ describe('runtime config loading and resolution', () => {
     ).toMatchObject({
       pluginId: 'character-state',
       enabled: false,
-      activationStatus: 'blocked',
+      activationStatus: 'disabled',
     });
 
     expect(
@@ -1924,7 +1929,12 @@ describe('runtime config loading and resolution', () => {
   it('writes non-secret and secret-ref config through the shared mutation path', async () => {
     const storeRoot = createTestTempRoot('project02-config-cli-');
     const secretPlugin = requiredSecretPlugin('mem0-local');
+    const memoryPlugin = memoryProviderPlugin('memory.recall');
     const factories = {
+      [memoryPlugin.manifest.id]: {
+        manifest: memoryPlugin.manifest,
+        create: () => memoryPlugin,
+      },
       [secretPlugin.manifest.id]: {
         manifest: secretPlugin.manifest,
         create: () => secretPlugin,
@@ -1934,7 +1944,15 @@ describe('runtime config loading and resolution', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'plugin', 'disable', 'character-state'],
+        [
+          '--store',
+          storeRoot,
+          '--character',
+          'mira',
+          'plugin',
+          'disable',
+          'character-state',
+        ],
         {
           stdout: collect(chunk => {
             stdout += chunk;
@@ -1950,6 +1968,7 @@ describe('runtime config loading and resolution', () => {
         {
           stdout: collect(() => {}),
           stderr: collect(() => {}),
+          factories,
         },
       ),
     ).toBe(0);
@@ -1981,11 +2000,22 @@ describe('runtime config loading and resolution', () => {
     expect(stdout).toContain('config.json');
     expect(config).toMatchObject({
       plugins: {
-        'character-state': {enabled: false},
         'memory.recall': {enabled: true},
         'mem0-local': {
           config: {apiKey: {$env: 'MEM0_API_KEY'}},
         },
+      },
+    });
+    expect(
+      JSON.parse(
+        readFileSync(
+          characterOverlayConfigPath(characterDataDirPath(storeRoot, 'mira')),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({
+      plugins: {
+        'character-state': {enabled: false},
       },
     });
     expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toContain(

@@ -91,6 +91,7 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
       },
       declaredPlugins: ['tool_provider', 'handle_tool_call'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',

@@ -78,7 +78,7 @@ describe('runtime config activation planning', () => {
     );
   });
 
-  it('keeps final activation aligned with host-owned default-enabled plugins', async () => {
+  it('keeps direct host activation aligned with manifest-default plugins', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-host-defaults-aligned-',
     );
@@ -95,7 +95,6 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
-      characterStatePluginId,
     ]);
     expect(
       configured.activation.plugins
@@ -482,7 +481,7 @@ describe('runtime config activation planning', () => {
     expect(hostAccess).toMatchObject(canonicalAccess);
   });
 
-  it('reports host-owned default grants for the built-in Character State factory', async () => {
+  it('keeps character-only Character State disabled until character initialization', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-character-state-default-api-perms-',
     );
@@ -496,9 +495,9 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        enabled: true,
+        enabled: false,
         requestedAccess: {file_store: 'write', model_input: 'write'},
-        grantedAccess: {file_store: 'write', model_input: 'write'},
+        grantedAccess: {},
       }),
     );
   });
@@ -698,8 +697,8 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.plugins).toContainEqual(
       expect.objectContaining({
         pluginId: characterStatePluginId,
-        enabled: true,
-        activationStatus: 'active',
+        enabled: false,
+        activationStatus: 'disabled',
       }),
     );
   });

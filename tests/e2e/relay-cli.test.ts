@@ -566,7 +566,7 @@ function createRelayShutdownPlugin(
         sourceSystem: 'test',
       },
       declaredPlugins: ['on_shutdown'],
-      config: {fields: []},
+      config: {scope: 'global_with_character_overrides', fields: []},
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,

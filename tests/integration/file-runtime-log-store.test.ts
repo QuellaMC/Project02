@@ -51,10 +51,71 @@ import {
 } from '../../src/role-model/providers/nvidia.ts';
 
 describe('file runtime log store plugin tool event validation', () => {
+  it('rejects a store before reading or mutating data owned by another character', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-foreign-character-marker';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'foreign-character',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const evidenceReads: string[] = [];
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+      onEvidenceFileRead: event => evidenceReads.push(event.filePath),
+    });
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    const schemaPath = createLocalRuntimeStorageLayout({storeRoot}).schemaPath;
+    const markerBeforeMutation = readFileSync(schemaPath, 'utf8');
+
+    writeFileSync(paths.tracePath, '', 'utf8');
+    writeFileSync(paths.rawEventsPath, '', 'utf8');
+    writeFileSync(paths.conversationPath, '', 'utf8');
+
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId,
+      ownerToken: fileLogStoreWriterOwnerToken(logStore),
+    });
+
+    try {
+      expect(() =>
+        logStore.appendTrace({
+          ...identity('evt_foreign_character_marker'),
+          step: 'runtime_event_received',
+        }),
+      ).toThrow(
+        expect.objectContaining({
+          code: 'character_identity_mismatch',
+        }),
+      );
+      expect(evidenceReads).toEqual([]);
+      expect(readFileSync(paths.tracePath, 'utf8')).toBe('');
+      expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe('');
+      expect(readFileSync(paths.conversationPath, 'utf8')).toBe('');
+      expect(readFileSync(schemaPath, 'utf8')).toBe(markerBeforeMutation);
+    } finally {
+      await writerLease.release();
+    }
+  });
+
   it("refuses a store mutation under another owner token's writer lease", async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-owner-token-append';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -63,11 +124,15 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeA = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
       writerLockOwnerToken: ownerA,
     });
     const storeB = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
       writerLockOwnerToken: ownerB,
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
@@ -92,7 +157,10 @@ describe('file runtime log store plugin tool event validation', () => {
   it('allows only the writer lease owner to scavenge abandoned evidence temporaries', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-owner-token-scavenge';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -101,11 +169,15 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeA = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
       writerLockOwnerToken: ownerA,
     });
     const storeB = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
       writerLockOwnerToken: ownerB,
     });
     const paths = storeA.localRuntimeSessionPaths;
@@ -136,11 +208,19 @@ describe('file runtime log store plugin tool event validation', () => {
   it('rejects low-level durable mutation without the active session writer lease', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-low-level-writer';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
 
     expect(() =>
       logStore.appendTrace({
@@ -159,11 +239,19 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-created-at-agreement';
     const eventIdentity = identity('evt_created_at_agreement');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -191,11 +279,19 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-canonical-created-at';
     const eventIdentity = identity('evt_canonical_created_at');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -219,11 +315,19 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-read-only-terminal-trace-reconciliation';
     const eventIdentity = identity('evt_legacy_schema1_patch');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -307,11 +411,19 @@ describe('file runtime log store plugin tool event validation', () => {
     const eventIdentity = identity(
       'evt_read_only_rejected_trace_reconciliation',
     );
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -361,11 +473,19 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-validated-terminal-lookup';
     const eventIdentity = identity('evt_legacy_schema1_patch');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: eventIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -421,13 +541,18 @@ describe('file runtime log store plugin tool event validation', () => {
   it('rejects terminal recovery for durable logs without session metadata', async () => {
     const storeRoot = createStoreRoot();
     const eventIdentity = identity('evt_orphaned_terminal_recovery');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'catalog-session',
       createdAt: eventIdentity.createdAt,
     });
     const orphanedLogStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'orphaned-session',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const paths = orphanedLogStore.localRuntimeSessionPaths;
 
@@ -534,11 +659,19 @@ describe('file runtime log store plugin tool event validation', () => {
   it('reloads a durable malformed provider exchange adapter rejection', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-malformed-provider-exchange-rejection';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'hello',
@@ -562,6 +695,8 @@ describe('file runtime log store plugin tool event validation', () => {
     const reloadedLogStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const reloadedTerminalEvent = reloadedLogStore.rawEvents().at(-1);
     expect(reloadedTerminalEvent).toMatchObject({
@@ -590,7 +725,10 @@ describe('file runtime log store plugin tool event validation', () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-provider-exchange-credential-redaction';
     const credentialSentinel = 'durable-provider-credential-sentinel';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -628,7 +766,12 @@ describe('file runtime log store plugin tool event validation', () => {
         id: sessionId,
         character: testCharacterProfile,
       }),
-      logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }),
       pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
       roleModelAdapter: createNvidiaRoleModelProviderAdapter({
         apiKey: 'secret',
@@ -641,6 +784,8 @@ describe('file runtime log store plugin tool event validation', () => {
     const rawEvents = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     }).rawEvents();
     const completed = rawEvents.find(
       rawEvent => rawEvent.kind === 'runtime_turn_completed',
@@ -682,7 +827,10 @@ describe('file runtime log store plugin tool event validation', () => {
   it('decodes legacy schema 1 role-model snapshots with character_state.patch as a former built-in allowed tool', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'legacy-schema-1-role-model';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -691,6 +839,7 @@ describe('file runtime log store plugin tool event validation', () => {
       `${JSON.stringify({
         schemaVersion: 4,
         scope: 'character-data',
+        characterId: 'mira',
         createdAt: '2026-06-15T00:00:00.000Z',
       })}\n`,
       'utf8',
@@ -699,6 +848,8 @@ describe('file runtime log store plugin tool event validation', () => {
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const paths = logStore.localRuntimeSessionPaths;
 
@@ -772,13 +923,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('persists multi-line visible conversation records', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'session-multiline-visible',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'session-multiline-visible',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const session = createConversationSession({
       character: testCharacterProfile,
@@ -810,16 +966,20 @@ describe('file runtime log store plugin tool event validation', () => {
   it('preserves a custom session character in durable conversation evidence', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-custom-character';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    const character = {
+      id: 'nova',
+      displayName: 'Nova',
+    };
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: character.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const session = createConversationSession({
       id: sessionId,
-      character: {
-        id: 'nova',
-        displayName: 'Nova',
-      },
+      character,
     });
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -827,13 +987,23 @@ describe('file runtime log store plugin tool event validation', () => {
         identity('evt_custom_character'),
       ),
       session,
-      logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: character.id,
+        boundCharacter: character,
+      }),
       pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
       roleModelAdapter: createMultilineVisibleReplyAdapter(),
     });
 
     expect(result.status).toBe('completed');
-    const durableStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const durableStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: character.id,
+      boundCharacter: character,
+    });
 
     expect(
       durableStore
@@ -858,6 +1028,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
     const rehydrated = await createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: character.id,
       conversationLogReader: {
         readConversationMessages() {
           return durableStore.readSessionEvidence().stored.conversationMessages;
@@ -868,10 +1039,10 @@ describe('file runtime log store plugin tool event validation', () => {
           return {
             // The reader's bound character matches this store's custom
             // character; a foreign bound profile is rejected by design.
-            character: durableRuntimeSessionCharacterProfile(evidence, {
-              id: 'nova',
-              displayName: 'Nova',
-            }),
+            character: durableRuntimeSessionCharacterProfile(
+              evidence,
+              character,
+            ),
             messages: evidence.conversationMessages,
           };
         },
@@ -902,7 +1073,12 @@ describe('file runtime log store plugin tool event validation', () => {
     writeJsonLines(paths.conversationPath, conversationRecords);
 
     expect(() =>
-      createFileRuntimeLogStore({storeRoot, sessionId}).conversationMessages(),
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: character.id,
+        boundCharacter: character,
+      }).conversationMessages(),
     ).toThrow(
       'Durable character speaker metadata must match recorded role-model character evidence.',
     );
@@ -920,14 +1096,24 @@ describe('file runtime log store plugin tool event validation', () => {
         identity('evt_custom_character_resumed'),
       ),
       session: rehydrated,
-      logStore: createFileRuntimeLogStore({storeRoot, sessionId}),
+      logStore: createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: character.id,
+        boundCharacter: character,
+      }),
       pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
       roleModelAdapter: createMultilineVisibleReplyAdapter(),
     });
 
     expect(resumedResult.status).toBe('completed');
     expect(
-      createFileRuntimeLogStore({storeRoot, sessionId})
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: character.id,
+        boundCharacter: character,
+      })
         .conversationMessages()
         .at(-1),
     ).toMatchObject({
@@ -940,11 +1126,20 @@ describe('file runtime log store plugin tool event validation', () => {
   it('rolls back a custom first turn when visible-reply raw evidence fails before append', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-custom-character-raw-rollback';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    const character = {id: 'nova', displayName: 'Nova'};
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: character.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const underlying = createFileRuntimeLogStore({storeRoot, sessionId});
+    const underlying = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: character.id,
+      boundCharacter: character,
+    });
     const appendFailure = new Error('visible reply raw append failed');
     let failedVisibleReplyAppend = false;
     const failingStore = Object.freeze({
@@ -984,7 +1179,7 @@ describe('file runtime log store plugin tool event validation', () => {
     } satisfies RuntimeLogStore);
     const failedSession = createConversationSession({
       id: sessionId,
-      character: {id: 'nova', displayName: 'Nova'},
+      character,
     });
 
     await expect(
@@ -1001,7 +1196,12 @@ describe('file runtime log store plugin tool event validation', () => {
     ).rejects.toBe(appendFailure);
 
     expect(failedSession.visibleTranscript).toEqual([]);
-    const reopened = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: character.id,
+      boundCharacter: character,
+    });
     expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual(
       [],
     );
@@ -1018,7 +1218,7 @@ describe('file runtime log store plugin tool event validation', () => {
         ),
         session: createConversationSession({
           id: sessionId,
-          character: {id: 'nova', displayName: 'Nova'},
+          character,
         }),
         logStore: reopened,
         pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
@@ -1038,13 +1238,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('persists decodable commit validation for plugin health rejections', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'session-health-rejected',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'session-health-rejected',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const session = createConversationSession({
       character: testCharacterProfile,
@@ -1115,13 +1320,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects degraded health snapshots when plugin health policy rejects turns', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'session-health-degraded-rejected',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'session-health-degraded-rejected',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const session = createConversationSession({
       character: testCharacterProfile,
@@ -1204,13 +1414,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects started tool calls without matching finished records', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'session-tools',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'session-tools',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
@@ -1243,13 +1458,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('allows a rejected terminal turn to close an unfinished tool call start', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'session-tools-rejected',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'session-tools-rejected',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const eventId = 'evt_tool_finish_log_failed';
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
@@ -1295,13 +1515,18 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects terminal events that reference unfinished tool calls', async () => {
     const storeRoot = createStoreRoot();
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'session-terminal-tools',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId: 'session-terminal-tools',
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
@@ -1386,11 +1611,19 @@ async function persistedDisallowedToolRejectionRecord(
   sessionId: string,
 ): Promise<Record<string, unknown>> {
   const storeRoot = createStoreRoot();
-  await createLocalRuntimeSessionStore({storeRoot}).createSession({
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: 'mira',
+  }).createSession({
     sessionId,
     createdAt: '2026-06-15T00:00:00.000Z',
   });
-  const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+  const logStore = createFileRuntimeLogStore({
+    storeRoot,
+    sessionId,
+    characterId: testCharacterProfile.id,
+    boundCharacter: testCharacterProfile,
+  });
   const result = await runLocalUserMessageEvent({
     event: createUserMessageRuntimeEvent(
       'try unknown',
@@ -1690,6 +1923,7 @@ function createHealthRejectingPluginHost(options?: {
           },
           declaredPlugins: ['health'],
           config: {
+            scope: 'global_with_character_overrides',
             fields: [],
           },
           localTrustLevel: 'test_fixture',

@@ -187,6 +187,7 @@ function authSecretConfigManifest(): RuntimePluginManifest {
     description: 'Test manifest for a secret field outside name heuristics.',
     declaredPlugins: ['plugin_discovery'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'auth',
@@ -215,6 +216,7 @@ function dottedConfigManifest(): RuntimePluginManifest {
     },
     declaredPlugins: [],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'api.key',

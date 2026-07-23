@@ -14,11 +14,9 @@ export {
 } from './env-file.ts';
 export {
   lockFailureProvesNoOverlayWriter,
-  applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
-  prepareRuntimePluginConfigControlOperation,
   type RuntimeConfigControlOperation,
+  type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
 } from './control.ts';
 export {
@@ -58,19 +56,18 @@ export {
   type ResolveLayeredProject02RuntimeConfigOptions,
 } from './resolve-layered.ts';
 export {
-  ensureCharacterDataDir,
-  type EnsureCharacterDataDirResult,
-} from './character-data-init.ts';
-export {
-  loadScopedGlobalLayerConfig,
   assertGlobalConfigLoadableForCharacterScope,
   assertScopedGlobalLayerLoadable,
   assertScopedMutationOperationAllowed,
-  applyScopedRuntimeConfigControlOperation,
-  applyScopedRuntimePluginConfigControlOperation,
-  assertRuntimeConfigSecretScopeAllowed,
+  applyRuntimeConfigControlOperation,
+  prepareRuntimeConfigControlOperation,
+  resolveScopedGlobalLayerLocation,
   resolveRuntimeConfigScopeTarget,
   type ResolvedRuntimeConfigScopeTarget,
+  type RuntimeConfigCharacterMaterialization,
+  type RuntimeConfigCharacterMaterializationOutcome,
+  type RuntimeConfigControlApplyResult,
+  type RuntimeConfigControlRequest,
   type RuntimeConfigMutationScopeSelector,
 } from './scope.ts';
 export {
@@ -81,6 +78,12 @@ export {
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 export {redactRuntimeConfigText, redactRuntimeConfigValue} from './redact.ts';
+export {
+  runtimePluginScopeDiagnostics,
+  runtimePluginScopeViolation,
+  type RuntimePluginScopeOperation,
+  type RuntimePluginScopeViolation,
+} from './plugin-scope.ts';
 export {
   characterDataRootForResolvedConfig,
   diagnosticsHaveErrors,

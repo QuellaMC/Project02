@@ -965,7 +965,7 @@ function testPluginManifest(
       hostContractVersions: ['mvp-008.runtime_plugin.v2'],
     },
     declaredPlugins: ['plugin_discovery'],
-    config: {fields: []},
+    config: {scope: 'global_with_character_overrides', fields: []},
     localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,

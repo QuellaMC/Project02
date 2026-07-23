@@ -26,6 +26,7 @@ export {
   createRuntimePluginContext,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
 } from './api/constructors.ts';
+export {validateRuntimePluginManifest} from './api/manifest-validation.ts';
 export {
   firstPartyModelToolsPluginId,
   runtimePluginConfigReadToolName,

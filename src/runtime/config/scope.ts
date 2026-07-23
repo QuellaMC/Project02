@@ -1,19 +1,18 @@
 /**
  * Scope-aware runtime config mutations: the same control operations,
  * targeted at either the global config.json or one character's
- * overlay. Global scope delegates to the existing control functions
- * unchanged. Character scope rejects global-only fields and secret
- * operations, verifies the caller's layered expectation across both
- * authored documents, and then runs the untouched per-file mutation
+ * overlay. One resolved target carries the write path, owning global
+ * layer, and scope policy for document and plugin-field changes.
+ * Character scope rejects global-only fields and secret operations,
+ * verifies the caller's layered expectation across both authored
+ * documents, and then runs the per-file mutation
  * machinery against the overlay file — never the global one, and never
  * through the global bootstrap (which would seed a store root into the
  * overlay): an absent overlay is first materialized as a minimal
  * versioned document.
  */
-import {mkdirSync, writeFileSync} from 'node:fs';
-import {dirname} from 'node:path';
+import {basename, dirname} from 'node:path';
 
-import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   createProject02HomeLayout,
   homeRootForCharacterDataDir,
@@ -21,9 +20,9 @@ import {
 import {acquireLocalRuntimeMutationLockSync} from '../storage/mutation-lock.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
-  applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
-  prepareRuntimePluginConfigControlOperation,
+  applyGlobalRuntimeConfigControlMutation,
+  assertRuntimeConfigControlOperation,
+  prepareGlobalRuntimeConfigControlMutation,
   resolveRuntimeConfigControlTargetPath,
   runtimePluginConfigControlMutation,
   type RuntimeConfigControlOperation,
@@ -34,7 +33,7 @@ import {
   createLayeredRuntimeConfigFingerprint,
   createRuntimeConfigFingerprint,
 } from './fingerprint.ts';
-import {loadProject02RuntimeConfig} from './load.ts';
+import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
 import {
   applyRuntimeConfigMutation,
   assertOverlayLocatedCandidateStaysCharacterScoped,
@@ -56,15 +55,18 @@ import {
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
+import {resolveProject02RuntimeStoreRoot} from './resolve.ts';
 import {
   project02RuntimeConfigFieldDefinitions,
   runtimeConfigValueMatchesField,
-  type Project02ConfigFieldDefinition,
 } from './schema.ts';
+import {runtimePluginScopeViolation} from './plugin-scope.ts';
 import {
+  runtimeConfigEnvVarName,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
+  type Project02RuntimePluginConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigMutationOperation,
 } from './types.ts';
@@ -85,18 +87,78 @@ type ScopedRuntimeConfigLocation = {
   readonly characterScope?: RuntimeConfigCharacterScope;
 };
 
-export type ResolvedRuntimeConfigScopeTarget = {
-  readonly scope: RuntimeConfigMutationScopeSelector;
-  /** The file this scope's mutations write. */
+type ResolvedRuntimeConfigScopeTargetBase = {
+  /** The file this target's mutations write. */
   readonly configPath: string;
-  readonly characterScope?: RuntimeConfigCharacterScope;
-  /** project02.* fields this scope may author. */
-  readonly allowedProject02Fields: readonly Project02ConfigFieldDefinition[];
-  readonly secretOpsAllowed: boolean;
+  /** Stable identity used by prepared-effect reconciliation. */
+  readonly canonicalConfigPath: string;
+  /** The authoritative home config composed with the target. */
+  readonly globalConfigPath: string;
+  readonly homeRoot: string;
+  /** Preserves whether the caller explicitly selected a store. */
+  readonly selectedStoreRoot?: string;
+  readonly env?: NodeJS.ProcessEnv;
 };
 
+export type ResolvedRuntimeConfigScopeTarget =
+  | (ResolvedRuntimeConfigScopeTargetBase & {
+      readonly scope: 'global';
+      /**
+       * Only an explicitly supplied scope is retained. Otherwise global
+       * writes re-derive the active character after committing so a
+       * project02.character change fingerprints the new overlay.
+       */
+      readonly characterScope?: RuntimeConfigCharacterScope;
+    })
+  | (ResolvedRuntimeConfigScopeTargetBase & {
+      readonly scope: 'character';
+      readonly characterScope: RuntimeConfigCharacterScope;
+    });
+
+export type RuntimeConfigControlRequest =
+  | {
+      readonly kind: 'document';
+      readonly operation: RuntimeConfigControlOperation;
+    }
+  | {
+      readonly kind: 'plugin_activation';
+      readonly manifest: RuntimePluginManifest;
+      readonly enabled: boolean;
+    }
+  | {
+      readonly kind: 'plugin_config';
+      readonly manifest: RuntimePluginManifest;
+      readonly actor: RuntimePluginConfigControlActor;
+      readonly fieldOperation: RuntimePluginConfigFieldControlOperation;
+    };
+
+export type RuntimeConfigCharacterMaterialization = {
+  /** Pure package-owned overlay contribution; never a merged global view. */
+  readonly document: Project02RuntimeConfig;
+  /**
+   * True when the package version differs from the marker. An absent
+   * overlay is always materialized regardless of this flag.
+   */
+  readonly fillMissingFields: boolean;
+};
+
+export type RuntimeConfigCharacterMaterializationOutcome = {
+  readonly configChanged: boolean;
+  readonly autoEnabledPluginIds: readonly string[];
+};
+
+export type RuntimeConfigControlApplyResult = RuntimeConfigMutationResult & {
+  readonly materialization: RuntimeConfigCharacterMaterializationOutcome;
+};
+
+type RuntimePluginConfigControlRequest = Extract<
+  RuntimeConfigControlRequest,
+  {readonly kind: 'plugin_config'}
+>;
+
 /**
- * Names the file, field allowlist, and secret policy for one scope.
+ * Names the target file, owning global file, and home. The scope itself
+ * controls whether shared secret operations are allowed.
  * Character scope requires a derivable character (configured id +
  * resolvable home); anything else is a usage error, not a fallback.
  */
@@ -105,90 +167,258 @@ export function resolveRuntimeConfigScopeTarget(
     readonly scope: RuntimeConfigMutationScopeSelector;
   },
 ): ResolvedRuntimeConfigScopeTarget {
-  const loadedConfig = loadProject02RuntimeConfig(options);
+  const globalLayerLocation =
+    options.scope === 'character'
+      ? resolveScopedGlobalLayerLocation(options)
+      : options;
+  const loadedConfig = loadProject02RuntimeConfig(globalLayerLocation);
+  const globalConfigPath =
+    loadedConfig.path ??
+    globalLayerLocation.configPath ??
+    defaultRuntimeConfigPath(globalLayerLocation.storeRoot);
+  const canonicalGlobalConfigPath =
+    canonicalRuntimeConfigMutationPath(globalConfigPath);
+  const homeRoot = resolveProject02RuntimeStoreRoot({
+    loadedConfig,
+    ...(globalLayerLocation.storeRoot === undefined
+      ? {}
+      : {storeRoot: globalLayerLocation.storeRoot}),
+  });
+  const shared = {
+    globalConfigPath,
+    homeRoot,
+    ...(options.storeRoot === undefined
+      ? {}
+      : {selectedStoreRoot: options.storeRoot}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+  };
 
   if (options.scope === 'global') {
     return Object.freeze({
+      ...shared,
       scope: 'global',
-      configPath: resolveRuntimeConfigControlTargetPath(options),
-      allowedProject02Fields: project02RuntimeConfigFieldDefinitions(),
-      secretOpsAllowed: true,
+      configPath: globalConfigPath,
+      canonicalConfigPath: canonicalGlobalConfigPath,
+      ...(options.characterScope === undefined
+        ? {}
+        : {characterScope: options.characterScope}),
     });
   }
 
-  const characterScope = requiredCharacterScope(loadedConfig, options);
+  const characterScope = requiredCharacterScope(loadedConfig, {
+    storeRoot: homeRoot,
+    ...(globalLayerLocation.characterId === undefined
+      ? {}
+      : {characterId: globalLayerLocation.characterId}),
+    ...(globalLayerLocation.characterScope === undefined
+      ? {}
+      : {characterScope: globalLayerLocation.characterScope}),
+  });
+
+  const characterConfigPath = characterOverlayConfigPath(
+    characterScope.dataRoot,
+  );
 
   return Object.freeze({
+    ...shared,
     scope: 'character',
-    configPath: characterOverlayConfigPath(characterScope.dataRoot),
+    configPath: characterConfigPath,
+    canonicalConfigPath:
+      canonicalRuntimeConfigMutationPath(characterConfigPath),
     characterScope,
-    allowedProject02Fields: project02RuntimeConfigFieldDefinitions().filter(
-      field => field.scopes.includes('character'),
-    ),
-    secretOpsAllowed: false,
   });
 }
 
-export function assertRuntimeConfigSecretScopeAllowed(
-  scope: RuntimeConfigMutationScopeSelector,
-): void {
-  if (scope === 'character') {
+export function applyRuntimeConfigControlOperation(options: {
+  readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly expectedFingerprint?: string;
+  readonly request?: RuntimeConfigControlRequest;
+  readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
+}): RuntimeConfigControlApplyResult {
+  if (
+    options.request === undefined &&
+    options.characterMaterialization === undefined
+  ) {
+    throw new TypeError(
+      'Runtime config control requires an operation or character materialization.',
+    );
+  }
+
+  if (
+    options.target.scope === 'global' &&
+    options.characterMaterialization !== undefined
+  ) {
+    throw new TypeError(
+      'Character package materialization requires a character-scoped target.',
+    );
+  }
+
+  const mutation = normalizedControlMutation(options.target, options.request);
+
+  if (options.target.scope === 'global') {
+    if (mutation.operation === undefined) {
+      throw new TypeError(
+        'Global runtime config control requires an operation.',
+      );
+    }
+
+    const result = applyGlobalRuntimeConfigControlMutation({
+      configPath: options.target.configPath,
+      ...(options.target.env === undefined ? {} : {env: options.target.env}),
+      ...(options.target.selectedStoreRoot === undefined
+        ? {}
+        : {storeRoot: options.target.selectedStoreRoot}),
+      ...(options.target.characterScope === undefined
+        ? {}
+        : {characterScope: options.target.characterScope}),
+      ...(options.expectedFingerprint === undefined
+        ? {}
+        : {expectedFingerprint: options.expectedFingerprint}),
+      operation: mutation.operation,
+      ...(mutation.validateCandidate === undefined
+        ? {}
+        : {validateCandidate: mutation.validateCandidate}),
+    });
+
+    return withMaterializationOutcome(result, {
+      configChanged: false,
+      autoEnabledPluginIds: Object.freeze([]),
+    });
+  }
+
+  return applyCharacterScopedMutation({
+    configPath: options.target.globalConfigPath,
+    storeRoot: options.target.homeRoot,
+    characterScope: options.target.characterScope,
+    ...(options.target.env === undefined ? {} : {env: options.target.env}),
+    ...(options.expectedFingerprint === undefined
+      ? {}
+      : {expectedFingerprint: options.expectedFingerprint}),
+    ...(mutation.operation === undefined
+      ? {}
+      : {operation: mutation.operation}),
+    ...(options.characterMaterialization === undefined
+      ? {}
+      : {materialization: options.characterMaterialization}),
+    ...(mutation.validateCandidate === undefined
+      ? {}
+      : {
+          validateCandidate: (candidate, globalDocument) => {
+            mutation.validateCandidate?.(
+              mergeCharacterOverlayDocument(globalDocument, candidate),
+            );
+          },
+        }),
+  });
+}
+
+export function prepareRuntimeConfigControlOperation(options: {
+  readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly request: RuntimePluginConfigControlRequest;
+  readonly expectedFingerprint: string;
+}): {
+  readonly resultFingerprint: string;
+  readonly targetConfigPath: string;
+} {
+  const mutation = normalizedControlMutation(options.target, options.request);
+
+  if (mutation.operation === undefined) {
+    throw new TypeError(
+      'Prepared runtime config control requires an operation.',
+    );
+  }
+
+  if (options.target.scope === 'global') {
+    return prepareGlobalRuntimeConfigControlMutation({
+      configPath: options.target.configPath,
+      ...(options.target.env === undefined ? {} : {env: options.target.env}),
+      ...(options.target.selectedStoreRoot === undefined
+        ? {}
+        : {storeRoot: options.target.selectedStoreRoot}),
+      ...(options.target.characterScope === undefined
+        ? {}
+        : {characterScope: options.target.characterScope}),
+      expectedFingerprint: options.expectedFingerprint,
+      operation: mutation.operation,
+      ...(mutation.validateCandidate === undefined
+        ? {}
+        : {validateCandidate: mutation.validateCandidate}),
+    });
+  }
+
+  return prepareCharacterRuntimeConfigControlMutation({
+    target: options.target,
+    expectedFingerprint: options.expectedFingerprint,
+    operation: mutation.operation,
+    ...(mutation.validateCandidate === undefined
+      ? {}
+      : {validateCandidate: mutation.validateCandidate}),
+  });
+}
+
+type NormalizedRuntimeConfigControlMutation = {
+  readonly operation?: RuntimeConfigMutationOperation;
+  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
+};
+
+function normalizedControlMutation(
+  target: ResolvedRuntimeConfigScopeTarget,
+  request: RuntimeConfigControlRequest | undefined,
+): NormalizedRuntimeConfigControlMutation {
+  if (request === undefined) {
+    return {};
+  }
+
+  if (request.kind === 'document') {
+    assertRuntimeConfigControlOperation(request.operation);
+
+    if (target.scope === 'character') {
+      assertCharacterScopedControlOperation(request.operation);
+    }
+
+    return {operation: request.operation};
+  }
+
+  if (request.kind === 'plugin_activation') {
+    const violation = runtimePluginScopeViolation({
+      manifest: request.manifest,
+      authoredScope: target.scope,
+      operation: {kind: 'activation'},
+    });
+
+    if (violation !== undefined) {
+      throw new RuntimeConfigMutationError(violation.message);
+    }
+
+    return {
+      operation: {
+        kind: request.enabled ? 'plugin_enable' : 'plugin_disable',
+        pluginId: request.manifest.id,
+      },
+    };
+  }
+
+  if (
+    request.fieldOperation.kind === 'secret_set' &&
+    target.scope === 'character'
+  ) {
     throw new RuntimeConfigMutationError(
       'Secrets are shared across characters; run the secret command ' +
         'without --character.',
     );
   }
-}
 
-export function applyScopedRuntimeConfigControlOperation(
-  options: ScopedRuntimeConfigLocation & {
-    readonly scope: RuntimeConfigMutationScopeSelector;
-    readonly expectedFingerprint?: string;
-    readonly operation: RuntimeConfigControlOperation;
-  },
-): RuntimeConfigMutationResult {
-  if (options.scope === 'global') {
-    return applyRuntimeConfigControlOperation(options);
-  }
-
-  assertCharacterScopedControlOperation(options.operation);
-
-  return applyCharacterScopedMutation({
-    ...options,
-    operation: options.operation,
-  });
-}
-
-export function applyScopedRuntimePluginConfigControlOperation(
-  options: ScopedRuntimeConfigLocation & {
-    readonly scope: RuntimeConfigMutationScopeSelector;
-    readonly manifest: RuntimePluginManifest;
-    readonly actor: RuntimePluginConfigControlActor;
-    readonly expectedFingerprint: string;
-    readonly operation: RuntimePluginConfigFieldControlOperation;
-  },
-): RuntimeConfigMutationResult {
-  if (options.scope === 'global') {
-    return applyRuntimePluginConfigControlOperation(options);
-  }
-
-  if (options.operation.kind === 'secret_set') {
-    assertRuntimeConfigSecretScopeAllowed('character');
-  }
-
-  const mutation = runtimePluginConfigControlMutation(options);
-
-  return applyCharacterScopedMutation({
-    ...options,
-    operation: mutation.operation,
-    // The manifest-aware candidate validation must see what the runtime
-    // will actually resolve: the overlay candidate merged over the
-    // current global document, not the sparse overlay alone.
-    validateCandidate: (candidate, globalDocument) => {
-      mutation.validateCandidate(
-        mergeCharacterOverlayDocument(globalDocument, candidate),
-      );
-    },
+  return runtimePluginConfigControlMutation({
+    manifest: request.manifest,
+    actor: request.actor,
+    operation: request.fieldOperation,
+    authoredScope: target.scope,
+    ...(target.env === undefined ? {} : {env: target.env}),
+    ...(target.scope === 'character'
+      ? {storeRoot: target.homeRoot}
+      : target.selectedStoreRoot === undefined
+        ? {}
+        : {storeRoot: target.selectedStoreRoot}),
   });
 }
 
@@ -219,8 +449,8 @@ export function assertGlobalConfigLoadableForCharacterScope(
  * Deterministic preflight for character-scoped mutations, mirroring
  * the mutation machinery's own set/unset validation: an unknown path,
  * a dialect violation (global-only field), or an invalid value is
- * rejected here, before any ensure step materializes a stamp or data
- * marker for the character.
+ * rejected here, before any ensure step materializes a marker or data
+ * directory for the character.
  */
 export function assertScopedMutationOperationAllowed(
   operation: RuntimeConfigMutationOperation,
@@ -262,8 +492,8 @@ export function assertScopedMutationOperationAllowed(
  * mutation's layered expectation is only meaningful if the global layer
  * cannot move between the check and the overlay write, so the lock is
  * held across verify + mutate. Ordering is always global before
- * overlay (the mutation machinery takes the overlay's own lock inside),
- * and no path takes them in the reverse order.
+ * overlay (the mutation machinery takes the overlay's own lock inside);
+ * every character-scoped apply and prepare path uses this order.
  */
 function withGlobalConfigLayerLock<T>(
   options: ScopedRuntimeConfigLocation,
@@ -272,7 +502,7 @@ function withGlobalConfigLayerLock<T>(
     readonly globalDocument: Project02RuntimeConfig;
   }) => T,
 ): T {
-  const globalLayerLocation = scopedGlobalLayerLocation(options);
+  const globalLayerLocation = resolveScopedGlobalLayerLocation(options);
   const canonicalGlobalPath = canonicalRuntimeConfigMutationPath(
     resolveRuntimeConfigControlTargetPath(globalLayerLocation),
   );
@@ -316,73 +546,55 @@ function withGlobalConfigLayerLock<T>(
  * config instead of the overlay file (which the mutation itself locks),
  * so the aliased case cannot self-deadlock.
  */
-function scopedGlobalLayerLocation(
+export function resolveScopedGlobalLayerLocation(
   options: ScopedRuntimeConfigLocation,
 ): ScopedRuntimeConfigLocation {
-  if (options.configPath === undefined) {
-    return options;
-  }
+  const selectedPath =
+    options.configPath ??
+    (options.storeRoot === undefined
+      ? (options.env ?? process.env)[runtimeConfigEnvVarName]
+      : undefined);
 
-  const scope =
-    options.characterScope ??
-    deriveRuntimeConfigCharacterScope({
-      loadedConfig: loadProject02RuntimeConfig(options),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.characterId === undefined
-        ? {}
-        : {characterId: options.characterId}),
-    });
-
-  if (scope === undefined) {
+  if (selectedPath === undefined || selectedPath.trim().length === 0) {
     return options;
   }
 
   const canonicalSelected = canonicalRuntimeConfigMutationPath(
-    options.configPath.trim(),
+    selectedPath.trim(),
   );
 
-  if (
-    canonicalSelected !==
-    canonicalRuntimeConfigMutationPath(
-      characterOverlayConfigPath(scope.dataRoot),
-    )
-  ) {
-    // An overlay-shaped selection for a DIFFERENT character can never
-    // serve as this scope's global layer: it would validate and merge
-    // against the wrong character's settings.
-    if (selectedConfigPathIsCharacterOverlay(canonicalSelected)) {
-      throw new RuntimeConfigMutationError(
-        `Config path "${canonicalSelected}" is another character's ` +
-          `overlay; it cannot serve as the global layer for character ` +
-          `"${scope.characterId}".`,
-      );
-    }
-
+  if (!selectedConfigPathIsCharacterOverlay(canonicalSelected)) {
     return options;
+  }
+
+  const selectedDataRoot = dirname(canonicalSelected);
+  const selectedCharacterId = basename(selectedDataRoot);
+  const requestedCharacterId =
+    options.characterScope?.characterId ?? options.characterId;
+  const selectedOverlayMatchesScope =
+    requestedCharacterId === undefined ||
+    (requestedCharacterId === selectedCharacterId &&
+      (options.characterScope === undefined ||
+        canonicalRuntimeConfigMutationPath(
+          characterOverlayConfigPath(options.characterScope.dataRoot),
+        ) === canonicalSelected));
+
+  if (!selectedOverlayMatchesScope) {
+    throw new RuntimeConfigMutationError(
+      `Config path "${canonicalSelected}" is another character's ` +
+        `overlay; it cannot serve as the global layer for character ` +
+        `"${requestedCharacterId}".`,
+    );
   }
 
   return Object.freeze({
     ...(options.env === undefined ? {} : {env: options.env}),
-    storeRoot: homeRootForCharacterDataDir(scope.dataRoot),
-    ...(options.characterId === undefined
-      ? {}
-      : {characterId: options.characterId}),
+    storeRoot: homeRootForCharacterDataDir(selectedDataRoot),
+    characterId: options.characterId ?? selectedCharacterId,
     ...(options.characterScope === undefined
       ? {}
       : {characterScope: options.characterScope}),
   });
-}
-
-/**
- * The global layer a scoped read composes against: the OWNING home's
- * config, even when --config aliases the overlay itself.
- */
-export function loadScopedGlobalLayerConfig(
-  options: ScopedRuntimeConfigLocation,
-): LoadedProject02RuntimeConfig {
-  return loadProject02RuntimeConfig(scopedGlobalLayerLocation(options));
 }
 
 /**
@@ -395,7 +607,7 @@ export function assertScopedGlobalLayerLoadable(
   options: ScopedRuntimeConfigLocation,
 ): void {
   assertGlobalConfigLoadableForCharacterScope(
-    loadProject02RuntimeConfig(scopedGlobalLayerLocation(options)),
+    loadProject02RuntimeConfig(resolveScopedGlobalLayerLocation(options)),
   );
 }
 
@@ -426,22 +638,23 @@ function verifyScopedExpectation(options: {
 function applyCharacterScopedMutation(
   options: ScopedRuntimeConfigLocation & {
     readonly expectedFingerprint?: string;
-    readonly operation: Parameters<
+    readonly operation?: Parameters<
       typeof applyRuntimeConfigMutation
     >[0]['operation'];
+    readonly materialization?: RuntimeConfigCharacterMaterialization;
     readonly validateCandidate?: (
       candidate: Project02RuntimeConfig,
       globalDocument: Project02RuntimeConfig,
     ) => void;
   },
-): RuntimeConfigMutationResult {
+): RuntimeConfigControlApplyResult {
   return withGlobalConfigLayerLock(
     options,
     ({loadedConfig, globalDocument}) => {
       const characterScope = requiredCharacterScope(loadedConfig, options);
       const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
 
-      // The stamp is the proof that the guarded initializer ran for
+      // The marker is the proof that the guarded initializer ran for
       // this directory; without it no scoped write — not even from a
       // plugin-control state — may create durable character state.
       assertOverlayLocatedTargetIsInitialized(
@@ -458,54 +671,84 @@ function applyCharacterScopedMutation(
         overlay,
       });
 
-      // Validate the candidate against a synthetic base BEFORE an
-      // absent overlay is materialized: a rejected edit must not leave
-      // a fresh overlay behind (that would move the layered
-      // fingerprint for a failed change).
-      prepareRuntimeConfigMutationCandidate({
-        loadedConfig: {
-          source: 'path',
-          path: overlayPath,
-          config:
-            overlay.config ??
-            Object.freeze({
-              version: runtimeConfigVersion,
-            } satisfies Project02RuntimeConfig),
-          diagnostics: Object.freeze([]),
-        },
-        configPath: overlayPath,
-        operation: options.operation,
-        validateCandidate: candidate => {
-          assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
-          options.validateCandidate?.(candidate, globalDocument);
-        },
+      const overlayBase =
+        overlay.config ??
+        Object.freeze({
+          version: runtimeConfigVersion,
+        } satisfies Project02RuntimeConfig);
+      let materializationOutcome = mergeCharacterMaterializationIntoOverlay({
+        current: overlayBase,
+        materialization: options.materialization,
+        overlayAbsent: overlay.config === undefined,
       });
+      const transformBase =
+        options.materialization === undefined
+          ? undefined
+          : (current: Project02RuntimeConfig) => {
+              materializationOutcome = mergeCharacterMaterializationIntoOverlay(
+                {
+                  current,
+                  materialization: options.materialization,
+                  overlayAbsent: overlay.config === undefined,
+                },
+              );
 
-      const overlayBase = ensureMinimalOverlayDocument(overlayPath, overlay);
+              return materializationOutcome.config;
+            };
+
+      if (
+        options.operation === undefined &&
+        !materializationOutcome.configChanged
+      ) {
+        return withMaterializationOutcome(
+          {
+            configPath: overlayPath,
+            envPath: createProject02HomeLayout(
+              options.storeRoot === undefined
+                ? {}
+                : {homeRoot: options.storeRoot},
+            ).envPath,
+            config: overlayBase,
+            fingerprint: createLayeredRuntimeConfigFingerprint({
+              globalConfig: globalDocument,
+              characterId: characterScope.characterId,
+              overlayConfig: overlayBase,
+            }),
+          },
+          materializationOutcome,
+        );
+      }
+
       const result = applyRuntimeConfigMutation({
         configPath: overlayPath,
         // This seam's callers initialize the data directory (home
-        // guard plus stamp) before mutating; see the option's doc.
+        // guard plus marker) before mutating; see the option's doc.
         characterScopeManaged: true,
         ...(options.env === undefined ? {} : {env: options.env}),
-        operation: options.operation,
-        ...(options.expectedFingerprint === undefined
+        ...(options.operation === undefined
           ? {}
-          : {expectedFingerprint: createRuntimeConfigFingerprint(overlayBase)}),
+          : {operation: options.operation}),
+        ...(transformBase === undefined ? {} : {transformBase}),
+        // A direct overlay writer does not take the global-layer lock.
+        // Pin the exact overlay base too so it cannot be overwritten.
+        expectedFingerprint: createRuntimeConfigFingerprint(overlayBase),
         validateCandidate: candidate => {
           assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
           options.validateCandidate?.(candidate, globalDocument);
         },
       });
 
-      return Object.freeze({
-        ...result,
-        fingerprint: createLayeredRuntimeConfigFingerprint({
-          globalConfig: globalDocument,
-          characterId: characterScope.characterId,
-          overlayConfig: result.config,
+      return withMaterializationOutcome(
+        Object.freeze({
+          ...result,
+          fingerprint: createLayeredRuntimeConfigFingerprint({
+            globalConfig: globalDocument,
+            characterId: characterScope.characterId,
+            overlayConfig: result.config,
+          }),
         }),
-      });
+        materializationOutcome,
+      );
     },
   );
 }
@@ -515,35 +758,30 @@ function applyCharacterScopedMutation(
  * and names the committed fingerprint and target path without writing
  * anything — an absent overlay stays absent until the apply.
  */
-export function prepareScopedRuntimePluginConfigControlOperation(
-  options: ScopedRuntimeConfigLocation & {
-    readonly scope: RuntimeConfigMutationScopeSelector;
-    readonly manifest: RuntimePluginManifest;
-    readonly actor: RuntimePluginConfigControlActor;
-    readonly expectedFingerprint: string;
-    readonly operation: RuntimePluginConfigFieldControlOperation;
-  },
-): {
+function prepareCharacterRuntimeConfigControlMutation(options: {
+  readonly target: Extract<
+    ResolvedRuntimeConfigScopeTarget,
+    {readonly scope: 'character'}
+  >;
+  readonly expectedFingerprint: string;
+  readonly operation: RuntimeConfigMutationOperation;
+  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
+}): {
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
 } {
-  if (options.scope === 'global') {
-    return prepareRuntimePluginConfigControlOperation(options);
-  }
-
-  if (options.operation.kind === 'secret_set') {
-    assertRuntimeConfigSecretScopeAllowed('character');
-  }
-
-  const mutation = runtimePluginConfigControlMutation(options);
-
   return withGlobalConfigLayerLock(
-    options,
-    ({loadedConfig, globalDocument}) => {
-      const characterScope = requiredCharacterScope(loadedConfig, options);
-      const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
+    {
+      configPath: options.target.globalConfigPath,
+      storeRoot: options.target.homeRoot,
+      characterScope: options.target.characterScope,
+      ...(options.target.env === undefined ? {} : {env: options.target.env}),
+    },
+    ({globalDocument}) => {
+      const characterScope = options.target.characterScope;
+      const overlayPath = options.target.configPath;
 
-      // The stamp is the proof that the guarded initializer ran for
+      // The marker is the proof that the guarded initializer ran for
       // this directory; without it no scoped write — not even from a
       // plugin-control state — may create durable character state.
       assertOverlayLocatedTargetIsInitialized(
@@ -573,10 +811,10 @@ export function prepareScopedRuntimePluginConfigControlOperation(
           diagnostics: Object.freeze([]),
         },
         configPath: overlayPath,
-        operation: mutation.operation,
+        operation: options.operation,
         validateCandidate: candidate => {
           assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
-          mutation.validateCandidate(
+          options.validateCandidate?.(
             mergeCharacterOverlayDocument(globalDocument, candidate),
           );
         },
@@ -644,37 +882,143 @@ function assertCharacterScopedControlOperation(
   assertScopedMutationOperationAllowed(operation);
 }
 
-/**
- * Materializes an absent overlay as the minimal versioned document so
- * the mutation base never routes through the global bootstrap. Losing
- * the creation race to a sibling is fine: the mutation lock serializes
- * the writes that follow.
- */
-function ensureMinimalOverlayDocument(
-  overlayPath: string,
-  overlay: LoadedProject02CharacterOverlayConfig,
-): Project02RuntimeConfig {
-  if (overlay.config !== undefined) {
-    return overlay.config;
+type CharacterMaterializationMerge =
+  RuntimeConfigCharacterMaterializationOutcome & {
+    readonly config: Project02RuntimeConfig;
+  };
+
+function mergeCharacterMaterializationIntoOverlay(options: {
+  readonly current: Project02RuntimeConfig;
+  readonly materialization: RuntimeConfigCharacterMaterialization | undefined;
+  readonly overlayAbsent: boolean;
+}): CharacterMaterializationMerge {
+  if (options.materialization === undefined) {
+    return Object.freeze({
+      config: options.current,
+      configChanged: false,
+      autoEnabledPluginIds: Object.freeze([]),
+    });
   }
 
-  const minimalDocument = Object.freeze({
-    version: runtimeConfigVersion,
-  } satisfies Project02RuntimeConfig);
+  if (!options.overlayAbsent && !options.materialization.fillMissingFields) {
+    return Object.freeze({
+      config: options.current,
+      configChanged: false,
+      autoEnabledPluginIds: Object.freeze([]),
+    });
+  }
 
-  mkdirSync(dirname(overlayPath), {recursive: true});
+  const nextPlugins = {...options.current.plugins};
+  const autoEnabledPluginIds: string[] = [];
+  let fieldsChanged = false;
 
-  try {
-    writeFileSync(
-      overlayPath,
-      `${JSON.stringify(minimalDocument, null, 2)}\n`,
-      {flag: 'wx'},
+  for (const pluginId of Object.keys(
+    options.materialization.document.plugins ?? {},
+  ).sort((left, right) => left.localeCompare(right))) {
+    const defaults = options.materialization.document.plugins?.[pluginId];
+
+    if (defaults === undefined) {
+      continue;
+    }
+
+    const merged = mergeCharacterPluginMaterialization(
+      nextPlugins[pluginId],
+      defaults,
     );
-  } catch (error: unknown) {
-    if (!isNodeErrorWithCode(error, 'EEXIST')) {
-      throw error;
+
+    if (!merged.changed) {
+      continue;
+    }
+
+    fieldsChanged = true;
+    nextPlugins[pluginId] = merged.plugin;
+    if (merged.autoEnabled) {
+      autoEnabledPluginIds.push(pluginId);
     }
   }
 
-  return minimalDocument;
+  const config = fieldsChanged
+    ? Object.freeze({
+        ...options.current,
+        plugins: Object.freeze(nextPlugins),
+      })
+    : options.current;
+
+  return Object.freeze({
+    config,
+    configChanged: options.overlayAbsent || fieldsChanged,
+    autoEnabledPluginIds: Object.freeze(
+      autoEnabledPluginIds.sort((left, right) => left.localeCompare(right)),
+    ),
+  });
+}
+
+function mergeCharacterPluginMaterialization(
+  existing: Project02RuntimePluginConfig | undefined,
+  defaults: Project02RuntimePluginConfig,
+): {
+  readonly plugin: Project02RuntimePluginConfig;
+  readonly changed: boolean;
+  readonly autoEnabled: boolean;
+} {
+  const enablementAdded =
+    existing?.enabled === undefined && defaults.enabled !== undefined;
+  const config = mergeMissingCharacterPluginConfig({
+    current: existing?.config,
+    defaults: defaults.config,
+    createEmpty: existing === undefined,
+  });
+  const changed =
+    existing === undefined || enablementAdded || config.fieldsChanged;
+  const enabled = existing?.enabled ?? defaults.enabled;
+
+  return Object.freeze({
+    plugin: changed
+      ? Object.freeze({
+          ...(enabled === undefined ? {} : {enabled}),
+          ...(config.value === undefined ? {} : {config: config.value}),
+        })
+      : existing,
+    changed,
+    autoEnabled: enablementAdded && defaults.enabled,
+  });
+}
+
+function mergeMissingCharacterPluginConfig(options: {
+  readonly current: Project02RuntimePluginConfig['config'];
+  readonly defaults: Project02RuntimePluginConfig['config'];
+  readonly createEmpty: boolean;
+}): {
+  readonly value: Project02RuntimePluginConfig['config'];
+  readonly fieldsChanged: boolean;
+} {
+  const missingEntries = Object.entries(options.defaults ?? {})
+    .filter(([fieldName]) => !Object.hasOwn(options.current ?? {}, fieldName))
+    .sort(([left], [right]) => left.localeCompare(right));
+  const fieldsChanged = missingEntries.length > 0;
+  const shouldMaterialize =
+    options.defaults !== undefined && (options.createEmpty || fieldsChanged);
+
+  return Object.freeze({
+    value: shouldMaterialize
+      ? Object.freeze({
+          ...options.current,
+          ...Object.fromEntries(missingEntries),
+        })
+      : options.current,
+    fieldsChanged,
+  });
+}
+
+function withMaterializationOutcome(
+  result: RuntimeConfigMutationResult,
+  outcome: RuntimeConfigCharacterMaterializationOutcome,
+): RuntimeConfigControlApplyResult {
+  return Object.freeze({
+    ...result,
+    materialization: Object.freeze({
+      configChanged: outcome.configChanged,
+      autoEnabledPluginIds: Object.freeze([...outcome.autoEnabledPluginIds]),
+    }),
+  });
 }

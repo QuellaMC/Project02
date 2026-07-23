@@ -2,7 +2,7 @@ import {
   testCharacterProfile,
   writeTestCharacterPackage,
 } from '../support/character-fixtures.ts';
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
 
@@ -37,12 +37,14 @@ import {
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
+  decodeStorageSchemaMarker,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {nvidiaApiKeyEnvName} from '../../src/role-model/providers/nvidia.ts';
 import {runChatCli, runChatCliFromArgs} from '../../src/cli/chat/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
+import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 const realSetTimeout = globalThis.setTimeout;
@@ -362,11 +364,14 @@ describe('chat CLI trace summary', () => {
     const sessionId = 'visible-trace-failure';
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: '2026-07-10T00:00:00.000Z',
     });
     const backingLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     });
@@ -418,6 +423,8 @@ describe('chat CLI trace summary', () => {
     });
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     });
@@ -999,6 +1006,7 @@ describe('chat CLI provider selection', () => {
       await expect(
         createLocalRuntimeSessionStore({
           storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+          characterId: 'mira',
         }).readSession(sessionId),
       ).resolves.toMatchObject({
         sessionId,
@@ -1058,6 +1066,7 @@ describe('chat CLI provider selection', () => {
       await expect(
         createLocalRuntimeSessionStore({
           storeRoot: characterDataDirPath(storeRoot, 'mira'),
+          characterId: 'mira',
         }).readSession(sessionId),
       ).resolves.toMatchObject({
         sessionId,
@@ -1116,6 +1125,7 @@ describe('chat CLI provider selection', () => {
       await expect(
         createLocalRuntimeSessionStore({
           storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+          characterId: 'mira',
         }).readSession(sessionId),
       ).resolves.toMatchObject({
         sessionId,
@@ -1372,6 +1382,11 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'plugin-config-approval-session';
     const configurablePlugin = createChatConfigurablePlugin();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await materializeChatCharacterConfig({
+      storeRoot,
+      configPath,
+      plugin: configurablePlugin,
+    });
     const fingerprint = inspectRuntimePluginConfig({
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
@@ -1470,6 +1485,11 @@ describe('chat CLI plugin lifecycle', () => {
       const sessionId = 'plugin-config-slow-approval-session';
       const configurablePlugin = createChatConfigurablePlugin();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      await materializeChatCharacterConfig({
+        storeRoot,
+        configPath,
+        plugin: configurablePlugin,
+      });
       const before = inspectRuntimePluginConfig({
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
@@ -1576,6 +1596,11 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'plugin-config-injected-session';
     const configurablePlugin = createChatConfigurablePlugin();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await materializeChatCharacterConfig({
+      storeRoot,
+      configPath,
+      plugin: configurablePlugin,
+    });
     const before = inspectRuntimePluginConfig({
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
@@ -1677,6 +1702,11 @@ describe('chat CLI plugin lifecycle', () => {
       const sessionId = 'plugin-config-timeout-session';
       const configurablePlugin = createChatConfigurablePlugin();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      await materializeChatCharacterConfig({
+        storeRoot,
+        configPath,
+        plugin: configurablePlugin,
+      });
       const before = inspectRuntimePluginConfig({
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
@@ -1828,12 +1858,13 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('preserves an injected plugin host when configured plugin activation would fail', async () => {
     const storeRoot = createTestTempRoot('project02-chat-injected-host-');
+    const configuredPlugin = createRequiredConfigPlugin(
+      'chat.injected-required-config',
+    );
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
-        'character-state': {
-          config: {
-            typoo: true,
-          },
+        [configuredPlugin.manifest.id]: {
+          enabled: true,
         },
       },
     });
@@ -1847,6 +1878,7 @@ describe('chat CLI plugin lifecycle', () => {
       enabledPluginIds: [runtimePluginId, sessionEndPlugin.manifest.id],
     });
     let stderr = '';
+    let configuredFactoryCalls = 0;
 
     const exitCode = await runChatCliFromArgs(
       [
@@ -1864,14 +1896,28 @@ describe('chat CLI plugin lifecycle', () => {
           stderr += chunk;
         }),
         pluginHost,
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              configuredFactoryCalls += 1;
+              throw new Error(
+                'injected plugin host must bypass configured factories',
+              );
+            },
+          },
+        },
       },
     );
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
+    expect(configuredFactoryCalls).toBe(0);
     expect(sessionEndContexts).toHaveLength(1);
 
     const storedRawEvents = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     }).rawEvents();
@@ -2027,6 +2073,8 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const storedRawEvents = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     }).rawEvents();
@@ -2071,6 +2119,7 @@ describe('chat CLI plugin lifecycle', () => {
 
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: '2026-06-22T00:00:00.000Z',
@@ -2245,13 +2294,22 @@ describe('chat CLI plugin lifecycle', () => {
     expect(stderr).toContain(
       'Configured plugin construction failed before creating a durable session.',
     );
-    expect(existsSync(layout.schemaPath)).toBe(false);
+    // The unified schema marker owns the character-data directory before
+    // plugin factories may touch it; it is not evidence that a durable
+    // session was created.
+    expect(
+      decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
+    ).toMatchObject({
+      scope: 'character-data',
+      characterId: 'mira',
+    });
     expect(existsSync(layout.sessionCatalogPath)).toBe(false);
     expect(existsSync(layout.sessionsRoot)).toBe(false);
   });
 
-  it('aborts startup when configured plugin activation reports errors', async () => {
+  it('rejects invalid configured plugin fields before materializing startup', async () => {
     const storeRoot = createTestTempRoot('project02-chat-activation-error-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         'character-state': {
@@ -2286,12 +2344,14 @@ describe('chat CLI plugin lifecycle', () => {
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
-    expect(stderr).toContain('Runtime config activation failed');
+    expect(stderr).toContain('Runtime config is invalid');
     expect(stderr).toContain('runtime_config_unknown_plugin_config_field');
     expect(stderr).toContain('plugins.character-state.config.typoo');
     expect(stderr).toContain(
       'Unknown config field "typoo" for plugin "character-state".',
     );
+    expect(existsSync(dataRoot)).toBe(false);
+    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
   });
 
   it('persists session-end hook failures when stdin closes normally', async () => {
@@ -2299,11 +2359,14 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'session-end-failure';
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: '2026-06-16T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     });
@@ -2328,6 +2391,8 @@ describe('chat CLI plugin lifecycle', () => {
     expect(exitCode).toBe(0);
 
     const storedRawEvents = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     }).rawEvents();
@@ -2451,6 +2516,31 @@ function createTextOnlyAdapter(): RoleModelAdapter {
   };
 }
 
+async function materializeChatCharacterConfig(options: {
+  readonly storeRoot: string;
+  readonly configPath: string;
+  readonly plugin: RuntimePlugin;
+}): Promise<void> {
+  const startup = await resolveRuntimeCliStartup({
+    location: {
+      storeRoot: options.storeRoot,
+      configPath: options.configPath,
+    },
+    env: {},
+    factories: {
+      [options.plugin.manifest.id]: {
+        manifest: options.plugin.manifest,
+        create: () => options.plugin,
+      },
+    },
+    continueAfterActivationErrors: true,
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new Error('Expected character config materialization to succeed.');
+  }
+}
+
 function createChatConfigurablePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
@@ -2467,6 +2557,7 @@ function createChatConfigurablePlugin(): RuntimePlugin {
       },
       declaredPlugins: ['tool_provider'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'tone',
@@ -2545,6 +2636,7 @@ function createSessionEndPlugin(
       },
       declaredPlugins,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -2618,6 +2710,7 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
       },
       declaredPlugins: ['on_session_end'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -2680,6 +2773,7 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
       },
       declaredPlugins: ['on_session_end'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'endpoint',
@@ -2731,6 +2825,7 @@ function createRequiredSecretAndConfigPlugin(pluginId: string): RuntimePlugin {
     manifest: {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           ...plugin.manifest.config.fields,
           {

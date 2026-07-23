@@ -84,7 +84,7 @@ export function loadProject02CharacterOverlayConfig(options: {
     path,
   });
 
-  // The overlay must live inside the stamped data directory: a
+  // The overlay must live inside the identity-marked data directory: a
   // symlinked file would let authored settings live outside it.
   if (overlayStats.isSymbolicLink()) {
     return loadedOverlay({

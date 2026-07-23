@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest';
 
+import type {CreateFileRuntimeLogStoreOptions} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionPaths,
   decodeStorageSchemaMarker,
@@ -9,7 +10,20 @@ import {decodeConversationLogRecord} from '../../src/runtime/storage/conversatio
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 import {decodeRuntimeTraceEntry} from '../../src/runtime/storage/trace-codec.ts';
 
+type FileRuntimeLogStoreRequiresCharacter =
+  CreateFileRuntimeLogStoreOptions extends {
+    readonly characterId: string;
+  }
+    ? true
+    : false;
+
 describe('local storage plugin schema', () => {
+  it('requires a character at the bounded file log store boundary', () => {
+    const requiresCharacter: FileRuntimeLogStoreRequiresCharacter = true;
+
+    expect(requiresCharacter).toBe(true);
+  });
+
   it('uses scoped schema version 4 and no top-level character state path', () => {
     expect(localRuntimeStorageSchemaVersion).toBe(4);
     expect(
@@ -23,13 +37,29 @@ describe('local storage plugin schema', () => {
         JSON.stringify({
           schemaVersion: 4,
           scope: 'character-data',
+          characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       ),
     ).toEqual({
       schemaVersion: 4,
       scope: 'character-data',
+      characterId: 'mira',
       createdAt: '2026-06-04T00:00:00.000Z',
+    });
+    expect(
+      decodeStorageSchemaMarker(
+        JSON.stringify({
+          schemaVersion: 4,
+          scope: 'character-data',
+          characterId: 'mira',
+          createdAt: '2026-06-04T00:00:00.000Z',
+          materializedCharacterPackageVersion: '2.3.4',
+        }),
+      ),
+    ).toMatchObject({
+      schemaVersion: 4,
+      materializedCharacterPackageVersion: '2.3.4',
     });
     expect(
       decodeStorageSchemaMarker(
@@ -54,6 +84,19 @@ describe('local storage plugin schema', () => {
         JSON.stringify({
           schemaVersion: 4,
           scope: 'other',
+          createdAt: '2026-06-04T00:00:00.000Z',
+        }),
+      ),
+    ).toThrow(expect.objectContaining({code: 'malformed_schema_marker'}));
+  });
+
+  it('classifies invalid stored character identities as malformed markers', () => {
+    expect(() =>
+      decodeStorageSchemaMarker(
+        JSON.stringify({
+          schemaVersion: 4,
+          scope: 'character-data',
+          characterId: '../mira',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       ),

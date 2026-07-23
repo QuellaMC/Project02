@@ -68,6 +68,7 @@ export function loadProject02RuntimeConfig(
     if (location.source === 'default') {
       return Object.freeze({
         source: 'none',
+        path: location.path,
         diagnostics: [],
       } satisfies LoadedProject02RuntimeConfig);
     }

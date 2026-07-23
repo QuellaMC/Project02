@@ -1,15 +1,16 @@
-import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, readFileSync, realpathSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
-import {structuredConfigPlugin} from '../support/runtime-config-fixtures.ts';
+import {
+  characterOnlyConfigPlugin,
+  structuredConfigPlugin,
+} from '../support/runtime-config-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   applyRuntimeConfigControlOperation,
-  applyScopedRuntimeConfigControlOperation,
-  applyScopedRuntimePluginConfigControlOperation,
   characterOverlayConfigPath,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
@@ -22,7 +23,7 @@ import {
 } from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
-  ensureCharacterDataStamp,
+  ensureCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 
 function seededHome(): {
@@ -49,19 +50,25 @@ describe('scope-aware runtime config mutations', () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const globalBefore = readFileSync(configPath, 'utf8');
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
 
-    const result = applyScopedRuntimeConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'character',
-      operation: {
-        kind: 'set',
-        path: 'project02.userDisplayName',
-        value: 'Overlay Name',
+    });
+    const result = applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Overlay Name',
+        },
       },
     });
 
@@ -98,97 +105,118 @@ describe('scope-aware runtime config mutations', () => {
 
   it('rejects global-only fields and secret operations under character scope', () => {
     const {homeRoot, dataRoot} = seededHome();
+    const target = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'character',
+    });
 
     expect(() =>
-      applyScopedRuntimeConfigControlOperation({
-        storeRoot: homeRoot,
-        env: {},
-        scope: 'character',
-        operation: {kind: 'set', path: 'project02.storeRoot', value: '/x'},
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'document',
+          operation: {kind: 'set', path: 'project02.storeRoot', value: '/x'},
+        },
       }),
     ).toThrow('global-only');
     expect(() =>
-      applyScopedRuntimePluginConfigControlOperation({
-        storeRoot: homeRoot,
-        env: {},
-        scope: 'character',
-        manifest: structuredConfigPlugin('scope.secrets').manifest,
-        actor: 'operator',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: 'unused',
-        operation: {
-          kind: 'secret_set',
-          fieldName: 'apiKey',
-          envVar: 'X',
-          secretValue: 'y',
+        request: {
+          kind: 'plugin_config',
+          manifest: structuredConfigPlugin('scope.secrets').manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'secret_set',
+            fieldName: 'apiKey',
+            envVar: 'X',
+            secretValue: 'y',
+          },
         },
       }),
     ).toThrow('Secrets are shared across characters');
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
   });
 
-  it('refuses scoped writes into an unstamped data directory', () => {
+  it('refuses scoped writes into an unmarked data directory', () => {
     const {homeRoot, dataRoot} = seededHome();
+    const target = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'character',
+    });
 
-    // The stamp is the proof that the guarded initializer ran; a bare
+    // The marker is proof that the guarded initializer ran; a bare
     // library call against a fresh (or foreign) home must not create
     // character state.
     expect(() =>
-      applyScopedRuntimeConfigControlOperation({
-        storeRoot: homeRoot,
-        env: {},
-        scope: 'character',
-        operation: {
-          kind: 'set',
-          path: 'project02.userDisplayName',
-          value: 'X',
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'X',
+          },
         },
       }),
-    ).toThrow('has no binding stamp');
+    ).toThrow('has no identity marker');
     expect(existsSync(dataRoot)).toBe(false);
   });
 
   it('enforces the layered expectation for scoped mutations', async () => {
     const {homeRoot, dataRoot} = seededHome();
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
-
-    const freshExpected = applyScopedRuntimeConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'character',
-      operation: {
-        kind: 'set',
-        path: 'project02.userDisplayName',
-        value: 'First',
+    });
+
+    const freshExpected = applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'First',
+        },
       },
     }).fingerprint;
 
-    const committed = applyScopedRuntimeConfigControlOperation({
-      storeRoot: homeRoot,
-      env: {},
-      scope: 'character',
+    const committed = applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: freshExpected,
-      operation: {
-        kind: 'set',
-        path: 'project02.userDisplayName',
-        value: 'Second',
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Second',
+        },
       },
     });
 
     expect(committed.config.project02?.['userDisplayName']).toBe('Second');
     expect(() =>
-      applyScopedRuntimeConfigControlOperation({
-        storeRoot: homeRoot,
-        env: {},
-        scope: 'character',
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: freshExpected,
-        operation: {
-          kind: 'set',
-          path: 'project02.userDisplayName',
-          value: 'Stale',
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Stale',
+          },
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
@@ -198,7 +226,7 @@ describe('scope-aware runtime config mutations', () => {
     const homeRoot = createTestTempRoot('project02-config-scope-merged-');
     const plugin = structuredConfigPlugin('scope.merged');
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'mira')},
       characterId: 'mira',
     });
@@ -214,17 +242,23 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const expected = resolveScopedExpected(homeRoot);
-    const result = applyScopedRuntimePluginConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'character',
-      manifest: plugin.manifest,
-      actor: 'operator',
+    });
+    const result = applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: expected,
-      operation: {
-        kind: 'set',
-        fieldName: 'settings',
-        value: {from: 'overlay'},
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'settings',
+          value: {from: 'overlay'},
+        },
       },
     });
 
@@ -240,22 +274,28 @@ describe('scope-aware runtime config mutations', () => {
     writeRuntimeConfig(join(bareHome, 'config.json'), {
       plugins: {'scope.merged': {enabled: true}},
     });
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(bareHome, 'mira')},
       characterId: 'mira',
     });
+    const bareTarget = resolveRuntimeConfigScopeTarget({
+      storeRoot: bareHome,
+      env: {},
+      scope: 'character',
+    });
     expect(() =>
-      applyScopedRuntimePluginConfigControlOperation({
-        storeRoot: bareHome,
-        env: {},
-        scope: 'character',
-        manifest: plugin.manifest,
-        actor: 'operator',
+      applyRuntimeConfigControlOperation({
+        target: bareTarget,
         expectedFingerprint: resolveScopedExpected(bareHome),
-        operation: {
-          kind: 'set',
-          fieldName: 'settings',
-          value: {from: 'overlay'},
+        request: {
+          kind: 'plugin_config',
+          manifest: plugin.manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'settings',
+            value: {from: 'overlay'},
+          },
         },
       }),
     ).toThrow('Cannot update plugin config');
@@ -268,8 +308,8 @@ describe('scope-aware runtime config mutations', () => {
     ).toBe(false);
   });
 
-  it('names the overlay file and character allowlist as the scope target', () => {
-    const {homeRoot, dataRoot} = seededHome();
+  it('names the overlay, owning home, and global file as the scope target', () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
@@ -282,17 +322,203 @@ describe('scope-aware runtime config mutations', () => {
       configPath: characterOverlayConfigPath(
         characterDataDirPath(homeRoot, 'nova'),
       ),
+      globalConfigPath: configPath,
+      homeRoot,
       characterScope: {characterId: 'nova'},
-      secretOpsAllowed: false,
     });
-    expect(
-      target.allowedProject02Fields.map(field => field.name).sort(),
-    ).toEqual([
-      'defaultMemoryProvider',
-      'roleModelProvider',
-      'userDisplayName',
-    ]);
     expect(dataRoot).toContain('character-data');
+  });
+
+  it('binds an overlay-only selection to that overlay owner', async () => {
+    const homeRoot = createTestTempRoot('project02-config-scope-owner-');
+    const configPath = join(homeRoot, 'config.json');
+    const miraRoot = characterDataDirPath(homeRoot, 'mira');
+    const novaRoot = characterDataDirPath(homeRoot, 'nova');
+    const novaOverlayPath = characterOverlayConfigPath(novaRoot);
+
+    writeRuntimeConfig(configPath, {
+      project02: {character: 'mira'},
+    });
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: novaRoot},
+      characterId: 'nova',
+    });
+    const canonicalHomeRoot = realpathSync.native(homeRoot);
+    const canonicalConfigPath = realpathSync.native(configPath);
+    const canonicalNovaRoot = realpathSync.native(novaRoot);
+    const canonicalNovaOverlayPath =
+      characterOverlayConfigPath(canonicalNovaRoot);
+
+    const target = resolveRuntimeConfigScopeTarget({
+      configPath: novaOverlayPath,
+      env: {},
+      scope: 'character',
+    });
+
+    expect(target).toMatchObject({
+      scope: 'character',
+      configPath: canonicalNovaOverlayPath,
+      canonicalConfigPath: canonicalNovaOverlayPath,
+      globalConfigPath: canonicalConfigPath,
+      homeRoot: canonicalHomeRoot,
+      characterScope: {
+        characterId: 'nova',
+        dataRoot: canonicalNovaRoot,
+      },
+    });
+
+    applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Nova Name',
+        },
+      },
+    });
+
+    expect(JSON.parse(readFileSync(novaOverlayPath, 'utf8'))).toMatchObject({
+      project02: {userDisplayName: 'Nova Name'},
+    });
+    expect(existsSync(miraRoot)).toBe(false);
+  });
+});
+
+describe('plugin manifest config scope policy', () => {
+  it('rejects global character-only enablement and non-secret fields while allowing global secret refs', () => {
+    const plugin = characterOnlyConfigPlugin('scope.character-only');
+    const resolved = resolveProject02RuntimeConfig({
+      loadedConfig: {
+        source: 'path',
+        config: {
+          version: runtimeConfigVersion,
+          plugins: {
+            [plugin.manifest.id]: {
+              enabled: true,
+              config: {
+                setting: 'global-value',
+                apiKey: {$env: 'CHARACTER_ONLY_API_KEY'},
+              },
+            },
+          },
+        },
+        diagnostics: [],
+      },
+      pluginManifests: [plugin.manifest],
+      validateInactivePluginConfigs: true,
+      env: {CHARACTER_ONLY_API_KEY: 'secret'},
+    });
+
+    expect(resolved.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'runtime_config_character_only_plugin_enabled_globally',
+          path: `plugins.${plugin.manifest.id}.enabled`,
+        }),
+        expect.objectContaining({
+          code: 'runtime_config_character_only_plugin_field_globally',
+          path: `plugins.${plugin.manifest.id}.config.setting`,
+        }),
+      ]),
+    );
+    expect(
+      resolved.diagnostics.some(
+        diagnostic =>
+          diagnostic.path === `plugins.${plugin.manifest.id}.config.apiKey` &&
+          diagnostic.code.includes('scope'),
+      ),
+    ).toBe(false);
+  });
+
+  it('uses the same policy for manifest-aware activation and field controls', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const plugin = characterOnlyConfigPlugin('scope.character-only-control');
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [plugin.manifest.id]: {
+          config: {apiKey: {$env: 'CHARACTER_ONLY_CONTROL_API_KEY'}},
+        },
+      },
+    });
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    const globalTarget = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
+      scope: 'global',
+    });
+    const characterTarget = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
+      scope: 'character',
+    });
+    const globalBefore = readFileSync(configPath, 'utf8');
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target: globalTarget,
+        request: {
+          kind: 'plugin_activation',
+          manifest: plugin.manifest,
+          enabled: true,
+        },
+      }),
+    ).toThrow('character-only');
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target: globalTarget,
+        request: {
+          kind: 'plugin_config',
+          manifest: plugin.manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'setting',
+            value: 'global-nope',
+          },
+        },
+      }),
+    ).toThrow('character-only');
+    expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
+
+    applyRuntimeConfigControlOperation({
+      target: characterTarget,
+      request: {
+        kind: 'plugin_activation',
+        manifest: plugin.manifest,
+        enabled: true,
+      },
+    });
+    applyRuntimeConfigControlOperation({
+      target: characterTarget,
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'agent',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'setting',
+          value: 'character-value',
+        },
+      },
+    });
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({
+      version: runtimeConfigVersion,
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {setting: 'character-value'},
+        },
+      },
+    });
   });
 });
 
@@ -315,7 +541,7 @@ describe('character-scoped plugin control capability', () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const plugin = structuredConfigPlugin('scope.capability');
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -340,30 +566,44 @@ describe('character-scoped plugin control capability', () => {
     }).fingerprint;
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const globalBefore = readFileSync(configPath, 'utf8');
-    const prepared = capability.prepareOperation({
+    const target = capability.resolveTarget({
       storeRoot: homeRoot,
       env: {},
+      scope: 'character',
       characterScope,
-      manifest: plugin.manifest,
-      actor: 'operator',
+    });
+    const prepared = capability.prepareOperation({
+      target,
       expectedFingerprint: fingerprint,
-      operation: {kind: 'set', fieldName: 'settings', value: {from: 'agent'}},
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'settings',
+          value: {from: 'agent'},
+        },
+      },
     });
 
     // Prepare is read-only and already names the overlay as the target.
     expect(existsSync(overlayPath)).toBe(false);
-    expect(prepared.targetConfigPath).toBe(
-      capability.resolveTargetPath({storeRoot: homeRoot, characterScope}),
-    );
+    expect(prepared.targetConfigPath).toBe(target.canonicalConfigPath);
 
     const applied = capability.applyOperation({
-      storeRoot: homeRoot,
-      env: {},
-      characterScope,
-      manifest: plugin.manifest,
-      actor: 'operator',
+      target,
       expectedFingerprint: fingerprint,
-      operation: {kind: 'set', fieldName: 'settings', value: {from: 'agent'}},
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'settings',
+          value: {from: 'agent'},
+        },
+      },
     });
 
     expect(applied.fingerprint).toBe(prepared.resultFingerprint);
@@ -380,7 +620,7 @@ describe('plugin inspection authored views', () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const plugin = structuredConfigPlugin('scope.authored-view');
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -400,18 +640,24 @@ describe('plugin inspection authored views', () => {
       env: {},
     };
 
-    applyScopedRuntimePluginConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'character',
       characterId: 'mira',
-      manifest: plugin.manifest,
-      actor: 'operator',
+    });
+    applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: inspectRuntimePluginConfig(base).fingerprint,
-      operation: {
-        kind: 'set',
-        fieldName: 'settings',
-        value: {from: 'overlay'},
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'set',
+          fieldName: 'settings',
+          value: {from: 'overlay'},
+        },
       },
     });
     const merged = inspectRuntimePluginConfig(base);
@@ -470,19 +716,25 @@ describe('scoped writes over a broken global layer', () => {
 
     writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
 
-    expect(() =>
-      applyScopedRuntimeConfigControlOperation({
+    expect(() => {
+      const target = resolveRuntimeConfigScopeTarget({
         storeRoot: homeRoot,
         env: {},
         scope: 'character',
         characterId: 'mira',
-        operation: {
-          kind: 'set',
-          path: 'project02.userDisplayName',
-          value: 'Bob',
+      });
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Bob',
+          },
         },
-      }),
-    ).toThrow(/failed to load/);
+      });
+    }).toThrow(/failed to load/);
     expect(
       existsSync(
         characterOverlayConfigPath(characterDataDirPath(homeRoot, 'mira')),
@@ -497,7 +749,7 @@ describe('global control writes aimed directly at the overlay path', () => {
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const plugin = structuredConfigPlugin('scope.direct-overlay');
 
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -505,10 +757,14 @@ describe('global control writes aimed directly at the overlay path', () => {
     const globalBefore = readFileSync(configPath, 'utf8');
     // The "global" layer aliases the overlay here; the expectation
     // pre-lock must not take the file lock the mutation itself needs.
-    const result = applyRuntimeConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       configPath: overlayPath,
       storeRoot: homeRoot,
       env: {},
+      scope: 'global',
+    });
+    const result = applyRuntimeConfigControlOperation({
+      target,
       expectedFingerprint: inspectRuntimePluginConfig({
         configPath: overlayPath,
         storeRoot: homeRoot,
@@ -516,10 +772,14 @@ describe('global control writes aimed directly at the overlay path', () => {
         manifest: plugin.manifest,
         pluginManifests: [plugin.manifest],
       }).fingerprint,
-      operation: {kind: 'plugin_enable', pluginId: 'scope.direct-overlay'},
+      request: {
+        kind: 'plugin_activation',
+        manifest: structuredConfigPlugin('scope.direct-overlay').manifest,
+        enabled: true,
+      },
     });
 
-    expect(result.configPath).toBe(overlayPath);
+    expect(result.configPath).toBe(target.configPath);
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
       version: runtimeConfigVersion,
       plugins: {'scope.direct-overlay': {enabled: true}},
@@ -531,16 +791,23 @@ describe('global control writes aimed directly at the overlay path', () => {
 describe('stale global expectations', () => {
   it('conflicts without materializing a lock root in an absent data dir', () => {
     const {homeRoot, dataRoot} = seededHome();
+    const target = resolveRuntimeConfigScopeTarget({
+      storeRoot: homeRoot,
+      env: {},
+      scope: 'global',
+    });
 
     expect(() =>
       applyRuntimeConfigControlOperation({
-        storeRoot: homeRoot,
-        env: {},
+        target,
         expectedFingerprint: 'stale-fingerprint',
-        operation: {
-          kind: 'set',
-          path: 'project02.userDisplayName',
-          value: 'Bob',
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Bob',
+          },
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
@@ -555,20 +822,26 @@ describe('global writes that move the character selection', () => {
     const homeRoot = createTestTempRoot('project02-scope-switch-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'nova')},
       characterId: 'nova',
     });
     // Give nova an overlay so the layers differ observably.
-    applyScopedRuntimeConfigControlOperation({
+    const novaTarget = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'character',
       characterId: 'nova',
-      operation: {
-        kind: 'set',
-        path: 'project02.userDisplayName',
-        value: 'Nova User',
+    });
+    applyRuntimeConfigControlOperation({
+      target: novaTarget,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Nova User',
+        },
       },
     });
 
@@ -584,12 +857,18 @@ describe('global writes that move the character selection', () => {
       characterId: 'mira',
       overlayConfig: null,
     });
-    const switched = applyScopedRuntimeConfigControlOperation({
+    const globalTarget = resolveRuntimeConfigScopeTarget({
       storeRoot: homeRoot,
       env: {},
       scope: 'global',
+    });
+    const switched = applyRuntimeConfigControlOperation({
+      target: globalTarget,
       expectedFingerprint: expected,
-      operation: {kind: 'set', path: 'project02.character', value: 'nova'},
+      request: {
+        kind: 'document',
+        operation: {kind: 'set', path: 'project02.character', value: 'nova'},
+      },
     });
 
     // The returned fingerprint is composed for the newly selected

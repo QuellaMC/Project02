@@ -37,7 +37,10 @@ describe('file runtime log store evidence cache', () => {
   it('retries one mixed generation and fails when both coherent-read attempts race', async () => {
     const storeRoot = createTestTempRoot('project02-log-race-');
     const sessionId = 'coherent-race-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
@@ -45,12 +48,19 @@ describe('file runtime log store evidence cache', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const writer = createFileRuntimeLogStore({storeRoot, sessionId});
+    const writer = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     await runTurn(session, writer, 0);
     let singleMutationCount = 0;
     const retryingReader = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
       onEvidenceFileRead({filePath}) {
         if (!filePath.endsWith('trace.jsonl') || singleMutationCount > 0) {
           return;
@@ -71,6 +81,8 @@ describe('file runtime log store evidence cache', () => {
     const racingReader = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
       onEvidenceFileRead({filePath}) {
         if (!filePath.endsWith('trace.jsonl')) {
           return;
@@ -93,7 +105,10 @@ describe('file runtime log store evidence cache', () => {
   it('loads a coherent snapshot once and performs no historical reads on 750 warm appends', async () => {
     const storeRoot = createTestTempRoot('project02-log-cache-');
     const sessionId = 'cache-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
@@ -105,6 +120,8 @@ describe('file runtime log store evidence cache', () => {
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
       onEvidenceValidation(mode) {
         if (mode === 'cold_snapshot') {
           validationCounts.cold += 1;
@@ -120,6 +137,8 @@ describe('file runtime log store evidence cache', () => {
     const reopened = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
       onEvidenceValidation(mode) {
         if (mode === 'cold_snapshot') {
           reopenedColdValidations += 1;
@@ -160,7 +179,10 @@ describe('file runtime log store evidence cache', () => {
   it('reloads exactly once after one external mutation and then remains warm', async () => {
     const storeRoot = createTestTempRoot('project02-log-external-change-');
     const sessionId = 'external-change-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
@@ -168,12 +190,19 @@ describe('file runtime log store evidence cache', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const writer = createFileRuntimeLogStore({storeRoot, sessionId});
+    const writer = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     await runTurn(session, writer, 0);
     let coldValidations = 0;
     const reader = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
       onEvidenceValidation(mode) {
         if (mode === 'cold_snapshot') {
           coldValidations += 1;
@@ -213,7 +242,10 @@ describe('file runtime log store evidence cache', () => {
   it('does not authorize another store cache under a different owner lease', async () => {
     const storeRoot = createTestTempRoot('project02-log-stale-writer-cache-');
     const sessionId = 'stale-writer-cache-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
@@ -221,9 +253,16 @@ describe('file runtime log store evidence cache', () => {
     const writerStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
       writerLockOwnerToken: writerOwnerToken,
     });
-    const staleStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const staleStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId,
@@ -250,7 +289,12 @@ describe('file runtime log store evidence cache', () => {
         expect.objectContaining({code: 'session_busy'}),
       );
       expect(
-        createFileRuntimeLogStore({storeRoot, sessionId}).traceEntries(),
+        createFileRuntimeLogStore({
+          storeRoot,
+          sessionId,
+          characterId: 'mira',
+          boundCharacter: testCharacterProfile,
+        }).traceEntries(),
       ).toEqual(writerStore.traceEntries());
     } finally {
       await writerLease.release();
@@ -260,11 +304,19 @@ describe('file runtime log store evidence cache', () => {
   it('refreshes cached evidence when the store reacquires a later writer lease', async () => {
     const storeRoot = createTestTempRoot('project02-log-writer-generation-');
     const sessionId = 'writer-generation-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const staleStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const staleStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     const firstLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
       sessionId,
@@ -277,7 +329,12 @@ describe('file runtime log store evidence cache', () => {
       await firstLease.release();
     }
 
-    const currentStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const currentStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     await runTurn(
       createConversationSession({
         id: sessionId,

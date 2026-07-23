@@ -5,6 +5,29 @@ import * as runtimeConfig from '../../src/runtime/config/index.ts';
 const canonicalRuntimeConfigVersion = 'project02.config.v2';
 
 describe('config system v2 contract', () => {
+  it('exposes one target-aware prepare/apply control seam', () => {
+    expect(runtimeConfig.applyRuntimeConfigControlOperation).toBeTypeOf(
+      'function',
+    );
+    expect(runtimeConfig.prepareRuntimeConfigControlOperation).toBeTypeOf(
+      'function',
+    );
+    expect(runtimeConfig.resolveRuntimeConfigScopeTarget).toBeTypeOf(
+      'function',
+    );
+
+    for (const displacedName of [
+      'applyScopedRuntimeConfigControlOperation',
+      'applyRuntimePluginConfigControlOperation',
+      'applyScopedRuntimePluginConfigControlOperation',
+      'prepareRuntimePluginConfigControlOperation',
+      'prepareScopedRuntimePluginConfigControlOperation',
+      'assertRuntimeConfigSecretScopeAllowed',
+    ]) {
+      expect(runtimeConfig).not.toHaveProperty(displacedName);
+    }
+  });
+
   it('exports the canonical config version and accepts the project02 section', () => {
     expect(runtimeConfig.runtimeConfigVersion).toBe(
       canonicalRuntimeConfigVersion,

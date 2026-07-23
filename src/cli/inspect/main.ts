@@ -1,19 +1,10 @@
-import {existsSync, readdirSync} from 'node:fs';
-import {join} from 'node:path';
-
 import {readFlagValue} from '../shared/flags.ts';
 import type {CharacterProfile} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
   characterDataDirPath,
-  createLocalRuntimeStorageLayout,
-  assertCharacterDataDirReadable,
   createProject02HomeLayout,
-  isLiveAtomicReplacementForAnyTarget,
-  isMissingDefaultSessionStore,
-  readCharacterBinding,
-  type CharacterBindingReadResult,
   type LocalRuntimeSessionMetadata,
   normalizeLocalRuntimeSessionId,
 } from '../../runtime/storage/index.ts';
@@ -79,7 +70,6 @@ type InspectCliArgs =
 
 type InspectSessionListOutput = {
   readonly runtimeConfig: RuntimeConfigInspectShape;
-  readonly characterBinding: CharacterBindingReadResult;
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
   readonly sessions: readonly LocalRuntimeSessionMetadata[];
@@ -87,7 +77,6 @@ type InspectSessionListOutput = {
 
 type InspectSessionOutput = {
   readonly runtimeConfig: RuntimeConfigInspectShape;
-  readonly characterBinding: CharacterBindingReadResult;
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
   readonly session: LocalRuntimeSessionMetadata;
@@ -124,11 +113,15 @@ export async function runInspectCliFromArgs(
         ? {}
         : {factories: options.factories}),
     });
+    const characterActivation = startup.characterActivation;
 
-    if (startup.status === 'character_invalid') {
+    if (
+      startup.status === 'character_invalid' ||
+      characterActivation.status === 'failed'
+    ) {
       throw new InspectCliUsageError(
-        (startup.characterActivation.status === 'failed'
-          ? startup.characterActivation.messages[0]
+        (characterActivation.status === 'failed'
+          ? characterActivation.messages[0]
           : undefined) ?? 'Character activation failed.',
       );
     }
@@ -157,9 +150,7 @@ export async function runInspectCliFromArgs(
       parsedArgs,
       options.stdout,
       startup.activationPlan,
-      startup.characterActivation.status === 'resolved'
-        ? startup.characterActivation.profile
-        : undefined,
+      characterActivation.profile,
     );
     return 0;
   } catch (error: unknown) {
@@ -291,47 +282,16 @@ async function writeSessionList(
     runtimeConfig.resolvedConfig.project02.character,
   );
 
-  assertInspectedDataDirBinding(
-    dataRoot,
-    runtimeConfig.resolvedConfig.project02.character,
-  );
-
-  const sessionStore = createLocalRuntimeSessionStore({storeRoot: dataRoot});
-  let sessions: readonly LocalRuntimeSessionMetadata[] = [];
-
-  try {
-    sessions = await sessionStore.listSessions();
-  } catch (error: unknown) {
-    // An absent data directory — or one holding only control state
-    // (binding stamp, overlay, locks) from a config-only workflow — has
-    // no sessions. Session artifacts without a listable catalog, or any
-    // entry outside the control allowlist while the data marker is
-    // missing, are corruption or foreign content, never an empty view.
-    const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
-    const hasSessionArtifacts =
-      existsSync(layout.schemaPath) ||
-      existsSync(layout.sessionCatalogPath) ||
-      existsSync(layout.sessionsRoot);
-
-    if (
-      !isMissingDefaultSessionStore(error) ||
-      hasSessionArtifacts ||
-      !dataDirHoldsOnlyControlEntries(dataRoot)
-    ) {
-      throw error;
-    }
-  }
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot: dataRoot,
+    characterId: runtimeConfig.resolvedConfig.project02.character,
+  });
+  const sessions = await sessionStore.listSessions();
 
   writeJson(stdout, {
     runtimeConfig: createRuntimeConfigInspectShape(
       runtimeConfig.resolvedConfig,
     ),
-    characterBinding: readCharacterBinding({
-      storeRoot: characterDataDirPath(
-        runtimeConfig.resolvedConfig.project02.storeRoot,
-        runtimeConfig.resolvedConfig.project02.character,
-      ),
-    }),
     activationDiagnostics: Object.freeze([
       ...runtimeConfig.activation.diagnostics,
     ]),
@@ -340,59 +300,11 @@ async function writeSessionList(
   } satisfies InspectSessionListOutput);
 }
 
-// The binding and adoptability rules hold at inspection: a data
-// directory stamped for another character, or one the writers would
-// refuse, fails read-only exactly as durable chat does.
-function assertInspectedDataDirBinding(
-  dataRoot: string,
-  characterId: string,
-): void {
-  assertCharacterDataDirReadable({
-    storageOptions: {storeRoot: dataRoot},
-    characterId,
-  });
-}
-
-// Entries a control-only data directory may hold besides sessions:
-// the overlay config, the binding stamp, and the lock root.
-function dataDirHoldsOnlyControlEntries(dataRoot: string): boolean {
-  const layout = createLocalRuntimeStorageLayout({storeRoot: dataRoot});
-  let entries: readonly string[];
-
-  try {
-    entries = readdirSync(dataRoot);
-  } catch {
-    // An unreadable or absent root holds nothing durable to hide; the
-    // missing-store classification above already matched.
-    return true;
-  }
-
-  return entries.every(entry => {
-    const entryPath = join(dataRoot, entry);
-
-    if (
-      entryPath === layout.configPath ||
-      entryPath === layout.locksRoot ||
-      entryPath === layout.characterBindingPath
-    ) {
-      return true;
-    }
-
-    // A sibling initializer's live marker/overlay/stamp replacement is
-    // not foreign; abandoned temps stay foreign.
-    return isLiveAtomicReplacementForAnyTarget(entry, [
-      layout.schemaPath,
-      layout.configPath,
-      layout.characterBindingPath,
-    ]);
-  });
-}
-
 async function writeSessionEvidence(
   args: InspectCliArgs & {readonly mode: 'session'},
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
-  boundCharacter: CharacterProfile | undefined,
+  boundCharacter: CharacterProfile,
 ): Promise<void> {
   const storage = {
     storeRoot: characterDataDirPath(
@@ -400,19 +312,18 @@ async function writeSessionEvidence(
       runtimeConfig.resolvedConfig.project02.character,
     ),
   };
-  assertInspectedDataDirBinding(
-    storage.storeRoot,
-    runtimeConfig.resolvedConfig.project02.character,
-  );
-
-  const sessionStore = createLocalRuntimeSessionStore(storage);
+  const sessionStore = createLocalRuntimeSessionStore({
+    ...storage,
+    characterId: runtimeConfig.resolvedConfig.project02.character,
+  });
   const session = await sessionStore.readSession(args.sessionId);
-  // The binding holds at inspection too: foreign evidence copied into a
-  // bound data directory must fail here exactly as durable chat does.
+  // The character boundary holds at inspection too: foreign evidence
+  // copied into a data directory must fail here exactly as durable chat does.
   const logStore = createFileRuntimeLogStore({
     ...storage,
     sessionId: session.sessionId,
-    ...(boundCharacter === undefined ? {} : {boundCharacter}),
+    characterId: runtimeConfig.resolvedConfig.project02.character,
+    boundCharacter,
   });
   const evidence = logStore.readSessionEvidence();
   const {traceEntries, rawEvents, conversationMessages} = evidence.stored;
@@ -421,12 +332,6 @@ async function writeSessionEvidence(
     runtimeConfig: createRuntimeConfigInspectShape(
       runtimeConfig.resolvedConfig,
     ),
-    characterBinding: readCharacterBinding({
-      storeRoot: characterDataDirPath(
-        runtimeConfig.resolvedConfig.project02.storeRoot,
-        runtimeConfig.resolvedConfig.project02.character,
-      ),
-    }),
     activationDiagnostics: Object.freeze([
       ...runtimeConfig.activation.diagnostics,
     ]),

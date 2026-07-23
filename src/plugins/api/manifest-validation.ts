@@ -9,6 +9,7 @@ import {
   confirmationRequirementValues,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
+  runtimePluginConfigScopeValues,
   runtimePluginConfigValueTypeValues,
   runtimePluginContextItemKindValues,
   runtimePluginContractVersion,
@@ -125,6 +126,16 @@ export function validateRuntimePluginManifest(
 
   if (activation.status === 'rejected') {
     return activation;
+  }
+
+  if (
+    config.value.scope === 'character_only' &&
+    activation.value.defaultEnabled
+  ) {
+    return reject(
+      'malformed_manifest',
+      'Character-only plugins cannot be enabled by the manifest default; enable them in a character package or character config.',
+    );
   }
 
   const requestedAccess = requiredAccess(
@@ -496,6 +507,15 @@ function requiredConfigMetadata(
     );
   }
 
+  const scope = value['scope'];
+
+  if (!isOneOf(scope, runtimePluginConfigScopeValues)) {
+    return reject(
+      'malformed_manifest',
+      'Plugin config scope must be "global_with_character_overrides" or "character_only".',
+    );
+  }
+
   const fieldsValue = value['fields'];
 
   if (!Array.isArray(fieldsValue)) {
@@ -534,6 +554,7 @@ function requiredConfigMetadata(
 
   return accept(
     Object.freeze({
+      scope,
       fields: Object.freeze(fields),
       ...(fingerprint.value === undefined
         ? {}

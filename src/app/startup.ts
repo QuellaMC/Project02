@@ -1,5 +1,4 @@
 import {
-  composeRuntimePluginCatalog,
   createRuntimePluginCatalogSnapshot,
   prepareConfiguredProject02PluginActivation,
   type PreparedProject02PluginActivationPlan,
@@ -11,37 +10,43 @@ import {
   type Project02CharacterActivation,
 } from './character.ts';
 import {
-  characterOverlaySeedDocument,
   enforceCharacterPluginExpectations,
-  validateCharacterOverlaySeedAgainstManifests,
+  planCharacterPackagePluginMaterialization,
 } from './character-plugins.ts';
+import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {
-  characterOverlayConfigPath,
+  applyRuntimeConfigControlOperation,
+  assertScopedMutationOperationAllowed,
   configuredProject02CharacterId,
+  createRuntimeConfigDiagnostic,
   defaultDotEnvForRuntimeLocation,
   deriveRuntimeConfigCharacterScope,
   diagnosticsHaveErrors,
-  ensureCharacterDataDir,
   loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
   loadRuntimeConfigEnvFile,
-  loadScopedGlobalLayerConfig,
   readDefaultDotEnvFile,
   resolveProject02RuntimeStoreRoot,
+  resolveRuntimeConfigScopeTarget,
+  RuntimeConfigMutationError,
+  resolveScopedGlobalLayerLocation,
   shouldReadDefaultDotEnvForRuntimeLocation,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
+  type Project02RuntimeConfig,
+  type RuntimeConfigControlApplyResult,
+  type RuntimeConfigControlOperation,
+  type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
-import {existsSync} from 'node:fs';
-
-import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {
   assertCharacterDataDirReadable,
   assertProject02HomeAdoptable,
-  characterDataDirPath,
+  ensureCharacterDataDir,
   LocalRuntimeStorageContractError,
+  recordMaterializedCharacterPackageVersion,
+  requireCharacterDataMarker,
 } from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
@@ -55,12 +60,24 @@ type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage?: 'activation';
   readonly continueAfterActivationErrors?: boolean;
   /**
-   * 'materialize' (writers: chat, relay) initializes the character-data
-   * directory — home guard, binding stamp, first-selection overlay seed
-   * — before the overlay is read. 'readonly' (default: inspect, config
-   * verbs) never creates or writes anything.
+   * Retained for caller compatibility. Character selection now always
+   * materializes package config, including inspect and config reads.
    */
   readonly dataDir?: 'materialize' | 'readonly';
+  /**
+   * Optional first scoped edit. The initializer composes it with
+   * package materialization and commits one locked overlay candidate.
+   */
+  readonly characterConfigRequest?:
+    | {
+        readonly kind: 'document';
+        readonly operation: RuntimeConfigControlOperation;
+      }
+    | {
+        readonly kind: 'plugin_activation';
+        readonly pluginId: string;
+        readonly enabled: boolean;
+      };
 };
 
 type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
@@ -69,6 +86,10 @@ type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
 
 type RuntimeCliStartupOptions =
   RuntimeCliActivationStartupOptions | RuntimeCliConfigStartupOptions;
+
+type RuntimeCliCharacterConfigRequest = NonNullable<
+  RuntimeCliActivationStartupOptions['characterConfigRequest']
+>;
 
 type RuntimeCliStartupBase = {
   readonly location: RuntimeLocationCliState;
@@ -84,6 +105,7 @@ type RuntimeCliActivationStartupBase = RuntimeCliStartupBase & {
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
   readonly activationPlan: PreparedProject02PluginActivationPlan;
+  readonly characterConfigMutation?: RuntimeConfigControlApplyResult;
 };
 
 type RuntimeCliStartupResult =
@@ -129,11 +151,13 @@ export function resolveRuntimeCliStartup(
   const loadedConfig =
     location.character === undefined
       ? loadProject02RuntimeConfig({...location, env: configEnv})
-      : loadScopedGlobalLayerConfig({
-          ...location,
-          env: configEnv,
-          characterId: location.character,
-        });
+      : loadProject02RuntimeConfig(
+          resolveScopedGlobalLayerLocation({
+            ...location,
+            env: configEnv,
+            characterId: location.character,
+          }),
+        );
   const startupBase = {
     location,
     cwdDotEnv,
@@ -159,11 +183,10 @@ export function resolveRuntimeCliStartup(
 /**
  * The one activation-stage sequence every CLI shares: character
  * activation first (a bad selection is a character_invalid, and no
- * plugin resources exist yet), then — for writers — the character-data
- * initialization with the package's first-selection overlay seed, then
- * the overlay read, plugin activation over both config layers, and the
- * character's plugin expectations merged into the activation
- * diagnostics.
+ * plugin resources exist yet), then character-data initialization for
+ * every selected-character surface, then the overlay read and activation over both
+ * config layers, and the character's plugin expectations merged into
+ * the activation diagnostics.
  */
 async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
@@ -204,18 +227,18 @@ async function resolveRuntimeCliActivationStartup(input: {
   ) => {
     const overlayForPlan =
       overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
-    const catalogSnapshot =
-      options.factories === undefined
-        ? createRuntimePluginCatalogSnapshot({
-            loadedConfig,
-            ...(overlayLoadedConfig === undefined
-              ? {}
-              : {overlayConfig: overlayLoadedConfig}),
-            ...(location.storeRoot === undefined
-              ? {}
-              : {storeRoot: location.storeRoot}),
-          })
-        : undefined;
+    const catalogSnapshot = createRuntimePluginCatalogSnapshot({
+      loadedConfig,
+      ...(overlayLoadedConfig === undefined
+        ? {}
+        : {overlayConfig: overlayLoadedConfig}),
+      ...(location.storeRoot === undefined
+        ? {}
+        : {storeRoot: location.storeRoot}),
+      ...(options.factories === undefined
+        ? {}
+        : {factoryOverrides: options.factories}),
+    });
 
     return {
       overlayForPlan,
@@ -226,23 +249,21 @@ async function resolveRuntimeCliActivationStartup(input: {
         ...overlayForPlan,
         location,
         env: input.configEnv,
-        ...(options.factories === undefined
-          ? {}
-          : {factories: options.factories}),
-        ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
+        validateInactivePluginConfigs: true,
+        catalogSnapshot,
       }),
       base: {
         ...input.startupBase,
         characterActivation,
         ...overlayForPlan,
-        ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
+        catalogSnapshot,
       },
     };
   };
 
   // An invalid global config must not create durable state: report it
   // (with the overlay read-only for attribution) before the home,
-  // stamp, or first-selection seed would be written.
+  // or identity marker would be written.
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
     const invalidState = buildPreEnvState(
       loadCharacterOverlayForStartup({loadedConfig, location}),
@@ -262,9 +283,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   await assertProject02HomeAdoptable({homeRoot});
 
   // An invalid pre-existing overlay must not create durable state
-  // either: read it before the home marker, stamp, or seed would be
-  // written. Materialization may create the overlay afterwards, so
-  // the post-materialize load below stays authoritative.
+  // either: read it before the home or character marker would be written.
   const preexistingOverlay = loadCharacterOverlayForStartup({
     loadedConfig,
     location,
@@ -283,24 +302,44 @@ async function resolveRuntimeCliActivationStartup(input: {
     });
   }
 
-  if (options.dataDir === 'materialize') {
-    const failure = await materializeCharacterDataDir({
-      homeRoot,
-      characterActivation,
-      pluginManifests: installedManifestsForSeedValidation({
-        options,
-        loadedConfig,
-        location,
-      }),
-    });
+  const preMaterializationState = buildPreEnvState(preexistingOverlay);
+  const preflight = prepareCharacterMaterializationPreflight({
+    expectations: characterActivation.definition.plugins,
+    plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
+    catalogSnapshot: preMaterializationState.catalogSnapshot,
+    request: options.characterConfigRequest,
+  });
 
-    if (failure !== undefined) {
-      return Object.freeze({
-        ...input.startupBase,
-        status: 'character_invalid',
-        characterActivation: failure,
-      });
-    }
+  if (preflight.diagnostics.length > 0) {
+    return Object.freeze({
+      ...preMaterializationState.base,
+      status: 'config_invalid',
+      activationPlan: withActivationDiagnostics(
+        preMaterializationState.activationPlanBeforeRuntimeEnv,
+        preflight.diagnostics,
+      ),
+    });
+  }
+
+  if (preflight.packagePlan.status !== 'ready') {
+    throw new TypeError('Character package materialization planning drifted.');
+  }
+
+  const materialization = await materializeCharacterDataDir({
+    homeRoot,
+    characterActivation,
+    location,
+    configEnv: input.configEnv,
+    document: preflight.packagePlan.document,
+    ...(preflight.request === undefined ? {} : {request: preflight.request}),
+  });
+
+  if (materialization.status === 'failed') {
+    return Object.freeze({
+      ...input.startupBase,
+      status: 'character_invalid',
+      characterActivation: materialization.characterActivation,
+    });
   }
 
   const overlayLoadedConfig = loadCharacterOverlayForStartup({
@@ -310,13 +349,23 @@ async function resolveRuntimeCliActivationStartup(input: {
   const {
     overlayForPlan,
     catalogSnapshot,
-    activationPlanBeforeRuntimeEnv,
+    activationPlanBeforeRuntimeEnv: unadornedActivationPlanBeforeRuntimeEnv,
     base,
   } = buildPreEnvState(overlayLoadedConfig);
+  const materializedBase = {
+    ...base,
+    ...(materialization.configMutation === undefined
+      ? {}
+      : {characterConfigMutation: materialization.configMutation}),
+  };
+  const activationPlanBeforeRuntimeEnv = withActivationDiagnostics(
+    unadornedActivationPlanBeforeRuntimeEnv,
+    materialization.diagnostics,
+  );
 
   if (startupConfigHasErrors(loadedConfig, overlayLoadedConfig)) {
     return Object.freeze({
-      ...base,
+      ...materializedBase,
       status: 'config_invalid',
       activationPlan: activationPlanBeforeRuntimeEnv,
     });
@@ -329,7 +378,7 @@ async function resolveRuntimeCliActivationStartup(input: {
     )
   ) {
     return Object.freeze({
-      ...base,
+      ...materializedBase,
       status: 'activation_blocked_before_runtime_env',
       activationPlan: activationPlanBeforeRuntimeEnv,
     });
@@ -341,18 +390,21 @@ async function resolveRuntimeCliActivationStartup(input: {
     suppliedEnv: input.suppliedEnv,
     cwdDotEnv: input.cwdDotEnv,
   });
-  const activationPlan = prepareActivationPlan({
-    loadedConfig,
-    characterActivation,
-    ...overlayForPlan,
-    location,
-    env: runtimeEnv,
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
-  });
+  const activationPlan = withActivationDiagnostics(
+    prepareActivationPlan({
+      loadedConfig,
+      characterActivation,
+      ...overlayForPlan,
+      location,
+      env: runtimeEnv,
+      validateInactivePluginConfigs: true,
+      catalogSnapshot,
+    }),
+    materialization.diagnostics,
+  );
 
   return Object.freeze({
-    ...base,
+    ...materializedBase,
     status: 'resolved',
     runtimeEnv,
     activationPlan,
@@ -360,118 +412,228 @@ async function resolveRuntimeCliActivationStartup(input: {
 }
 
 /**
- * The installed manifests a first-selection seed is judged against.
- * Factories-injected runs use those manifests directly; otherwise one
- * discovery pass runs before materialization (the plan's own catalog
- * is built later, after the overlay exists, so its diagnostics can be
- * classified against the merged view).
- */
-function installedManifestsForSeedValidation(input: {
-  readonly options: RuntimeCliActivationStartupOptions;
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly location: RuntimeLocationCliState;
-}): readonly RuntimePluginManifest[] {
-  if (input.options.factories !== undefined) {
-    // The composed catalog, not the raw factories: host-owned service
-    // manifests join the set exactly as they will during activation.
-    return Object.values(
-      composeRuntimePluginCatalog(input.options.factories).catalogEntries,
-    ).map(entry => entry.manifest);
-  }
-
-  return Object.values(
-    createRuntimePluginCatalogSnapshot({
-      loadedConfig: input.loadedConfig,
-      ...(input.location.storeRoot === undefined
-        ? {}
-        : {storeRoot: input.location.storeRoot}),
-    }).catalogEntries,
-  ).map(entry => entry.manifest);
-}
-
-/**
- * Writer-side character-data initialization. Returns a failed
- * character activation instead of throwing so every character-shaped
- * problem exits through the same character_invalid status.
+ * Character selection initialization. The package plan and any
+ * existing config were validated before this function runs. It commits
+ * the overlay first through the target-aware config seam, then records
+ * the package version in the data marker.
  */
 async function materializeCharacterDataDir(input: {
   readonly homeRoot: string;
+  readonly location: RuntimeLocationCliState;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly document: Project02RuntimeConfig;
+  readonly request?: RuntimeConfigControlRequest;
   readonly characterActivation: Extract<
     Project02CharacterActivation,
     {status: 'resolved'}
   >;
-  readonly pluginManifests: readonly RuntimePluginManifest[];
 }): Promise<
-  Extract<Project02CharacterActivation, {status: 'failed'}> | undefined
+  | {
+      readonly status: 'resolved';
+      readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+      readonly configMutation?: RuntimeConfigControlApplyResult;
+    }
+  | {
+      readonly status: 'failed';
+      readonly characterActivation: Extract<
+        Project02CharacterActivation,
+        {status: 'failed'}
+      >;
+    }
 > {
   const characterId = input.characterActivation.profile.id;
-  // An existing overlay wins outright: the seed will not be written, so
-  // its package defaults must not be judged either — an operator's
-  // corrected overlay stays the recovery path for a broken package.
-  const overlayExists = existsSync(
-    characterOverlayConfigPath(
-      characterDataDirPath(input.homeRoot, characterId),
-    ),
-  );
-  const seed = overlayExists
-    ? undefined
-    : characterOverlaySeedDocument(
-        input.characterActivation.definition.plugins,
-      );
-
-  if (seed !== undefined && seed.status === 'invalid') {
-    return Object.freeze({
-      status: 'failed',
-      configuredCharacterId: characterId,
-      messages: seed.messages,
-    });
-  }
-
-  // A seed the installed manifests reject would poison the overlay
-  // permanently (the file is never re-materialized): fail the selection
-  // instead of writing it.
-  if (seed !== undefined && seed.status === 'seed') {
-    const seedIssues = validateCharacterOverlaySeedAgainstManifests({
-      document: seed.document,
-      pluginManifests: input.pluginManifests,
-    });
-
-    if (seedIssues.length > 0) {
-      return Object.freeze({
-        status: 'failed',
-        configuredCharacterId: characterId,
-        messages: seedIssues,
-      });
-    }
-  }
 
   try {
-    await ensureCharacterDataDir({
+    const dataRoot = await ensureCharacterDataDir({
       homeRoot: input.homeRoot,
       characterId,
-      ...(seed !== undefined && seed.status === 'seed'
-        ? {seedDocument: seed.document}
-        : {}),
+    });
+    const marker = requireCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId,
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      ...(input.location.configPath === undefined
+        ? {}
+        : {configPath: input.location.configPath}),
+      ...(input.location.storeRoot === undefined
+        ? {storeRoot: input.homeRoot}
+        : {storeRoot: input.location.storeRoot}),
+      env: input.configEnv,
+      scope: 'character',
+      characterId,
+      characterScope: {characterId, dataRoot},
+    });
+    const applied = applyRuntimeConfigControlOperation({
+      target,
+      characterMaterialization: {
+        document: input.document,
+        fillMissingFields:
+          marker.materializedCharacterPackageVersion !==
+          input.characterActivation.definition.meta.version,
+      },
+      ...(input.request === undefined ? {} : {request: input.request}),
+    });
+
+    await recordMaterializedCharacterPackageVersion({
+      storageOptions: {storeRoot: dataRoot},
+      characterId,
+      packageVersion: input.characterActivation.definition.meta.version,
+    });
+
+    return Object.freeze({
+      status: 'resolved',
+      diagnostics: Object.freeze(
+        applied.materialization.autoEnabledPluginIds
+          .filter(
+            pluginId => applied.config.plugins?.[pluginId]?.enabled === true,
+          )
+          .map(pluginId =>
+            createRuntimeConfigDiagnostic(
+              'warning',
+              'character_package_plugin_auto_enabled',
+              `Character package "${characterId}" enabled plugin "${pluginId}" in the character config.`,
+              `plugins.${pluginId}.enabled`,
+              {pluginId},
+            ),
+          ),
+      ),
+      ...(input.request === undefined ? {} : {configMutation: applied}),
     });
   } catch (error: unknown) {
-    // Only a binding rejection is character-shaped (wrong character for
+    // Only an identity mismatch is character-shaped (wrong character for
     // this data directory); every other storage error keeps its own
     // formatted identity through the caller's terminal-error path.
     if (
       error instanceof LocalRuntimeStorageContractError &&
-      error.code === 'character_binding_rejected'
+      error.code === 'character_identity_mismatch'
     ) {
       return Object.freeze({
         status: 'failed',
-        configuredCharacterId: characterId,
-        messages: Object.freeze([error.message]),
+        characterActivation: Object.freeze({
+          status: 'failed',
+          configuredCharacterId: characterId,
+          messages: Object.freeze([error.message]),
+        }),
       });
     }
 
     throw error;
   }
+}
 
-  return undefined;
+function resolveCharacterConfigStartupRequest(options: {
+  readonly request: RuntimeCliCharacterConfigRequest | undefined;
+  readonly plan: PreparedProject02PluginActivationPlan;
+}): RuntimeConfigControlRequest | undefined {
+  if (options.request === undefined) {
+    return undefined;
+  }
+
+  if (options.request.kind === 'document') {
+    assertScopedMutationOperationAllowed(options.request.operation);
+    return options.request;
+  }
+
+  const definition = options.plan.catalogEntries[options.request.pluginId];
+
+  if (
+    definition === undefined ||
+    definition.manifest.id !== options.request.pluginId
+  ) {
+    throw new RuntimeConfigMutationError(
+      `Plugin "${options.request.pluginId}" is not installed.`,
+    );
+  }
+
+  return Object.freeze({
+    kind: 'plugin_activation',
+    manifest: definition.manifest,
+    enabled: options.request.enabled,
+  });
+}
+
+function prepareCharacterMaterializationPreflight(options: {
+  readonly expectations: CharacterPluginExpectations | undefined;
+  readonly plan: PreparedProject02PluginActivationPlan;
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
+  readonly request: RuntimeCliCharacterConfigRequest | undefined;
+}) {
+  const request = resolveCharacterConfigStartupRequest({
+    request: options.request,
+    plan: options.plan,
+  });
+  const packagePlan = planCharacterPackagePluginMaterialization({
+    expectations: options.expectations,
+    pluginManifests: Object.values(options.plan.catalogEntries).map(
+      entry => entry.manifest,
+    ),
+  });
+
+  return Object.freeze({
+    request,
+    packagePlan,
+    diagnostics: Object.freeze([
+      ...(packagePlan.status === 'invalid' ? packagePlan.diagnostics : []),
+      ...materializationConfigPreflightDiagnostics(options.plan),
+      ...declaredInvalidPackageDiagnostics({
+        expectations: options.expectations,
+        catalogSnapshot: options.catalogSnapshot,
+      }),
+    ]),
+  });
+}
+
+function materializationConfigPreflightDiagnostics(
+  plan: PreparedProject02PluginActivationPlan,
+): readonly RuntimeConfigDiagnostic[] {
+  return Object.freeze(
+    plan.resolvedConfig.diagnostics.filter(
+      diagnostic =>
+        diagnostic.severity === 'error' &&
+        // Missing required values are activation readiness failures, not
+        // proof that an authored document is malformed. Runtime .env is
+        // also loaded only after durable initialization. All other
+        // errors here describe an invalid authored global or overlay
+        // value and must fail before materialization writes anything.
+        diagnostic.code !== 'runtime_config_required_value_missing' &&
+        diagnostic.code !== 'runtime_config_required_secret_missing',
+    ),
+  );
+}
+
+function declaredInvalidPackageDiagnostics(options: {
+  readonly expectations: CharacterPluginExpectations | undefined;
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
+}): readonly RuntimeConfigDiagnostic[] {
+  if (
+    options.expectations === undefined ||
+    options.catalogSnapshot === undefined
+  ) {
+    return Object.freeze([]);
+  }
+
+  const declaredIds = new Set([
+    ...options.expectations.required,
+    ...options.expectations.recommended,
+    ...Object.keys(options.expectations.config),
+  ]);
+
+  return Object.freeze(
+    options.catalogSnapshot.diagnostics
+      .filter(
+        diagnostic =>
+          diagnostic.code.startsWith('runtime_plugin_package_') &&
+          diagnostic.scope === 'plugin' &&
+          declaredIds.has(diagnostic.pluginId),
+      )
+      .map(diagnostic =>
+        Object.freeze({
+          ...diagnostic,
+          severity: 'error' as const,
+        }),
+      ),
+  );
 }
 
 function startupConfigHasErrors(
@@ -509,8 +671,8 @@ function loadCharacterOverlayForStartup(options: {
     return undefined;
   }
 
-  // The binding and adoptability rules hold for read-only startups
-  // too: a data directory stamped for another character, holding
+  // The marker and adoptability rules hold for read-only startups too:
+  // a data directory marked for another character, holding
   // foreign content, or reached through a symlink must fail check and
   // inspect exactly as durable materialization does.
   assertCharacterDataDirReadable({
@@ -570,6 +732,7 @@ function prepareActivationPlan(options: {
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly location: RuntimeLocationCliState;
   readonly env: NodeJS.ProcessEnv;
+  readonly validateInactivePluginConfigs?: boolean;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
@@ -582,6 +745,8 @@ function prepareActivationPlan(options: {
       ? {}
       : {storeRoot: options.location.storeRoot}),
     env: options.env,
+    validateInactivePluginConfigs:
+      options.validateInactivePluginConfigs === true,
     ...(options.factories === undefined ? {} : {factories: options.factories}),
     ...(options.catalogSnapshot === undefined
       ? {}

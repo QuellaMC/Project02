@@ -56,6 +56,7 @@ describe('inspect CLI evidence indexing', () => {
 
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId,
       createdAt: identity.createdAt,

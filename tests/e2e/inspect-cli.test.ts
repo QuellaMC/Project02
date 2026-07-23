@@ -1,7 +1,13 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
-import {ensureCharacterDataStamp} from '../../src/runtime/storage/index.ts';
+import {ensureCharacterDataMarker} from '../../src/runtime/storage/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -24,7 +30,9 @@ import {
 } from '../../src/role-model/index.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
-  applyScopedRuntimeConfigControlOperation,
+  applyRuntimeConfigControlOperation,
+  characterOverlayConfigPath,
+  resolveRuntimeConfigScopeTarget,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
@@ -46,12 +54,14 @@ describe('inspect CLI plugin evidence', () => {
     const storeRoot = createTestTempRoot('project02-inspect-');
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-inspect',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId: 'session-inspect',
     });
@@ -196,16 +206,23 @@ describe('inspect CLI plugin evidence', () => {
         'unknown-plugin': {
           enabled: true,
         },
+      },
+    });
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+
+    await createLocalRuntimeSessionStore({
+      storeRoot: dataRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId: 'session-config',
+      createdAt: '2026-06-21T00:00:00.000Z',
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {
         'character-state': {
           enabled: false,
         },
       },
-    });
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-    }).createSession({
-      sessionId: 'session-config',
-      createdAt: '2026-06-21T00:00:00.000Z',
     });
 
     let stdout = '';
@@ -278,6 +295,7 @@ describe('inspect CLI plugin evidence', () => {
     );
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-cwd-config',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -341,6 +359,7 @@ describe('inspect CLI plugin evidence', () => {
     );
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-selected-store',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -396,6 +415,7 @@ describe('inspect CLI plugin evidence', () => {
     mkdirSync(join(cwdRoot, '.env'));
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-selected-before-cwd-dotenv',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -465,6 +485,7 @@ describe('inspect CLI plugin evidence', () => {
     mkdirSync(join(cwdRoot, '.env'));
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-env-selected-before-cwd-dotenv',
       createdAt: '2026-06-22T00:00:00.000Z',
@@ -524,6 +545,7 @@ describe('inspect CLI plugin evidence', () => {
     });
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-custom-factory',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -638,7 +660,7 @@ describe('inspect CLI plugin evidence', () => {
     let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -665,6 +687,12 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toEqual({
+      version: 'project02.config.v2',
+      plugins: {'character-state': {enabled: true}},
+    });
   });
 
   it('reports a foreign entry in the data directory instead of an empty session list', async () => {
@@ -706,11 +734,12 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
-      join(dataRoot, 'character-binding.json'),
+      join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'mira',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
     writeFileSync(join(outside, 'external-catalog.jsonl'), '');
@@ -734,7 +763,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('Error:');
   });
 
-  it('rejects a session list when the binding stamp names another character', async () => {
+  it('rejects a session list when the data marker names another character', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-foreign-list-');
     const dataRoot = characterDataDirPath(storeRoot, 'mira');
     let stderr = '';
@@ -742,11 +771,12 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
-      join(dataRoot, 'character-binding.json'),
+      join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'nova',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
 
@@ -765,22 +795,23 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('holds history for character "nova"');
   });
 
-  it('rejects a session read when the binding stamp names another character', async () => {
-    const storeRoot = createTestTempRoot('project02-inspect-foreign-stamp-');
+  it('rejects a session read when the data marker names another character', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-foreign-marker-');
     const dataRoot = characterDataDirPath(storeRoot, 'mira');
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A copied data directory: mira's path carries nova's stamp. The
-    // binding must hold at inspection even when the selected session
+    // A copied data directory: mira's path carries nova's marker. The
+    // identity must hold at inspection even when the selected session
     // carries no character evidence at all.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
-      join(dataRoot, 'character-binding.json'),
+      join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        format: 'project02.character-binding.v1',
+        schemaVersion: 4,
+        scope: 'character-data',
         characterId: 'nova',
-        boundAt: '2026-07-23T00:00:00.000Z',
+        createdAt: '2026-07-23T00:00:00.000Z',
       })}\n`,
     );
 
@@ -807,7 +838,7 @@ describe('inspect CLI plugin evidence', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       project02: {userDisplayName: 'Home Name'},
     });
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
@@ -838,27 +869,95 @@ describe('inspect CLI plugin evidence', () => {
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
   });
 
+  it('keeps the owning home when both aliased overlay and global config are absent', async () => {
+    const homeRoot = createTestTempRoot('project02-inspect-absent-layers-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = join(dataRoot, 'config.json');
+    let stdout = '';
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--character', 'mira', '--config', overlayPath, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      runtimeConfig: {
+        project02: {storeRoot: realpathSync(homeRoot), character: 'mira'},
+      },
+      sessions: [],
+    });
+  });
+
+  it('keeps the owning home when an absent overlay is selected through the environment', async () => {
+    const homeRoot = createTestTempRoot('project02-inspect-env-absent-layers-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = join(dataRoot, 'config.json');
+    let stdout = '';
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--character', 'mira', '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {[runtimeConfigEnvVarName]: overlayPath},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({
+      runtimeConfig: {
+        project02: {storeRoot: realpathSync(homeRoot), character: 'mira'},
+      },
+      sessions: [],
+    });
+  });
+
   it('lists no sessions for a data directory holding only control state', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-control-only-');
     let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A config-only workflow leaves a binding stamp, an overlay, and
+    // A config-only workflow leaves an identity marker, an overlay, and
     // locks — but no session artifacts. That is an empty view, not a
     // corrupt store.
-    await ensureCharacterDataStamp({
+    await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(storeRoot, 'mira')},
       characterId: 'mira',
     });
-    applyScopedRuntimeConfigControlOperation({
+    const target = resolveRuntimeConfigScopeTarget({
       storeRoot,
       env: {},
       scope: 'character',
       characterId: 'mira',
-      operation: {
-        kind: 'set',
-        path: 'project02.userDisplayName',
-        value: 'Config Only',
+    });
+    applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Config Only',
+        },
       },
     });
 
@@ -874,10 +973,7 @@ describe('inspect CLI plugin evidence', () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(JSON.parse(stdout)).toMatchObject({
-      sessions: [],
-      characterBinding: {status: 'bound'},
-    });
+    expect(JSON.parse(stdout)).toMatchObject({sessions: []});
   });
 
   it('reports config load errors before runtime env file errors', async () => {
@@ -931,6 +1027,7 @@ describe('inspect CLI plugin evidence', () => {
     });
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-activation-before-env',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -999,6 +1096,7 @@ describe('inspect CLI plugin evidence', () => {
     });
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-mixed-activation-env',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -1068,6 +1166,7 @@ describe('inspect CLI plugin evidence', () => {
     });
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-close',
       createdAt: '2026-06-22T00:00:00.000Z',
@@ -1134,6 +1233,7 @@ describe('inspect CLI plugin evidence', () => {
     });
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'existing-session',
       createdAt: '2026-06-22T00:00:00.000Z',
@@ -1235,6 +1335,7 @@ describe('inspect CLI plugin evidence', () => {
     );
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
     }).createSession({
       sessionId: 'session-env',
       createdAt: '2026-06-21T00:00:00.000Z',
@@ -1352,6 +1453,7 @@ function createInspectFixturePlugin(
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -1387,6 +1489,7 @@ function createInspectRequiredConfigFixturePlugin(
     manifest: {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'endpoint',
@@ -1411,6 +1514,7 @@ function createInspectRequiredSecretAndConfigFixturePlugin(
     manifest: {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           ...plugin.manifest.config.fields,
           {
@@ -1446,6 +1550,7 @@ function createInspectSessionEndFixturePlugin(
       },
       declaredPlugins: ['on_session_end'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',

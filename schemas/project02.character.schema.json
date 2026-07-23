@@ -21,7 +21,7 @@
         "id": {
           "type": "string",
           "pattern": "^[A-Za-z][A-Za-z0-9._-]{0,127}$",
-          "description": "Stable character id; must equal the package folder name. Permanent once a store is bound to it."
+          "description": "Stable character id; must equal the package folder name and the identity recorded in its character-data marker."
         },
         "displayName": {
           "type": "string",
@@ -66,7 +66,7 @@
     "plugins": {
       "type": "object",
       "additionalProperties": false,
-      "description": "Plugins this character expects: required ids block activation when missing or disabled, recommended ids warn, config seeds per-plugin defaults into the character overlay on first selection.",
+      "description": "Plugins this character expects: required ids block activation when missing or disabled, recommended ids warn, and config supplies non-secret character defaults.",
       "properties": {
         "required": {
           "type": "array",
@@ -91,11 +91,39 @@
           "additionalProperties": false,
           "patternProperties": {
             "^[A-Za-z][A-Za-z0-9._-]{0,127}$": {
-              "type": "object"
+              "$ref": "#/definitions/packagePluginConfig"
             }
           }
         }
       }
+    }
+  },
+  "definitions": {
+    "packagePluginConfig": {
+      "type": "object",
+      "properties": {
+        "$env": false,
+        "$plaintextSecret": false,
+        "allowPlaintextSecret": false
+      },
+      "additionalProperties": {
+        "$ref": "#/definitions/packageConfigValue"
+      }
+    },
+    "packageConfigValue": {
+      "anyOf": [
+        {"type": "string"},
+        {"type": "number"},
+        {"type": "boolean"},
+        {"type": "null"},
+        {
+          "type": "array",
+          "items": {"$ref": "#/definitions/packageConfigValue"}
+        },
+        {
+          "$ref": "#/definitions/packagePluginConfig"
+        }
+      ]
     }
   }
 }

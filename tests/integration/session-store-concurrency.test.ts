@@ -61,6 +61,7 @@ describe('local runtime session catalog concurrency', () => {
     expect(results.every(result => result.status === 'created')).toBe(true);
     const sessions = await createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
     }).listSessions();
     expect(sessions.map(session => session.sessionId)).toEqual(sessionIds);
   }, 20_000);
@@ -68,7 +69,7 @@ describe('local runtime session catalog concurrency', () => {
   it('allows exactly one creator for a shared session ID', async () => {
     const storeRoot = await createTempStoreRoot();
     const stores = Array.from({length: 12}, () =>
-      createLocalRuntimeSessionStore({storeRoot}),
+      createLocalRuntimeSessionStore({storeRoot, characterId: 'mira'}),
     );
 
     const results = await Promise.allSettled(
@@ -108,7 +109,10 @@ describe('local runtime session catalog concurrency', () => {
 
     await Promise.all(
       sessionIds.map(async sessionId => {
-        await createLocalRuntimeSessionStore({storeRoot}).createSession({
+        await createLocalRuntimeSessionStore({
+          storeRoot,
+          characterId: 'mira',
+        }).createSession({
           sessionId,
           createdAt: '2026-07-11T00:00:00.000Z',
         });
@@ -117,6 +121,7 @@ describe('local runtime session catalog concurrency', () => {
 
     const sessions = await createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
     }).listSessions();
     expect(sessions.map(session => session.sessionId)).toEqual(sessionIds);
 
@@ -126,7 +131,10 @@ describe('local runtime session catalog concurrency', () => {
 
   it('compacts legacy duplicate catalog history on selection', async () => {
     const storeRoot = await createTempStoreRoot();
-    const store = createLocalRuntimeSessionStore({storeRoot});
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    });
     const created = await store.createSession({
       sessionId: 'legacy-history',
       createdAt: '2026-07-11T00:00:00.000Z',
@@ -172,7 +180,7 @@ async function createSessionInChildProcess(
   const script = [
     "import { createLocalRuntimeSessionStore } from './src/runtime/storage/session-store.ts';",
     'try {',
-    '  await createLocalRuntimeSessionStore({ storeRoot: process.argv[1] }).createSession({',
+    "  await createLocalRuntimeSessionStore({ storeRoot: process.argv[1], characterId: 'mira' }).createSession({",
     '    sessionId: process.argv[2],',
     "    createdAt: '2026-07-11T00:00:00.000Z'",
     '  });',

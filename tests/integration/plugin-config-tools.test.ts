@@ -26,10 +26,11 @@ import {
   type RuntimePluginManifest,
 } from '../../src/plugins/api/index.ts';
 import {
-  applyRuntimePluginConfigControlOperation,
+  applyRuntimeConfigControlOperation,
   inspectRuntimePluginConfig,
   loadProject02RuntimeConfig,
-  prepareRuntimePluginConfigControlOperation,
+  prepareRuntimeConfigControlOperation,
+  resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -154,13 +155,20 @@ describe('host-owned runtime plugin management tools', () => {
       configPath,
       storeRoot,
     });
-    const prepared = prepareRuntimePluginConfigControlOperation({
-      manifest: targetManifest,
-      actor: 'agent',
-      expectedFingerprint: before.fingerprint,
-      operation: {kind: 'set', fieldName: 'tone', value: 'warm'},
+    const target = resolveRuntimeConfigScopeTarget({
+      scope: 'global',
       configPath,
       storeRoot,
+    });
+    const prepared = prepareRuntimeConfigControlOperation({
+      target,
+      expectedFingerprint: before.fingerprint,
+      request: {
+        kind: 'plugin_config',
+        manifest: targetManifest,
+        actor: 'agent',
+        fieldOperation: {kind: 'set', fieldName: 'tone', value: 'warm'},
+      },
     });
     const arbitraryPluginId = 'settings.arbitrary.fixture';
     const arbitraryToolName = 'settings.arbitrary.update';
@@ -179,7 +187,7 @@ describe('host-owned runtime plugin management tools', () => {
           sourceSystem: 'test',
         },
         declaredPlugins: ['tool_provider', 'handle_tool_call'],
-        config: {fields: []},
+        config: {scope: 'global_with_character_overrides', fields: []},
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,
@@ -776,6 +784,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = createRuntimePluginManifest({
       ...baseManifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: baseManifest.config.fields.map(field =>
           field.name === 'tone' ? {...field, reloadRequired: false} : field,
         ),
@@ -897,6 +906,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = createRuntimePluginManifest({
       ...baseManifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           ...baseManifest.config.fields.map(field =>
             field.name === 'tone' ? {...field, reloadRequired: false} : field,
@@ -1036,6 +1046,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = createRuntimePluginManifest({
       ...baseManifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           ...baseManifest.config.fields.map(field =>
             field.name === 'tone' ? {...field, reloadRequired: false} : field,
@@ -1513,17 +1524,23 @@ describe('host-owned runtime plugin management tools', () => {
         configPath,
       },
       toolConfirmationHandler: () => {
-        applyRuntimePluginConfigControlOperation({
-          manifest,
-          actor: 'operator',
+        applyRuntimeConfigControlOperation({
+          target: resolveRuntimeConfigScopeTarget({
+            scope: 'global',
+            configPath,
+            storeRoot,
+          }),
           expectedFingerprint: before.fingerprint,
-          operation: {
-            kind: 'set',
-            fieldName: 'tone',
-            value: 'competing-value',
+          request: {
+            kind: 'plugin_config',
+            manifest,
+            actor: 'operator',
+            fieldOperation: {
+              kind: 'set',
+              fieldName: 'tone',
+              value: 'competing-value',
+            },
           },
-          configPath,
-          storeRoot,
         });
         return {status: 'approved'};
       },
@@ -2028,6 +2045,7 @@ function configurablePluginManifest(
     },
     declaredPlugins: ['tool_provider'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'tone',

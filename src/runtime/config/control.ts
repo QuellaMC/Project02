@@ -14,7 +14,7 @@ import {
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
-import {assertCharacterDataDirReadable} from '../storage/character-binding.ts';
+import {assertCharacterDataDirReadable} from '../storage/character-data.ts';
 import {
   acquireLocalRuntimeMutationLockSync,
   LocalRuntimeMutationLockBusyError,
@@ -37,6 +37,7 @@ import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
 } from './schema.ts';
+import {runtimePluginScopeViolation} from './plugin-scope.ts';
 import {
   redactRuntimeConfigValue,
   runtimeConfigValueIsSecretMarker,
@@ -57,47 +58,17 @@ import type {
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
   {
-    readonly kind:
-      | 'set'
-      | 'unset'
-      | 'plugin_enable'
-      | 'plugin_disable'
-      | 'default_memory_provider';
+    readonly kind: 'set' | 'unset' | 'default_memory_provider';
   }
 >;
 
-export function applyRuntimeConfigControlOperation(options: {
+export function applyGlobalRuntimeConfigControlMutation(options: {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly expectedFingerprint?: string;
   readonly storeRoot?: string;
   readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly operation: RuntimeConfigControlOperation;
-}): RuntimeConfigMutationResult {
-  assertRuntimeConfigControlOperation(options.operation);
-  return applyGlobalTargetControlMutation(options);
-}
-
-/**
- * Shared core of the global-target control writes. A layered
- * expectation is verified — and stays protected — under the active
- * character's overlay control lock, so a concurrent scoped edit cannot
- * land between the check and the global commit; the mutation machinery
- * then takes the global file's own lock inside. (The scoped path locks
- * global-then-overlay; a rare cross-scope race resolves through the
- * lock wait timeout as a conflict, never a silent stale write.) The
- * result fingerprint re-derives the scope from the committed document:
- * a write that changes the selected character reports the new layer.
- */
-function applyGlobalTargetControlMutation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly expectedFingerprint?: string;
-  readonly storeRoot?: string;
-  readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly operation: Parameters<
-    typeof applyRuntimeConfigMutation
-  >[0]['operation'];
+  readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 }): RuntimeConfigMutationResult {
   return withExpectationOverlayLock(options, () => {
@@ -243,16 +214,19 @@ export function lockFailureProvesNoOverlayWriter(error: unknown): boolean {
   );
 }
 
-function assertRuntimeConfigControlOperation(
+export function assertRuntimeConfigControlOperation(
   operation: RuntimeConfigMutationOperation,
 ): asserts operation is RuntimeConfigControlOperation {
   switch (operation.kind) {
     case 'set':
     case 'unset':
-    case 'plugin_enable':
-    case 'plugin_disable':
     case 'default_memory_provider':
       return;
+    case 'plugin_enable':
+    case 'plugin_disable':
+      throw new TypeError(
+        'Plugin activation must be changed through manifest-aware control.',
+      );
     case 'plugin_config_set':
     case 'plugin_config_unset':
     case 'secret_set':
@@ -307,7 +281,7 @@ export function inspectRuntimePluginConfig(options: {
   });
   const characterScope = controlCharacterScope(loadedConfig, options);
 
-  // The binding and adoptability rules hold for control reads too: a
+  // The identity and adoptability rules hold for control reads too: a
   // data directory rebound to another character must not feed its
   // overlay into model-visible plugin config.
   if (characterScope !== undefined) {
@@ -367,7 +341,7 @@ export function inspectRuntimePluginConfig(options: {
 /**
  * The character scope a control operation fingerprints against: the
  * explicit scope threaded from activation when present, else the same
- * derivation activation itself uses. Every stamp/inspect/prepare/apply
+ * derivation activation itself uses. Every inspect/prepare/apply
  * site composes fingerprints through this one pair.
  */
 function controlCharacterScope(
@@ -398,25 +372,6 @@ function layeredControlFingerprint(options: {
     globalConfig: options.globalConfig,
     characterScope: options.characterScope,
     overlay: options.overlayConfig,
-  });
-}
-
-export function applyRuntimePluginConfigControlOperation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-  readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly manifest: RuntimePluginManifest;
-  readonly actor: RuntimePluginConfigControlActor;
-  readonly expectedFingerprint: string;
-  readonly operation: RuntimePluginConfigFieldControlOperation;
-}): RuntimeConfigMutationResult {
-  const mutation = runtimePluginConfigControlMutation(options);
-
-  return applyGlobalTargetControlMutation({
-    ...options,
-    operation: mutation.operation,
-    validateCandidate: mutation.validateCandidate,
   });
 }
 
@@ -477,15 +432,14 @@ function verifyLayeredControlExpectation(options: {
   };
 }
 
-export function prepareRuntimePluginConfigControlOperation(options: {
+export function prepareGlobalRuntimeConfigControlMutation(options: {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
   readonly storeRoot?: string;
   readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly manifest: RuntimePluginManifest;
-  readonly actor: RuntimePluginConfigControlActor;
   readonly expectedFingerprint: string;
-  readonly operation: RuntimePluginConfigFieldControlOperation;
+  readonly operation: RuntimeConfigMutationOperation;
+  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 }): {
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
@@ -522,7 +476,6 @@ export function prepareRuntimePluginConfigControlOperation(options: {
     );
   }
 
-  const mutation = runtimePluginConfigControlMutation(options);
   // The layered expectation was already verified on this exact loaded
   // snapshot, so the candidate preparation runs without its own
   // per-file expectation.
@@ -532,8 +485,10 @@ export function prepareRuntimePluginConfigControlOperation(options: {
       ? {}
       : {configPath: options.configPath}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    validateCandidate: mutation.validateCandidate,
-    operation: mutation.operation,
+    ...(options.validateCandidate === undefined
+      ? {}
+      : {validateCandidate: options.validateCandidate}),
+    operation: options.operation,
   });
 
   return Object.freeze({
@@ -596,11 +551,21 @@ export function runtimePluginConfigControlMutation(options: {
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
+  readonly authoredScope?: 'global' | 'character';
 }): {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
   const field = validateRuntimePluginConfigControlOperation(options);
+  const scopeViolation = runtimePluginScopeViolation({
+    manifest: options.manifest,
+    authoredScope: options.authoredScope ?? 'global',
+    operation: {kind: 'field', fieldName: field.name},
+  });
+
+  if (scopeViolation !== undefined) {
+    throw new TypeError(scopeViolation.message);
+  }
 
   return {
     operation: runtimePluginConfigMutationOperation(options.operation, {
@@ -662,6 +627,7 @@ function assertRuntimePluginConfigCandidateValid(options: {
       diagnostics: Object.freeze([]),
     },
     pluginManifests: [options.manifest],
+    skipPluginScopeValidation: true,
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     validateInactivePluginConfigs: true,

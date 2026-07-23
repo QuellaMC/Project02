@@ -30,6 +30,7 @@ import {
 } from '../../shared/json-boundary.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {runtimeConfigValueMatchesField} from './schema.ts';
+import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -39,6 +40,13 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly allowPlaintextSecrets?: boolean;
   readonly validateInactivePluginConfigs?: boolean;
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
+  /** Scope of this authored document. Defaults to the global home config. */
+  readonly authoredScope?: 'global' | 'character';
+  /**
+   * Layered resolution validates each raw layer before merging, then
+   * disables this merged-document check so origins are not lost.
+   */
+  readonly skipPluginScopeValidation?: boolean;
 };
 
 export function resolveProject02RuntimeConfig(
@@ -49,6 +57,13 @@ export function resolveProject02RuntimeConfig(
   const storeRoot = resolveProject02RuntimeStoreRoot(options);
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...options.loadedConfig.diagnostics,
+    ...(options.skipPluginScopeValidation === true
+      ? []
+      : runtimePluginScopeDiagnostics({
+          config,
+          manifests: options.pluginManifests ?? [],
+          authoredScope: options.authoredScope ?? 'global',
+        })),
   ];
   const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
@@ -202,13 +217,13 @@ function resolvePluginConfig(options: {
     options.config?.plugins,
     options.manifest.id,
   );
+  const validateReadiness = shouldValidatePluginConfig({
+    config: options.config,
+    manifest: options.manifest,
+    defaultEnabled: options.defaultEnabled,
+  });
   const validateConfig =
-    options.validateInactivePluginConfigs ||
-    shouldValidatePluginConfig({
-      config: options.config,
-      manifest: options.manifest,
-      defaultEnabled: options.defaultEnabled,
-    });
+    options.validateInactivePluginConfigs || validateReadiness;
 
   if (validateConfig) {
     pushUnknownPluginConfigFieldDiagnostics({
@@ -225,6 +240,7 @@ function resolvePluginConfig(options: {
         resolvePluginConfigField({
           ...options,
           validateConfig,
+          validateReadiness,
           field,
           rawValue: ownJsonRecordValue(configuredPlugin?.config, field.name),
         }),
@@ -242,6 +258,7 @@ function resolvePluginConfigField(options: {
   readonly allowPlaintextSecrets: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly validateConfig: boolean;
+  readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
   const path = `plugins.${options.manifest.id}.config.${options.field.name}`;
 
@@ -250,7 +267,7 @@ function resolvePluginConfigField(options: {
   }
 
   if (options.rawValue === undefined) {
-    if (options.field.required && options.validateConfig) {
+    if (options.field.required && options.validateReadiness) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
@@ -327,6 +344,7 @@ function resolveSecretField(options: {
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
   readonly validateConfig: boolean;
+  readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
   const envRef =
     options.rawValue === undefined && options.field.envVar !== undefined
@@ -359,7 +377,7 @@ function resolveSecretField(options: {
     const secretValue = options.env[envRef.$env];
     const resolved = secretValue !== undefined && secretValue.length > 0;
 
-    if (!resolved && options.field.required && options.validateConfig) {
+    if (!resolved && options.field.required && options.validateReadiness) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
@@ -421,7 +439,7 @@ function resolveSecretField(options: {
     });
   }
 
-  if (options.field.required && options.validateConfig) {
+  if (options.field.required && options.validateReadiness) {
     options.diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
