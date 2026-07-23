@@ -227,6 +227,53 @@ describe('configured runtime plugin reloader', () => {
     expect(tampered.reason).toContain('moved past');
   });
 
+  it('refuses to reload from a data directory rebound to another character', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-reload-rebind-');
+    const configPath = join(storeRoot, 'config.json');
+    const overlayPath = join(
+      storeRoot,
+      'character-data',
+      'mira',
+      'config.json',
+    );
+
+    writeRuntimeConfig(configPath, {
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+    mkdirSync(dirname(overlayPath), {recursive: true});
+    writeRuntimeConfig(overlayPath, {
+      plugins: {'demo-config': {config: {tone: 'formal'}}},
+    });
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      loadedConfig: loadProject02RuntimeConfig({
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      storeRoot,
+      env: {},
+    });
+    const reloader = createConfiguredRuntimePluginReloader({activationPlan});
+
+    // The data dir is rebound to another character after approval:
+    // the reload must fail exactly as startup would refuse the store.
+    writeFileSync(
+      join(dirname(overlayPath), 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'nova',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+
+    await expect(
+      reloader.reload('demo-config', {
+        expectedFingerprint: activationPlan.authoredConfigFingerprint,
+      }),
+    ).rejects.toThrow('holds history for character "nova"');
+  });
+
   it('declines when the authored config moved past the approved update', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-reload-moved-');
     const configPath = join(storeRoot, 'config.json');

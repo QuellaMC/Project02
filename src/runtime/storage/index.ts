@@ -36,6 +36,7 @@ export {
   homeRootForCharacterDataDir,
   type LocalRuntimeStorageSchemaMarker,
 } from './layout-contract.ts';
+export {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 export {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,

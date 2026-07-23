@@ -45,6 +45,7 @@ import {
   prepareRuntimeConfigMutationCandidate,
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
+  selectedConfigPathIsCharacterOverlay,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {
@@ -334,13 +335,31 @@ function scopedGlobalLayerLocation(
         : {characterId: options.characterId}),
     });
 
+  if (scope === undefined) {
+    return options;
+  }
+
+  const canonicalSelected = canonicalRuntimeConfigMutationPath(
+    options.configPath.trim(),
+  );
+
   if (
-    scope === undefined ||
-    canonicalRuntimeConfigMutationPath(options.configPath.trim()) !==
-      canonicalRuntimeConfigMutationPath(
-        characterOverlayConfigPath(scope.dataRoot),
-      )
+    canonicalSelected !==
+    canonicalRuntimeConfigMutationPath(
+      characterOverlayConfigPath(scope.dataRoot),
+    )
   ) {
+    // An overlay-shaped selection for a DIFFERENT character can never
+    // serve as this scope's global layer: it would validate and merge
+    // against the wrong character's settings.
+    if (selectedConfigPathIsCharacterOverlay(canonicalSelected)) {
+      throw new RuntimeConfigMutationError(
+        `Config path "${canonicalSelected}" is another character's ` +
+          `overlay; it cannot serve as the global layer for character ` +
+          `"${scope.characterId}".`,
+      );
+    }
+
     return options;
   }
 

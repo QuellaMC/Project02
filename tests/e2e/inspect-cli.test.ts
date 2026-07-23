@@ -632,6 +632,41 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('lists no sessions while a sibling marker replacement is live', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-live-temp-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    // A concurrent first initializer between temp-write and rename:
+    // the live replacement must not fail the control-only view.
+    writeFileSync(
+      join(
+        dataRoot,
+        `.schema.json.${String(process.pid)}.0f0e0d0c-0b0a-4908-8706-050403020100.tmp`,
+      ),
+      '',
+    );
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({sessions: []});
+  });
+
   it('reports a foreign entry in the data directory instead of an empty session list', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-foreign-entry-');
     const dataRoot = characterDataDirPath(storeRoot, 'mira');

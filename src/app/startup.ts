@@ -592,6 +592,7 @@ function prepareActivationPlan(options: {
     characterId: options.characterActivation.profile.id,
     activation: plan.activation,
     installedPluginIds: new Set(Object.keys(plan.catalogEntries)),
+    storeRoot: plan.resolvedConfig.project02.storeRoot,
   });
 
   return enforcement.length === 0

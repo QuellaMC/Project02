@@ -221,15 +221,12 @@ async function runRuntimePluginSecretSetCommand(
 
   await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
 
-  // An explicitly selected config that IS a home's default config.json
-  // derives that home's .env for the secret write; the env file must
-  // be a real in-home file even though the guard above skipped the
-  // explicit selection.
-  const envHome = storeRootForLoadedDefaultConfigPath(startup.loadedConfig);
-
-  if (envHome !== undefined) {
-    await assertRealHomeEnvFile({homeRoot: envHome});
-  }
+  // The secret lands at the RESOLVED home's .env — which may differ
+  // from the selected one when the config's own storeRoot points
+  // elsewhere — so validate the env file where the write will happen.
+  await assertRealHomeEnvFile({
+    homeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
+  });
 
   const result = applyRuntimePluginSecretSetCommand({
     location: parsedArgs.location,

@@ -606,6 +606,37 @@ describe('overlay files reached through --config directly', () => {
     expect(existsSync(dataRoot)).toBe(false);
   });
 
+  it('rejects another character overlay offered as the global layer', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-cross-alias-');
+    const miraRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: miraRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(miraRoot), {
+      project02: {userDisplayName: 'Mira Name'},
+    });
+
+    // Mira's overlay can neither serve as Nova's global layer nor
+    // seed a write into Nova's scope.
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'nova',
+      '--config',
+      characterOverlayConfigPath(miraRoot),
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain("another character's overlay");
+    expect(existsSync(characterDataDirPath(homeRoot, 'nova'))).toBe(false);
+  });
+
   it('keeps plain file semantics for a standalone overlay --config read', async () => {
     const homeRoot = createTestTempRoot('project02-scope-plain-config-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');

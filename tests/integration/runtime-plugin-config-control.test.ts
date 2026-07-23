@@ -511,6 +511,45 @@ describe('runtime plugin config control', () => {
     );
   });
 
+  it('refuses to inspect through a data directory rebound to another character', async () => {
+    const homeRoot = createTestTempRoot('project02-plugin-inspect-rebind-');
+    const dataRoot = join(homeRoot, 'character-data', 'mira');
+    const plugin = requiredSecretPlugin('operator.rebind-inspect');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const before = inspectRuntimePluginConfig({
+      storeRoot: homeRoot,
+      env: {},
+      manifest: plugin.manifest,
+    });
+
+    expect(before.pluginId).toBe('operator.rebind-inspect');
+
+    // Rebound after the fact: model-visible config must not come from
+    // a store the runtime would refuse.
+    writeFileSync(
+      join(dataRoot, 'character-binding.json'),
+      `${JSON.stringify({
+        format: 'project02.character-binding.v1',
+        characterId: 'nova',
+        boundAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+
+    expect(() =>
+      inspectRuntimePluginConfig({
+        storeRoot: homeRoot,
+        env: {},
+        manifest: plugin.manifest,
+      }),
+    ).toThrow('holds history for character "nova"');
+  });
+
   it('rejects a direct overlay secret set entirely', async () => {
     const homeRoot = createTestTempRoot('project02-plugin-overlay-secret-');
     const dataRoot = join(homeRoot, 'character-data', 'mira');

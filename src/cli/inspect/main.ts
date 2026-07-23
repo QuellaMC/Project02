@@ -10,6 +10,7 @@ import {
   createLocalRuntimeStorageLayout,
   assertCharacterDataDirReadable,
   createProject02HomeLayout,
+  isLiveAtomicReplacementForAnyTarget,
   isMissingDefaultSessionStore,
   readCharacterBinding,
   type CharacterBindingReadResult,
@@ -369,11 +370,21 @@ function dataDirHoldsOnlyControlEntries(dataRoot: string): boolean {
   return entries.every(entry => {
     const entryPath = join(dataRoot, entry);
 
-    return (
+    if (
       entryPath === layout.configPath ||
       entryPath === layout.locksRoot ||
       entryPath === layout.characterBindingPath
-    );
+    ) {
+      return true;
+    }
+
+    // A sibling initializer's live marker/overlay/stamp replacement is
+    // not foreign; abandoned temps stay foreign.
+    return isLiveAtomicReplacementForAnyTarget(entry, [
+      layout.schemaPath,
+      layout.configPath,
+      layout.characterBindingPath,
+    ]);
   });
 }
 

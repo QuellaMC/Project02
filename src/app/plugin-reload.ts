@@ -5,6 +5,7 @@
  * config resolution or the catalog, so this capability is injected at
  * host construction (same inversion as fileStore and config control).
  */
+import {assertCharacterDataDirReadable} from '../runtime/storage/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {
@@ -73,6 +74,17 @@ export function createConfiguredRuntimePluginReloader(options: {
             : {env: pluginConfigControl.env}),
           storeRoot: resolvedConfig.project02.storeRoot,
         });
+
+        // A data directory rebound to another character mid-run must
+        // decline the reload, exactly as startup would refuse it.
+        if (pluginConfigControl.characterScope !== undefined) {
+          assertCharacterDataDirReadable({
+            storageOptions: {
+              storeRoot: pluginConfigControl.characterScope.dataRoot,
+            },
+            characterId: pluginConfigControl.characterScope.characterId,
+          });
+        }
 
         return {
           loaded,

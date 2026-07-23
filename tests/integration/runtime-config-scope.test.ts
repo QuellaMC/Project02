@@ -528,6 +528,28 @@ describe('global control writes aimed directly at the overlay path', () => {
   });
 });
 
+describe('stale global expectations', () => {
+  it('conflicts without materializing a lock root in an absent data dir', () => {
+    const {homeRoot, dataRoot} = seededHome();
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        storeRoot: homeRoot,
+        env: {},
+        expectedFingerprint: 'stale-fingerprint',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Bob',
+        },
+      }),
+    ).toThrow(RuntimeConfigConflictError);
+    // The rejected commit created no character state — not even the
+    // per-character lock root.
+    expect(existsSync(dataRoot)).toBe(false);
+  });
+});
+
 describe('global writes that move the character selection', () => {
   it('reports the new character layer in the returned fingerprint', async () => {
     const homeRoot = createTestTempRoot('project02-scope-switch-');

@@ -7,12 +7,14 @@ import {
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
+import {existsSync} from 'node:fs';
 import {dirname} from 'node:path';
 
 import {
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
+import {assertCharacterDataDirReadable} from '../storage/character-binding.ts';
 import {
   acquireLocalRuntimeMutationLockSync,
   LocalRuntimeMutationLockBusyError,
@@ -195,6 +197,13 @@ function withExpectationOverlayLock<T>(
     return run();
   }
 
+  // No data directory means no overlay and no scoped writer holding
+  // its lock: skip the pre-lock instead of materializing a lock root
+  // that a stale expectation would leave behind on conflict.
+  if (!existsSync(dirname(canonicalOverlayPath))) {
+    return run();
+  }
+
   let overlayLock: ReturnType<typeof acquireLocalRuntimeMutationLockSync>;
 
   try {
@@ -297,6 +306,17 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const characterScope = controlCharacterScope(loadedConfig, options);
+
+  // The binding and adoptability rules hold for control reads too: a
+  // data directory rebound to another character must not feed its
+  // overlay into model-visible plugin config.
+  if (characterScope !== undefined) {
+    assertCharacterDataDirReadable({
+      storageOptions: {storeRoot: characterScope.dataRoot},
+      characterId: characterScope.characterId,
+    });
+  }
+
   const overlayConfig =
     characterScope === undefined
       ? undefined

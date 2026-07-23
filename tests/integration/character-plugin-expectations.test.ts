@@ -316,8 +316,11 @@ describe('first-selection materialization through startup', () => {
       diagnostic => diagnostic.code === 'character_required_plugin_disabled',
     );
 
+    // The recovery command names the selected home so it edits the
+    // right store.
+    expect(disabled?.message).toContain(`--store ${homeRoot} `);
     expect(disabled?.message).toContain(
-      'runtime-config --character seeded plugin enable demo-config',
+      '--character seeded plugin enable demo-config',
     );
   });
 });

@@ -65,6 +65,52 @@ describe('runtime config CLI mutation and storage', () => {
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
 
+  it('validates the configured secret env home, not just the selected one', async () => {
+    const storeA = createTestTempRoot('project02-config-env-home-a-');
+    const storeB = createTestTempRoot('project02-config-env-home-b-');
+    const outside = createTestTempRoot('project02-config-env-home-target-');
+    const targetPath = join(outside, 'external.env');
+    let stderr = '';
+
+    // A's config points the store at B: the secret would land in
+    // B/.env, so B's env file is the one that must be real.
+    writeRuntimeConfig(join(storeA, 'config.json'), {
+      project02: {storeRoot: storeB},
+      plugins: {
+        'mem0-local': {
+          enabled: true,
+          config: {apiKey: {$env: 'MEM0_API_KEY'}},
+        },
+      },
+    });
+    writeFileSync(targetPath, '');
+    symlinkSync(targetPath, join(storeB, '.env'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      [
+        '--store',
+        storeA,
+        'secret',
+        'set',
+        'mem0-local',
+        'apiKey',
+        'MEM0_API_KEY',
+      ],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        factories: installedSecretFactories,
+        env: {MEM0_API_KEY: 'stored-secret'},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(readFileSync(targetPath, 'utf8')).toBe('');
+  });
+
   it('keeps the --store home guard when the config env var is set', async () => {
     const storeRoot = createTestTempRoot('project02-config-envvar-store-');
     const elsewhere = createTestTempRoot('project02-config-envvar-file-');
