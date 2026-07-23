@@ -13,12 +13,12 @@ export {
   type RuntimeLocationCliState,
 } from './env-file.ts';
 export {
-  lockFailureProvesNoOverlayWriter,
   inspectRuntimePluginConfig,
   type RuntimeConfigControlOperation,
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
 } from './control.ts';
+export {lockFailureProvesNoOverlayWriter} from './control-transaction.ts';
 export {
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigControlCapability,

@@ -23,6 +23,7 @@ import {
 import {
   acquireLocalRuntimeMutationLockSync,
   defaultLocalRuntimeMutationLockWaitTimeoutMs,
+  type LocalRuntimeMutationLockOwnerToken,
   type LocalRuntimeMutationLocksLeaseSync,
   type LocalRuntimeMutationLockLeaseSync,
 } from '../storage/mutation-lock.ts';
@@ -63,6 +64,26 @@ export type ApplyRuntimeConfigMutationOptions = {
    * target must already carry a matching identity marker.
    */
   readonly characterScopeManaged?: boolean;
+  /**
+   * Set by the layered control transaction, which pre-acquires the
+   * control-file locks in one canonical order: the inner acquisitions
+   * here re-enter instead of taking fresh (possibly inverted) locks.
+   */
+  readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+  /**
+   * Env path the caller already holds a lock for (secret writes). The
+   * first locked attempt starts from it instead of discovering it via
+   * an internal release-and-retry.
+   */
+  readonly anticipatedEnvPath?: string;
+  /**
+   * False when the caller owns the path-drift retry (the layered
+   * control transaction): instead of internally releasing and
+   * reacquiring — which would acquire out of canonical order while the
+   * caller still holds its other locks — the drift is thrown for the
+   * caller to release everything and retry.
+   */
+  readonly retryOnPathChange?: boolean;
   readonly operation?: RuntimeConfigMutationOperation;
   /**
    * Pure base transform applied under the config-file lock before the
@@ -106,6 +127,21 @@ export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
   }
 }
 
+/**
+ * The mutation's effective paths moved while (re)acquiring locks and
+ * the caller opted out of the internal retry. Carries the env path the
+ * next attempt should lock up front.
+ */
+export class RuntimeConfigPathDriftError extends Error {
+  readonly anticipatedEnvPath: string | undefined;
+
+  constructor(anticipatedEnvPath: string | undefined) {
+    super('Runtime config mutation paths changed while acquiring locks.');
+    this.name = 'RuntimeConfigPathDriftError';
+    this.anticipatedEnvPath = anticipatedEnvPath;
+  }
+}
+
 export function applyRuntimeConfigMutation(
   options: ApplyRuntimeConfigMutationOptions,
 ): RuntimeConfigMutationResult {
@@ -113,7 +149,10 @@ export function applyRuntimeConfigMutation(
     throw new TypeError('Config mutation requires an operation or transform.');
   }
 
-  return applyRuntimeConfigMutationWithLocks(options);
+  return applyRuntimeConfigMutationWithLocks(
+    options,
+    options.anticipatedEnvPath,
+  );
 }
 
 function applyRuntimeConfigMutationWithLocks(
@@ -125,11 +164,11 @@ function applyRuntimeConfigMutationWithLocks(
     options,
     anticipatedEnvPath,
   );
-  const overlayLocatedTarget = selectedConfigPathIsCharacterOverlay(
-    location.canonicalSelectedConfigPath,
-  );
-
-  assertSelectedOverlayShapedPathIsNotSymlink(location.displayConfigPath);
+  const overlayLocatedTarget = assertRuntimeConfigMutationTargetSelectable({
+    displayConfigPath: location.displayConfigPath,
+    canonicalSelectedConfigPath: location.canonicalSelectedConfigPath,
+    characterScopeManaged: options.characterScopeManaged === true,
+  });
 
   // Secrets are shared across characters: their references are
   // authored in the home config.json, never in a character overlay —
@@ -141,19 +180,10 @@ function applyRuntimeConfigMutationWithLocks(
     );
   }
 
-  if (options.characterScopeManaged !== true) {
-    if (overlayLocatedTarget) {
-      assertOverlayLocatedTargetIsInitialized(
-        location.canonicalSelectedConfigPath,
-      );
-    } else {
-      assertTargetNotInsideCharacterDataDir(
-        location.canonicalSelectedConfigPath,
-      );
-    }
-  }
-
-  const mutationLease = acquireRuntimeConfigMutationLease(location);
+  const mutationLease = acquireRuntimeConfigMutationLease(
+    location,
+    options.ownerToken,
+  );
 
   try {
     cleanupRuntimeConfigMutationTargets(location);
@@ -246,12 +276,14 @@ function resolveRuntimeConfigMutationLocation(
 
 function acquireRuntimeConfigMutationLease(
   location: RuntimeConfigMutationLocation,
+  ownerToken: LocalRuntimeMutationLockOwnerToken | undefined,
 ): LocalRuntimeMutationLocksLeaseSync | LocalRuntimeMutationLockLeaseSync {
   if (location.canonicalAnticipatedEnvPath === undefined) {
     return acquireRuntimeConfigFileLock({
       path: location.canonicalSelectedConfigPath,
       displayPath: location.displayConfigPath,
       kind: 'config',
+      ownerToken,
     });
   }
 
@@ -261,6 +293,7 @@ function acquireRuntimeConfigMutationLease(
     envPath: location.canonicalAnticipatedEnvPath,
     displayEnvPath:
       location.anticipatedEnvPath ?? location.canonicalAnticipatedEnvPath,
+    ownerToken,
   });
 }
 
@@ -440,6 +473,10 @@ function retryRuntimeConfigMutationAfterPathChange(options: {
 }): RuntimeConfigMutationResult {
   options.mutationLease.release();
 
+  if (options.options.retryOnPathChange === false) {
+    throw new RuntimeConfigPathDriftError(options.anticipatedEnvPath);
+  }
+
   if (options.retryCount >= 8) {
     throw new RuntimeConfigMutationError(
       'Runtime config mutation paths kept changing while acquiring filesystem locks.',
@@ -517,6 +554,39 @@ export function assertOverlayLocatedCandidateStaysCharacterScoped(
       );
     }
   }
+}
+
+/**
+ * Every target check that must run BEFORE the mutation lock exists, so
+ * a rejected target leaves no trace — not even a lock root — in a
+ * directory the runtime refuses to adopt. The layered control
+ * transaction runs the same preflight before pre-acquiring its lock
+ * set. Returns whether the selection is an overlay-located target.
+ */
+export function assertRuntimeConfigMutationTargetSelectable(options: {
+  readonly displayConfigPath: string;
+  readonly canonicalSelectedConfigPath: string;
+  readonly characterScopeManaged: boolean;
+}): boolean {
+  const overlayLocatedTarget = selectedConfigPathIsCharacterOverlay(
+    options.canonicalSelectedConfigPath,
+  );
+
+  assertSelectedOverlayShapedPathIsNotSymlink(options.displayConfigPath);
+
+  if (!options.characterScopeManaged) {
+    if (overlayLocatedTarget) {
+      assertOverlayLocatedTargetIsInitialized(
+        options.canonicalSelectedConfigPath,
+      );
+    } else {
+      assertTargetNotInsideCharacterDataDir(
+        options.canonicalSelectedConfigPath,
+      );
+    }
+  }
+
+  return overlayLocatedTarget;
 }
 
 // The scoped seam marks a data directory before writing into it; a
@@ -1368,13 +1438,43 @@ function writeTextAtomic(path: string, value: string, mode: number): void {
   });
 }
 
+/**
+ * The layered control transaction's pre-acquisition of the global
+ * config/env pair, with the same failure mapping the mutation's own
+ * lease uses ("could not write" naming the file whose lock root failed).
+ */
+export function acquireRuntimeConfigControlPairLease(options: {
+  readonly canonicalConfigPath: string;
+  readonly displayConfigPath: string;
+  readonly canonicalEnvPath?: string | undefined;
+  readonly ownerToken?: LocalRuntimeMutationLockOwnerToken | undefined;
+}): LocalRuntimeMutationLocksLeaseSync {
+  if (options.canonicalEnvPath === undefined) {
+    return acquireRuntimeConfigFileLock({
+      path: options.canonicalConfigPath,
+      displayPath: options.displayConfigPath,
+      kind: 'config',
+      ownerToken: options.ownerToken,
+    });
+  }
+
+  return acquireRuntimeConfigFileLocks({
+    configPath: options.canonicalConfigPath,
+    displayConfigPath: options.displayConfigPath,
+    envPath: options.canonicalEnvPath,
+    displayEnvPath: options.canonicalEnvPath,
+    ownerToken: options.ownerToken,
+  });
+}
+
 function acquireRuntimeConfigFileLock(options: {
   readonly path: string;
   readonly displayPath: string;
   readonly kind: 'config' | 'env';
+  readonly ownerToken?: LocalRuntimeMutationLockOwnerToken | undefined;
 }): LocalRuntimeMutationLocksLeaseSync {
   try {
-    return acquireRuntimeControlPathLocks([options.path]);
+    return acquireRuntimeControlPathLocks([options.path], options.ownerToken);
   } catch (error: unknown) {
     throw mutationFileAccessError(
       options.kind === 'config'
@@ -1390,12 +1490,13 @@ function acquireRuntimeConfigFileLocks(options: {
   readonly displayConfigPath: string;
   readonly envPath: string;
   readonly displayEnvPath: string;
+  readonly ownerToken?: LocalRuntimeMutationLockOwnerToken | undefined;
 }): LocalRuntimeMutationLocksLeaseSync {
   try {
-    return acquireRuntimeControlPathLocks([
-      options.configPath,
-      options.envPath,
-    ]);
+    return acquireRuntimeControlPathLocks(
+      [options.configPath, options.envPath],
+      options.ownerToken,
+    );
   } catch (error: unknown) {
     const pathError =
       error instanceof RuntimeControlPathLockError ? error : undefined;
@@ -1419,8 +1520,9 @@ class RuntimeControlPathLockError extends Error {
   }
 }
 
-function acquireRuntimeControlPathLocks(
+export function acquireRuntimeControlPathLocks(
   paths: readonly string[],
+  ownerToken?: LocalRuntimeMutationLockOwnerToken,
 ): LocalRuntimeMutationLocksLeaseSync {
   const canonicalPaths = Object.freeze(
     [...new Set(paths.map(canonicalRuntimeConfigMutationPath))].sort(
@@ -1447,6 +1549,7 @@ function acquireRuntimeControlPathLocks(
               defaultLocalRuntimeMutationLockWaitTimeoutMs -
                 (Date.now() - startedAt),
             ),
+            ...(ownerToken === undefined ? {} : {ownerToken}),
           }),
         );
       } catch (error: unknown) {

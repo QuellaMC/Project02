@@ -169,10 +169,14 @@ export default tseslint.config(
       // then +10 so direct overlay targets pass the full adoptability
       // guard and every as-written path component is symlink-checked,
       // then +6 so secret references are never authored in a character
-      // overlay, matching the --character secret-scope rejection.
+      // overlay, matching the --character secret-scope rejection, then
+      // +62 so the layered control transaction can pre-acquire the
+      // control-file locks in one canonical order (owner-token
+      // re-entry, seeded env path, caller-owned path-drift retry, the
+      // shared pre-lock target preflight, and the wrapped pair lease).
       'max-lines': [
         'error',
-        {max: 1382, skipBlankLines: true, skipComments: true},
+        {max: 1444, skipBlankLines: true, skipComments: true},
       ],
     },
   },

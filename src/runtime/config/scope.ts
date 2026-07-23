@@ -17,18 +17,23 @@ import {
   createProject02HomeLayout,
   homeRootForCharacterDataDir,
 } from '../storage/layout-contract.ts';
-import {acquireLocalRuntimeMutationLockSync} from '../storage/mutation-lock.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
   applyGlobalRuntimeConfigControlMutation,
   assertRuntimeConfigControlOperation,
   prepareGlobalRuntimeConfigControlMutation,
-  resolveRuntimeConfigControlTargetPath,
   runtimePluginConfigControlMutation,
   type RuntimeConfigControlOperation,
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
 } from './control.ts';
+import {
+  assertGlobalConfigLoadableForCharacterScope,
+  requiredLayeredCharacterScope,
+  requiredLayeredOverlay,
+  verifyLayeredControlExpectation,
+  withLayeredControlSnapshot,
+} from './control-transaction.ts';
 import {
   createLayeredRuntimeConfigFingerprint,
   createRuntimeConfigFingerprint,
@@ -37,21 +42,16 @@ import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
 import {
   applyRuntimeConfigMutation,
   assertOverlayLocatedCandidateStaysCharacterScoped,
-  assertOverlayLocatedTargetIsInitialized,
   canonicalRuntimeConfigMutationPath,
   characterOverlayGlobalOnlyFieldMessage,
-  createRuntimeConfigMutationBase,
   prepareRuntimeConfigMutationCandidate,
-  RuntimeConfigConflictError,
   RuntimeConfigMutationError,
   selectedConfigPathIsCharacterOverlay,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {
   characterOverlayConfigPath,
-  characterOverlayFingerprintLayer,
   deriveRuntimeConfigCharacterScope,
-  loadCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
 } from './overlay.ts';
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
@@ -64,7 +64,6 @@ import {runtimePluginScopeViolation} from './plugin-scope.ts';
 import {
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
-  type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type RuntimeConfigCharacterScope,
@@ -422,28 +421,7 @@ function normalizedControlMutation(
   });
 }
 
-/**
- * An overlay is one layer of the layered config: it cannot be verified
- * or merged against a global file that failed to load. A missing
- * default file is fine (defaults apply); anything else blocks the
- * scoped change before durable state is touched.
- */
-export function assertGlobalConfigLoadableForCharacterScope(
-  loadedConfig: LoadedProject02RuntimeConfig,
-): void {
-  const blockingDiagnostic = loadedConfig.diagnostics.find(
-    diagnostic =>
-      diagnostic.severity === 'error' &&
-      diagnostic.code !== 'runtime_config_missing',
-  );
-
-  if (blockingDiagnostic !== undefined) {
-    throw new RuntimeConfigMutationError(
-      'Cannot change character-scoped config because the home config ' +
-        `failed to load: ${blockingDiagnostic.message}`,
-    );
-  }
-}
+export {assertGlobalConfigLoadableForCharacterScope};
 
 /**
  * Deterministic preflight for character-scoped mutations, mirroring
@@ -484,57 +462,6 @@ export function assertScopedMutationOperationAllowed(
     throw new RuntimeConfigMutationError(
       `${field.invalidValueMessage} Path: ${operation.path}.`,
     );
-  }
-}
-
-/**
- * Both layers loaded under the GLOBAL file's control lock: a scoped
- * mutation's layered expectation is only meaningful if the global layer
- * cannot move between the check and the overlay write, so the lock is
- * held across verify + mutate. Ordering is always global before
- * overlay (the mutation machinery takes the overlay's own lock inside);
- * every character-scoped apply and prepare path uses this order.
- */
-function withGlobalConfigLayerLock<T>(
-  options: ScopedRuntimeConfigLocation,
-  run: (context: {
-    readonly loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>;
-    readonly globalDocument: Project02RuntimeConfig;
-  }) => T,
-): T {
-  const globalLayerLocation = resolveScopedGlobalLayerLocation(options);
-  const canonicalGlobalPath = canonicalRuntimeConfigMutationPath(
-    resolveRuntimeConfigControlTargetPath(globalLayerLocation),
-  );
-  const runWithLoadedConfig = () => {
-    const loadedConfig = loadProject02RuntimeConfig(globalLayerLocation);
-
-    assertGlobalConfigLoadableForCharacterScope(loadedConfig);
-
-    return run({
-      loadedConfig,
-      globalDocument: createRuntimeConfigMutationBase({
-        loadedConfig,
-        ...(globalLayerLocation.configPath === undefined
-          ? {}
-          : {configPath: globalLayerLocation.configPath}),
-        ...(globalLayerLocation.storeRoot === undefined
-          ? {}
-          : {storeRoot: globalLayerLocation.storeRoot}),
-      }),
-    });
-  };
-  const globalLock = acquireLocalRuntimeMutationLockSync({
-    locksRoot: createProject02HomeLayout({
-      homeRoot: dirname(canonicalGlobalPath),
-    }).locksRoot,
-    resourceKey: `runtime-control-file:${canonicalGlobalPath}`,
-  });
-
-  try {
-    return runWithLoadedConfig();
-  } finally {
-    globalLock.release();
   }
 }
 
@@ -611,30 +538,6 @@ export function assertScopedGlobalLayerLoadable(
   );
 }
 
-function verifyScopedExpectation(options: {
-  readonly expectedFingerprint: string | undefined;
-  readonly globalDocument: Project02RuntimeConfig;
-  readonly characterScope: RuntimeConfigCharacterScope;
-  readonly overlay: LoadedProject02CharacterOverlayConfig;
-}): void {
-  if (options.expectedFingerprint === undefined) {
-    return;
-  }
-
-  const currentFingerprint = createLayeredRuntimeConfigFingerprint({
-    globalConfig: options.globalDocument,
-    characterId: options.characterScope.characterId,
-    overlayConfig: characterOverlayFingerprintLayer(options.overlay),
-  });
-
-  if (options.expectedFingerprint !== currentFingerprint) {
-    throw new RuntimeConfigConflictError(
-      'Runtime config changed before the mutation could be committed. ' +
-        `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
-    );
-  }
-}
-
 function applyCharacterScopedMutation(
   options: ScopedRuntimeConfigLocation & {
     readonly expectedFingerprint?: string;
@@ -648,28 +551,40 @@ function applyCharacterScopedMutation(
     ) => void;
   },
 ): RuntimeConfigControlApplyResult {
-  return withGlobalConfigLayerLock(
-    options,
-    ({loadedConfig, globalDocument}) => {
-      const characterScope = requiredCharacterScope(loadedConfig, options);
+  const globalLayerLocation = resolveScopedGlobalLayerLocation(options);
+
+  return withLayeredControlSnapshot(
+    {
+      ...(globalLayerLocation.configPath === undefined
+        ? {}
+        : {configPath: globalLayerLocation.configPath}),
+      ...(globalLayerLocation.env === undefined
+        ? {}
+        : {env: globalLayerLocation.env}),
+      ...(globalLayerLocation.storeRoot === undefined
+        ? {}
+        : {storeRoot: globalLayerLocation.storeRoot}),
+      ...(globalLayerLocation.characterId === undefined
+        ? {}
+        : {characterId: globalLayerLocation.characterId}),
+      ...(globalLayerLocation.characterScope === undefined
+        ? {}
+        : {characterScope: globalLayerLocation.characterScope}),
+      scopeSelector: 'character',
+      lockMode: 'mutation',
+      expectingFingerprint: options.expectedFingerprint !== undefined,
+    },
+    snapshot => {
+      const characterScope = requiredLayeredCharacterScope(snapshot);
+      const overlay = requiredLayeredOverlay(snapshot);
       const overlayPath = characterOverlayConfigPath(characterScope.dataRoot);
-
-      // The marker is the proof that the guarded initializer ran for
-      // this directory; without it no scoped write — not even from a
-      // plugin-control state — may create durable character state.
-      assertOverlayLocatedTargetIsInitialized(
-        canonicalRuntimeConfigMutationPath(overlayPath),
-      );
-
-      const overlay = loadCharacterOverlayForScope(characterScope);
+      const globalDocument = snapshot.globalDocument;
 
       assertOverlayMutable(overlay);
-      verifyScopedExpectation({
-        expectedFingerprint: options.expectedFingerprint,
-        globalDocument,
-        characterScope,
-        overlay,
-      });
+
+      if (options.expectedFingerprint !== undefined) {
+        verifyLayeredControlExpectation(snapshot, options.expectedFingerprint);
+      }
 
       const overlayBase =
         overlay.config ??
@@ -736,6 +651,8 @@ function applyCharacterScopedMutation(
           assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
           options.validateCandidate?.(candidate, globalDocument);
         },
+        ownerToken: snapshot.ownerToken,
+        retryOnPathChange: false,
       });
 
       return withMaterializationOutcome(
@@ -770,33 +687,24 @@ function prepareCharacterRuntimeConfigControlMutation(options: {
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
 } {
-  return withGlobalConfigLayerLock(
+  return withLayeredControlSnapshot(
     {
       configPath: options.target.globalConfigPath,
       storeRoot: options.target.homeRoot,
       characterScope: options.target.characterScope,
       ...(options.target.env === undefined ? {} : {env: options.target.env}),
+      scopeSelector: 'character',
+      lockMode: 'global_layer',
+      expectingFingerprint: true,
     },
-    ({globalDocument}) => {
+    snapshot => {
       const characterScope = options.target.characterScope;
       const overlayPath = options.target.configPath;
-
-      // The marker is the proof that the guarded initializer ran for
-      // this directory; without it no scoped write — not even from a
-      // plugin-control state — may create durable character state.
-      assertOverlayLocatedTargetIsInitialized(
-        canonicalRuntimeConfigMutationPath(overlayPath),
-      );
-
-      const overlay = loadCharacterOverlayForScope(characterScope);
+      const overlay = requiredLayeredOverlay(snapshot);
+      const globalDocument = snapshot.globalDocument;
 
       assertOverlayMutable(overlay);
-      verifyScopedExpectation({
-        expectedFingerprint: options.expectedFingerprint,
-        globalDocument,
-        characterScope,
-        overlay,
-      });
+      verifyLayeredControlExpectation(snapshot, options.expectedFingerprint);
 
       const overlayBase =
         overlay.config ??

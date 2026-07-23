@@ -3,25 +3,15 @@ import {
   canonicalRuntimeConfigMutationPath,
   createRuntimeConfigMutationBase,
   prepareRuntimeConfigMutationCandidate,
-  RuntimeConfigConflictError,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
-import {existsSync} from 'node:fs';
-import {basename, dirname, resolve} from 'node:path';
-
 import {
-  characterDataDirectoryName,
-  createProject02HomeLayout,
-  LocalRuntimeStorageContractError,
-} from '../storage/layout-contract.ts';
-import {assertCharacterDataDirReadable} from '../storage/character-data.ts';
+  verifyLayeredControlExpectation,
+  withLayeredControlSnapshot,
+  type LayeredControlSnapshot,
+} from './control-transaction.ts';
 import {
-  acquireLocalRuntimeMutationLockSync,
-  LocalRuntimeMutationLockBusyError,
-} from '../storage/mutation-lock.ts';
-import {
-  characterOverlayConfigPath,
   deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
@@ -72,25 +62,29 @@ export function applyGlobalRuntimeConfigControlMutation(options: {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
 }): RuntimeConfigMutationResult {
-  return withExpectationOverlayLock(options, () => {
-    const layered =
-      options.expectedFingerprint === undefined
-        ? undefined
-        : verifyLayeredControlExpectation({
-            ...options,
-            expectedFingerprint: options.expectedFingerprint,
-          });
+  return withLayeredControlSnapshot(
+    {
+      ...(options.configPath === undefined
+        ? {}
+        : {configPath: options.configPath}),
+      ...(options.env === undefined ? {} : {env: options.env}),
+      ...(options.storeRoot === undefined
+        ? {}
+        : {storeRoot: options.storeRoot}),
+      ...(options.characterScope === undefined
+        ? {}
+        : {characterScope: options.characterScope}),
+      scopeSelector: 'global',
+      lockMode: 'mutation',
+      secretMutation: options.operation.kind === 'secret_set',
+      expectingFingerprint: options.expectedFingerprint !== undefined,
+    },
+    snapshot => {
+      if (options.expectedFingerprint !== undefined) {
+        verifyLayeredControlExpectation(snapshot, options.expectedFingerprint);
+      }
 
-    // The layered verify above reads the overlay through the guarded
-    // loader. Without an expectation nothing has checked the active
-    // character's data directory yet, and the result fingerprint reads
-    // its overlay only after the write commits — so a rebound or
-    // unreadable directory must fail the mutation before the write.
-    // A selection inside a character-data directory is the aliased
-    // overlay flow instead: the mutation machinery owns its precise
-    // marker and symlink rejections there.
-    if (layered === undefined) {
-      const loadedConfig = loadProject02RuntimeConfig({
+      const result = applyRuntimeConfigMutation({
         ...(options.configPath === undefined
           ? {}
           : {configPath: options.configPath}),
@@ -98,166 +92,77 @@ export function applyGlobalRuntimeConfigControlMutation(options: {
         ...(options.storeRoot === undefined
           ? {}
           : {storeRoot: options.storeRoot}),
+        // The layered expectation was verified against this locked
+        // snapshot; pin the global file so the write engine checks the
+        // same document it verified.
+        ...(options.expectedFingerprint === undefined
+          ? {}
+          : {
+              expectedFingerprint: createRuntimeConfigFingerprint(
+                snapshot.globalDocument,
+              ),
+            }),
+        ...(options.validateCandidate === undefined
+          ? {}
+          : {validateCandidate: options.validateCandidate}),
+        operation: options.operation,
+        ownerToken: snapshot.ownerToken,
+        ...(snapshot.anticipatedEnvPath === undefined
+          ? {}
+          : {anticipatedEnvPath: snapshot.anticipatedEnvPath}),
+        retryOnPathChange: false,
       });
-      const selectedPath =
-        loadedConfig.path ??
-        options.configPath ??
-        defaultRuntimeConfigPath(options.storeRoot);
-      const preWriteScope = selectedPathIsOverlayShapedAsWritten(selectedPath)
-        ? undefined
-        : controlCharacterScope(loadedConfig, options);
 
-      if (preWriteScope !== undefined) {
-        assertCharacterDataDirReadable({
-          storageOptions: {storeRoot: preWriteScope.dataRoot},
-          characterId: preWriteScope.characterId,
-        });
-      }
-    }
-
-    const result = applyRuntimeConfigMutation({
-      ...(options.configPath === undefined
-        ? {}
-        : {configPath: options.configPath}),
-      ...(options.env === undefined ? {} : {env: options.env}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(layered === undefined
-        ? {}
-        : {expectedFingerprint: layered.globalFileFingerprint}),
-      ...(options.validateCandidate === undefined
-        ? {}
-        : {validateCandidate: options.validateCandidate}),
-      operation: options.operation,
-    });
-    const characterScope = controlCharacterScope(
-      {
-        source: 'path',
-        path: result.configPath,
-        config: result.config,
-        diagnostics: Object.freeze([]),
-      },
-      options,
-    );
-    const overlayConfig =
-      characterScope === undefined
-        ? undefined
-        : loadCharacterOverlayForScope(characterScope);
-
-    return Object.freeze({
-      ...result,
-      fingerprint: layeredControlFingerprint({
-        globalConfig: result.config,
-        characterScope,
-        overlayConfig,
-      }),
-    });
-  });
-}
-
-// Judged AS WRITTEN (not symlink-canonicalized), matching the mutation
-// machinery's own overlay-shape classification: a symlink sitting where
-// an overlay belongs must reach its precise rejection, not a scope
-// guard's generic one.
-function selectedPathIsOverlayShapedAsWritten(selectedPath: string): boolean {
-  const written = resolve(selectedPath.trim());
-
-  return basename(dirname(dirname(written))) === characterDataDirectoryName;
+      return Object.freeze({
+        ...result,
+        fingerprint: committedLayeredControlFingerprint(
+          options,
+          snapshot,
+          result,
+        ),
+      });
+    },
+  );
 }
 
 /**
- * Holds the active character's overlay control lock while a layered
- * expectation authorizes a global write. Without an expectation there
- * is nothing to protect and no lock is taken.
+ * Result fingerprint of a committed global write: composed with the
+ * overlay of the character the COMMITTED config selects — the locked
+ * pre-write snapshot when the selection is unchanged, a fresh guarded
+ * read when the write moved project02.character to another character.
  */
-function withExpectationOverlayLock<T>(
+function committedLayeredControlFingerprint(
   options: {
-    readonly configPath?: string;
-    readonly env?: NodeJS.ProcessEnv;
-    readonly expectedFingerprint?: string;
     readonly storeRoot?: string;
     readonly characterScope?: RuntimeConfigCharacterScope;
   },
-  run: () => T,
-): T {
-  if (options.expectedFingerprint === undefined) {
-    return run();
-  }
-
+  snapshot: LayeredControlSnapshot,
+  result: RuntimeConfigMutationResult,
+): string {
   const characterScope = controlCharacterScope(
-    loadProject02RuntimeConfig({
-      ...(options.configPath === undefined
-        ? {}
-        : {configPath: options.configPath}),
-      ...(options.env === undefined ? {} : {env: options.env}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-    }),
+    {
+      source: 'path',
+      path: result.configPath,
+      config: result.config,
+      diagnostics: Object.freeze([]),
+    },
     options,
   );
+  const overlayConfig =
+    characterScope === undefined
+      ? undefined
+      : snapshot.overlay !== undefined &&
+          snapshot.characterScope !== undefined &&
+          snapshot.characterScope.characterId === characterScope.characterId &&
+          snapshot.characterScope.dataRoot === characterScope.dataRoot
+        ? snapshot.overlay
+        : loadCharacterOverlayForScope(characterScope);
 
-  if (characterScope === undefined) {
-    return run();
-  }
-
-  const canonicalOverlayPath = canonicalRuntimeConfigMutationPath(
-    characterOverlayConfigPath(characterScope.dataRoot),
-  );
-
-  // A --config pointed directly at the overlay makes the "global" path
-  // the overlay itself; pre-locking it here would deadlock against the
-  // mutation's own lock on the same file. That single-file case is
-  // covered by the mutation lock alone.
-  if (resolveRuntimeConfigControlTargetPath(options) === canonicalOverlayPath) {
-    return run();
-  }
-
-  // No data directory means no overlay and no scoped writer holding
-  // its lock: skip the pre-lock instead of materializing a lock root
-  // that a stale expectation would leave behind on conflict.
-  if (!existsSync(dirname(canonicalOverlayPath))) {
-    return run();
-  }
-
-  let overlayLock: ReturnType<typeof acquireLocalRuntimeMutationLockSync>;
-
-  try {
-    overlayLock = acquireLocalRuntimeMutationLockSync({
-      locksRoot: createProject02HomeLayout({
-        homeRoot: dirname(canonicalOverlayPath),
-      }).locksRoot,
-      resourceKey: `runtime-control-file:${canonicalOverlayPath}`,
-    });
-  } catch (error: unknown) {
-    if (lockFailureProvesNoOverlayWriter(error)) {
-      return run();
-    }
-
-    throw error;
-  }
-
-  try {
-    return run();
-  } finally {
-    overlayLock.release();
-  }
-}
-
-/**
- * True only for lock-acquisition failures that prove no scoped writer
- * can hold the lock either (an uncreatable lock root in a hostile
- * store); the mutation then surfaces the store problem with its own
- * precise error. A BUSY lock proves the opposite — a scoped writer is
- * active right now — so the expectation must abort instead of
- * verifying unlocked and racing that writer's commit.
- */
-export function lockFailureProvesNoOverlayWriter(error: unknown): boolean {
-  return (
-    error instanceof LocalRuntimeStorageContractError &&
-    !(error instanceof LocalRuntimeMutationLockBusyError)
-  );
+  return layeredControlFingerprint({
+    globalConfig: result.config,
+    characterScope,
+    overlayConfig,
+  });
 }
 
 export function assertRuntimeConfigControlOperation(
@@ -413,63 +318,6 @@ function layeredControlFingerprint(options: {
   });
 }
 
-/**
- * Verifies a caller's layered expected fingerprint against the current
- * pair of authored documents and hands back the global file's per-file
- * fingerprint for the mutation lock plus the overlay snapshot the
- * result fingerprint composes with.
- */
-function verifyLayeredControlExpectation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-  readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly expectedFingerprint: string;
-}): {
-  readonly globalFileFingerprint: string;
-  readonly characterScope: RuntimeConfigCharacterScope | undefined;
-  readonly overlayConfig:
-    ReturnType<typeof loadCharacterOverlayForScope> | undefined;
-} {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-  const characterScope = controlCharacterScope(loadedConfig, options);
-  const overlayConfig =
-    characterScope === undefined
-      ? undefined
-      : loadCharacterOverlayForScope(characterScope);
-  const globalConfig = createRuntimeConfigMutationBase({
-    loadedConfig,
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-  const currentFingerprint = layeredControlFingerprint({
-    globalConfig,
-    characterScope,
-    overlayConfig,
-  });
-
-  if (options.expectedFingerprint !== currentFingerprint) {
-    throw new RuntimeConfigConflictError(
-      'Runtime config changed before the mutation could be committed. ' +
-        `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
-    );
-  }
-
-  return {
-    globalFileFingerprint: createRuntimeConfigFingerprint(globalConfig),
-    characterScope,
-    overlayConfig,
-  };
-}
-
 export function prepareGlobalRuntimeConfigControlMutation(options: {
   readonly configPath?: string;
   readonly env?: NodeJS.ProcessEnv;
@@ -482,71 +330,54 @@ export function prepareGlobalRuntimeConfigControlMutation(options: {
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
 } {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-  const characterScope = controlCharacterScope(loadedConfig, options);
-  const overlayConfig =
-    characterScope === undefined
-      ? undefined
-      : loadCharacterOverlayForScope(characterScope);
-  const globalConfig = createRuntimeConfigMutationBase({
-    loadedConfig,
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-  const currentFingerprint = layeredControlFingerprint({
-    globalConfig,
-    characterScope,
-    overlayConfig,
-  });
-
-  if (options.expectedFingerprint !== currentFingerprint) {
-    throw new RuntimeConfigConflictError(
-      'Runtime config changed before the mutation could be committed. ' +
-        `Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
-    );
-  }
-
-  // The layered expectation was already verified on this exact loaded
-  // snapshot, so the candidate preparation runs without its own
-  // per-file expectation.
-  const prepared = prepareRuntimeConfigMutationCandidate({
-    loadedConfig,
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.validateCandidate === undefined
-      ? {}
-      : {validateCandidate: options.validateCandidate}),
-    operation: options.operation,
-  });
-
-  return Object.freeze({
-    resultFingerprint: layeredControlFingerprint({
-      globalConfig: prepared.config,
-      characterScope,
-      overlayConfig,
-    }),
-    targetConfigPath: runtimeConfigControlTargetPathFromLoaded({
-      ...(loadedConfig.path === undefined
-        ? {}
-        : {loadedPath: loadedConfig.path}),
+  // Read-only preparation runs without locks: the apply re-verifies
+  // the same layered expectation under the full mutation lock set.
+  return withLayeredControlSnapshot(
+    {
       ...(options.configPath === undefined
         ? {}
         : {configPath: options.configPath}),
+      ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.storeRoot === undefined
         ? {}
         : {storeRoot: options.storeRoot}),
-    }),
-  });
+      ...(options.characterScope === undefined
+        ? {}
+        : {characterScope: options.characterScope}),
+      scopeSelector: 'global',
+      lockMode: 'none',
+      expectingFingerprint: true,
+    },
+    snapshot => {
+      verifyLayeredControlExpectation(snapshot, options.expectedFingerprint);
+
+      // The layered expectation was already verified on this exact
+      // loaded snapshot, so the candidate preparation runs without its
+      // own per-file expectation.
+      const prepared = prepareRuntimeConfigMutationCandidate({
+        loadedConfig: snapshot.loadedConfig,
+        ...(options.configPath === undefined
+          ? {}
+          : {configPath: options.configPath}),
+        ...(options.storeRoot === undefined
+          ? {}
+          : {storeRoot: options.storeRoot}),
+        ...(options.validateCandidate === undefined
+          ? {}
+          : {validateCandidate: options.validateCandidate}),
+        operation: options.operation,
+      });
+
+      return Object.freeze({
+        resultFingerprint: layeredControlFingerprint({
+          globalConfig: prepared.config,
+          characterScope: snapshot.characterScope,
+          overlayConfig: snapshot.overlay,
+        }),
+        targetConfigPath: snapshot.canonicalGlobalPath,
+      });
+    },
+  );
 }
 
 export function resolveRuntimeConfigControlTargetPath(options: {
