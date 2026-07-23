@@ -29,6 +29,7 @@ import {
   resolveProject02RuntimeStoreRoot,
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigMutationError,
+  runtimeConfigDiagnosticIsReadinessFailure,
   resolveScopedGlobalLayerLocation,
   shouldReadDefaultDotEnvForRuntimeLocation,
   type LoadedProject02CharacterOverlayConfig,
@@ -590,13 +591,12 @@ function materializationConfigPreflightDiagnostics(
     plan.resolvedConfig.diagnostics.filter(
       diagnostic =>
         diagnostic.severity === 'error' &&
-        // Missing required values are activation readiness failures, not
-        // proof that an authored document is malformed. Runtime .env is
-        // also loaded only after durable initialization. All other
-        // errors here describe an invalid authored global or overlay
-        // value and must fail before materialization writes anything.
-        diagnostic.code !== 'runtime_config_required_value_missing' &&
-        diagnostic.code !== 'runtime_config_required_secret_missing',
+        // Readiness failures are not proof that an authored document is
+        // malformed (runtime .env also loads only after durable
+        // initialization); every other error describes an invalid
+        // authored global or overlay value and must fail before
+        // materialization writes anything.
+        !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
     ),
   );
 }

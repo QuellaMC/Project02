@@ -11,22 +11,13 @@ import {
 import {
   createRuntimeConfigDiagnostic,
   resolveProject02RuntimeConfig,
+  runtimeConfigDiagnosticIsReadinessFailure,
   validateProject02RuntimeConfig,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type RuntimeConfigDiagnostic,
 } from '../runtime/config/index.ts';
 import type {RuntimePluginActivationResult} from './activation.ts';
-
-const packageConfigBlockingDiagnosticCodes = new Set([
-  'runtime_config_unknown_plugin_config_field',
-  'runtime_config_value_type_invalid',
-  'runtime_config_secret_ref_for_non_secret',
-  'runtime_config_plaintext_secret_rejected',
-  'runtime_config_reserved_control_env_var',
-  'runtime_config_secret_field_character_scoped',
-  'runtime_config_secret_value_character_scoped',
-]);
 
 export type CharacterPackagePluginMaterializationPlan =
   | {
@@ -115,10 +106,14 @@ export function planCharacterPackagePluginMaterialization(options: {
     authoredScope: 'character',
     env: {},
   });
+  // Same polarity as startup's materialization preflight: only a
+  // readiness failure (a required value the global layer or env may
+  // still supply) passes; every other error proves the package authored
+  // invalid config and blocks before anything is written.
   const blocking = resolved.diagnostics.filter(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      packageConfigBlockingDiagnosticCodes.has(diagnostic.code),
+      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
   );
 
   if (blocking.length > 0) {

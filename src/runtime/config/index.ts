@@ -1,6 +1,7 @@
 export {
   createRuntimeConfigDiagnostic,
   runtimeConfigDiagnosticAttribution,
+  runtimeConfigDiagnosticIsReadinessFailure,
   withRuntimeConfigDiagnosticOrigin,
 } from './diagnostic.ts';
 export {
