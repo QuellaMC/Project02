@@ -4,9 +4,11 @@
  * (runtime, plugins, role-model, core, shared) may import it.
  */
 export {
+  classifyRuntimePluginCatalogDiscovery,
   createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
   createRuntimePluginCatalogSnapshot,
+  discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
   resolveRuntimePluginActivation,
   type PreparedProject02PluginActivationPlan,
@@ -15,6 +17,7 @@ export {
   type RuntimePluginActivationResult,
   type RuntimePluginActivationSnapshot,
   type RuntimePluginActivationStatus,
+  type RuntimePluginCatalogDiscovery,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition,
 } from './activation.ts';

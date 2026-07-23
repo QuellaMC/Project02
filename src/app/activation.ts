@@ -125,6 +125,27 @@ export type RuntimePluginCatalogSnapshot = {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
+/**
+ * One immutable filesystem discovery, classified per config layer:
+ * package scanning is config-free, so a startup discovers once and
+ * re-classifies the same manifests against each layer state instead of
+ * re-scanning — package defaults and final activation then always
+ * judge one manifest snapshot.
+ */
+export type RuntimePluginCatalogDiscovery = {
+  readonly storeRoot: string;
+  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
+  readonly defaultEnabledPluginIds: readonly string[];
+  readonly packageProvenanceByPluginId: Readonly<
+    Record<string, RuntimePluginPackageProvenance>
+  >;
+  /** Raw package diagnostics awaiting per-layer severity classification. */
+  readonly packageDiagnostics: readonly RuntimePluginPackageDiagnostic[];
+  /** Config-independent catalog errors (reserved system-service ids). */
+  readonly reservedIdDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly discoveredPluginIds: ReadonlySet<string>;
+};
+
 // The host must not import the file-store engine (arch rule: plugins never
 // value-import runtime storage); the composition root supplies it instead.
 const configuredRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
@@ -165,16 +186,32 @@ export function createRuntimePluginCatalogSnapshot(options: {
    */
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
-  const storeRoot = resolveProject02RuntimeStoreRoot(options);
-  const classificationConfig =
-    options.overlayConfig === undefined
-      ? options.loadedConfig
-      : mergedLoadedConfigForOverlay(
-          options.loadedConfig,
-          options.overlayConfig,
-        );
+  return classifyRuntimePluginCatalogDiscovery({
+    discovery: discoverRuntimePluginCatalog({
+      storeRoot: resolveProject02RuntimeStoreRoot(options),
+      ...(options.factoryOverrides === undefined
+        ? {}
+        : {factoryOverrides: options.factoryOverrides}),
+    }),
+    classificationConfig:
+      options.overlayConfig === undefined
+        ? options.loadedConfig
+        : mergedLoadedConfigForOverlay(
+            options.loadedConfig,
+            options.overlayConfig,
+          ),
+  });
+}
+
+export function discoverRuntimePluginCatalog(options: {
+  /** The resolved home; installed packages live at the home level. */
+  readonly storeRoot: string;
+  readonly factoryOverrides?: Readonly<
+    Record<string, RuntimePluginFactoryDefinition>
+  >;
+}): RuntimePluginCatalogDiscovery {
   const operatorPackageRoot = createProject02HomeLayout({
-    homeRoot: storeRoot,
+    homeRoot: options.storeRoot,
   }).pluginPackagesRoot;
   const discovery = discoverRuntimePluginPackages({
     sources: [
@@ -192,7 +229,7 @@ export function createRuntimePluginCatalogSnapshot(options: {
   const ordinaryPackages = discovery.packages.filter(
     item => !isHostScopedFirstPartyRuntimePluginId(item.manifest.id),
   );
-  const bundledSystemServiceDiagnostics = discovery.packages
+  const reservedIdDiagnostics = discovery.packages
     .filter(item => isHostScopedFirstPartyRuntimePluginId(item.manifest.id))
     .map((item): RuntimeConfigDiagnostic =>
       Object.freeze({
@@ -203,68 +240,58 @@ export function createRuntimePluginCatalogSnapshot(options: {
         pluginId: item.manifest.id,
       }),
     );
-  const packageProvenanceByPluginId = Object.freeze(
-    Object.fromEntries(
-      ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
-    ),
-  );
-  const discoveredCatalogEntries = {
-    ...defaultRuntimePluginHostServiceEntries,
-    ...Object.fromEntries(
-      ordinaryPackages.map(item => [item.manifest.id, item]),
-    ),
-  };
-  const factoryCatalog =
-    options.factoryOverrides === undefined
-      ? undefined
-      : composeRuntimePluginCatalog(options.factoryOverrides);
-  const catalogEntries = Object.freeze({
-    ...discoveredCatalogEntries,
-    ...factoryCatalog?.catalogEntries,
+  const composition = composeRuntimePluginCatalog({
+    discoveredPackages: ordinaryPackages,
+    ...(options.factoryOverrides === undefined
+      ? {}
+      : {factories: options.factoryOverrides}),
   });
-  const discoveredPluginIds = new Set([
-    ...ordinaryPackages.map(item => item.manifest.id),
-    ...Object.keys(defaultRuntimePluginHostServiceEntries),
-    ...Object.keys(options.factoryOverrides ?? {}),
-  ]);
-  const defaultEnabledPluginIds = new Set<string>();
-
-  for (const definition of Object.values(
-    defaultRuntimePluginHostServiceEntries,
-  )) {
-    if (definition.manifest.activation.defaultEnabled) {
-      defaultEnabledPluginIds.add(definition.manifest.id);
-    }
-  }
-  for (const item of ordinaryPackages) {
-    if (
-      item.provenance === 'bundled' &&
-      item.manifest.activation.defaultEnabled
-    ) {
-      defaultEnabledPluginIds.add(item.manifest.id);
-    }
-  }
-  for (const pluginId of Object.keys(options.factoryOverrides ?? {})) {
-    defaultEnabledPluginIds.delete(pluginId);
-  }
-  for (const pluginId of factoryCatalog?.defaultEnabledPluginIds ?? []) {
-    defaultEnabledPluginIds.add(pluginId);
-  }
 
   return Object.freeze({
-    storeRoot,
-    catalogEntries,
-    defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds]),
-    packageProvenanceByPluginId,
+    storeRoot: options.storeRoot,
+    catalogEntries: composition.catalogEntries,
+    defaultEnabledPluginIds: composition.defaultEnabledPluginIds,
+    packageProvenanceByPluginId: Object.freeze(
+      Object.fromEntries(
+        ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
+      ),
+    ),
+    packageDiagnostics: discovery.diagnostics,
+    reservedIdDiagnostics: Object.freeze(reservedIdDiagnostics),
+    discoveredPluginIds: new Set([
+      ...ordinaryPackages.map(item => item.manifest.id),
+      ...Object.keys(defaultRuntimePluginHostServiceEntries),
+      ...Object.keys(options.factoryOverrides ?? {}),
+    ]),
+  } satisfies RuntimePluginCatalogDiscovery);
+}
+
+/**
+ * Severity classification of one discovery against one config layer
+ * view: an overlay-enabled broken package is as much an error as a
+ * globally enabled one, and the same discovery re-classifies cheaply
+ * as the layer state changes.
+ */
+export function classifyRuntimePluginCatalogDiscovery(options: {
+  readonly discovery: RuntimePluginCatalogDiscovery;
+  readonly classificationConfig: LoadedProject02RuntimeConfig;
+}): RuntimePluginCatalogSnapshot {
+  const {discovery} = options;
+
+  return Object.freeze({
+    storeRoot: discovery.storeRoot,
+    catalogEntries: discovery.catalogEntries,
+    defaultEnabledPluginIds: discovery.defaultEnabledPluginIds,
+    packageProvenanceByPluginId: discovery.packageProvenanceByPluginId,
     diagnostics: Object.freeze([
-      ...discovery.diagnostics.map(diagnostic =>
+      ...discovery.packageDiagnostics.map(diagnostic =>
         runtimePluginPackageDiagnostic({
           diagnostic,
-          loadedConfig: classificationConfig,
-          discoveredPluginIds,
+          loadedConfig: options.classificationConfig,
+          discoveredPluginIds: discovery.discoveredPluginIds,
         }),
       ),
-      ...bundledSystemServiceDiagnostics,
+      ...discovery.reservedIdDiagnostics,
     ]),
   } satisfies RuntimePluginCatalogSnapshot);
 }
@@ -396,7 +423,7 @@ function activationCatalogComposition(options: {
   if (options.factories !== undefined) {
     return Object.freeze({
       storeRoot: resolveProject02RuntimeStoreRoot(options),
-      ...composeRuntimePluginCatalog(options.factories),
+      ...composeRuntimePluginCatalog({factories: options.factories}),
       packageProvenanceByPluginId: Object.freeze({}),
       diagnostics: Object.freeze([]),
     } satisfies RuntimePluginCatalogSnapshot);

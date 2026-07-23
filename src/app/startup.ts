@@ -1,5 +1,6 @@
 import {
-  createRuntimePluginCatalogSnapshot,
+  classifyRuntimePluginCatalogDiscovery,
+  discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginCatalogSnapshot,
@@ -25,6 +26,7 @@ import {
   loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
   loadRuntimeConfigEnvFile,
+  mergedLoadedConfigForOverlay,
   readDefaultDotEnvFile,
   resolveProject02RuntimeStoreRoot,
   resolveRuntimeConfigScopeTarget,
@@ -222,22 +224,27 @@ async function resolveRuntimeCliActivationStartup(input: {
     });
   }
 
+  // One filesystem discovery for the whole startup: every activation
+  // plan — pre-materialization, post-materialization, and the final
+  // runtime-env one — judges the same manifest snapshot, and only the
+  // diagnostic classification re-runs as the overlay state changes.
+  const catalogDiscovery = discoverRuntimePluginCatalog({
+    storeRoot: homeRoot,
+    ...(options.factories === undefined
+      ? {}
+      : {factoryOverrides: options.factories}),
+  });
   const buildPreEnvState = (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
   ) => {
     const overlayForPlan =
       overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
-    const catalogSnapshot = createRuntimePluginCatalogSnapshot({
-      loadedConfig,
-      ...(overlayLoadedConfig === undefined
-        ? {}
-        : {overlayConfig: overlayLoadedConfig}),
-      ...(location.storeRoot === undefined
-        ? {}
-        : {storeRoot: location.storeRoot}),
-      ...(options.factories === undefined
-        ? {}
-        : {factoryOverrides: options.factories}),
+    const catalogSnapshot = classifyRuntimePluginCatalogDiscovery({
+      discovery: catalogDiscovery,
+      classificationConfig:
+        overlayLoadedConfig === undefined
+          ? loadedConfig
+          : mergedLoadedConfigForOverlay(loadedConfig, overlayLoadedConfig),
     });
 
     return {
