@@ -1,5 +1,9 @@
 import type {Project02RuntimeConfig, RuntimeConfigValue} from './types.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
+import {
+  plaintextSecretMarkerField,
+  secretEnvMarkerField,
+} from '../../shared/secret-marker.ts';
 
 export function createRuntimeConfigFingerprint(
   value: RuntimeConfigValue | Project02RuntimeConfig,
@@ -49,14 +53,14 @@ function secretSafeFingerprintValue(value: unknown): unknown {
     return null;
   }
 
-  if ('$env' in value && typeof value.$env === 'string') {
+  if (secretEnvMarkerField in value && typeof value.$env === 'string') {
     return {
       $secretRef: value.$env,
     };
   }
 
   if (
-    '$plaintextSecret' in value &&
+    plaintextSecretMarkerField in value &&
     'justification' in value &&
     typeof value.justification === 'string'
   ) {

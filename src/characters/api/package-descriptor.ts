@@ -9,6 +9,10 @@ import {
   freezeCharacterProfile,
   type CharacterProfile,
 } from '../../core/index.ts';
+import {
+  allowPlaintextSecretMarkerField,
+  valueIsSecretMarker,
+} from '../../shared/secret-marker.ts';
 
 export const characterPackageDescriptorFormat = 'project02.character.v1';
 export const characterPackageDescriptorFileName = 'project02.character.json';
@@ -428,9 +432,8 @@ function parseCharacterPluginConfigObject(
       readonly issue: CharacterPackageDescriptorIssue;
     } {
   if (
-    Object.hasOwn(value, '$env') ||
-    Object.hasOwn(value, '$plaintextSecret') ||
-    Object.hasOwn(value, 'allowPlaintextSecret')
+    valueIsSecretMarker(value) ||
+    Object.hasOwn(value, allowPlaintextSecretMarkerField)
   ) {
     return rejectedDescriptor(
       'invalid_plugins',

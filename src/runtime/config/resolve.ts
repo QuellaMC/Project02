@@ -28,6 +28,7 @@ import {
   createJsonBoundarySnapshot,
   ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
+import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {runtimeConfigValueMatchesField} from './schema.ts';
 import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
@@ -286,7 +287,10 @@ function resolvePluginConfigField(options: {
     });
   }
 
-  const secretValuePath = nestedSecretValuePath(options.rawValue, path);
+  // The shared walker: any embedded reserved marker — malformed ones
+  // included — blocks a non-secret field, matching load-time rejection
+  // and the mutation-control validation.
+  const secretValuePath = nestedSecretMarkerPath(options.rawValue, path);
 
   if (secretValuePath !== undefined) {
     if (options.validateConfig) {
@@ -607,50 +611,6 @@ function isPlaintextSecretOverride(
     !Array.isArray(value) &&
     '$plaintextSecret' in value
   );
-}
-
-function nestedSecretValuePath(
-  value: RuntimeConfigValue | undefined,
-  path: string,
-): string | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (isSecretRef(value) || isPlaintextSecretOverride(value)) {
-    return path;
-  }
-
-  if (Array.isArray(value)) {
-    const items: readonly RuntimeConfigValue[] = value;
-
-    for (const [index, item] of items.entries()) {
-      const nestedPath = nestedSecretValuePath(
-        item,
-        `${path}.${String(index)}`,
-      );
-
-      if (nestedPath !== undefined) {
-        return nestedPath;
-      }
-    }
-
-    return undefined;
-  }
-
-  if (typeof value !== 'object' || value === null) {
-    return undefined;
-  }
-
-  for (const [key, item] of Object.entries(value)) {
-    const nestedPath = nestedSecretValuePath(item, `${path}.${key}`);
-
-    if (nestedPath !== undefined) {
-      return nestedPath;
-    }
-  }
-
-  return undefined;
 }
 
 function effectiveFingerprintInput(options: {

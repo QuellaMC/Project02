@@ -23,5 +23,9 @@
     "plugins",
     "role-model",
     "runtime"
+  ],
+  "secret-marker.ts": [
+    "characters",
+    "runtime"
   ]
 }

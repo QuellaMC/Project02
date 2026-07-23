@@ -17,6 +17,11 @@ import {
   type RuntimeConfigValue,
 } from './types.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
+import {
+  allowPlaintextSecretMarkerField,
+  plaintextSecretMarkerField,
+  secretEnvMarkerField,
+} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldDefinitions,
@@ -31,10 +36,13 @@ const project02RuntimeConfigFields = Object.freeze([
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
 const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
-const runtimeConfigSecretRefFields = Object.freeze(['$env', 'description']);
+const runtimeConfigSecretRefFields = Object.freeze([
+  secretEnvMarkerField,
+  'description',
+]);
 const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
-  '$plaintextSecret',
-  'allowPlaintextSecret',
+  plaintextSecretMarkerField,
+  allowPlaintextSecretMarkerField,
   'justification',
 ]);
 
@@ -598,21 +606,21 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
     return false;
   }
 
-  if ('$env' in value) {
+  if (secretEnvMarkerField in value) {
     return (
       hasOnlyFields(value, runtimeConfigSecretRefFields) &&
-      typeof value['$env'] === 'string' &&
-      value['$env'].trim().length > 0 &&
+      typeof value[secretEnvMarkerField] === 'string' &&
+      value[secretEnvMarkerField].trim().length > 0 &&
       (value['description'] === undefined ||
         typeof value['description'] === 'string')
     );
   }
 
-  if ('$plaintextSecret' in value) {
+  if (plaintextSecretMarkerField in value) {
     return (
       hasOnlyFields(value, runtimeConfigPlaintextSecretOverrideFields) &&
-      typeof value['$plaintextSecret'] === 'string' &&
-      value['allowPlaintextSecret'] === true &&
+      typeof value[plaintextSecretMarkerField] === 'string' &&
+      value[allowPlaintextSecretMarkerField] === true &&
       typeof value['justification'] === 'string' &&
       value['justification'].trim().length > 0
     );

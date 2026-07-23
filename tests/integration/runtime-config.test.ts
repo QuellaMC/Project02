@@ -838,7 +838,7 @@ describe('runtime config loading and resolution', () => {
         }),
         expect.objectContaining({
           code: 'runtime_config_secret_ref_for_non_secret',
-          path: 'plugins.memory.structured.config.endpoints.0.token',
+          path: 'plugins.memory.structured.config.endpoints[0].token',
           pluginId: 'memory.structured',
           pluginConfigField: 'endpoints',
         }),

@@ -1,12 +1,10 @@
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
+import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
-import {runtimeConfigValueIsSecretMarker} from './redact.ts';
 import type {
   Project02RuntimeConfig,
   RuntimeConfigDiagnostic,
   RuntimeConfigFieldScope,
-  RuntimeConfigObject,
-  RuntimeConfigValue,
 } from './types.ts';
 
 export type RuntimePluginScopeOperation =
@@ -235,59 +233,5 @@ function pluginScopeDiagnostic(options: {
         ? {}
         : {pluginConfigField: options.fieldName}),
     },
-  );
-}
-
-function nestedSecretMarkerPath(
-  value: RuntimeConfigValue,
-  path: string,
-): string | undefined {
-  if (runtimeConfigValueIsSecretMarker(value)) {
-    return path;
-  }
-
-  if (runtimeConfigValueIsArray(value)) {
-    for (const [index, entry] of value.entries()) {
-      const nested = nestedSecretMarkerPath(entry, `${path}[${String(index)}]`);
-
-      if (nested !== undefined) {
-        return nested;
-      }
-    }
-    return undefined;
-  }
-
-  if (!runtimeConfigValueIsObject(value)) {
-    return undefined;
-  }
-
-  for (const [key, entry] of runtimeConfigObjectEntries(value)) {
-    const nested = nestedSecretMarkerPath(entry, `${path}.${key}`);
-
-    if (nested !== undefined) {
-      return nested;
-    }
-  }
-
-  return undefined;
-}
-
-function runtimeConfigValueIsArray(
-  value: RuntimeConfigValue,
-): value is readonly RuntimeConfigValue[] {
-  return Array.isArray(value);
-}
-
-function runtimeConfigValueIsObject(
-  value: RuntimeConfigValue,
-): value is RuntimeConfigObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function runtimeConfigObjectEntries(
-  value: RuntimeConfigObject,
-): readonly (readonly [string, RuntimeConfigValue])[] {
-  return Object.entries(value).sort(([left], [right]) =>
-    left.localeCompare(right),
   );
 }

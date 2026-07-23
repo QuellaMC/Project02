@@ -29,10 +29,8 @@ import {
   runtimeConfigValueMatchesField,
 } from './schema.ts';
 import {runtimePluginScopeViolation} from './plugin-scope.ts';
-import {
-  redactRuntimeConfigValue,
-  runtimeConfigValueIsSecretMarker,
-} from './redact.ts';
+import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
+import {redactRuntimeConfigValue} from './redact.ts';
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest,
@@ -620,17 +618,5 @@ function manifestsIncludingTarget(
 function runtimeConfigControlValueContainsSecret(
   value: RuntimeConfigValue,
 ): boolean {
-  if (Array.isArray(value)) {
-    return value.some(runtimeConfigControlValueContainsSecret);
-  }
-
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  if (runtimeConfigValueIsSecretMarker(value)) {
-    return true;
-  }
-
-  return Object.values(value).some(runtimeConfigControlValueContainsSecret);
+  return nestedSecretMarkerPath(value, 'value') !== undefined;
 }
