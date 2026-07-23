@@ -65,6 +65,49 @@ describe('runtime config CLI mutation and storage', () => {
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
 
+  it('refuses secret writes when the home env file is a symlink', async () => {
+    const storeRoot = createTestTempRoot('project02-config-env-link-');
+    const outside = createTestTempRoot('project02-config-env-link-target-');
+    const targetPath = join(outside, 'external.env');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'mem0-local': {
+          enabled: true,
+          config: {apiKey: {$env: 'MEM0_API_KEY'}},
+        },
+      },
+    });
+    writeFileSync(targetPath, '');
+    symlinkSync(targetPath, join(storeRoot, '.env'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      [
+        '--store',
+        storeRoot,
+        'secret',
+        'set',
+        'mem0-local',
+        'apiKey',
+        'MEM0_API_KEY',
+      ],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        factories: installedSecretFactories,
+        env: {MEM0_API_KEY: 'stored-secret'},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    // The secret never lands outside the validated home.
+    expect(readFileSync(targetPath, 'utf8')).toBe('');
+  });
+
   it('refuses global writes when the home lock root is a symlink', async () => {
     const storeRoot = createTestTempRoot('project02-config-home-lock-link-');
     const outside = createTestTempRoot('project02-config-lock-target-');

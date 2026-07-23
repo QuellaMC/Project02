@@ -258,6 +258,29 @@ describe('character data directories through the durable runtime', () => {
     });
   });
 
+  it('tolerates a live sibling marker replacement during first adoption', async () => {
+    const homeRoot = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    // A concurrent initializer between temp-write and rename: the live
+    // replacement must not read as foreign content.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(
+        dataRoot,
+        `.schema.json.${String(process.pid)}.0f0e0d0c-0b0a-4908-8706-050403020100.tmp`,
+      ),
+      '',
+    );
+
+    const stamped = await ensureCharacterDataStamp({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    expect(stamped).toMatchObject({status: 'stamped', created: true});
+  });
+
   it('refuses a stamped data directory whose sessions root is a symlink', async () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();

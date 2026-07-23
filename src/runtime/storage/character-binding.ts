@@ -10,7 +10,10 @@ import {lstatSync, readdirSync, readFileSync} from 'node:fs';
 import {basename, dirname, join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
-import {atomicReplaceFile} from './atomic-file.ts';
+import {
+  atomicReplaceFile,
+  isLiveAtomicReplacementForAnyTarget,
+} from './atomic-file.ts';
 import {
   characterBindingFileName,
   characterDataDirectoryName,
@@ -249,11 +252,22 @@ export function assertCharacterDataDirAdoptable(
   const foreignEntry = readdirSync(layout.storeRoot).find(entry => {
     const entryPath = join(layout.storeRoot, entry);
 
-    return (
-      entryPath !== layout.configPath &&
-      entryPath !== layout.locksRoot &&
-      entryPath !== layout.characterBindingPath
-    );
+    if (
+      entryPath === layout.configPath ||
+      entryPath === layout.locksRoot ||
+      entryPath === layout.characterBindingPath
+    ) {
+      return false;
+    }
+
+    // A concurrent initializer's half-written marker — or a sibling
+    // writer's overlay/stamp temp — is not foreign content; its rename
+    // lands before that sibling proceeds. Abandoned temps stay foreign.
+    return !isLiveAtomicReplacementForAnyTarget(entry, [
+      layout.schemaPath,
+      layout.configPath,
+      layout.characterBindingPath,
+    ]);
   });
 
   if (foreignEntry !== undefined) {

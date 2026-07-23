@@ -1,10 +1,12 @@
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {Readable} from 'node:stream';
 
 import {describe, expect, it} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import {ensureConsoleCommitTarget} from '../../src/cli/config/console-shared.ts';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
 import type {RuntimePlugin} from '../../src/plugins/api/types.ts';
 import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
@@ -26,6 +28,38 @@ type ScriptedPromptStep =
     };
 
 describe('runtime config console UI', () => {
+  it('refuses an unscoped console commit into a foreign home', async () => {
+    const homeRoot = createTestTempRoot('project02-console-foreign-home-');
+
+    writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    await expect(
+      ensureConsoleCommitTarget({storeRoot: homeRoot, env: {}}, undefined),
+    ).rejects.toThrow();
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+  });
+
+  it('revalidates scoped layers before a console save materializes state', async () => {
+    const homeRoot = createTestTempRoot('project02-console-bad-overlay-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // The overlay went bad after the console opened: the save must
+    // fail before ensure writes the home marker or binding stamp.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'config.json'), '{not json\n');
+
+    await expect(
+      ensureConsoleCommitTarget(
+        {storeRoot: homeRoot, env: {}},
+        {characterId: 'mira', dataRoot},
+      ),
+    ).rejects.toThrow();
+    expect(existsSync(join(dataRoot, 'character-binding.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
   it('exits cleanly when the default prompt reaches stdin EOF', async () => {
     const storeRoot = createTestTempRoot('project02-config-console-eof-');
     let stdout = '';

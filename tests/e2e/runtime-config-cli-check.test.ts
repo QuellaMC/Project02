@@ -43,6 +43,29 @@ describe('runtime config CLI reads and checks', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('rejects check for a marker-less home holding foreign content', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-foreign-home-',
+    );
+    let stderr = '';
+
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
   it('rejects check when the data marker is a directory', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-marker-dir-');
     const dataRoot = join(storeRoot, 'character-data', 'mira');

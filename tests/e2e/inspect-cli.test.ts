@@ -611,6 +611,27 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('reports a foreign home instead of an empty session list', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-foreign-home-');
+    let stderr = '';
+
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
   it('reports a foreign entry in the data directory instead of an empty session list', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-foreign-entry-');
     const dataRoot = characterDataDirPath(storeRoot, 'mira');

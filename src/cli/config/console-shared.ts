@@ -5,9 +5,13 @@
  */
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
+  assertScopedGlobalLayerLoadable,
   ensureCharacterDataDir,
+  loadCharacterOverlayForScope,
   redactRuntimeConfigText,
+  RuntimeConfigMutationError,
   runtimeConfigDiagnosticAttribution,
+  runtimeConfigEnvVarName,
   runtimeConfigValueMatchesField,
   type createRuntimeConfigMutationBase,
   type loadProject02RuntimeConfig,
@@ -18,7 +22,11 @@ import {
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
-import {homeRootForCharacterDataDir} from '../../runtime/storage/index.ts';
+import {
+  assertProject02HomeAdoptable,
+  assertRealHomeEnvFile,
+  homeRootForCharacterDataDir,
+} from '../../runtime/storage/index.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
   question(prompt: string): Promise<string | undefined>;
@@ -61,16 +69,54 @@ export type StagedRuntimeConfigChange = {
 };
 
 /**
- * Commit-time preparation of a scoped console write: home guard and
- * binding stamp land only when the user actually saves, so a read-only
- * console session never creates durable character state and a foreign
- * --store directory is rejected before any config lands in it.
+ * Commit-time preparation of a console write: guards and the binding
+ * stamp land only when the user actually saves, so a read-only console
+ * session never creates durable state. Unscoped commits refuse a home
+ * the runtime would not adopt (explicit --config and env-selected
+ * paths keep standalone-file semantics); scoped commits re-validate
+ * the layers the save mutates — exactly as the non-UI verbs do —
+ * before ensure materializes the stamp or marker.
  */
-export async function ensureScopedConsoleCommitTarget(
+export async function ensureConsoleCommitTarget(
+  context: {
+    readonly configPath?: string;
+    readonly storeRoot?: string;
+    readonly env?: NodeJS.ProcessEnv;
+  },
   characterScope: RuntimeConfigCharacterScope | undefined,
 ): Promise<void> {
   if (characterScope === undefined) {
+    if (
+      context.configPath !== undefined ||
+      ((context.env ?? {})[runtimeConfigEnvVarName] ?? '').trim() !== ''
+    ) {
+      return;
+    }
+
+    await assertProject02HomeAdoptable(
+      context.storeRoot === undefined ? {} : {homeRoot: context.storeRoot},
+    );
+    await assertRealHomeEnvFile(
+      context.storeRoot === undefined ? {} : {homeRoot: context.storeRoot},
+    );
     return;
+  }
+
+  assertScopedGlobalLayerLoadable({
+    ...runtimeConfigLocation(context),
+    ...(context.env === undefined ? {} : {env: context.env}),
+    characterId: characterScope.characterId,
+  });
+
+  const overlay = loadCharacterOverlayForScope(characterScope);
+  const overlayError = overlay.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (overlayError !== undefined) {
+    throw new RuntimeConfigMutationError(
+      `${runtimeConfigDiagnosticAttribution(overlayError)}${overlayError.message}`,
+    );
   }
 
   await ensureCharacterDataDir({

@@ -110,6 +110,34 @@ async function ensureRealCharacterDataRoot(
   }
 }
 
+/**
+ * The shared env file must live inside the home before a mutation
+ * writes secrets through it. Kept separate from the adoptability
+ * assert: startup error precedence gives env-independent activation
+ * errors priority over env-file problems, so only the mutation guards
+ * call this.
+ */
+export async function assertRealHomeEnvFile(
+  options: Project02HomeLayoutOptions = {},
+): Promise<void> {
+  const layout = createProject02HomeLayout(options);
+  let stats;
+
+  try {
+    stats = await lstat(layout.envPath);
+  } catch {
+    return;
+  }
+
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Project02 home "${layout.homeRoot}" has an env file that is not ` +
+        'a real file; home control state must live inside the home.',
+    );
+  }
+}
+
 async function assertRealHomeControlEntries(
   layout: Project02HomeLayout,
 ): Promise<void> {
@@ -193,7 +221,12 @@ async function readProject02HomeMarker(layout: Project02HomeLayout) {
   try {
     source = await readFile(layout.schemaPath, 'utf8');
   } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
+    // ENOTDIR: the home root is not a directory; the storage layer
+    // owns that diagnosis with a more precise error than this guard.
+    if (
+      isNodeErrorWithCode(error, 'ENOENT') ||
+      isNodeErrorWithCode(error, 'ENOTDIR')
+    ) {
       return undefined;
     }
 
@@ -214,7 +247,10 @@ async function project02HomeHasForeignContent(
   try {
     entries = await readdir(layout.homeRoot, {withFileTypes: true});
   } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
+    if (
+      isNodeErrorWithCode(error, 'ENOENT') ||
+      isNodeErrorWithCode(error, 'ENOTDIR')
+    ) {
       return false;
     }
 

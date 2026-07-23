@@ -982,7 +982,7 @@ describe('runtime config activation checks and construction', () => {
           },
         },
       }),
-    ).rejects.toThrow('Could not read Project02 home marker');
+    ).rejects.toThrow('Could not inspect the character-data root');
 
     expect(factoryCalls).toBe(0);
     expect(cleanupContexts).toHaveLength(0);

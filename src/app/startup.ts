@@ -38,6 +38,7 @@ import {existsSync} from 'node:fs';
 import type {RuntimePluginManifest} from '../plugins/index.ts';
 import {
   assertCharacterDataDirReadable,
+  assertProject02HomeAdoptable,
   characterDataDirPath,
   LocalRuntimeStorageContractError,
 } from '../runtime/storage/index.ts';
@@ -242,6 +243,12 @@ async function resolveRuntimeCliActivationStartup(input: {
       activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
     });
   }
+
+  // The home itself must be adoptable before any startup — read-only
+  // included — reports config or sessions from it; a marker-less
+  // directory holding foreign content fails check and inspect exactly
+  // as the writers refuse it.
+  await assertProject02HomeAdoptable({homeRoot});
 
   // An invalid pre-existing overlay must not create durable state
   // either: read it before the home marker, stamp, or seed would be

@@ -28,6 +28,7 @@ import {
 import {
   assertCharacterDataDirReadable,
   assertProject02HomeAdoptable,
+  assertRealHomeEnvFile,
   homeRootForCharacterDataDir,
 } from '../../runtime/storage/index.ts';
 import {
@@ -430,6 +431,9 @@ async function assertMutationHomeAdoptable(
   }
 
   await assertProject02HomeAdoptable(
+    location.storeRoot === undefined ? {} : {homeRoot: location.storeRoot},
+  );
+  await assertRealHomeEnvFile(
     location.storeRoot === undefined ? {} : {homeRoot: location.storeRoot},
   );
 }
