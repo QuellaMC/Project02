@@ -167,10 +167,12 @@ export default tseslint.config(
       // +25 so a symlink sitting where an overlay belongs is rejected
       // as written, before canonicalization can route it elsewhere,
       // then +10 so direct overlay targets pass the full adoptability
-      // guard and every as-written path component is symlink-checked.
+      // guard and every as-written path component is symlink-checked,
+      // then +6 so secret references are never authored in a character
+      // overlay, matching the --character secret-scope rejection.
       'max-lines': [
         'error',
-        {max: 1376, skipBlankLines: true, skipComments: true},
+        {max: 1382, skipBlankLines: true, skipComments: true},
       ],
     },
   },
