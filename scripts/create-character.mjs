@@ -8,11 +8,13 @@
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-
-const characterIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+import {
+  displayNameFromProject02Identifier,
+  isProject02Identifier,
+} from '../src/shared/identifier.ts';
 
 export function scaffoldCharacterPackage({id, packagesRoot}) {
-  if (!characterIdPattern.test(id)) {
+  if (!isProject02Identifier(id)) {
     throw new Error(
       `Character id "${id}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`,
     );
@@ -26,11 +28,7 @@ export function scaffoldCharacterPackage({id, packagesRoot}) {
     );
   }
 
-  const displayName = id
-    .split(/[._-]/u)
-    .filter(part => part.length > 0)
-    .map(part => part[0].toUpperCase() + part.slice(1))
-    .join(' ');
+  const displayName = displayNameFromProject02Identifier(id);
 
   mkdirSync(packageRoot, {recursive: true});
   writeFileSync(
@@ -83,9 +81,7 @@ if (invokedDirectly) {
     console.log('Next steps:');
     console.log('  1. Shape the identity and persona sections.');
     console.log('  2. pnpm check');
-    console.log(
-      '  3. Select it for a fresh store (one store stays bound to one character).',
-    );
+    console.log(`  3. Select it with --store <home> --character ${id}.`);
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));
     process.exit(1);

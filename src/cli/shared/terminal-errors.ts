@@ -1,4 +1,5 @@
 import {ConversationRehydrationError} from '../../core/index.ts';
+import {RuntimeConfigLocationError} from '../../runtime/config/index.ts';
 import {
   LocalRuntimeSessionStoreError,
   LocalRuntimeStorageContractError,
@@ -6,6 +7,7 @@ import {
 
 export type LocalRuntimeTerminalError =
   | ConversationRehydrationError
+  | RuntimeConfigLocationError
   | LocalRuntimeSessionStoreError
   | LocalRuntimeStorageContractError;
 
@@ -14,6 +16,7 @@ export function isLocalRuntimeTerminalError(
 ): error is LocalRuntimeTerminalError {
   return (
     error instanceof ConversationRehydrationError ||
+    error instanceof RuntimeConfigLocationError ||
     error instanceof LocalRuntimeSessionStoreError ||
     error instanceof LocalRuntimeStorageContractError
   );

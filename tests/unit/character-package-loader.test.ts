@@ -215,6 +215,42 @@ describe('character package discovery', () => {
     ]);
   });
 
+  it('preserves the discovery diagnostic for unsafe descriptor JSON', () => {
+    const root = createTestTempRoot();
+
+    writeCharacterPackage(root, 'unsafe-json', {
+      raw: `${JSON.stringify({
+        format: 'project02.character.v1',
+        identity: {id: 'unsafe-json', displayName: 'Unsafe JSON'},
+        persona: {system: ['You are Unsafe JSON.']},
+        meta: {version: '1.0.0'},
+        plugins: {
+          config: {
+            fixture: Object.fromEntries(
+              Array.from({length: 257}, (_, index) => [
+                `field-${String(index)}`,
+                index,
+              ]),
+            ),
+          },
+        },
+      })}\n`,
+    });
+
+    const discovery = discoverCharacterPackages({
+      sources: [{root, provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'invalid_descriptor',
+        characterId: 'unsafe-json',
+        message: 'Character package descriptor exceeds safe JSON limits.',
+      }),
+    ]);
+  });
+
   it('ignores loose files in a discovery root', () => {
     const root = createTestTempRoot();
 

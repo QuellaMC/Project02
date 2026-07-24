@@ -19,7 +19,6 @@ export {
   type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
 } from './control.ts';
-export {lockFailureProvesNoOverlayWriter} from './control-transaction.ts';
 export {
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigControlCapability,
@@ -39,6 +38,7 @@ export {
   loadProject02RuntimeConfig,
   maxProject02RuntimeConfigBytes,
   readProject02RuntimeConfigDocument,
+  RuntimeConfigLocationError,
   validateProject02RuntimeConfig,
 } from './load.ts';
 export {
@@ -62,9 +62,7 @@ export {
   assertScopedMutationOperationAllowed,
   applyRuntimeConfigControlOperation,
   prepareRuntimeConfigControlOperation,
-  resolveScopedGlobalLayerLocation,
   resolveRuntimeConfigScopeTarget,
-  type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigCharacterMaterialization,
   type RuntimeConfigCharacterMaterializationOutcome,
   type RuntimeConfigControlApplyResult,
@@ -111,6 +109,7 @@ export {
   type Project02HostConfig,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
+  type ResolvedRuntimeConfigScopeTarget,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,

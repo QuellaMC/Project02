@@ -6,6 +6,12 @@
     "role-model",
     "runtime"
   ],
+  "identifier.ts": [
+    "characters",
+    "plugins",
+    "role-model",
+    "runtime"
+  ],
   "json-boundary.ts": [
     "app",
     "characters",

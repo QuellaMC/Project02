@@ -3,7 +3,10 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
+import {
+  createConfiguredProject02PluginHostFromPlan,
+  prepareConfiguredProject02PluginActivation,
+} from '../../src/app/index.ts';
 import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
@@ -715,21 +718,23 @@ describe('runtime config activation checks and construction', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig,
-        env: {
-          [envVar]: 'same-id-different-manifest-secret',
-        },
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin,
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig,
+          env: {
+            [envVar]: 'same-id-different-manifest-secret',
           },
-          'memory.contract': {
-            manifest: declaredPlugin.manifest,
-            create: () => returnedPlugin,
+          factories: {
+            [cleanupPlugin.manifest.id]: {
+              manifest: cleanupPlugin.manifest,
+              create: () => cleanupPlugin,
+            },
+            'memory.contract': {
+              manifest: declaredPlugin.manifest,
+              create: () => returnedPlugin,
+            },
           },
-        },
+        }),
       }),
     ).rejects.toThrow(
       'Plugin package loader "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".',
@@ -765,22 +770,24 @@ describe('runtime config activation checks and construction', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig,
-        storeRoot,
-        sessionId,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin,
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error('later manifest-backed factory failed');
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig,
+          storeRoot,
+          factories: {
+            [cleanupPlugin.manifest.id]: {
+              manifest: cleanupPlugin.manifest,
+              create: () => cleanupPlugin,
+            },
+            [failingPlugin.manifest.id]: {
+              manifest: failingPlugin.manifest,
+              create: () => {
+                throw new Error('later manifest-backed factory failed');
+              },
             },
           },
-        },
+        }),
+        sessionId,
       }),
     ).rejects.toThrow('later manifest-backed factory failed');
 
@@ -841,21 +848,23 @@ describe('runtime config activation checks and construction', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        storeRoot,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin,
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error('later manifest-backed factory failed');
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          storeRoot,
+          factories: {
+            [cleanupPlugin.manifest.id]: {
+              manifest: cleanupPlugin.manifest,
+              create: () => cleanupPlugin,
+            },
+            [failingPlugin.manifest.id]: {
+              manifest: failingPlugin.manifest,
+              create: () => {
+                throw new Error('later manifest-backed factory failed');
+              },
             },
           },
-        },
+        }),
       }),
     ).rejects.toThrow('later manifest-backed factory failed');
 
@@ -914,32 +923,34 @@ describe('runtime config activation checks and construction', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        storeRoot,
-        sessionId,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: input => {
-              createRuntimePluginFileStore({
-                storeRoot: input.storeRoot,
-                sessionId,
-                pluginId: cleanupPlugin.manifest.id,
-              }).writeJsonAtomic('state.json', {
-                value: 'durable construction state',
-              });
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          storeRoot,
+          factories: {
+            [cleanupPlugin.manifest.id]: {
+              manifest: cleanupPlugin.manifest,
+              create: input => {
+                createRuntimePluginFileStore({
+                  storeRoot: input.storeRoot,
+                  sessionId,
+                  pluginId: cleanupPlugin.manifest.id,
+                }).writeJsonAtomic('state.json', {
+                  value: 'durable construction state',
+                });
 
-              return cleanupPlugin;
+                return cleanupPlugin;
+              },
+            },
+            [failingPlugin.manifest.id]: {
+              manifest: failingPlugin.manifest,
+              create: () => {
+                throw new Error('later manifest-backed factory failed');
+              },
             },
           },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              throw new Error('later manifest-backed factory failed');
-            },
-          },
-        },
+        }),
+        sessionId,
       }),
     ).rejects.toThrow('later manifest-backed factory failed');
 
@@ -950,7 +961,7 @@ describe('runtime config activation checks and construction', () => {
     ]);
   });
 
-  it('fails closed on an unusable store before any factory or cleanup runs', async () => {
+  it('fails closed on an unusable store before any factory or cleanup runs', () => {
     const configRoot = createTestTempRoot(
       'project02-config-factory-invalid-store-cleanup-',
     );
@@ -980,8 +991,8 @@ describe('runtime config activation checks and construction', () => {
 
     // The guarded initializer rejects the unusable store with its own
     // precise error before any factory can construct against it.
-    await expect(
-      createConfiguredProject02PluginHost({
+    expect(() =>
+      prepareConfiguredProject02PluginActivation({
         loadedConfig: loadProject02RuntimeConfig({configPath}),
         storeRoot: invalidStoreRoot,
         factories: {
@@ -1003,7 +1014,7 @@ describe('runtime config activation checks and construction', () => {
           },
         },
       }),
-    ).rejects.toThrow('Could not inspect the character-data root');
+    ).toThrow('Could not inspect the character-data root');
 
     expect(factoryCalls).toBe(0);
     expect(cleanupContexts).toHaveLength(0);
@@ -1057,23 +1068,25 @@ describe('runtime config activation checks and construction', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        storeRoot,
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => cleanupPlugin,
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          storeRoot,
+          factories: {
+            [cleanupPlugin.manifest.id]: {
+              manifest: cleanupPlugin.manifest,
+              create: () => cleanupPlugin,
+            },
+            [firstToolPlugin.manifest.id]: {
+              manifest: firstToolPlugin.manifest,
+              create: () => firstToolPlugin,
+            },
+            [secondToolPlugin.manifest.id]: {
+              manifest: secondToolPlugin.manifest,
+              create: () => secondToolPlugin,
+            },
           },
-          [firstToolPlugin.manifest.id]: {
-            manifest: firstToolPlugin.manifest,
-            create: () => firstToolPlugin,
-          },
-          [secondToolPlugin.manifest.id]: {
-            manifest: secondToolPlugin.manifest,
-            create: () => secondToolPlugin,
-          },
-        },
+        }),
       }),
     ).rejects.toThrow(/declared more than once/iu);
 
@@ -1122,15 +1135,17 @@ describe('runtime config activation checks and construction', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        storeRoot,
-        factories: {
-          [collisionPlugin.manifest.id]: {
-            manifest: collisionPlugin.manifest,
-            create: () => collisionPlugin,
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          storeRoot,
+          factories: {
+            [collisionPlugin.manifest.id]: {
+              manifest: collisionPlugin.manifest,
+              create: () => collisionPlugin,
+            },
           },
-        },
+        }),
       }),
     ).rejects.toThrow(
       'Plugin tool "runtime.plugin.list" is declared more than once.',
@@ -1165,21 +1180,23 @@ describe('runtime config activation checks and construction', () => {
     const loadedConfig = loadProject02RuntimeConfig({configPath});
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig,
-      env: {
-        [envVar]: 'same-id-matching-manifest-secret',
-      },
-      factories: {
-        'memory.contract': {
-          manifest: plugin.manifest,
-          create: () => {
-            factoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig,
+        env: {
+          [envVar]: 'same-id-matching-manifest-secret',
+        },
+        factories: {
+          'memory.contract': {
+            manifest: plugin.manifest,
+            create: () => {
+              factoryCalls += 1;
 
-            return plugin;
+              return plugin;
+            },
           },
         },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(1);

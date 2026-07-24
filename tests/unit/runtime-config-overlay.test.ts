@@ -8,6 +8,7 @@ import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 import {
+  assertScopedMutationOperationAllowed,
   characterOverlayConfigPath,
   loadProject02CharacterOverlayConfig,
   resolveLayeredProject02RuntimeConfig,
@@ -19,6 +20,7 @@ import {
   type Project02HostConfig,
   type Project02RuntimePluginConfig,
 } from '../../src/runtime/config/index.ts';
+import {assertOverlayLocatedCandidateStaysCharacterScoped} from '../../src/runtime/config/mutate.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 
 function overlayDataRoot(): string {
@@ -193,6 +195,81 @@ describe('character overlay config loader', () => {
       '[character mira] ',
     );
   });
+
+  it.each([
+    [
+      'project02.storeRoot',
+      '/tmp/home',
+      {version: runtimeConfigVersion, project02: {storeRoot: '/tmp/home'}},
+      true,
+    ],
+    [
+      'project02.character',
+      'mira',
+      {version: runtimeConfigVersion, project02: {character: 'mira'}},
+      true,
+    ],
+    [
+      'project02.defaultMemoryProvider',
+      'memory',
+      {
+        version: runtimeConfigVersion,
+        project02: {defaultMemoryProvider: 'memory'},
+      },
+      false,
+    ],
+    [
+      'project02.roleModelProvider',
+      'local',
+      {
+        version: runtimeConfigVersion,
+        project02: {roleModelProvider: 'local' as const},
+      },
+      false,
+    ],
+    [
+      'project02.userDisplayName',
+      'Mike',
+      {version: runtimeConfigVersion, project02: {userDisplayName: 'Mike'}},
+      false,
+    ],
+  ] as const)(
+    'uses one character-field scope policy for %s across every write boundary',
+    (path, value, candidate, globalOnly) => {
+      const operation = {kind: 'set' as const, path, value};
+      const dataRoot = overlayDataRoot();
+
+      writeRuntimeConfig(characterOverlayConfigPath(dataRoot), candidate);
+      const loaded = loadProject02CharacterOverlayConfig({
+        dataRoot,
+        characterId: 'mira',
+      });
+
+      if (globalOnly) {
+        expect(() => {
+          assertScopedMutationOperationAllowed(operation);
+        }).toThrow('global-only');
+        expect(() => {
+          assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
+        }).toThrow('global-only');
+        expect(loaded.diagnostics).toEqual([
+          expect.objectContaining({
+            code: 'runtime_config_field_global_only',
+            path,
+          }),
+        ]);
+        return;
+      }
+
+      expect(() => {
+        assertScopedMutationOperationAllowed(operation);
+      }).not.toThrow();
+      expect(() => {
+        assertOverlayLocatedCandidateStaysCharacterScoped(candidate);
+      }).not.toThrow();
+      expect(loaded.diagnostics).toEqual([]);
+    },
+  );
 
   it('stays structurally incompatible with the global loaded-config type', () => {
     // Structural guard (R7): an overlay must never reach the global

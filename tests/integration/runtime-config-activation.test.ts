@@ -10,7 +10,6 @@ import {
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {
-  createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
   initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
@@ -94,8 +93,10 @@ describe('runtime config activation planning', () => {
     // state, which previously produced a host with no package defaults
     // and no diagnostics.
     await expect(
-      createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
       }),
     ).rejects.toThrow('is not initialized in this home');
     expect(existsSync(join(storeRoot, 'character-data', 'mira'))).toBe(false);
@@ -156,9 +157,11 @@ describe('runtime config activation planning', () => {
       },
     );
     const output = parseActivationOutput(stdout);
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {},
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {},
+      }),
     });
     const checkDiscovery = output.plugins.find(
       plugin => plugin.pluginId === runtimePluginId,
@@ -202,8 +205,10 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
 
@@ -239,21 +244,23 @@ describe('runtime config activation planning', () => {
       },
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      env: {
-        [envVar]: 'blocked-config-secret',
-      },
-      toolConfirmationHandler: () => ({status: 'approved'}),
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
-            return plugin;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        env: {
+          [envVar]: 'blocked-config-secret',
+        },
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              return plugin;
+            },
           },
         },
-      },
+      }),
+      toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const inventoryResult = await configured.host.handleToolCall(
       {
@@ -313,9 +320,11 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      storeRoot,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        storeRoot,
+      }),
       sessionId,
     });
     const logStore = createRuntimeLogStore();
@@ -442,15 +451,17 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      strictUnknownPlugins: true,
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create: () => plugin,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        strictUnknownPlugins: true,
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create: () => plugin,
+          },
         },
-      },
+      }),
     });
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
@@ -489,14 +500,16 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create: () => plugin,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create: () => plugin,
+          },
         },
-      },
+      }),
     });
     const activation = configured.activation.plugins.find(
       item => item.pluginId === plugin.manifest.id,
@@ -526,8 +539,10 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.plugins).toContainEqual(
@@ -551,18 +566,20 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {
-        [characterStatePluginId]: {
-          manifest: createCharacterStatePluginManifest(),
-          create: () => {
-            factoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: createCharacterStatePluginManifest(),
+            create: () => {
+              factoryCalls += 1;
 
-            return plugin;
+              return plugin;
+            },
           },
         },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -586,14 +603,16 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {
-        [characterStatePluginId]: {
-          manifest: plugin.manifest,
-          create: () => plugin,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest: plugin.manifest,
+            create: () => plugin,
+          },
         },
-      },
+      }),
     });
 
     expect(configured.activation.plugins).toContainEqual(
@@ -627,9 +646,11 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories,
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -657,9 +678,11 @@ describe('runtime config activation planning', () => {
       },
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      strictUnknownPlugins: true,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        strictUnknownPlugins: true,
+      }),
     });
 
     expect(configured.activation.diagnostics).toEqual(
@@ -681,9 +704,11 @@ describe('runtime config activation planning', () => {
       defaultMemoryProvider: 'memory.typo',
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      strictUnknownPlugins: true,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        strictUnknownPlugins: true,
+      }),
     });
 
     expect(configured.plugins).toEqual([]);
@@ -722,8 +747,10 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(
@@ -766,18 +793,20 @@ describe('runtime config activation planning', () => {
       defaultMemoryProvider: plugin.manifest.id,
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
 
-            return plugin;
+              return plugin;
+            },
           },
         },
-      },
+      }),
     });
     const activation = configured.activation.plugins.find(
       item => item.pluginId === plugin.manifest.id,
@@ -830,19 +859,21 @@ describe('runtime config activation planning', () => {
       },
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
-            throw new Error(
-              'explicitly disabled memory provider was constructed',
-            );
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'explicitly disabled memory provider was constructed',
+              );
+            },
           },
         },
-      },
+      }),
     });
     const activation = configured.activation.plugins.find(
       item => item.pluginId === plugin.manifest.id,
@@ -888,19 +919,21 @@ describe('runtime config activation planning', () => {
       defaultMemoryProvider: plugin.manifest.id,
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
-            throw new Error(
-              'invalid memory provider config reached the factory',
-            );
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error(
+                'invalid memory provider config reached the factory',
+              );
+            },
           },
         },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -952,29 +985,31 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      env: {
-        [envVar]: 'selected-memory-secret',
-      },
-      factories: {
-        [selectedPlugin.manifest.id]: {
-          manifest: selectedPlugin.manifest,
-          create() {
-            selectedFactoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        env: {
+          [envVar]: 'selected-memory-secret',
+        },
+        factories: {
+          [selectedPlugin.manifest.id]: {
+            manifest: selectedPlugin.manifest,
+            create() {
+              selectedFactoryCalls += 1;
 
-            return selectedPlugin;
+              return selectedPlugin;
+            },
+          },
+          [unselectedPlugin.manifest.id]: {
+            manifest: unselectedPlugin.manifest,
+            create() {
+              unselectedFactoryCalls += 1;
+
+              return unselectedPlugin;
+            },
           },
         },
-        [unselectedPlugin.manifest.id]: {
-          manifest: unselectedPlugin.manifest,
-          create() {
-            unselectedFactoryCalls += 1;
-
-            return unselectedPlugin;
-          },
-        },
-      },
+      }),
     });
     const discoveryResult = await configured.host.handleToolCall(
       {
@@ -1062,29 +1097,31 @@ describe('runtime config activation planning', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      env: {
-        [envVar]: 'selected-memory-secret',
-      },
-      factories: {
-        [selectedPlugin.manifest.id]: {
-          manifest: selectedPlugin.manifest,
-          create() {
-            selectedFactoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        env: {
+          [envVar]: 'selected-memory-secret',
+        },
+        factories: {
+          [selectedPlugin.manifest.id]: {
+            manifest: selectedPlugin.manifest,
+            create() {
+              selectedFactoryCalls += 1;
 
-            return selectedPlugin;
+              return selectedPlugin;
+            },
+          },
+          [unselectedPlugin.manifest.id]: {
+            manifest: unselectedPlugin.manifest,
+            create() {
+              unselectedFactoryCalls += 1;
+
+              return unselectedPlugin;
+            },
           },
         },
-        [unselectedPlugin.manifest.id]: {
-          manifest: unselectedPlugin.manifest,
-          create() {
-            unselectedFactoryCalls += 1;
-
-            return unselectedPlugin;
-          },
-        },
-      },
+      }),
     });
     const unselectedActivation = configured.activation.plugins.find(
       plugin => plugin.pluginId === unselectedPlugin.manifest.id,

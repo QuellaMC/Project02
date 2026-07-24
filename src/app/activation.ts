@@ -461,39 +461,6 @@ function runtimePluginConfigActivationByPluginId(
   );
 }
 
-export async function createConfiguredProject02PluginHost(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly strictUnknownPlugins?: boolean;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-  readonly toolConfirmationHandler?:
-    RuntimePluginToolConfirmationHandler | undefined;
-}): Promise<Project02ConfiguredPluginHost> {
-  const activationPlan = prepareConfiguredProject02PluginActivation({
-    loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    strictUnknownPlugins: options.strictUnknownPlugins === true,
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(options.catalogSnapshot === undefined
-      ? {}
-      : {catalogSnapshot: options.catalogSnapshot}),
-  });
-
-  return createConfiguredProject02PluginHostFromPlan({
-    activationPlan,
-    sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity,
-    constructionCleanup: options.constructionCleanup,
-    toolConfirmationHandler: options.toolConfirmationHandler,
-  });
-}
-
 export async function createConfiguredProject02PluginHostFromPlan(options: {
   readonly activationPlan: PreparedProject02PluginActivationPlan;
   readonly sessionId?: string | undefined;

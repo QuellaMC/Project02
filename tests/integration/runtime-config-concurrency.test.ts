@@ -87,12 +87,13 @@ async function runConfigMutationChild(options: {
 }): Promise<void> {
   const script = [
     "import { existsSync } from 'node:fs';",
-    "const { applyRuntimeConfigMutation } = await import('./src/runtime/config/mutate.ts');",
+    "const { applyRuntimeConfigControlOperation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
+    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
-    'applyRuntimeConfigMutation({',
-    '  storeRoot: process.argv[1],',
-    "  operation: { kind: 'plugin_enable', pluginId: process.argv[3] }",
+    'applyRuntimeConfigControlOperation({',
+    "  target: resolveRuntimeConfigScopeTarget({ storeRoot: process.argv[1], env: {}, scope: 'global' }),",
+    "  request: { kind: 'plugin_activation', manifest: requiredSecretPlugin(process.argv[3]).manifest, enabled: true }",
     '});',
   ].join('\n');
 
@@ -112,18 +113,17 @@ async function runSecretMutationChild(options: {
 }): Promise<void> {
   const script = [
     "import { existsSync } from 'node:fs';",
-    "const { applyRuntimeConfigMutation } = await import('./src/runtime/config/mutate.ts');",
+    "const { applyRuntimeConfigControlOperation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
+    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
-    'applyRuntimeConfigMutation({',
-    '  storeRoot: process.argv[1],',
-    '  configPath: process.argv[3],',
-    '  operation: {',
-    "    kind: 'secret_set',",
-    '    pluginId: process.argv[4],',
-    "    fieldName: 'apiKey',",
-    '    envVar: process.argv[5],',
-    '    secretValue: process.argv[6]',
+    'applyRuntimeConfigControlOperation({',
+    "  target: resolveRuntimeConfigScopeTarget({ storeRoot: process.argv[1], configPath: process.argv[3], env: { [process.argv[5]]: process.argv[6] }, scope: 'global' }),",
+    '  request: {',
+    "    kind: 'plugin_config',",
+    '    manifest: requiredSecretPlugin(process.argv[4]).manifest,',
+    "    actor: 'operator',",
+    "    fieldOperation: { kind: 'secret_set', fieldName: 'apiKey', envVar: process.argv[5], secretValue: process.argv[6] }",
     '  }',
     '});',
   ].join('\n');

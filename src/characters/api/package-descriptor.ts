@@ -9,6 +9,8 @@ import {
   freezeCharacterProfile,
   type CharacterProfile,
 } from '../../core/index.ts';
+import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
+import {isProject02Identifier} from '../../shared/identifier.ts';
 import {
   allowPlaintextSecretMarkerField,
   valueIsSecretMarker,
@@ -20,13 +22,8 @@ export const characterPackageDescriptorFileName = 'project02.character.json';
 export const maxCharacterPersonaSections = 16;
 export const maxCharacterPersonaSectionLength = 4000;
 
-const characterIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 const maxCharacterDisplayNameLength = 128;
 const characterVersionPattern = /^\d+\.\d+\.\d+$/u;
-// Kept in lockstep with the plugin id rules (plugins/api manifest
-// validation and the storage layout contract); the characters module
-// must not import either, so the pattern is duplicated here on purpose.
-const characterPluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 
 export const maxCharacterPluginExpectations = 32;
 
@@ -92,12 +89,25 @@ export type CharacterPackageDescriptorParseResult =
     };
 
 export function parseCharacterPackageDescriptor(
-  descriptor: unknown,
+  value: unknown,
 ): CharacterPackageDescriptorParseResult {
-  if (!isRecord(descriptor)) {
+  if (!isRecord(value)) {
     return rejectedDescriptor(
       'invalid_descriptor',
       'Character package descriptor must be an object.',
+    );
+  }
+
+  let descriptor;
+
+  try {
+    descriptor = createJsonBoundaryObjectSnapshot(value, {
+      field: 'Character package descriptor',
+    });
+  } catch {
+    return rejectedDescriptor(
+      'invalid_descriptor',
+      'Character package descriptor exceeds safe JSON limits.',
     );
   }
 
@@ -183,7 +193,7 @@ function parseCharacterIdentity(value: unknown): CharacterIdentityParseResult {
 
   const id = value['id'];
 
-  if (typeof id !== 'string' || !characterIdPattern.test(id)) {
+  if (typeof id !== 'string' || !isProject02Identifier(id)) {
     return rejectedDescriptor(
       'invalid_identity',
       'Character package identity.id must start with a letter and use only ' +
@@ -383,7 +393,7 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
   for (const [pluginId, pluginConfig] of Object.entries(rawConfig ?? {}).sort(
     ([left], [right]) => compareDescriptorText(left, right),
   )) {
-    if (!characterPluginIdPattern.test(pluginId)) {
+    if (!isProject02Identifier(pluginId)) {
       return rejectedDescriptor(
         'invalid_plugins',
         `Character package plugins.config key "${pluginId}" is not a valid plugin id.`,
@@ -397,16 +407,20 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
       );
     }
 
-    const parsedConfig = parseCharacterPluginConfigObject(
+    const configPath = `plugins.config["${pluginId}"]`;
+    const unsafeSecretPath = characterPackageUnsafeSecretPath(
       pluginConfig,
-      `plugins.config["${pluginId}"]`,
+      configPath,
     );
 
-    if (parsedConfig.status === 'rejected') {
-      return parsedConfig;
+    if (unsafeSecretPath !== undefined) {
+      return rejectedDescriptor(
+        'invalid_plugins',
+        `Character package ${unsafeSecretPath} must not contain secret references or plaintext-secret markers.`,
+      );
     }
 
-    config[pluginId] = parsedConfig.value;
+    config[pluginId] = pluginConfig;
   }
 
   return Object.freeze({
@@ -419,103 +433,48 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
   });
 }
 
-function parseCharacterPluginConfigObject(
-  value: Record<string, unknown>,
-  path: string,
-):
-  | {
-      readonly status: 'accepted';
-      readonly value: Readonly<Record<string, unknown>>;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly issue: CharacterPackageDescriptorIssue;
-    } {
-  if (
-    valueIsSecretMarker(value) ||
-    Object.hasOwn(value, allowPlaintextSecretMarkerField)
-  ) {
-    return rejectedDescriptor(
-      'invalid_plugins',
-      `Character package ${path} must not contain secret references or plaintext-secret markers.`,
-    );
-  }
-
-  const parsed: Record<string, unknown> = {};
-
-  for (const [key, fieldValue] of Object.entries(value).sort(
-    ([left], [right]) => compareDescriptorText(left, right),
-  )) {
-    const accepted = parseCharacterPluginConfigValue(
-      fieldValue,
-      `${path}.${key}`,
-    );
-
-    if (accepted.status === 'rejected') {
-      return accepted;
-    }
-
-    parsed[key] = accepted.value;
-  }
-
-  return {status: 'accepted', value: Object.freeze(parsed)};
-}
-
-function parseCharacterPluginConfigValue(
+function characterPackageUnsafeSecretPath(
   value: unknown,
   path: string,
-):
-  | {readonly status: 'accepted'; readonly value: unknown}
-  | {
-      readonly status: 'rejected';
-      readonly issue: CharacterPackageDescriptorIssue;
-    } {
+): string | undefined {
   if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
+    valueIsSecretMarker(value) ||
+    (isRecord(value) && Object.hasOwn(value, allowPlaintextSecretMarkerField))
   ) {
-    return {status: 'accepted', value};
-  }
-
-  if (typeof value === 'number') {
-    return Number.isFinite(value)
-      ? {status: 'accepted', value}
-      : rejectedDescriptor(
-          'invalid_plugins',
-          `Character package ${path} must be valid JSON.`,
-        );
+    return path;
   }
 
   if (Array.isArray(value)) {
-    const accepted: unknown[] = [];
-
     for (const [index, entry] of value.entries()) {
-      const parsed = parseCharacterPluginConfigValue(
+      const unsafePath = characterPackageUnsafeSecretPath(
         entry,
         `${path}[${String(index)}]`,
       );
 
-      if (parsed.status === 'rejected') {
-        return parsed;
+      if (unsafePath !== undefined) {
+        return unsafePath;
       }
-
-      accepted.push(parsed.value);
     }
 
-    return {status: 'accepted', value: Object.freeze(accepted)};
+    return undefined;
   }
 
   if (isRecord(value)) {
-    const parsed = parseCharacterPluginConfigObject(value, path);
+    for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
+      compareDescriptorText(left, right),
+    )) {
+      const unsafePath = characterPackageUnsafeSecretPath(
+        entry,
+        `${path}.${key}`,
+      );
 
-    return parsed;
+      if (unsafePath !== undefined) {
+        return unsafePath;
+      }
+    }
   }
 
-  return rejectedDescriptor(
-    'invalid_plugins',
-    `Character package ${path} must be valid JSON.`,
-  );
+  return undefined;
 }
 
 function parseCharacterPluginIdList(
@@ -542,7 +501,7 @@ function parseCharacterPluginIdList(
   const pluginIds: string[] = [];
 
   for (const entry of value) {
-    if (typeof entry !== 'string' || !characterPluginIdPattern.test(entry)) {
+    if (typeof entry !== 'string' || !isProject02Identifier(entry)) {
       return rejectedDescriptor(
         'invalid_plugins',
         `Character package plugins.${fieldName} entries must be valid plugin ids.`,

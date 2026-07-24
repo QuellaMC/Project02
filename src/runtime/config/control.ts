@@ -1,16 +1,4 @@
-import {
-  applyRuntimeConfigMutation,
-  canonicalRuntimeConfigMutationPath,
-  createRuntimeConfigMutationBase,
-  prepareRuntimeConfigMutationCandidate,
-  type RuntimeConfigMutationResult,
-} from './mutate.ts';
-import {createRuntimeConfigFingerprint} from './fingerprint.ts';
-import {
-  verifyLayeredControlExpectation,
-  withLayeredControlSnapshot,
-  type LayeredControlSnapshot,
-} from './control-transaction.ts';
+import {createRuntimeConfigMutationBase} from './mutate.ts';
 import {
   deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
@@ -22,7 +10,7 @@ import {
 } from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
-import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
+import {loadProject02RuntimeConfig} from './load.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
@@ -50,118 +38,6 @@ export type RuntimeConfigControlOperation = Extract<
     readonly kind: 'set' | 'unset' | 'default_memory_provider';
   }
 >;
-
-export function applyGlobalRuntimeConfigControlMutation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly expectedFingerprint?: string;
-  readonly storeRoot?: string;
-  readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly operation: RuntimeConfigMutationOperation;
-  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
-}): RuntimeConfigMutationResult {
-  return withLayeredControlSnapshot(
-    {
-      ...(options.configPath === undefined
-        ? {}
-        : {configPath: options.configPath}),
-      ...(options.env === undefined ? {} : {env: options.env}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.characterScope === undefined
-        ? {}
-        : {characterScope: options.characterScope}),
-      scopeSelector: 'global',
-      lockMode: 'mutation',
-      secretMutation: options.operation.kind === 'secret_set',
-      expectingFingerprint: options.expectedFingerprint !== undefined,
-    },
-    snapshot => {
-      if (options.expectedFingerprint !== undefined) {
-        verifyLayeredControlExpectation(snapshot, options.expectedFingerprint);
-      }
-
-      const result = applyRuntimeConfigMutation({
-        ...(options.configPath === undefined
-          ? {}
-          : {configPath: options.configPath}),
-        ...(options.env === undefined ? {} : {env: options.env}),
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
-        // The layered expectation was verified against this locked
-        // snapshot; pin the global file so the write engine checks the
-        // same document it verified.
-        ...(options.expectedFingerprint === undefined
-          ? {}
-          : {
-              expectedFingerprint: createRuntimeConfigFingerprint(
-                snapshot.globalDocument,
-              ),
-            }),
-        ...(options.validateCandidate === undefined
-          ? {}
-          : {validateCandidate: options.validateCandidate}),
-        operation: options.operation,
-        ownerToken: snapshot.ownerToken,
-        ...(snapshot.anticipatedEnvPath === undefined
-          ? {}
-          : {anticipatedEnvPath: snapshot.anticipatedEnvPath}),
-        retryOnPathChange: false,
-      });
-
-      return Object.freeze({
-        ...result,
-        fingerprint: committedLayeredControlFingerprint(
-          options,
-          snapshot,
-          result,
-        ),
-      });
-    },
-  );
-}
-
-/**
- * Result fingerprint of a committed global write: composed with the
- * overlay of the character the COMMITTED config selects — the locked
- * pre-write snapshot when the selection is unchanged, a fresh guarded
- * read when the write moved project02.character to another character.
- */
-function committedLayeredControlFingerprint(
-  options: {
-    readonly storeRoot?: string;
-    readonly characterScope?: RuntimeConfigCharacterScope;
-  },
-  snapshot: LayeredControlSnapshot,
-  result: RuntimeConfigMutationResult,
-): string {
-  const characterScope = controlCharacterScope(
-    {
-      source: 'path',
-      path: result.configPath,
-      config: result.config,
-      diagnostics: Object.freeze([]),
-    },
-    options,
-  );
-  const overlayConfig =
-    characterScope === undefined
-      ? undefined
-      : snapshot.overlay !== undefined &&
-          snapshot.characterScope !== undefined &&
-          snapshot.characterScope.characterId === characterScope.characterId &&
-          snapshot.characterScope.dataRoot === characterScope.dataRoot
-        ? snapshot.overlay
-        : loadCharacterOverlayForScope(characterScope);
-
-  return layeredControlFingerprint({
-    globalConfig: result.config,
-    characterScope,
-    overlayConfig,
-  });
-}
 
 export function assertRuntimeConfigControlOperation(
   operation: RuntimeConfigMutationOperation,
@@ -314,102 +190,6 @@ function layeredControlFingerprint(options: {
     characterScope: options.characterScope,
     overlay: options.overlayConfig,
   });
-}
-
-export function prepareGlobalRuntimeConfigControlMutation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-  readonly characterScope?: RuntimeConfigCharacterScope;
-  readonly expectedFingerprint: string;
-  readonly operation: RuntimeConfigMutationOperation;
-  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
-}): {
-  readonly resultFingerprint: string;
-  readonly targetConfigPath: string;
-} {
-  // Read-only preparation runs without locks: the apply re-verifies
-  // the same layered expectation under the full mutation lock set.
-  return withLayeredControlSnapshot(
-    {
-      ...(options.configPath === undefined
-        ? {}
-        : {configPath: options.configPath}),
-      ...(options.env === undefined ? {} : {env: options.env}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.characterScope === undefined
-        ? {}
-        : {characterScope: options.characterScope}),
-      scopeSelector: 'global',
-      lockMode: 'none',
-      expectingFingerprint: true,
-    },
-    snapshot => {
-      verifyLayeredControlExpectation(snapshot, options.expectedFingerprint);
-
-      // The layered expectation was already verified on this exact
-      // loaded snapshot, so the candidate preparation runs without its
-      // own per-file expectation.
-      const prepared = prepareRuntimeConfigMutationCandidate({
-        loadedConfig: snapshot.loadedConfig,
-        ...(options.configPath === undefined
-          ? {}
-          : {configPath: options.configPath}),
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
-        ...(options.validateCandidate === undefined
-          ? {}
-          : {validateCandidate: options.validateCandidate}),
-        operation: options.operation,
-      });
-
-      return Object.freeze({
-        resultFingerprint: layeredControlFingerprint({
-          globalConfig: prepared.config,
-          characterScope: snapshot.characterScope,
-          overlayConfig: snapshot.overlay,
-        }),
-        targetConfigPath: snapshot.canonicalGlobalPath,
-      });
-    },
-  );
-}
-
-export function resolveRuntimeConfigControlTargetPath(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-}): string {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-
-  return runtimeConfigControlTargetPathFromLoaded({
-    ...(loadedConfig.path === undefined ? {} : {loadedPath: loadedConfig.path}),
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-}
-
-function runtimeConfigControlTargetPathFromLoaded(options: {
-  readonly loadedPath?: string;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-}): string {
-  return canonicalRuntimeConfigMutationPath(
-    options.loadedPath ??
-      options.configPath ??
-      defaultRuntimeConfigPath(options.storeRoot),
-  );
 }
 
 export function runtimePluginConfigControlMutation(options: {

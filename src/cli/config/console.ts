@@ -6,7 +6,6 @@ import {
   layeredRuntimeConfigFingerprintForScope,
   loadCharacterOverlayForScope,
   loadProject02RuntimeConfig,
-  resolveScopedGlobalLayerLocation,
   type RuntimeConfigDiagnostic,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -109,24 +108,12 @@ function consoleLoadDiagnostics(loaded: {
 function loadConsoleSnapshot(
   context: RuntimeConfigConsoleContext,
 ): RuntimeConfigConsoleSnapshot {
-  // The owning home's global layer when a character is explicitly
-  // requested and --config aliases its overlay: the snapshot's
-  // fingerprint must compose the same pair of documents the commit
-  // path verifies against. Without --character, an explicit --config
-  // keeps plain file semantics.
-  const loaded =
-    context.character === undefined
-      ? loadProject02RuntimeConfig({
-          ...runtimeConfigLocation(context),
-          ...(context.env === undefined ? {} : {env: context.env}),
-        })
-      : loadProject02RuntimeConfig(
-          resolveScopedGlobalLayerLocation({
-            ...runtimeConfigLocation(context),
-            ...(context.env === undefined ? {} : {env: context.env}),
-            characterId: context.character,
-          }),
-        );
+  const location = {
+    ...runtimeConfigLocation(context),
+    ...(context.env === undefined ? {} : {env: context.env}),
+  };
+
+  const loaded = loadProject02RuntimeConfig(location);
   const {diagnostics, blockingDiagnostic} = consoleLoadDiagnostics(loaded);
 
   if (blockingDiagnostic !== undefined) {
@@ -139,12 +126,12 @@ function loadConsoleSnapshot(
     loadedConfig: loaded,
     ...runtimeConfigLocation(context),
   });
-  const location = runtimeConfigLocation(context);
+  const selectedLocation = runtimeConfigLocation(context);
   const characterScope = deriveRuntimeConfigCharacterScope({
     loadedConfig: loaded,
-    ...(location.storeRoot === undefined
+    ...(selectedLocation.storeRoot === undefined
       ? {}
-      : {storeRoot: location.storeRoot}),
+      : {storeRoot: selectedLocation.storeRoot}),
     ...(context.character === undefined
       ? {}
       : {characterId: context.character}),

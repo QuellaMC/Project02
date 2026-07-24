@@ -1,4 +1,4 @@
-import {existsSync, readFileSync, realpathSync, writeFileSync} from 'node:fs';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -329,60 +329,19 @@ describe('scope-aware runtime config mutations', () => {
     expect(dataRoot).toContain('character-data');
   });
 
-  it('binds an overlay-only selection to that overlay owner', async () => {
+  it('rejects an overlay-only selection before resolving a target', () => {
     const homeRoot = createTestTempRoot('project02-config-scope-owner-');
-    const configPath = join(homeRoot, 'config.json');
-    const miraRoot = characterDataDirPath(homeRoot, 'mira');
     const novaRoot = characterDataDirPath(homeRoot, 'nova');
     const novaOverlayPath = characterOverlayConfigPath(novaRoot);
 
-    writeRuntimeConfig(configPath, {
-      project02: {character: 'mira'},
-    });
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: novaRoot},
-      characterId: 'nova',
-    });
-    const canonicalHomeRoot = realpathSync.native(homeRoot);
-    const canonicalConfigPath = realpathSync.native(configPath);
-    const canonicalNovaRoot = realpathSync.native(novaRoot);
-    const canonicalNovaOverlayPath =
-      characterOverlayConfigPath(canonicalNovaRoot);
-
-    const target = resolveRuntimeConfigScopeTarget({
-      configPath: novaOverlayPath,
-      env: {},
-      scope: 'character',
-    });
-
-    expect(target).toMatchObject({
-      scope: 'character',
-      configPath: canonicalNovaOverlayPath,
-      canonicalConfigPath: canonicalNovaOverlayPath,
-      globalConfigPath: canonicalConfigPath,
-      homeRoot: canonicalHomeRoot,
-      characterScope: {
-        characterId: 'nova',
-        dataRoot: canonicalNovaRoot,
-      },
-    });
-
-    applyRuntimeConfigControlOperation({
-      target,
-      request: {
-        kind: 'document',
-        operation: {
-          kind: 'set',
-          path: 'project02.userDisplayName',
-          value: 'Nova Name',
-        },
-      },
-    });
-
-    expect(JSON.parse(readFileSync(novaOverlayPath, 'utf8'))).toMatchObject({
-      project02: {userDisplayName: 'Nova Name'},
-    });
-    expect(existsSync(miraRoot)).toBe(false);
+    expect(() =>
+      resolveRuntimeConfigScopeTarget({
+        configPath: novaOverlayPath,
+        env: {},
+        scope: 'character',
+      }),
+    ).toThrow('is a character overlay');
+    expect(existsSync(novaRoot)).toBe(false);
   });
 });
 
@@ -740,51 +699,6 @@ describe('scoped writes over a broken global layer', () => {
         characterOverlayConfigPath(characterDataDirPath(homeRoot, 'mira')),
       ),
     ).toBe(false);
-  });
-});
-
-describe('global control writes aimed directly at the overlay path', () => {
-  it('completes without pre-locking the overlay against itself', async () => {
-    const {homeRoot, configPath, dataRoot} = seededHome();
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-    const plugin = structuredConfigPlugin('scope.direct-overlay');
-
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-
-    const globalBefore = readFileSync(configPath, 'utf8');
-    // The "global" layer aliases the overlay here; the expectation
-    // pre-lock must not take the file lock the mutation itself needs.
-    const target = resolveRuntimeConfigScopeTarget({
-      configPath: overlayPath,
-      storeRoot: homeRoot,
-      env: {},
-      scope: 'global',
-    });
-    const result = applyRuntimeConfigControlOperation({
-      target,
-      expectedFingerprint: inspectRuntimePluginConfig({
-        configPath: overlayPath,
-        storeRoot: homeRoot,
-        env: {},
-        manifest: plugin.manifest,
-        pluginManifests: [plugin.manifest],
-      }).fingerprint,
-      request: {
-        kind: 'plugin_activation',
-        manifest: structuredConfigPlugin('scope.direct-overlay').manifest,
-        enabled: true,
-      },
-    });
-
-    expect(result.configPath).toBe(target.configPath);
-    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
-      version: runtimeConfigVersion,
-      plugins: {'scope.direct-overlay': {enabled: true}},
-    });
-    expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
   });
 });
 

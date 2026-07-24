@@ -86,13 +86,14 @@ describe('runtime config console UI', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
-  it('saves a scoped edit when --config aliases the overlay', async () => {
+  it('saves a scoped edit with an explicit global config', async () => {
     const homeRoot = createTestTempRoot('project02-console-alias-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = join(dataRoot, 'config.json');
+    const globalConfigPath = join(homeRoot, 'config.json');
     let stdout = '';
 
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+    writeRuntimeConfig(globalConfigPath, {
       project02: {roleModelProvider: 'local'},
     });
     await ensureCharacterDataMarker({
@@ -101,9 +102,8 @@ describe('runtime config console UI', () => {
     });
     writeRuntimeConfig(overlayPath, {});
 
-    // The snapshot must fingerprint the owning home's global layer +
-    // the overlay — the same pair the commit verifies — or the save
-    // would conflict without any concurrent edit.
+    // The snapshot fingerprints the selected global document plus the
+    // overlay — the same pair the commit verifies.
     const exitCode = await runRuntimeConfigCliFromArgs(
       [
         '--store',
@@ -111,7 +111,7 @@ describe('runtime config console UI', () => {
         '--character',
         'mira',
         '--config',
-        overlayPath,
+        globalConfigPath,
         'ui',
       ],
       {

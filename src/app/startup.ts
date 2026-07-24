@@ -32,7 +32,6 @@ import {
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticIsReadinessFailure,
-  resolveScopedGlobalLayerLocation,
   shouldReadDefaultDotEnvForRuntimeLocation,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
@@ -198,22 +197,10 @@ export function resolveRuntimeCliStartup(
     mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
   const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
-  // The scoped-global-layer load: when a character is explicitly
-  // requested and --config aliases that character's overlay, the
-  // global layer comes from the OWNING home and the overlay composes
-  // separately, matching the scoped config verbs. Without --character,
-  // an explicit --config keeps plain file semantics so reads and
-  // writes target the same file.
-  const loadedConfig =
-    location.character === undefined
-      ? loadProject02RuntimeConfig({...location, env: configEnv})
-      : loadProject02RuntimeConfig(
-          resolveScopedGlobalLayerLocation({
-            ...location,
-            env: configEnv,
-            characterId: location.character,
-          }),
-        );
+  const loadedConfig = loadProject02RuntimeConfig({
+    ...location,
+    env: configEnv,
+  });
   const startupBase = {
     location,
     cwdDotEnv,

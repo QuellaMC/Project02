@@ -3,7 +3,10 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
-import {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
+import {
+  createConfiguredProject02PluginHostFromPlan,
+  prepareConfiguredProject02PluginActivation,
+} from '../../src/app/index.ts';
 import {
   characterOverlayConfigPath,
   createRuntimeConfigInspectShape,
@@ -243,8 +246,10 @@ describe('runtime config loading and resolution', () => {
       }),
     ]);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loaded,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loaded,
+      }),
     });
 
     expect(configured.activation.enabledPluginIds).not.toContain(
@@ -319,8 +324,10 @@ describe('runtime config loading and resolution', () => {
       }),
     ]);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loaded,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loaded,
+      }),
     });
 
     expect(configured.activation.enabledPluginIds).not.toContain(
@@ -384,18 +391,20 @@ describe('runtime config loading and resolution', () => {
       }),
     ]);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loaded,
-      factories: {
-        'character-state': {
-          manifest: createCharacterStatePluginManifest(),
-          create() {
-            factoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loaded,
+        factories: {
+          'character-state': {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              factoryCalls += 1;
 
-            return createCharacterStatePlugin();
+              return createCharacterStatePlugin();
+            },
           },
         },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -451,24 +460,28 @@ describe('runtime config loading and resolution', () => {
       }),
     ]);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loaded,
-      factories: {
-        'character-state': {
-          manifest: createCharacterStatePluginManifest(),
-          create() {
-            manifestBackedFactoryCalls += 1;
-            throw new Error('unrelated factory should not be constructed');
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loaded,
+        factories: {
+          'character-state': {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              manifestBackedFactoryCalls += 1;
+              throw new Error('unrelated factory should not be constructed');
+            },
+          },
+          bad: {
+            manifest: badPlugin.manifest,
+            create() {
+              manifestBackedFactoryCalls += 1;
+              throw new Error(
+                'invalid plugin factory should not be constructed',
+              );
+            },
           },
         },
-        bad: {
-          manifest: badPlugin.manifest,
-          create() {
-            manifestBackedFactoryCalls += 1;
-            throw new Error('invalid plugin factory should not be constructed');
-          },
-        },
-      },
+      }),
     });
     const badActivation = configured.activation.plugins.find(
       plugin => plugin.pluginId === 'bad',
@@ -779,21 +792,23 @@ describe('runtime config loading and resolution', () => {
     );
     let factoryCalls = 0;
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        'memory.structured': {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
-            throw new Error('factory should not receive nested secret refs');
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          'memory.structured': {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('factory should not receive nested secret refs');
+            },
           },
         },
-      },
-      env: {
-        PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
-        PROJECT02_NESTED_ARRAY_SECRET: 'array-secret',
-      },
+        env: {
+          PROJECT02_NESTED_OBJECT_SECRET: 'object-secret',
+          PROJECT02_NESTED_ARRAY_SECRET: 'array-secret',
+        },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -952,19 +967,21 @@ describe('runtime config loading and resolution', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      env: {[envVar]: 'manifest-default-secret'},
-      factories: {
-        [plugin.manifest.id]: {
-          manifest: plugin.manifest,
-          create(input) {
-            factoryInputs.push(input.resolvedConfig['apiKey']?.value);
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        env: {[envVar]: 'manifest-default-secret'},
+        factories: {
+          [plugin.manifest.id]: {
+            manifest: plugin.manifest,
+            create(input) {
+              factoryInputs.push(input.resolvedConfig['apiKey']?.value);
 
-            return plugin;
+              return plugin;
+            },
           },
         },
-      },
+      }),
     });
 
     expect(configured.activation.enabledPluginIds).toContain(
@@ -1004,18 +1021,22 @@ describe('runtime config loading and resolution', () => {
         },
       );
       let factoryCalls = 0;
-      const configured = await createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        env: {[envVar]: 'runtime-control-value'},
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error('reserved control env var must block activation');
+      const configured = await createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          env: {[envVar]: 'runtime-control-value'},
+          factories: {
+            [plugin.manifest.id]: {
+              manifest: plugin.manifest,
+              create() {
+                factoryCalls += 1;
+                throw new Error(
+                  'reserved control env var must block activation',
+                );
+              },
             },
           },
-        },
+        }),
       });
       const resolvedField =
         configured.resolvedConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'];
@@ -1077,15 +1098,17 @@ describe('runtime config loading and resolution', () => {
         },
       },
     );
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        'memory.required': {
-          manifest: plugin.manifest,
-          create: () => plugin,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          'memory.required': {
+            manifest: plugin.manifest,
+            create: () => plugin,
+          },
         },
-      },
-      env: {[envVar]: 'configured-secret'},
+        env: {[envVar]: 'configured-secret'},
+      }),
     });
 
     expect(configured.resolvedConfig.diagnostics).toEqual([
@@ -1127,18 +1150,20 @@ describe('runtime config loading and resolution', () => {
     );
     let factoryCalls = 0;
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        memory: {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          memory: {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
 
-            return plugin;
+              return plugin;
+            },
           },
         },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -1192,17 +1217,19 @@ describe('runtime config loading and resolution', () => {
       );
       let factoryCalls = 0;
 
-      const configured = await createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        factories: {
-          [pluginId]: {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
-              return plugin;
+      const configured = await createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          factories: {
+            [pluginId]: {
+              manifest: plugin.manifest,
+              create() {
+                factoryCalls += 1;
+                return plugin;
+              },
             },
           },
-        },
+        }),
       });
 
       expect(factoryCalls).toBe(0);
@@ -1237,26 +1264,28 @@ describe('runtime config loading and resolution', () => {
     let characterFactoryCalls = 0;
     let memoryFactoryCalls = 0;
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        'character-state': {
-          manifest: characterPlugin.manifest,
-          create() {
-            characterFactoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          'character-state': {
+            manifest: characterPlugin.manifest,
+            create() {
+              characterFactoryCalls += 1;
 
-            return characterPlugin;
+              return characterPlugin;
+            },
+          },
+          'memory.required': {
+            manifest: memoryPlugin.manifest,
+            create() {
+              memoryFactoryCalls += 1;
+
+              return memoryPlugin;
+            },
           },
         },
-        'memory.required': {
-          manifest: memoryPlugin.manifest,
-          create() {
-            memoryFactoryCalls += 1;
-
-            return memoryPlugin;
-          },
-        },
-      },
+      }),
     });
     const characterActivation = configured.activation.plugins.find(
       plugin => plugin.pluginId === 'character-state',
@@ -1318,17 +1347,19 @@ describe('runtime config loading and resolution', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        'memory.required': {
-          manifest: plugin.manifest,
-          create() {
-            factoryCalls += 1;
-            throw new Error('disabled plugin should not be constructed');
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          'memory.required': {
+            manifest: plugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('disabled plugin should not be constructed');
+            },
           },
         },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -1372,15 +1403,17 @@ describe('runtime config loading and resolution', () => {
 
       await initializeCharacterDataForHost(storeRoot);
 
-      const configured = await createConfiguredProject02PluginHost({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        factories: {
-          'memory.required': {
-            manifest: requiredSecretPlugin().manifest,
-            create: () => requiredSecretPlugin(),
+      const configured = await createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          factories: {
+            'memory.required': {
+              manifest: requiredSecretPlugin().manifest,
+              create: () => requiredSecretPlugin(),
+            },
           },
-        },
-        env: {[envVar]: 'from-supplied-env'},
+          env: {[envVar]: 'from-supplied-env'},
+        }),
       });
 
       expect(configured.activation.enabledPluginIds).toContain(
@@ -1430,33 +1463,35 @@ describe('runtime config loading and resolution', () => {
 
     await initializeCharacterDataForHost(storeRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        'character-state': {
-          manifest: createCharacterStatePluginManifest(),
-          create() {
-            characterFactoryCalls += 1;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          'character-state': {
+            manifest: createCharacterStatePluginManifest(),
+            create() {
+              characterFactoryCalls += 1;
 
-            return createCharacterStatePlugin();
+              return createCharacterStatePlugin();
+            },
+          },
+          'memory.required': {
+            manifest: requiredSecretPlugin().manifest,
+            create(input) {
+              memoryFactoryCalls += 1;
+              memoryFactoryInputs.push({
+                pluginId: input.pluginId,
+                storeRoot: input.storeRoot,
+                apiKeyValue: input.resolvedConfig['apiKey']?.value,
+                redactedApiKeyValue: input.redactedConfig['apiKey']?.value,
+              });
+
+              return requiredSecretPlugin();
+            },
           },
         },
-        'memory.required': {
-          manifest: requiredSecretPlugin().manifest,
-          create(input) {
-            memoryFactoryCalls += 1;
-            memoryFactoryInputs.push({
-              pluginId: input.pluginId,
-              storeRoot: input.storeRoot,
-              apiKeyValue: input.resolvedConfig['apiKey']?.value,
-              redactedApiKeyValue: input.redactedConfig['apiKey']?.value,
-            });
-
-            return requiredSecretPlugin();
-          },
-        },
-      },
-      env: {[envVar]: 'from-manifest-backed-factory'},
+        env: {[envVar]: 'from-manifest-backed-factory'},
+      }),
     });
 
     expect(characterFactoryCalls).toBe(0);
@@ -1498,24 +1533,26 @@ describe('runtime config loading and resolution', () => {
     );
     let factoryCalls = 0;
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      factories: {
-        'memory.disabled': {
-          manifest: disabledPlugin.manifest,
-          create() {
-            factoryCalls += 1;
-            throw new Error('disabled plugin should not be constructed');
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        factories: {
+          'memory.disabled': {
+            manifest: disabledPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('disabled plugin should not be constructed');
+            },
+          },
+          'memory.blocked': {
+            manifest: blockedPlugin.manifest,
+            create() {
+              factoryCalls += 1;
+              throw new Error('blocked plugin should not be constructed');
+            },
           },
         },
-        'memory.blocked': {
-          manifest: blockedPlugin.manifest,
-          create() {
-            factoryCalls += 1;
-            throw new Error('blocked plugin should not be constructed');
-          },
-        },
-      },
+      }),
     });
 
     expect(factoryCalls).toBe(0);
@@ -1562,20 +1599,22 @@ describe('runtime config loading and resolution', () => {
 
     await initializeCharacterDataForHost(configuredStoreRoot);
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
-      storeRoot: cliStoreRoot,
-      factories: {
-        'memory.required': {
-          manifest: requiredSecretPlugin().manifest,
-          create(input) {
-            factoryStoreRoot = input.storeRoot;
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        storeRoot: cliStoreRoot,
+        factories: {
+          'memory.required': {
+            manifest: requiredSecretPlugin().manifest,
+            create(input) {
+              factoryStoreRoot = input.storeRoot;
 
-            return requiredSecretPlugin();
+              return requiredSecretPlugin();
+            },
           },
         },
-      },
-      env: {[envVar]: 'from-configured-store-root'},
+        env: {[envVar]: 'from-configured-store-root'},
+      }),
     });
 
     expect(factoryStoreRoot).toBe(
@@ -1612,9 +1651,11 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories,
+      }),
     });
 
     expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
@@ -1682,9 +1723,11 @@ describe('runtime config loading and resolution', () => {
       },
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories,
+      }),
     });
     const characterActivation = configured.activation.plugins.find(
       plugin => plugin.pluginId === 'character-state',
@@ -1744,8 +1787,10 @@ describe('runtime config loading and resolution', () => {
       defaultMemoryProvider: 'character-state',
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.plugins).toEqual([]);
@@ -1810,9 +1855,11 @@ describe('runtime config loading and resolution', () => {
       },
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories,
+      }),
     });
 
     expect(configured.activation.enabledPluginIds).toEqual([runtimePluginId]);
@@ -1881,9 +1928,11 @@ describe('runtime config loading and resolution', () => {
       },
     });
 
-    const configured = await createConfiguredProject02PluginHost({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      factories,
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan: prepareConfiguredProject02PluginActivation({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        factories,
+      }),
     });
 
     expect(factoryCalls).toBe(0);

@@ -12,7 +12,10 @@ import {
   resolveProject02RuntimeConfig,
   type ResolveProject02RuntimeConfigOptions,
 } from './resolve.ts';
-import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
+import {
+  characterRuntimeConfigFieldScopeViolation,
+  project02RuntimeConfigFieldDefinitions,
+} from './schema.ts';
 import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
 import {withRuntimeConfigDiagnosticOrigin} from './diagnostic.ts';
 import {
@@ -186,7 +189,10 @@ function mergedProject02Section(
   for (const field of project02RuntimeConfigFieldDefinitions()) {
     const value = overlaySection[field.name];
 
-    if (!field.scopes.includes('character') || value === undefined) {
+    if (
+      characterRuntimeConfigFieldScopeViolation(field) !== undefined ||
+      value === undefined
+    ) {
       continue;
     }
 

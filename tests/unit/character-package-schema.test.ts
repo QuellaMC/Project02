@@ -121,6 +121,88 @@ describe('character package descriptor schema parity', () => {
     });
   });
 
+  it('preserves package-authored nested config key order', () => {
+    const parsed = parseCharacterPackageDescriptor({
+      ...validDescriptor(),
+      plugins: {
+        config: {
+          'demo-config': {
+            zeta: true,
+            alpha: false,
+          },
+        },
+      },
+    });
+
+    expect(parsed.status).toBe('accepted');
+    if (parsed.status === 'accepted') {
+      expect(
+        Object.keys(parsed.definition.plugins?.config['demo-config'] ?? {}),
+      ).toEqual(['zeta', 'alpha']);
+    }
+  });
+
+  it.each([
+    [
+      'cycles',
+      () => {
+        const nested: Record<string, unknown> = {};
+
+        nested['self'] = nested;
+        return {
+          ...validDescriptor(),
+          plugins: {config: {'demo-config': nested}},
+        };
+      },
+    ],
+    [
+      'non-finite numbers',
+      () => ({
+        ...validDescriptor(),
+        plugins: {config: {'demo-config': {temperature: Number.NaN}}},
+      }),
+    ],
+    [
+      'excessive nesting',
+      () => {
+        let nested: Record<string, unknown> = {value: true};
+
+        for (let depth = 0; depth < 20; depth += 1) {
+          nested = {nested};
+        }
+
+        return {
+          ...validDescriptor(),
+          plugins: {config: {'demo-config': nested}},
+        };
+      },
+    ],
+    [
+      'oversized containers',
+      () => ({
+        ...validDescriptor(),
+        plugins: {
+          config: {
+            'demo-config': Object.fromEntries(
+              Array.from({length: 257}, (_, index) => [
+                `field-${String(index)}`,
+                index,
+              ]),
+            ),
+          },
+        },
+      }),
+    ],
+  ])('rejects unsafe direct-parser input with %s', (_label, createValue) => {
+    expect(parseCharacterPackageDescriptor(createValue())).toMatchObject({
+      status: 'rejected',
+      issue: {
+        code: 'invalid_descriptor',
+        message: 'Character package descriptor exceeds safe JSON limits.',
+      },
+    });
+  });
+
   it.each([
     [
       'an unknown descriptor key',

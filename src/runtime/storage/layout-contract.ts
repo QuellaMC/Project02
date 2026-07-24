@@ -1,5 +1,6 @@
 import {basename, dirname, join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
+import {isProject02Identifier} from '../../shared/identifier.ts';
 
 export const defaultProject02HomeRoot = '.project02';
 
@@ -191,12 +192,6 @@ const conversationFileName = 'conversation.jsonl';
 
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
-const pluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
-
-// Character ids share the plugin-id syntax (and the characters module's
-// descriptor pattern, duplicated there because it cannot import runtime).
-const characterIdPattern = pluginIdPattern;
-
 export function createProject02HomeLayout(
   options: Project02HomeLayoutOptions = {},
 ): Project02HomeLayout {
@@ -252,7 +247,7 @@ export function characterDataDirPath(
 export function normalizeLocalRuntimeCharacterId(characterId: string): string {
   const normalized = characterId.trim();
 
-  if (!characterIdPattern.test(normalized)) {
+  if (!isProject02Identifier(normalized)) {
     throw new LocalRuntimeStorageContractError(
       'invalid_plugin_id',
       'Local runtime character ID must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
@@ -342,7 +337,7 @@ export function normalizeLocalRuntimeSessionId(
 export function normalizeLocalRuntimePluginId(pluginId: string): string {
   const normalizedPluginId = pluginId.trim();
 
-  if (!pluginIdPattern.test(normalizedPluginId)) {
+  if (!isProject02Identifier(normalizedPluginId)) {
     throw new LocalRuntimeStorageContractError(
       'invalid_plugin_id',
       'Local runtime plugin ID must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
@@ -458,10 +453,7 @@ export function decodeStorageSchemaMarker(
   const materializedCharacterPackageVersion =
     record['materializedCharacterPackageVersion'];
 
-  if (
-    typeof characterId !== 'string' ||
-    !characterIdPattern.test(characterId)
-  ) {
+  if (typeof characterId !== 'string' || !isProject02Identifier(characterId)) {
     throwMalformedSchemaMarker('characterId');
   }
 

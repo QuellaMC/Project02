@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -10,7 +11,10 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
+import {
+  characterOverlayConfigPath,
+  runtimeConfigEnvVarName,
+} from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
   ensureCharacterDataMarker,
@@ -20,7 +24,10 @@ import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
-async function runConfigCli(args: readonly string[]): Promise<{
+async function runConfigCli(
+  args: readonly string[],
+  env: NodeJS.ProcessEnv = {},
+): Promise<{
   readonly code: number;
   readonly stdout: string;
   readonly stderr: string;
@@ -34,7 +41,7 @@ async function runConfigCli(args: readonly string[]): Promise<{
     stderr: collect(chunk => {
       stderr += chunk;
     }),
-    env: {},
+    env,
   });
 
   return {code, stdout, stderr};
@@ -372,17 +379,17 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain('Error:');
   });
 
-  it('rejects a scoped get through an overlay alias while the home cannot load', async () => {
+  it('rejects a scoped get when the explicit global config cannot load', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-get-invalid-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
+    const globalConfigPath = join(homeRoot, 'config.json');
 
-    writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
+    writeFileSync(globalConfigPath, '{not json\n');
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
-    writeRuntimeConfig(overlayPath, {
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       project02: {userDisplayName: 'Overlay Name'},
     });
 
@@ -392,7 +399,7 @@ describe('runtime-config --character verbs', () => {
       '--character',
       'mira',
       '--config',
-      overlayPath,
+      globalConfigPath,
       'get',
       'project02.userDisplayName',
     ]);
@@ -565,72 +572,14 @@ describe('runtime-config --character verbs', () => {
 });
 
 describe('overlay files reached through --config directly', () => {
-  it('never bootstraps a store root into an overlay-located config', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+  it('rejects an overlay-shaped --config before any filesystem side effect', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-reject-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-
-    const set = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--config',
-      overlayPath,
-      'set',
-      'project02.roleModelProvider',
-      'local',
-    ]);
-
-    expect(set.code).toBe(0);
-    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
-      version: 'project02.config.v2',
-      project02: {roleModelProvider: 'local'},
-    });
-  });
-
-  it('refuses a direct overlay write into an unmarked data directory', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
     const rejected = await runConfigCli([
       '--store',
       homeRoot,
-      '--config',
-      overlayPath,
-      'set',
-      'project02.roleModelProvider',
-      'local',
-    ]);
-
-    expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('has no identity marker');
-    // The guard runs before the mutation lock: the data directory was
-    // never created, not even its lock root.
-    expect(existsSync(dataRoot)).toBe(false);
-  });
-
-  it('validates the owning home config even when --config aliases the overlay', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    // The overlay path is the mutation TARGET; the global layer must
-    // still come from the OWNING home, whose config is malformed.
-    writeFileSync(join(homeRoot, 'config.json'), '{not json\n');
-
-    const rejected = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--character',
-      'mira',
       '--config',
       overlayPath,
       'set',
@@ -639,324 +588,87 @@ describe('overlay files reached through --config directly', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('failed to load');
-    expect(existsSync(dataRoot)).toBe(false);
-  });
-
-  it('rejects another character overlay offered as the global layer', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-cross-alias-');
-    const miraRoot = characterDataDirPath(homeRoot, 'mira');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: miraRoot},
-      characterId: 'mira',
-    });
-    writeRuntimeConfig(characterOverlayConfigPath(miraRoot), {
-      project02: {userDisplayName: 'Mira Name'},
-    });
-
-    // Mira's overlay can neither serve as Nova's global layer nor
-    // seed a write into Nova's scope.
-    const rejected = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--character',
-      'nova',
-      '--config',
-      characterOverlayConfigPath(miraRoot),
-      'get',
-      'project02.userDisplayName',
-    ]);
-
-    expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain("another character's overlay");
-    expect(existsSync(characterDataDirPath(homeRoot, 'nova'))).toBe(false);
-  });
-
-  it('keeps plain file semantics for a standalone overlay --config read', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-plain-config-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {userDisplayName: 'Home Name'},
-    });
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-    writeRuntimeConfig(overlayPath, {
-      project02: {userDisplayName: 'Overlay Name'},
-    });
-
-    // Without --character, an explicit --config is a plain file
-    // selection: reads and writes target the same file.
-    const get = await runConfigCli([
-      '--config',
-      overlayPath,
-      'get',
-      'project02.userDisplayName',
-    ]);
-
-    expect(get.code).toBe(0);
-    expect(JSON.parse(get.stdout)).toBe('Overlay Name');
-  });
-
-  it('applies a scoped write selected only by the overlay path', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-only-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    // No --store and no global config.json: the owning home derives
-    // from the overlay path alone, and the resolved scope must ride
-    // into the apply instead of a fresh default-home derivation.
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-    writeRuntimeConfig(overlayPath, {});
-
-    const set = await runConfigCli([
-      '--character',
-      'mira',
-      '--config',
-      overlayPath,
-      'set',
-      'project02.userDisplayName',
-      'Bob',
-    ]);
-
-    expect(set.code).toBe(0);
-    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
-      version: 'project02.config.v2',
-      project02: {userDisplayName: 'Bob'},
-      plugins: {
-        'character-state': {enabled: true},
-      },
-    });
-    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
-  });
-
-  it('reads the owning home global fallback when --config aliases the overlay', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {userDisplayName: 'Global Name'},
-    });
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-    writeRuntimeConfig(overlayPath, {});
-
-    const scopedGet = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--character',
-      'mira',
-      '--config',
-      overlayPath,
-      'get',
-      'project02.userDisplayName',
-    ]);
-
-    expect(scopedGet.code).toBe(0);
-    // The overlay omits the field; the fallback must come from the
-    // OWNING home config, not the overlay read as a global layer.
-    expect(JSON.parse(scopedGet.stdout)).toEqual({
-      value: 'Global Name',
-      origin: 'global',
-    });
-  });
-
-  it('rejects a symlinked data directory instead of writing its marked target', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const outside = createTestTempRoot('project02-scope-dir-link-target-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // The external target even carries a matching marker: following the
-    // link would write character config outside the home.
-    writeFileSync(
-      join(outside, 'schema.json'),
-      `${JSON.stringify({
-        schemaVersion: 4,
-        scope: 'character-data',
-        characterId: 'mira',
-        createdAt: '2026-07-23T00:00:00.000Z',
-      })}\n`,
-    );
-    mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
-    symlinkSync(outside, dataRoot);
-
-    const rejected = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--config',
-      characterOverlayConfigPath(dataRoot),
-      'set',
-      'project02.userDisplayName',
-      'Bob',
-    ]);
-
-    expect(rejected.code).toBe(1);
-    expect(existsSync(join(outside, 'config.json'))).toBe(false);
-  });
-
-  it('reads the global fallback when the aliased overlay is absent', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {userDisplayName: 'Global Name'},
-    });
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-
-    // No overlay file exists; the aliased get must still fall back to
-    // the owning home instead of failing on the missing selection.
-    const scopedGet = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--character',
-      'mira',
-      '--config',
-      characterOverlayConfigPath(dataRoot),
-      'get',
-      'project02.userDisplayName',
-    ]);
-
-    expect(scopedGet.code).toBe(0);
-    expect(JSON.parse(scopedGet.stdout)).toEqual({
-      value: 'Global Name',
-      origin: 'global',
-    });
-  });
-
-  it('rejects a symlinked overlay path instead of writing its target', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const outside = createTestTempRoot('project02-scope-link-target-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const targetPath = join(outside, 'external.json');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-    writeRuntimeConfig(targetPath, {});
-    const targetBefore = readFileSync(targetPath, 'utf8');
-    symlinkSync(targetPath, characterOverlayConfigPath(dataRoot));
-
-    const rejected = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--config',
-      characterOverlayConfigPath(dataRoot),
-      'set',
-      'project02.userDisplayName',
-      'Bob',
-    ]);
-
-    expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('is a symlink');
-    // The overlay write must never escape the data directory.
-    expect(readFileSync(targetPath, 'utf8')).toBe(targetBefore);
-  });
-
-  it('rejects a non-overlay file inside a character-data directory', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-
-    const rejected = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--config',
-      join(dataRoot, 'other.json'),
-      'set',
-      'project02.roleModelProvider',
-      'local',
-    ]);
-
-    expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('is not its overlay');
-    // No reader ever loads such a file; the write must not happen.
-    expect(existsSync(join(dataRoot, 'other.json'))).toBe(false);
-  });
-
-  it('rejects global-only fields instead of writing them into the overlay', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = characterOverlayConfigPath(dataRoot);
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
-
-    const rejected = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--config',
-      overlayPath,
-      'set',
-      'project02.character',
-      'nova',
-    ]);
-
-    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('is a character overlay');
+    expect(rejected.stderr).toContain(`--store "${homeRoot}"`);
+    expect(rejected.stderr).toContain('--character "mira"');
     expect(rejected.stderr).toContain(
-      'Config field "project02.character" is global-only; set it in the ' +
-        'home config.json, not the character overlay.',
+      'instead of selecting a character overlay with --config',
     );
-    expect(existsSync(overlayPath)).toBe(false);
+    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
-  it('still writes the overlay when --config selects the overlay path under --character', async () => {
-    const homeRoot = createTestTempRoot('project02-scope-config-flag-');
+  it('rejects an overlay selected by the config environment variable without side effects', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-env-reject-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    const globalBefore = readFileSync(join(homeRoot, 'config.json'), 'utf8');
+    const rejected = await runConfigCli(
+      ['set', 'project02.userDisplayName', 'Bob'],
+      {[runtimeConfigEnvVarName]: overlayPath},
+    );
 
-    // The global layer aliases the overlay here; taking the global-layer
-    // lock would deadlock against the scoped overlay lock.
-    const set = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--character',
-      'mira',
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('is a character overlay');
+    expect(rejected.stderr).toContain(runtimeConfigEnvVarName);
+    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('rejects an outside symlink whose canonical target is an overlay', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-config-link-reject-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+    const selectedPath = join(homeRoot, 'runtime.json');
+
+    symlinkSync(overlayPath, selectedPath);
+
+    const rejected = await runConfigCli([
       '--config',
-      overlayPath,
+      selectedPath,
       'set',
       'project02.userDisplayName',
-      'Overlay Name',
+      'Bob',
     ]);
 
-    expect(set.code).toBe(0);
-    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
-      version: 'project02.config.v2',
-      project02: {userDisplayName: 'Overlay Name'},
-      plugins: {
-        'character-state': {enabled: true},
-      },
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('is a character overlay');
+    expect(rejected.stderr).toContain(`--store "${realpathSync(homeRoot)}"`);
+    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('keeps an explicit global config compatible with character scope', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-global-config-');
+    const globalConfigPath = join(homeRoot, 'config.json');
+
+    writeRuntimeConfig(globalConfigPath, {
+      project02: {userDisplayName: 'Global Name'},
     });
-    expect(readFileSync(join(homeRoot, 'config.json'), 'utf8')).toBe(
-      globalBefore,
-    );
+
+    const scopedGet = await runConfigCli([
+      '--config',
+      globalConfigPath,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(scopedGet.code).toBe(0);
+    expect(JSON.parse(scopedGet.stdout)).toEqual({
+      value: 'Global Name',
+      origin: 'global',
+    });
   });
 });
 

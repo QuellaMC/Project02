@@ -1,6 +1,9 @@
 import {existsSync, readFileSync, statSync} from 'node:fs';
+import {basename, dirname, resolve} from 'node:path';
 
 import {
+  characterDataDirectoryName,
+  createLocalRuntimeStorageLayout,
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
@@ -17,6 +20,10 @@ import {
   type RuntimeConfigValue,
 } from './types.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
+import {
+  canonicalRuntimeConfigPath,
+  RuntimeConfigPathResolutionError,
+} from './path.ts';
 import {
   allowPlaintextSecretMarkerField,
   plaintextSecretMarkerField,
@@ -48,6 +55,13 @@ const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
 
 export const maxProject02RuntimeConfigBytes = 256 * 1_024;
 
+export class RuntimeConfigLocationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'RuntimeConfigLocationError';
+  }
+}
+
 export type LoadProject02RuntimeConfigOptions = {
   readonly configPath?: string;
   readonly storeRoot?: string;
@@ -71,6 +85,8 @@ export function loadProject02RuntimeConfig(
       diagnostics: [],
     } satisfies LoadedProject02RuntimeConfig);
   }
+
+  assertSelectedRuntimeConfigIsGlobal(location);
 
   if (!existsSync(location.path)) {
     if (location.source === 'default') {
@@ -295,6 +311,56 @@ function resolveRuntimeConfigLocation(options: {
     source: 'default',
     path: defaultRuntimeConfigPath(options.storeRoot),
   };
+}
+
+function assertSelectedRuntimeConfigIsGlobal(location: {
+  readonly source: Exclude<RuntimeConfigSource, 'none'>;
+  readonly path: string;
+}): void {
+  if (location.source !== 'path' && location.source !== 'env') {
+    return;
+  }
+
+  const overlayPath = [
+    resolve(location.path),
+    canonicalSelectedRuntimeConfigPath(location.path),
+  ].find(path => characterOverlaySelection(path));
+
+  if (overlayPath === undefined) {
+    return;
+  }
+
+  const dataRoot = dirname(overlayPath);
+  const characterId = basename(dataRoot);
+  const homeRoot = dirname(dirname(dataRoot));
+
+  throw new RuntimeConfigLocationError(
+    `Runtime config path "${location.path}" is a character overlay. ` +
+      `Use --store "${homeRoot}" with --character "${characterId}" instead ` +
+      `of selecting a character overlay with --config or ` +
+      `${runtimeConfigEnvVarName}.`,
+  );
+}
+
+function characterOverlaySelection(path: string): boolean {
+  const dataRoot = dirname(path);
+
+  return (
+    basename(dirname(dataRoot)) === characterDataDirectoryName &&
+    path === createLocalRuntimeStorageLayout({storeRoot: dataRoot}).configPath
+  );
+}
+
+function canonicalSelectedRuntimeConfigPath(path: string): string {
+  try {
+    return canonicalRuntimeConfigPath(path);
+  } catch (error: unknown) {
+    if (error instanceof RuntimeConfigPathResolutionError) {
+      throw new RuntimeConfigLocationError(error.message);
+    }
+
+    throw error;
+  }
 }
 
 function parseProject02RuntimeConfig(value: unknown): {

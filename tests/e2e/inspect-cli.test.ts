@@ -2,9 +2,9 @@ import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts
 import {ensureCharacterDataMarker} from '../../src/runtime/storage/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
+  existsSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -830,12 +830,13 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('holds history for character "nova"');
   });
 
-  it('composes the owning home when --config aliases an absent overlay', async () => {
+  it('composes character state with an explicitly selected global config', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-alias-');
     const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    const globalConfigPath = join(storeRoot, 'config.json');
     let stdout = '';
 
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+    writeRuntimeConfig(globalConfigPath, {
       project02: {userDisplayName: 'Home Name'},
     });
     await ensureCharacterDataMarker({
@@ -843,9 +844,6 @@ describe('inspect CLI plugin evidence', () => {
       characterId: 'mira',
     });
 
-    // The overlay path is the selection, but no overlay exists: the
-    // global layer must come from the owning home instead of failing
-    // on the missing file.
     const exitCode = await runInspectCliFromArgs(
       [
         '--store',
@@ -853,7 +851,7 @@ describe('inspect CLI plugin evidence', () => {
         '--character',
         'mira',
         '--config',
-        join(dataRoot, 'config.json'),
+        globalConfigPath,
         '--sessions',
       ],
       {
@@ -869,10 +867,9 @@ describe('inspect CLI plugin evidence', () => {
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
   });
 
-  it('keeps the owning home when both aliased overlay and global config are absent', async () => {
+  it('keeps an explicit home when its global config and overlay are absent', async () => {
     const homeRoot = createTestTempRoot('project02-inspect-absent-layers-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
-    const overlayPath = join(dataRoot, 'config.json');
     let stdout = '';
 
     await ensureCharacterDataMarker({
@@ -881,7 +878,7 @@ describe('inspect CLI plugin evidence', () => {
     });
 
     const exitCode = await runInspectCliFromArgs(
-      ['--character', 'mira', '--config', overlayPath, '--sessions'],
+      ['--store', homeRoot, '--character', 'mira', '--sessions'],
       {
         stdout: collect(chunk => {
           stdout += chunk;
@@ -894,41 +891,32 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({
       runtimeConfig: {
-        project02: {storeRoot: realpathSync(homeRoot), character: 'mira'},
+        project02: {storeRoot: homeRoot, character: 'mira'},
       },
       sessions: [],
     });
   });
 
-  it('keeps the owning home when an absent overlay is selected through the environment', async () => {
+  it('rejects an overlay selected through the environment', async () => {
     const homeRoot = createTestTempRoot('project02-inspect-env-absent-layers-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = join(dataRoot, 'config.json');
-    let stdout = '';
-
-    await ensureCharacterDataMarker({
-      storageOptions: {storeRoot: dataRoot},
-      characterId: 'mira',
-    });
+    let stderr = '';
 
     const exitCode = await runInspectCliFromArgs(
       ['--character', 'mira', '--sessions'],
       {
-        stdout: collect(chunk => {
-          stdout += chunk;
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
         }),
-        stderr: collect(() => {}),
         env: {[runtimeConfigEnvVarName]: overlayPath},
       },
     );
 
-    expect(exitCode).toBe(0);
-    expect(JSON.parse(stdout)).toMatchObject({
-      runtimeConfig: {
-        project02: {storeRoot: realpathSync(homeRoot), character: 'mira'},
-      },
-      sessions: [],
-    });
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('is a character overlay');
+    expect(existsSync(dataRoot)).toBe(false);
   });
 
   it('lists no sessions for a data directory holding only control state', async () => {

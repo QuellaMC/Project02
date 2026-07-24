@@ -5,7 +5,6 @@
  */
 export {
   classifyRuntimePluginCatalogDiscovery,
-  createConfiguredProject02PluginHost,
   createConfiguredProject02PluginHostFromPlan,
   createRuntimePluginCatalogSnapshot,
   discoverRuntimePluginCatalog,

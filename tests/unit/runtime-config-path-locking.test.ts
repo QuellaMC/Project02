@@ -39,6 +39,7 @@ describe('runtime config canonical path locking', () => {
     );
     symlinkSync(targetA, configAlias);
     let swapped = false;
+    let aliasReads = 0;
 
     vi.doMock('node:fs', async () => {
       const actual = await vi.importActual<typeof NodeFs>('node:fs');
@@ -51,10 +52,14 @@ describe('runtime config canonical path locking', () => {
             ...args,
           ]) as unknown;
 
-          if (path === configAlias && !swapped) {
-            swapped = true;
-            unlinkSync(configAlias);
-            symlinkSync(targetB, configAlias);
+          if (path === configAlias) {
+            aliasReads += 1;
+
+            if (aliasReads === 2 && !swapped) {
+              swapped = true;
+              unlinkSync(configAlias);
+              symlinkSync(targetB, configAlias);
+            }
           }
 
           return content;
@@ -62,14 +67,23 @@ describe('runtime config canonical path locking', () => {
       };
     });
 
-    const {applyRuntimeConfigMutation} =
-      await import('../../src/runtime/config/mutate.ts');
+    const {
+      applyRuntimeConfigControlOperation,
+      resolveRuntimeConfigScopeTarget,
+    } = await import('../../src/runtime/config/index.ts');
+    const {requiredSecretPlugin} =
+      await import('../support/runtime-config-fixtures.ts');
 
-    applyRuntimeConfigMutation({
-      configPath: configAlias,
-      operation: {
-        kind: 'plugin_enable',
-        pluginId: 'gamma',
+    applyRuntimeConfigControlOperation({
+      target: resolveRuntimeConfigScopeTarget({
+        configPath: configAlias,
+        env: {},
+        scope: 'global',
+      }),
+      request: {
+        kind: 'plugin_activation',
+        manifest: requiredSecretPlugin('gamma').manifest,
+        enabled: true,
       },
     });
 

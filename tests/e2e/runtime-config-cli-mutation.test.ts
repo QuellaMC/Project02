@@ -12,13 +12,14 @@ import {
 } from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {applyRuntimeConfigMutation} from '../../src/runtime/config/mutate.ts';
 import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   defaultRuntimeConfigPath,
+  applyRuntimeConfigControlOperation,
   loadProject02RuntimeConfig,
   resolveProject02RuntimeConfig,
+  resolveRuntimeConfigScopeTarget,
   roleModelProviderEnvVarName,
   runtimeControlEnvVarNames,
   runtimeConfigEnvVarName,
@@ -1451,14 +1452,22 @@ describe('runtime config CLI mutation and storage', () => {
 
     mkdirSync(configTempPath);
 
-    applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'secret_set',
-        pluginId: 'mem0-local',
-        fieldName: 'apiKey',
-        envVar: 'MEM0_API_KEY',
-        secretValue: 'stored-secret',
+    applyRuntimeConfigControlOperation({
+      target: resolveRuntimeConfigScopeTarget({
+        configPath,
+        env: {MEM0_API_KEY: 'stored-secret'},
+        scope: 'global',
+      }),
+      request: {
+        kind: 'plugin_config',
+        manifest: installedSecretPlugin.manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'secret_set',
+          fieldName: 'apiKey',
+          envVar: 'MEM0_API_KEY',
+          secretValue: 'stored-secret',
+        },
       },
     });
 
@@ -1483,22 +1492,36 @@ describe('runtime config CLI mutation and storage', () => {
       storeRoot: initialStoreRoot,
     });
 
-    const setResult = applyRuntimeConfigMutation({
-      configPath,
-      operation: {
-        kind: 'set',
-        path: 'project02.storeRoot',
-        value: nextStoreRoot,
+    const setResult = applyRuntimeConfigControlOperation({
+      target: resolveRuntimeConfigScopeTarget({
+        configPath,
+        env: {},
+        scope: 'global',
+      }),
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.storeRoot',
+          value: nextStoreRoot,
+        },
       },
     });
 
     expect(setResult.config.project02?.storeRoot).toBe(nextStoreRoot);
     expect(setResult.envPath).toBe(join(nextStoreRoot, '.env'));
 
-    const unsetResult = applyRuntimeConfigMutation({
-      configPath,
-      storeRoot: initialStoreRoot,
-      operation: {kind: 'unset', path: 'project02.storeRoot'},
+    const unsetResult = applyRuntimeConfigControlOperation({
+      target: resolveRuntimeConfigScopeTarget({
+        configPath,
+        storeRoot: initialStoreRoot,
+        env: {},
+        scope: 'global',
+      }),
+      request: {
+        kind: 'document',
+        operation: {kind: 'unset', path: 'project02.storeRoot'},
+      },
     });
 
     expect(unsetResult.config.project02?.storeRoot).toBeUndefined();
@@ -1516,12 +1539,19 @@ describe('runtime config CLI mutation and storage', () => {
     try {
       process.chdir(configRoot);
 
-      const result = applyRuntimeConfigMutation({
-        configPath: paddedConfigPath,
-        operation: {
-          kind: 'set',
-          path: 'project02.storeRoot',
-          value: 'next-store',
+      const result = applyRuntimeConfigControlOperation({
+        target: resolveRuntimeConfigScopeTarget({
+          configPath: paddedConfigPath,
+          env: {},
+          scope: 'global',
+        }),
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.storeRoot',
+            value: 'next-store',
+          },
         },
       });
       const config: unknown = JSON.parse(readFileSync(configPath, 'utf8'));

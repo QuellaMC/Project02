@@ -6,7 +6,6 @@ import {describe, expect, it} from 'vitest';
 import {
   applyRuntimeConfigControlOperation,
   createLayeredRuntimeConfigFingerprint,
-  lockFailureProvesNoOverlayWriter,
   defaultRuntimeConfigPath,
   inspectRuntimePluginConfig,
   prepareRuntimeConfigControlOperation,
@@ -22,11 +21,7 @@ import {
   createRuntimePlugin,
   type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
-import {
-  ensureCharacterDataMarker,
-  LocalRuntimeStorageContractError,
-} from '../../src/runtime/storage/index.ts';
-import {acquireLocalRuntimeMutationLockSync} from '../../src/runtime/storage/mutation-lock.ts';
+import {ensureCharacterDataMarker} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
@@ -568,53 +563,6 @@ describe('runtime plugin config control', () => {
     expect(readConfigFile(fixture.configPath)).toEqual(invalidConfig);
   });
 
-  it('aborts the layered expectation when the overlay lock is busy, and bypasses only setup failures', () => {
-    const root = createTestTempRoot('project02-overlay-lock-busy-');
-    const locksRoot = join(root, '.locks');
-    const held = acquireLocalRuntimeMutationLockSync({
-      locksRoot,
-      resourceKey: 'runtime-control-file:probe',
-    });
-
-    try {
-      // A busy lock proves a scoped writer is active: the expectation
-      // must abort rather than verify unlocked and race that writer.
-      expect(() =>
-        acquireLocalRuntimeMutationLockSync({
-          locksRoot,
-          resourceKey: 'runtime-control-file:probe',
-          waitTimeoutMs: 0,
-        }),
-      ).toThrow();
-
-      try {
-        acquireLocalRuntimeMutationLockSync({
-          locksRoot,
-          resourceKey: 'runtime-control-file:probe',
-          waitTimeoutMs: 0,
-        });
-        throw new Error('Expected the second acquisition to be busy.');
-      } catch (error: unknown) {
-        expect(lockFailureProvesNoOverlayWriter(error)).toBe(false);
-      }
-    } finally {
-      held.release();
-    }
-
-    // An uncreatable lock root proves no writer can hold it either.
-    expect(
-      lockFailureProvesNoOverlayWriter(
-        new LocalRuntimeStorageContractError(
-          'write_failed',
-          'Could not create the lock root.',
-        ),
-      ),
-    ).toBe(true);
-    expect(lockFailureProvesNoOverlayWriter(new Error('unrelated'))).toBe(
-      false,
-    );
-  });
-
   it('refuses to inspect through a data directory rebound to another character', async () => {
     const homeRoot = createTestTempRoot('project02-plugin-inspect-rebind-');
     const dataRoot = join(homeRoot, 'character-data', 'mira');
@@ -655,47 +603,24 @@ describe('runtime plugin config control', () => {
     ).toThrow('holds history for character "nova"');
   });
 
-  it('rejects a direct overlay secret set entirely', async () => {
+  it('rejects a direct overlay selection before secret control', async () => {
     const homeRoot = createTestTempRoot('project02-plugin-overlay-secret-');
     const dataRoot = join(homeRoot, 'character-data', 'mira');
     const overlayPath = join(dataRoot, 'config.json');
-    const plugin = requiredSecretPlugin('operator.overlay-secret');
 
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
 
-    // Secrets are shared across characters: their references are
-    // authored in the home config.json, never a character overlay.
     const env = {OVERLAY_SECRET_VAR: 'overlay-secret-value'};
-    const target = resolveRuntimeConfigScopeTarget({
-      configPath: overlayPath,
-      env,
-      scope: 'character',
-    });
-
     expect(() =>
-      applyRuntimeConfigControlOperation({
-        target,
-        expectedFingerprint: inspectRuntimePluginConfig({
-          configPath: overlayPath,
-          env,
-          manifest: plugin.manifest,
-        }).fingerprint,
-        request: {
-          kind: 'plugin_config',
-          manifest: plugin.manifest,
-          actor: 'operator',
-          fieldOperation: {
-            kind: 'secret_set',
-            fieldName: 'apiKey',
-            envVar: 'OVERLAY_SECRET_VAR',
-            secretValue: 'overlay-secret-value',
-          },
-        },
+      resolveRuntimeConfigScopeTarget({
+        configPath: overlayPath,
+        env,
+        scope: 'character',
       }),
-    ).toThrow('Secrets are shared across characters');
+    ).toThrow('is a character overlay');
     expect(existsSync(overlayPath)).toBe(false);
     expect(existsSync(join(homeRoot, '.env'))).toBe(false);
     expect(existsSync(join(dataRoot, '.env'))).toBe(false);

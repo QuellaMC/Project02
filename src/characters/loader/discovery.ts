@@ -13,7 +13,6 @@ import {basename, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
-import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {
   characterPackageDescriptorFileName,
   parseCharacterPackageDescriptor,
@@ -278,15 +277,7 @@ function readCharacterDescriptorFile(options: {
     return reject('Character package descriptor must contain valid JSON.');
   }
 
-  try {
-    return {
-      value: createJsonBoundarySnapshot(parsed, {
-        field: 'Character package descriptor',
-      }),
-    };
-  } catch {
-    return reject('Character package descriptor exceeds safe JSON limits.');
-  }
+  return {value: parsed};
 }
 
 function applyCharacterIdentityPolicy(options: {

@@ -28,7 +28,10 @@ import {
   validateProject02RuntimeConfig,
 } from './load.ts';
 import {resolveProject02RuntimeStoreRoot} from './resolve.ts';
-import {project02RuntimeConfigFieldDefinitions} from './schema.ts';
+import {
+  characterRuntimeConfigFieldScopeViolation,
+  project02RuntimeConfigFieldDefinitions,
+} from './schema.ts';
 import {
   configuredProject02CharacterId,
   type LoadedProject02RuntimeConfig,
@@ -265,19 +268,18 @@ function globalOnlyFieldDiagnostics(
 
   const section = project02 as Record<string, unknown>;
 
-  return project02RuntimeConfigFieldDefinitions()
-    .filter(
-      field =>
-        !field.scopes.includes('character') &&
-        section[field.name] !== undefined,
-    )
-    .map(field =>
-      createRuntimeConfigDiagnostic(
-        'error',
-        'runtime_config_field_global_only',
-        `Config field "${field.path}" is global-only; set it in the home ` +
-          'config.json, not the character overlay.',
-        field.path,
-      ),
-    );
+  return project02RuntimeConfigFieldDefinitions().flatMap(field => {
+    const violation = characterRuntimeConfigFieldScopeViolation(field);
+
+    return violation === undefined || section[field.name] === undefined
+      ? []
+      : [
+          createRuntimeConfigDiagnostic(
+            'error',
+            'runtime_config_field_global_only',
+            violation,
+            field.path,
+          ),
+        ];
+  });
 }

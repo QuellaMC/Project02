@@ -127,56 +127,14 @@ export default tseslint.config(
     },
   },
   {
-    // Re-pinned +2 to inject the plugin reloader capability into the host,
-    // then +13 to stamp the plan with its authored-config fingerprint and
-    // hand it to the host as the construction-currency signal recovery uses,
-    // then +13 for the home/character-data split: deriving the per-character
-    // data root from resolved config and threading it to host construction,
-    // factory inputs, and construction-cleanup contexts, then +10 for the
-    // layered flip: one derived character scope and overlay snapshot feeds
-    // the layered resolve, the construction stamp, and the control state,
-    // then +4 to hand the enablement ladder the merged two-layer view,
-    // then +6 for the active-character override: a supplied overlay is
-    // the scope authority and stamps its id into the resolved config,
-    // then +23 for review hardening: catalog diagnostics classified
-    // against the merged view, the home root recorded in the plugin
-    // config-control state, and the catalog composition extracted, then
-    // +3 so the direct activation path derives the character scope and
-    // overlay before catalog composition classifies packages, then +5
-    // so direct host creation runs the guarded character-data
-    // initializer before any plugin file store is exposed, then +11 so
-    // the direct path's auto-loaded overlay passes the same read
-    // guards (stamp + adoptability) startup applies.
+    // Ratcheted down after deleting the direct configured-host constructor.
+    // Remaining bulk owns catalog composition, layered activation planning,
+    // package instantiation, construction cleanup, and host state assembly.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1222, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
-    files: ['src/runtime/config/mutate.ts'],
-    rules: {
-      // Re-pinned +43 so a directly selected overlay target must carry
-      // a matching binding stamp before any lock or write touches the
-      // data directory (review round five), then +8 so an overlay
-      // path's store resolution names the OWNING home for env writes,
-      // then +30 so only the data directory's config.json counts as an
-      // overlay and any other file there is rejected as a target, then
-      // +25 so a symlink sitting where an overlay belongs is rejected
-      // as written, before canonicalization can route it elsewhere,
-      // then +10 so direct overlay targets pass the full adoptability
-      // guard and every as-written path component is symlink-checked,
-      // then +6 so secret references are never authored in a character
-      // overlay, matching the --character secret-scope rejection, then
-      // +62 so the layered control transaction can pre-acquire the
-      // control-file locks in one canonical order (owner-token
-      // re-entry, seeded env path, caller-owned path-drift retry, the
-      // shared pre-lock target preflight, and the wrapped pair lease).
-      'max-lines': [
-        'error',
-        {max: 1444, skipBlankLines: true, skipComments: true},
+        {max: 1182, skipBlankLines: true, skipComments: true},
       ],
     },
   },

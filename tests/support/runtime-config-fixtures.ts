@@ -1,4 +1,4 @@
-import type {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
+import type {createConfiguredProject02PluginHostFromPlan} from '../../src/app/index.ts';
 import {
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
@@ -216,7 +216,7 @@ export function restoreProcessEnvValue(
 }
 
 export type ActivationPluginSnapshot = Awaited<
-  ReturnType<typeof createConfiguredProject02PluginHost>
+  ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
 >['activation']['plugins'][number];
 
 export function activationPluginById(

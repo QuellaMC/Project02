@@ -63,8 +63,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     name: 'character',
     label: 'Character',
     description:
-      'Selects one discovered character package; a store binds permanently ' +
-      'to this character id at first activation.',
+      'Selects the default active character package for this Project02 home.',
     invalidValueCode: 'runtime_config_string_invalid',
     invalidValueMessage: 'Runtime config field must be a non-empty string.',
     required: false,
@@ -128,6 +127,15 @@ export function project02RuntimeConfigFieldNames(): readonly string[] {
   return Object.freeze(
     project02ConfigFieldDefinitions.map(field => field.name),
   );
+}
+
+export function characterRuntimeConfigFieldScopeViolation(
+  field: Project02ConfigFieldDefinition,
+): string | undefined {
+  return field.scopes.includes('character')
+    ? undefined
+    : `Config field "${field.path}" is global-only; set it in the home ` +
+        'config.json, not the character overlay.';
 }
 
 export function runtimeConfigValueMatchesField(
