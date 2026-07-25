@@ -16,6 +16,7 @@ import type {
 import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import type {RuntimePluginReloader} from '../../src/plugins/host/index.ts';
 import {runtimePluginReloadTimeoutMs} from '../../src/plugins/host/reload.ts';
+import {runtimePluginQuiesceTimeoutMs} from '../../src/plugins/host/instance-lifecycle.ts';
 import {createPluginContextEvidence} from '../../src/plugins/api/evidence-helpers.ts';
 import {
   testIdentity,
@@ -685,6 +686,42 @@ describe('runtime plugin host live config reload', () => {
       await vi.runAllTimersAsync();
       await shutdown;
       expect(terminalLog).toEqual(['late:shutdown', 'v1:shutdown']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds terminal quiescing when a reload never settles', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const terminalLog: string[] = [];
+      const host = reloadHost({
+        initial: terminalReloadFixturePlugin('v1', terminalLog),
+        reloader: {
+          // Never settles and never produces a candidate. The reload race
+          // abandons this promise without cancelling it, so it stays tracked
+          // for the rest of the process.
+          reload: () => new Promise(() => undefined),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      // Terminal dispatch is the one phase that must always finish. Without a
+      // bound this never resolves and the session can never shut down.
+      const shutdown = host.shutdown(testPluginContext());
+
+      await vi.advanceTimersByTimeAsync(runtimePluginQuiesceTimeoutMs);
+      await shutdown;
+
+      // Giving up on the stuck reload must not skip teardown for the instance
+      // the host already owns.
+      expect(terminalLog).toEqual(['v1:shutdown']);
     } finally {
       vi.useRealTimers();
     }
