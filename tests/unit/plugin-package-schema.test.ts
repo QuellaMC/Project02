@@ -111,6 +111,16 @@ describe('plugin package descriptor schema parity', () => {
       }),
     ],
     [
+      'a missing config scope',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+        const config = {...(manifest['config'] as Record<string, unknown>)};
+
+        delete config['scope'];
+        return {...descriptor, manifest: {...manifest, config}};
+      },
+    ],
+    [
       'an unsupported config scope',
       (descriptor: Record<string, unknown>) => {
         const manifest = descriptor['manifest'] as Record<string, unknown>;
@@ -167,32 +177,6 @@ describe('plugin package descriptor schema parity', () => {
       );
     },
   );
-
-  it('accepts a legacy descriptor without a config scope', () => {
-    const descriptor = validDescriptor();
-    const manifest = descriptor['manifest'] as Record<string, unknown>;
-    const config = {...(manifest['config'] as Record<string, unknown>)};
-
-    delete config['scope'];
-
-    const legacy = {...descriptor, manifest: {...manifest, config}};
-
-    // New descriptors must state the field, so the published schema still
-    // requires it...
-    expect(validateAgainstSchema(legacy)).toBe(false);
-
-    // ...but a package authored before the field existed is already installed,
-    // and its previous semantics were global with per-character overrides. It
-    // has to keep loading rather than blocking startup.
-    const parsed = parseRuntimePluginPackageDescriptor(legacy);
-
-    expect(parsed.status).toBe('accepted');
-    expect(
-      parsed.status === 'accepted'
-        ? parsed.descriptor.manifest.config.scope
-        : undefined,
-    ).toBe('global_with_character_overrides');
-  });
 
   it('allows and ignores the $schema key in both validators', () => {
     const descriptor = validDescriptor();

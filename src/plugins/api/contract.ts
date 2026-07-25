@@ -147,16 +147,6 @@ export const runtimePluginConfigScopeValues = [
   'character_only',
 ] as const;
 
-/**
- * Scope assumed for a descriptor authored before `config.scope` existed.
- *
- * Plugin config was global with per-character overrides before the field was
- * introduced, so an omitted scope keeps its original meaning instead of failing
- * validation. New descriptors are expected to state the field; the published
- * schema requires it.
- */
-export const legacyRuntimePluginConfigScope = 'global_with_character_overrides';
-
 export type RuntimePluginKind = (typeof runtimePluginKindValues)[number];
 export type RuntimePluginDeclaration =
   (typeof runtimePluginDeclarationValues)[number];
