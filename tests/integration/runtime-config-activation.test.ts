@@ -28,7 +28,10 @@ import {
 } from '../../src/plugins/packages/character-state/plugin.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   fileStoreSessionEndPlugin,
@@ -56,7 +59,9 @@ describe('runtime config activation planning', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan,
@@ -95,7 +100,9 @@ describe('runtime config activation planning', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          }),
         }),
       }),
     ).rejects.toThrow('is not initialized in this home');
@@ -159,7 +166,10 @@ describe('runtime config activation planning', () => {
     const output = parseActivationOutput(stdout);
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {},
       }),
     });
@@ -207,7 +217,9 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
       }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
@@ -246,7 +258,13 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          env: {
+            [envVar]: 'blocked-config-secret',
+          },
+        }),
+
         env: {
           [envVar]: 'blocked-config-secret',
         },
@@ -322,8 +340,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-        storeRoot,
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          storeRoot: storeRoot,
+        }),
       }),
       sessionId,
     });
@@ -453,7 +473,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         strictUnknownPlugins: true,
         factories: {
           [plugin.manifest.id]: {
@@ -502,7 +525,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {
           [plugin.manifest.id]: {
             manifest: plugin.manifest,
@@ -541,7 +567,9 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
       }),
     });
 
@@ -568,7 +596,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {
           [characterStatePluginId]: {
             manifest: createCharacterStatePluginManifest(),
@@ -605,7 +636,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {
           [characterStatePluginId]: {
             manifest: plugin.manifest,
@@ -648,7 +682,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories,
       }),
     });
@@ -680,7 +717,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         strictUnknownPlugins: true,
       }),
     });
@@ -706,7 +746,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         strictUnknownPlugins: true,
       }),
     });
@@ -749,7 +792,9 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
       }),
     });
 
@@ -795,7 +840,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {
           [plugin.manifest.id]: {
             manifest: plugin.manifest,
@@ -861,7 +909,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {
           [plugin.manifest.id]: {
             manifest: plugin.manifest,
@@ -921,7 +972,10 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        }),
+
         factories: {
           [plugin.manifest.id]: {
             manifest: plugin.manifest,
@@ -987,7 +1041,13 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          env: {
+            [envVar]: 'selected-memory-secret',
+          },
+        }),
+
         env: {
           [envVar]: 'selected-memory-secret',
         },
@@ -1099,7 +1159,13 @@ describe('runtime config activation planning', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          env: {
+            [envVar]: 'selected-memory-secret',
+          },
+        }),
+
         env: {
           [envVar]: 'selected-memory-secret',
         },

@@ -18,15 +18,19 @@ import {
   defaultRuntimeConfigPath,
   applyRuntimeConfigControlOperation,
   loadProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
-  resolveRuntimeConfigScopeTarget,
   roleModelProviderEnvVarName,
   runtimeControlEnvVarNames,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
+  resolveProject02RuntimeConfig,
+  resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   requiredSecretPlugin,
@@ -42,6 +46,33 @@ const installedSecretFactories = Object.freeze({
 });
 
 describe('runtime config CLI mutation and storage', () => {
+  it('repairs an invalid authored character without resolving its data path', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-invalid-character-repair-',
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {character: '../bad'},
+    });
+    let stderr = '';
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.character', 'mira'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
+      project02: {character: 'mira'},
+    });
+  });
+
   it('refuses global config writes when an initialized home cannot hold character data', async () => {
     const storeRoot = createTestTempRoot('project02-config-home-data-file-');
     let stderr = '';
@@ -485,7 +516,9 @@ describe('runtime config CLI mutation and storage', () => {
         [runtimeConfigEnvVarName]: configPath,
       },
     });
-    const resolved = resolveProject02RuntimeConfig({loadedConfig: loaded});
+    const resolved = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
+    });
 
     expect(resolved.project02.storeRoot).toBe(seededStoreRoot);
 
@@ -1454,7 +1487,11 @@ describe('runtime config CLI mutation and storage', () => {
 
     applyRuntimeConfigControlOperation({
       target: resolveRuntimeConfigScopeTarget({
-        configPath,
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          env: {MEM0_API_KEY: 'stored-secret'},
+        }),
+
         env: {MEM0_API_KEY: 'stored-secret'},
         scope: 'global',
       }),
@@ -1494,7 +1531,11 @@ describe('runtime config CLI mutation and storage', () => {
 
     const setResult = applyRuntimeConfigControlOperation({
       target: resolveRuntimeConfigScopeTarget({
-        configPath,
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          env: {},
+        }),
+
         env: {},
         scope: 'global',
       }),
@@ -1513,8 +1554,12 @@ describe('runtime config CLI mutation and storage', () => {
 
     const unsetResult = applyRuntimeConfigControlOperation({
       target: resolveRuntimeConfigScopeTarget({
-        configPath,
-        storeRoot: initialStoreRoot,
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: initialStoreRoot,
+          env: {},
+        }),
+
         env: {},
         scope: 'global',
       }),
@@ -1541,7 +1586,11 @@ describe('runtime config CLI mutation and storage', () => {
 
       const result = applyRuntimeConfigControlOperation({
         target: resolveRuntimeConfigScopeTarget({
-          configPath: paddedConfigPath,
+          runtimeLocation: runtimeLocationForTest({
+            configPath: paddedConfigPath,
+            env: {},
+          }),
+
           env: {},
           scope: 'global',
         }),

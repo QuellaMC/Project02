@@ -2,12 +2,13 @@ import {describe, expect, it} from 'vitest';
 
 import {
   pluginHasConfigErrors,
-  resolveProject02RuntimeConfig,
   runtimeConfigVersion,
   runtimeConfigDiagnosticIsReadinessFailure,
   runtimeConfigDiagnosticMatchesPlugin,
   type RuntimeConfigDiagnostic,
+  resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
+import {runtimeConfigSnapshotForTest} from '../support/runtime-config.ts';
 import {resolveRuntimePluginActivation} from '../../src/app/index.ts';
 
 describe('runtime config readiness classification', () => {
@@ -166,7 +167,8 @@ describe('runtime config diagnostic plugin matching', () => {
       diagnostics: Object.freeze([]),
     });
     const resolvedConfig = resolveProject02RuntimeConfig({
-      loadedConfig,
+      ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
+
       pluginManifests: [],
     });
     const activation = resolveRuntimePluginActivation({

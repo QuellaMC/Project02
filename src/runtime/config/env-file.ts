@@ -2,11 +2,8 @@ import {existsSync, readFileSync} from 'node:fs';
 import {parseEnv} from 'node:util';
 
 import {defaultRuntimeConfigEnvPath} from './load.ts';
-import {storeRootForLoadedDefaultConfigPath} from './resolve.ts';
-import {
-  runtimeConfigEnvVarName,
-  type LoadedProject02RuntimeConfig,
-} from './types.ts';
+import type {ResolvedProject02RuntimeLocation} from './location.ts';
+import {runtimeConfigEnvVarName} from './types.ts';
 
 /**
  * A runtime location selected by the operator (store root, config
@@ -16,12 +13,6 @@ import {
  * selects a config scope or an active character; env-file resolution
  * ignores it (secrets are shared).
  */
-export type RuntimeLocationCliState = {
-  readonly storeRoot?: string;
-  readonly configPath?: string;
-  readonly character?: string;
-};
-
 export class RuntimeEnvFileError extends Error {
   readonly path: string | undefined;
 
@@ -32,24 +23,18 @@ export class RuntimeEnvFileError extends Error {
   }
 }
 
-export function runtimeConfigEnvPathForLocation(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-}): string {
-  return defaultRuntimeConfigEnvPath(
-    options.loadedConfig.config?.project02?.storeRoot ??
-      options.storeRoot ??
-      storeRootForLoadedDefaultConfigPath(options.loadedConfig),
-  );
+export function runtimeConfigEnvPathForLocation(
+  runtimeLocation: Pick<ResolvedProject02RuntimeLocation, 'homeRoot'>,
+): string {
+  return defaultRuntimeConfigEnvPath(runtimeLocation.homeRoot);
 }
 
 export function loadRuntimeConfigEnvFile(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
   readonly envDefaults?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
-  const envPath = runtimeConfigEnvPathForLocation(options);
+  const envPath = runtimeConfigEnvPathForLocation(options.runtimeLocation);
   const env = options.env ?? process.env;
 
   if (!existsSync(envPath)) {

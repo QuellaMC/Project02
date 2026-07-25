@@ -39,7 +39,6 @@ import {
 export type CreateRuntimePluginManagementPluginOptions = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 };
 
 const runtimePluginManagementPluginInstances = new WeakSet<RuntimePlugin>();
@@ -89,9 +88,6 @@ export function createRuntimePluginManagementPlugin(
             call,
             context,
             state: pluginConfigControl,
-            ...(options.storeRoot === undefined
-              ? {}
-              : {storeRoot: options.storeRoot}),
           });
         }
 
@@ -122,9 +118,6 @@ export function createRuntimePluginManagementPlugin(
                 },
                 pluginId,
               ) === true,
-            ...(options.storeRoot === undefined
-              ? {}
-              : {storeRoot: options.storeRoot}),
           });
         }
 

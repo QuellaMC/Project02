@@ -261,6 +261,21 @@ describe('character package descriptor schema parity', () => {
       }),
     ],
     [
+      'a plaintext-secret allowance marker in plugin defaults',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        plugins: {
+          config: {
+            'demo-config': {
+              nested: {
+                allowPlaintextSecret: false,
+              },
+            },
+          },
+        },
+      }),
+    ],
+    [
       'a non-object plugin config entry',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,

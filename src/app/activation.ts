@@ -37,17 +37,15 @@ import {
   createRuntimeConfigDiagnostic,
   createRuntimeConfigMutationBase,
   createRuntimePluginConfigControlCapability,
-  characterDataRootForResolvedConfig,
-  deriveRuntimeConfigCharacterScope,
   diagnosticsHaveErrors,
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterOverlayForScope,
   mergedLoadedConfigForOverlay,
+  readCharacterOverlayForScope,
   resolveLayeredProject02RuntimeConfig,
-  resolveProject02RuntimeStoreRoot,
   runtimeConfigDiagnosticMatchesPlugin,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
+  type ResolvedProject02RuntimeLocation,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimePluginConfigActivationInspectShape,
@@ -96,9 +94,11 @@ export type Project02ConfiguredPluginHost = {
     Record<string, RuntimePluginPackageProvenance>
   >;
   readonly pluginConfigControl: RuntimePluginConfigControlHostState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
 };
 
 export type Project02ConfiguredPluginActivation = {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly activation: RuntimePluginActivationResult;
   readonly packageProvenanceByPluginId: Readonly<
@@ -171,7 +171,7 @@ const selectedAsDefaultMemoryProviderReason =
 
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   /**
    * Test or embedding overrides extend the discovered catalog instead of
    * replacing it. Character-package requirements must keep seeing bundled
@@ -189,7 +189,7 @@ export function createRuntimePluginCatalogSnapshot(options: {
 }): RuntimePluginCatalogSnapshot {
   return classifyRuntimePluginCatalogDiscovery({
     discovery: discoverRuntimePluginCatalog({
-      storeRoot: resolveProject02RuntimeStoreRoot(options),
+      storeRoot: options.runtimeLocation.homeRoot,
       ...(options.factoryOverrides === undefined
         ? {}
         : {factoryOverrides: options.factoryOverrides}),
@@ -299,8 +299,8 @@ export function classifyRuntimePluginCatalogDiscovery(options: {
 
 export function prepareConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
-  readonly storeRoot?: string;
   readonly strictUnknownPlugins?: boolean;
   readonly validateInactivePluginConfigs?: boolean;
   readonly env?: NodeJS.ProcessEnv;
@@ -322,23 +322,23 @@ export function prepareConfiguredProject02PluginActivation(options: {
   // of documents — including direct callers that never went through
   // startup. A supplied overlay is the scope authority: its character
   // id may be a flag override the loaded config knows nothing about.
-  const characterScope = deriveRuntimeConfigCharacterScope({
-    loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.overlayConfig === undefined
-      ? {}
-      : {characterId: options.overlayConfig.characterId}),
-  });
+  const characterScope = options.runtimeLocation.characterScope;
+  if (
+    options.overlayConfig !== undefined &&
+    options.overlayConfig.characterId !== characterScope.characterId
+  ) {
+    throw new TypeError(
+      'Runtime character overlay does not match the resolved runtime location.',
+    );
+  }
   const overlayConfig =
     options.overlayConfig ??
-    (characterScope === undefined
-      ? undefined
-      : loadCharacterOverlayForScope(characterScope));
+    readCharacterOverlayForScope(characterScope).overlay;
   const composition = activationCatalogComposition({
     ...options,
-    ...(overlayConfig === undefined ? {} : {overlayConfig}),
+    overlayConfig,
   });
-  const expectedStoreRoot = resolveProject02RuntimeStoreRoot(options);
+  const expectedStoreRoot = options.runtimeLocation.homeRoot;
 
   if (composition.storeRoot !== expectedStoreRoot) {
     throw new TypeError(
@@ -350,11 +350,8 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
   const resolvedConfig = resolveLayeredProject02RuntimeConfig({
     loadedConfig: options.loadedConfig,
-    ...(overlayConfig === undefined ? {} : {overlayConfig}),
-    ...(options.overlayConfig === undefined
-      ? {}
-      : {characterId: options.overlayConfig.characterId}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+    runtimeLocation: options.runtimeLocation,
+    overlayConfig,
     pluginManifests,
     defaultEnabledPluginIds,
     validateInactivePluginConfigs:
@@ -367,10 +364,10 @@ export function prepareConfiguredProject02PluginActivation(options: {
     resolvedConfig,
     // The enablement ladder judges the merged view, so an overlay's
     // explicit enabled rung carries the same weight as a global one.
-    loadedConfig:
-      overlayConfig === undefined
-        ? options.loadedConfig
-        : mergedLoadedConfigForOverlay(options.loadedConfig, overlayConfig),
+    loadedConfig: mergedLoadedConfigForOverlay(
+      options.loadedConfig,
+      overlayConfig,
+    ),
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
   });
@@ -379,10 +376,13 @@ export function prepareConfiguredProject02PluginActivation(options: {
     ...(resolvedConfig.path === undefined
       ? {}
       : {configPath: resolvedConfig.path}),
-    storeRoot: resolvedConfig.project02.storeRoot,
+    ...(options.runtimeLocation.selection.storeRoot === undefined
+      ? {}
+      : {storeRoot: options.runtimeLocation.selection.storeRoot}),
   });
 
   return Object.freeze({
+    runtimeLocation: options.runtimeLocation,
     catalogEntries,
     packageProvenanceByPluginId: composition.packageProvenanceByPluginId,
     resolvedConfig,
@@ -399,31 +399,25 @@ export function prepareConfiguredProject02PluginActivation(options: {
       defaultEnabledPluginIds: Object.freeze([
         ...composition.defaultEnabledPluginIds,
       ]),
-      ...(resolvedConfig.path === undefined
-        ? {}
-        : {configPath: resolvedConfig.path}),
-      // The home root rides along even when no config file exists yet:
-      // control operations must never fall back to the host's store
-      // root, which is the character data directory.
-      storeRoot: resolvedConfig.project02.storeRoot,
+      runtimeLocation: options.runtimeLocation,
+      configScope: 'character',
       ...(options.env === undefined
         ? {}
         : {env: Object.freeze({...options.env})}),
-      ...(characterScope === undefined ? {} : {characterScope}),
     }),
   } satisfies PreparedProject02PluginActivationPlan);
 }
 
 function activationCatalogComposition(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly overlayConfig: LoadedProject02CharacterOverlayConfig;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): RuntimePluginCatalogSnapshot {
   if (options.factories !== undefined) {
     return Object.freeze({
-      storeRoot: resolveProject02RuntimeStoreRoot(options),
+      storeRoot: options.runtimeLocation.homeRoot,
       ...composeRuntimePluginCatalog({factories: options.factories}),
       packageProvenanceByPluginId: Object.freeze({}),
       diagnostics: Object.freeze([]),
@@ -434,12 +428,8 @@ function activationCatalogComposition(options: {
     options.catalogSnapshot ??
     createRuntimePluginCatalogSnapshot({
       loadedConfig: options.loadedConfig,
-      ...(options.overlayConfig === undefined
-        ? {}
-        : {overlayConfig: options.overlayConfig}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
+      runtimeLocation: options.runtimeLocation,
+      overlayConfig: options.overlayConfig,
     })
   );
 }
@@ -479,9 +469,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
-        storeRoot: characterDataRootForResolvedConfig(
-          activationPlan.resolvedConfig,
-        ),
+        storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
         fileStore: configuredRuntimePluginFileStoreProvider,
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
@@ -495,6 +483,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       activation: activationPlan.activation,
       packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
       pluginConfigControl: activationPlan.pluginConfigControl,
+      runtimeLocation: activationPlan.runtimeLocation,
     } satisfies Project02ConfiguredPluginHost);
   }
 
@@ -504,10 +493,11 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   // itself — a direct caller on an uninitialized home used to get a
   // partially initialized character with no package defaults and no
   // diagnostics.
-  assertCharacterRuntimeInitialized(activationPlan.resolvedConfig);
+  assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
   const plugins = await instantiateRuntimePluginPackages({
     catalogEntries,
+    runtimeLocation: activationPlan.runtimeLocation,
     resolvedConfig: activationPlan.resolvedConfig,
     enabledPluginIds: activationPlan.activation.enabledPluginIds,
     sessionId: options.sessionId,
@@ -520,9 +510,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     host = createRuntimePluginHost({
       plugins,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
-      storeRoot: characterDataRootForResolvedConfig(
-        activationPlan.resolvedConfig,
-      ),
+      storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
       toolConfirmationHandler: options.toolConfirmationHandler,
@@ -534,6 +522,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
       plugins,
+      runtimeLocation: activationPlan.runtimeLocation,
       resolvedConfig: activationPlan.resolvedConfig,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
@@ -549,18 +538,19 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     activation: activationPlan.activation,
     packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
     pluginConfigControl: activationPlan.pluginConfigControl,
+    runtimeLocation: activationPlan.runtimeLocation,
   } satisfies Project02ConfiguredPluginHost);
 }
 
 function assertCharacterRuntimeInitialized(
-  resolvedConfig: ResolvedProject02RuntimeConfig,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): void {
   try {
     requireCharacterDataMarker({
       storageOptions: {
-        storeRoot: characterDataRootForResolvedConfig(resolvedConfig),
+        storeRoot: runtimeLocation.characterScope.dataRoot,
       },
-      characterId: resolvedConfig.project02.character,
+      characterId: runtimeLocation.characterScope.characterId,
     });
   } catch (error: unknown) {
     if (
@@ -568,7 +558,7 @@ function assertCharacterRuntimeInitialized(
       error.code === 'missing_file'
     ) {
       throw new TypeError(
-        `Character "${resolvedConfig.project02.character}" is not ` +
+        `Character "${runtimeLocation.characterScope.characterId}" is not ` +
           'initialized in this home. Run the character initializer ' +
           '(initializeProject02CharacterRuntime, or any project02 CLI ' +
           'startup) before constructing the plugin host.',
@@ -799,6 +789,7 @@ function isKnownPluginRuntimeConfigDiagnostic(options: {
 
 async function instantiateRuntimePluginPackages(options: {
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly enabledPluginIds: readonly string[];
   readonly sessionId?: string | undefined;
@@ -820,7 +811,7 @@ async function instantiateRuntimePluginPackages(options: {
       const plugin = await entry.load({
         pluginId: entry.manifest.id,
         manifest: entry.manifest,
-        storeRoot: characterDataRootForResolvedConfig(options.resolvedConfig),
+        storeRoot: options.runtimeLocation.characterScope.dataRoot,
         resolvedConfig:
           ownJsonRecordValue(
             options.resolvedConfig.pluginConfigs,
@@ -849,6 +840,7 @@ async function instantiateRuntimePluginPackages(options: {
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
       plugins,
+      runtimeLocation: options.runtimeLocation,
       resolvedConfig: options.resolvedConfig,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
@@ -904,6 +896,7 @@ function runtimePluginPackageDiagnostic(options: {
 
 async function cleanupPartiallyInstantiatedPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -928,7 +921,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginSessionEndHooks({
       plugins: options.plugins,
       context,
-      storeRoot: characterDataRootForResolvedConfig(options.resolvedConfig),
+      storeRoot: options.runtimeLocation.characterScope.dataRoot,
       createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
       sessionIdentity: options.sessionIdentity,
@@ -945,7 +938,7 @@ async function cleanupPartiallyInstantiatedPlugins(options: {
     await runRuntimePluginShutdownHooks({
       plugins: options.plugins,
       context,
-      storeRoot: characterDataRootForResolvedConfig(options.resolvedConfig),
+      storeRoot: options.runtimeLocation.characterScope.dataRoot,
       createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
       sessionId,
       sessionIdentity: options.sessionIdentity,
@@ -1000,7 +993,7 @@ function runtimePluginInventoryStateForInvalidConfig(
     ...(state.defaultEnabledPluginIds === undefined
       ? {}
       : {defaultEnabledPluginIds: state.defaultEnabledPluginIds}),
-    ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
+    runtimeLocation: state.runtimeLocation,
     ...(state.env === undefined ? {} : {env: state.env}),
   });
 }

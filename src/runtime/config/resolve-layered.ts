@@ -31,63 +31,46 @@ import {
 export type ResolveLayeredProject02RuntimeConfigOptions =
   ResolveProject02RuntimeConfigOptions & {
     readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
-    /**
-     * Active character override (e.g. a --character flag): stamped into
-     * the merged document's project02.character so the resolved config
-     * — data root, fingerprint, everything downstream — follows the
-     * flag, not the authored global selection.
-     */
-    readonly characterId?: string;
   };
 
 export function resolveLayeredProject02RuntimeConfig(
   options: ResolveLayeredProject02RuntimeConfigOptions,
 ): ResolvedProject02RuntimeConfig {
-  const {overlayConfig, characterId, ...globalOptions} = options;
+  const {overlayConfig, ...globalOptions} = options;
 
   // No overlay file, no override, nothing to report: the layered
   // resolve is the global resolve, fingerprint included.
   if (
-    (overlayConfig === undefined ||
-      (overlayConfig.config === undefined &&
-        overlayConfig.diagnostics.length === 0)) &&
-    characterId === undefined
+    overlayConfig === undefined ||
+    (overlayConfig.config === undefined &&
+      overlayConfig.diagnostics.length === 0)
   ) {
     return resolveProject02RuntimeConfig(globalOptions);
   }
 
-  const merged =
-    overlayConfig === undefined
-      ? globalOptions.loadedConfig
-      : mergedLoadedConfigForOverlay(globalOptions.loadedConfig, overlayConfig);
+  const merged = mergedLoadedConfigForOverlay(
+    globalOptions.loadedConfig,
+    overlayConfig,
+  );
   const manifests = globalOptions.pluginManifests ?? [];
-  const scopeDiagnostics =
-    overlayConfig === undefined
-      ? runtimePluginScopeDiagnostics({
-          config: globalOptions.loadedConfig.config,
-          manifests,
-          authoredScope: 'global',
-        })
-      : [
-          ...runtimePluginScopeDiagnostics({
-            config: globalOptions.loadedConfig.config,
-            manifests,
-            authoredScope: 'global',
-          }),
-          ...runtimePluginScopeDiagnostics({
-            config: overlayConfig.config,
-            manifests,
-            authoredScope: 'character',
-          }).map(diagnostic =>
-            withRuntimeConfigDiagnosticOrigin(diagnostic, {
-              scope: 'character',
-              characterId: overlayConfig.characterId,
-              ...(overlayConfig.path === undefined
-                ? {}
-                : {path: overlayConfig.path}),
-            }),
-          ),
-        ];
+  const scopeDiagnostics = [
+    ...runtimePluginScopeDiagnostics({
+      config: globalOptions.loadedConfig.config,
+      manifests,
+      authoredScope: 'global',
+    }),
+    ...runtimePluginScopeDiagnostics({
+      config: overlayConfig.config,
+      manifests,
+      authoredScope: 'character',
+    }).map(diagnostic =>
+      withRuntimeConfigDiagnosticOrigin(diagnostic, {
+        scope: 'character',
+        characterId: overlayConfig.characterId,
+        ...(overlayConfig.path === undefined ? {} : {path: overlayConfig.path}),
+      }),
+    ),
+  ];
   const scopedMerged = Object.freeze({
     ...merged,
     diagnostics: Object.freeze([...merged.diagnostics, ...scopeDiagnostics]),
@@ -96,10 +79,10 @@ export function resolveLayeredProject02RuntimeConfig(
   return resolveProject02RuntimeConfig({
     ...globalOptions,
     skipPluginScopeValidation: true,
-    loadedConfig:
-      characterId === undefined
-        ? scopedMerged
-        : withActiveCharacter(scopedMerged, characterId),
+    loadedConfig: withActiveCharacter(
+      scopedMerged,
+      options.runtimeLocation.characterScope.characterId,
+    ),
   });
 }
 

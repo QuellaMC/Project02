@@ -1,6 +1,13 @@
-import {existsSync, mkdtempSync, readFileSync, readdirSync} from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 import {Ajv} from 'ajv';
 import {describe, expect, it} from 'vitest';
@@ -11,7 +18,10 @@ import {
   parseRuntimePluginPackageDescriptor,
   readRuntimePluginPackageDescriptor,
 } from '../../src/plugins/api/package-descriptor.ts';
-import {bundledRuntimePluginPackageRoot} from '../../src/plugins/package-loader/index.ts';
+import {
+  bundledRuntimePluginPackageRoot,
+  maxRuntimePluginPackageMetadataBytes,
+} from '../../src/plugins/package-loader/index.ts';
 
 const schemaPath = join(
   process.cwd(),
@@ -175,6 +185,25 @@ describe('plugin package descriptor schema parity', () => {
     const parsed = parseRuntimePluginPackageDescriptor(descriptor);
 
     expect(parsed.status).toBe('accepted');
+  });
+
+  it('bounds descriptor self-reads before parsing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'project02-plugin-self-read-'));
+    const descriptorPath = join(root, 'project02.plugin.json');
+
+    writeFileSync(
+      descriptorPath,
+      JSON.stringify({
+        padding: 'x'.repeat(maxRuntimePluginPackageMetadataBytes),
+      }),
+      'utf8',
+    );
+
+    expect(() =>
+      readRuntimePluginPackageDescriptor({
+        descriptorUrl: pathToFileURL(descriptorPath),
+      }),
+    ).toThrow('Runtime plugin package descriptor could not be read.');
   });
 
   it('stamps a scaffold whose descriptor passes both validators', () => {

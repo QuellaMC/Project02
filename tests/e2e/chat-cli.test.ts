@@ -9,7 +9,10 @@ import {PassThrough, Readable} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 
 import {createConversationSession} from '../../src/core/index.ts';
@@ -29,8 +32,8 @@ import {
 import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
-  inspectRuntimePluginConfig,
   runtimeConfigEnvVarName,
+  inspectRuntimePluginConfig,
 } from '../../src/runtime/config/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
@@ -1388,10 +1391,12 @@ describe('chat CLI plugin lifecycle', () => {
       plugin: configurablePlugin,
     });
     const fingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     }).fingerprint;
     let adapterRound = 0;
     let stdout = '';
@@ -1455,10 +1460,12 @@ describe('chat CLI plugin lifecycle', () => {
       },
     );
     const committed = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(exitCode).toBe(0);
@@ -1491,10 +1498,12 @@ describe('chat CLI plugin lifecycle', () => {
         plugin: configurablePlugin,
       });
       const before = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
-        configPath,
-        storeRoot,
       });
       let adapterRound = 0;
       let stdout = '';
@@ -1569,10 +1578,12 @@ describe('chat CLI plugin lifecycle', () => {
       expect(stderr).toBe('');
       expect(stdout).toContain('Mira: Plugin config request finished.');
       const after = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
-        configPath,
-        storeRoot,
       });
 
       expect({
@@ -1602,10 +1613,12 @@ describe('chat CLI plugin lifecycle', () => {
       plugin: configurablePlugin,
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     });
     let adapterRound = 0;
     let confirmationCalls = 0;
@@ -1676,10 +1689,12 @@ describe('chat CLI plugin lifecycle', () => {
       },
     );
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(exitCode).toBe(0);
@@ -1708,10 +1723,12 @@ describe('chat CLI plugin lifecycle', () => {
         plugin: configurablePlugin,
       });
       const before = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
-        configPath,
-        storeRoot,
       });
       const approvalTimeoutMs = 5 * 60_000;
 
@@ -1793,10 +1810,12 @@ describe('chat CLI plugin lifecycle', () => {
       expect(stdout).toContain('Plugin tone was not changed.');
       expect(
         inspectRuntimePluginConfig({
+          runtimeLocation: runtimeLocationForTest({
+            configPath: configPath,
+            storeRoot: storeRoot,
+          }),
           manifest: configurablePlugin.manifest,
           pluginManifests: [configurablePlugin.manifest],
-          configPath,
-          storeRoot,
         }).fingerprint,
       ).toBe(before.fingerprint);
     } finally {

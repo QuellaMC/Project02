@@ -13,7 +13,10 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 
 import {
@@ -32,9 +35,9 @@ import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
   applyRuntimeConfigControlOperation,
   characterOverlayConfigPath,
-  resolveRuntimeConfigScopeTarget,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
+  resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
@@ -932,10 +935,14 @@ describe('inspect CLI plugin evidence', () => {
       characterId: 'mira',
     });
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: storeRoot,
+        characterId: 'mira',
+        env: {},
+      }),
+
       env: {},
       scope: 'character',
-      characterId: 'mira',
     });
     applyRuntimeConfigControlOperation({
       target,

@@ -56,6 +56,21 @@ describe('nestedSecretMarkerPath', () => {
     ).toBe('field.alpha');
   });
 
+  it('optionally rejects plaintext allowance markers', () => {
+    const value = {
+      nested: {
+        allowPlaintextSecret: false,
+      },
+    };
+
+    expect(nestedSecretMarkerPath(value, 'field')).toBeUndefined();
+    expect(
+      nestedSecretMarkerPath(value, 'field', {
+        rejectPlaintextAllowanceMarker: true,
+      }),
+    ).toBe('field.nested');
+  });
+
   it('returns undefined for marker-free structures', () => {
     expect(
       nestedSecretMarkerPath({list: [1, 'two', null], flag: true}, 'field'),

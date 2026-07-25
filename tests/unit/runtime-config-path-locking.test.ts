@@ -69,14 +69,25 @@ describe('runtime config canonical path locking', () => {
 
     const {
       applyRuntimeConfigControlOperation,
+      loadProject02RuntimeConfig,
+      resolveProject02RuntimeLocation,
       resolveRuntimeConfigScopeTarget,
     } = await import('../../src/runtime/config/index.ts');
     const {requiredSecretPlugin} =
       await import('../support/runtime-config-fixtures.ts');
 
+    const loadedConfig = loadProject02RuntimeConfig({
+      configPath: configAlias,
+      env: {},
+    });
+    const runtimeLocation = resolveProject02RuntimeLocation({
+      loadedConfig,
+      selection: {configPath: configAlias},
+    });
+
     applyRuntimeConfigControlOperation({
       target: resolveRuntimeConfigScopeTarget({
-        configPath: configAlias,
+        runtimeLocation,
         env: {},
         scope: 'global',
       }),

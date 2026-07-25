@@ -7,19 +7,22 @@ import {
   characterOnlyConfigPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  runtimeLocationForTest,
+  writeRuntimeConfig,
+} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   applyRuntimeConfigControlOperation,
   characterOverlayConfigPath,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
-  inspectRuntimePluginConfig,
   loadProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
-  resolveRuntimeConfigScopeTarget,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
+  inspectRuntimePluginConfig,
+  resolveProject02RuntimeConfig,
+  resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
@@ -56,7 +59,8 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'character',
     });
@@ -106,7 +110,8 @@ describe('scope-aware runtime config mutations', () => {
   it('rejects global-only fields and secret operations under character scope', () => {
     const {homeRoot, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'character',
     });
@@ -143,7 +148,8 @@ describe('scope-aware runtime config mutations', () => {
   it('refuses scoped writes into an unmarked data directory', () => {
     const {homeRoot, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'character',
     });
@@ -175,7 +181,8 @@ describe('scope-aware runtime config mutations', () => {
       characterId: 'mira',
     });
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'character',
     });
@@ -243,7 +250,8 @@ describe('scope-aware runtime config mutations', () => {
 
     const expected = resolveScopedExpected(homeRoot);
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'character',
     });
@@ -279,7 +287,8 @@ describe('scope-aware runtime config mutations', () => {
       characterId: 'mira',
     });
     const bareTarget = resolveRuntimeConfigScopeTarget({
-      storeRoot: bareHome,
+      runtimeLocation: runtimeLocationForTest({storeRoot: bareHome, env: {}}),
+
       env: {},
       scope: 'character',
     });
@@ -311,10 +320,14 @@ describe('scope-aware runtime config mutations', () => {
   it('names the overlay, owning home, and global file as the scope target', () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterId: 'nova',
+        env: {},
+      }),
+
       env: {},
       scope: 'character',
-      characterId: 'nova',
     });
 
     expect(target).toMatchObject({
@@ -322,9 +335,11 @@ describe('scope-aware runtime config mutations', () => {
       configPath: characterOverlayConfigPath(
         characterDataDirPath(homeRoot, 'nova'),
       ),
-      globalConfigPath: configPath,
-      homeRoot,
-      characterScope: {characterId: 'nova'},
+      runtimeLocation: {
+        globalConfigPath: configPath,
+        homeRoot,
+        characterScope: {characterId: 'nova'},
+      },
     });
     expect(dataRoot).toContain('character-data');
   });
@@ -336,7 +351,11 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       resolveRuntimeConfigScopeTarget({
-        configPath: novaOverlayPath,
+        runtimeLocation: runtimeLocationForTest({
+          configPath: novaOverlayPath,
+          env: {},
+        }),
+
         env: {},
         scope: 'character',
       }),
@@ -349,6 +368,25 @@ describe('plugin manifest config scope policy', () => {
   it('rejects global character-only enablement and non-secret fields while allowing global secret refs', () => {
     const plugin = characterOnlyConfigPlugin('scope.character-only');
     const resolved = resolveProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: {
+          source: 'path',
+          config: {
+            version: runtimeConfigVersion,
+            plugins: {
+              [plugin.manifest.id]: {
+                enabled: true,
+                config: {
+                  setting: 'global-value',
+                  apiKey: {$env: 'CHARACTER_ONLY_API_KEY'},
+                },
+              },
+            },
+          },
+          diagnostics: [],
+        },
+        env: {CHARACTER_ONLY_API_KEY: 'secret'},
+      }),
       loadedConfig: {
         source: 'path',
         config: {
@@ -407,12 +445,20 @@ describe('plugin manifest config scope policy', () => {
       characterId: 'mira',
     });
     const globalTarget = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
+      }),
+
       env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
       scope: 'global',
     });
     const characterTarget = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
+      }),
+
       env: {CHARACTER_ONLY_CONTROL_API_KEY: 'secret'},
       scope: 'character',
     });
@@ -517,19 +563,26 @@ describe('character-scoped plugin control capability', () => {
     const characterScope = {characterId: 'mira', dataRoot};
     const capability = createRuntimePluginConfigControlCapability();
     const fingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterScope: characterScope,
+        env: {},
+      }),
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
-      storeRoot: homeRoot,
+
       env: {},
-      characterScope,
     }).fingerprint;
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const globalBefore = readFileSync(configPath, 'utf8');
     const target = capability.resolveTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterScope,
+        env: {},
+      }),
       env: {},
       scope: 'character',
-      characterScope,
     });
     const prepared = capability.prepareOperation({
       target,
@@ -593,17 +646,16 @@ describe('plugin inspection authored views', () => {
       },
     });
     const base = {
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
-      storeRoot: homeRoot,
       env: {},
     };
 
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: base.runtimeLocation,
       env: {},
       scope: 'character',
-      characterId: 'mira',
     });
     applyRuntimeConfigControlOperation({
       target,
@@ -654,17 +706,24 @@ describe('configured character id normalization', () => {
     });
 
     const resolved = resolveProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadProject02RuntimeConfig({
+          storeRoot: homeRoot,
+          env: {},
+        }),
+        storeRoot: homeRoot,
+      }),
       loadedConfig: loadProject02RuntimeConfig({storeRoot: homeRoot, env: {}}),
-      storeRoot: homeRoot,
     });
 
     expect(resolved.project02.character).toBe('mira');
     expect(
       resolveRuntimeConfigScopeTarget({
-        storeRoot: homeRoot,
+        runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
         env: {},
         scope: 'character',
-      }).characterScope,
+      }).runtimeLocation.characterScope,
     ).toMatchObject({characterId: 'mira'});
   });
 });
@@ -677,10 +736,14 @@ describe('scoped writes over a broken global layer', () => {
 
     expect(() => {
       const target = resolveRuntimeConfigScopeTarget({
-        storeRoot: homeRoot,
+        runtimeLocation: runtimeLocationForTest({
+          storeRoot: homeRoot,
+          characterId: 'mira',
+          env: {},
+        }),
+
         env: {},
         scope: 'character',
-        characterId: 'mira',
       });
       applyRuntimeConfigControlOperation({
         target,
@@ -706,7 +769,8 @@ describe('stale global expectations', () => {
   it('conflicts without materializing a lock root in an absent data dir', () => {
     const {homeRoot, dataRoot} = seededHome();
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'global',
     });
@@ -742,10 +806,14 @@ describe('global writes that move the character selection', () => {
     });
     // Give nova an overlay so the layers differ observably.
     const novaTarget = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterId: 'nova',
+        env: {},
+      }),
+
       env: {},
       scope: 'character',
-      characterId: 'nova',
     });
     applyRuntimeConfigControlOperation({
       target: novaTarget,
@@ -772,7 +840,8 @@ describe('global writes that move the character selection', () => {
       overlayConfig: null,
     });
     const globalTarget = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'global',
     });

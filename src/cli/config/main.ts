@@ -2,18 +2,17 @@ import {
   applyRuntimeConfigControlOperation,
   assertGlobalConfigLoadableForCharacterScope,
   createRuntimeConfigInspectShape,
-  defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
-  loadCharacterOverlayForScope,
+  readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticAttribution,
   RuntimeConfigMutationError,
   runtimeConfigEnvPathForLocation,
-  runtimeConfigEnvVarName,
+  runtimeConfigLocationUsesDefaultConfigPath,
   RuntimeEnvFileError,
-  storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
+  type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
@@ -31,10 +30,7 @@ import {
   isLocalRuntimeTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
-import {
-  RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState,
-} from '../shared/runtime-location-flags.ts';
+import {RuntimeLocationCliUsageError} from '../shared/runtime-location-flags.ts';
 import {
   runRuntimeConfigConsole,
   type RuntimeConfigConsolePromptAdapter,
@@ -219,7 +215,7 @@ async function runRuntimePluginSecretSetCommand(
     );
   }
 
-  await assertCommandHomeAdoptable(parsedArgs.location, startup.configEnv);
+  await assertCommandHomeAdoptable(startup.runtimeLocation);
 
   // The secret lands at the RESOLVED home's .env — which may differ
   // from the selected one when the config's own storeRoot points
@@ -229,7 +225,7 @@ async function runRuntimePluginSecretSetCommand(
   });
 
   const result = applyRuntimePluginSecretSetCommand({
-    location: parsedArgs.location,
+    runtimeLocation: startup.runtimeLocation,
     runtimeEnv:
       startup.status === 'resolved' ? startup.runtimeEnv : startup.configEnv,
     catalogEntries: startup.activationPlan.catalogEntries,
@@ -263,27 +259,20 @@ async function runRuntimeConfigDocumentCommand(
   // directory the runtime would not adopt is refused before any value
   // is reported or written. Standalone --config and env-selected
   // paths keep their file semantics.
-  await assertCommandHomeAdoptable(parsed.location, configStartup.configEnv);
+  await assertCommandHomeAdoptable(configStartup.runtimeLocation);
 
   if (parsed.command.kind === 'path') {
-    options.stdout.write(
-      `${
-        configStartup.loadedConfig.path ??
-        defaultRuntimeConfigPath(parsed.location.storeRoot)
-      }\n`,
-    );
+    options.stdout.write(`${configStartup.runtimeLocation.globalConfigPath}\n`);
     return 0;
   }
 
   if (parsed.command.kind === 'env_path') {
-    assertRuntimeConfigLoadedForEnvPath(configStartup.loadedConfig);
+    assertRuntimeConfigLoadedForEnvPath(
+      configStartup.loadedConfig,
+      configStartup.runtimeLocation,
+    );
     options.stdout.write(
-      `${runtimeConfigEnvPathForLocation({
-        loadedConfig: configStartup.loadedConfig,
-        ...(parsed.location.storeRoot === undefined
-          ? {}
-          : {storeRoot: parsed.location.storeRoot}),
-      })}\n`,
+      `${runtimeConfigEnvPathForLocation(configStartup.runtimeLocation)}\n`,
     );
     return 0;
   }
@@ -313,7 +302,7 @@ async function runRuntimeConfigDocumentCommand(
   }
 
   const target = resolveRuntimeConfigScopeTarget({
-    ...parsed.location,
+    runtimeLocation: configStartup.runtimeLocation,
     env: configStartup.configEnv,
     scope: 'global',
   });
@@ -381,7 +370,7 @@ async function runManifestAwarePluginActivation(options: {
   }
 
   const target = resolveRuntimeConfigScopeTarget({
-    ...options.parsedArgs.location,
+    runtimeLocation: startup.runtimeLocation,
     env: startup.configEnv,
     scope: 'global',
   });
@@ -448,25 +437,10 @@ async function runCharacterScopedRuntimeConfigCommand(
     assertScopedStartupConfigReadable(startup);
   }
 
-  const location = {
-    ...(parsedArgs.location.configPath === undefined
-      ? {}
-      : {configPath: parsedArgs.location.configPath}),
-    ...(parsedArgs.location.storeRoot === undefined
-      ? {}
-      : {storeRoot: parsedArgs.location.storeRoot}),
-    env: startup.configEnv,
-  };
   const target = resolveRuntimeConfigScopeTarget({
-    ...location,
+    runtimeLocation: startup.runtimeLocation,
+    env: startup.configEnv,
     scope: 'character',
-    characterId,
-    ...(startup.activationPlan.pluginConfigControl.characterScope === undefined
-      ? {}
-      : {
-          characterScope:
-            startup.activationPlan.pluginConfigControl.characterScope,
-        }),
   });
 
   return writeCharacterScopedRuntimeConfigResult({
@@ -591,26 +565,17 @@ function assertScopedStartupConfigReadable(
  * config files with no home semantics.
  */
 async function assertCommandHomeAdoptable(
-  location: RuntimeLocationCliState,
-  configEnv: NodeJS.ProcessEnv,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): Promise<void> {
-  // The env-selected file only governs when nothing narrower does:
-  // with --store supplied, the loader ignores the env var, so the
-  // selected home must still pass the guard.
   if (
-    location.configPath !== undefined ||
-    (location.storeRoot === undefined &&
-      (configEnv[runtimeConfigEnvVarName] ?? '').trim() !== '')
+    runtimeLocation.configSource === 'path' ||
+    runtimeLocation.configSource === 'env'
   ) {
     return;
   }
 
-  await assertProject02HomeAdoptable(
-    location.storeRoot === undefined ? {} : {homeRoot: location.storeRoot},
-  );
-  await assertRealHomeEnvFile(
-    location.storeRoot === undefined ? {} : {homeRoot: location.storeRoot},
-  );
+  await assertProject02HomeAdoptable({homeRoot: runtimeLocation.homeRoot});
+  await assertRealHomeEnvFile({homeRoot: runtimeLocation.homeRoot});
 }
 
 function writeCharacterScopedValue(options: {
@@ -623,11 +588,10 @@ function writeCharacterScopedValue(options: {
   // reads too: a directory marked for another character, or one the
   // writers would refuse, must not report its overlay as this
   // character's config.
-  const overlay =
-    options.target.characterScope === undefined
-      ? undefined
-      : loadCharacterOverlayForScope(options.target.characterScope);
-  const overlayError = overlay?.diagnostics.find(
+  const overlay = readCharacterOverlayForScope(
+    options.target.runtimeLocation.characterScope,
+  ).overlay;
+  const overlayError = overlay.diagnostics.find(
     diagnostic => diagnostic.severity === 'error',
   );
 
@@ -638,7 +602,7 @@ function writeCharacterScopedValue(options: {
   }
 
   const overlayValue = getRedactedRuntimeConfigValueAtPath(
-    overlay?.config,
+    overlay.config,
     options.path,
   );
   const globalValue = getRedactedRuntimeConfigValueAtPath(
@@ -685,7 +649,7 @@ async function resolveRuntimeConfigCliActivationStartup(options: {
 }
 
 function applyRuntimePluginSecretSetCommand(options: {
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly runtimeEnv: NodeJS.ProcessEnv;
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
   readonly operation: Extract<
@@ -712,7 +676,7 @@ function applyRuntimePluginSecretSetCommand(options: {
     [options.operation.envVar]: options.operation.secretValue,
   };
   const target = resolveRuntimeConfigScopeTarget({
-    ...options.location,
+    runtimeLocation: options.runtimeLocation,
     env: runtimeEnv,
     scope: 'global',
   });
@@ -757,6 +721,7 @@ function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
 
 function assertRuntimeConfigLoadedForEnvPath(
   loaded: LoadedProject02RuntimeConfig,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): void {
   if (!diagnosticsHaveErrors(loaded.diagnostics)) {
     return;
@@ -768,7 +733,7 @@ function assertRuntimeConfigLoadedForEnvPath(
 
   if (
     errorDiagnostic?.code === 'runtime_config_missing' &&
-    storeRootForLoadedDefaultConfigPath(loaded) !== undefined
+    runtimeConfigLocationUsesDefaultConfigPath(runtimeLocation)
   ) {
     return;
   }

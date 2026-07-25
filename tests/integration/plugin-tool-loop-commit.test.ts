@@ -1,3 +1,4 @@
+import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {spawn} from 'node:child_process';
 import {readFileSync} from 'node:fs';
@@ -21,7 +22,6 @@ import {
 } from '../support/plugin-host-fixtures.ts';
 import {durablePluginStoreMutationResourceKey} from '../../src/runtime/storage/plugin-file-store/durable-primitives.ts';
 import {
-  createRuntimePluginHost,
   type RuntimePluginHost,
   type RuntimePluginReloader,
 } from '../../src/plugins/host/index.ts';
@@ -39,6 +39,11 @@ import {
   inspectRuntimePluginConfig,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+  runtimePluginConfigControlStateForTest,
+} from '../support/runtime-config.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimePluginPaths,
@@ -71,7 +76,7 @@ import {
   handleFileStoreWriteToolName,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+
 import {requiredDottedConfigPlugin} from '../support/runtime-config-fixtures.ts';
 
 async function createConfigEffectTestFixture(label: string) {
@@ -111,10 +116,12 @@ async function createConfigEffectTestFixture(label: string) {
     },
   });
   const before = inspectRuntimePluginConfig({
+    runtimeLocation: runtimeLocationForTest({
+      configPath: configPath,
+      storeRoot: storeRoot,
+    }),
     manifest: targetPlugin.manifest,
     pluginManifests: [targetPlugin.manifest],
-    configPath,
-    storeRoot,
   });
 
   return {
@@ -137,11 +144,15 @@ function createConfigEffectTestHost(options: {
     storeRoot: fixture.storeRoot,
     sessionId: fixture.sessionId,
     sessionIdentity: options.session,
-    pluginConfigControl: {
+    pluginConfigControl: runtimePluginConfigControlStateForTest({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
+
       control: testRuntimePluginConfigControlCapability,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath,
-    },
+    }),
     toolConfirmationHandler: () => ({status: 'approved'}),
   });
 }
@@ -251,10 +262,12 @@ async function createLiveReloadLoopFixture(
       },
     });
     before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot,
     });
   }
   const afterCommitLog: string[] = [];
@@ -320,10 +333,12 @@ async function createLiveReloadLoopFixture(
       // authored config its instances were built from, so recovery can skip
       // rebuilds the running host already reflects.
       constructionConfigFingerprint: inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: fixture.configPath,
+          storeRoot: fixture.storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
       }).fingerprint,
       plugins: [stylePlugin(authoredTone())],
       enabledPluginIds: [
@@ -331,11 +346,15 @@ async function createLiveReloadLoopFixture(
         firstPartyModelToolsPluginId,
         manifest.id,
       ],
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: fixture.configPath,
+          storeRoot: fixture.storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath: fixture.configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
       pluginReloader:
         overrides.reloader ??
@@ -1574,10 +1593,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       }),
     });
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot,
     });
     const terminal = logStore
       .rawEvents()
@@ -1695,10 +1716,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       roleModelAdapter: adapter,
     });
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot,
     });
     const rejection = observationsByRound[1]?.find(
       observation => observation.toolName === runtimePluginConfigUpdateToolName,
@@ -1856,10 +1879,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       .find(event => event.kind === 'runtime_turn_completed');
     const effect = terminal?.runtimeConfigEffects?.[0];
     const afterApply = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot,
     });
 
     expect(firstResult).toMatchObject({
@@ -2432,9 +2457,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
         if (!driftApplied) {
           applyRuntimeConfigControlOperation({
             target: resolveRuntimeConfigScopeTarget({
+              runtimeLocation: runtimeLocationForTest({
+                configPath: fixture.configPath,
+                storeRoot: fixture.storeRoot,
+              }),
               scope: 'global',
-              configPath: fixture.configPath,
-              storeRoot: fixture.storeRoot,
             }),
             expectedFingerprint: fixture.before.fingerprint,
             request: {
@@ -2469,10 +2496,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       }),
     });
     const afterDrift = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot,
     });
     const effectId = logStore
       .rawEvents()
@@ -2584,10 +2613,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       'Approved runtime config effects require durable local session evidence.',
     );
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: fixture.configPath,
+        storeRoot: fixture.storeRoot,
+      }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
-      configPath: fixture.configPath,
-      storeRoot: fixture.storeRoot,
     });
 
     expect(after.fingerprint).toBe(fixture.before.fingerprint);
@@ -2639,10 +2670,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
     const session = createConversationSession({
       id: sessionId,
@@ -2659,11 +2692,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
       sessionIdentity: session,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const recoveryPendingHost = Object.freeze({
@@ -2710,10 +2747,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       .rawEvents()
       .find(event => event.kind === 'tool_call_finished');
     const afterInterruptedCommit = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(firstResult).toMatchObject({
@@ -2756,11 +2795,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
       sessionIdentity: restoredSession,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const followupResult = await runLocalUserMessageEvent({
@@ -2780,10 +2823,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       ]),
     });
     const afterRecovery = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
     const effectMarkers = reopenedLogStore
       .rawEvents()
@@ -2849,10 +2894,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
     const session = createConversationSession({
       id: sessionId,
@@ -2871,11 +2918,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
       sessionIdentity: session,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const adapter = createSequencedAdapter([
@@ -2917,10 +2968,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).rejects.toThrow('tool_call_finished raw event append failed');
 
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(after.fingerprint).toBe(before.fingerprint);
@@ -2976,10 +3029,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
     const session = createConversationSession({
       id: sessionId,
@@ -2998,11 +3053,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
       sessionIdentity: session,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [targetPlugin.manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const adapter = createSequencedAdapter([
@@ -3044,10 +3103,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).rejects.toThrow('runtime_turn_completed raw event append failed');
 
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(after.fingerprint).toBe(before.fingerprint);

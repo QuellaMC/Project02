@@ -24,7 +24,10 @@ import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {collect} from '../support/streams.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
 import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 
 describe('configured runtime plugin package activation', () => {
@@ -34,7 +37,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(
@@ -100,7 +105,9 @@ describe('configured runtime plugin package activation', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan,
@@ -145,7 +152,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.resolvedConfig.diagnostics).not.toContainEqual(
@@ -242,7 +251,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -278,7 +289,9 @@ describe('configured runtime plugin package activation', () => {
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -316,8 +329,10 @@ describe('configured runtime plugin package activation', () => {
 
     expect(() =>
       prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-        storeRoot,
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          storeRoot: storeRoot,
+        }),
       }),
     ).toThrow('without a data marker');
   });
@@ -329,8 +344,10 @@ describe('configured runtime plugin package activation', () => {
     writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
 
     const plan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      storeRoot,
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        storeRoot: storeRoot,
+      }),
     });
 
     // Host construction never creates durable character state: on an
@@ -372,8 +389,10 @@ describe('configured runtime plugin package activation', () => {
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-      storeRoot,
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        storeRoot: storeRoot,
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -402,7 +421,9 @@ describe('configured runtime plugin package activation', () => {
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -436,7 +457,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.packageProvenanceByPluginId[characterStatePluginId]).toBe(
@@ -498,7 +521,9 @@ describe('configured runtime plugin package activation', () => {
     await initializeCharacterDataForHost(storeRoot);
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan,

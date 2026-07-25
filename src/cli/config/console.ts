@@ -2,10 +2,9 @@ import {createInterface} from 'node:readline/promises';
 
 import {
   createRuntimeConfigMutationBase,
-  deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterOverlayForScope,
-  loadProject02RuntimeConfig,
+  loadProject02RuntimeConfigWithLocation,
+  readCharacterOverlayForScope,
   type RuntimeConfigDiagnostic,
   runtimeConfigVersion,
   type Project02RuntimeConfig,
@@ -50,10 +49,10 @@ export async function runRuntimeConfigConsole(
     const snapshot = loadConsoleSnapshot(context);
 
     writeLine(context.stdout, 'Project02 Runtime Config');
-    if (snapshot.characterScope !== undefined) {
+    if (snapshot.scope === 'character') {
       writeLine(
         context.stdout,
-        `Scope: character ${snapshot.characterScope.characterId} (overlay)`,
+        `Scope: character ${snapshot.runtimeLocation.characterScope.characterId} (overlay)`,
       );
     }
     writeDiagnostics(context.stdout, snapshot.diagnostics);
@@ -108,12 +107,16 @@ function consoleLoadDiagnostics(loaded: {
 function loadConsoleSnapshot(
   context: RuntimeConfigConsoleContext,
 ): RuntimeConfigConsoleSnapshot {
-  const location = {
-    ...runtimeConfigLocation(context),
-    ...(context.env === undefined ? {} : {env: context.env}),
-  };
-
-  const loaded = loadProject02RuntimeConfig(location);
+  const {loadedConfig: loaded, runtimeLocation} =
+    loadProject02RuntimeConfigWithLocation({
+      selection: {
+        ...runtimeConfigLocation(context),
+        ...(context.character === undefined
+          ? {}
+          : {character: context.character}),
+      },
+      ...(context.env === undefined ? {} : {env: context.env}),
+    });
   const {diagnostics, blockingDiagnostic} = consoleLoadDiagnostics(loaded);
 
   if (blockingDiagnostic !== undefined) {
@@ -124,31 +127,15 @@ function loadConsoleSnapshot(
 
   const config = createRuntimeConfigMutationBase({
     loadedConfig: loaded,
-    ...runtimeConfigLocation(context),
-  });
-  const selectedLocation = runtimeConfigLocation(context);
-  const characterScope = deriveRuntimeConfigCharacterScope({
-    loadedConfig: loaded,
-    ...(selectedLocation.storeRoot === undefined
+    configPath: runtimeLocation.globalConfigPath,
+    ...(runtimeLocation.selection.storeRoot === undefined
       ? {}
-      : {storeRoot: selectedLocation.storeRoot}),
-    ...(context.character === undefined
-      ? {}
-      : {characterId: context.character}),
+      : {storeRoot: runtimeLocation.selection.storeRoot}),
   });
-
-  if (context.character !== undefined && characterScope === undefined) {
-    throw new TypeError(
-      'Cannot open the config console: the character scope is unavailable ' +
-        'for this store root.',
-    );
-  }
-
-  const overlay =
-    characterScope === undefined
-      ? undefined
-      : loadCharacterOverlayForScope(characterScope);
-  const overlayError = overlay?.diagnostics.find(
+  const overlay = readCharacterOverlayForScope(
+    runtimeLocation.characterScope,
+  ).overlay;
+  const overlayError = overlay.diagnostics.find(
     diagnostic => diagnostic.severity === 'error',
   );
 
@@ -161,20 +148,22 @@ function loadConsoleSnapshot(
 
   return Object.freeze({
     loadedConfig: loaded,
+    runtimeLocation,
+    scope: context.character === undefined ? 'global' : 'character',
     config,
+    overlay,
     diagnostics: Object.freeze(diagnostics),
     // Same layered composition the control operations verify against.
     fingerprint: layeredRuntimeConfigFingerprintForScope({
       globalConfig: config,
-      characterScope,
+      characterScope: runtimeLocation.characterScope,
       overlay,
     }),
-    ...(context.character === undefined || characterScope === undefined
+    ...(context.character === undefined
       ? {}
       : {
-          characterScope,
           scopedConfig:
-            overlay?.config ??
+            overlay.config ??
             ({version: runtimeConfigVersion} satisfies Project02RuntimeConfig),
         }),
   });

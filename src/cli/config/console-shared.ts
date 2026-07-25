@@ -6,16 +6,16 @@
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   assertScopedGlobalLayerLoadable,
-  loadCharacterOverlayForScope,
+  readCharacterOverlayForScope,
   redactRuntimeConfigText,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticAttribution,
-  runtimeConfigEnvVarName,
   runtimeConfigValueMatchesField,
   type createRuntimeConfigMutationBase,
   type loadProject02RuntimeConfig,
+  type LoadedProject02CharacterOverlayConfig,
   type Project02RuntimeConfig,
-  type RuntimeConfigCharacterScope,
+  type ResolvedProject02RuntimeLocation,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigValue,
   type RuntimePluginConfigFieldInspectShape,
@@ -25,7 +25,6 @@ import {
   assertProject02HomeAdoptable,
   assertRealHomeEnvFile,
   ensureCharacterDataDir,
-  homeRootForCharacterDataDir,
 } from '../../runtime/storage/index.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
@@ -51,11 +50,12 @@ export type RuntimeConfigConsoleContext = RuntimeConfigConsoleOptions & {
 
 export type RuntimeConfigConsoleSnapshot = {
   readonly loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly scope: 'global' | 'character';
   readonly config: ReturnType<typeof createRuntimeConfigMutationBase>;
+  readonly overlay: LoadedProject02CharacterOverlayConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
-  /** Set when the console operates on one character's overlay. */
-  readonly characterScope?: RuntimeConfigCharacterScope;
   /** The overlay document the scoped sections display and edit. */
   readonly scopedConfig?: Project02RuntimeConfig;
 };
@@ -77,43 +77,36 @@ export type StagedRuntimeConfigChange = {
  * the layers the save mutates — exactly as the non-UI verbs do —
  * before ensure materializes the marker.
  */
-export async function ensureConsoleCommitTarget(
-  context: {
-    readonly configPath?: string;
-    readonly storeRoot?: string;
-    readonly env?: NodeJS.ProcessEnv;
-  },
-  characterScope: RuntimeConfigCharacterScope | undefined,
-): Promise<void> {
-  if (characterScope === undefined) {
-    // The env-selected file only governs when nothing narrower does:
-    // with --store supplied, the loader ignores the env var, so the
-    // selected home must still pass the guard.
+export async function ensureConsoleCommitTarget(options: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly scope: 'global' | 'character';
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (options.scope === 'global') {
     if (
-      context.configPath !== undefined ||
-      (context.storeRoot === undefined &&
-        ((context.env ?? {})[runtimeConfigEnvVarName] ?? '').trim() !== '')
+      options.runtimeLocation.configSource === 'path' ||
+      options.runtimeLocation.configSource === 'env'
     ) {
       return;
     }
 
-    await assertProject02HomeAdoptable(
-      context.storeRoot === undefined ? {} : {homeRoot: context.storeRoot},
-    );
-    await assertRealHomeEnvFile(
-      context.storeRoot === undefined ? {} : {homeRoot: context.storeRoot},
-    );
+    await assertProject02HomeAdoptable({
+      homeRoot: options.runtimeLocation.homeRoot,
+    });
+    await assertRealHomeEnvFile({
+      homeRoot: options.runtimeLocation.homeRoot,
+    });
     return;
   }
 
   assertScopedGlobalLayerLoadable({
-    ...runtimeConfigLocation(context),
-    ...(context.env === undefined ? {} : {env: context.env}),
-    characterId: characterScope.characterId,
-    characterScope,
+    runtimeLocation: options.runtimeLocation,
+    ...(options.env === undefined ? {} : {env: options.env}),
   });
 
-  const overlay = loadCharacterOverlayForScope(characterScope);
+  const overlay = readCharacterOverlayForScope(
+    options.runtimeLocation.characterScope,
+  ).overlay;
   const overlayError = overlay.diagnostics.find(
     diagnostic => diagnostic.severity === 'error',
   );
@@ -125,8 +118,8 @@ export async function ensureConsoleCommitTarget(
   }
 
   await ensureCharacterDataDir({
-    homeRoot: homeRootForCharacterDataDir(characterScope.dataRoot),
-    characterId: characterScope.characterId,
+    homeRoot: options.runtimeLocation.homeRoot,
+    characterId: options.runtimeLocation.characterScope.characterId,
   });
 }
 

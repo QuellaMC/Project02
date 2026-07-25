@@ -25,6 +25,10 @@
     "plugins",
     "runtime"
   ],
+  "package-metadata.ts": [
+    "characters",
+    "plugins"
+  ],
   "redaction.ts": [
     "plugins",
     "role-model",

@@ -18,17 +18,14 @@ import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {
   applyRuntimeConfigControlOperation,
   assertScopedMutationOperationAllowed,
-  configuredProject02CharacterId,
   createRuntimeConfigDiagnostic,
   defaultDotEnvForRuntimeLocation,
-  deriveRuntimeConfigCharacterScope,
   diagnosticsHaveErrors,
-  loadCharacterOverlayForScope,
-  loadProject02RuntimeConfig,
+  readCharacterOverlayForScope,
+  loadProject02RuntimeConfigWithLocation,
   loadRuntimeConfigEnvFile,
   mergedLoadedConfigForOverlay,
   readDefaultDotEnvFile,
-  resolveProject02RuntimeStoreRoot,
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticIsReadinessFailure,
@@ -40,6 +37,7 @@ import {
   type RuntimeConfigControlOperation,
   type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
+  type ResolvedProject02RuntimeLocation,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
 import {
@@ -88,7 +86,7 @@ type RuntimeCliCharacterConfigRequest = NonNullable<
 >;
 
 type RuntimeCliStartupBase = {
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -197,12 +195,13 @@ export function resolveRuntimeCliStartup(
     mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
   const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...location,
-    env: configEnv,
-  });
+  const {loadedConfig, runtimeLocation} =
+    loadProject02RuntimeConfigWithLocation({
+      selection: location,
+      env: configEnv,
+    });
   const startupBase = {
-    location,
+    runtimeLocation,
     cwdDotEnv,
     configEnv,
     loadedConfig,
@@ -214,7 +213,7 @@ export function resolveRuntimeCliStartup(
 
   return resolveRuntimeCliActivationStartup({
     options,
-    location,
+    runtimeLocation,
     suppliedEnv,
     cwdDotEnv,
     configEnv,
@@ -233,25 +232,16 @@ export function resolveRuntimeCliStartup(
  */
 async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): Promise<RuntimeCliStartupResult> {
-  const {options, location, loadedConfig} = input;
-  // Precedence: --character flag > configured character > default.
-  const activeCharacterId = configuredProject02CharacterId(
-    loadedConfig.config,
-    location.character,
-  );
-  const homeRoot = resolveProject02RuntimeStoreRoot({
-    loadedConfig,
-    ...(location.storeRoot === undefined
-      ? {}
-      : {storeRoot: location.storeRoot}),
-  });
+  const {options, runtimeLocation, loadedConfig} = input;
+  const activeCharacterId = runtimeLocation.characterScope.characterId;
+  const homeRoot = runtimeLocation.homeRoot;
   const characterActivation = prepareProject02CharacterActivation({
     storeRoot: homeRoot,
     configuredCharacterId: activeCharacterId,
@@ -295,7 +285,7 @@ async function resolveRuntimeCliActivationStartup(input: {
         loadedConfig,
         characterActivation,
         ...overlayForPlan,
-        location,
+        runtimeLocation,
         env: input.configEnv,
         validateInactivePluginConfigs: true,
         catalogSnapshot,
@@ -314,7 +304,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   // or identity marker would be written.
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
     const invalidState = buildPreEnvState(
-      loadCharacterOverlayForStartup({loadedConfig, location}),
+      loadCharacterOverlayForStartup(runtimeLocation),
     );
 
     return Object.freeze({
@@ -332,15 +322,9 @@ async function resolveRuntimeCliActivationStartup(input: {
 
   // An invalid pre-existing overlay must not create durable state
   // either: read it before the home or character marker would be written.
-  const preexistingOverlay = loadCharacterOverlayForStartup({
-    loadedConfig,
-    location,
-  });
+  const preexistingOverlay = loadCharacterOverlayForStartup(runtimeLocation);
 
-  if (
-    preexistingOverlay !== undefined &&
-    diagnosticsHaveErrors(preexistingOverlay.diagnostics)
-  ) {
+  if (diagnosticsHaveErrors(preexistingOverlay.diagnostics)) {
     const invalidState = buildPreEnvState(preexistingOverlay);
 
     return Object.freeze({
@@ -374,9 +358,8 @@ async function resolveRuntimeCliActivationStartup(input: {
   }
 
   const materialization = await materializeCharacterDataDir({
-    homeRoot,
     characterActivation,
-    location,
+    runtimeLocation,
     configEnv: input.configEnv,
     document: preflight.packagePlan.document,
     ...(preflight.request === undefined ? {} : {request: preflight.request}),
@@ -390,10 +373,7 @@ async function resolveRuntimeCliActivationStartup(input: {
     });
   }
 
-  const overlayLoadedConfig = loadCharacterOverlayForStartup({
-    loadedConfig,
-    location,
-  });
+  const overlayLoadedConfig = loadCharacterOverlayForStartup(runtimeLocation);
   const {
     overlayForPlan,
     catalogSnapshot,
@@ -433,8 +413,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   }
 
   const runtimeEnv = loadRuntimeEnv({
-    loadedConfig,
-    location,
+    runtimeLocation,
     suppliedEnv: input.suppliedEnv,
     cwdDotEnv: input.cwdDotEnv,
   });
@@ -443,7 +422,7 @@ async function resolveRuntimeCliActivationStartup(input: {
       loadedConfig,
       characterActivation,
       ...overlayForPlan,
-      location,
+      runtimeLocation,
       env: runtimeEnv,
       validateInactivePluginConfigs: true,
       catalogSnapshot,
@@ -466,8 +445,7 @@ async function resolveRuntimeCliActivationStartup(input: {
  * the package version in the data marker.
  */
 async function materializeCharacterDataDir(input: {
-  readonly homeRoot: string;
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly document: Project02RuntimeConfig;
   readonly request?: RuntimeConfigControlRequest;
@@ -493,7 +471,7 @@ async function materializeCharacterDataDir(input: {
 
   try {
     const dataRoot = await ensureCharacterDataDir({
-      homeRoot: input.homeRoot,
+      homeRoot: input.runtimeLocation.homeRoot,
       characterId,
     });
     const marker = requireCharacterDataMarker({
@@ -501,16 +479,9 @@ async function materializeCharacterDataDir(input: {
       characterId,
     });
     const target = resolveRuntimeConfigScopeTarget({
-      ...(input.location.configPath === undefined
-        ? {}
-        : {configPath: input.location.configPath}),
-      ...(input.location.storeRoot === undefined
-        ? {storeRoot: input.homeRoot}
-        : {storeRoot: input.location.storeRoot}),
+      runtimeLocation: input.runtimeLocation,
       env: input.configEnv,
       scope: 'character',
-      characterId,
-      characterScope: {characterId, dataRoot},
     });
     const applied = applyRuntimeConfigControlOperation({
       target,
@@ -700,29 +671,14 @@ function startupConfigHasErrors(
  * id the storage layer rejects fails startup later with its own
  * diagnostic; the overlay simply does not exist for it.
  */
-function loadCharacterOverlayForStartup(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly location: RuntimeLocationCliState;
-}): LoadedProject02CharacterOverlayConfig | undefined {
-  const characterScope = deriveRuntimeConfigCharacterScope({
-    loadedConfig: options.loadedConfig,
-    ...(options.location.storeRoot === undefined
-      ? {}
-      : {storeRoot: options.location.storeRoot}),
-    ...(options.location.character === undefined
-      ? {}
-      : {characterId: options.location.character}),
-  });
-
-  if (characterScope === undefined) {
-    return undefined;
-  }
-
+function loadCharacterOverlayForStartup(
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): LoadedProject02CharacterOverlayConfig {
   // The guarded loader holds the marker and adoptability rules for
   // read-only startups too: a data directory marked for another
   // character, holding foreign content, or reached through a symlink
   // fails check and inspect exactly as durable materialization does.
-  return loadCharacterOverlayForScope(characterScope);
+  return readCharacterOverlayForScope(runtimeLocation.characterScope).overlay;
 }
 
 function resolveCwdDotEnv(options: {
@@ -748,17 +704,13 @@ function resolveCwdDotEnv(options: {
 }
 
 function loadRuntimeEnv(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   return Object.freeze(
     loadRuntimeConfigEnvFile({
-      loadedConfig: options.loadedConfig,
-      ...(options.location.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.location.storeRoot}),
+      runtimeLocation: options.runtimeLocation,
       env: options.suppliedEnv,
       envDefaults: options.cwdDotEnv,
     }),
@@ -772,7 +724,7 @@ function prepareActivationPlan(options: {
     {status: 'resolved'}
   >;
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env: NodeJS.ProcessEnv;
   readonly validateInactivePluginConfigs?: boolean;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
@@ -780,12 +732,10 @@ function prepareActivationPlan(options: {
 }): PreparedProject02PluginActivationPlan {
   const plan = prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
+    runtimeLocation: options.runtimeLocation,
     ...(options.overlayLoadedConfig === undefined
       ? {}
       : {overlayConfig: options.overlayLoadedConfig}),
-    ...(options.location.storeRoot === undefined
-      ? {}
-      : {storeRoot: options.location.storeRoot}),
     env: options.env,
     validateInactivePluginConfigs:
       options.validateInactivePluginConfigs === true,

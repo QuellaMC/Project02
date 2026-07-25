@@ -20,7 +20,6 @@ import {
   ensureConsoleCommitTarget,
   formatCurrentValue,
   previewAndCommitChange,
-  runtimeConfigLocation,
   writeLine,
   type RuntimeConfigConsoleContext,
   type RuntimeConfigConsoleSnapshot,
@@ -34,7 +33,7 @@ export async function runProject02ConfigSection(
   // Character scope edits the overlay: only character-scoped fields
   // appear, and current values come from the overlay document.
   const fields =
-    snapshot.characterScope === undefined
+    snapshot.scope === 'global'
       ? project02RuntimeConfigFieldDefinitions()
       : project02RuntimeConfigFieldDefinitions().filter(field =>
           field.scopes.includes('character'),
@@ -116,17 +115,15 @@ async function stageProject02FieldChange(
     newValue,
     reloadRequired: field.reloadRequired,
     async commit() {
-      await ensureConsoleCommitTarget(context, snapshot.characterScope);
-      const target = resolveRuntimeConfigScopeTarget({
-        ...runtimeConfigLocation(context),
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
         ...(context.env === undefined ? {} : {env: context.env}),
-        scope: snapshot.characterScope === undefined ? 'global' : 'character',
-        ...(snapshot.characterScope === undefined
-          ? {}
-          : {
-              characterId: snapshot.characterScope.characterId,
-              characterScope: snapshot.characterScope,
-            }),
+      });
+      const target = resolveRuntimeConfigScopeTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        ...(context.env === undefined ? {} : {env: context.env}),
+        scope: snapshot.scope,
       });
 
       applyRuntimeConfigControlOperation({

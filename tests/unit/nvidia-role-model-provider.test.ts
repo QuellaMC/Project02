@@ -1,3 +1,4 @@
+import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it, vi} from 'vitest';
 
@@ -27,7 +28,7 @@ import {
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
-import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import {testRuntimePluginConfigControlCapability} from '../support/plugin-host-fixtures.ts';
 import {createRuntimePluginContextItem} from '../../src/plugins/api/index.ts';
 import {
@@ -802,10 +803,10 @@ describe('NVIDIA role-model provider', () => {
 
   it('uses canonical provider-safe names for every runtime plugin management tool', () => {
     const pluginHost = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [],
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const inputEnvelope = createNvidiaTestInputEnvelope(

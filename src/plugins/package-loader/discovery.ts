@@ -3,23 +3,22 @@
  * sources, validates descriptors and entry paths, applies the identity
  * policy, and hands accepted packages a load closure.
  */
-import {
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
-import type {Dirent} from 'node:fs';
+import {lstatSync, realpathSync, statSync} from 'node:fs';
 import {basename, isAbsolute, join, relative, resolve, sep} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {
+  readBoundedPackageJsonFile,
+  scanPackageSourceRoot,
+  type BoundedPackageJsonRejectionReason,
+} from '../../shared/package-metadata.ts';
 import {isRecord} from '../api/validation-primitives.ts';
-import {parseRuntimePluginPackageDescriptor} from '../api/package-descriptor.ts';
-import type {RuntimePluginManifest} from '../api/types.ts';
-import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {
   maxRuntimePluginPackageMetadataBytes,
+  parseRuntimePluginPackageDescriptor,
+} from '../api/package-descriptor.ts';
+import type {RuntimePluginManifest} from '../api/types.ts';
+import {
   type DiscoveredRuntimePluginPackage,
   type RuntimePluginPackageDiagnostic,
   type RuntimePluginPackageDiscovery,
@@ -41,12 +40,10 @@ export function discoverRuntimePluginPackages(options: {
   const diagnostics: RuntimePluginPackageDiagnostic[] = [];
 
   for (const source of options.sources) {
-    let entries: Dirent[];
+    const scan = scanPackageSourceRoot(source.root);
 
-    try {
-      entries = readdirSync(source.root, {withFileTypes: true});
-    } catch (error: unknown) {
-      if (isNodeErrorWithCode(error, 'ENOENT')) {
+    if (scan.status === 'unavailable') {
+      if (isNodeErrorWithCode(scan.error, 'ENOENT')) {
         continue;
       }
 
@@ -61,12 +58,10 @@ export function discoverRuntimePluginPackages(options: {
       continue;
     }
 
-    for (const entry of entries.sort((left, right) =>
-      compareText(left.name, right.name),
-    )) {
-      const packageRoot = join(source.root, entry.name);
+    for (const candidate of scan.candidates) {
+      const packageRoot = join(source.root, candidate.name);
 
-      if (entry.isSymbolicLink()) {
+      if (candidate.kind === 'symbolic_link') {
         diagnostics.push(
           packageDiagnostic({
             code: 'invalid_package_directory',
@@ -74,12 +69,9 @@ export function discoverRuntimePluginPackages(options: {
               'Runtime plugin package directories must not be symbolic links.',
             path: packageRoot,
             provenance: source.provenance,
-            pluginId: entry.name,
+            pluginId: candidate.name,
           }),
         );
-        continue;
-      }
-      if (!entry.isDirectory()) {
         continue;
       }
 
@@ -99,7 +91,7 @@ export function discoverRuntimePluginPackages(options: {
                 message: 'Runtime plugin package is invalid.',
                 path: packageRoot,
                 provenance: source.provenance,
-                pluginId: entry.name,
+                pluginId: candidate.name,
               }),
         );
       }
@@ -384,99 +376,42 @@ function parsePackageJsonFile(options: {
   readonly provenance: RuntimePluginPackageProvenance;
   readonly pluginId: string;
 }): unknown {
-  let metadataStat: ReturnType<typeof lstatSync>;
-  let source: string;
+  const metadata = readBoundedPackageJsonFile({
+    path: options.path,
+    maxBytes: maxRuntimePluginPackageMetadataBytes,
+    boundaryField: `Runtime plugin package ${options.label}`,
+  });
 
-  try {
-    metadataStat = lstatSync(options.path);
-  } catch {
+  if (metadata.status === 'rejected') {
     throw packageDiscoveryError({
       code: options.code,
-      message: `Runtime plugin package ${options.label} is unreadable.`,
+      message: runtimePluginMetadataReadMessage(options.label, metadata.reason),
       path: options.path,
       provenance: options.provenance,
       pluginId: options.pluginId,
     });
   }
 
-  if (metadataStat.isSymbolicLink()) {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} must not be a symbolic link.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
-  if (!metadataStat.isFile()) {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} must be a regular file.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
-  if (metadataStat.size > maxRuntimePluginPackageMetadataBytes) {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} exceeds the metadata size limit.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
+  return metadata.value;
+}
 
-  try {
-    source = readFileSync(options.path, 'utf8');
-  } catch {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} is unreadable.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
-
-  if (
-    Buffer.byteLength(source, 'utf8') > maxRuntimePluginPackageMetadataBytes
-  ) {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} exceeds the metadata size limit.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(source) as unknown;
-  } catch {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} must contain valid JSON.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
-
-  try {
-    return createJsonBoundarySnapshot(parsed, {
-      field: `Runtime plugin package ${options.label}`,
-    });
-  } catch {
-    throw packageDiscoveryError({
-      code: options.code,
-      message: `Runtime plugin package ${options.label} exceeds safe JSON metadata limits.`,
-      path: options.path,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
+function runtimePluginMetadataReadMessage(
+  label: string,
+  reason: BoundedPackageJsonRejectionReason,
+): string {
+  switch (reason) {
+    case 'unreadable':
+      return `Runtime plugin package ${label} is unreadable.`;
+    case 'symbolic_link':
+      return `Runtime plugin package ${label} must not be a symbolic link.`;
+    case 'not_file':
+      return `Runtime plugin package ${label} must be a regular file.`;
+    case 'too_large':
+      return `Runtime plugin package ${label} exceeds the metadata size limit.`;
+    case 'invalid_json':
+      return `Runtime plugin package ${label} must contain valid JSON.`;
+    case 'unsafe_json':
+      return `Runtime plugin package ${label} exceeds safe JSON metadata limits.`;
   }
 }
 

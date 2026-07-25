@@ -1,4 +1,5 @@
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
+import {isProject02Identifier} from '../../shared/identifier.ts';
 
 import {
   project02RoleModelProviderValues,
@@ -65,7 +66,8 @@ const project02ConfigFieldDefinitions = Object.freeze([
     description:
       'Selects the default active character package for this Project02 home.',
     invalidValueCode: 'runtime_config_string_invalid',
-    invalidValueMessage: 'Runtime config field must be a non-empty string.',
+    invalidValueMessage:
+      'Project02 character must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
     required: false,
     secret: false,
     valueType: 'string',
@@ -171,6 +173,17 @@ export function runtimeConfigValueMatchesField(
   }
 
   return true;
+}
+
+export function project02RuntimeConfigValueMatchesField(
+  value: RuntimeConfigValue,
+  field: Project02ConfigFieldDefinition,
+): boolean {
+  return (
+    runtimeConfigValueMatchesField(value, field) &&
+    (field.path !== 'project02.character' ||
+      (typeof value === 'string' && isProject02Identifier(value.trim())))
+  );
 }
 
 /**

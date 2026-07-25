@@ -11,8 +11,17 @@ export {
   runtimeConfigEnvPathForLocation,
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation,
-  type RuntimeLocationCliState,
 } from './env-file.ts';
+export {
+  loadProject02RuntimeConfigForLocation,
+  loadProject02RuntimeConfigWithLocation,
+  resolveProject02RuntimeLocation,
+  runtimeConfigLocationUsesDefaultConfigPath,
+  sameRuntimeConfigCharacterScope,
+  type ResolvedProject02RuntimeLocation,
+  type ResolvedRuntimeConfigScopeTarget,
+  type RuntimeLocationCliState,
+} from './location.ts';
 export {
   inspectRuntimePluginConfig,
   type RuntimeConfigControlOperation,
@@ -44,11 +53,10 @@ export {
 export {
   characterOverlayConfigPath,
   characterOverlayFingerprintLayer,
-  deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterOverlayForScope,
-  loadProject02CharacterOverlayConfig,
+  readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
+  type RuntimeConfigCharacterOverlaySnapshot,
 } from './overlay.ts';
 export {
   mergeCharacterOverlayDocument,
@@ -84,13 +92,10 @@ export {
   type RuntimePluginScopeViolation,
 } from './plugin-scope.ts';
 export {
-  characterDataRootForResolvedConfig,
   diagnosticsHaveErrors,
   pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
-  resolveProject02RuntimeStoreRoot,
   runtimeConfigDiagnosticMatchesPlugin,
-  storeRootForLoadedDefaultConfigPath,
 } from './resolve.ts';
 export {
   project02RuntimeConfigFieldDefinitions,
@@ -109,7 +114,6 @@ export {
   type Project02HostConfig,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
-  type ResolvedRuntimeConfigScopeTarget,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,

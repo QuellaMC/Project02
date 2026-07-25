@@ -1,3 +1,4 @@
+import {resolveRuntimeConfigScopeTarget} from '../../src/runtime/config/index.ts';
 import {spawn} from 'node:child_process';
 import {existsSync, readdirSync, realpathSync} from 'node:fs';
 import {mkdtemp, rm, writeFile} from 'node:fs/promises';
@@ -6,7 +7,10 @@ import {join} from 'node:path';
 
 import {afterEach, describe, expect, it} from 'vitest';
 
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
 import {
   characterDataDirPath,
   createProject02HomeLayout,
@@ -109,15 +113,22 @@ const controlChildPrelude = [
   "import { existsSync, writeFileSync } from 'node:fs';",
   'const {',
   '  applyRuntimeConfigControlOperation,',
+  '  loadProject02RuntimeConfig,',
+  '  resolveProject02RuntimeLocation,',
   '  resolveRuntimeConfigScopeTarget,',
   "} = await import('./src/runtime/config/index.ts');",
+  'const storeRoot = process.argv[1];',
+  'const loadedConfig = loadProject02RuntimeConfig({ storeRoot, env: {} });',
+  'const runtimeLocation = resolveProject02RuntimeLocation({',
+  "  loadedConfig, selection: { storeRoot, character: 'mira' },",
+  '});',
   'const sleep = new Int32Array(new SharedArrayBuffer(4));',
 ].join('\n');
 
 const globalExpectationMutationScript = [
   controlChildPrelude,
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  storeRoot: process.argv[1], env: {}, scope: 'global',",
+  "  runtimeLocation, env: {}, scope: 'global',",
   '});',
   "writeFileSync(process.argv[2], 'started\\n');",
   'applyRuntimeConfigControlOperation({',
@@ -133,7 +144,7 @@ const globalExpectationMutationScript = [
 const characterMutationScript = [
   controlChildPrelude,
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  storeRoot: process.argv[1], env: {}, scope: 'character', characterId: 'mira',",
+  "  runtimeLocation, env: {}, scope: 'character',",
   '});',
   "writeFileSync(process.argv[2], 'started\\n');",
   'applyRuntimeConfigControlOperation({',
@@ -149,7 +160,7 @@ const barrieredGlobalExpectationMutationScript = [
   controlChildPrelude,
   'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  storeRoot: process.argv[1], env: {}, scope: 'global',",
+  "  runtimeLocation, env: {}, scope: 'global',",
   '});',
   'try {',
   '  applyRuntimeConfigControlOperation({',
@@ -171,7 +182,7 @@ const barrieredCharacterMutationScript = [
   controlChildPrelude,
   'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
   'const target = resolveRuntimeConfigScopeTarget({',
-  "  storeRoot: process.argv[1], env: {}, scope: 'character', characterId: 'mira',",
+  "  runtimeLocation, env: {}, scope: 'character',",
   '});',
   'applyRuntimeConfigControlOperation({',
   '  target,',
@@ -200,11 +211,12 @@ async function createLayeredHome(): Promise<{
   });
   await ensureCharacterDataDir({homeRoot, characterId: 'mira'});
 
-  const {applyRuntimeConfigControlOperation, resolveRuntimeConfigScopeTarget} =
+  const {applyRuntimeConfigControlOperation} =
     await import('../../src/runtime/config/index.ts');
   const seeded = applyRuntimeConfigControlOperation({
     target: resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'global',
     }),

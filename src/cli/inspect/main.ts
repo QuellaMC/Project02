@@ -3,7 +3,6 @@ import type {CharacterProfile} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
-  characterDataDirPath,
   createProject02HomeLayout,
   type LocalRuntimeSessionMetadata,
   normalizeLocalRuntimeSessionId,
@@ -16,6 +15,7 @@ import {
   createRuntimeConfigInspectShape,
   runtimeConfigDiagnosticAttribution,
   RuntimeEnvFileError,
+  type ResolvedProject02RuntimeLocation,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
 } from '../../runtime/config/index.ts';
@@ -142,7 +142,11 @@ export async function runInspectCliFromArgs(
     }
 
     if (parsedArgs.mode === 'sessions') {
-      await writeSessionList(options.stdout, startup.activationPlan);
+      await writeSessionList(
+        options.stdout,
+        startup.activationPlan,
+        startup.runtimeLocation,
+      );
       return 0;
     }
 
@@ -151,6 +155,7 @@ export async function runInspectCliFromArgs(
       options.stdout,
       startup.activationPlan,
       characterActivation.profile,
+      startup.runtimeLocation,
     );
     return 0;
   } catch (error: unknown) {
@@ -276,15 +281,11 @@ function validateInspectCliArgs(args: InspectCliArgs): void {
 async function writeSessionList(
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): Promise<void> {
-  const dataRoot = characterDataDirPath(
-    runtimeConfig.resolvedConfig.project02.storeRoot,
-    runtimeConfig.resolvedConfig.project02.character,
-  );
-
   const sessionStore = createLocalRuntimeSessionStore({
-    storeRoot: dataRoot,
-    characterId: runtimeConfig.resolvedConfig.project02.character,
+    storeRoot: runtimeLocation.characterScope.dataRoot,
+    characterId: runtimeLocation.characterScope.characterId,
   });
   const sessions = await sessionStore.listSessions();
 
@@ -305,16 +306,14 @@ async function writeSessionEvidence(
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
   boundCharacter: CharacterProfile,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): Promise<void> {
   const storage = {
-    storeRoot: characterDataDirPath(
-      runtimeConfig.resolvedConfig.project02.storeRoot,
-      runtimeConfig.resolvedConfig.project02.character,
-    ),
+    storeRoot: runtimeLocation.characterScope.dataRoot,
   };
   const sessionStore = createLocalRuntimeSessionStore({
     ...storage,
-    characterId: runtimeConfig.resolvedConfig.project02.character,
+    characterId: runtimeLocation.characterScope.characterId,
   });
   const session = await sessionStore.readSession(args.sessionId);
   // The character boundary holds at inspection too: foreign evidence
@@ -322,7 +321,7 @@ async function writeSessionEvidence(
   const logStore = createFileRuntimeLogStore({
     ...storage,
     sessionId: session.sessionId,
-    characterId: runtimeConfig.resolvedConfig.project02.character,
+    characterId: runtimeLocation.characterScope.characterId,
     boundCharacter,
   });
   const evidence = logStore.readSessionEvidence();

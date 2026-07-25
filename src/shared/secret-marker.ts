@@ -22,6 +22,10 @@ export function valueIsSecretMarker(value: unknown): boolean {
   );
 }
 
+export type NestedSecretMarkerPathOptions = {
+  readonly rejectPlaintextAllowanceMarker?: boolean;
+};
+
 /**
  * Walks a value and returns the canonical path of the first secret
  * marker found (object keys visited in sorted order for determinism),
@@ -30,14 +34,23 @@ export function valueIsSecretMarker(value: unknown): boolean {
 export function nestedSecretMarkerPath(
   value: unknown,
   path: string,
+  options: NestedSecretMarkerPathOptions = {},
 ): string | undefined {
-  if (valueIsSecretMarker(value)) {
+  if (
+    valueIsSecretMarker(value) ||
+    (options.rejectPlaintextAllowanceMarker === true &&
+      valueHasPlaintextAllowanceMarker(value))
+  ) {
     return path;
   }
 
   if (Array.isArray(value)) {
     for (const [index, entry] of value.entries()) {
-      const nested = nestedSecretMarkerPath(entry, `${path}[${String(index)}]`);
+      const nested = nestedSecretMarkerPath(
+        entry,
+        `${path}[${String(index)}]`,
+        options,
+      );
 
       if (nested !== undefined) {
         return nested;
@@ -56,7 +69,7 @@ export function nestedSecretMarkerPath(
   );
 
   for (const [key, entry] of entries) {
-    const nested = nestedSecretMarkerPath(entry, `${path}.${key}`);
+    const nested = nestedSecretMarkerPath(entry, `${path}.${key}`, options);
 
     if (nested !== undefined) {
       return nested;
@@ -64,4 +77,13 @@ export function nestedSecretMarkerPath(
   }
 
   return undefined;
+}
+
+function valueHasPlaintextAllowanceMarker(value: unknown): boolean {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.hasOwn(value, allowPlaintextSecretMarkerField)
+  );
 }

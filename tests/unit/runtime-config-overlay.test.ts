@@ -4,21 +4,25 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {structuredConfigPlugin} from '../support/runtime-config-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 import {
   assertScopedMutationOperationAllowed,
   characterOverlayConfigPath,
-  loadProject02CharacterOverlayConfig,
-  resolveLayeredProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
+  readCharacterOverlayForScope,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigVersion,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimePluginConfig,
+  resolveLayeredProject02RuntimeConfig,
+  resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {assertOverlayLocatedCandidateStaysCharacterScoped} from '../../src/runtime/config/mutate.ts';
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
@@ -28,6 +32,13 @@ function overlayDataRoot(): string {
 
   mkdirSync(dataRoot, {recursive: true});
   return dataRoot;
+}
+
+function loadCharacterOverlay(
+  dataRoot: string,
+  characterId = 'mira',
+): LoadedProject02CharacterOverlayConfig {
+  return readCharacterOverlayForScope({dataRoot, characterId}).overlay;
 }
 
 function loadedGlobalConfig(options: {
@@ -75,19 +86,8 @@ describe('character overlay config loader', () => {
       join(dataRoot, 'config.json'),
     );
 
-    const loaded = loadProject02CharacterOverlayConfig({
-      dataRoot,
-      characterId: 'mira',
-    });
-
-    expect(loaded.source).toBe('overlay');
-    expect(loaded.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_overlay_symlink',
-        }),
-      ]),
+    expect(() => loadCharacterOverlay(dataRoot)).toThrow(
+      'must be a real file inside the data directory',
     );
   });
 
@@ -99,27 +99,13 @@ describe('character overlay config loader', () => {
     writeFileSync(realConfig, '{"version":"project02.config.v2"}\n');
     symlinkSync(realConfig, join(dataRoot, 'config.json'));
 
-    const loaded = loadProject02CharacterOverlayConfig({
-      dataRoot,
-      characterId: 'mira',
-    });
-
-    expect(loaded.config).toBeUndefined();
-    expect(loaded.diagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_overlay_symlink',
-        }),
-      ]),
+    expect(() => loadCharacterOverlay(dataRoot)).toThrow(
+      'must be a real file inside the data directory',
     );
   });
 
   it('treats an absent overlay file as valid and empty', () => {
-    const overlay = loadProject02CharacterOverlayConfig({
-      dataRoot: overlayDataRoot(),
-      characterId: 'mira',
-    });
+    const overlay = loadCharacterOverlay(overlayDataRoot());
 
     expect(overlay).toEqual({
       scope: 'character',
@@ -137,10 +123,7 @@ describe('character overlay config loader', () => {
       plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
     });
 
-    const overlay = loadProject02CharacterOverlayConfig({
-      dataRoot,
-      characterId: 'mira',
-    });
+    const overlay = loadCharacterOverlay(dataRoot);
 
     expect(overlay.source).toBe('overlay');
     expect(overlay.diagnostics).toEqual([]);
@@ -161,10 +144,7 @@ describe('character overlay config loader', () => {
       },
     });
 
-    const overlay = loadProject02CharacterOverlayConfig({
-      dataRoot,
-      characterId: 'mira',
-    });
+    const overlay = loadCharacterOverlay(dataRoot);
 
     expect(overlay.config).toBeUndefined();
     expect(overlay.diagnostics).toEqual([
@@ -240,10 +220,7 @@ describe('character overlay config loader', () => {
       const dataRoot = overlayDataRoot();
 
       writeRuntimeConfig(characterOverlayConfigPath(dataRoot), candidate);
-      const loaded = loadProject02CharacterOverlayConfig({
-        dataRoot,
-        characterId: 'mira',
-      });
+      const loaded = loadCharacterOverlay(dataRoot);
 
       if (globalOnly) {
         expect(() => {
@@ -292,10 +269,7 @@ describe('character overlay config loader', () => {
       project02: {userDisplayName: 'Mike'},
     });
 
-    const versionGated = loadProject02CharacterOverlayConfig({
-      dataRoot,
-      characterId: 'mira',
-    });
+    const versionGated = loadCharacterOverlay(dataRoot);
 
     expect(versionGated.config).toBeUndefined();
     expect(versionGated.diagnostics).toHaveLength(1);
@@ -313,14 +287,27 @@ describe('layered runtime config resolution', () => {
     const loadedConfig = loadedGlobalConfig({
       project02: {...character, userDisplayName: 'Global Name'},
     });
-    const globalResolved = resolveProject02RuntimeConfig({loadedConfig});
+    const globalResolved = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
+    });
 
-    expect(resolveLayeredProject02RuntimeConfig({loadedConfig})).toEqual(
-      globalResolved,
-    );
     expect(
       resolveLayeredProject02RuntimeConfig({
-        loadedConfig,
+        ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
+      }),
+    ).toEqual(globalResolved);
+    expect(
+      resolveLayeredProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadedConfig,
+          characterId: {
+            scope: 'character',
+            characterId: 'mira',
+            source: 'none',
+            diagnostics: [],
+          }.characterId,
+        }),
+
         overlayConfig: {
           scope: 'character',
           characterId: 'mira',
@@ -340,7 +327,21 @@ describe('layered runtime config resolution', () => {
       },
     });
     const resolved = resolveLayeredProject02RuntimeConfig({
-      loadedConfig,
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadedConfig,
+        characterId: loadedOverlay({
+          project02: {
+            userDisplayName: 'Overlay Name',
+            roleModelProvider: 'nvidia',
+            defaultMemoryProvider: 'memory.overlay',
+            // Smuggled global-only values must never cross the merge, even
+            // when a hand-built overlay bypasses the loader's rejection.
+            storeRoot: '/smuggled-home',
+            character: 'nova',
+          },
+        }).characterId,
+      }),
+
       overlayConfig: loadedOverlay({
         project02: {
           userDisplayName: 'Overlay Name',
@@ -378,14 +379,26 @@ describe('layered runtime config resolution', () => {
     });
 
     const globalOnly = resolveProject02RuntimeConfig({
-      loadedConfig,
+      ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
+
       pluginManifests: [plugin.manifest],
     });
     // Disabled globally: config is not validated, fields resolve as-is.
     expect(globalOnly.diagnostics).toEqual([]);
 
     const reEnabled = resolveLayeredProject02RuntimeConfig({
-      loadedConfig,
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadedConfig,
+        characterId: loadedOverlay({
+          plugins: {
+            'demo.layered': {
+              enabled: true,
+              config: {settings: {from: 'overlay'}},
+            },
+          },
+        }).characterId,
+      }),
+
       pluginManifests: [plugin.manifest],
       overlayConfig: loadedOverlay({
         plugins: {
@@ -406,6 +419,15 @@ describe('layered runtime config resolution', () => {
     expect(reEnabled.diagnostics).toEqual([]);
 
     const disabledByOverlay = resolveLayeredProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadedGlobalConfig({
+          project02: character,
+          plugins: {'demo.layered': {enabled: true}},
+        }),
+        characterId: loadedOverlay({
+          plugins: {'demo.layered': {enabled: false}},
+        }).characterId,
+      }),
       loadedConfig: loadedGlobalConfig({
         project02: character,
         plugins: {'demo.layered': {enabled: true}},
@@ -423,21 +445,44 @@ describe('layered runtime config resolution', () => {
 
   it('changes the effective fingerprint when character-scoped values change', () => {
     const base = resolveProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadedGlobalConfig({
+          project02: {...character, userDisplayName: 'One'},
+        }),
+      }),
       loadedConfig: loadedGlobalConfig({
         project02: {...character, userDisplayName: 'One'},
       }),
     });
     const renamedUser = resolveProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadedGlobalConfig({
+          project02: {...character, userDisplayName: 'Two'},
+        }),
+      }),
       loadedConfig: loadedGlobalConfig({
         project02: {...character, userDisplayName: 'Two'},
       }),
     });
     const otherCharacter = resolveProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadedGlobalConfig({
+          project02: {character: 'nova', userDisplayName: 'One'},
+        }),
+      }),
       loadedConfig: loadedGlobalConfig({
         project02: {character: 'nova', userDisplayName: 'One'},
       }),
     });
     const overlayApplied = resolveLayeredProject02RuntimeConfig({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadedGlobalConfig({
+          project02: {...character, userDisplayName: 'One'},
+        }),
+        characterId: loadedOverlay({
+          project02: {userDisplayName: 'Two'},
+        }).characterId,
+      }),
       loadedConfig: loadedGlobalConfig({
         project02: {...character, userDisplayName: 'One'},
       }),

@@ -1,16 +1,11 @@
-import {
-  characterDataDirPath,
-  createProject02HomeLayout,
-} from '../storage/layout-contract.ts';
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
 import {createRuntimeConfigFingerprint} from './fingerprint.ts';
-import {storeRootForSelectedDefaultConfigPath} from './mutate.ts';
+import type {ResolvedProject02RuntimeLocation} from './location.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
-  configuredProject02CharacterId,
   defaultProject02UserDisplayName,
   isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
@@ -35,7 +30,7 @@ import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
 
 export type ResolveProject02RuntimeConfigOptions = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly env?: NodeJS.ProcessEnv;
   readonly allowPlaintextSecrets?: boolean;
@@ -55,7 +50,7 @@ export function resolveProject02RuntimeConfig(
 ): ResolvedProject02RuntimeConfig {
   const env = options.env ?? process.env;
   const config = options.loadedConfig.config;
-  const storeRoot = resolveProject02RuntimeStoreRoot(options);
+  const storeRoot = options.runtimeLocation.homeRoot;
   const diagnostics: RuntimeConfigDiagnostic[] = [
     ...options.loadedConfig.diagnostics,
     ...(options.skipPluginScopeValidation === true
@@ -71,7 +66,7 @@ export function resolveProject02RuntimeConfig(
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
   // Trimmed via the shared helper, mirroring userDisplayName below.
-  const character = configuredProject02CharacterId(config);
+  const character = options.runtimeLocation.characterScope.characterId;
   // Trimmed at the resolve seam so an authored value with stray padding
   // never reaches the strict speaker constructor as a startup crash.
   const userDisplayName = (
@@ -129,39 +124,6 @@ export function resolveProject02RuntimeConfig(
       }),
     ),
   } satisfies ResolvedProject02RuntimeConfig);
-}
-
-export function resolveProject02RuntimeStoreRoot(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-}): string {
-  const configuredStoreRoot =
-    options.loadedConfig.config?.project02?.storeRoot ??
-    options.storeRoot ??
-    storeRootForLoadedDefaultConfigPath(options.loadedConfig);
-
-  return createProject02HomeLayout(
-    configuredStoreRoot === undefined ? {} : {homeRoot: configuredStoreRoot},
-  ).homeRoot;
-}
-
-// The per-character data directory every plugin file store and host
-// operation writes into; installed packages stay at the home level.
-export function characterDataRootForResolvedConfig(resolvedConfig: {
-  readonly project02: {readonly storeRoot: string; readonly character: string};
-}): string {
-  return characterDataDirPath(
-    resolvedConfig.project02.storeRoot,
-    resolvedConfig.project02.character,
-  );
-}
-
-export function storeRootForLoadedDefaultConfigPath(
-  loadedConfig: LoadedProject02RuntimeConfig,
-): string | undefined {
-  return loadedConfig.path === undefined
-    ? undefined
-    : storeRootForSelectedDefaultConfigPath(loadedConfig.path);
 }
 
 export function diagnosticsHaveErrors(

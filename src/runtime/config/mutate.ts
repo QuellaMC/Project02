@@ -31,7 +31,7 @@ import {
   type Project02ConfigFieldDefinition,
   project02RuntimeConfigFieldDefinition,
   project02RuntimeConfigFieldDefinitions,
-  runtimeConfigValueMatchesField,
+  project02RuntimeConfigValueMatchesField,
 } from './schema.ts';
 
 export type RuntimeConfigMutationResult = {
@@ -254,7 +254,8 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   const blockingDiagnostic = options.loadedConfig.diagnostics.find(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      diagnostic.code !== 'runtime_config_missing',
+      diagnostic.code !== 'runtime_config_missing' &&
+      !operationRepairsDiagnostic(options.operation, diagnostic.path),
   );
 
   if (blockingDiagnostic !== undefined) {
@@ -275,6 +276,17 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   return Object.freeze({
     config,
   } satisfies PreparedRuntimeConfigMutationCandidate);
+}
+
+function operationRepairsDiagnostic(
+  operation: RuntimeConfigMutationOperation | undefined,
+  diagnosticPath: string | undefined,
+): boolean {
+  return (
+    diagnosticPath !== undefined &&
+    (operation?.kind === 'set' || operation?.kind === 'unset') &&
+    operation.path === diagnosticPath
+  );
 }
 
 export function storeRootForSelectedDefaultConfigPath(
@@ -580,7 +592,7 @@ function setProject02ConfigField(
   path: string,
 ): Project02RuntimeConfig {
   if (
-    !runtimeConfigValueMatchesField(value, field) ||
+    !project02RuntimeConfigValueMatchesField(value, field) ||
     (typeof value === 'string' && value.trim().length === 0)
   ) {
     throw new TypeError(`${field.invalidValueMessage} Path: ${path}.`);

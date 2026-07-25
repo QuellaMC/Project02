@@ -18,7 +18,6 @@ import type {
   RuntimePluginToolCall,
 } from '../../api/types.ts';
 import type {
-  RuntimeConfigCharacterScope,
   RuntimeConfigValue,
   RuntimePluginConfigControlCapability,
   RuntimePluginConfigFieldControlOperation,
@@ -41,19 +40,13 @@ import {
 
 function controlStateLocation(state: RuntimePluginConfigControlHostState): {
   readonly scope: 'global' | 'character';
-  readonly configPath?: string;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: RuntimePluginConfigControlHostState['runtimeLocation'];
   readonly env?: NodeJS.ProcessEnv;
-  readonly characterScope?: RuntimeConfigCharacterScope;
 } {
   return {
-    scope: state.characterScope === undefined ? 'global' : 'character',
-    ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
-    ...(state.storeRoot === undefined ? {} : {storeRoot: state.storeRoot}),
+    scope: state.configScope,
+    runtimeLocation: state.runtimeLocation,
     ...(state.env === undefined ? {} : {env: state.env}),
-    ...(state.characterScope === undefined
-      ? {}
-      : {characterScope: state.characterScope}),
   };
 }
 
@@ -113,7 +106,6 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
 export function reconcilePreparedRuntimePluginConfigEffect(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string | undefined;
 }) {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
@@ -145,10 +137,7 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
   });
   const target = requiredRuntimePluginConfigControl(
     options.state,
-  ).resolveTarget({
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...controlStateLocation(options.state),
-  });
+  ).resolveTarget(controlStateLocation(options.state));
 
   if (target.canonicalConfigPath !== options.effect.targetConfigPath) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
@@ -159,7 +148,6 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   let reconciliation: 'already_applied' | 'applied';
 
@@ -270,7 +258,6 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
 export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): boolean {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
@@ -282,14 +269,10 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
 
   const target = requiredRuntimePluginConfigControl(
     options.state,
-  ).resolveTarget({
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...controlStateLocation(options.state),
-  });
+  ).resolveTarget(controlStateLocation(options.state));
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return !(
@@ -301,7 +284,6 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
 export function createPreparedRuntimePluginConfigEffectConfirmationPreview(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): RuntimePluginJsonObject {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
@@ -337,7 +319,6 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(optio
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const inspectedField = inspection.fields.find(
     candidate => candidate.name === field.name,
@@ -375,7 +356,6 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
    * update must stop promising appliesTo: next_turn in that case.
    */
   readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
-  readonly storeRoot?: string;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
 
@@ -425,7 +405,6 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const blockingDiagnostic = inspection.diagnostics.find(
     diagnostic => diagnostic.severity === 'error',
@@ -451,12 +430,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   try {
     const target = requiredRuntimePluginConfigControl(
       options.state,
-    ).resolveTarget({
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...controlStateLocation(options.state),
-    });
+    ).resolveTarget(controlStateLocation(options.state));
     const prepared = requiredRuntimePluginConfigControl(
       options.state,
     ).prepareOperation({

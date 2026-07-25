@@ -22,7 +22,10 @@ import {
   requiredSecretPlugin,
   requiredSecretPluginWithManifestEnvVar,
 } from '../support/runtime-config-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  runtimeLocationForTest,
+  writeRuntimeConfig,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -40,7 +43,11 @@ describe('runtime config console UI', () => {
     writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
 
     await expect(
-      ensureConsoleCommitTarget({storeRoot: homeRoot, env: {}}, undefined),
+      ensureConsoleCommitTarget({
+        runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+        scope: 'global',
+        env: {},
+      }),
     ).rejects.toThrow();
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
     expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
@@ -55,13 +62,14 @@ describe('runtime config console UI', () => {
     writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
 
     await expect(
-      ensureConsoleCommitTarget(
-        {
+      ensureConsoleCommitTarget({
+        runtimeLocation: runtimeLocationForTest({
           storeRoot: homeRoot,
           env: {[runtimeConfigEnvVarName]: envSelectedPath},
-        },
-        undefined,
-      ),
+        }),
+        scope: 'global',
+        env: {[runtimeConfigEnvVarName]: envSelectedPath},
+      }),
     ).rejects.toThrow();
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
   });
@@ -77,10 +85,15 @@ describe('runtime config console UI', () => {
     writeFileSync(join(dataRoot, 'config.json'), '{not json\n');
 
     await expect(
-      ensureConsoleCommitTarget(
-        {storeRoot: homeRoot, env: {}},
-        {characterId: 'mira', dataRoot},
-      ),
+      ensureConsoleCommitTarget({
+        runtimeLocation: runtimeLocationForTest({
+          storeRoot: homeRoot,
+          characterScope: {characterId: 'mira', dataRoot},
+          env: {},
+        }),
+        scope: 'character',
+        env: {},
+      }),
     ).rejects.toThrow();
     expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);

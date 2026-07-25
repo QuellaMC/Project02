@@ -97,34 +97,6 @@ export type RuntimeConfigCharacterScope = {
   readonly dataRoot: string;
 };
 
-type ResolvedRuntimeConfigScopeTargetBase = {
-  /** The file this target's mutations write. */
-  readonly configPath: string;
-  /** Stable identity used by prepared-effect reconciliation. */
-  readonly canonicalConfigPath: string;
-  /** The authoritative home config composed with the target. */
-  readonly globalConfigPath: string;
-  readonly homeRoot: string;
-  /** Preserves whether the caller explicitly selected a store. */
-  readonly selectedStoreRoot?: string;
-  readonly env?: NodeJS.ProcessEnv;
-};
-
-export type ResolvedRuntimeConfigScopeTarget =
-  | (ResolvedRuntimeConfigScopeTargetBase & {
-      readonly scope: 'global';
-      /**
-       * Only an explicitly supplied scope is retained. Otherwise global
-       * writes re-derive the active character after committing so a
-       * project02.character change fingerprints the new overlay.
-       */
-      readonly characterScope?: RuntimeConfigCharacterScope;
-    })
-  | (ResolvedRuntimeConfigScopeTargetBase & {
-      readonly scope: 'character';
-      readonly characterScope: RuntimeConfigCharacterScope;
-    });
-
 /**
  * Which config document a diagnostic came from. Global-document
  * diagnostics carry no origin; character-overlay diagnostics name the

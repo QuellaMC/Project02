@@ -6,7 +6,6 @@ import {describe, expect, it, vi} from 'vitest';
 import {
   createRuntimePlugin,
   createRuntimePluginContext,
-  createRuntimePluginHost,
   defaultRuntimePluginHostServiceCatalogEntries,
   isRuntimePluginManagementPlugin,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
@@ -17,6 +16,7 @@ import {
   runtimePluginId,
   runtimePluginListToolName,
   type RuntimePluginToolConfirmationRequest,
+  createRuntimePluginHost,
 } from '../../src/plugins/index.ts';
 import {
   createRuntimePluginManifest,
@@ -27,12 +27,16 @@ import {
 } from '../../src/plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
-  inspectRuntimePluginConfig,
   loadProject02RuntimeConfig,
   prepareRuntimeConfigControlOperation,
+  inspectRuntimePluginConfig,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  runtimePluginConfigControlStateForTest,
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   pluginDiscoveryPluginSummaries,
@@ -57,12 +61,12 @@ describe('host-owned runtime plugin management tools', () => {
         accessByPluginId: Object.freeze({}),
         confirmationAvailable: false,
       }),
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: Object.values(
           defaultRuntimePluginHostServiceCatalogEntries(),
         ).map(entry => entry.manifest),
-      },
+      }),
     });
 
     expect(isRuntimePluginManagementPlugin(plugin)).toBe(true);
@@ -80,16 +84,16 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const bareHost = createRuntimePluginHost();
     const readOnlyHost = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-      },
+      }),
     });
     const writableHost = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
 
@@ -150,15 +154,19 @@ describe('host-owned runtime plugin management tools', () => {
     const targetManifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: targetManifest,
       pluginManifests: [targetManifest],
-      configPath,
-      storeRoot,
     });
     const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       scope: 'global',
-      configPath,
-      storeRoot,
     });
     const prepared = prepareRuntimeConfigControlOperation({
       target,
@@ -248,11 +256,11 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const enabledPluginIds = [runtimePluginId, arbitraryPluginId];
-    const pluginConfigControl = {
+    const pluginConfigControl = runtimePluginConfigControlStateForTest({
       control: testRuntimePluginConfigControlCapability,
       pluginManifests: [targetManifest],
-      configPath,
-    };
+      runtimeLocation: runtimeLocationForTest({configPath, storeRoot}),
+    });
     const call = {
       ...testIdentity(),
       toolCallId,
@@ -358,10 +366,10 @@ describe('host-owned runtime plugin management tools', () => {
   it('does not register or expose the removed plugin identifiers and tool names', () => {
     const manifest = configurablePluginManifest();
     const host = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
 
@@ -403,7 +411,13 @@ describe('host-owned runtime plugin management tools', () => {
     });
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+          env: {PLUGIN_CONFIG_TEST_KEY: 'raw-secret-value'},
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         activationByPluginId: {
@@ -413,9 +427,9 @@ describe('host-owned runtime plugin management tools', () => {
             reasons: ['host_policy_blocked'],
           },
         },
-        configPath,
+
         env: {PLUGIN_CONFIG_TEST_KEY: 'raw-secret-value'},
-      },
+      }),
     });
 
     const result = await host.handleToolCall(
@@ -476,11 +490,11 @@ describe('host-owned runtime plugin management tools', () => {
       id: 'constructor',
     });
     const host = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         activationByPluginId: {},
-      },
+      }),
     });
 
     const result = await host.handleToolCall(
@@ -511,7 +525,7 @@ describe('host-owned runtime plugin management tools', () => {
   it('uses host-attested defaults instead of an unconfigured manifest claim', async () => {
     const manifest = configurablePluginManifest(true);
     const host = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
         defaultEnabledPluginIds: [],
@@ -522,7 +536,7 @@ describe('host-owned runtime plugin management tools', () => {
             reasons: ['not_enabled'],
           },
         },
-      },
+      }),
     });
 
     const result = await host.handleToolCall(
@@ -545,10 +559,10 @@ describe('host-owned runtime plugin management tools', () => {
 
   it('returns a stable rejection for an empty plugin config inspection id', async () => {
     const host = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [configurablePluginManifest()],
-      },
+      }),
     });
 
     const result = await host.handleToolCall(
@@ -571,10 +585,10 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-      },
+      }),
       toolConfirmationHandler: () => {
         confirmationCalls += 1;
         return {status: 'approved'};
@@ -609,19 +623,25 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const fingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     }).fingerprint;
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         confirmationCalls += 1;
         return {status: 'approved'};
@@ -670,19 +690,25 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         confirmationCalls += 1;
         return {status: 'approved'};
@@ -697,10 +723,12 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(before.diagnostics).toContainEqual(
@@ -724,19 +752,25 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const fingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     }).fingerprint;
     let request: RuntimePluginToolConfirmationRequest | undefined;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: candidate => {
         request = candidate;
         return {status: 'denied'};
@@ -770,10 +804,12 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       }).fields.find(field => field.name === 'tone')?.authored.configured,
     ).toBe(false);
   });
@@ -798,10 +834,12 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     const hostWithReloader = createRuntimePluginHost({
       storeRoot,
@@ -811,11 +849,15 @@ describe('host-owned runtime plugin management tools', () => {
         firstPartyModelToolsPluginId,
         manifest.id,
       ],
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
       pluginReloader: {
         reload: () =>
@@ -824,11 +866,15 @@ describe('host-owned runtime plugin management tools', () => {
     });
     const hostWithoutReloader = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
 
@@ -871,11 +917,15 @@ describe('host-owned runtime plugin management tools', () => {
     // cannot be live-applied either.
     const hostWithColdPlugin = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
       pluginReloader: {
         reload: () =>
@@ -931,10 +981,12 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const fingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     }).fingerprint;
     const host = createRuntimePluginHost({
       storeRoot,
@@ -944,11 +996,15 @@ describe('host-owned runtime plugin management tools', () => {
         firstPartyModelToolsPluginId,
         manifest.id,
       ],
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
       pluginReloader: {
         reload: () =>
@@ -1071,10 +1127,12 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const fingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     }).fingerprint;
     const host = createRuntimePluginHost({
       storeRoot,
@@ -1084,11 +1142,15 @@ describe('host-owned runtime plugin management tools', () => {
         firstPartyModelToolsPluginId,
         manifest.id,
       ],
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       // Deny exactly the session-scoped field; a denied update never commits,
       // so it must not poison the live field's next_turn promise.
       toolConfirmationHandler: request => ({
@@ -1140,19 +1202,25 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         confirmationCalls += 1;
         return {status: 'approved'};
@@ -1167,10 +1235,12 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(result).toMatchObject({
@@ -1209,18 +1279,24 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const result = await updateConfigField(host, {
@@ -1243,20 +1319,24 @@ describe('host-owned runtime plugin management tools', () => {
           ...preparedConfigEffect,
           resultFingerprint: `${preparedConfigEffect.resultFingerprint}-tampered`,
         }),
-        state: {
+        state: runtimePluginConfigControlStateForTest({
+          runtimeLocation: runtimeLocationForTest({
+            configPath: configPath,
+            storeRoot: storeRoot,
+          }),
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
-          configPath,
-        },
-        storeRoot,
+        }),
       }),
     ).toThrow('does not match its validated config candidate');
 
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(after.fingerprint).toBe(before.fingerprint);
@@ -1286,24 +1366,32 @@ describe('host-owned runtime plugin management tools', () => {
       authoredConfig,
     );
     const beforeA = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPathA,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath: configPathA,
-      storeRoot,
     });
     const beforeB = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPathB,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath: configPathB,
-      storeRoot,
     });
     const hostA = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPathA,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath: configPathA,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const result = await updateConfigField(hostA, {
@@ -1323,26 +1411,32 @@ describe('host-owned runtime plugin management tools', () => {
     expect(() =>
       reconcilePreparedRuntimePluginConfigEffect({
         effect: preparedConfigEffect,
-        state: {
+        state: runtimePluginConfigControlStateForTest({
+          runtimeLocation: runtimeLocationForTest({
+            configPath: configPathB,
+            storeRoot: storeRoot,
+          }),
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
-          configPath: configPathB,
-        },
-        storeRoot,
+        }),
       }),
     ).toThrow('targets another runtime config path');
 
     const afterA = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPathA,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath: configPathA,
-      storeRoot,
     });
     const afterB = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPathB,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath: configPathB,
-      storeRoot,
     });
 
     expect(afterA.fingerprint).toBe(beforeA.fingerprint);
@@ -1365,19 +1459,25 @@ describe('host-owned runtime plugin management tools', () => {
     const mutatedPluginId = 'test.mutated-after-preview';
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: mutableManifest,
       pluginManifests: [mutableManifest],
-      configPath,
-      storeRoot,
     });
     let previewTarget: RuntimePluginJsonValue | undefined;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [mutableManifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: request => {
         previewTarget = request.preview['targetPluginId'];
         expect(Reflect.set(mutableManifest, 'id', mutatedPluginId)).toBe(true);
@@ -1417,7 +1517,7 @@ describe('host-owned runtime plugin management tools', () => {
     const originalPluginId = mutableManifest.id;
     const originalDisplayName = mutableManifest.displayName;
     const host = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [mutableManifest],
         activationByPluginId: {
@@ -1427,7 +1527,7 @@ describe('host-owned runtime plugin management tools', () => {
             reasons: ['test_disabled'],
           },
         },
-      },
+      }),
     });
 
     expect(Reflect.set(mutableManifest, 'id', 'test.retargeted')).toBe(true);
@@ -1511,24 +1611,32 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         applyRuntimeConfigControlOperation({
           target: resolveRuntimeConfigScopeTarget({
+            runtimeLocation: runtimeLocationForTest({
+              configPath: configPath,
+              storeRoot: storeRoot,
+            }),
             scope: 'global',
-            configPath,
-            storeRoot,
           }),
           expectedFingerprint: before.fingerprint,
           request: {
@@ -1554,10 +1662,12 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(result).toMatchObject({
@@ -1576,18 +1686,24 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
     });
 
     const result = await updateConfigField(host, {
@@ -1604,10 +1720,12 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       }).fingerprint,
     ).toBe(before.fingerprint);
   });
@@ -1619,19 +1737,25 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         confirmationCalls += 1;
         return {status: 'approved'};
@@ -1668,18 +1792,24 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'cancelled'}),
     });
 
@@ -1697,10 +1827,12 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       }).fingerprint,
     ).toBe(before.fingerprint);
   });
@@ -1715,19 +1847,25 @@ describe('host-owned runtime plugin management tools', () => {
       const manifest = configurablePluginManifest();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
       const before = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       });
       const approvalDelayMs = 30_000;
       const host = createRuntimePluginHost({
         storeRoot,
-        pluginConfigControl: {
+        pluginConfigControl: runtimePluginConfigControlStateForTest({
+          runtimeLocation: runtimeLocationForTest({
+            configPath: configPath,
+            storeRoot: storeRoot,
+          }),
+
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
-          configPath,
-        },
+        }),
         toolConfirmationHandler: async () => {
           await new Promise<void>(resolve => {
             setTimeout(resolve, approvalDelayMs);
@@ -1768,19 +1906,25 @@ describe('host-owned runtime plugin management tools', () => {
       const manifest = configurablePluginManifest();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
       const before = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       });
       let approvalDelayMs = 0;
       const host = createRuntimePluginHost({
         storeRoot,
-        pluginConfigControl: {
+        pluginConfigControl: runtimePluginConfigControlStateForTest({
+          runtimeLocation: runtimeLocationForTest({
+            configPath: configPath,
+            storeRoot: storeRoot,
+          }),
+
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest],
-          configPath,
-        },
+        }),
         toolConfirmationHandler: async () => {
           await new Promise<void>(resolve => {
             setTimeout(resolve, approvalDelayMs + 1);
@@ -1809,10 +1953,12 @@ describe('host-owned runtime plugin management tools', () => {
       await vi.advanceTimersByTimeAsync(approvalDelayMs + 1);
       const result = await updatePromise;
       const after = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       });
 
       expect(result).toMatchObject({
@@ -1825,10 +1971,12 @@ describe('host-owned runtime plugin management tools', () => {
 
       await vi.advanceTimersByTimeAsync(approvalDelayMs + 1);
       const afterLateApproval = inspectRuntimePluginConfig({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest,
         pluginManifests: [manifest],
-        configPath,
-        storeRoot,
       });
 
       expect(
@@ -1847,19 +1995,25 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     const callerOwnedValue = {mode: 'approved-value'};
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         callerOwnedValue.mode = 'mutated-after-preview';
         return {status: 'approved'};
@@ -1882,10 +2036,12 @@ describe('host-owned runtime plugin management tools', () => {
       testContext(),
     );
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(result.status).toBe('accepted');
@@ -1911,19 +2067,25 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     let request: RuntimePluginToolConfirmationRequest | undefined;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: candidate => {
         request = candidate;
         return {status: 'approved'};
@@ -1937,10 +2099,12 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(result.status).toBe('accepted');
@@ -1968,19 +2132,25 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest,
       pluginManifests: [manifest],
-      configPath,
-      storeRoot,
     });
     let confirmationCalls = 0;
     const host = createRuntimePluginHost({
       storeRoot,
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
+
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
-        configPath,
-      },
+      }),
       toolConfirmationHandler: () => {
         confirmationCalls += 1;
         return {status: 'approved'};
@@ -2018,10 +2188,10 @@ describe('host-owned runtime plugin management tools', () => {
 
     expect(() =>
       createRuntimePluginHost({
-        pluginConfigControl: {
+        pluginConfigControl: runtimePluginConfigControlStateForTest({
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [manifest, manifest],
-        },
+        }),
       }),
     ).toThrow(
       `Plugin config control manifest id "${manifest.id}" is declared more than once.`,

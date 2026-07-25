@@ -10,6 +10,7 @@ import {
 } from '../plugins/index.ts';
 import {
   createRuntimeConfigDiagnostic,
+  resolveProject02RuntimeLocation,
   resolveProject02RuntimeConfig,
   runtimeConfigDiagnosticIsReadinessFailure,
   validateProject02RuntimeConfig,
@@ -95,12 +96,16 @@ export function planCharacterPackagePluginMaterialization(options: {
     );
   }
 
+  const loadedConfig = {
+    source: 'none',
+    config: validated.config,
+    diagnostics: Object.freeze([]),
+  } as const;
   const resolved = resolveProject02RuntimeConfig({
-    loadedConfig: {
-      source: 'none',
-      config: validated.config,
-      diagnostics: Object.freeze([]),
-    },
+    loadedConfig,
+    runtimeLocation: resolveProject02RuntimeLocation({
+      loadedConfig,
+    }),
     pluginManifests: options.pluginManifests,
     validateInactivePluginConfigs: true,
     authoredScope: 'character',

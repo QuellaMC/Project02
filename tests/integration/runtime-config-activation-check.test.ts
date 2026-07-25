@@ -19,7 +19,10 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
 } from '../../src/plugins/packages/character-state/plugin.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   enabledNonHostScopedActivationPlugins,
@@ -720,7 +723,13 @@ describe('runtime config activation checks and construction', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig,
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadedConfig,
+            env: {
+              [envVar]: 'same-id-different-manifest-secret',
+            },
+          }),
+
           env: {
             [envVar]: 'same-id-different-manifest-secret',
           },
@@ -772,8 +781,11 @@ describe('runtime config activation checks and construction', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig,
-          storeRoot,
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadedConfig,
+            storeRoot: storeRoot,
+          }),
+
           factories: {
             [cleanupPlugin.manifest.id]: {
               manifest: cleanupPlugin.manifest,
@@ -850,8 +862,11 @@ describe('runtime config activation checks and construction', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig: loadProject02RuntimeConfig({configPath}),
-          storeRoot,
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            storeRoot: storeRoot,
+          }),
+
           factories: {
             [cleanupPlugin.manifest.id]: {
               manifest: cleanupPlugin.manifest,
@@ -925,8 +940,11 @@ describe('runtime config activation checks and construction', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig: loadProject02RuntimeConfig({configPath}),
-          storeRoot,
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            storeRoot: storeRoot,
+          }),
+
           factories: {
             [cleanupPlugin.manifest.id]: {
               manifest: cleanupPlugin.manifest,
@@ -993,8 +1011,11 @@ describe('runtime config activation checks and construction', () => {
     // precise error before any factory can construct against it.
     expect(() =>
       prepareConfiguredProject02PluginActivation({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
-        storeRoot: invalidStoreRoot,
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          storeRoot: invalidStoreRoot,
+        }),
+
         factories: {
           [cleanupPlugin.manifest.id]: {
             manifest: cleanupPlugin.manifest,
@@ -1070,8 +1091,11 @@ describe('runtime config activation checks and construction', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig: loadProject02RuntimeConfig({configPath}),
-          storeRoot,
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            storeRoot: storeRoot,
+          }),
+
           factories: {
             [cleanupPlugin.manifest.id]: {
               manifest: cleanupPlugin.manifest,
@@ -1137,8 +1161,11 @@ describe('runtime config activation checks and construction', () => {
     await expect(
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
-          loadedConfig: loadProject02RuntimeConfig({configPath}),
-          storeRoot,
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            storeRoot: storeRoot,
+          }),
+
           factories: {
             [collisionPlugin.manifest.id]: {
               manifest: collisionPlugin.manifest,
@@ -1182,7 +1209,13 @@ describe('runtime config activation checks and construction', () => {
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
-        loadedConfig,
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadedConfig,
+          env: {
+            [envVar]: 'same-id-matching-manifest-secret',
+          },
+        }),
+
         env: {
           [envVar]: 'same-id-matching-manifest-secret',
         },

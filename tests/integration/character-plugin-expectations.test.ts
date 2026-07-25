@@ -20,7 +20,10 @@ import {
   ensureCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 import type {RuntimePluginActivationResult} from '../../src/app/index.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 function expectations(
@@ -368,10 +371,14 @@ describe('first-selection materialization through startup', () => {
       characterId: 'seeded',
     });
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterId: 'seeded',
+        env: {},
+      }),
+
       env: {},
       scope: 'character',
-      characterId: 'seeded',
     });
     applyRuntimeConfigControlOperation({
       target,

@@ -1,13 +1,10 @@
 /**
- * Public contract of the runtime plugin package loader: descriptor
- * format, metadata size limits, bundled package root, and the shapes a
- * discovery run produces.
+ * Public contract of the runtime plugin package loader: bundled package
+ * root and the shapes a discovery run produces.
  */
 import {fileURLToPath} from 'node:url';
 
 import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
-
-export const maxRuntimePluginPackageMetadataBytes = 256 * 1_024;
 
 export const bundledRuntimePluginPackageRoot = fileURLToPath(
   new URL('../packages/', import.meta.url),

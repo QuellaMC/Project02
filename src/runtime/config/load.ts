@@ -31,9 +31,9 @@ import {
 } from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
+  project02RuntimeConfigValueMatchesField,
   project02RuntimeConfigFieldDefinitions,
   project02RuntimeConfigFieldNames,
-  runtimeConfigValueMatchesField,
 } from './schema.ts';
 
 const project02RuntimeConfigFields = Object.freeze([
@@ -68,6 +68,11 @@ export type LoadProject02RuntimeConfigOptions = {
   readonly env?: NodeJS.ProcessEnv;
 };
 
+export type SelectedProject02RuntimeConfigLocation = {
+  readonly source: Exclude<RuntimeConfigSource, 'none'>;
+  readonly path: string;
+};
+
 export type Project02RuntimeConfigValidationResult = {
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -77,15 +82,17 @@ export function loadProject02RuntimeConfig(
   options: LoadProject02RuntimeConfigOptions = {},
 ): LoadedProject02RuntimeConfig {
   const env = options.env ?? process.env;
-  const location = resolveRuntimeConfigLocation({...options, env});
+  const location = selectProject02RuntimeConfigLocation({
+    selection: options,
+    env,
+  });
 
-  if (location.source === 'none') {
-    return Object.freeze({
-      source: 'none',
-      diagnostics: [],
-    } satisfies LoadedProject02RuntimeConfig);
-  }
+  return loadSelectedProject02RuntimeConfig(location);
+}
 
+export function loadSelectedProject02RuntimeConfig(
+  location: SelectedProject02RuntimeConfigLocation,
+): LoadedProject02RuntimeConfig {
   assertSelectedRuntimeConfigIsGlobal(location);
 
   if (!existsSync(location.path)) {
@@ -274,27 +281,24 @@ export function defaultRuntimeConfigEnvPath(storeRoot?: string): string {
   ).envPath;
 }
 
-function resolveRuntimeConfigLocation(options: {
-  readonly configPath?: string;
-  readonly storeRoot?: string;
+export function selectProject02RuntimeConfigLocation(options: {
+  readonly selection: {
+    readonly configPath?: string;
+    readonly storeRoot?: string;
+  };
   readonly env: NodeJS.ProcessEnv;
-}):
-  | {
-      readonly source: Exclude<RuntimeConfigSource, 'none'>;
-      readonly path: string;
-    }
-  | {readonly source: 'none'} {
-  if (options.configPath !== undefined) {
+}): SelectedProject02RuntimeConfigLocation {
+  if (options.selection.configPath !== undefined) {
     return {
       source: 'path',
-      path: normalizeConfigPath(options.configPath),
+      path: normalizeConfigPath(options.selection.configPath),
     };
   }
 
-  if (options.storeRoot !== undefined) {
+  if (options.selection.storeRoot !== undefined) {
     return {
       source: 'default',
-      path: defaultRuntimeConfigPath(options.storeRoot),
+      path: defaultRuntimeConfigPath(options.selection.storeRoot),
     };
   }
 
@@ -309,7 +313,7 @@ function resolveRuntimeConfigLocation(options: {
 
   return {
     source: 'default',
-    path: defaultRuntimeConfigPath(options.storeRoot),
+    path: defaultRuntimeConfigPath(options.selection.storeRoot),
   };
 }
 
@@ -456,7 +460,7 @@ function optionalProject02HostConfig(
 
     if (
       !isRuntimeConfigValue(fieldValue) ||
-      !runtimeConfigValueMatchesField(fieldValue, field) ||
+      !project02RuntimeConfigValueMatchesField(fieldValue, field) ||
       (typeof fieldValue === 'string' && fieldValue.trim().length === 0)
     ) {
       diagnostics.push(project02HostConfigFieldDiagnostic(field));

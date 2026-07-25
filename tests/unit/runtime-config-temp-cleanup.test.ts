@@ -5,11 +5,12 @@ import {describe, expect, it} from 'vitest';
 
 import {
   applyRuntimeConfigControlOperation,
-  resolveRuntimeConfigScopeTarget,
   runtimeConfigVersion,
+  resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
+import {runtimeLocationForTest} from '../support/runtime-config.ts';
 
 describe('runtime config atomic temporary-file cleanup', () => {
   it('removes an abandoned plaintext env replacement under the env lock', () => {
@@ -42,7 +43,11 @@ describe('runtime config atomic temporary-file cleanup', () => {
 
     applyRuntimeConfigControlOperation({
       target: resolveRuntimeConfigScopeTarget({
-        storeRoot,
+        runtimeLocation: runtimeLocationForTest({
+          storeRoot: storeRoot,
+          env: {PROJECT02_MEMORY_API_KEY: 'current-secret'},
+        }),
+
         env: {PROJECT02_MEMORY_API_KEY: 'current-secret'},
         scope: 'global',
       }),

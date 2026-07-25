@@ -8,14 +8,15 @@
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {
-  characterDataRootForResolvedConfig,
   createRuntimeConfigMutationBase,
   diagnosticsHaveErrors,
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterOverlayForScope,
-  loadProject02RuntimeConfig,
+  loadProject02RuntimeConfigForLocation,
+  readCharacterOverlayForScope,
+  resolveProject02RuntimeLocation,
   resolveLayeredProject02RuntimeConfig,
   runtimeConfigDiagnosticMatchesPlugin,
+  type ResolvedProject02RuntimeLocation,
 } from '../runtime/config/index.ts';
 import type {
   RuntimePluginCatalogEntry,
@@ -33,10 +34,11 @@ export function createConfiguredRuntimePluginReloader(options: {
       Record<string, RuntimePluginCatalogEntry>
     >;
     readonly pluginConfigControl: RuntimePluginConfigControlHostState;
+    readonly runtimeLocation: ResolvedProject02RuntimeLocation;
     readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   };
 }): RuntimePluginReloader {
-  const {catalogEntries, pluginConfigControl, resolvedConfig} =
+  const {catalogEntries, pluginConfigControl, runtimeLocation} =
     options.activationPlan;
   const pluginManifests = Object.values(catalogEntries).map(
     entry => entry.manifest,
@@ -61,29 +63,23 @@ export function createConfiguredRuntimePluginReloader(options: {
       // overlay. Re-read together so an overlay edit between approval
       // and rebuild declines exactly like a global edit.
       const loadAuthoredState = () => {
-        const loaded = loadProject02RuntimeConfig({
-          ...(pluginConfigControl.configPath === undefined
-            ? {}
-            : {configPath: pluginConfigControl.configPath}),
-          // Omitted env falls back to process.env inside the loader, the
-          // same default the inspection/approval path used — forcing {}
-          // here would strand $env secrets that approval already resolved.
-          ...(pluginConfigControl.env === undefined
-            ? {}
-            : {env: pluginConfigControl.env}),
-          storeRoot: resolvedConfig.project02.storeRoot,
+        const loaded = loadProject02RuntimeConfigForLocation(runtimeLocation);
+        const freshLocation = resolveProject02RuntimeLocation({
+          loadedConfig: loaded,
+          selection: runtimeLocation.selection,
+          selectedConfig: {
+            source: runtimeLocation.configSource,
+            path: runtimeLocation.globalConfigPath,
+          },
         });
 
         return {
           loaded,
+          runtimeLocation: freshLocation,
           // The guarded loader refuses a data directory rebound to
           // another character mid-run, exactly as startup would.
-          overlay:
-            pluginConfigControl.characterScope === undefined
-              ? undefined
-              : loadCharacterOverlayForScope(
-                  pluginConfigControl.characterScope,
-                ),
+          overlay: readCharacterOverlayForScope(freshLocation.characterScope)
+            .overlay,
         };
       };
       const authoredFingerprintOf = (
@@ -92,12 +88,12 @@ export function createConfiguredRuntimePluginReloader(options: {
         layeredRuntimeConfigFingerprintForScope({
           globalConfig: createRuntimeConfigMutationBase({
             loadedConfig: state.loaded,
-            ...(pluginConfigControl.configPath === undefined
+            configPath: state.runtimeLocation.globalConfigPath,
+            ...(state.runtimeLocation.selection.storeRoot === undefined
               ? {}
-              : {configPath: pluginConfigControl.configPath}),
-            storeRoot: resolvedConfig.project02.storeRoot,
+              : {storeRoot: state.runtimeLocation.selection.storeRoot}),
           }),
-          characterScope: pluginConfigControl.characterScope,
+          characterScope: state.runtimeLocation.characterScope,
           overlay: state.overlay,
         });
       const authoredState = loadAuthoredState();
@@ -111,16 +107,8 @@ export function createConfiguredRuntimePluginReloader(options: {
       }
       const freshResolvedConfig = resolveLayeredProject02RuntimeConfig({
         loadedConfig: authoredState.loaded,
-        // The overlay's character id may be a flag override the global
-        // document knows nothing about; without it the rebuilt plugin
-        // would land in the wrong character-data directory.
-        ...(authoredState.overlay === undefined
-          ? {}
-          : {
-              overlayConfig: authoredState.overlay,
-              characterId: authoredState.overlay.characterId,
-            }),
-        storeRoot: resolvedConfig.project02.storeRoot,
+        runtimeLocation: authoredState.runtimeLocation,
+        overlayConfig: authoredState.overlay,
         pluginManifests,
         defaultEnabledPluginIds,
         ...(pluginConfigControl.env === undefined
@@ -148,7 +136,7 @@ export function createConfiguredRuntimePluginReloader(options: {
       const plugin = await entry.load({
         pluginId: entry.manifest.id,
         manifest: entry.manifest,
-        storeRoot: characterDataRootForResolvedConfig(freshResolvedConfig),
+        storeRoot: authoredState.runtimeLocation.characterScope.dataRoot,
         resolvedConfig:
           ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ?? {},
         redactedConfig:

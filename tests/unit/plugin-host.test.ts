@@ -14,13 +14,14 @@ import {
   runtimePluginListToolName,
 } from '../../src/plugins/api/contract.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
-import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {
   createRuntimePluginManagementPlugin,
   type RuntimePluginConfigControlHostState,
+  createRuntimePluginHost,
 } from '../../src/plugins/index.ts';
 import {
   createRuntimePluginConfigControlHostStateSnapshot,
@@ -110,10 +111,10 @@ describe('runtime plugin host catalog and routing', () => {
     ).toThrow('without its host config-control capability');
     expect(() =>
       createRuntimePluginHost({
-        pluginConfigControl: {
+        pluginConfigControl: runtimePluginConfigControlStateForTest({
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [],
-        },
+        }),
       }),
     ).not.toThrow();
     expect(() =>
@@ -122,10 +123,12 @@ describe('runtime plugin host catalog and routing', () => {
   });
 
   it('strips the control capability when inventory-snapshotting a config-control snapshot', () => {
-    const controlSnapshot = createRuntimePluginConfigControlHostStateSnapshot({
-      control: testRuntimePluginConfigControlCapability,
-      pluginManifests: [],
-    });
+    const controlSnapshot = createRuntimePluginConfigControlHostStateSnapshot(
+      runtimePluginConfigControlStateForTest({
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [],
+      }),
+    );
     const inventorySnapshot =
       createRuntimePluginInventoryHostStateSnapshot(controlSnapshot);
 

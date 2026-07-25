@@ -11,8 +11,8 @@
 import {lstatSync} from 'node:fs';
 
 import {
-  characterDataDirPath,
   createLocalRuntimeStorageLayout,
+  type LocalRuntimeCharacterDataStorageSchemaMarker,
 } from '../storage/layout-contract.ts';
 import {assertCharacterDataDirReadable} from '../storage/character-data.ts';
 import {
@@ -27,14 +27,11 @@ import {
   readProject02RuntimeConfigDocument,
   validateProject02RuntimeConfig,
 } from './load.ts';
-import {resolveProject02RuntimeStoreRoot} from './resolve.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
   project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
 import {
-  configuredProject02CharacterId,
-  type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
@@ -57,7 +54,7 @@ export function characterOverlayConfigPath(dataRoot: string): string {
   return createLocalRuntimeStorageLayout({storeRoot: dataRoot}).configPath;
 }
 
-export function loadProject02CharacterOverlayConfig(options: {
+function loadProject02CharacterOverlayConfig(options: {
   readonly dataRoot: string;
   readonly characterId: string;
 }): LoadedProject02CharacterOverlayConfig {
@@ -175,36 +172,10 @@ export function characterOverlayFingerprintLayer(
   return overlay.config ?? Object.freeze({$overlayUnreadable: true});
 }
 
-/**
- * The character scope every authored-fingerprint site shares: character
- * id from the loaded global config (or the default; an explicit
- * characterId — e.g. a --character flag — wins over both) and its data
- * directory under the resolved home. Undefined when the id or store
- * root cannot form a data path — that state fails elsewhere with its
- * own diagnostic, and fingerprints stay single-layer.
- */
-export function deriveRuntimeConfigCharacterScope(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-  readonly characterId?: string;
-}): RuntimeConfigCharacterScope | undefined {
-  const characterId = configuredProject02CharacterId(
-    options.loadedConfig.config,
-    options.characterId,
-  );
-
-  try {
-    return Object.freeze({
-      characterId,
-      dataRoot: characterDataDirPath(
-        resolveProject02RuntimeStoreRoot(options),
-        characterId,
-      ),
-    });
-  } catch {
-    return undefined;
-  }
-}
+export type RuntimeConfigCharacterOverlaySnapshot = {
+  readonly marker?: LocalRuntimeCharacterDataStorageSchemaMarker;
+  readonly overlay: LoadedProject02CharacterOverlayConfig;
+};
 
 /**
  * The one guarded overlay read: wherever a scope's overlay feeds
@@ -214,18 +185,21 @@ export function deriveRuntimeConfigCharacterScope(options: {
  * have its overlay reported as this character's config. An absent or
  * marker-less (still adoptable) directory loads as an absent overlay.
  */
-export function loadCharacterOverlayForScope(
+export function readCharacterOverlayForScope(
   scope: RuntimeConfigCharacterScope,
-): LoadedProject02CharacterOverlayConfig {
-  assertCharacterDataDirReadable({
+): RuntimeConfigCharacterOverlaySnapshot {
+  const marker = assertCharacterDataDirReadable({
     storageOptions: {storeRoot: scope.dataRoot},
     characterId: scope.characterId,
   });
 
-  return loadProject02CharacterOverlayConfig({
-    dataRoot: scope.dataRoot,
-    characterId: scope.characterId,
-  });
+  return Object.freeze({
+    ...(marker === undefined ? {} : {marker}),
+    overlay: loadProject02CharacterOverlayConfig({
+      dataRoot: scope.dataRoot,
+      characterId: scope.characterId,
+    }),
+  } satisfies RuntimeConfigCharacterOverlaySnapshot);
 }
 
 /**

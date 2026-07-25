@@ -11,10 +11,7 @@ import {
 } from '../../core/index.ts';
 import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
-import {
-  allowPlaintextSecretMarkerField,
-  valueIsSecretMarker,
-} from '../../shared/secret-marker.ts';
+import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 
 export const characterPackageDescriptorFormat = 'project02.character.v1';
 export const characterPackageDescriptorFileName = 'project02.character.json';
@@ -408,10 +405,9 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
     }
 
     const configPath = `plugins.config["${pluginId}"]`;
-    const unsafeSecretPath = characterPackageUnsafeSecretPath(
-      pluginConfig,
-      configPath,
-    );
+    const unsafeSecretPath = nestedSecretMarkerPath(pluginConfig, configPath, {
+      rejectPlaintextAllowanceMarker: true,
+    });
 
     if (unsafeSecretPath !== undefined) {
       return rejectedDescriptor(
@@ -431,50 +427,6 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
       config: Object.freeze(config),
     } satisfies CharacterPluginExpectations),
   });
-}
-
-function characterPackageUnsafeSecretPath(
-  value: unknown,
-  path: string,
-): string | undefined {
-  if (
-    valueIsSecretMarker(value) ||
-    (isRecord(value) && Object.hasOwn(value, allowPlaintextSecretMarkerField))
-  ) {
-    return path;
-  }
-
-  if (Array.isArray(value)) {
-    for (const [index, entry] of value.entries()) {
-      const unsafePath = characterPackageUnsafeSecretPath(
-        entry,
-        `${path}[${String(index)}]`,
-      );
-
-      if (unsafePath !== undefined) {
-        return unsafePath;
-      }
-    }
-
-    return undefined;
-  }
-
-  if (isRecord(value)) {
-    for (const [key, entry] of Object.entries(value).sort(([left], [right]) =>
-      compareDescriptorText(left, right),
-    )) {
-      const unsafePath = characterPackageUnsafeSecretPath(
-        entry,
-        `${path}.${key}`,
-      );
-
-      if (unsafePath !== undefined) {
-        return unsafePath;
-      }
-    }
-  }
-
-  return undefined;
 }
 
 function parseCharacterPluginIdList(

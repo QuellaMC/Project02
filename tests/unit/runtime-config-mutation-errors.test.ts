@@ -52,6 +52,8 @@ describe('runtime config mutation error handling', () => {
 
     const {
       applyRuntimeConfigControlOperation,
+      loadProject02RuntimeConfig,
+      resolveProject02RuntimeLocation,
       resolveRuntimeConfigScopeTarget,
       RuntimeConfigMutationError,
     } = await import('../../src/runtime/config/index.ts');
@@ -62,9 +64,15 @@ describe('runtime config mutation error handling', () => {
     let thrown: unknown;
 
     try {
+      const loadedConfig = loadProject02RuntimeConfig({storeRoot, env: {}});
+      const runtimeLocation = resolveProject02RuntimeLocation({
+        loadedConfig,
+        selection: {storeRoot},
+      });
+
       applyRuntimeConfigControlOperation({
         target: resolveRuntimeConfigScopeTarget({
-          storeRoot,
+          runtimeLocation,
           env: {PROJECT02_MEMORY_API_KEY: 'secret-value'},
           scope: 'global',
         }),

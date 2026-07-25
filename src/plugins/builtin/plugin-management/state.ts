@@ -2,7 +2,7 @@ import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {RuntimePluginManifest} from '../../api/types.ts';
 import type {RuntimePluginConfigActivationInspectShape} from '../../../runtime/config/index.ts';
 import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
-import type {RuntimeConfigCharacterScope} from '../../../runtime/config/index.ts';
+import type {ResolvedProject02RuntimeLocation} from '../../../runtime/config/index.ts';
 
 /**
  * Manifest inventory a host can serve without any config mutation
@@ -14,18 +14,8 @@ export type RuntimePluginInventoryHostState = {
     Record<string, RuntimePluginConfigActivationInspectShape>
   >;
   readonly defaultEnabledPluginIds?: readonly string[];
-  readonly configPath?: string;
-  /**
-   * The Project02 home root the global config layer lives under. The
-   * composition root records it even when no config file exists yet:
-   * the plugin host's own store root is the character DATA directory,
-   * and using that as a config location would read the overlay as the
-   * global layer.
-   */
-  readonly storeRoot?: string;
+  readonly runtimeLocation?: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
-  /** Opaque overlay location; the composition root fills it in. */
-  readonly characterScope?: RuntimeConfigCharacterScope;
 };
 
 /**
@@ -36,6 +26,8 @@ export type RuntimePluginInventoryHostState = {
  */
 export type RuntimePluginConfigControlHostState =
   RuntimePluginInventoryHostState & {
+    readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+    readonly configScope: 'global' | 'character';
     /** Injected by the composition root; plugins never import the functions. */
     readonly control: RuntimePluginConfigControlCapability;
   };
@@ -127,6 +119,8 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
 
   const snapshot = Object.freeze({
     ...inventoryHostStateSnapshotFields(state),
+    runtimeLocation: state.runtimeLocation,
+    configScope: state.configScope,
     control: state.control,
   } satisfies RuntimePluginConfigControlHostState);
 
@@ -170,12 +164,10 @@ function inventoryHostStateSnapshotFields(
             ...new Set(state.defaultEnabledPluginIds),
           ]),
         }),
-    ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
-    ...(state.storeRoot === undefined ? {} : {storeRoot: state.storeRoot}),
-    ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
-    ...(state.characterScope === undefined
+    ...(state.runtimeLocation === undefined
       ? {}
-      : {characterScope: Object.freeze({...state.characterScope})}),
+      : {runtimeLocation: state.runtimeLocation}),
+    ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
   };
 }
 

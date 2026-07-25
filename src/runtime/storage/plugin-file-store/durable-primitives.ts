@@ -21,6 +21,7 @@ import {
 import {
   acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
+  LocalRuntimeMutationLocksAcquireError,
   type LocalRuntimeMutationLockOwnerToken,
 } from '../mutation-lock.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
@@ -95,19 +96,26 @@ export function withDurablePluginStoreMutations<T>(
   },
   operation: () => T,
 ): T {
-  const lease = acquireLocalRuntimeMutationLocksSync({
-    locksRoot: createLocalRuntimeStorageLayout({
-      storeRoot: options.storeRoot,
-    }).locksRoot,
-    resourceKeys: [
-      ...options.roots.map(durablePluginStoreMutationResourceKey),
-      ...(options.resourceKeys ?? []),
-    ],
-    waitTimeoutMs: 0,
-    ...(options.ownerToken === undefined
-      ? {}
-      : {ownerToken: options.ownerToken}),
-  });
+  const locksRoot = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  }).locksRoot;
+  const resourceKeys = [
+    ...options.roots.map(durablePluginStoreMutationResourceKey),
+    ...(options.resourceKeys ?? []),
+  ];
+  let lease: ReturnType<typeof acquireLocalRuntimeMutationLocksSync>;
+
+  try {
+    lease = acquireLocalRuntimeMutationLocksSync({
+      targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
+      waitTimeoutMs: 0,
+      ...(options.ownerToken === undefined
+        ? {}
+        : {ownerToken: options.ownerToken}),
+    });
+  } catch (error: unknown) {
+    throw singleMutationLockError(error);
+  }
 
   try {
     return operation();
@@ -125,19 +133,26 @@ export async function withDurablePluginStoreMutationsAsync<T>(
   },
   operation: () => T | Promise<T>,
 ): Promise<T> {
-  const lease = await acquireLocalRuntimeMutationLocks({
-    locksRoot: createLocalRuntimeStorageLayout({
-      storeRoot: options.storeRoot,
-    }).locksRoot,
-    resourceKeys: [
-      ...options.roots.map(durablePluginStoreMutationResourceKey),
-      ...(options.resourceKeys ?? []),
-    ],
-    waitTimeoutMs: 0,
-    ...(options.ownerToken === undefined
-      ? {}
-      : {ownerToken: options.ownerToken}),
-  });
+  const locksRoot = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  }).locksRoot;
+  const resourceKeys = [
+    ...options.roots.map(durablePluginStoreMutationResourceKey),
+    ...(options.resourceKeys ?? []),
+  ];
+  let lease: Awaited<ReturnType<typeof acquireLocalRuntimeMutationLocks>>;
+
+  try {
+    lease = await acquireLocalRuntimeMutationLocks({
+      targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
+      waitTimeoutMs: 0,
+      ...(options.ownerToken === undefined
+        ? {}
+        : {ownerToken: options.ownerToken}),
+    });
+  } catch (error: unknown) {
+    throw singleMutationLockError(error);
+  }
 
   try {
     return await operation();
@@ -148,6 +163,12 @@ export async function withDurablePluginStoreMutationsAsync<T>(
 
 export function durablePluginStoreMutationResourceKey(root: string): string {
   return `plugin:${canonicalDurablePluginStoreRoot(root)}`;
+}
+
+function singleMutationLockError(error: unknown): unknown {
+  return error instanceof LocalRuntimeMutationLocksAcquireError
+    ? (error.cause ?? error)
+    : error;
 }
 
 export function canonicalDurablePluginStoreRoot(storeRoot: string): string {

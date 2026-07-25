@@ -395,7 +395,6 @@ export function createRuntimePluginHost(
       return reconcilePreparedRuntimePluginConfigEffect({
         effect,
         state: pluginConfigControl,
-        storeRoot: options.storeRoot,
       });
     },
     pluginConfigCurrentFor(pluginId, configFingerprint) {
@@ -579,7 +578,6 @@ function createRuntimePluginHostState(
           }),
     }),
     ...(pluginConfigControl === undefined ? {} : {pluginConfigControl}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const plugins = Object.freeze([...hostScopedPlugins, ...configuredPlugins]);
   allPlugins = plugins;

@@ -87,12 +87,13 @@ async function runConfigMutationChild(options: {
 }): Promise<void> {
   const script = [
     "import { existsSync } from 'node:fs';",
-    "const { applyRuntimeConfigControlOperation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
+    "const { applyRuntimeConfigControlOperation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
     "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+    'const { runtimeLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] }, env: {} });',
     'applyRuntimeConfigControlOperation({',
-    "  target: resolveRuntimeConfigScopeTarget({ storeRoot: process.argv[1], env: {}, scope: 'global' }),",
+    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation, env: {}, scope: 'global' }),",
     "  request: { kind: 'plugin_activation', manifest: requiredSecretPlugin(process.argv[3]).manifest, enabled: true }",
     '});',
   ].join('\n');
@@ -113,12 +114,14 @@ async function runSecretMutationChild(options: {
 }): Promise<void> {
   const script = [
     "import { existsSync } from 'node:fs';",
-    "const { applyRuntimeConfigControlOperation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
+    "const { applyRuntimeConfigControlOperation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
     "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+    'const env = { [process.argv[5]]: process.argv[6] };',
+    'const { runtimeLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1], configPath: process.argv[3] }, env });',
     'applyRuntimeConfigControlOperation({',
-    "  target: resolveRuntimeConfigScopeTarget({ storeRoot: process.argv[1], configPath: process.argv[3], env: { [process.argv[5]]: process.argv[6] }, scope: 'global' }),",
+    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation, env, scope: 'global' }),",
     '  request: {',
     "    kind: 'plugin_config',",
     '    manifest: requiredSecretPlugin(process.argv[4]).manifest,',

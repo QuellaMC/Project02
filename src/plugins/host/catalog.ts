@@ -21,7 +21,6 @@ import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 export type RuntimePluginHostServiceBootstrapInput = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 };
 
 export type RuntimePluginHostServiceCatalogEntry = {
@@ -48,9 +47,6 @@ export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
           ...(input.pluginConfigControl === undefined
             ? {}
             : {pluginConfigControl: input.pluginConfigControl}),
-          ...(input.storeRoot === undefined
-            ? {}
-            : {storeRoot: input.storeRoot}),
         }),
     } satisfies RuntimePluginHostServiceCatalogEntry),
     [firstPartyModelToolsPluginId]: Object.freeze({
@@ -84,7 +80,6 @@ const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
 export function createHostScopedFirstPartyRuntimePlugins(options: {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): readonly RuntimePlugin[] {
   return Object.freeze(
     Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(entry =>

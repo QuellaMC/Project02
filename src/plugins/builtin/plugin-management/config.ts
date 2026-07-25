@@ -52,7 +52,6 @@ export function handleRuntimePluginConfigReadToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): RuntimePluginToolCallResult {
   let pluginId: string;
 
@@ -79,7 +78,6 @@ export function handleRuntimePluginConfigReadToolCall(options: {
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return {
@@ -108,7 +106,6 @@ export function handleRuntimePluginConfigReadToolCall(options: {
 export function inspectRuntimePluginConfigForControl(options: {
   readonly manifest: RuntimePluginManifest;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): RuntimePluginConfigInspection {
   const activation = ownJsonRecordValue(
     options.state.activationByPluginId,
@@ -126,17 +123,8 @@ export function inspectRuntimePluginConfigForControl(options: {
             options.manifest.id,
           ),
         }),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.state.configPath === undefined
-      ? {}
-      : {configPath: options.state.configPath}),
-    ...(options.state.storeRoot === undefined
-      ? {}
-      : {storeRoot: options.state.storeRoot}),
+    runtimeLocation: options.state.runtimeLocation,
     ...(options.state.env === undefined ? {} : {env: options.state.env}),
-    ...(options.state.characterScope === undefined
-      ? {}
-      : {characterScope: options.state.characterScope}),
   });
 }
 

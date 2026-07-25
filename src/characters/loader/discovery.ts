@@ -7,12 +7,15 @@
  * explicit beats precedence magic, because exactly one definition may own
  * a character id per runtime.
  */
-import {lstatSync, readFileSync, readdirSync} from 'node:fs';
-import type {Dirent} from 'node:fs';
 import {basename, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {
+  readBoundedPackageJsonFile,
+  scanPackageSourceRoot,
+  type BoundedPackageJsonRejectionReason,
+} from '../../shared/package-metadata.ts';
 import {
   characterPackageDescriptorFileName,
   parseCharacterPackageDescriptor,
@@ -92,17 +95,15 @@ export function discoverCharacterPackages(options: {
   const diagnostics: CharacterPackageDiagnostic[] = [];
 
   for (const source of options.sources) {
-    let entries: Dirent[];
+    const scan = scanPackageSourceRoot(source.root);
 
-    try {
-      entries = readdirSync(source.root, {withFileTypes: true});
-    } catch (error: unknown) {
+    if (scan.status === 'unavailable') {
       // A missing root or a root that is not a directory both mean "no
       // packages here"; a corrupt store surfaces through the storage
       // layer's own diagnostics instead.
       if (
-        isNodeErrorWithCode(error, 'ENOENT') ||
-        isNodeErrorWithCode(error, 'ENOTDIR')
+        isNodeErrorWithCode(scan.error, 'ENOENT') ||
+        isNodeErrorWithCode(scan.error, 'ENOTDIR')
       ) {
         continue;
       }
@@ -118,12 +119,10 @@ export function discoverCharacterPackages(options: {
       continue;
     }
 
-    for (const entry of entries.sort((left, right) =>
-      compareText(left.name, right.name),
-    )) {
-      const packageRoot = join(source.root, entry.name);
+    for (const candidate of scan.candidates) {
+      const packageRoot = join(source.root, candidate.name);
 
-      if (entry.isSymbolicLink()) {
+      if (candidate.kind === 'symbolic_link') {
         diagnostics.push(
           characterDiagnostic({
             code: 'invalid_package_directory',
@@ -131,12 +130,9 @@ export function discoverCharacterPackages(options: {
               'Character package directories must not be symbolic links.',
             path: packageRoot,
             provenance: source.provenance,
-            characterId: entry.name,
+            characterId: candidate.name,
           }),
         );
-        continue;
-      }
-      if (!entry.isDirectory()) {
         continue;
       }
 
@@ -243,41 +239,36 @@ function readCharacterDescriptorFile(options: {
       characterId: options.characterId,
     }),
   });
-  let descriptorStat: ReturnType<typeof lstatSync>;
+  const descriptor = readBoundedPackageJsonFile({
+    path: options.path,
+    maxBytes: maxCharacterPackageDescriptorBytes,
+    boundaryField: 'Character package descriptor',
+  });
 
-  try {
-    descriptorStat = lstatSync(options.path);
-  } catch {
-    return reject('Character package descriptor is unreadable.');
+  if (descriptor.status === 'rejected') {
+    return reject(characterDescriptorReadMessage(descriptor.reason));
   }
 
-  if (descriptorStat.isSymbolicLink()) {
-    return reject('Character package descriptor must not be a symbolic link.');
-  }
-  if (!descriptorStat.isFile()) {
-    return reject('Character package descriptor must be a regular file.');
-  }
-  if (descriptorStat.size > maxCharacterPackageDescriptorBytes) {
-    return reject('Character package descriptor exceeds the size limit.');
-  }
+  return {value: descriptor.value};
+}
 
-  let source: string;
-
-  try {
-    source = readFileSync(options.path, 'utf8');
-  } catch {
-    return reject('Character package descriptor is unreadable.');
+function characterDescriptorReadMessage(
+  reason: BoundedPackageJsonRejectionReason,
+): string {
+  switch (reason) {
+    case 'unreadable':
+      return 'Character package descriptor is unreadable.';
+    case 'symbolic_link':
+      return 'Character package descriptor must not be a symbolic link.';
+    case 'not_file':
+      return 'Character package descriptor must be a regular file.';
+    case 'too_large':
+      return 'Character package descriptor exceeds the size limit.';
+    case 'invalid_json':
+      return 'Character package descriptor must contain valid JSON.';
+    case 'unsafe_json':
+      return 'Character package descriptor exceeds safe JSON limits.';
   }
-
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(source) as unknown;
-  } catch {
-    return reject('Character package descriptor must contain valid JSON.');
-  }
-
-  return {value: parsed};
 }
 
 function applyCharacterIdentityPolicy(options: {

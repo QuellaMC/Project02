@@ -11,10 +11,8 @@ import type {
 import {
   applyRuntimeConfigControlOperation,
   inspectRuntimePluginConfig,
-  loadCharacterOverlayForScope,
   redactRuntimeConfigValue,
   resolveRuntimeConfigScopeTarget,
-  type RuntimeConfigCharacterScope,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,
   type RuntimePluginConfigFieldInspectShape,
@@ -28,7 +26,6 @@ import {
   ensureConsoleCommitTarget,
   formatInspectedFieldValue,
   previewAndCommitChange,
-  runtimeConfigLocation,
   writeDiagnostics,
   writeLine,
   type RuntimeConfigConsoleContext,
@@ -84,15 +81,13 @@ export async function runPluginConfigSection(
   );
 
   const inspected = inspectRuntimePluginConfig({
-    ...runtimeConfigLocation(context),
+    runtimeLocation: snapshot.runtimeLocation,
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
     // An unscoped console stages global-file edits: its authored view
     // must not present overlay-authored values as editable here.
-    ...(snapshot.characterScope === undefined
-      ? {authoredView: 'global' as const}
-      : {characterScope: snapshot.characterScope}),
+    ...(snapshot.scope === 'global' ? {authoredView: 'global' as const} : {}),
     manifest,
     pluginManifests: manifests,
     ...(activation === undefined ? {} : {activation}),
@@ -126,7 +121,7 @@ export async function runPluginConfigSection(
       manifest,
       inspected.enabled,
       inspected.fingerprint,
-      snapshot.characterScope,
+      snapshot,
     );
 
     if (change !== undefined) {
@@ -153,7 +148,7 @@ export async function runPluginConfigSection(
     field,
     inspectedField,
     inspected.fingerprint,
-    snapshot.characterScope,
+    snapshot,
   );
 
   if (change !== undefined) {
@@ -166,7 +161,7 @@ async function stagePluginActivationChange(
   manifest: RuntimePluginManifest,
   enabled: boolean,
   fingerprint: string,
-  characterScope: RuntimeConfigCharacterScope | undefined,
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Enable');
   writeLine(context.stdout, '2) Disable');
@@ -195,17 +190,15 @@ async function stagePluginActivationChange(
     newValue: nextEnabled,
     reloadRequired: true,
     async commit() {
-      await ensureConsoleCommitTarget(context, characterScope);
-      const target = resolveRuntimeConfigScopeTarget({
-        ...runtimeConfigLocation(context),
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
         ...(context.env === undefined ? {} : {env: context.env}),
-        scope: characterScope === undefined ? 'global' : 'character',
-        ...(characterScope === undefined
-          ? {}
-          : {
-              characterId: characterScope.characterId,
-              characterScope,
-            }),
+      });
+      const target = resolveRuntimeConfigScopeTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        ...(context.env === undefined ? {} : {env: context.env}),
+        scope: snapshot.scope,
       });
 
       applyRuntimeConfigControlOperation({
@@ -227,7 +220,7 @@ async function stagePluginFieldChange(
   field: RuntimePluginConfigField,
   inspectedField: RuntimePluginConfigFieldInspectShape,
   fingerprint: string,
-  characterScope: RuntimeConfigCharacterScope | undefined,
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Set');
   if (!field.required) {
@@ -286,18 +279,16 @@ async function stagePluginFieldChange(
     newValue,
     reloadRequired: field.reloadRequired !== false,
     async commit() {
-      await ensureConsoleCommitTarget(context, characterScope);
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
+        ...(context.env === undefined ? {} : {env: context.env}),
+      });
       const runtimeEnv = context.runtimeEnv ?? context.env;
       const target = resolveRuntimeConfigScopeTarget({
-        ...runtimeConfigLocation(context),
+        runtimeLocation: snapshot.runtimeLocation,
         ...(runtimeEnv === undefined ? {} : {env: runtimeEnv}),
-        scope: characterScope === undefined ? 'global' : 'character',
-        ...(characterScope === undefined
-          ? {}
-          : {
-              characterId: characterScope.characterId,
-              characterScope,
-            }),
+        scope: snapshot.scope,
       });
 
       applyRuntimeConfigControlOperation({
@@ -320,15 +311,15 @@ function pluginCatalog(
 ): RuntimeConfigConsolePluginCatalog {
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: snapshot.loadedConfig,
+    runtimeLocation: snapshot.runtimeLocation,
     // A scoped console judges activation for the selected character —
     // the snapshot's scope may be a flag override the loaded config
     // does not name.
-    ...(snapshot.characterScope === undefined
+    ...(snapshot.scope === 'global'
       ? {}
       : {
-          overlayConfig: loadCharacterOverlayForScope(snapshot.characterScope),
+          overlayConfig: snapshot.overlay,
         }),
-    ...(context.storeRoot === undefined ? {} : {storeRoot: context.storeRoot}),
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),

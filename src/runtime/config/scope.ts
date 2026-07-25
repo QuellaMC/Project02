@@ -27,7 +27,13 @@ import {
   type RuntimeConfigControlSnapshot,
 } from './control-transaction.ts';
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
-import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
+import {
+  loadProject02RuntimeConfigForLocation,
+  resolveProject02RuntimeLocation,
+  sameRuntimeConfigCharacterScope,
+  type ResolvedProject02RuntimeLocation,
+  type ResolvedRuntimeConfigScopeTarget,
+} from './location.ts';
 import {
   assertOverlayLocatedCandidateStaysCharacterScoped,
   canonicalRuntimeConfigMutationPath,
@@ -37,42 +43,28 @@ import {
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {
-  characterOverlayConfigPath,
-  deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterOverlayForScope,
+  readCharacterOverlayForScope,
 } from './overlay.ts';
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
-import {resolveProject02RuntimeStoreRoot} from './resolve.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
+  project02RuntimeConfigValueMatchesField,
   project02RuntimeConfigFieldDefinitions,
-  runtimeConfigValueMatchesField,
 } from './schema.ts';
 import {runtimePluginScopeViolation} from './plugin-scope.ts';
 import {
   runtimeConfigVersion,
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
-  type ResolvedRuntimeConfigScopeTarget,
-  type RuntimeConfigCharacterScope,
   type RuntimeConfigMutationOperation,
 } from './types.ts';
 
 export type RuntimeConfigMutationScopeSelector = 'global' | 'character';
 
 type ScopedRuntimeConfigLocation = {
-  readonly configPath?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-  /** Explicit character id (e.g. --character); wins over the configured one. */
-  readonly characterId?: string;
-  /**
-   * Full explicit scope (id + data root), e.g. from a plugin host's
-   * control state. Wins over any derivation: a host's storeRoot is the
-   * character DATA root, and re-deriving from it would nest the path.
-   */
-  readonly characterScope?: RuntimeConfigCharacterScope;
 };
 
 export type RuntimeConfigControlRequest =
@@ -127,21 +119,8 @@ export function resolveRuntimeConfigScopeTarget(
     readonly scope: RuntimeConfigMutationScopeSelector;
   },
 ): ResolvedRuntimeConfigScopeTarget {
-  const loadedConfig = loadProject02RuntimeConfig(options);
-  const globalConfigPath =
-    loadedConfig.path ??
-    options.configPath ??
-    defaultRuntimeConfigPath(options.storeRoot);
-  const homeRoot = resolveProject02RuntimeStoreRoot({
-    loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
   const shared = {
-    globalConfigPath,
-    homeRoot,
-    ...(options.storeRoot === undefined
-      ? {}
-      : {selectedStoreRoot: options.storeRoot}),
+    runtimeLocation: options.runtimeLocation,
     ...(options.env === undefined ? {} : {env: options.env}),
   };
 
@@ -149,35 +128,20 @@ export function resolveRuntimeConfigScopeTarget(
     return Object.freeze({
       ...shared,
       scope: 'global',
-      configPath: globalConfigPath,
-      canonicalConfigPath: canonicalRuntimeConfigMutationPath(globalConfigPath),
-      ...(options.characterScope === undefined
-        ? {}
-        : {characterScope: options.characterScope}),
+      configPath: options.runtimeLocation.globalConfigPath,
+      canonicalConfigPath: canonicalRuntimeConfigMutationPath(
+        options.runtimeLocation.globalConfigPath,
+      ),
     });
   }
-
-  const characterScope = requiredCharacterScope(loadedConfig, {
-    storeRoot: homeRoot,
-    ...(options.characterId === undefined
-      ? {}
-      : {characterId: options.characterId}),
-    ...(options.characterScope === undefined
-      ? {}
-      : {characterScope: options.characterScope}),
-  });
-
-  const characterConfigPath = characterOverlayConfigPath(
-    characterScope.dataRoot,
-  );
 
   return Object.freeze({
     ...shared,
     scope: 'character',
-    configPath: characterConfigPath,
-    canonicalConfigPath:
-      canonicalRuntimeConfigMutationPath(characterConfigPath),
-    characterScope,
+    configPath: options.runtimeLocation.overlayPath,
+    canonicalConfigPath: canonicalRuntimeConfigMutationPath(
+      options.runtimeLocation.overlayPath,
+    ),
   });
 }
 
@@ -331,13 +295,9 @@ function normalizedControlMutation(
     manifest: request.manifest,
     actor: request.actor,
     operation: request.fieldOperation,
+    runtimeLocation: target.runtimeLocation,
     authoredScope: target.scope,
     ...(target.env === undefined ? {} : {env: target.env}),
-    ...(target.scope === 'character'
-      ? {storeRoot: target.homeRoot}
-      : target.selectedStoreRoot === undefined
-        ? {}
-        : {storeRoot: target.selectedStoreRoot}),
   });
 }
 
@@ -375,7 +335,7 @@ export function assertScopedMutationOperationAllowed(
 
   if (
     operation.kind === 'set' &&
-    (!runtimeConfigValueMatchesField(operation.value, field) ||
+    (!project02RuntimeConfigValueMatchesField(operation.value, field) ||
       (typeof operation.value === 'string' &&
         operation.value.trim().length === 0))
   ) {
@@ -393,7 +353,7 @@ export function assertScopedGlobalLayerLoadable(
   options: ScopedRuntimeConfigLocation,
 ): void {
   assertGlobalConfigLoadableForCharacterScope(
-    loadProject02RuntimeConfig(options),
+    loadProject02RuntimeConfigForLocation(options.runtimeLocation),
   );
 }
 
@@ -425,10 +385,12 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
     return Object.freeze({
       preparedCandidate: prepareRuntimeConfigMutationCandidate({
         loadedConfig: options.snapshot.loadedConfig,
-        configPath: options.target.globalConfigPath,
-        ...(options.target.selectedStoreRoot === undefined
+        configPath: options.target.runtimeLocation.globalConfigPath,
+        ...(options.target.runtimeLocation.selection.storeRoot === undefined
           ? {}
-          : {storeRoot: options.target.selectedStoreRoot}),
+          : {
+              storeRoot: options.target.runtimeLocation.selection.storeRoot,
+            }),
         operation: options.operation,
         ...(options.validateCandidate === undefined
           ? {}
@@ -440,13 +402,7 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
     });
   }
 
-  const overlay = options.snapshot.overlay;
-
-  if (overlay === undefined) {
-    throw new RuntimeConfigMutationError(
-      `Character "${options.target.characterScope.characterId}" overlay snapshot is unavailable.`,
-    );
-  }
+  const overlay = options.snapshot.characterOverlay.overlay;
 
   const overlayBase =
     overlay.config ??
@@ -494,30 +450,31 @@ function scopedPreparedCandidateFingerprint(options: {
   if (options.target.scope === 'character') {
     return createLayeredRuntimeConfigFingerprint({
       globalConfig: options.snapshot.globalDocument,
-      characterId: options.target.characterScope.characterId,
+      characterId: options.target.runtimeLocation.characterScope.characterId,
       overlayConfig: options.candidate,
     });
   }
 
-  const characterScope =
-    options.target.characterScope ??
-    deriveRuntimeConfigCharacterScope({
-      loadedConfig: Object.freeze({
-        source: 'path',
-        path: options.target.globalConfigPath,
-        config: options.candidate,
-        diagnostics: Object.freeze([]),
-      }),
-      ...(options.target.selectedStoreRoot === undefined
-        ? {}
-        : {storeRoot: options.target.selectedStoreRoot}),
-    });
-  const overlay =
-    characterScope === undefined
-      ? undefined
-      : sameCharacterScope(characterScope, options.snapshot.characterScope)
-        ? options.snapshot.overlay
-        : loadCharacterOverlayForScope(characterScope);
+  const candidateLocation = resolveProject02RuntimeLocation({
+    loadedConfig: Object.freeze({
+      source: 'path',
+      path: options.target.runtimeLocation.globalConfigPath,
+      config: options.candidate,
+      diagnostics: Object.freeze([]),
+    }),
+    selection: options.target.runtimeLocation.selection,
+    selectedConfig: {
+      source: options.target.runtimeLocation.configSource,
+      path: options.target.runtimeLocation.globalConfigPath,
+    },
+  });
+  const characterScope = candidateLocation.characterScope;
+  const overlay = sameRuntimeConfigCharacterScope(
+    characterScope,
+    options.snapshot.runtimeLocation.characterScope,
+  )
+    ? options.snapshot.characterOverlay.overlay
+    : readCharacterOverlayForScope(characterScope).overlay;
 
   return layeredRuntimeConfigFingerprintForScope({
     globalConfig: options.candidate,
@@ -526,52 +483,11 @@ function scopedPreparedCandidateFingerprint(options: {
   });
 }
 
-function sameCharacterScope(
-  left: RuntimeConfigCharacterScope,
-  right: RuntimeConfigCharacterScope | undefined,
-): boolean {
-  return (
-    right !== undefined &&
-    left.characterId === right.characterId &&
-    left.dataRoot === right.dataRoot
-  );
-}
-
 function emptyCharacterMaterializationOutcome(): RuntimeConfigCharacterMaterializationOutcome {
   return Object.freeze({
     configChanged: false,
     autoEnabledPluginIds: Object.freeze([]),
   });
-}
-
-function requiredCharacterScope(
-  loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>,
-  options: {
-    readonly storeRoot?: string;
-    readonly characterId?: string;
-    readonly characterScope?: RuntimeConfigCharacterScope;
-  },
-): RuntimeConfigCharacterScope {
-  const characterScope =
-    options.characterScope ??
-    deriveRuntimeConfigCharacterScope({
-      loadedConfig,
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.characterId === undefined
-        ? {}
-        : {characterId: options.characterId}),
-    });
-
-  if (characterScope === undefined) {
-    throw new RuntimeConfigMutationError(
-      'Character scope is unavailable: the configured character id or ' +
-        'store root does not form a character-data path.',
-    );
-  }
-
-  return characterScope;
 }
 
 function assertCharacterScopedControlOperation(

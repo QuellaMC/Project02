@@ -4,14 +4,15 @@
  * use to self-read their manifest. "$schema" is allowed and ignored so
  * descriptors can reference the editor schema in schemas/.
  */
-import {readFileSync} from 'node:fs';
 import {extname} from 'node:path';
 
+import {readBoundedPackageJsonFile} from '../../shared/package-metadata.ts';
 import {createRuntimePluginManifest} from './manifest-validation.ts';
 import {isRecord} from './validation-primitives.ts';
 import type {RuntimePluginManifest} from './types.ts';
 
 export const runtimePluginPackageDescriptorFormat = 'project02.plugin.v1';
+export const maxRuntimePluginPackageMetadataBytes = 256 * 1_024;
 
 export const runtimePluginPackageEntryExtensions = Object.freeze([
   '.ts',
@@ -121,20 +122,17 @@ export function readRuntimePluginPackageDescriptor(options: {
   readonly descriptorUrl: URL;
   readonly expectedEntry?: string;
 }): ParsedRuntimePluginPackageDescriptor {
-  let raw: unknown;
+  const descriptor = readBoundedPackageJsonFile({
+    path: options.descriptorUrl,
+    maxBytes: maxRuntimePluginPackageMetadataBytes,
+    boundaryField: 'Runtime plugin package descriptor',
+  });
 
-  try {
-    raw = JSON.parse(readFileSync(options.descriptorUrl, 'utf8')) as unknown;
-  } catch (error: unknown) {
-    throw new TypeError(
-      'Runtime plugin package descriptor could not be read.',
-      {
-        cause: error,
-      },
-    );
+  if (descriptor.status === 'rejected') {
+    throw new TypeError('Runtime plugin package descriptor could not be read.');
   }
 
-  const parsed = parseRuntimePluginPackageDescriptor(raw);
+  const parsed = parseRuntimePluginPackageDescriptor(descriptor.value);
 
   if (parsed.status === 'rejected') {
     throw new TypeError(parsed.issue.message);

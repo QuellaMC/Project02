@@ -14,22 +14,19 @@ import {
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
 } from '../storage/layout-contract.ts';
-import {assertCharacterDataDirReadable} from '../storage/character-data.ts';
 import {
   acquireLocalRuntimeMutationLockSync,
+  acquireLocalRuntimeMutationLocksSync,
   createLocalRuntimeMutationLockOwnerToken,
-  defaultLocalRuntimeMutationLockWaitTimeoutMs,
   LocalRuntimeMutationLockBusyError,
+  LocalRuntimeMutationLocksAcquireError,
   type LocalRuntimeMutationLockLeaseSync,
   type LocalRuntimeMutationLockOwnerToken,
   type LocalRuntimeMutationLocksLeaseSync,
 } from '../storage/mutation-lock.ts';
 import {runtimeConfigEnvPathForLocation} from './env-file.ts';
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
-import {
-  loadProject02RuntimeConfig,
-  RuntimeConfigLocationError,
-} from './load.ts';
+import {RuntimeConfigLocationError} from './load.ts';
 import {
   canonicalRuntimeConfigMutationPath,
   commitPreparedRuntimeConfigMutation,
@@ -40,25 +37,29 @@ import {
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 import {
-  characterOverlayConfigPath,
-  deriveRuntimeConfigCharacterScope,
   layeredRuntimeConfigFingerprintForScope,
-  loadCharacterOverlayForScope,
+  readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
+  type RuntimeConfigCharacterOverlaySnapshot,
 } from './overlay.ts';
+import {
+  loadProject02RuntimeConfigForLocation,
+  resolveProject02RuntimeLocation,
+  sameRuntimeConfigCharacterScope,
+  type ResolvedProject02RuntimeLocation,
+  type ResolvedRuntimeConfigScopeTarget,
+} from './location.ts';
 import type {
   LoadedProject02RuntimeConfig,
   Project02RuntimeConfig,
-  ResolvedRuntimeConfigScopeTarget,
-  RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
 } from './types.ts';
 
 export type RuntimeConfigControlSnapshot = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly globalDocument: Project02RuntimeConfig;
-  readonly characterScope: RuntimeConfigCharacterScope | undefined;
-  readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly characterOverlay: RuntimeConfigCharacterOverlaySnapshot;
 };
 
 export type RuntimeConfigControlTransactionPreparation<T> = {
@@ -87,17 +88,17 @@ const runtimeConfigControlDriftRetryLimit = 8;
 export function readRuntimeConfigControlSnapshot(
   target: ResolvedRuntimeConfigScopeTarget,
 ): RuntimeConfigControlSnapshot {
-  preflightRuntimeConfigControlTarget(target);
   const loadedConfig = loadSelectedGlobalConfig(target);
+  const runtimeLocation = runtimeLocationForLoadedGlobal(target, loadedConfig);
   const canonicalGlobalConfigPath = canonicalRuntimeConfigMutationPath(
-    loadedConfig.path ?? target.globalConfigPath,
+    loadedConfig.path ?? runtimeLocation.globalConfigPath,
   );
   assertGlobalTargetOutsideCharacterData(canonicalGlobalConfigPath);
 
   return snapshotFromLoadedGlobal({
     target,
     loadedConfig,
-    characterScope: controlCharacterScope(target, loadedConfig),
+    runtimeLocation,
   });
 }
 
@@ -113,10 +114,9 @@ type ApplyRuntimeConfigControlTransactionOptions<T> = {
 export function applyRuntimeConfigControlTransaction<T>(
   options: ApplyRuntimeConfigControlTransactionOptions<T>,
 ): RuntimeConfigControlTransactionResult<T> {
-  preflightRuntimeConfigControlTarget(options.target);
-
+  const preflightSnapshot = readRuntimeConfigControlSnapshot(options.target);
   let anticipatedEnvPath = options.secretMutation
-    ? currentRuntimeConfigEnvPath(options.target)
+    ? runtimeConfigEnvPathForLocation(preflightSnapshot.runtimeLocation)
     : undefined;
 
   for (let attempt = 0; ; attempt += 1) {
@@ -149,7 +149,7 @@ function applyRuntimeConfigControlAttempt<T>(
 
   try {
     const canonicalGlobalConfigPath = canonicalRuntimeConfigMutationPath(
-      options.target.globalConfigPath,
+      options.target.runtimeLocation.globalConfigPath,
     );
     assertGlobalTargetOutsideCharacterData(canonicalGlobalConfigPath);
     const canonicalAnticipatedEnvPath =
@@ -160,7 +160,8 @@ function applyRuntimeConfigControlAttempt<T>(
     leases.push(
       acquireGlobalControlLocks({
         canonicalGlobalConfigPath,
-        displayGlobalConfigPath: options.target.globalConfigPath,
+        displayGlobalConfigPath:
+          options.target.runtimeLocation.globalConfigPath,
         ...(canonicalAnticipatedEnvPath === undefined
           ? {}
           : {
@@ -172,8 +173,12 @@ function applyRuntimeConfigControlAttempt<T>(
     );
 
     const loadedConfig = loadSelectedGlobalConfig(options.target);
+    const currentRuntimeLocation = runtimeLocationForLoadedGlobal(
+      options.target,
+      loadedConfig,
+    );
     const currentCanonicalGlobalConfigPath = canonicalRuntimeConfigMutationPath(
-      loadedConfig.path ?? options.target.globalConfigPath,
+      loadedConfig.path ?? currentRuntimeLocation.globalConfigPath,
     );
 
     if (currentCanonicalGlobalConfigPath !== canonicalGlobalConfigPath) {
@@ -181,12 +186,9 @@ function applyRuntimeConfigControlAttempt<T>(
     }
 
     assertGlobalTargetOutsideCharacterData(currentCanonicalGlobalConfigPath);
-    const currentEnvPath = runtimeConfigEnvPathForLocation({
-      loadedConfig,
-      ...(options.target.selectedStoreRoot === undefined
-        ? {}
-        : {storeRoot: options.target.selectedStoreRoot}),
-    });
+    const currentEnvPath = runtimeConfigEnvPathForLocation(
+      currentRuntimeLocation,
+    );
     const currentCanonicalEnvPath =
       canonicalRuntimeConfigMutationPath(currentEnvPath);
 
@@ -197,20 +199,23 @@ function applyRuntimeConfigControlAttempt<T>(
       throw new RuntimeConfigControlPathDrift(currentEnvPath);
     }
 
-    const characterScope = controlCharacterScope(options.target, loadedConfig);
-    const lockedOverlay =
-      characterScope === undefined
-        ? undefined
-        : lockOverlayForScope({
-            characterScope,
-            ownerToken,
-            leases,
-            required: options.target.scope === 'character',
-          });
+    if (
+      options.target.scope === 'character' &&
+      canonicalRuntimeConfigMutationPath(currentRuntimeLocation.overlayPath) !==
+        options.target.canonicalConfigPath
+    ) {
+      throw new RuntimeConfigControlPathDrift();
+    }
+    const lockedOverlay = lockOverlayForScope({
+      runtimeLocation: currentRuntimeLocation,
+      ownerToken,
+      leases,
+      required: options.target.scope === 'character',
+    });
     const snapshot = snapshotFromLoadedGlobal({
       target: options.target,
       loadedConfig,
-      characterScope,
+      runtimeLocation: currentRuntimeLocation,
     });
 
     if (options.expectedFingerprint !== undefined) {
@@ -221,11 +226,14 @@ function applyRuntimeConfigControlAttempt<T>(
     }
 
     const preparation = options.prepare(snapshot);
-    const candidateEnvPath = runtimeConfigControlCandidateEnvPath({
+    const candidateRuntimeLocation = runtimeConfigControlCandidateLocation({
       target: options.target,
       snapshot,
       candidate: preparation.preparedCandidate.config,
     });
+    const candidateEnvPath = runtimeConfigEnvPathForLocation(
+      candidateRuntimeLocation,
+    );
     const canonicalCandidateEnvPath =
       canonicalRuntimeConfigMutationPath(candidateEnvPath);
 
@@ -244,17 +252,14 @@ function applyRuntimeConfigControlAttempt<T>(
             lockedOverlay,
             preparation.commit,
           );
-    const resultScope =
+    const resultRuntimeLocation =
       options.target.scope === 'character'
-        ? options.target.characterScope
-        : controlCharacterScopeForCandidate(
-            options.target,
-            preparation.preparedCandidate.config,
-          );
+        ? snapshot.runtimeLocation
+        : candidateRuntimeLocation;
     const resultOverlay = resultOverlayForCandidate({
-      previousScope: snapshot.characterScope,
-      previousOverlay: snapshot.overlay,
-      resultScope,
+      previousLocation: snapshot.runtimeLocation,
+      previousOverlay: snapshot.characterOverlay.overlay,
+      resultLocation: resultRuntimeLocation,
       ownerToken,
       leases,
     });
@@ -281,12 +286,13 @@ function applyRuntimeConfigControlAttempt<T>(
           options.target.scope === 'character'
             ? createLayeredRuntimeConfigFingerprint({
                 globalConfig: snapshot.globalDocument,
-                characterId: options.target.characterScope.characterId,
+                characterId:
+                  options.target.runtimeLocation.characterScope.characterId,
                 overlayConfig: preparation.preparedCandidate.config,
               })
             : layeredRuntimeConfigFingerprintForScope({
                 globalConfig: preparation.preparedCandidate.config,
-                characterScope: resultScope,
+                characterScope: resultRuntimeLocation.characterScope,
                 overlay: resultOverlay,
               }),
       } satisfies RuntimeConfigMutationResult),
@@ -300,14 +306,14 @@ function applyRuntimeConfigControlAttempt<T>(
 export function verifyRuntimeConfigControlExpectation(
   snapshot: Pick<
     RuntimeConfigControlSnapshot,
-    'globalDocument' | 'characterScope' | 'overlay'
+    'globalDocument' | 'runtimeLocation' | 'characterOverlay'
   >,
   expectedFingerprint: string,
 ): void {
   const currentFingerprint = layeredRuntimeConfigFingerprintForScope({
     globalConfig: snapshot.globalDocument,
-    characterScope: snapshot.characterScope,
-    overlay: snapshot.overlay,
+    characterScope: snapshot.runtimeLocation.characterScope,
+    overlay: snapshot.characterOverlay.overlay,
   });
 
   if (expectedFingerprint !== currentFingerprint) {
@@ -335,23 +341,10 @@ export function assertGlobalConfigLoadableForCharacterScope(
   }
 }
 
-function currentRuntimeConfigEnvPath(
-  target: ResolvedRuntimeConfigScopeTarget,
-): string {
-  const loadedConfig = loadSelectedGlobalConfig(target);
-
-  return runtimeConfigEnvPathForLocation({
-    loadedConfig,
-    ...(target.selectedStoreRoot === undefined
-      ? {}
-      : {storeRoot: target.selectedStoreRoot}),
-  });
-}
-
 function snapshotFromLoadedGlobal(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly characterScope: RuntimeConfigCharacterScope | undefined;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
 }): RuntimeConfigControlSnapshot {
   if (options.target.scope === 'character') {
     assertGlobalConfigLoadableForCharacterScope(options.loadedConfig);
@@ -359,165 +352,108 @@ function snapshotFromLoadedGlobal(options: {
 
   const globalDocument = createRuntimeConfigMutationBase({
     loadedConfig: options.loadedConfig,
-    configPath: options.target.globalConfigPath,
-    ...(options.target.selectedStoreRoot === undefined
+    configPath: options.runtimeLocation.globalConfigPath,
+    ...(options.runtimeLocation.selection.storeRoot === undefined
       ? {}
-      : {storeRoot: options.target.selectedStoreRoot}),
+      : {storeRoot: options.runtimeLocation.selection.storeRoot}),
   });
-  const overlay =
-    options.characterScope === undefined
-      ? undefined
-      : loadCharacterOverlayForScope(options.characterScope);
+  const characterOverlay = readCharacterOverlayForScope(
+    options.runtimeLocation.characterScope,
+  );
 
-  assertCharacterOverlayMutable(options.target, overlay);
+  if (
+    options.target.scope === 'character' &&
+    characterOverlay.marker === undefined
+  ) {
+    throw new RuntimeConfigMutationError(
+      `Config file "${options.target.configPath}" sits in a character-data ` +
+        'directory that has no identity marker; run the command with ' +
+        `--character ${options.runtimeLocation.characterScope.characterId} to initialize it first.`,
+    );
+  }
+
+  assertCharacterOverlayMutable(options.target, characterOverlay.overlay);
 
   return Object.freeze({
     loadedConfig: options.loadedConfig,
     globalDocument,
-    characterScope: options.characterScope,
-    overlay,
+    runtimeLocation: options.runtimeLocation,
+    characterOverlay,
   });
 }
 
 function loadSelectedGlobalConfig(
   target: ResolvedRuntimeConfigScopeTarget,
 ): LoadedProject02RuntimeConfig {
-  return loadProject02RuntimeConfig({
-    configPath: target.globalConfigPath,
-    ...(target.env === undefined ? {} : {env: target.env}),
-    ...(target.selectedStoreRoot === undefined
-      ? {}
-      : {storeRoot: target.selectedStoreRoot}),
-  });
+  return loadProject02RuntimeConfigForLocation(target.runtimeLocation);
 }
 
-function controlCharacterScope(
+function runtimeLocationForLoadedGlobal(
   target: ResolvedRuntimeConfigScopeTarget,
   loadedConfig: LoadedProject02RuntimeConfig,
-): RuntimeConfigCharacterScope | undefined {
-  if (target.scope === 'character' || target.characterScope !== undefined) {
-    return target.characterScope;
-  }
-
-  return deriveRuntimeConfigCharacterScope({
+): ResolvedProject02RuntimeLocation {
+  return resolveProject02RuntimeLocation({
     loadedConfig,
-    ...(target.selectedStoreRoot === undefined
-      ? {}
-      : {storeRoot: target.selectedStoreRoot}),
+    selection: target.runtimeLocation.selection,
+    selectedConfig: {
+      source: target.runtimeLocation.configSource,
+      path: target.runtimeLocation.globalConfigPath,
+    },
   });
 }
 
-function controlCharacterScopeForCandidate(
-  target: Extract<ResolvedRuntimeConfigScopeTarget, {readonly scope: 'global'}>,
-  config: Project02RuntimeConfig,
-): RuntimeConfigCharacterScope | undefined {
-  if (target.characterScope !== undefined) {
-    return target.characterScope;
-  }
-
-  return deriveRuntimeConfigCharacterScope({
-    loadedConfig: Object.freeze({
-      source: 'path',
-      path: target.globalConfigPath,
-      config,
-      diagnostics: Object.freeze([]),
-    }),
-    ...(target.selectedStoreRoot === undefined
-      ? {}
-      : {storeRoot: target.selectedStoreRoot}),
-  });
-}
-
-function runtimeConfigControlCandidateEnvPath(options: {
+function runtimeConfigControlCandidateLocation(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly snapshot: RuntimeConfigControlSnapshot;
   readonly candidate: Project02RuntimeConfig;
-}): string {
+}): ResolvedProject02RuntimeLocation {
   const globalConfig =
     options.target.scope === 'global'
       ? options.candidate
       : options.snapshot.globalDocument;
 
-  return runtimeConfigEnvPathForLocation({
+  return resolveProject02RuntimeLocation({
     loadedConfig: Object.freeze({
       source: 'path',
-      path: options.target.globalConfigPath,
+      path: options.target.runtimeLocation.globalConfigPath,
       config: globalConfig,
       diagnostics: Object.freeze([]),
     }),
-    ...(options.target.selectedStoreRoot === undefined
-      ? {}
-      : {storeRoot: options.target.selectedStoreRoot}),
+    selection: options.target.runtimeLocation.selection,
+    selectedConfig: {
+      source: options.target.runtimeLocation.configSource,
+      path: options.target.runtimeLocation.globalConfigPath,
+    },
   });
 }
 
 function resultOverlayForCandidate(options: {
-  readonly previousScope: RuntimeConfigCharacterScope | undefined;
-  readonly previousOverlay: LoadedProject02CharacterOverlayConfig | undefined;
-  readonly resultScope: RuntimeConfigCharacterScope | undefined;
+  readonly previousLocation: ResolvedProject02RuntimeLocation;
+  readonly previousOverlay: LoadedProject02CharacterOverlayConfig;
+  readonly resultLocation: ResolvedProject02RuntimeLocation;
   readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
   readonly leases: (
     LocalRuntimeMutationLocksLeaseSync | LocalRuntimeMutationLockLeaseSync
   )[];
-}): LoadedProject02CharacterOverlayConfig | undefined {
-  if (options.resultScope === undefined) {
-    return undefined;
-  }
-
-  if (sameCharacterScope(options.resultScope, options.previousScope)) {
+}): LoadedProject02CharacterOverlayConfig {
+  if (
+    sameRuntimeConfigCharacterScope(
+      options.resultLocation.characterScope,
+      options.previousLocation.characterScope,
+    )
+  ) {
     return options.previousOverlay;
   }
 
   lockOverlayForScope({
-    characterScope: options.resultScope,
+    runtimeLocation: options.resultLocation,
     ownerToken: options.ownerToken,
     leases: options.leases,
     required: false,
   });
 
-  return loadCharacterOverlayForScope(options.resultScope);
-}
-
-function sameCharacterScope(
-  left: RuntimeConfigCharacterScope,
-  right: RuntimeConfigCharacterScope | undefined,
-): boolean {
-  return (
-    right !== undefined &&
-    left.characterId === right.characterId &&
-    left.dataRoot === right.dataRoot
-  );
-}
-
-function preflightRuntimeConfigControlTarget(
-  target: ResolvedRuntimeConfigScopeTarget,
-): void {
-  assertGlobalTargetOutsideCharacterData(
-    canonicalRuntimeConfigMutationPath(target.globalConfigPath),
-  );
-
-  if (target.scope !== 'character') {
-    return;
-  }
-
-  assertGlobalConfigLoadableForCharacterScope(loadSelectedGlobalConfig(target));
-  const marker = assertCharacterDataDirReadable({
-    storageOptions: {storeRoot: target.characterScope.dataRoot},
-    characterId: target.characterScope.characterId,
-  });
-
-  if (marker === undefined) {
-    throw new RuntimeConfigMutationError(
-      `Config file "${target.configPath}" sits in a character-data ` +
-        'directory that has no identity marker; run the command with ' +
-        `--character ${target.characterScope.characterId} to initialize it first.`,
-    );
-  }
-
-  assertCharacterOverlayMutable(
-    target,
-    loadCharacterOverlayForScope(target.characterScope),
-  );
+  return readCharacterOverlayForScope(options.resultLocation.characterScope)
+    .overlay;
 }
 
 function assertCharacterOverlayMutable(
@@ -553,16 +489,14 @@ function assertGlobalTargetOutsideCharacterData(path: string): void {
 }
 
 function lockOverlayForScope(options: {
-  readonly characterScope: RuntimeConfigCharacterScope;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
   readonly leases: (
     LocalRuntimeMutationLocksLeaseSync | LocalRuntimeMutationLockLeaseSync
   )[];
   readonly required: boolean;
 }): LockedOverlay {
-  const overlayPath = characterOverlayConfigPath(
-    options.characterScope.dataRoot,
-  );
+  const overlayPath = options.runtimeLocation.overlayPath;
   const canonicalPath = canonicalRuntimeConfigMutationPath(overlayPath);
 
   if (!existsSync(dirname(canonicalPath))) {
@@ -615,7 +549,7 @@ function requiredCharacterWritePath(
 ): string {
   if (lockedOverlay === undefined) {
     throw new RuntimeConfigMutationError(
-      `Character "${target.characterScope.characterId}" overlay lock is unavailable.`,
+      `Character "${target.runtimeLocation.characterScope.characterId}" overlay lock is unavailable.`,
     );
   }
 
@@ -648,13 +582,24 @@ function acquireGlobalControlLocks(options: {
       : [options.canonicalGlobalConfigPath, options.canonicalEnvPath];
 
   try {
-    return acquireControlPathLocks(paths, options.ownerToken);
+    return acquireLocalRuntimeMutationLocksSync({
+      targets: paths.map(path => ({
+        locksRoot: createProject02HomeLayout({
+          homeRoot: dirname(path),
+        }).locksRoot,
+        resourceKey: runtimeControlPathResourceKey(path),
+      })),
+      ownerToken: options.ownerToken,
+    });
   } catch (error: unknown) {
-    const pathError =
-      error instanceof RuntimeControlPathLockError ? error : undefined;
+    const failedTarget =
+      error instanceof LocalRuntimeMutationLocksAcquireError
+        ? error.target
+        : undefined;
     const envFailed =
       options.canonicalEnvPath !== undefined &&
-      pathError?.path === options.canonicalEnvPath;
+      failedTarget?.resourceKey ===
+        runtimeControlPathResourceKey(options.canonicalEnvPath);
 
     throw runtimeConfigControlFileError(
       envFailed
@@ -667,67 +612,8 @@ function acquireGlobalControlLocks(options: {
   }
 }
 
-class RuntimeControlPathLockError extends Error {
-  readonly path: string;
-
-  constructor(path: string, options?: ErrorOptions) {
-    super(`Could not acquire runtime control path lock for ${path}.`, options);
-    this.name = 'RuntimeControlPathLockError';
-    this.path = path;
-  }
-}
-
-function acquireControlPathLocks(
-  canonicalPathsInput: readonly string[],
-  ownerToken: LocalRuntimeMutationLockOwnerToken,
-): LocalRuntimeMutationLocksLeaseSync {
-  const canonicalPaths = Object.freeze(
-    [...new Set(canonicalPathsInput)].sort(compareCodeUnits),
-  );
-  const leases: LocalRuntimeMutationLockLeaseSync[] = [];
-  const startedAt = Date.now();
-
-  try {
-    for (const path of canonicalPaths) {
-      try {
-        leases.push(
-          acquireLocalRuntimeMutationLockSync({
-            locksRoot: createProject02HomeLayout({
-              homeRoot: dirname(path),
-            }).locksRoot,
-            resourceKey: `runtime-control-file:${path}`,
-            waitTimeoutMs: Math.max(
-              0,
-              defaultLocalRuntimeMutationLockWaitTimeoutMs -
-                (Date.now() - startedAt),
-            ),
-            ownerToken,
-          }),
-        );
-      } catch (error: unknown) {
-        throw new RuntimeControlPathLockError(path, {cause: error});
-      }
-    }
-  } catch (error: unknown) {
-    releaseControlLeases(leases);
-    throw error;
-  }
-
-  let released = false;
-
-  return Object.freeze({
-    resourceKeys: Object.freeze(
-      canonicalPaths.map(path => `runtime-control-file:${path}`),
-    ),
-    release() {
-      if (released) {
-        return;
-      }
-
-      released = true;
-      releaseControlLeases(leases);
-    },
-  } satisfies LocalRuntimeMutationLocksLeaseSync);
+function runtimeControlPathResourceKey(path: string): string {
+  return `runtime-control-file:${path}`;
 }
 
 function releaseControlLeases(
@@ -762,10 +648,6 @@ function runtimeConfigControlFileError(
   return cause instanceof RuntimeConfigMutationError
     ? cause
     : new RuntimeConfigMutationError(message, {cause});
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 class RuntimeConfigControlPathDrift extends Error {

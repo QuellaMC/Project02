@@ -31,7 +31,10 @@ import {
   applyRuntimeConfigControlOperation,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 
 const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
@@ -328,7 +331,8 @@ describe('layered config control against a rebound character-data directory', ()
   it('refuses a global mutation instead of fingerprinting the foreign overlay', () => {
     const {homeRoot, configPath} = homeWithForeignMiraDataDir();
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'global',
     });
@@ -353,7 +357,8 @@ describe('layered config control against a rebound character-data directory', ()
   it('refuses a layered expectation before comparing fingerprints', () => {
     const {homeRoot, configPath} = homeWithForeignMiraDataDir();
     const target = resolveRuntimeConfigScopeTarget({
-      storeRoot: homeRoot,
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
       env: {},
       scope: 'global',
     });

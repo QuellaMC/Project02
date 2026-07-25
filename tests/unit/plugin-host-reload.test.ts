@@ -1,3 +1,4 @@
+import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
@@ -12,7 +13,7 @@ import type {
   RuntimePlugin,
   RuntimePluginManifest,
 } from '../../src/plugins/api/index.ts';
-import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import type {RuntimePluginReloader} from '../../src/plugins/host/index.ts';
 import {runtimePluginReloadTimeoutMs} from '../../src/plugins/host/reload.ts';
 import {createPluginContextEvidence} from '../../src/plugins/api/evidence-helpers.ts';
@@ -149,10 +150,10 @@ function reloadHost(options: {
   return createRuntimePluginHost({
     plugins: [options.initial ?? reloadFixturePlugin('v1')],
     enabledPluginIds: [reloadPluginId],
-    pluginConfigControl: {
+    pluginConfigControl: runtimePluginConfigControlStateForTest({
       control: testRuntimePluginConfigControlCapability,
       pluginManifests: [reloadFixtureManifest()],
-    },
+    }),
     ...(options.reloader === undefined
       ? {}
       : {pluginReloader: options.reloader}),
