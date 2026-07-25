@@ -7,6 +7,8 @@
  */
 import {
   freezeCharacterProfile,
+  isValidSpeakerDisplayName,
+  maxSpeakerDisplayNameLength,
   type CharacterProfile,
 } from '../../core/index.ts';
 import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
@@ -19,7 +21,6 @@ export const characterPackageDescriptorFileName = 'project02.character.json';
 export const maxCharacterPersonaSections = 16;
 export const maxCharacterPersonaSectionLength = 4000;
 
-const maxCharacterDisplayNameLength = 128;
 // Bounded per component: the version is copied into `characterRef.version` on
 // every role-model I/O snapshot and persisted in raw evidence, so an unbounded
 // digit count would let one package field add kilobytes to every turn. Nine
@@ -204,17 +205,15 @@ function parseCharacterIdentity(value: unknown): CharacterIdentityParseResult {
 
   const displayName = value['displayName'];
 
-  if (
-    typeof displayName !== 'string' ||
-    displayName.trim().length === 0 ||
-    displayName.length > maxCharacterDisplayNameLength ||
-    displayName !== displayName.trim()
-  ) {
+  // Shared with the user speaker: both are stamped into `speakerName`, and both
+  // are interpolated before a colon in chat and relay output, so a multiline
+  // name would let an accepted package forge extra lines.
+  if (!isValidSpeakerDisplayName(displayName)) {
     return rejectedDescriptor(
       'invalid_identity',
-      'Character package identity.displayName must be a non-empty string ' +
-        `of at most ${String(maxCharacterDisplayNameLength)} characters ` +
-        'with no leading or trailing whitespace.',
+      'Character package identity.displayName must be a non-empty ' +
+        `single-line string of at most ${String(maxSpeakerDisplayNameLength)} ` +
+        'characters with no leading or trailing whitespace.',
     );
   }
 

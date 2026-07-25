@@ -8,6 +8,9 @@ import {
   parseBoundedPackageJsonSource,
   readBoundedPackageJsonFile,
   scanPackageSourceRoot,
+  snapshotPackageDirectory,
+  snapshotPackageDirectoryFromSource,
+  snapshotPackageSourceDirectory,
 } from '../../src/shared/package-metadata.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -43,6 +46,43 @@ describe('scanPackageSourceRoot', () => {
     if (result.status === 'unavailable') {
       expect(result.error).toMatchObject({code: 'ENOENT'});
     }
+  });
+});
+
+describe('snapshotPackageSourceDirectory', () => {
+  it('accepts a linked source root but not a linked package inside it', () => {
+    const home = createTestTempRoot('project02-package-home-');
+    const installed = createTestTempRoot('project02-package-installed-');
+    const elsewhere = createTestTempRoot('project02-package-elsewhere-');
+    // The home ownership guard permits this layout, so discovery must too:
+    // rejecting it makes even the bundled default package fail to load.
+    const sourceRoot = join(home, 'characters');
+
+    mkdirSync(join(installed, 'mira'));
+    symlinkSync(installed, sourceRoot, 'dir');
+    symlinkSync(elsewhere, join(installed, 'linked-away'), 'dir');
+
+    const sourceDirectory = snapshotPackageSourceDirectory(sourceRoot);
+
+    expect(snapshotPackageDirectory(sourceRoot)).toBeUndefined();
+    expect(sourceDirectory).toBeDefined();
+    if (sourceDirectory === undefined) {
+      return;
+    }
+
+    expect(
+      snapshotPackageDirectoryFromSource({
+        sourceDirectory,
+        packageName: 'mira',
+      }),
+    ).toBeDefined();
+    // Individual packages stay strict: only the source root may be linked.
+    expect(
+      snapshotPackageDirectoryFromSource({
+        sourceDirectory,
+        packageName: 'linked-away',
+      }),
+    ).toBeUndefined();
   });
 });
 

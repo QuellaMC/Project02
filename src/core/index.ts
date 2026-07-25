@@ -12,6 +12,8 @@ export {
   type VisibleMessageRole,
 } from './message/message.ts';
 export {
+  isValidSpeakerDisplayName,
+  maxSpeakerDisplayNameLength,
   normalizeOneLineMessage,
   normalizeVisibleMessageText,
   oneLineMessageMissingErrorMessage,
@@ -43,7 +45,6 @@ export {
   createUserSpeaker,
   defaultRecentVisibleMessageLimit,
   localUserSpeaker,
-  maxUserDisplayNameLength,
   normalizeCharacterAgentReply,
   rollbackLastCharacterTurn,
   runCharacterTurn,

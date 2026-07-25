@@ -18,6 +18,7 @@ import {
   scanPackageSourceRoot,
   snapshotPackageDirectory,
   snapshotPackageDirectoryFromSource,
+  snapshotPackageSourceDirectory,
   type BoundedPackageJsonRejectionReason,
   type PackageDirectorySnapshot,
 } from '../../shared/package-metadata.ts';
@@ -110,7 +111,7 @@ function discoverRuntimePluginPackageSource(options: {
   readonly candidates: DiscoveredRuntimePluginPackageCandidate[];
   readonly diagnostics: RuntimePluginPackageDiagnostic[];
 }): void {
-  const sourceDirectory = snapshotPackageDirectory(options.source.root);
+  const sourceDirectory = snapshotPackageSourceDirectory(options.source.root);
   const scan = scanPackageSourceRoot(options.source.root);
 
   if (scan.status === 'unavailable') {
@@ -170,7 +171,7 @@ function discoverRuntimePluginPackageSource(options: {
   if (
     !packageDirectorySnapshotsEqual(
       sourceDirectory,
-      snapshotPackageDirectory(options.source.root),
+      snapshotPackageSourceDirectory(options.source.root),
     )
   ) {
     options.diagnostics.push(

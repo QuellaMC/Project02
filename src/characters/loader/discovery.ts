@@ -15,8 +15,8 @@ import {
   packageDirectorySnapshotsEqual,
   parseBoundedPackageJsonSource,
   scanPackageSourceRoot,
-  snapshotPackageDirectory,
   snapshotPackageDirectoryFromSource,
+  snapshotPackageSourceDirectory,
   type BoundedPackageJsonRejectionReason,
   type PackageDirectorySnapshot,
 } from '../../shared/package-metadata.ts';
@@ -104,7 +104,7 @@ export function discoverCharacterPackages(options: {
   const diagnostics: CharacterPackageDiagnostic[] = [];
 
   for (const source of options.sources) {
-    const sourceDirectory = snapshotPackageDirectory(source.root);
+    const sourceDirectory = snapshotPackageSourceDirectory(source.root);
     const scan = scanPackageSourceRoot(source.root);
 
     if (scan.status === 'unavailable') {
@@ -165,7 +165,7 @@ export function discoverCharacterPackages(options: {
     if (
       !packageDirectorySnapshotsEqual(
         sourceDirectory,
-        snapshotPackageDirectory(source.root),
+        snapshotPackageSourceDirectory(source.root),
       )
     ) {
       diagnostics.push(characterPackageSourceUnavailable(source));

@@ -3,7 +3,13 @@
  * discovery. Callers retain ownership of source policy, diagnostics,
  * descriptor parsing, and package identity.
  */
-import {lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
+import {
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import type {BigIntStats, Dirent} from 'node:fs';
 import {
   basename,
@@ -51,21 +57,48 @@ export type PackageDirectoryAncestryEntry = {
 export function snapshotPackageDirectory(
   packageRoot: string,
 ): PackageDirectorySnapshot | undefined {
+  return snapshotDirectory(packageRoot, {followRootLink: false});
+}
+
+/**
+ * Snapshots a package *source root*, where an intentional link is allowed.
+ *
+ * The home ownership guard accepts a linked `plugins`/`characters` root so an
+ * operator can install a package collection from elsewhere. Rejecting one here
+ * would turn that approved layout into the globally blocking
+ * `package_source_unavailable`, so even the bundled default package would fail
+ * to load. Individual packages inside the source stay strict: they resolve
+ * through `snapshotPackageDirectoryFromSource`, which snapshots the real path
+ * and rejects a link there.
+ */
+export function snapshotPackageSourceDirectory(
+  sourceRoot: string,
+): PackageDirectorySnapshot | undefined {
+  return snapshotDirectory(sourceRoot, {followRootLink: true});
+}
+
+function snapshotDirectory(
+  packageRoot: string,
+  options: {readonly followRootLink: boolean},
+): PackageDirectorySnapshot | undefined {
   const normalizedRoot = resolve(packageRoot);
+  // Following pins the identity of the directory a linked root names, which is
+  // the state the rest of discovery reads. Not following reports a link as
+  // neither a directory nor equal to itself, which is the strict rejection.
+  const statRoot = options.followRootLink ? statSync : lstatSync;
 
   try {
-    const initialStat = lstatSync(normalizedRoot, {bigint: true});
+    const initialStat = statRoot(normalizedRoot, {bigint: true});
 
-    if (initialStat.isSymbolicLink() || !initialStat.isDirectory()) {
+    if (!initialStat.isDirectory()) {
       return undefined;
     }
     const realPackageRoot = realpathSync(normalizedRoot);
     const canonicalAncestry =
       snapshotCanonicalDirectoryAncestry(realPackageRoot);
-    const finalStat = lstatSync(normalizedRoot, {bigint: true});
+    const finalStat = statRoot(normalizedRoot, {bigint: true});
 
     if (
-      finalStat.isSymbolicLink() ||
       !finalStat.isDirectory() ||
       filesystemMetadataIdentity(initialStat) !==
         filesystemMetadataIdentity(finalStat) ||

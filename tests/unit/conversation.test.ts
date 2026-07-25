@@ -6,7 +6,7 @@ import {
   CharacterReplyValidationError,
   createConversationSession,
   createUserSpeaker,
-  maxUserDisplayNameLength,
+  maxSpeakerDisplayNameLength,
   runCharacterTurn,
   ConversationRehydrationError,
   type CharacterAgent,
@@ -564,16 +564,22 @@ describe('conversation core', () => {
     });
   });
 
-  it('caps the user display name before it becomes session state', () => {
+  it('bounds the user display name before it becomes session state', () => {
     expect(() =>
-      createUserSpeaker('a'.repeat(maxUserDisplayNameLength)),
+      createUserSpeaker('a'.repeat(maxSpeakerDisplayNameLength)),
     ).not.toThrow();
 
     // The name is stamped onto every user message, so an oversized value would
     // be repeated per turn in durable logs, rehydration, and the prompt.
     expect(() =>
-      createUserSpeaker('a'.repeat(maxUserDisplayNameLength + 1)),
+      createUserSpeaker('a'.repeat(maxSpeakerDisplayNameLength + 1)),
     ).toThrow(/at most 128 characters/);
+
+    // Chat and relay interpolate the name before a colon, so a newline would
+    // let it forge additional output lines.
+    expect(() => createUserSpeaker('Mira\nError: failed')).toThrow(
+      /single-line/,
+    );
   });
 });
 
