@@ -286,12 +286,20 @@ async function waitForOutput(
 ): Promise<void> {
   await new Promise<void>((resolveOutput, rejectOutput) => {
     let stdout = '';
-    // Generous on purpose: loaded CI runners have taken >5s just to
-    // cold-start the child Node process before any output appears.
-    const timeout = setTimeout(() => {
-      rejectOutput(new Error(`Timed out waiting for chat output: ${stdout}`));
-    }, 15_000);
+    // Idle deadline rather than a total one: these cases spawn several real
+    // Node processes that each cold-start, so total time tracks runner load
+    // and any fixed budget eventually goes flaky (this test reached 6.0s, then
+    // 8.0s, then timed out at 15s on progressively busier runners). Waiting on
+    // silence instead measures the thing that actually indicates a hang, and
+    // `exit` still fails fast when the child dies before it is ready.
+    let timeout: NodeJS.Timeout;
+    const failIfIdle = (): void => {
+      timeout = setTimeout(() => {
+        rejectOutput(new Error(`Timed out waiting for chat output: ${stdout}`));
+      }, 20_000);
+    };
 
+    failIfIdle();
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
@@ -299,7 +307,11 @@ async function waitForOutput(
       if (stdout.includes(expected)) {
         clearTimeout(timeout);
         resolveOutput();
+        return;
       }
+      // Progress, not readiness: give the child a fresh idle window.
+      clearTimeout(timeout);
+      failIfIdle();
     });
     child.once('error', error => {
       clearTimeout(timeout);
