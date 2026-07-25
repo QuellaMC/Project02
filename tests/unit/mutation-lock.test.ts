@@ -143,6 +143,67 @@ describe('local runtime mutation locks', () => {
     await outer.release();
   });
 
+  it('gives each lock target its own stall budget', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const waitTimeoutMs = 200;
+    // Targets are acquired in hashed-path order, so ask for that order rather
+    // than assuming it: the point of the test is that the SECOND resource
+    // acquired still gets a full budget.
+    const probe = await acquireLocalRuntimeMutationLocks({
+      targets: ['a-first', 'b-second'].map(resourceKey => ({
+        locksRoot,
+        resourceKey,
+      })),
+      waitTimeoutMs: 0,
+    });
+    const [firstKey, secondKey] = probe.targets.map(
+      target => target.resourceKey,
+    );
+
+    await probe.release();
+
+    if (firstKey === undefined || secondKey === undefined) {
+      throw new Error('Expected two canonical lock targets.');
+    }
+
+    // Hold the first for most of one budget so the wait is spent legitimately
+    // queueing on a healthy resource, then release the second just after.
+    const first = await acquireLocalRuntimeMutationLock({
+      locksRoot,
+      resourceKey: firstKey,
+      waitTimeoutMs: 0,
+    });
+    const second = await acquireLocalRuntimeMutationLock({
+      locksRoot,
+      resourceKey: secondKey,
+      waitTimeoutMs: 0,
+    });
+
+    setTimeout(() => {
+      void first.release();
+    }, waitTimeoutMs * 0.75);
+    setTimeout(() => {
+      void second.release();
+    }, waitTimeoutMs * 1.5);
+
+    // A pooled budget would have been exhausted by queueing on the first
+    // target and would reject the second on its first contended attempt, even
+    // though that resource is healthy and about to be released.
+    const lease = await acquireLocalRuntimeMutationLocks({
+      targets: ['a-first', 'b-second'].map(resourceKey => ({
+        locksRoot,
+        resourceKey,
+      })),
+      waitTimeoutMs,
+    });
+
+    expect(lease.targets.map(target => target.resourceKey)).toEqual([
+      firstKey,
+      secondKey,
+    ]);
+    await lease.release();
+  });
+
   it('acquires multiple resources in canonical order', async () => {
     const locksRoot = await createTempLocksRoot();
     const lease = await acquireLocalRuntimeMutationLocks({

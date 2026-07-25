@@ -206,23 +206,15 @@ export async function acquireLocalRuntimeMutationLocks(
   const normalizedTargets = normalizeMutationLockTargets(inputTargets);
   const targets = publicMutationLockTargets(normalizedTargets);
   const leases: LocalRuntimeMutationLockLease[] = [];
-  const startedAt = Date.now();
 
   try {
     for (const target of normalizedTargets) {
-      const configuredWaitMs =
-        options.waitTimeoutMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
-      const remainingWaitMs = Math.max(
-        0,
-        configuredWaitMs - (Date.now() - startedAt),
-      );
-
       try {
         leases.push(
           await acquireNormalizedMutationLock(
             normalizedMutationLockOptionsForTarget(target, {
               ...lockOptions,
-              waitTimeoutMs: remainingWaitMs,
+              waitTimeoutMs: waitTimeoutMsPerTarget(options.waitTimeoutMs),
             }),
             options.ownerToken,
           ),
@@ -298,23 +290,15 @@ export function acquireLocalRuntimeMutationLocksSync(
   const normalizedTargets = normalizeMutationLockTargets(inputTargets);
   const targets = publicMutationLockTargets(normalizedTargets);
   const leases: LocalRuntimeMutationLockLeaseSync[] = [];
-  const startedAt = Date.now();
 
   try {
     for (const target of normalizedTargets) {
-      const configuredWaitMs =
-        options.waitTimeoutMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
-      const remainingWaitMs = Math.max(
-        0,
-        configuredWaitMs - (Date.now() - startedAt),
-      );
-
       try {
         leases.push(
           acquireNormalizedMutationLockSync(
             normalizedMutationLockOptionsForTarget(target, {
               ...lockOptions,
-              waitTimeoutMs: remainingWaitMs,
+              waitTimeoutMs: waitTimeoutMsPerTarget(options.waitTimeoutMs),
             }),
             options.ownerToken,
           ),
@@ -1137,6 +1121,19 @@ type MutationLockWait = {
    */
   remainingRetryDelayMs(): number;
 };
+
+/**
+ * Gives every target in a multi-lock acquisition its own full stall budget.
+ *
+ * `waitTimeoutMs` is per-resource health, so it cannot also be spent as one
+ * pooled allowance across targets: time spent legitimately queueing on a healthy
+ * first target would arrive at the second as a zero budget and reject it on the
+ * first contended attempt. Each target is a distinct resource and answers the
+ * stall question independently.
+ */
+function waitTimeoutMsPerTarget(configuredWaitMs: number | undefined): number {
+  return configuredWaitMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
+}
 
 /**
  * Tracks a contended acquisition as a *stall* budget rather than a total one.
