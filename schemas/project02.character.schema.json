@@ -58,8 +58,8 @@
       "properties": {
         "version": {
           "type": "string",
-          "pattern": "^\\d+\\.\\d+\\.\\d+$",
-          "description": "Semantic version of the character content; recorded in turn evidence."
+          "pattern": "^\\d{1,9}\\.\\d{1,9}\\.\\d{1,9}$",
+          "description": "Semantic version of the character content, at most nine digits per component; recorded in turn evidence."
         }
       }
     },

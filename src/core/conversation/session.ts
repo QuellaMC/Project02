@@ -67,12 +67,29 @@ export const localUserSpeaker = {
   displayName: 'You',
 } as const;
 
+/**
+ * Bounds the user display name where it becomes session state.
+ *
+ * The name is stamped into `speakerName` on every user message, so it is
+ * repeated in durable logs, rehydration, inspection output, and the interactive
+ * prompt once per turn. The generic config boundary only caps strings at 16 KiB,
+ * which is far too large to repeat per turn; this matches the character
+ * display-name limit, which is the same kind of identity value.
+ */
+export const maxUserDisplayNameLength = 128;
+
 export function createUserSpeaker(userDisplayName?: string): SpeakerIdentity {
   const displayName = userDisplayName ?? localUserSpeaker.displayName;
 
   if (displayName.trim().length === 0 || displayName !== displayName.trim()) {
     throw new TypeError(
       'User display name must be a non-empty string with no leading or trailing whitespace.',
+    );
+  }
+
+  if (displayName.length > maxUserDisplayNameLength) {
+    throw new TypeError(
+      `User display name must be at most ${String(maxUserDisplayNameLength)} characters.`,
     );
   }
 

@@ -133,7 +133,23 @@ describe('character plugin enforcement', () => {
       },
     ]);
     expect(diagnostics[1]?.message).toContain(
-      'runtime-config --character seeded plugin enable disabled-required',
+      "runtime-config --character 'seeded' plugin enable 'disabled-required'",
+    );
+  });
+
+  it('quotes a selected home containing whitespace in the recovery command', () => {
+    const diagnostics = enforceCharacterPluginExpectations({
+      expectations: expectations({required: ['disabled-required']}),
+      characterId: 'seeded',
+      activation: activationWithEnabled([]),
+      installedPluginIds: new Set(['disabled-required']),
+      storeRoot: '/tmp/My Home',
+    });
+
+    // Unquoted, --store would consume only "/tmp/My" and the pasted command
+    // would leave the character blocked.
+    expect(diagnostics[0]?.message).toContain(
+      "runtime-config --store '/tmp/My Home' --character 'seeded' plugin enable 'disabled-required'",
     );
   });
 });
@@ -473,12 +489,12 @@ describe('first-selection materialization through startup', () => {
     );
 
     // The recovery command names the selected home so it edits the
-    // right store.
+    // right store, shell-quoted so it survives a copy-paste.
     expect(disabled?.message).toContain(
-      `--store ${realpathSync.native(homeRoot)} `,
+      `--store '${realpathSync.native(homeRoot)}' `,
     );
     expect(disabled?.message).toContain(
-      '--character seeded plugin enable demo-config',
+      "--character 'seeded' plugin enable 'demo-config'",
     );
   });
 });

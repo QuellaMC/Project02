@@ -370,6 +370,15 @@ describe('character package descriptor schema parity', () => {
         meta: {version: 'v1'},
       }),
     ],
+    [
+      'an over-length meta version component',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        // The version is copied into every turn's `characterRef`, so digits are
+        // bounded per component rather than left open.
+        meta: {version: `1.0.${'9'.repeat(10)}`},
+      }),
+    ],
   ])(
     'rejects %s through both the schema and the code validator',
     (_label, mutate) => {

@@ -5,6 +5,8 @@ import {
   CharacterInputError,
   CharacterReplyValidationError,
   createConversationSession,
+  createUserSpeaker,
+  maxUserDisplayNameLength,
   runCharacterTurn,
   ConversationRehydrationError,
   type CharacterAgent,
@@ -560,6 +562,18 @@ describe('conversation core', () => {
         text: 'I remember you said "are you there?" Stay with me for a minute.',
       },
     });
+  });
+
+  it('caps the user display name before it becomes session state', () => {
+    expect(() =>
+      createUserSpeaker('a'.repeat(maxUserDisplayNameLength)),
+    ).not.toThrow();
+
+    // The name is stamped onto every user message, so an oversized value would
+    // be repeated per turn in durable logs, rehydration, and the prompt.
+    expect(() =>
+      createUserSpeaker('a'.repeat(maxUserDisplayNameLength + 1)),
+    ).toThrow(/at most 128 characters/);
   });
 });
 

@@ -13,5 +13,6 @@
   "package-capture.ts": ["characters", "plugins"],
   "package-metadata.ts": ["characters", "plugins"],
   "redaction.ts": ["plugins", "role-model", "runtime"],
-  "secret-marker.ts": ["characters", "runtime"]
+  "secret-marker.ts": ["characters", "runtime"],
+  "shell-command.ts": ["app", "cli"]
 }

@@ -5,6 +5,7 @@
  */
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
+import {shellQuoteCommandArgument} from '../shared/shell-command.ts';
 import {
   validateRuntimePluginManifest,
   type RuntimePluginManifest,
@@ -224,12 +225,15 @@ export function enforceCharacterPluginExpectations(options: {
           `Character "${options.characterId}" ${
             level === 'required' ? 'requires' : 'recommends'
           } plugin "${pluginId}", which is disabled. Enable it with: ` +
+            // Quoted so the hint survives a copy-paste: a home containing
+            // whitespace would otherwise split across arguments, and shell
+            // metacharacters in it would be interpreted rather than passed.
             `runtime-config ${
               options.storeRoot === undefined
                 ? ''
-                : `--store ${options.storeRoot} `
-            }--character ${options.characterId} plugin ` +
-            `enable ${pluginId}`,
+                : `--store ${shellQuoteCommandArgument(options.storeRoot)} `
+            }--character ${shellQuoteCommandArgument(options.characterId)} plugin ` +
+            `enable ${shellQuoteCommandArgument(pluginId)}`,
           `plugins.${pluginId}.enabled`,
           {pluginId},
         ),

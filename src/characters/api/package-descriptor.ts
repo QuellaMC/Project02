@@ -20,7 +20,11 @@ export const maxCharacterPersonaSections = 16;
 export const maxCharacterPersonaSectionLength = 4000;
 
 const maxCharacterDisplayNameLength = 128;
-const characterVersionPattern = /^\d+\.\d+\.\d+$/u;
+// Bounded per component: the version is copied into `characterRef.version` on
+// every role-model I/O snapshot and persisted in raw evidence, so an unbounded
+// digit count would let one package field add kilobytes to every turn. Nine
+// digits per component is far beyond any real semantic version.
+const characterVersionPattern = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/u;
 
 export const maxCharacterPluginExpectations = 32;
 

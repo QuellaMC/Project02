@@ -43,6 +43,7 @@ export {
   createUserSpeaker,
   defaultRecentVisibleMessageLimit,
   localUserSpeaker,
+  maxUserDisplayNameLength,
   normalizeCharacterAgentReply,
   rollbackLastCharacterTurn,
   runCharacterTurn,

@@ -22,6 +22,7 @@ import {
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
+import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {ensureCharacterDataDir} from '../../runtime/storage/index.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
@@ -333,9 +334,8 @@ export function runtimeConfigSecretSetCommandPrefix(options: {
   }`;
 }
 
-export function shellQuoteConsoleCommandArgument(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
-}
+/** Console-facing name for the shared quoting helper. */
+export const shellQuoteConsoleCommandArgument = shellQuoteCommandArgument;
 
 export function writeLine(stdout: NodeJS.WritableStream, value: string): void {
   stdout.write(`${value}\n`);
