@@ -10,6 +10,7 @@ import {
   createLocalRuntimeStorageSchemaMarker,
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
+  normalizeLocalRuntimeCharacterId,
   type LocalRuntimeCharacterDataStorageSchemaMarker,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
@@ -116,20 +117,25 @@ export async function ensureCharacterDataDir(options: {
 }): Promise<string> {
   const homeOptions =
     options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot};
+  // Normalize once, before anything is written. The path helper and the marker
+  // constructor each normalize on their own, so carrying the raw ID further
+  // would verify the persisted marker against a value that never reaches
+  // storage -- failing after the home marker and data directory already exist.
+  const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
   const selectedHome = createProject02HomeLayout(homeOptions);
   const selectedDataRoot = characterDataDirPath(
     selectedHome.homeRoot,
-    options.characterId,
+    characterId,
   );
 
   // A rejected character directory must not leave a new home marker.
   assertCharacterDataDirAdoptable({storeRoot: selectedDataRoot});
 
   const home = await ensureInitializedProject02Home(homeOptions);
-  const dataRoot = characterDataDirPath(home.homeRoot, options.characterId);
+  const dataRoot = characterDataDirPath(home.homeRoot, characterId);
   await ensureCharacterDataMarker({
     storageOptions: {storeRoot: dataRoot},
-    characterId: options.characterId,
+    characterId,
     ...(options.now === undefined ? {} : {now: options.now}),
   });
 

@@ -25,6 +25,7 @@ export type LocalRuntimeStorageScope =
 export type LocalRuntimeStorageContractErrorCode =
   | 'character_identity_mismatch'
   | 'concurrent_write'
+  | 'invalid_character_id'
   | 'invalid_session_id'
   | 'invalid_plugin_id'
   | 'malformed_record'
@@ -249,7 +250,7 @@ export function normalizeLocalRuntimeCharacterId(characterId: string): string {
 
   if (!isProject02Identifier(normalized)) {
     throw new LocalRuntimeStorageContractError(
-      'invalid_plugin_id',
+      'invalid_character_id',
       'Local runtime character ID must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
     );
   }
