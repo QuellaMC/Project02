@@ -16,6 +16,7 @@ import {
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticPluginMetadata,
+  type RuntimeConfigSource,
   type RuntimeConfigSecretRef,
   type RuntimeConfigValue,
 } from './types.ts';
@@ -45,44 +46,58 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly skipPluginScopeValidation?: boolean;
 };
 
-export function resolveProject02RuntimeConfig(
-  options: ResolveProject02RuntimeConfigOptions,
-): ResolvedProject02RuntimeConfig {
-  const env = options.env ?? process.env;
-  const config = options.loadedConfig.config;
-  const storeRoot = options.runtimeLocation.homeRoot;
-  const diagnostics: RuntimeConfigDiagnostic[] = [
-    ...options.loadedConfig.diagnostics,
-    ...(options.skipPluginScopeValidation === true
+export type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
+  ResolveProject02RuntimeConfigOptions,
+  'loadedConfig'
+> & {
+  readonly config: Project02RuntimeConfig | undefined;
+  readonly source: RuntimeConfigSource;
+  readonly path?: string;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+};
+
+export type ResolveRuntimePluginConfigsOptions = {
+  readonly config: Project02RuntimeConfig | undefined;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
+  readonly env?: NodeJS.ProcessEnv;
+  readonly allowPlaintextSecrets?: boolean;
+  readonly validateInactivePluginConfigs?: boolean;
+  readonly defaultEnabledPluginIds?: ReadonlySet<string>;
+  readonly authoredScope?: 'global' | 'character';
+  readonly skipPluginScopeValidation?: boolean;
+};
+
+export type ResolvedRuntimePluginConfigs = Readonly<{
+  pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
+  redactedPluginConfigs: Readonly<Record<string, RedactedPluginRuntimeConfig>>;
+  diagnostics: readonly RuntimeConfigDiagnostic[];
+}>;
+
+/**
+ * Pure plugin-config resolution shared by the full runtime resolver and
+ * character-package planning. It owns manifest policy and field validation
+ * without requiring either caller to fabricate a filesystem location.
+ */
+export function resolveRuntimePluginConfigs(
+  options: ResolveRuntimePluginConfigsOptions,
+): ResolvedRuntimePluginConfigs {
+  const diagnostics: RuntimeConfigDiagnostic[] =
+    options.skipPluginScopeValidation === true
       ? []
-      : runtimePluginScopeDiagnostics({
-          config,
-          manifests: options.pluginManifests ?? [],
-          authoredScope: options.authoredScope ?? 'global',
-        })),
-  ];
+      : [
+          ...runtimePluginScopeDiagnostics({
+            config: options.config,
+            manifests: options.pluginManifests,
+            authoredScope: options.authoredScope ?? 'global',
+          }),
+        ];
   const pluginConfigs: Record<string, ResolvedPluginRuntimeConfig> = {};
   const redactedPluginConfigs: Record<string, RedactedPluginRuntimeConfig> = {};
-  const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
-  const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
-  // Trimmed via the shared helper, mirroring userDisplayName below.
-  const character = options.runtimeLocation.characterScope.characterId;
-  // Trimmed at the resolve seam so an authored value with stray padding
-  // never reaches the strict speaker constructor as a startup crash.
-  const userDisplayName = (
-    config?.project02?.userDisplayName ?? defaultProject02UserDisplayName
-  ).trim();
-  const project02 = Object.freeze({
-    storeRoot,
-    character,
-    userDisplayName,
-    ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
-    roleModelProvider,
-  });
+  const env = options.env ?? process.env;
 
-  for (const manifest of options.pluginManifests ?? []) {
+  for (const manifest of options.pluginManifests) {
     const resolved = resolvePluginConfig({
-      config,
+      config: options.config,
       manifest,
       env,
       allowPlaintextSecrets: options.allowPlaintextSecrets === true,
@@ -106,21 +121,84 @@ export function resolveProject02RuntimeConfig(
   }
 
   return Object.freeze({
-    source: options.loadedConfig.source,
-    ...(options.loadedConfig.path === undefined
-      ? {}
-      : {path: options.loadedConfig.path}),
-    project02,
     pluginConfigs: Object.freeze(pluginConfigs),
     redactedPluginConfigs: Object.freeze(redactedPluginConfigs),
     diagnostics: Object.freeze(diagnostics),
+  });
+}
+
+export function resolveProject02RuntimeConfig(
+  options: ResolveProject02RuntimeConfigOptions,
+): ResolvedProject02RuntimeConfig {
+  const {loadedConfig, ...effectiveOptions} = options;
+
+  return resolveEffectiveProject02RuntimeConfig({
+    ...effectiveOptions,
+    config: loadedConfig.config,
+    source: loadedConfig.source,
+    ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
+    diagnostics: loadedConfig.diagnostics,
+  });
+}
+
+/**
+ * Resolves an already-selected effective document. Loaded config and layered
+ * config delegate here, while mutation code continues to require a real
+ * loader-owned snapshot.
+ */
+export function resolveEffectiveProject02RuntimeConfig(
+  options: ResolveEffectiveProject02RuntimeConfigOptions,
+): ResolvedProject02RuntimeConfig {
+  const config = options.config;
+  const storeRoot = options.runtimeLocation.homeRoot;
+  const pluginResolution = resolveRuntimePluginConfigs({
+    config,
+    pluginManifests: options.pluginManifests ?? [],
+    ...(options.env === undefined ? {} : {env: options.env}),
+    allowPlaintextSecrets: options.allowPlaintextSecrets === true,
+    validateInactivePluginConfigs:
+      options.validateInactivePluginConfigs === true,
+    ...(options.defaultEnabledPluginIds === undefined
+      ? {}
+      : {defaultEnabledPluginIds: options.defaultEnabledPluginIds}),
+    authoredScope: options.authoredScope ?? 'global',
+    skipPluginScopeValidation: options.skipPluginScopeValidation === true,
+  });
+  const diagnostics = Object.freeze([
+    ...options.diagnostics,
+    ...pluginResolution.diagnostics,
+  ]);
+  const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
+  const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
+  // Trimmed via the shared helper, mirroring userDisplayName below.
+  const character = options.runtimeLocation.characterScope.characterId;
+  // Trimmed at the resolve seam so an authored value with stray padding
+  // never reaches the strict speaker constructor as a startup crash.
+  const userDisplayName = (
+    config?.project02?.userDisplayName ?? defaultProject02UserDisplayName
+  ).trim();
+  const project02 = Object.freeze({
+    storeRoot,
+    character,
+    userDisplayName,
+    ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
+    roleModelProvider,
+  });
+
+  return Object.freeze({
+    source: options.source,
+    ...(options.path === undefined ? {} : {path: options.path}),
+    project02,
+    pluginConfigs: pluginResolution.pluginConfigs,
+    redactedPluginConfigs: pluginResolution.redactedPluginConfigs,
+    diagnostics,
     effectiveConfigFingerprint: createRuntimeConfigFingerprint(
       effectiveFingerprintInput({
         config,
         storeRoot,
         character,
         userDisplayName,
-        redactedPluginConfigs,
+        redactedPluginConfigs: pluginResolution.redactedPluginConfigs,
       }),
     ),
   } satisfies ResolvedProject02RuntimeConfig);

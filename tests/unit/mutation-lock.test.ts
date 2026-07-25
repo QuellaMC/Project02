@@ -5,6 +5,7 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -18,6 +19,7 @@ import {
   acquireLocalRuntimeMutationLock,
   acquireLocalRuntimeMutationLockSync,
   createLocalRuntimeMutationLockOwnerToken,
+  localRuntimeMutationLockOwnerOwnsResource,
   LocalRuntimeMutationLockBusyError,
   LocalRuntimeMutationLocksAcquireError,
   reclaimObservedLocalRuntimeMutationLock,
@@ -110,6 +112,37 @@ describe('local runtime mutation locks', () => {
     await next.release();
   });
 
+  it('reenters the same physical lock root through filesystem aliases', async () => {
+    const {aliasLocksRoot, physicalLocksRoot} =
+      await createAliasedTempLocksRoots();
+    const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+    const outer = await acquireLocalRuntimeMutationLock({
+      locksRoot: physicalLocksRoot,
+      resourceKey: 'session-writer:alpha',
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+
+    expect(
+      localRuntimeMutationLockOwnerOwnsResource({
+        locksRoot: aliasLocksRoot,
+        resourceKey: 'session-writer:alpha',
+        ownerToken,
+      }),
+    ).toBe(true);
+
+    const nested = await acquireLocalRuntimeMutationLock({
+      locksRoot: aliasLocksRoot,
+      resourceKey: 'session-writer:alpha',
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+
+    expect(nested.lockPath).toBe(outer.lockPath);
+    await nested.release();
+    await outer.release();
+  });
+
   it('acquires multiple resources in canonical order', async () => {
     const locksRoot = await createTempLocksRoot();
     const lease = await acquireLocalRuntimeMutationLocks({
@@ -144,6 +177,45 @@ describe('local runtime mutation locks', () => {
     });
 
     expect(reversed.targets).toEqual(lease.targets);
+    await reversed.release();
+  });
+
+  it('deduplicates aliased physical lock roots before ordering batches', async () => {
+    const {aliasLocksRoot, physicalLocksRoot} =
+      await createAliasedTempLocksRoots();
+    const otherLocksRoot = await createTempLocksRoot();
+    const forward = await acquireLocalRuntimeMutationLocks({
+      targets: [
+        {locksRoot: aliasLocksRoot, resourceKey: 'shared'},
+        {locksRoot: otherLocksRoot, resourceKey: 'other'},
+        {locksRoot: physicalLocksRoot, resourceKey: 'shared'},
+      ],
+      waitTimeoutMs: 0,
+    });
+
+    expect(forward.targets).toHaveLength(2);
+    expect(
+      forward.targets.filter(target => target.resourceKey === 'shared'),
+    ).toHaveLength(1);
+    await expect(
+      acquireLocalRuntimeMutationLock({
+        locksRoot: aliasLocksRoot,
+        resourceKey: 'shared',
+        waitTimeoutMs: 0,
+      }),
+    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    await forward.release();
+
+    const reversed = await acquireLocalRuntimeMutationLocks({
+      targets: [
+        {locksRoot: physicalLocksRoot, resourceKey: 'shared'},
+        {locksRoot: otherLocksRoot, resourceKey: 'other'},
+        {locksRoot: aliasLocksRoot, resourceKey: 'shared'},
+      ],
+      waitTimeoutMs: 0,
+    });
+
+    expect(reversed.targets).toEqual(forward.targets);
     await reversed.release();
   });
 
@@ -291,6 +363,35 @@ describe('local runtime mutation locks', () => {
       waitTimeoutMs: 0,
     });
     next.release();
+  });
+
+  it('reenters aliased physical lock roots in sync batches', async () => {
+    const {aliasLocksRoot, physicalLocksRoot} =
+      await createAliasedTempLocksRoots();
+    const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+    const outer = acquireLocalRuntimeMutationLockSync({
+      locksRoot: physicalLocksRoot,
+      resourceKey: 'owned',
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+    const nested = acquireLocalRuntimeMutationLocksSync({
+      targets: [{locksRoot: aliasLocksRoot, resourceKey: 'owned'}],
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+
+    expect(nested.targets).toHaveLength(1);
+    nested.release();
+    expect(() =>
+      acquireLocalRuntimeMutationLockSync({
+        locksRoot: aliasLocksRoot,
+        resourceKey: 'owned',
+        waitTimeoutMs: 0,
+      }),
+    ).toThrow(LocalRuntimeMutationLockBusyError);
+
+    outer.release();
   });
 
   it('reclaims a same-host lock whose owner process is dead', async () => {
@@ -552,4 +653,21 @@ async function createTempLocksRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'project02-mutation-lock-'));
   tempRoots.push(root);
   return join(root, 'locks');
+}
+
+async function createAliasedTempLocksRoots(): Promise<{
+  readonly aliasLocksRoot: string;
+  readonly physicalLocksRoot: string;
+}> {
+  const root = await mkdtemp(join(tmpdir(), 'project02-mutation-lock-alias-'));
+  const physicalRoot = join(root, 'physical');
+
+  tempRoots.push(root);
+  await mkdir(physicalRoot);
+  await symlink(physicalRoot, join(root, 'alias'), 'dir');
+
+  return {
+    aliasLocksRoot: join(root, 'alias', '.locks'),
+    physicalLocksRoot: join(physicalRoot, '.locks'),
+  };
 }

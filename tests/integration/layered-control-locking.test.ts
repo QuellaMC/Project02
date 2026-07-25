@@ -1,7 +1,7 @@
 import {resolveRuntimeConfigScopeTarget} from '../../src/runtime/config/index.ts';
 import {spawn} from 'node:child_process';
 import {existsSync, readdirSync, realpathSync} from 'node:fs';
-import {mkdtemp, rm, writeFile} from 'node:fs/promises';
+import {mkdir, mkdtemp, rm, symlink, writeFile} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
@@ -29,6 +29,51 @@ afterEach(async () => {
 });
 
 describe('layered control lock ordering', () => {
+  it('orders reversed cross-process batches through physical lock-root aliases', async () => {
+    const root = await mkdtemp(
+      join(tmpdir(), 'project02-aliased-batch-locking-'),
+    );
+    const aliasRoot = join(root, 'a-alias');
+    const otherRoot = join(root, 'm-other');
+    const physicalRoot = join(root, 'z-shared');
+    const barrierPath = join(root, 'start');
+
+    tempRoots.push(root);
+    await mkdir(physicalRoot);
+    await mkdir(otherRoot);
+    await symlink(physicalRoot, aliasRoot, 'dir');
+
+    const aliasTarget = {
+      locksRoot: join(aliasRoot, '.locks'),
+      resourceKey: 'shared',
+    };
+    const physicalTarget = {
+      locksRoot: join(physicalRoot, '.locks'),
+      resourceKey: 'shared',
+    };
+    const otherTarget = {
+      locksRoot: join(otherRoot, '.locks'),
+      resourceKey: 'other',
+    };
+    const children = [
+      runControlChild({
+        script: barrieredMutationLockBatchScript,
+        args: [JSON.stringify([aliasTarget, otherTarget]), barrierPath],
+      }),
+      runControlChild({
+        script: barrieredMutationLockBatchScript,
+        args: [JSON.stringify([otherTarget, physicalTarget]), barrierPath],
+      }),
+    ];
+
+    await delay(250);
+    await writeFile(barrierPath, 'go\n', 'utf8');
+    await Promise.all(children);
+
+    expect(overlayLockEntries(join(physicalRoot, '.locks'))).toEqual([]);
+    expect(overlayLockEntries(join(otherRoot, '.locks'))).toEqual([]);
+  }, 20_000);
+
   it('keeps a blocked global expectation write off the overlay lock', async () => {
     const {homeRoot, dataRoot, fingerprint} = await createLayeredHome();
     const overlayLocksRoot = join(dataRoot, '.locks');
@@ -113,14 +158,16 @@ const controlChildPrelude = [
   "import { existsSync, writeFileSync } from 'node:fs';",
   'const {',
   '  applyRuntimeConfigControlOperation,',
-  '  loadProject02RuntimeConfig,',
-  '  resolveProject02RuntimeLocation,',
+  '  bindProject02CharacterRuntimeLocation,',
+  '  loadProject02RuntimeConfigWithLocation,',
   '  resolveRuntimeConfigScopeTarget,',
   "} = await import('./src/runtime/config/index.ts');",
   'const storeRoot = process.argv[1];',
-  'const loadedConfig = loadProject02RuntimeConfig({ storeRoot, env: {} });',
-  'const runtimeLocation = resolveProject02RuntimeLocation({',
-  "  loadedConfig, selection: { storeRoot, character: 'mira' },",
+  'const { configLocation } = loadProject02RuntimeConfigWithLocation({',
+  "  selection: { storeRoot, character: 'mira' }, env: {},",
+  '});',
+  'const runtimeLocation = bindProject02CharacterRuntimeLocation({',
+  "  configLocation, characterId: 'mira',",
   '});',
   'const sleep = new Int32Array(new SharedArrayBuffer(4));',
 ].join('\n');
@@ -191,6 +238,20 @@ const barrieredCharacterMutationScript = [
   "    operation: { kind: 'set', path: 'project02.userDisplayName', value: 'Scoped' },",
   '  },',
   '});',
+].join('\n');
+
+const barrieredMutationLockBatchScript = [
+  "import { existsSync } from 'node:fs';",
+  "const { acquireLocalRuntimeMutationLocks } = await import('./src/runtime/storage/mutation-lock.ts');",
+  'const sleep = new Int32Array(new SharedArrayBuffer(4));',
+  'const targets = JSON.parse(process.argv[1]);',
+  'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
+  'const lease = await acquireLocalRuntimeMutationLocks({',
+  '  targets,',
+  '  waitTimeoutMs: 5_000,',
+  '});',
+  'Atomics.wait(sleep, 0, 0, 100);',
+  'await lease.release();',
 ].join('\n');
 
 async function createLayeredHome(): Promise<{

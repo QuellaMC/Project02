@@ -36,13 +36,12 @@ describe('runtime plugin config control', () => {
   it('resolves one coherent control target from one selected config snapshot', () => {
     const firstRoot = createTestTempRoot('project02-control-target-first-');
     const secondRoot = createTestTempRoot('project02-control-target-second-');
-    const firstConfigPath = writeRuntimeConfig(
-      join(firstRoot, 'config.json'),
-      {},
-    );
+    const firstConfigPath = writeRuntimeConfig(join(firstRoot, 'config.json'), {
+      project02: {storeRoot: firstRoot},
+    });
     const secondConfigPath = writeRuntimeConfig(
       join(secondRoot, 'config.json'),
-      {},
+      {project02: {storeRoot: secondRoot}},
     );
     const env: NodeJS.ProcessEnv = {};
     let selectionReads = 0;
@@ -67,7 +66,10 @@ describe('runtime plugin config control', () => {
       configPath: firstConfigPath,
       canonicalConfigPath: realpathSync.native(firstConfigPath),
       runtimeLocation: {
-        globalConfigPath: firstConfigPath,
+        selectedConfig: {
+          path: firstConfigPath,
+          canonicalPath: realpathSync.native(firstConfigPath),
+        },
         homeRoot: realpathSync.native(firstRoot),
       },
     });
@@ -79,6 +81,7 @@ describe('runtime plugin config control', () => {
     const manifest = configControlManifest();
     const authoredConfig: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
+      project02: {storeRoot: root},
       plugins: {
         [fixturePluginId]: {
           enabled: true,
@@ -91,11 +94,16 @@ describe('runtime plugin config control', () => {
       },
     };
 
-    writeRuntimeConfig(configPath, {plugins: authoredConfig.plugins});
+    writeRuntimeConfig(configPath, {
+      project02: authoredConfig.project02,
+      plugins: authoredConfig.plugins,
+    });
 
     const inspected = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
+        storeRoot: root,
         env: {[fixtureSecretEnvVar]: 'resolved-secret-value'},
       }),
 
@@ -103,8 +111,10 @@ describe('runtime plugin config control', () => {
       manifest,
     });
     const inspectedWithChangedSecret = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
+        storeRoot: root,
         env: {[fixtureSecretEnvVar]: 'changed-secret-value'},
       }),
 
@@ -137,6 +147,7 @@ describe('runtime plugin config control', () => {
         configured: true,
         value: 'remote',
       },
+      effectiveSource: 'global',
       effective: {
         name: 'mode',
         secret: false,
@@ -157,6 +168,7 @@ describe('runtime plugin config control', () => {
         configured: true,
         value: '[redacted]',
       },
+      effectiveSource: 'global',
       effective: {
         name: 'apiKey',
         secret: true,
@@ -194,6 +206,7 @@ describe('runtime plugin config control', () => {
     );
 
     const inspected = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         env: {},
@@ -250,6 +263,9 @@ describe('runtime plugin config control', () => {
     });
     const expectedAfterSet: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
+      ...(fixture.config.project02 === undefined
+        ? {}
+        : {project02: fixture.config.project02}),
       plugins: {
         [fixturePluginId]: {
           enabled: true,
@@ -285,6 +301,9 @@ describe('runtime plugin config control', () => {
     });
     const expectedAfterUnset: Project02RuntimeConfig = {
       version: runtimeConfigVersion,
+      ...(fixture.config.project02 === undefined
+        ? {}
+        : {project02: fixture.config.project02}),
       plugins: {
         [fixturePluginId]: {
           enabled: true,
@@ -581,7 +600,10 @@ describe('runtime plugin config control', () => {
       },
     };
 
-    writeRuntimeConfig(fixture.configPath, {plugins: invalidConfig.plugins});
+    writeRuntimeConfig(fixture.configPath, {
+      project02: invalidConfig.project02,
+      plugins: invalidConfig.plugins,
+    });
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
@@ -629,6 +651,7 @@ describe('runtime plugin config control', () => {
     });
 
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
 
       env: {},
@@ -651,6 +674,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
 
         env: {},
@@ -680,7 +704,7 @@ describe('runtime plugin config control', () => {
         env,
         scope: 'character',
       }),
-    ).toThrow('is a character overlay');
+    ).toThrow('is inside a character-data directory');
     expect(existsSync(overlayPath)).toBe(false);
     expect(existsSync(join(homeRoot, '.env'))).toBe(false);
     expect(existsSync(join(dataRoot, '.env'))).toBe(false);
@@ -794,6 +818,7 @@ describe('runtime plugin config control', () => {
     const configPath = defaultRuntimeConfigPath(storeRoot);
     const manifest = configControlManifest();
     const inspected = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({storeRoot: storeRoot, env: {}}),
 
       env: {},
@@ -955,6 +980,7 @@ function createSeededControlFixture(): {
   const manifest = configControlManifest();
   const config: Project02RuntimeConfig = {
     version: runtimeConfigVersion,
+    project02: {storeRoot: root},
     plugins: {
       [fixturePluginId]: {
         enabled: true,
@@ -972,13 +998,17 @@ function createSeededControlFixture(): {
     },
   };
 
-  writeRuntimeConfig(configPath, {plugins: config.plugins});
+  writeRuntimeConfig(configPath, {
+    project02: config.project02,
+    plugins: config.plugins,
+  });
 
   return {
     configPath,
     config,
     manifest,
     fingerprint: inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         env: {},

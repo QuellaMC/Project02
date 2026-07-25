@@ -1,17 +1,147 @@
-import {mkdirSync, symlinkSync, unlinkSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
+import type * as NodeCrypto from 'node:crypto';
+import type * as NodeFs from 'node:fs';
 import {join} from 'node:path';
 
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {createRuntimePluginManifest} from '../../src/plugins/api/manifest-validation.ts';
 import {
+  bundledRuntimePluginPackageRoot,
   discoverRuntimePluginPackages,
   maxRuntimePluginPackageMetadataBytes,
 } from '../../src/plugins/package-loader/index.ts';
-import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
+import {
+  activateRuntimePluginPackageArtifact,
+  captureRuntimePluginPackageArtifact,
+} from '../../src/plugins/package-loader/artifact.ts';
+import {
+  capturePackageDirectoryArtifact,
+  PackageCaptureError,
+} from '../../src/shared/package-capture.ts';
+import {snapshotPackageDirectory} from '../../src/shared/package-metadata.ts';
+import {createDemoConfigPluginManifest} from '../../src/plugins/packages/demo-config/plugin.ts';
+import type {
+  RuntimePlugin,
+  RuntimePluginManifest,
+} from '../../src/plugins/api/types.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
+afterEach(() => {
+  vi.doUnmock('node:fs');
+  vi.resetModules();
+});
+
 describe('runtime plugin package loader', () => {
+  it('frames artifact paths and bytes without NUL-delimiter collisions', () => {
+    const root = createTestTempRoot('project02-plugin-artifact-id-');
+    const packageRoot = join(root, 'collision');
+    const firstPath = join(packageRoot, 'a');
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(firstPath, Buffer.from('x\0b\0y'));
+    const firstDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (firstDirectory === undefined) {
+      throw new Error('Expected first package directory snapshot.');
+    }
+    const first = captureRuntimePluginPackageArtifact({
+      packageDirectory: firstDirectory,
+      provenance: 'operator',
+    });
+
+    writeFileSync(firstPath, 'x');
+    writeFileSync(join(packageRoot, 'b'), 'y');
+    const secondDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (secondDirectory === undefined) {
+      throw new Error('Expected second package directory snapshot.');
+    }
+    const second = captureRuntimePluginPackageArtifact({
+      packageDirectory: secondDirectory,
+      provenance: 'operator',
+    });
+
+    expect(second.id).not.toBe(first.id);
+    activateRuntimePluginPackageArtifact({
+      artifact: first,
+      entryRelativePath: 'a',
+    });
+    expect(() =>
+      activateRuntimePluginPackageArtifact({
+        artifact: Object.freeze({...second, id: first.id}),
+        entryRelativePath: 'a',
+      }),
+    ).toThrow('identifier collision');
+  });
+
+  it('includes empty directories in the framed artifact identity', () => {
+    const root = createTestTempRoot('project02-plugin-artifact-directory-');
+    const packageRoot = join(root, 'directory-identity');
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(join(packageRoot, 'index.mjs'), 'export {};\n');
+    const firstDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (firstDirectory === undefined) {
+      throw new Error('Expected first package directory snapshot.');
+    }
+    const first = captureRuntimePluginPackageArtifact({
+      packageDirectory: firstDirectory,
+      provenance: 'operator',
+    });
+
+    mkdirSync(join(packageRoot, 'empty'));
+    const secondDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (secondDirectory === undefined) {
+      throw new Error('Expected second package directory snapshot.');
+    }
+    const second = captureRuntimePluginPackageArtifact({
+      packageDirectory: secondDirectory,
+      provenance: 'operator',
+    });
+
+    expect(second.id).not.toBe(first.id);
+  });
+
+  it('enforces descriptor byte limits at the physical capture boundary', () => {
+    const root = createTestTempRoot('project02-plugin-artifact-limit-');
+    const packageRoot = join(root, 'bounded');
+    const descriptorRelativePath = 'project02.plugin.json';
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(join(packageRoot, descriptorRelativePath), Buffer.alloc(33));
+    const packageDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (packageDirectory === undefined) {
+      throw new Error('Expected package directory snapshot.');
+    }
+
+    expect(() =>
+      capturePackageDirectoryArtifact({
+        packageDirectory,
+        maxFiles: 10,
+        maxBytes: 1_024,
+        fileByteLimits: new Map([[descriptorRelativePath, 32]]),
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: PackageCaptureError.name,
+        reason: 'too_large',
+      }),
+    );
+  });
+
   it('cold-discovers an immutable package without importing its entry', () => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const manifest = testPluginManifest('memory.cold');
@@ -23,7 +153,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -39,6 +169,215 @@ describe('runtime plugin package loader', () => {
     expect(Object.isFrozen(discovery.packages)).toBe(true);
     expect(Object.isFrozen(discovery.packages[0])).toBe(true);
     expect(discovery.packages[0]).not.toHaveProperty('factory');
+  });
+
+  it('rejects a package replaced by a symbolic link after source enumeration', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-root-swap-');
+    const sourceRoot = join(parentRoot, 'source');
+    const externalRoot = join(parentRoot, 'external');
+    const manifest = testPluginManifest('memory.root-swap');
+
+    writeTestPackage({
+      root: sourceRoot,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    writeTestPackage({
+      root: externalRoot,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    const packageRoot = join(sourceRoot, manifest.id);
+    const externalPackageRoot = join(externalRoot, manifest.id);
+    const parkedPackageRoot = join(parentRoot, 'parked');
+    let swapped = false;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        readdirSync(path: NodeFs.PathLike, options?: unknown) {
+          const entries = Reflect.apply(actual.readdirSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === sourceRoot && !swapped) {
+            swapped = true;
+            renameSync(packageRoot, parkedPackageRoot);
+            symlinkSync(externalPackageRoot, packageRoot, 'dir');
+          }
+
+          return entries;
+        },
+      };
+    });
+    const {discoverRuntimePluginPackages: discoverAfterEnumeration} =
+      await import('../../src/plugins/package-loader/index.ts');
+
+    const discovery = discoverAfterEnumeration({
+      sources: [{root: sourceRoot}],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.packages).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_changed',
+        path: sourceRoot,
+      }),
+    ]);
+  });
+
+  it('rejects a source root replaced after enumeration', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-source-swap-');
+    const sourceRoot = join(parentRoot, 'source');
+    const externalRoot = join(parentRoot, 'external');
+    const parkedSourceRoot = join(parentRoot, 'parked-source');
+    const manifest = testPluginManifest('memory.source-swap');
+
+    writeTestPackage({
+      root: sourceRoot,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    writeTestPackage({
+      root: externalRoot,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    let swapped = false;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        readdirSync(path: NodeFs.PathLike, options?: unknown) {
+          const entries = Reflect.apply(actual.readdirSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === sourceRoot && !swapped) {
+            swapped = true;
+            renameSync(sourceRoot, parkedSourceRoot);
+            symlinkSync(externalRoot, sourceRoot, 'dir');
+          }
+
+          return entries;
+        },
+      };
+    });
+    const {discoverRuntimePluginPackages: discoverAfterEnumeration} =
+      await import('../../src/plugins/package-loader/index.ts');
+
+    const discovery = discoverAfterEnumeration({
+      sources: [{root: sourceRoot}],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.packages).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_changed',
+        path: sourceRoot,
+      }),
+    ]);
+  });
+
+  it('rejects an outside artifact captured through an ancestor ABA swap', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-ancestor-aba-');
+    const boundAncestor = join(parentRoot, 'bound');
+    const externalAncestor = join(parentRoot, 'external');
+    const parkedAncestor = join(parentRoot, 'parked');
+    const sourceRoot = join(boundAncestor, 'source');
+    const externalSourceRoot = join(externalAncestor, 'source');
+    const manifest = testPluginManifest('memory.ancestor-aba');
+
+    writeTestPackage({
+      root: sourceRoot,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    writeTestPackage({
+      root: externalSourceRoot,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    let swapped = false;
+    let restored = false;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        readdirSync(path: NodeFs.PathLike, options?: unknown) {
+          const entries = Reflect.apply(actual.readdirSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === sourceRoot && !swapped) {
+            swapped = true;
+            renameSync(boundAncestor, parkedAncestor);
+            renameSync(externalAncestor, boundAncestor);
+          }
+          return entries;
+        },
+      };
+    });
+    vi.doMock('node:crypto', async () => {
+      const actual = await vi.importActual<typeof NodeCrypto>('node:crypto');
+
+      return {
+        ...actual,
+        createHash(
+          algorithm: string,
+          options?: NodeCrypto.HashOptions,
+        ): NodeCrypto.Hash {
+          const hash = actual.createHash(algorithm, options);
+          const digestBuffer: () => Buffer = hash.digest.bind(hash);
+          const digestText: (
+            encoding: NodeCrypto.BinaryToTextEncoding,
+          ) => string = hash.digest.bind(hash);
+
+          Object.defineProperty(hash, 'digest', {
+            value(encoding?: NodeCrypto.BinaryToTextEncoding): Buffer | string {
+              if (swapped && !restored) {
+                renameSync(boundAncestor, externalAncestor);
+                renameSync(parkedAncestor, boundAncestor);
+                restored = true;
+              }
+              return encoding === undefined
+                ? digestBuffer()
+                : digestText(encoding);
+            },
+          });
+          return hash;
+        },
+      };
+    });
+    const {discoverRuntimePluginPackages: discoverDuringAncestorSwap} =
+      await import('../../src/plugins/package-loader/index.ts');
+
+    const discovery = discoverDuringAncestorSwap({
+      sources: [{root: sourceRoot}],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.packages).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_changed',
+        path: sourceRoot,
+      }),
+    ]);
   });
 
   it('quarantines an invalid descriptor without hiding valid siblings', () => {
@@ -59,7 +398,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -101,7 +440,7 @@ describe('runtime plugin package loader', () => {
     );
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -115,6 +454,94 @@ describe('runtime plugin package loader', () => {
       }),
     ]);
     expect(JSON.stringify(discovery.diagnostics)).not.toContain('xxxxx');
+  });
+
+  it('keeps an opened descriptor read bounded if the file grows', async () => {
+    const root = createTestTempRoot('project02-plugin-metadata-growth-');
+    const manifest = testPluginManifest('memory.metadata-growth');
+    const descriptorPath = join(root, manifest.id, 'project02.plugin.json');
+    let descriptor: number | undefined;
+    let descriptorGrew = false;
+    const descriptorReadLengths: number[] = [];
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    const canonicalDescriptorPath = realpathSync(descriptorPath);
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        openSync(
+          path: NodeFs.PathLike,
+          flags: string | number,
+          mode?: NodeFs.Mode,
+        ) {
+          const opened =
+            mode === undefined
+              ? actual.openSync(path, flags)
+              : actual.openSync(path, flags, mode);
+
+          if (path === canonicalDescriptorPath) {
+            descriptor = opened;
+          }
+          return opened;
+        },
+        fstatSync(fileDescriptor: number, ...args: unknown[]) {
+          const stat = Reflect.apply(actual.fstatSync, actual, [
+            fileDescriptor,
+            ...args,
+          ]) as unknown;
+
+          if (fileDescriptor === descriptor && !descriptorGrew) {
+            descriptorGrew = true;
+            actual.writeFileSync(
+              canonicalDescriptorPath,
+              'x'.repeat(maxRuntimePluginPackageMetadataBytes + 1),
+            );
+          }
+          return stat;
+        },
+        readSync(
+          fileDescriptor: number,
+          buffer: NodeJS.ArrayBufferView,
+          offset: number,
+          length: number,
+          position: NodeFs.ReadPosition | null,
+        ) {
+          if (fileDescriptor === descriptor) {
+            descriptorReadLengths.push(length);
+          }
+          return Reflect.apply(actual.readSync, actual, [
+            fileDescriptor,
+            buffer,
+            offset,
+            length,
+            position,
+          ]) as number;
+        },
+      };
+    });
+    const {discoverRuntimePluginPackages: discoverAfterGrowth} =
+      await import('../../src/plugins/package-loader/index.ts');
+
+    const discovery = discoverAfterGrowth({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.packages).toEqual([]);
+    expect(descriptorReadLengths.length).toBeGreaterThan(0);
+    expect(
+      descriptorReadLengths.every(
+        length => length <= maxRuntimePluginPackageMetadataBytes,
+      ),
+    ).toBe(true);
   });
 
   it('rejects non-regular metadata before attempting to read it', () => {
@@ -131,7 +558,7 @@ describe('runtime plugin package loader', () => {
     mkdirSync(descriptorPath);
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -158,7 +585,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'bundled'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -170,7 +597,7 @@ describe('runtime plugin package loader', () => {
         message:
           'Runtime plugin package package.json must declare type "module".',
         path: join(root, manifest.id, 'package.json'),
-        provenance: 'bundled',
+        provenance: 'operator',
         pluginId: manifest.id,
       },
     ]);
@@ -188,7 +615,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -223,7 +650,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -262,7 +689,7 @@ describe('runtime plugin package loader', () => {
       skipEntryWrite: true,
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -287,7 +714,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -326,7 +753,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: new Set(['runtime.plugin']),
     });
 
@@ -361,7 +788,7 @@ describe('runtime plugin package loader', () => {
       entrySource: validEntrySource(),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
@@ -389,6 +816,310 @@ describe('runtime plugin package loader', () => {
     expect(Object.isFrozen(plugin.lifecycleHooks)).toBe(true);
   });
 
+  it('loads the discovered entry artifact after its source path is replaced', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-entry-swap-');
+    const root = join(parentRoot, 'source');
+    const manifest = testPluginManifest('memory.entry-swap');
+    const markerPath = join(parentRoot, 'outside-imported');
+    const outsideEntryPath = join(parentRoot, 'outside.ts');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+    const entryPath = join(root, manifest.id, 'index.ts');
+
+    writeFileSync(
+      outsideEntryPath,
+      [
+        "import {writeFileSync} from 'node:fs';",
+        `writeFileSync(${JSON.stringify(markerPath)}, 'executed\\n', 'utf8');`,
+        validEntrySource(),
+      ].join('\n'),
+      'utf8',
+    );
+    unlinkSync(entryPath);
+    symlinkSync(outsideEntryPath, entryPath);
+
+    await expect(
+      instantiateOnlyPackage(discovery, root),
+    ).resolves.toMatchObject({
+      manifest: {id: manifest.id},
+    });
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('loads the discovered artifact after its package directory is replaced', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-package-swap-');
+    const root = join(parentRoot, 'source');
+    const manifest = testPluginManifest('memory.package-swap');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+    const packageRoot = join(root, manifest.id);
+
+    renameSync(packageRoot, join(parentRoot, 'parked'));
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+
+    await expect(
+      instantiateOnlyPackage(discovery, root),
+    ).resolves.toMatchObject({
+      manifest: {id: manifest.id},
+    });
+  });
+
+  it('loads the discovered artifact after descriptor source drift', async () => {
+    const root = createTestTempRoot('project02-plugin-descriptor-drift-');
+    const manifest = testPluginManifest('memory.descriptor-drift');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    writeFileSync(
+      join(root, manifest.id, 'project02.plugin.json'),
+      `${JSON.stringify({
+        format: 'project02.plugin.v1',
+        entry: './index.ts',
+        manifest: {...manifest, displayName: 'Changed after discovery'},
+      })}\n`,
+      'utf8',
+    );
+
+    await expect(
+      instantiateOnlyPackage(discovery, root),
+    ).resolves.toMatchObject({
+      manifest: {id: manifest.id},
+    });
+  });
+
+  it('loads transitive modules from the discovered artifact', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-module-graph-');
+    const root = join(parentRoot, 'source');
+    const manifest = testPluginManifest('memory.module-graph');
+    const markerPath = join(parentRoot, 'changed-helper-imported');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entry: './index.mjs',
+      entrySource: [
+        "import {createPlugin} from './helper.mjs';",
+        'export const createProject02Plugin = createPlugin;',
+        '',
+      ].join('\n'),
+    });
+    const helperPath = join(root, manifest.id, 'helper.mjs');
+
+    writeFileSync(
+      helperPath,
+      [
+        'export function createPlugin(input) {',
+        '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
+        '}',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    writeFileSync(
+      helperPath,
+      [
+        "import {writeFileSync} from 'node:fs';",
+        `writeFileSync(${JSON.stringify(markerPath)}, 'executed\\n', 'utf8');`,
+        'export function createPlugin(input) {',
+        '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
+        '}',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    await expect(
+      instantiateOnlyPackage(discovery, root),
+    ).resolves.toMatchObject({
+      manifest: {id: manifest.id},
+    });
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('rejects a transitive module format outside the package contract', async () => {
+    const root = createTestTempRoot('project02-plugin-module-format-');
+    const manifest = testPluginManifest('memory.module-format');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entry: './index.mjs',
+      entrySource: [
+        "import {createPlugin} from './helper.mts';",
+        'export const createProject02Plugin = createPlugin;',
+        '',
+      ].join('\n'),
+    });
+    writeFileSync(
+      join(root, manifest.id, 'helper.mts'),
+      [
+        'export const createPlugin = input => ({',
+        '  manifest: input.manifest, providedTools: [], lifecycleHooks: {}',
+        '});',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    await expect(instantiateOnlyPackage(discovery, root)).rejects.toThrow(
+      `Runtime plugin package "${manifest.id}" entry could not be imported.`,
+    );
+  });
+
+  it('rejects absolute imports even when they point inside the package', async () => {
+    const root = createTestTempRoot('project02-plugin-module-absolute-');
+    const manifest = testPluginManifest('memory.module-absolute');
+    const helperPath = join(root, manifest.id, 'helper.mjs');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entry: './index.mjs',
+      entrySource: [
+        `import {createPlugin} from ${JSON.stringify(helperPath)};`,
+        'export const createProject02Plugin = createPlugin;',
+        '',
+      ].join('\n'),
+    });
+    writeFileSync(
+      helperPath,
+      [
+        'export const createPlugin = input => ({',
+        '  manifest: input.manifest, providedTools: [], lifecycleHooks: {}',
+        '});',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    await expect(instantiateOnlyPackage(discovery, root)).rejects.toThrow(
+      `Runtime plugin package "${manifest.id}" entry could not be imported.`,
+    );
+  });
+
+  it('does not let caller-spoofed bundled provenance escape the artifact', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-module-escape-');
+    const root = join(parentRoot, 'source');
+    const manifest = testPluginManifest('memory.module-escape');
+    const outsidePath = join(root, 'outside.mjs');
+    const markerPath = join(parentRoot, 'outside-module-imported');
+
+    mkdirSync(root, {recursive: true});
+    writeFileSync(
+      outsidePath,
+      [
+        "import {writeFileSync} from 'node:fs';",
+        `writeFileSync(${JSON.stringify(markerPath)}, 'executed\\n', 'utf8');`,
+        'export const createPlugin = input => ({',
+        '  manifest: input.manifest, providedTools: [], lifecycleHooks: {}',
+        '});',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    writeTestPackage({
+      root,
+      manifest,
+      entry: './index.mjs',
+      entrySource: [
+        "import {createPlugin} from '../outside.mjs';",
+        'export const createProject02Plugin = createPlugin;',
+        '',
+      ].join('\n'),
+    });
+    const spoofedSource = {root, provenance: 'bundled'} as const;
+    const discovery = discoverRuntimePluginPackages({
+      sources: [spoofedSource],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.packages[0]?.provenance).toBe('operator');
+    await expect(instantiateOnlyPackage(discovery, root)).rejects.toThrow(
+      `Runtime plugin package "${manifest.id}" entry could not be imported.`,
+    );
+    expect(existsSync(markerPath)).toBe(false);
+  });
+
+  it('reuses one accepted factory without revalidating on later loads', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-load-cache-');
+    const root = join(parentRoot, 'source');
+    const manifest = testPluginManifest('memory.load-cache');
+    const importMarker = join(parentRoot, 'imports');
+    const factoryMarker = join(parentRoot, 'factory-calls');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: [
+        "import {appendFileSync} from 'node:fs';",
+        `appendFileSync(${JSON.stringify(importMarker)}, 'import\\n', 'utf8');`,
+        'export function createProject02Plugin(input) {',
+        `  appendFileSync(${JSON.stringify(factoryMarker)}, 'factory\\n', 'utf8');`,
+        '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
+        '}',
+        '',
+      ].join('\n'),
+    });
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    await instantiateOnlyPackage(discovery, root);
+    writeFileSync(
+      join(root, manifest.id, 'project02.plugin.json'),
+      '{changed after accepted import\n',
+      'utf8',
+    );
+    await instantiateOnlyPackage(discovery, root);
+
+    expect(readFileSync(importMarker, 'utf8')).toBe('import\n');
+    expect(readFileSync(factoryMarker, 'utf8')).toBe('factory\nfactory\n');
+  });
+
   it.each(['.ts', '.js', '.mjs'] as const)(
     'loads %s entries through the same package factory path',
     async extension => {
@@ -402,7 +1133,7 @@ describe('runtime plugin package loader', () => {
         entrySource: validEntrySource(),
       });
       const discovery = discoverRuntimePluginPackages({
-        sources: [{root, provenance: 'operator'}],
+        sources: [{root}],
         reservedPluginIds: [],
       });
       const discoveredPackage = discovery.packages[0];
@@ -435,7 +1166,7 @@ describe('runtime plugin package loader', () => {
       entrySource: validEntrySource(),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
@@ -464,15 +1195,9 @@ describe('runtime plugin package loader', () => {
 
   it('keeps one bundled package and quarantines an operator duplicate', () => {
     const parentRoot = createTestTempRoot('project02-plugin-packages-');
-    const bundledRoot = join(parentRoot, 'bundled');
     const operatorRoot = join(parentRoot, 'operator');
-    const manifest = testPluginManifest('memory.duplicate');
+    const manifest = createDemoConfigPluginManifest();
 
-    writeTestPackage({
-      root: bundledRoot,
-      manifest,
-      entrySource: validEntrySource(),
-    });
     writeTestPackage({
       root: operatorRoot,
       manifest,
@@ -480,24 +1205,21 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [
-        {root: operatorRoot, provenance: 'operator'},
-        {root: bundledRoot, provenance: 'bundled'},
-      ],
+      sources: [{root: operatorRoot}, {root: bundledRuntimePluginPackageRoot}],
       reservedPluginIds: [],
     });
 
-    expect(discovery.packages).toHaveLength(1);
-    expect(discovery.packages[0]?.provenance).toBe('bundled');
-    expect(discovery.packages[0]?.manifest.id).toBe(manifest.id);
-    expect(discovery.diagnostics).toEqual([
+    expect(
+      discovery.packages.find(item => item.manifest.id === manifest.id),
+    ).toMatchObject({provenance: 'bundled'});
+    expect(discovery.diagnostics).toContainEqual(
       expect.objectContaining({
         code: 'duplicate_plugin_id',
         path: join(operatorRoot, manifest.id, 'project02.plugin.json'),
         provenance: 'operator',
         pluginId: manifest.id,
       }),
-    ]);
+    );
   });
 
   it('quarantines every conflicting operator duplicate instead of choosing by order', () => {
@@ -518,10 +1240,7 @@ describe('runtime plugin package loader', () => {
     });
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [
-        {root: firstRoot, provenance: 'operator'},
-        {root: secondRoot, provenance: 'operator'},
-      ],
+      sources: [{root: firstRoot}, {root: secondRoot}],
       reservedPluginIds: [],
     });
 
@@ -544,7 +1263,7 @@ describe('runtime plugin package loader', () => {
       entrySource: 'export default function createProject02Plugin() {}\n',
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
@@ -577,7 +1296,7 @@ describe('runtime plugin package loader', () => {
       entrySource: `${validEntrySource()}export const extra = true;\n`,
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -596,7 +1315,7 @@ describe('runtime plugin package loader', () => {
       entrySource: "throw new Error('private import detail');\n",
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
     const error = await instantiateOnlyPackage(discovery, root).catch(
@@ -626,7 +1345,7 @@ describe('runtime plugin package loader', () => {
       ].join('\n'),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
@@ -689,7 +1408,7 @@ describe('runtime plugin package loader', () => {
       ].join('\n'),
     });
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
     const discoveredPackage = discovery.packages[0];
@@ -732,7 +1451,7 @@ describe('runtime plugin package loader', () => {
     expect(String(error)).not.toContain(secret);
   });
 
-  it('rejects invalid factory output and cold-manifest drift', async () => {
+  it('rejects invalid and manifest-drifted output while returning constructed candidates to the lifecycle owner', async () => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const invalidManifest = testPluginManifest('memory.invalid-output');
     const driftManifest = testPluginManifest('memory.manifest-drift');
@@ -748,7 +1467,7 @@ describe('runtime plugin package loader', () => {
       ].join('\n'),
     });
     const invalidDiscovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -767,13 +1486,39 @@ describe('runtime plugin package loader', () => {
       ].join('\n'),
     });
     const driftDiscovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
+    const driftPackage = driftDiscovery.packages.find(
+      item => item.manifest.id === driftManifest.id,
+    );
+    const retained: RuntimePlugin[] = [];
+
+    expect(driftPackage).toBeDefined();
+    if (driftPackage === undefined) {
+      throw new Error('Expected the drift package to be discovered.');
+    }
+
     await expect(
-      instantiatePackageById(driftDiscovery, driftManifest.id, root),
+      driftPackage.load(
+        {
+          pluginId: driftPackage.manifest.id,
+          manifest: driftPackage.manifest,
+          storeRoot: root,
+          resolvedConfig: {},
+          redactedConfig: {},
+        },
+        {
+          retainRejectedCandidate: plugin => retained.push(plugin),
+        },
+      ),
     ).rejects.toThrow('factory returned a different manifest');
+    expect(retained).toHaveLength(1);
+    expect(retained[0]?.manifest).toEqual({
+      ...driftManifest,
+      displayName: 'Drifted',
+    });
   });
 
   it('diagnoses package-directory and entry symbolic links', () => {
@@ -818,7 +1563,7 @@ describe('runtime plugin package loader', () => {
     symlinkSync(metadataTarget, metadataPath);
 
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root, provenance: 'operator'}],
+      sources: [{root}],
       reservedPluginIds: [],
     });
 
@@ -826,15 +1571,15 @@ describe('runtime plugin package loader', () => {
     expect(discovery.diagnostics).toEqual([
       expect.objectContaining({
         code: 'invalid_package_directory',
-        message:
-          'Runtime plugin package directories must not be symbolic links.',
+        message: 'Runtime plugin package directories must be real directories.',
         path: join(root, directoryPluginId),
         pluginId: directoryPluginId,
       }),
       expect.objectContaining({
-        code: 'invalid_entry',
-        message: 'Runtime plugin package entry must not be a symbolic link.',
-        path: join(root, entryManifest.id, 'project02.plugin.json'),
+        code: 'invalid_package',
+        message:
+          'Runtime plugin packages must contain only stable regular files and directories.',
+        path: join(root, entryManifest.id, 'index.ts'),
         pluginId: entryManifest.id,
       }),
       expect.objectContaining({

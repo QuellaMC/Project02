@@ -2,17 +2,25 @@ import type {
   RuntimePlugin,
   RuntimePluginContext,
   RuntimePluginEvidenceSnapshot,
+  RuntimePluginManifest,
   RuntimePluginToolCallResult,
 } from './types.ts';
 
 export function mergedRedactionLabels(options: {
-  readonly plugin: RuntimePlugin;
+  readonly plugin?: RuntimePlugin | undefined;
+  readonly manifest?: RuntimePluginManifest | undefined;
   readonly context: RuntimePluginContext;
 }): readonly string[] {
+  const manifest = options.manifest ?? options.plugin?.manifest;
+
+  if (manifest === undefined) {
+    throw new TypeError('Plugin evidence policy requires a manifest.');
+  }
+
   return Object.freeze([
     ...new Set([
       ...options.context.privacy.redactionLabels,
-      ...options.plugin.manifest.runtimePolicy.redactionLabels,
+      ...manifest.runtimePolicy.redactionLabels,
     ]),
   ]);
 }

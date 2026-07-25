@@ -1,8 +1,13 @@
 import {existsSync, readFileSync, unlinkSync} from 'node:fs';
-import {dirname} from 'node:path';
 
-import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
-import {createProject02HomeLayout} from '../storage/layout-contract.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot,
+  isJsonBoundaryObject,
+  ownJsonRecordValue,
+  type JsonBoundaryObject,
+  type JsonBoundaryValue,
+} from '../../shared/json-boundary.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
@@ -13,14 +18,10 @@ import {
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
-  type Project02RuntimePluginConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
 } from './types.ts';
-import {
-  defaultRuntimeConfigPath,
-  validateProject02RuntimeConfig,
-} from './load.ts';
+import {validateProject02RuntimeConfig} from './load.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {
   canonicalRuntimeConfigPath,
@@ -167,7 +168,6 @@ function cleanupRuntimeConfigAtomicTemps(
 }
 
 function bootstrapRuntimeConfig(options: {
-  readonly selectedConfigPath: string;
   readonly storeRoot?: string;
 }): Project02RuntimeConfig {
   if (options.storeRoot !== undefined) {
@@ -177,16 +177,7 @@ function bootstrapRuntimeConfig(options: {
     };
   }
 
-  const selectedStoreRoot = storeRootForSelectedDefaultConfigPath(
-    options.selectedConfigPath,
-  );
-
-  return selectedStoreRoot === undefined
-    ? {version: runtimeConfigVersion}
-    : {
-        version: runtimeConfigVersion,
-        project02: Object.freeze({storeRoot: selectedStoreRoot}),
-      };
+  return {version: runtimeConfigVersion};
 }
 
 /**
@@ -212,51 +203,83 @@ export function assertOverlayLocatedCandidateStaysCharacterScoped(
   }
 }
 
-export function createRuntimeConfigMutationBase(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-}): Project02RuntimeConfig {
-  if (options.loadedConfig.config !== undefined) {
-    return options.loadedConfig.config;
+export type RuntimeConfigAuthoredSnapshot = Readonly<{
+  /** Exact readable authored JSON, or the one bootstrap document if absent. */
+  document: JsonBoundaryObject;
+  /** Present only when that document is already schema-valid. */
+  validatedConfig?: Project02RuntimeConfig;
+}>;
+
+export function createRuntimeConfigAuthoredSnapshot(
+  loadedConfig: LoadedProject02RuntimeConfig,
+): RuntimeConfigAuthoredSnapshot {
+  if (loadedConfig.authoredDocument !== undefined) {
+    return Object.freeze({
+      document: loadedConfig.authoredDocument,
+      ...(loadedConfig.config === undefined
+        ? {}
+        : {validatedConfig: loadedConfig.config}),
+    });
+  }
+
+  if (loadedConfig.config !== undefined) {
+    return Object.freeze({
+      document: createJsonBoundaryObjectSnapshot(loadedConfig.config, {
+        field: 'Runtime config authored snapshot',
+      }),
+      validatedConfig: loadedConfig.config,
+    });
   }
 
   const selectedConfigPath =
-    options.loadedConfig.path ??
-    options.configPath ??
-    defaultRuntimeConfigPath(options.storeRoot);
-  const selectedStoreRoot =
-    options.storeRoot ??
-    storeRootForSelectedDefaultConfigPath(selectedConfigPath);
-  const bootstrapStoreRoot =
-    options.storeRoot === undefined
-      ? selectedStoreRoot
-      : canonicalRuntimeConfigMutationPath(
-          createProject02HomeLayout({homeRoot: options.storeRoot}).homeRoot,
-        );
+    loadedConfig.selectedConfig?.canonicalPath ?? loadedConfig.path;
 
-  return bootstrapRuntimeConfig({
-    selectedConfigPath,
-    ...(bootstrapStoreRoot === undefined
+  if (selectedConfigPath === undefined) {
+    throw new TypeError(
+      'Absent runtime config bootstrap requires retained selection provenance.',
+    );
+  }
+
+  const bootstrapStoreRoot =
+    loadedConfig.selectedConfig?.runtimeHomeRoot ??
+    (loadedConfig.selectedConfig === undefined
+      ? undefined
+      : loadedConfig.selectedConfig.owner.kind === 'home'
+        ? loadedConfig.selectedConfig.owner.homeRoot
+        : undefined);
+  const canonicalBootstrapStoreRoot =
+    bootstrapStoreRoot === undefined
+      ? undefined
+      : canonicalRuntimeConfigMutationPath(bootstrapStoreRoot);
+
+  const validatedConfig = bootstrapRuntimeConfig({
+    ...(canonicalBootstrapStoreRoot === undefined
       ? {}
-      : {storeRoot: bootstrapStoreRoot}),
+      : {storeRoot: canonicalBootstrapStoreRoot}),
+  });
+
+  return Object.freeze({
+    document: createJsonBoundaryObjectSnapshot(validatedConfig, {
+      field: 'Runtime config bootstrap',
+    }),
+    validatedConfig,
   });
 }
 
 export function prepareRuntimeConfigMutationCandidate(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
   readonly operation?: RuntimeConfigMutationOperation;
   readonly validateCandidate?:
     ((config: Project02RuntimeConfig) => void) | undefined;
 }): PreparedRuntimeConfigMutationCandidate {
-  const blockingDiagnostic = options.loadedConfig.diagnostics.find(
-    diagnostic =>
-      diagnostic.severity === 'error' &&
-      diagnostic.code !== 'runtime_config_missing' &&
-      !operationRepairsDiagnostic(options.operation, diagnostic.path),
-  );
+  const blockingDiagnostic =
+    options.loadedConfig.authoredDocument === undefined
+      ? options.loadedConfig.diagnostics.find(
+          diagnostic =>
+            diagnostic.severity === 'error' &&
+            diagnostic.code !== 'runtime_config_missing',
+        )
+      : undefined;
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(
@@ -264,7 +287,9 @@ export function prepareRuntimeConfigMutationCandidate(options: {
     );
   }
 
-  const currentConfig = createRuntimeConfigMutationBase(options);
+  const currentConfig = createRuntimeConfigAuthoredSnapshot(
+    options.loadedConfig,
+  ).document;
   const config = validateMutatedRuntimeConfig(
     options.operation === undefined
       ? currentConfig
@@ -276,31 +301,6 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   return Object.freeze({
     config,
   } satisfies PreparedRuntimeConfigMutationCandidate);
-}
-
-function operationRepairsDiagnostic(
-  operation: RuntimeConfigMutationOperation | undefined,
-  diagnosticPath: string | undefined,
-): boolean {
-  return (
-    diagnosticPath !== undefined &&
-    (operation?.kind === 'set' || operation?.kind === 'unset') &&
-    operation.path === diagnosticPath
-  );
-}
-
-export function storeRootForSelectedDefaultConfigPath(
-  selectedConfigPath: string,
-): string | undefined {
-  const canonicalConfigPath =
-    canonicalRuntimeConfigMutationPath(selectedConfigPath);
-
-  const candidateStoreRoot = dirname(canonicalConfigPath);
-  const defaultConfigPath = defaultRuntimeConfigPath(candidateStoreRoot);
-
-  return pathsAlias(canonicalConfigPath, defaultConfigPath)
-    ? canonicalRuntimeConfigMutationPath(candidateStoreRoot)
-    : undefined;
 }
 
 export function getRedactedRuntimeConfigValueAtPath(
@@ -403,9 +403,9 @@ function project02ConfigValue(
 }
 
 function mutateConfig(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   operation: RuntimeConfigMutationOperation,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   switch (operation.kind) {
     case 'set':
       return setConfigPath(config, operation.path, operation.value);
@@ -447,7 +447,7 @@ function mutateConfig(
 }
 
 function validateMutatedRuntimeConfig(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
 ): Project02RuntimeConfig {
   const accepted = validateProject02RuntimeConfig(config);
   const blockingDiagnostic = accepted.diagnostics.find(
@@ -470,74 +470,111 @@ function validateMutatedRuntimeConfig(
 }
 
 function setPluginEnabled(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   pluginId: string,
   enabled: boolean,
-): Project02RuntimeConfig {
-  const currentPlugin = ownJsonRecordValue(config.plugins, pluginId) ?? {};
-  const plugins = {...(config.plugins ?? {})};
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
+  const currentPlugin =
+    authoredObjectValue(
+      ownJsonRecordValue(plugins, pluginId),
+      `plugins.${pluginId}`,
+    ) ?? {};
+  const nextPlugins = {...plugins};
 
-  plugins[pluginId] = freezePluginConfig({
+  nextPlugins[pluginId] = freezeJsonObject({
     ...currentPlugin,
     enabled,
   });
 
-  return freezeConfig({...config, plugins});
+  return freezeJsonObject({...config, plugins: freezeJsonObject(nextPlugins)});
 }
 
 function setPluginConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   pluginId: string,
   fieldName: string,
   value: RuntimeConfigValue,
-): Project02RuntimeConfig {
-  const currentPlugin = ownJsonRecordValue(config.plugins, pluginId) ?? {};
-  const plugins = {...(config.plugins ?? {})};
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
+  const currentPlugin =
+    authoredObjectValue(
+      ownJsonRecordValue(plugins, pluginId),
+      `plugins.${pluginId}`,
+    ) ?? {};
+  const currentFields =
+    authoredObjectValue(
+      ownJsonRecordValue(currentPlugin, 'config'),
+      `plugins.${pluginId}.config`,
+    ) ?? {};
+  const nextPlugins = {...plugins};
 
-  plugins[pluginId] = freezePluginConfig({
+  nextPlugins[pluginId] = freezeJsonObject({
     ...currentPlugin,
-    config: {
-      ...(currentPlugin.config ?? {}),
-      [fieldName]: value,
-    },
+    config: freezeJsonObject({
+      ...currentFields,
+      [fieldName]: snapshotMutationValue(
+        value,
+        `plugins.${pluginId}.config.${fieldName}`,
+      ),
+    }),
   });
 
-  return freezeConfig({...config, plugins});
+  return freezeJsonObject({
+    ...config,
+    plugins: freezeJsonObject(nextPlugins),
+  });
 }
 
 function unsetPluginConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   pluginId: string,
   fieldName: string,
-): Project02RuntimeConfig {
-  const currentPlugin = ownJsonRecordValue(config.plugins, pluginId);
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins');
+  const currentPluginValue =
+    plugins === undefined ? undefined : ownJsonRecordValue(plugins, pluginId);
 
-  if (currentPlugin === undefined) {
+  if (currentPluginValue === undefined) {
     return config;
   }
 
-  const plugins = {...(config.plugins ?? {})};
-  const nextPluginConfigEntries = Object.entries(
-    currentPlugin.config ?? {},
-  ).filter(([name]) => name !== fieldName);
+  const currentPlugin = requiredAuthoredObjectValue(
+    currentPluginValue,
+    `plugins.${pluginId}`,
+  );
+  const currentFields = authoredObjectValue(
+    ownJsonRecordValue(currentPlugin, 'config'),
+    `plugins.${pluginId}.config`,
+  );
 
-  return setOrDeletePluginWrapper(config, plugins, pluginId, {
-    ...(currentPlugin.enabled === undefined
-      ? {}
-      : {enabled: currentPlugin.enabled}),
-    ...(nextPluginConfigEntries.length === 0
-      ? {}
-      : {
-          config: frozenRuntimeConfigRecord(nextPluginConfigEntries),
-        }),
-  });
+  if (
+    currentFields === undefined ||
+    ownJsonRecordValue(currentFields, fieldName) === undefined
+  ) {
+    return config;
+  }
+
+  const nextFields = jsonObjectWithout(currentFields, fieldName);
+  const nextPlugin = jsonObjectWithout(currentPlugin, 'config');
+
+  if (Object.keys(nextFields).length > 0) {
+    nextPlugin['config'] = freezeJsonObject(nextFields);
+  }
+
+  return setOrDeletePluginWrapper(
+    config,
+    plugins ?? {},
+    pluginId,
+    freezeJsonObject(nextPlugin),
+  );
 }
 
 function setConfigPath(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   path: string,
   value: RuntimeConfigValue,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   const parts = parseConfigPath(path);
   const project02Field = project02FieldForConfigPath(parts);
 
@@ -549,9 +586,9 @@ function setConfigPath(
 }
 
 function unsetConfigPath(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   path: string,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   const parts = parseConfigPath(path);
   const project02Field = project02FieldForConfigPath(parts);
 
@@ -586,11 +623,11 @@ function project02FieldForConfigPath(
 }
 
 function setProject02ConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   field: Project02ConfigFieldDefinition,
   value: RuntimeConfigValue,
   path: string,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   if (
     !project02RuntimeConfigValueMatchesField(value, field) ||
     (typeof value === 'string' && value.trim().length === 0)
@@ -598,40 +635,39 @@ function setProject02ConfigField(
     throw new TypeError(`${field.invalidValueMessage} Path: ${path}.`);
   }
 
-  const current = config.project02 ?? {};
-  const project02: Project02HostConfig = Object.freeze({
+  const current = authoredObjectValue(config['project02'], 'project02') ?? {};
+  const project02 = freezeJsonObject({
     ...current,
-    [field.name]: value,
+    [field.name]: snapshotMutationValue(value, path),
   });
 
-  return freezeConfig({
+  return freezeJsonObject({
     ...config,
     project02,
   });
 }
 
 function unsetProject02ConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   field: Project02ConfigFieldDefinition,
-): Project02RuntimeConfig {
-  const project02 =
-    config.project02 === undefined
-      ? undefined
-      : Object.freeze(
-          Object.fromEntries(
-            Object.entries(config.project02).filter(
-              ([name]) => name !== field.name,
-            ),
-          ),
-        );
-  const hasProject02Fields =
-    project02 !== undefined && Object.keys(project02).length > 0;
+): JsonBoundaryObject {
+  const current = authoredObjectValue(config['project02'], 'project02');
 
-  return freezeConfig({
-    version: config.version,
-    ...(hasProject02Fields ? {project02: Object.freeze(project02)} : {}),
-    ...(config.plugins === undefined ? {} : {plugins: config.plugins}),
-  });
+  if (
+    current === undefined ||
+    ownJsonRecordValue(current, field.name) === undefined
+  ) {
+    return config;
+  }
+
+  const project02 = jsonObjectWithout(current, field.name);
+  const root = jsonObjectWithout(config, 'project02');
+
+  if (Object.keys(project02).length > 0) {
+    root['project02'] = freezeJsonObject(project02);
+  }
+
+  return freezeJsonObject(root);
 }
 
 type PreparedEnvSecretWrite = {
@@ -915,13 +951,6 @@ function writeTextAtomic(path: string, value: string, mode: number): void {
   });
 }
 
-function pathsAlias(left: string, right: string): boolean {
-  return (
-    canonicalRuntimeConfigMutationPath(left) ===
-    canonicalRuntimeConfigMutationPath(right)
-  );
-}
-
 export function canonicalRuntimeConfigMutationPath(path: string): string {
   try {
     return canonicalRuntimeConfigPath(path);
@@ -953,70 +982,97 @@ function parseConfigPath(path: string): readonly string[] {
   return Object.freeze(parts);
 }
 
-function freezeConfig(config: Project02RuntimeConfig): Project02RuntimeConfig {
-  return Object.freeze(config);
-}
-
 function setOrDeletePluginWrapper(
-  config: Project02RuntimeConfig,
-  plugins: Record<string, Project02RuntimePluginConfig>,
+  config: JsonBoundaryObject,
+  plugins: JsonBoundaryObject,
   pluginId: string,
-  pluginConfig: Project02RuntimePluginConfig,
-): Project02RuntimeConfig {
-  if (isEmptyPluginWrapper(pluginConfig)) {
+  pluginConfig: JsonBoundaryObject,
+): JsonBoundaryObject {
+  const nextPlugins = {...plugins};
+
+  if (Object.keys(pluginConfig).length === 0) {
     return freezeConfigWithPluginWrappers(
       config,
-      pluginWrappersWithout(plugins, pluginId),
+      jsonObjectWithout(plugins, pluginId),
     );
   }
 
-  plugins[pluginId] = freezePluginConfig(pluginConfig);
-  return freezeConfigWithPluginWrappers(config, plugins);
-}
-
-function pluginWrappersWithout(
-  plugins: Readonly<Record<string, Project02RuntimePluginConfig>>,
-  pluginId: string,
-): Record<string, Project02RuntimePluginConfig> {
-  return Object.fromEntries(
-    Object.entries(plugins).filter(
-      ([entryPluginId]) => entryPluginId !== pluginId,
-    ),
-  );
-}
-
-function isEmptyPluginWrapper(config: Project02RuntimePluginConfig): boolean {
-  return (
-    config.enabled === undefined &&
-    (config.config === undefined || Object.keys(config.config).length === 0)
-  );
+  nextPlugins[pluginId] = pluginConfig;
+  return freezeConfigWithPluginWrappers(config, freezeJsonObject(nextPlugins));
 }
 
 function freezeConfigWithPluginWrappers(
-  config: Project02RuntimeConfig,
-  plugins: Readonly<Record<string, Project02RuntimePluginConfig>>,
-): Project02RuntimeConfig {
+  config: JsonBoundaryObject,
+  plugins: JsonBoundaryObject,
+): JsonBoundaryObject {
   const pluginEntries = Object.entries(plugins);
 
   if (pluginEntries.length > 0) {
-    return freezeConfig({
+    return freezeJsonObject({
       ...config,
-      plugins: Object.freeze(
-        Object.fromEntries(pluginEntries) as Readonly<
-          Record<string, Project02RuntimePluginConfig>
-        >,
-      ),
+      plugins,
     });
   }
 
-  return freezeConfig({
-    version: config.version,
-    ...(config.project02 === undefined ? {} : {project02: config.project02}),
-  });
+  return freezeJsonObject(jsonObjectWithout(config, 'plugins'));
 }
 
-function freezePluginConfig(
-  config: Project02RuntimePluginConfig,
-): Project02RuntimePluginConfig {
-  return Object.freeze(config);
+function authoredObjectValue(
+  value: JsonBoundaryValue | undefined,
+  path: string,
+): JsonBoundaryObject | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (isJsonBoundaryObject(value)) {
+    return value;
+  }
+
+  throw new TypeError(
+    `Cannot mutate runtime config because authored field "${path}" is not an object.`,
+  );
+}
+
+function requiredAuthoredObjectValue(
+  value: JsonBoundaryValue,
+  path: string,
+): JsonBoundaryObject {
+  const object = authoredObjectValue(value, path);
+
+  if (object === undefined) {
+    throw new TypeError(
+      `Cannot mutate runtime config because authored field "${path}" is missing.`,
+    );
+  }
+
+  return object;
+}
+
+function snapshotMutationValue(
+  value: RuntimeConfigValue,
+  field: string,
+): JsonBoundaryValue {
+  return createJsonBoundarySnapshot(value, {field});
+}
+
+function jsonObjectWithout(
+  value: JsonBoundaryObject,
+  omittedKey: string,
+): Record<string, JsonBoundaryValue> {
+  const result: Record<string, JsonBoundaryValue> = {};
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key !== omittedKey) {
+      result[key] = item;
+    }
+  }
+
+  return result;
+}
+
+function freezeJsonObject(
+  value: Record<string, JsonBoundaryValue>,
+): JsonBoundaryObject {
+  return Object.freeze(value);
 }

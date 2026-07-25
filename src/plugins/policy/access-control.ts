@@ -40,14 +40,21 @@ export function runtimePluginAccessForPlugin(options: {
   readonly plugin: RuntimePlugin;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
 }): RuntimePluginAccessSnapshot {
-  const access = ownJsonRecordValue(
-    options.accessByPluginId,
-    options.plugin.manifest.id,
-  );
+  return runtimePluginAccessForPluginId({
+    pluginId: options.plugin.manifest.id,
+    accessByPluginId: options.accessByPluginId,
+  });
+}
+
+export function runtimePluginAccessForPluginId(options: {
+  readonly pluginId: string;
+  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
+}): RuntimePluginAccessSnapshot {
+  const access = ownJsonRecordValue(options.accessByPluginId, options.pluginId);
 
   if (access === undefined) {
     throw new TypeError(
-      `Plugin "${options.plugin.manifest.id}" is missing resolved access.`,
+      `Plugin "${options.pluginId}" is missing resolved access.`,
     );
   }
 

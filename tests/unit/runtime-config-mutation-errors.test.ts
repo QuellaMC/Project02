@@ -52,8 +52,9 @@ describe('runtime config mutation error handling', () => {
 
     const {
       applyRuntimeConfigControlOperation,
+      bindProject02CharacterRuntimeLocation,
       loadProject02RuntimeConfig,
-      resolveProject02RuntimeLocation,
+      resolveProject02ConfigLocation,
       resolveRuntimeConfigScopeTarget,
       RuntimeConfigMutationError,
     } = await import('../../src/runtime/config/index.ts');
@@ -65,9 +66,10 @@ describe('runtime config mutation error handling', () => {
 
     try {
       const loadedConfig = loadProject02RuntimeConfig({storeRoot, env: {}});
-      const runtimeLocation = resolveProject02RuntimeLocation({
-        loadedConfig,
-        selection: {storeRoot},
+      const configLocation = resolveProject02ConfigLocation({loadedConfig});
+      const runtimeLocation = bindProject02CharacterRuntimeLocation({
+        configLocation,
+        characterId: 'mira',
       });
 
       applyRuntimeConfigControlOperation({

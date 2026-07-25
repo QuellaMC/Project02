@@ -1,5 +1,5 @@
 import {lstatSync, readdirSync} from 'node:fs';
-import {basename, dirname, join} from 'node:path';
+import {basename, dirname, isAbsolute, join, relative, sep} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
@@ -26,6 +26,83 @@ export type EnsureCharacterDataMarkerResult = {
   readonly marker: LocalRuntimeCharacterDataStorageSchemaMarker;
   readonly created: boolean;
 };
+
+/**
+ * Answers whether one already-canonical path belongs to Project02 character
+ * storage. Ownership comes from an explicitly selected home or a valid
+ * storage marker, never from a coincidental directory name.
+ */
+export function isProject02CharacterDataOwnedPath(options: {
+  readonly canonicalPath: string;
+  readonly selectedHomeRoot?: string;
+}): boolean {
+  if (
+    options.selectedHomeRoot !== undefined &&
+    pathIsAtOrBelow(
+      options.canonicalPath,
+      createProject02HomeLayout({
+        homeRoot: options.selectedHomeRoot,
+      }).characterDataRoot,
+    )
+  ) {
+    return true;
+  }
+
+  let ancestor = dirname(options.canonicalPath);
+
+  for (;;) {
+    const marker = recognizedStorageMarker(ancestor);
+
+    if (marker?.scope === 'character-data') {
+      return true;
+    }
+
+    if (
+      marker?.scope === 'home' &&
+      pathIsAtOrBelow(
+        options.canonicalPath,
+        createProject02HomeLayout({homeRoot: ancestor}).characterDataRoot,
+      )
+    ) {
+      return true;
+    }
+
+    const parent = dirname(ancestor);
+
+    if (parent === ancestor) {
+      return false;
+    }
+
+    ancestor = parent;
+  }
+}
+
+function recognizedStorageMarker(
+  directory: string,
+): LocalRuntimeStorageSchemaMarker | undefined {
+  try {
+    return readStorageSchemaMarker(
+      createProject02HomeLayout({homeRoot: directory}),
+    );
+  } catch (error: unknown) {
+    if (error instanceof LocalRuntimeStorageContractError) {
+      return undefined;
+    }
+
+    throw error;
+  }
+}
+
+function pathIsAtOrBelow(path: string, root: string): boolean {
+  const relativePath = relative(root, path);
+
+  return (
+    relativePath.length === 0 ||
+    (!isAbsolute(relativePath) &&
+      relativePath !== '..' &&
+      !relativePath.startsWith(`..${sep}`))
+  );
+}
 
 /**
  * The one writer-side initializer for character data. It preflights

@@ -1,16 +1,24 @@
 import {writeFileSync} from 'node:fs';
+import {dirname} from 'node:path';
 
 import {
+  bindProject02CharacterRuntimeLocation,
+  configuredProject02CharacterId,
   loadProject02RuntimeConfigWithLocation,
-  resolveProject02RuntimeLocation,
+  resolveRuntimeConfigScopeTarget,
+  runtimeConfigEnvVarName,
   runtimeConfigVersion,
-  sameRuntimeConfigCharacterScope,
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigCharacterScope,
 } from '../../src/runtime/config/index.ts';
+import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
 import {homeRootForCharacterDataDir} from '../../src/runtime/storage/index.ts';
-import {type RuntimePluginConfigControlHostState} from '../../src/plugins/index.ts';
+import {
+  createRuntimePluginConfigControlBinding,
+  type RuntimePluginConfigControlBinding,
+  type RuntimePluginConfigControlHostState,
+} from '../../src/plugins/index.ts';
 
 type TestRuntimeLocationOptions = {
   readonly loadedConfig?: LoadedProject02RuntimeConfig;
@@ -41,25 +49,30 @@ export function runtimeLocationForTest(
     ...(storeRoot === undefined ? {} : {storeRoot}),
     ...(character === undefined ? {} : {character}),
   };
-  if (options.loadedConfig === undefined) {
-    return loadProject02RuntimeConfigWithLocation({
-      selection,
-      ...(options.env === undefined ? {} : {env: options.env}),
-    }).runtimeLocation;
-  }
-
-  const loadedConfig = options.loadedConfig;
-  const runtimeLocation = resolveProject02RuntimeLocation({
-    loadedConfig,
-    selection,
+  const selectedSnapshot = loadProject02RuntimeConfigWithLocation(
+    options.loadedConfig === undefined
+      ? {
+          selection,
+          ...(options.env === undefined ? {} : {env: options.env}),
+        }
+      : selectedRuntimeLocationInputsForTest(
+          options.loadedConfig,
+          selection,
+          options.env,
+        ),
+  );
+  const loadedConfig = options.loadedConfig ?? selectedSnapshot.loadedConfig;
+  const runtimeLocation = bindProject02CharacterRuntimeLocation({
+    configLocation: selectedSnapshot.configLocation,
+    characterId: configuredProject02CharacterId(loadedConfig.config, character),
   });
 
   if (
     options.characterScope !== undefined &&
-    !sameRuntimeConfigCharacterScope(
-      runtimeLocation.characterScope,
-      options.characterScope,
-    )
+    (runtimeLocation.characterScope.characterId !==
+      options.characterScope.characterId ||
+      canonicalRuntimeConfigPath(runtimeLocation.characterScope.dataRoot) !==
+        canonicalRuntimeConfigPath(options.characterScope.dataRoot))
   ) {
     throw new TypeError(
       'Test character scope does not match its resolved runtime location.',
@@ -67,6 +80,104 @@ export function runtimeLocationForTest(
   }
 
   return runtimeLocation;
+}
+
+function selectedRuntimeLocationInputsForTest(
+  loadedConfig: LoadedProject02RuntimeConfig,
+  selection: Readonly<{
+    configPath?: string;
+    storeRoot?: string;
+    character?: string;
+  }>,
+  env: NodeJS.ProcessEnv | undefined,
+): Readonly<{
+  selection: Readonly<{
+    configPath?: string;
+    storeRoot?: string;
+    character?: string;
+  }>;
+  env: NodeJS.ProcessEnv;
+}> {
+  if (selection.configPath !== undefined || selection.storeRoot !== undefined) {
+    return {selection, env: env ?? {}};
+  }
+
+  const selectedConfig = loadedConfig.selectedConfig;
+
+  if (selectedConfig !== undefined) {
+    if (selectedConfig.source === 'default') {
+      return {
+        selection: {
+          ...selection,
+          storeRoot:
+            selectedConfig.owner.kind === 'home'
+              ? selectedConfig.owner.homeRoot
+              : dirname(selectedConfig.path),
+        },
+        env: env ?? {},
+      };
+    }
+
+    if (selectedConfig.source === 'path') {
+      return {
+        selection: {
+          ...selection,
+          configPath: selectedConfig.path,
+          ...(selectedConfig.runtimeHomeRoot === undefined
+            ? {}
+            : {storeRoot: selectedConfig.runtimeHomeRoot}),
+        },
+        env: env ?? {},
+      };
+    }
+
+    return {
+      selection,
+      env: {
+        ...(env ?? {}),
+        [runtimeConfigEnvVarName]: selectedConfig.path,
+      },
+    };
+  }
+
+  const configuredStoreRoot = loadedConfig.config?.project02?.storeRoot;
+
+  if (configuredStoreRoot !== undefined) {
+    return {
+      selection: {
+        ...selection,
+        storeRoot: configuredStoreRoot,
+        ...(loadedConfig.path === undefined
+          ? {}
+          : {configPath: loadedConfig.path}),
+      },
+      env: env ?? {},
+    };
+  }
+
+  if (loadedConfig.path === undefined) {
+    return {selection, env: env ?? {}};
+  }
+
+  if (loadedConfig.source === 'env') {
+    return {
+      selection,
+      env: {
+        ...(env ?? {}),
+        [runtimeConfigEnvVarName]: loadedConfig.path,
+      },
+    };
+  }
+
+  return loadedConfig.source === 'path'
+    ? {
+        selection: {...selection, configPath: loadedConfig.path},
+        env: env ?? {},
+      }
+    : {
+        selection: {...selection, storeRoot: dirname(loadedConfig.path)},
+        env: env ?? {},
+      };
 }
 
 export function runtimeConfigSnapshotForTest(
@@ -85,11 +196,14 @@ export function runtimeConfigSnapshotForTest(
 
 export type RuntimePluginConfigControlStateForTestOptions = Omit<
   RuntimePluginConfigControlHostState,
-  'runtimeLocation' | 'configScope'
+  'configControl'
 > &
-  Partial<
-    Pick<RuntimePluginConfigControlHostState, 'runtimeLocation' | 'configScope'>
-  >;
+  Pick<RuntimePluginConfigControlBinding, 'control'> &
+  Readonly<{
+    runtimeLocation?: ResolvedProject02RuntimeLocation;
+    configScope?: 'global' | 'character';
+    env?: NodeJS.ProcessEnv;
+  }>;
 
 export function runtimePluginConfigControlStateForTest(
   options: RuntimePluginConfigControlStateForTestOptions,
@@ -99,13 +213,21 @@ export function runtimePluginConfigControlStateForTest(
       ...(options.env === undefined ? {} : {env: options.env}),
     }),
     configScope = 'global',
+    control,
+    env,
     ...state
   } = options;
 
   return Object.freeze({
     ...state,
-    configScope,
-    runtimeLocation,
+    configControl: createRuntimePluginConfigControlBinding({
+      control,
+      target: resolveRuntimeConfigScopeTarget({
+        runtimeLocation,
+        scope: configScope,
+        ...(env === undefined ? {} : {env}),
+      }),
+    }),
   });
 }
 

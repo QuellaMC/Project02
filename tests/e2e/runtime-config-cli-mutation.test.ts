@@ -4,6 +4,7 @@ import {
   mkdirSync,
   readlinkSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   rmSync,
   statSync,
@@ -50,8 +51,22 @@ describe('runtime config CLI mutation and storage', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-invalid-character-repair-',
     );
+    const authoredConfig = {
+      project02: {
+        character: '../bad',
+        userDisplayName: 'Ada',
+        roleModelProvider: 'nvidia',
+        defaultMemoryProvider: 'demo-memory',
+      },
+      plugins: {
+        'demo-memory': {
+          enabled: true,
+          config: {tone: 'warm', limit: 3},
+        },
+      },
+    } as const;
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      project02: {character: '../bad'},
+      ...authoredConfig,
     });
     let stderr = '';
 
@@ -68,8 +83,90 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
-    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
-      project02: {character: 'mira'},
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+      version: runtimeConfigVersion,
+      ...authoredConfig,
+      project02: {
+        ...authoredConfig.project02,
+        character: 'mira',
+      },
+    });
+  });
+
+  it('does not write when an authored repair leaves another invalid field', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-invalid-character-and-provider-',
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {
+        character: '../bad',
+        roleModelProvider: 'unsupported',
+        userDisplayName: 'Ada',
+      },
+    });
+    const before = readFileSync(configPath, 'utf8');
+    let stderr = '';
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.character', 'mira'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+  });
+
+  it('preserves unrelated authored config when unsetting an invalid field', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-invalid-character-unset-',
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {
+        character: '../bad',
+        userDisplayName: 'Ada',
+        roleModelProvider: 'nvidia',
+      },
+      plugins: {
+        demo: {
+          enabled: false,
+          config: {tone: 'warm'},
+        },
+      },
+    });
+    let stderr = '';
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'unset', 'project02.character'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toBe('');
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toEqual({
+      version: runtimeConfigVersion,
+      project02: {
+        userDisplayName: 'Ada',
+        roleModelProvider: 'nvidia',
+      },
+      plugins: {
+        demo: {
+          enabled: false,
+          config: {tone: 'warm'},
+        },
+      },
     });
   });
 
@@ -187,12 +284,14 @@ describe('runtime config CLI mutation and storage', () => {
     writeFileSync(targetPath, '');
     symlinkSync(targetPath, join(storeRoot, '.env'));
 
-    // The explicit --config IS the home's default config: the derived
-    // env file must still be a real in-home file.
+    // The explicit config remains standalone; --store states which home owns
+    // secrets and other runtime data.
     const exitCode = await runRuntimeConfigCliFromArgs(
       [
         '--config',
         configPath,
+        '--store',
+        storeRoot,
         'secret',
         'set',
         'mem0-local',
@@ -357,6 +456,112 @@ describe('runtime config CLI mutation and storage', () => {
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
 
+  it.each([
+    {
+      label: 'as the default config target',
+      args(selectedHomeRoot: string, configPath: string) {
+        void configPath;
+        return ['--store', selectedHomeRoot] as const;
+      },
+    },
+    {
+      label: 'alongside an explicit config',
+      args(selectedHomeRoot: string, configPath: string) {
+        return ['--config', configPath, '--store', selectedHomeRoot] as const;
+      },
+    },
+  ])('guards the selected --store home $label', async example => {
+    const selectedHomeRoot = createTestTempRoot(
+      'project02-config-selected-foreign-home-',
+    );
+    const effectiveHomeRoot = createTestTempRoot(
+      'project02-config-selected-effective-home-',
+    );
+    const configPath = join(selectedHomeRoot, 'config.json');
+    let stderr = '';
+
+    await ensureInitializedProject02Home({homeRoot: effectiveHomeRoot});
+    const effectiveConfigPath = writeRuntimeConfig(
+      join(effectiveHomeRoot, 'config.json'),
+      {project02: {userDisplayName: 'Effective Home'}},
+    );
+    writeRuntimeConfig(configPath, {
+      project02: {storeRoot: effectiveHomeRoot},
+    });
+    writeFileSync(
+      join(selectedHomeRoot, 'notes.txt'),
+      'not a project02 home\n',
+    );
+    const configBefore = readFileSync(configPath, 'utf8');
+    const effectiveConfigBefore = readFileSync(effectiveConfigPath, 'utf8');
+    const effectiveLocksBefore = readdirSync(
+      join(effectiveHomeRoot, '.locks'),
+    ).sort();
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      [
+        ...example.args(selectedHomeRoot, configPath),
+        'set',
+        'project02.userDisplayName',
+        'Bob',
+      ],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+    expect(readFileSync(configPath, 'utf8')).toBe(configBefore);
+    expect(existsSync(join(selectedHomeRoot, '.locks'))).toBe(false);
+    expect(readFileSync(effectiveConfigPath, 'utf8')).toBe(
+      effectiveConfigBefore,
+    );
+    expect(readdirSync(join(effectiveHomeRoot, '.locks')).sort()).toEqual(
+      effectiveLocksBefore,
+    );
+  });
+
+  it('rejects a global --config nested inside character-owned storage', async () => {
+    const homeRoot = createTestTempRoot(
+      'project02-config-character-owned-global-',
+    );
+    const nestedRoot = join(
+      homeRoot,
+      'character-data',
+      'mira',
+      'sessions',
+      'rogue',
+    );
+    const configPath = join(nestedRoot, 'config.json');
+    let stderr = '';
+
+    await ensureInitializedProject02Home({homeRoot});
+    mkdirSync(nestedRoot, {recursive: true});
+    writeRuntimeConfig(configPath, {});
+    const configBefore = readFileSync(configPath, 'utf8');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--config', configPath, 'set', 'project02.character', 'nova'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('inside a character-data directory');
+    expect(readFileSync(configPath, 'utf8')).toBe(configBefore);
+    expect(existsSync(join(nestedRoot, '.locks'))).toBe(false);
+  });
+
   it('seeds explicit store roots into newly created store configs', async () => {
     const storeRoot = createTestTempRoot('project02-config-cli-store-seed-');
     const seededStoreRoot = realpathSync.native(storeRoot);
@@ -472,12 +677,12 @@ describe('runtime config CLI mutation and storage', () => {
     }
   });
 
-  it('seeds env-selected missing store-default configs with their store root', async () => {
+  it('keeps an env-selected missing config independent from its filename', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-cli-env-store-seed-',
     );
-    const seededStoreRoot = realpathSync.native(storeRoot);
     const configPath = defaultRuntimeConfigPath(storeRoot);
+    const defaultHomeRoot = join(process.cwd(), '.project02');
     let setStdout = '';
     let envPathStdout = '';
 
@@ -500,15 +705,11 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(JSON.parse(setStdout) as unknown).toMatchObject({
       configPath,
-      envPath: join(seededStoreRoot, '.env'),
+      envPath: join(defaultHomeRoot, '.env'),
     });
-    expect(
-      JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
-    ).toMatchObject({
-      project02: {
-        storeRoot: seededStoreRoot,
-        roleModelProvider: 'local',
-      },
+    expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toEqual({
+      version: runtimeConfigVersion,
+      project02: {roleModelProvider: 'local'},
     });
 
     const loaded = loadProject02RuntimeConfig({
@@ -520,7 +721,7 @@ describe('runtime config CLI mutation and storage', () => {
       ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
     });
 
-    expect(resolved.project02.storeRoot).toBe(seededStoreRoot);
+    expect(resolved.project02.storeRoot).toBe(defaultHomeRoot);
 
     expect(
       await runRuntimeConfigCliFromArgs(['env-path'], {
@@ -534,7 +735,7 @@ describe('runtime config CLI mutation and storage', () => {
       }),
     ).toBe(0);
 
-    expect(envPathStdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
+    expect(envPathStdout).toBe(`${join(defaultHomeRoot, '.env')}\n`);
   });
 
   it.each([
@@ -560,12 +761,11 @@ describe('runtime config CLI mutation and storage', () => {
       },
     },
   ])(
-    'infers env-path from a missing store-default config selected by $label',
+    'does not infer a home from a missing config selected by $label',
     async example => {
       const storeRoot = createTestTempRoot(
         'project02-config-cli-missing-env-path-store-',
       );
-      const seededStoreRoot = realpathSync.native(storeRoot);
       const configPath = defaultRuntimeConfigPath(storeRoot);
       let stdout = '';
       let stderr = '';
@@ -582,22 +782,21 @@ describe('runtime config CLI mutation and storage', () => {
           }),
           env: example.env(configPath),
         }),
-      ).toBe(0);
+      ).toBe(1);
 
-      expect(stdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
-      expect(stderr).toBe('');
+      expect(stdout).toBe('');
+      expect(stderr).toContain('Runtime config file does not exist');
       expect(existsSync(configPath)).toBe(false);
     },
   );
 
-  it('seeds cwd dotenv-selected missing store-default configs with their store root', async () => {
+  it('keeps a dotenv-selected missing config independent from its filename', async () => {
     const cwdRoot = createTestTempRoot(
       'project02-config-cli-dotenv-store-seed-',
     );
     const storeRoot = createTestTempRoot(
       'project02-config-cli-dotenv-selected-store-',
     );
-    const seededStoreRoot = realpathSync.native(storeRoot);
     const configPath = defaultRuntimeConfigPath(storeRoot);
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
@@ -613,6 +812,7 @@ describe('runtime config CLI mutation and storage', () => {
     try {
       Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
       process.chdir(cwdRoot);
+      const defaultHomeRoot = join(process.cwd(), '.project02');
 
       expect(
         await runRuntimeConfigCliFromArgs(
@@ -628,15 +828,11 @@ describe('runtime config CLI mutation and storage', () => {
 
       expect(JSON.parse(setStdout) as unknown).toMatchObject({
         configPath,
-        envPath: join(seededStoreRoot, '.env'),
+        envPath: join(defaultHomeRoot, '.env'),
       });
-      expect(
-        JSON.parse(readFileSync(configPath, 'utf8')) as unknown,
-      ).toMatchObject({
-        project02: {
-          storeRoot: seededStoreRoot,
-          roleModelProvider: 'local',
-        },
+      expect(JSON.parse(readFileSync(configPath, 'utf8')) as unknown).toEqual({
+        version: runtimeConfigVersion,
+        project02: {roleModelProvider: 'local'},
       });
 
       expect(
@@ -648,7 +844,7 @@ describe('runtime config CLI mutation and storage', () => {
         }),
       ).toBe(0);
 
-      expect(envPathStdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
+      expect(envPathStdout).toBe(`${join(defaultHomeRoot, '.env')}\n`);
     } finally {
       process.chdir(previousCwd);
       restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
@@ -951,7 +1147,7 @@ describe('runtime config CLI mutation and storage', () => {
       },
     },
   ])(
-    'bootstraps symlinked store-default configs from canonical target store roots for $label mutations',
+    'keeps a symlinked config standalone for $label mutations',
     async example => {
       const targetStoreRoot = createTestTempRoot(
         'project02-config-link-default-target-',
@@ -959,9 +1155,9 @@ describe('runtime config CLI mutation and storage', () => {
       const linkStoreRoot = createTestTempRoot(
         'project02-config-link-default-selected-',
       );
-      const seededStoreRoot = realpathSync.native(targetStoreRoot);
       const targetConfigPath = defaultRuntimeConfigPath(targetStoreRoot);
       const linkConfigPath = defaultRuntimeConfigPath(linkStoreRoot);
+      const defaultHomeRoot = join(process.cwd(), '.project02');
       let stdout = '';
 
       symlinkSync(targetConfigPath, linkConfigPath);
@@ -982,7 +1178,7 @@ describe('runtime config CLI mutation and storage', () => {
 
       expect(JSON.parse(stdout) as unknown).toMatchObject({
         configPath: linkConfigPath,
-        envPath: join(seededStoreRoot, '.env'),
+        envPath: join(defaultHomeRoot, '.env'),
       });
       expect(lstatSync(linkConfigPath).isSymbolicLink()).toBe(true);
       expect(readlinkSync(linkConfigPath)).toBe(targetConfigPath);
@@ -990,10 +1186,7 @@ describe('runtime config CLI mutation and storage', () => {
         JSON.parse(readFileSync(targetConfigPath, 'utf8')) as unknown,
       ).toEqual({
         version: runtimeConfigVersion,
-        project02: {
-          storeRoot: seededStoreRoot,
-          roleModelProvider: 'nvidia',
-        },
+        project02: {roleModelProvider: 'nvidia'},
       });
     },
   );
@@ -1216,6 +1409,7 @@ describe('runtime config CLI mutation and storage', () => {
     let stdout = '';
     let stderr = '';
 
+    await ensureInitializedProject02Home({homeRoot: storeRoot});
     writeFileSync(existingPath, 'preserve existing file\n', 'utf8');
     symlinkSync(storeRoot, configParent, 'dir');
 
@@ -1436,7 +1630,6 @@ describe('runtime config CLI mutation and storage', () => {
   it('reports env secret read failures before writing config updates', async () => {
     const storeRoot = createTestTempRoot('project02-config-env-read-blocked-');
     const envPath = join(realpathSync.native(storeRoot), '.env');
-    const displayEnvPath = join(storeRoot, '.env');
     let stdout = '';
     let stderr = '';
 
@@ -1468,7 +1661,7 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(stdout).toBe('');
     expect(stderr).toBe(
-      `Error: Could not read runtime config env file at ${displayEnvPath}.\n`,
+      `Error: Could not read runtime config env file at ${envPath}.\n`,
     );
     expect(stderr).not.toContain('EISDIR');
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
@@ -1550,7 +1743,9 @@ describe('runtime config CLI mutation and storage', () => {
     });
 
     expect(setResult.config.project02?.storeRoot).toBe(nextStoreRoot);
-    expect(setResult.envPath).toBe(join(nextStoreRoot, '.env'));
+    expect(setResult.envPath).toBe(
+      join(realpathSync.native(nextStoreRoot), '.env'),
+    );
 
     const unsetResult = applyRuntimeConfigControlOperation({
       target: resolveRuntimeConfigScopeTarget({
@@ -1570,7 +1765,9 @@ describe('runtime config CLI mutation and storage', () => {
     });
 
     expect(unsetResult.config.project02?.storeRoot).toBeUndefined();
-    expect(unsetResult.envPath).toBe(join(initialStoreRoot, '.env'));
+    expect(unsetResult.envPath).toBe(
+      join(realpathSync.native(initialStoreRoot), '.env'),
+    );
   });
 
   it('writes mutations to the normalized selected config path', () => {

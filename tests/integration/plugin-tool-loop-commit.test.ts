@@ -46,6 +46,8 @@ import {
 } from '../support/runtime-config.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
+  characterDataDirPath,
+  createProject02HomeLayout,
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
@@ -81,7 +83,8 @@ import {requiredDottedConfigPlugin} from '../support/runtime-config-fixtures.ts'
 
 async function createConfigEffectTestFixture(label: string) {
   const sessionId = `session-config-effect-${label}`;
-  const storeRoot = createTestTempRoot(`project02-config-effect-${label}-`);
+  const homeRoot = createTestTempRoot(`project02-config-effect-${label}-`);
+  const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
 
   await createLocalRuntimeSessionStore({
     storeRoot,
@@ -108,17 +111,21 @@ async function createConfigEffectTestFixture(label: string) {
       },
     },
   });
-  const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-    plugins: {
-      [targetPlugin.manifest.id]: {
-        config: {tone: 'cool'},
+  const configPath = writeRuntimeConfig(
+    createProject02HomeLayout({homeRoot}).configPath,
+    {
+      plugins: {
+        [targetPlugin.manifest.id]: {
+          config: {tone: 'cool'},
+        },
       },
     },
-  });
+  );
   const before = inspectRuntimePluginConfig({
+    targetScope: 'global',
     runtimeLocation: runtimeLocationForTest({
       configPath: configPath,
-      storeRoot: storeRoot,
+      storeRoot: homeRoot,
     }),
     manifest: targetPlugin.manifest,
     pluginManifests: [targetPlugin.manifest],
@@ -126,6 +133,7 @@ async function createConfigEffectTestFixture(label: string) {
 
   return {
     sessionId,
+    homeRoot,
     storeRoot,
     targetPlugin,
     configPath,
@@ -147,7 +155,7 @@ function createConfigEffectTestHost(options: {
     pluginConfigControl: runtimePluginConfigControlStateForTest({
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
 
       control: testRuntimePluginConfigControlCapability,
@@ -262,9 +270,10 @@ async function createLiveReloadLoopFixture(
       },
     });
     before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
       manifest,
       pluginManifests: [manifest],
@@ -333,9 +342,10 @@ async function createLiveReloadLoopFixture(
       // authored config its instances were built from, so recovery can skip
       // rebuilds the running host already reflects.
       constructionConfigFingerprint: inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: fixture.configPath,
-          storeRoot: fixture.storeRoot,
+          storeRoot: fixture.homeRoot,
         }),
         manifest,
         pluginManifests: [manifest],
@@ -349,7 +359,7 @@ async function createLiveReloadLoopFixture(
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         runtimeLocation: runtimeLocationForTest({
           configPath: fixture.configPath,
-          storeRoot: fixture.storeRoot,
+          storeRoot: fixture.homeRoot,
         }),
 
         control: testRuntimePluginConfigControlCapability,
@@ -1593,9 +1603,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       }),
     });
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
@@ -1716,9 +1727,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       roleModelAdapter: adapter,
     });
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
@@ -1879,9 +1891,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       .find(event => event.kind === 'runtime_turn_completed');
     const effect = terminal?.runtimeConfigEffects?.[0];
     const afterApply = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
@@ -2459,7 +2472,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
             target: resolveRuntimeConfigScopeTarget({
               runtimeLocation: runtimeLocationForTest({
                 configPath: fixture.configPath,
-                storeRoot: fixture.storeRoot,
+                storeRoot: fixture.homeRoot,
               }),
               scope: 'global',
             }),
@@ -2496,9 +2509,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       }),
     });
     const afterDrift = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
@@ -2613,9 +2627,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       'Approved runtime config effects require durable local session evidence.',
     );
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: fixture.configPath,
-        storeRoot: fixture.storeRoot,
+        storeRoot: fixture.homeRoot,
       }),
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
@@ -2635,7 +2650,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('recovers a durable pending config effect once and records its effect marker', async () => {
     const sessionId = 'session-config-update-recovery';
-    const storeRoot = createTestTempRoot('project02-config-update-recovery-');
+    const homeRoot = createTestTempRoot('project02-config-update-recovery-');
+    const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
 
     await createLocalRuntimeSessionStore({
       storeRoot,
@@ -2662,17 +2678,21 @@ describe('plugin-driven tool loop commit and rollback', () => {
         },
       },
     });
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [targetPlugin.manifest.id]: {
-          config: {tone: 'cool'},
+    const configPath = writeRuntimeConfig(
+      createProject02HomeLayout({homeRoot}).configPath,
+      {
+        plugins: {
+          [targetPlugin.manifest.id]: {
+            config: {tone: 'cool'},
+          },
         },
       },
-    });
+    );
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
@@ -2695,7 +2715,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
-          storeRoot: storeRoot,
+          storeRoot: homeRoot,
         }),
 
         control: testRuntimePluginConfigControlCapability,
@@ -2747,9 +2767,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       .rawEvents()
       .find(event => event.kind === 'tool_call_finished');
     const afterInterruptedCommit = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
@@ -2798,7 +2819,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
-          storeRoot: storeRoot,
+          storeRoot: homeRoot,
         }),
 
         control: testRuntimePluginConfigControlCapability,
@@ -2823,9 +2844,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       ]),
     });
     const afterRecovery = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
@@ -2859,7 +2881,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('leaves authored config unchanged when config-update finish logging fails', async () => {
     const sessionId = 'session-config-update-finish-log-failure';
-    const storeRoot = createTestTempRoot('project02-config-update-loop-');
+    const homeRoot = createTestTempRoot('project02-config-update-loop-');
+    const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
 
     await createLocalRuntimeSessionStore({
       storeRoot,
@@ -2886,7 +2909,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         },
       },
     });
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+    const configPath = writeRuntimeConfig(join(homeRoot, 'config.json'), {
       plugins: {
         [targetPlugin.manifest.id]: {
           config: {tone: 'cool'},
@@ -2894,9 +2917,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
@@ -2921,7 +2945,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
-          storeRoot: storeRoot,
+          storeRoot: homeRoot,
         }),
 
         control: testRuntimePluginConfigControlCapability,
@@ -2968,9 +2992,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).rejects.toThrow('tool_call_finished raw event append failed');
 
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
@@ -2994,7 +3019,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('leaves authored config unchanged when the terminal append fails with a prepared effect', async () => {
     const sessionId = 'session-config-update-terminal-append-failure';
-    const storeRoot = createTestTempRoot('project02-config-update-loop-');
+    const homeRoot = createTestTempRoot('project02-config-update-loop-');
+    const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
 
     await createLocalRuntimeSessionStore({
       storeRoot,
@@ -3021,7 +3047,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         },
       },
     });
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+    const configPath = writeRuntimeConfig(join(homeRoot, 'config.json'), {
       plugins: {
         [targetPlugin.manifest.id]: {
           config: {tone: 'cool'},
@@ -3029,9 +3055,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],
@@ -3056,7 +3083,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
-          storeRoot: storeRoot,
+          storeRoot: homeRoot,
         }),
 
         control: testRuntimePluginConfigControlCapability,
@@ -3103,9 +3130,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).rejects.toThrow('runtime_turn_completed raw event append failed');
 
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
-        storeRoot: storeRoot,
+        storeRoot: homeRoot,
       }),
       manifest: targetPlugin.manifest,
       pluginManifests: [targetPlugin.manifest],

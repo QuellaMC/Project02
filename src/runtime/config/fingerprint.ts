@@ -1,4 +1,5 @@
 import type {Project02RuntimeConfig, RuntimeConfigValue} from './types.ts';
+import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 import {createCanonicalJsonFingerprint} from '../../shared/canonical-json.ts';
 import {
   plaintextSecretMarkerField,
@@ -6,7 +7,7 @@ import {
 } from '../../shared/secret-marker.ts';
 
 export function createRuntimeConfigFingerprint(
-  value: RuntimeConfigValue | Project02RuntimeConfig,
+  value: RuntimeConfigValue | Project02RuntimeConfig | JsonBoundaryObject,
 ): string {
   return createCanonicalJsonFingerprint(secretSafeFingerprintValue(value));
 }
@@ -20,7 +21,7 @@ export function createRuntimeConfigFingerprint(
  * can never be satisfied with a single-file value.
  */
 export function createLayeredRuntimeConfigFingerprint(options: {
-  readonly globalConfig: Project02RuntimeConfig;
+  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterId: string;
   readonly overlayConfig: RuntimeConfigValue | Project02RuntimeConfig | null;
 }): string {

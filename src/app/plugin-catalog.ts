@@ -8,6 +8,7 @@ import {
   type RuntimePluginPackageCatalogEntry,
 } from '../plugins/index.ts';
 import type {DiscoveredRuntimePluginPackage} from '../plugins/package-loader/index.ts';
+import {acceptRuntimePluginPackageCandidate} from '../plugins/package-loader/index.ts';
 
 export type RuntimePluginFactoryDefinition =
   RuntimePluginFactoryDefinitionContract<RuntimePluginFactoryFunction>;
@@ -38,7 +39,17 @@ export function composeRuntimePluginCatalog(options: {
         Object.freeze({
           catalogKind: 'package',
           manifest: definition.manifest,
-          load: input => definition.create(input),
+          load: async (input, loadOptions) =>
+            acceptRuntimePluginPackageCandidate({
+              manifest: definition.manifest,
+              candidate: await definition.create(input),
+              ...(loadOptions?.retainRejectedCandidate === undefined
+                ? {}
+                : {
+                    retainRejectedCandidate:
+                      loadOptions.retainRejectedCandidate,
+                  }),
+            }),
         } satisfies RuntimePluginPackageCatalogEntry),
       ]),
   );

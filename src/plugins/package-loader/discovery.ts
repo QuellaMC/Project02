@@ -3,14 +3,23 @@
  * sources, validates descriptors and entry paths, applies the identity
  * policy, and hands accepted packages a load closure.
  */
-import {lstatSync, realpathSync, statSync} from 'node:fs';
 import {basename, isAbsolute, join, relative, resolve, sep} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
-  readBoundedPackageJsonFile,
+  capturePackageFiles,
+  PackageCaptureError,
+  readCapturedPackageFile,
+  type CapturedPackageArtifact,
+} from '../../shared/package-capture.ts';
+import {
+  packageDirectorySnapshotsEqual,
+  parseBoundedPackageJsonSource,
   scanPackageSourceRoot,
+  snapshotPackageDirectory,
+  snapshotPackageDirectoryFromSource,
   type BoundedPackageJsonRejectionReason,
+  type PackageDirectorySnapshot,
 } from '../../shared/package-metadata.ts';
 import {isRecord} from '../api/validation-primitives.ts';
 import {
@@ -19,18 +28,55 @@ import {
 } from '../api/package-descriptor.ts';
 import type {RuntimePluginManifest} from '../api/types.ts';
 import {
+  captureRuntimePluginPackageArtifact,
+  RuntimePluginPackageArtifactError,
+  type RuntimePluginPackageArtifact,
+} from './artifact.ts';
+import {
+  bundledRuntimePluginPackageRoot,
   type DiscoveredRuntimePluginPackage,
   type RuntimePluginPackageDiagnostic,
   type RuntimePluginPackageDiscovery,
   type RuntimePluginPackageProvenance,
   type RuntimePluginPackageSource,
 } from './contract.ts';
-import {loadRuntimePluginPackage} from './load.ts';
+import {bundledRuntimePluginFactory} from './bundled.ts';
+import {createRuntimePluginPackageLoader} from './load.ts';
+
+const bundledRuntimePluginPackageDirectory =
+  requireBundledRuntimePluginPackageDirectory();
 
 type DiscoveredRuntimePluginPackageCandidate = {
   readonly package: DiscoveredRuntimePluginPackage;
   readonly descriptorPath: string;
 };
+
+type RuntimePluginPackageSnapshot = {
+  readonly descriptorPath: string;
+  readonly entryRelativePath: string;
+  readonly manifest: RuntimePluginManifest;
+  readonly source:
+    | {
+        readonly kind: 'bound';
+        readonly factory: NonNullable<
+          ReturnType<typeof bundledRuntimePluginFactory>
+        >;
+      }
+    | {
+        readonly kind: 'captured';
+        readonly artifact: RuntimePluginPackageArtifact;
+        readonly entryRelativePath: string;
+      };
+};
+
+function requireBundledRuntimePluginPackageDirectory(): PackageDirectorySnapshot {
+  const directory = snapshotPackageDirectory(bundledRuntimePluginPackageRoot);
+
+  if (directory === undefined) {
+    throw new TypeError('Bundled runtime plugin package root is unavailable.');
+  }
+  return directory;
+}
 
 export function discoverRuntimePluginPackages(options: {
   readonly sources: readonly RuntimePluginPackageSource[];
@@ -40,62 +86,7 @@ export function discoverRuntimePluginPackages(options: {
   const diagnostics: RuntimePluginPackageDiagnostic[] = [];
 
   for (const source of options.sources) {
-    const scan = scanPackageSourceRoot(source.root);
-
-    if (scan.status === 'unavailable') {
-      if (isNodeErrorWithCode(scan.error, 'ENOENT')) {
-        continue;
-      }
-
-      diagnostics.push(
-        packageDiagnostic({
-          code: 'package_source_unavailable',
-          message: 'Runtime plugin package source is unavailable.',
-          path: source.root,
-          provenance: source.provenance,
-        }),
-      );
-      continue;
-    }
-
-    for (const candidate of scan.candidates) {
-      const packageRoot = join(source.root, candidate.name);
-
-      if (candidate.kind === 'symbolic_link') {
-        diagnostics.push(
-          packageDiagnostic({
-            code: 'invalid_package_directory',
-            message:
-              'Runtime plugin package directories must not be symbolic links.',
-            path: packageRoot,
-            provenance: source.provenance,
-            pluginId: candidate.name,
-          }),
-        );
-        continue;
-      }
-
-      try {
-        candidates.push(
-          discoverRuntimePluginPackage({
-            packageRoot,
-            provenance: source.provenance,
-          }),
-        );
-      } catch (error: unknown) {
-        diagnostics.push(
-          error instanceof RuntimePluginPackageDiscoveryError
-            ? error.diagnostic
-            : packageDiagnostic({
-                code: 'invalid_package',
-                message: 'Runtime plugin package is invalid.',
-                path: packageRoot,
-                provenance: source.provenance,
-                pluginId: candidate.name,
-              }),
-        );
-      }
-    }
+    discoverRuntimePluginPackageSource({source, candidates, diagnostics});
   }
 
   const packages = applyPackageIdentityPolicy({
@@ -114,46 +105,247 @@ export function discoverRuntimePluginPackages(options: {
   } satisfies RuntimePluginPackageDiscovery);
 }
 
+function discoverRuntimePluginPackageSource(options: {
+  readonly source: RuntimePluginPackageSource;
+  readonly candidates: DiscoveredRuntimePluginPackageCandidate[];
+  readonly diagnostics: RuntimePluginPackageDiagnostic[];
+}): void {
+  const sourceDirectory = snapshotPackageDirectory(options.source.root);
+  const scan = scanPackageSourceRoot(options.source.root);
+
+  if (scan.status === 'unavailable') {
+    if (isNodeErrorWithCode(scan.error, 'ENOENT')) {
+      return;
+    }
+    options.diagnostics.push(packageSourceUnavailable(options.source));
+    return;
+  }
+  if (sourceDirectory === undefined) {
+    options.diagnostics.push(packageSourceUnavailable(options.source));
+    return;
+  }
+  const provenance = authenticatedPackageProvenance(sourceDirectory);
+
+  const sourceCandidates: DiscoveredRuntimePluginPackageCandidate[] = [];
+  const sourceDiagnostics: RuntimePluginPackageDiagnostic[] = [];
+
+  for (const candidate of scan.candidates) {
+    const packageRoot = join(options.source.root, candidate.name);
+    const packageDirectory = snapshotPackageDirectoryFromSource({
+      sourceDirectory,
+      packageName: candidate.name,
+    });
+
+    try {
+      if (packageDirectory === undefined) {
+        throw invalidPackageDirectory(
+          {
+            packageRoot,
+            provenance,
+          },
+          candidate.name,
+        );
+      }
+      sourceCandidates.push(
+        discoverRuntimePluginPackage({
+          packageDirectory,
+          provenance,
+        }),
+      );
+    } catch (error: unknown) {
+      sourceDiagnostics.push(
+        error instanceof RuntimePluginPackageDiscoveryError
+          ? error.diagnostic
+          : packageDiagnostic({
+              code: 'invalid_package',
+              message: 'Runtime plugin package is invalid.',
+              path: packageRoot,
+              provenance,
+              pluginId: candidate.name,
+            }),
+      );
+    }
+  }
+
+  if (
+    !packageDirectorySnapshotsEqual(
+      sourceDirectory,
+      snapshotPackageDirectory(options.source.root),
+    )
+  ) {
+    options.diagnostics.push(
+      packageDiagnostic({
+        code: 'package_source_changed',
+        message: 'Runtime plugin package source changed during discovery.',
+        path: options.source.root,
+        provenance,
+      }),
+    );
+    return;
+  }
+
+  options.candidates.push(...sourceCandidates);
+  options.diagnostics.push(...sourceDiagnostics);
+}
+
+function packageSourceUnavailable(
+  source: RuntimePluginPackageSource,
+): RuntimePluginPackageDiagnostic {
+  return packageDiagnostic({
+    code: 'package_source_unavailable',
+    message: 'Runtime plugin package source is unavailable.',
+    path: source.root,
+    provenance:
+      resolve(source.root) === resolve(bundledRuntimePluginPackageRoot)
+        ? 'bundled'
+        : 'operator',
+  });
+}
+
+function authenticatedPackageProvenance(
+  sourceDirectory: PackageDirectorySnapshot,
+): RuntimePluginPackageProvenance {
+  return packageDirectorySnapshotsEqual(
+    bundledRuntimePluginPackageDirectory,
+    sourceDirectory,
+  )
+    ? 'bundled'
+    : 'operator';
+}
+
 function discoverRuntimePluginPackage(options: {
-  readonly packageRoot: string;
+  readonly packageDirectory: PackageDirectorySnapshot;
   readonly provenance: RuntimePluginPackageProvenance;
 }): DiscoveredRuntimePluginPackageCandidate {
-  const descriptor = readRuntimePluginPackageDescriptor(options);
-  const entryPath = resolveRuntimePluginPackageEntryPath({
-    packageRoot: options.packageRoot,
-    entry: descriptor.entry,
-    descriptorPath: descriptor.descriptorPath,
-    provenance: options.provenance,
-    pluginId: descriptor.manifest.id,
-  });
+  const snapshot = readRuntimePluginPackageSnapshot(options);
 
   return Object.freeze({
     package: Object.freeze({
       catalogKind: 'package',
-      manifest: descriptor.manifest,
+      manifest: snapshot.manifest,
       provenance: options.provenance,
-      load: input =>
-        loadRuntimePluginPackage({
-          entryPath,
-          manifest: descriptor.manifest,
-          input,
-        }),
+      load: createRuntimePluginPackageLoader({
+        manifest: snapshot.manifest,
+        source: snapshot.source,
+      }),
     } satisfies DiscoveredRuntimePluginPackage),
-    descriptorPath: descriptor.descriptorPath,
+    descriptorPath: snapshot.descriptorPath,
   } satisfies DiscoveredRuntimePluginPackageCandidate);
 }
 
-function readRuntimePluginPackageDescriptor(options: {
-  readonly packageRoot: string;
-  readonly provenance: RuntimePluginPackageProvenance;
-}): {
-  readonly descriptorPath: string;
-  readonly entry: string;
-  readonly manifest: RuntimePluginManifest;
+function bundledRuntimePluginLoaderSource(
+  snapshot: Pick<
+    RuntimePluginPackageSnapshot,
+    'entryRelativePath' | 'manifest'
+  >,
+): {
+  readonly kind: 'bound';
+  readonly factory: NonNullable<ReturnType<typeof bundledRuntimePluginFactory>>;
 } {
-  const packageJsonPath = join(options.packageRoot, 'package.json');
-  const pluginId = basename(options.packageRoot);
-  const packageJson = parsePackageJsonFile({
+  const factory = bundledRuntimePluginFactory({
+    pluginId: snapshot.manifest.id,
+    entryRelativePath: snapshot.entryRelativePath,
+  });
+
+  if (factory === undefined) {
+    throw new TypeError(
+      `Bundled runtime plugin package "${snapshot.manifest.id}" has no host-bound factory.`,
+    );
+  }
+
+  return Object.freeze({kind: 'bound', factory});
+}
+
+function readRuntimePluginPackageSnapshot(options: {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly provenance: RuntimePluginPackageProvenance;
+}): RuntimePluginPackageSnapshot {
+  if (options.provenance === 'bundled') {
+    return readBundledRuntimePluginPackageSnapshot(options.packageDirectory);
+  }
+
+  const packageDirectory = options.packageDirectory;
+  const pluginId = basename(packageDirectory.packageRoot);
+  const artifact = capturePackageArtifact({
+    packageDirectory,
+    pluginId,
+    provenance: 'operator',
+  });
+  const metadata = readRuntimePluginPackageMetadata({
+    packageDirectory,
+    provenance: 'operator',
+    artifact,
+  });
+
+  if (!artifact.files.has(metadata.entryRelativePath)) {
+    throw invalidRuntimePluginEntry({
+      descriptorPath: metadata.descriptorPath,
+      provenance: 'operator',
+      pluginId: metadata.manifest.id,
+    });
+  }
+
+  return Object.freeze({
+    ...metadata,
+    source: Object.freeze({
+      kind: 'captured',
+      artifact,
+      entryRelativePath: metadata.entryRelativePath,
+    }),
+  } satisfies RuntimePluginPackageSnapshot);
+}
+
+function readBundledRuntimePluginPackageSnapshot(
+  packageDirectory: PackageDirectorySnapshot,
+): RuntimePluginPackageSnapshot {
+  const pluginId = basename(packageDirectory.packageRoot);
+  let artifact: CapturedPackageArtifact;
+
+  try {
+    artifact = capturePackageFiles({
+      packageDirectory,
+      relativePaths: ['package.json', 'project02.plugin.json'],
+      maxBytes: maxRuntimePluginPackageMetadataBytes * 2,
+    });
+  } catch (error: unknown) {
+    if (!(error instanceof PackageCaptureError)) {
+      throw error;
+    }
+    throw artifactMetadataDiscoveryError({
+      error,
+      code:
+        basename(error.path) === 'package.json'
+          ? 'invalid_package_json'
+          : 'invalid_descriptor',
+      label:
+        basename(error.path) === 'package.json' ? 'package.json' : 'descriptor',
+      pluginId,
+      provenance: 'bundled',
+    });
+  }
+  const metadata = readRuntimePluginPackageMetadata({
+    packageDirectory,
+    provenance: 'bundled',
+    artifact,
+  });
+
+  return Object.freeze({
+    ...metadata,
+    source: bundledRuntimePluginLoaderSource(metadata),
+  } satisfies RuntimePluginPackageSnapshot);
+}
+
+function readRuntimePluginPackageMetadata(options: {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly provenance: RuntimePluginPackageProvenance;
+  readonly artifact: Pick<CapturedPackageArtifact, 'directories' | 'files'>;
+}): Omit<RuntimePluginPackageSnapshot, 'source'> {
+  const packageDirectory = options.packageDirectory;
+  const packageJsonPath = join(packageDirectory.packageRoot, 'package.json');
+  const pluginId = basename(packageDirectory.packageRoot);
+  const packageJson = parsePackageArtifactJson({
+    artifact: options.artifact,
+    relativePath: 'package.json',
     path: packageJsonPath,
     code: 'invalid_package_json',
     label: 'package.json',
@@ -172,8 +364,13 @@ function readRuntimePluginPackageDescriptor(options: {
     });
   }
 
-  const descriptorPath = join(options.packageRoot, 'project02.plugin.json');
-  const descriptor = parsePackageJsonFile({
+  const descriptorPath = join(
+    packageDirectory.packageRoot,
+    'project02.plugin.json',
+  );
+  const descriptor = parsePackageArtifactJson({
+    artifact: options.artifact,
+    relativePath: 'project02.plugin.json',
     path: descriptorPath,
     code: 'invalid_descriptor',
     label: 'descriptor',
@@ -206,19 +403,29 @@ function readRuntimePluginPackageDescriptor(options: {
     });
   }
 
-  return Object.freeze({descriptorPath, entry, manifest});
+  const entryRelativePath = resolveRuntimePluginPackageEntry({
+    packageRoot: packageDirectory.packageRoot,
+    entry,
+    descriptorPath,
+    provenance: options.provenance,
+    pluginId: manifest.id,
+  });
+  return Object.freeze({
+    descriptorPath,
+    entryRelativePath,
+    manifest,
+  });
 }
 
-function resolveRuntimePluginPackageEntryPath(options: {
+function resolveRuntimePluginPackageEntry(options: {
   readonly packageRoot: string;
   readonly entry: string;
   readonly descriptorPath: string;
   readonly provenance: RuntimePluginPackageProvenance;
   readonly pluginId: string;
 }): string {
-  const packageRoot = resolve(options.packageRoot);
-  const unresolvedEntryPath = resolve(packageRoot, options.entry);
-  const relativeEntryPath = relative(packageRoot, unresolvedEntryPath);
+  const unresolvedEntryPath = resolve(options.packageRoot, options.entry);
+  const relativeEntryPath = relative(options.packageRoot, unresolvedEntryPath);
 
   if (
     relativeEntryPath === '' ||
@@ -235,53 +442,113 @@ function resolveRuntimePluginPackageEntryPath(options: {
       pluginId: options.pluginId,
     });
   }
+  const normalizedRelativePath = relativeEntryPath.split(sep).join('/');
+
+  return normalizedRelativePath;
+}
+
+function capturePackageArtifact(options: {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly pluginId: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+}): RuntimePluginPackageArtifact {
   try {
-    if (lstatSync(unresolvedEntryPath).isSymbolicLink()) {
-      throw packageDiscoveryError({
-        code: 'invalid_entry',
-        message: 'Runtime plugin package entry must not be a symbolic link.',
-        path: options.descriptorPath,
-        provenance: options.provenance,
-        pluginId: options.pluginId,
-      });
-    }
-    if (!statSync(unresolvedEntryPath).isFile()) {
-      throw new TypeError('Entry is not a file.');
-    }
+    return captureRuntimePluginPackageArtifact({
+      packageDirectory: options.packageDirectory,
+      provenance: options.provenance,
+    });
   } catch (error: unknown) {
-    if (error instanceof RuntimePluginPackageDiscoveryError) {
+    if (!(error instanceof RuntimePluginPackageArtifactError)) {
       throw error;
     }
 
-    throw packageDiscoveryError({
-      code: 'invalid_entry',
-      message: 'Runtime plugin package entry must reference an existing file.',
-      path: options.descriptorPath,
-      provenance: options.provenance,
-      pluginId: options.pluginId,
-    });
-  }
+    const fileName = basename(error.path);
 
-  const realPackageRoot = realpathSync(packageRoot);
-  const entryPath = realpathSync(unresolvedEntryPath);
-  const realRelativeEntryPath = relative(realPackageRoot, entryPath);
-
-  if (
-    realRelativeEntryPath === '..' ||
-    realRelativeEntryPath.startsWith(`..${sep}`) ||
-    isAbsolute(realRelativeEntryPath)
-  ) {
+    if (fileName === 'package.json') {
+      throw artifactMetadataDiscoveryError({
+        error,
+        code: 'invalid_package_json',
+        label: 'package.json',
+        pluginId: options.pluginId,
+        provenance: options.provenance,
+      });
+    }
+    if (fileName === 'project02.plugin.json') {
+      throw artifactMetadataDiscoveryError({
+        error,
+        code: 'invalid_descriptor',
+        label: 'descriptor',
+        pluginId: options.pluginId,
+        provenance: options.provenance,
+      });
+    }
     throw packageDiscoveryError({
-      code: 'invalid_entry',
+      code: 'invalid_package',
       message:
-        'Runtime plugin package entry must stay inside its package directory.',
-      path: options.descriptorPath,
+        'Runtime plugin packages must contain only stable regular files and directories.',
+      path: error.path,
       provenance: options.provenance,
       pluginId: options.pluginId,
     });
   }
+}
 
-  return entryPath;
+function artifactMetadataDiscoveryError(options: {
+  readonly error: Pick<
+    RuntimePluginPackageArtifactError | PackageCaptureError,
+    'path' | 'reason'
+  >;
+  readonly code: string;
+  readonly label: string;
+  readonly pluginId: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+}): RuntimePluginPackageDiscoveryError {
+  const reason: BoundedPackageJsonRejectionReason =
+    options.error.reason === 'symbolic_link'
+      ? 'symbolic_link'
+      : options.error.reason === 'not_regular'
+        ? 'not_file'
+        : options.error.reason === 'too_large'
+          ? 'too_large'
+          : 'unreadable';
+
+  return packageDiscoveryError({
+    code: options.code,
+    message: runtimePluginMetadataReadMessage(options.label, reason),
+    path: options.error.path,
+    provenance: options.provenance,
+    pluginId: options.pluginId,
+  });
+}
+
+function invalidPackageDirectory(
+  options: {
+    readonly packageRoot: string;
+    readonly provenance: RuntimePluginPackageProvenance;
+  },
+  pluginId: string,
+): RuntimePluginPackageDiscoveryError {
+  return packageDiscoveryError({
+    code: 'invalid_package_directory',
+    message: 'Runtime plugin package directories must be real directories.',
+    path: options.packageRoot,
+    provenance: options.provenance,
+    pluginId,
+  });
+}
+
+function invalidRuntimePluginEntry(options: {
+  readonly descriptorPath: string;
+  readonly provenance: RuntimePluginPackageProvenance;
+  readonly pluginId: string;
+}): RuntimePluginPackageDiscoveryError {
+  return packageDiscoveryError({
+    code: 'invalid_entry',
+    message: 'Runtime plugin package entry must reference an existing file.',
+    path: options.descriptorPath,
+    provenance: options.provenance,
+    pluginId: options.pluginId,
+  });
 }
 
 function applyPackageIdentityPolicy(options: {
@@ -369,18 +636,32 @@ function applyPackageIdentityPolicy(options: {
   return packages;
 }
 
-function parsePackageJsonFile(options: {
+function parsePackageArtifactJson(options: {
+  readonly artifact: Pick<CapturedPackageArtifact, 'directories' | 'files'>;
+  readonly relativePath: string;
   readonly path: string;
   readonly code: string;
   readonly label: string;
   readonly provenance: RuntimePluginPackageProvenance;
   readonly pluginId: string;
-}): unknown {
-  const metadata = readBoundedPackageJsonFile({
-    path: options.path,
-    maxBytes: maxRuntimePluginPackageMetadataBytes,
-    boundaryField: `Runtime plugin package ${options.label}`,
-  });
+}) {
+  const source = readCapturedPackageFile(
+    options.artifact,
+    options.relativePath,
+  );
+  const metadata =
+    source === undefined
+      ? ({
+          status: 'rejected',
+          reason: options.artifact.directories.has(options.relativePath)
+            ? 'not_file'
+            : 'unreadable',
+        } as const)
+      : parseBoundedPackageJsonSource({
+          source,
+          maxBytes: maxRuntimePluginPackageMetadataBytes,
+          boundaryField: `Runtime plugin package ${options.label}`,
+        });
 
   if (metadata.status === 'rejected') {
     throw packageDiscoveryError({

@@ -107,6 +107,18 @@ export function inspectRuntimePluginConfigForControl(options: {
   readonly manifest: RuntimePluginManifest;
   readonly state: RuntimePluginConfigControlHostState;
 }): RuntimePluginConfigInspection {
+  const target = options.state.configControl.target;
+  const runtimeLocation =
+    target.scope === 'character'
+      ? target.runtimeLocation
+      : target.characterRuntimeLocation;
+
+  if (runtimeLocation === undefined) {
+    throw new TypeError(
+      'Plugin config control requires an activated character runtime.',
+    );
+  }
+
   const activation = ownJsonRecordValue(
     options.state.activationByPluginId,
     options.manifest.id,
@@ -123,8 +135,9 @@ export function inspectRuntimePluginConfigForControl(options: {
             options.manifest.id,
           ),
         }),
-    runtimeLocation: options.state.runtimeLocation,
-    ...(options.state.env === undefined ? {} : {env: options.state.env}),
+    runtimeLocation,
+    targetScope: target.scope,
+    env: target.env,
   });
 }
 
@@ -174,6 +187,7 @@ function modelVisiblePluginConfigInspection(
       agentMutable: field.agentMutable && !field.secret,
       reloadRequired: field.reloadRequired,
       authored: field.authored,
+      effectiveSource: field.effectiveSource,
       effective: {
         name: field.effective.name,
         sensitive: field.effective.secret,

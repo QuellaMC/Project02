@@ -22,16 +22,7 @@ import type {RuntimePluginConfigControlHostState} from '../builtin/plugin-manage
 
 export type RuntimePluginReloadResult =
   | {readonly status: 'rebuilt'; readonly plugin: RuntimePlugin}
-  | {
-      readonly status: 'declined';
-      readonly reason: string;
-      /**
-       * Instance the reloader constructed before declining (e.g. the factory
-       * ran but the result failed a check). The host retires it so terminal
-       * lifecycle hooks still reach factory-allocated resources.
-       */
-      readonly plugin?: RuntimePlugin;
-    }
+  | {readonly status: 'declined'; readonly reason: string}
   | {readonly status: 'failed'; readonly message: string};
 
 /**
@@ -45,6 +36,12 @@ export type RuntimePluginReloader = {
     options: {
       /** Authored-config fingerprint the approved effect produced; the reloader declines when the file has moved past it. */
       readonly expectedFingerprint: string;
+      /**
+       * Transfers every factory result to the host under the expected catalog
+       * identity before the reloader performs any operation that may fail. A
+       * successful swap removes the now-live instance from retirement.
+       */
+      readonly retainCandidate: (plugin: RuntimePlugin) => void;
     },
   ): Promise<RuntimePluginReloadResult>;
 };
@@ -129,8 +126,13 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
-  /** Retains an instance that will never serve so it still receives terminal lifecycle hooks. */
-  readonly retirePlugin: (plugin: RuntimePlugin) => void;
+  /** Retains an instance under the catalog identity that authorized its construction. */
+  readonly retirePlugin: (
+    plugin: RuntimePlugin,
+    catalogPluginId: string,
+  ) => void;
+  /** Keeps terminal dispatch behind every accepted reload ownership transfer. */
+  readonly trackReloadWork: <T>(work: Promise<T>) => Promise<T>;
   /** Records that this host swapped the plugin to an instance built from the fingerprinted config. */
   readonly recordLiveAppliedFingerprint: (
     pluginId: string,
@@ -211,26 +213,21 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
     );
   }
 
-  // Retention is only safe under a truthful id: terminal dispatch resolves
-  // access by the retired instance's own manifest.id, so an id-drifted
-  // factory product must not enter ordinary lifecycle dispatch — under an
-  // unknown id cleanup aborts, and under a colliding id it would run with
-  // another plugin's access.
   const retireRebuilt = (instance: RuntimePlugin): void => {
-    if (instance.manifest.id === pluginId) {
-      options.retirePlugin(instance);
-    }
+    options.retirePlugin(instance, pluginId);
   };
 
   let reloaded: RuntimePluginReloadResult;
 
   try {
-    reloaded = await settleReloadWithinTimeout(
+    const construction = options.trackReloadWork(
       options.reloader.reload(pluginId, {
         expectedFingerprint: authoredResultFingerprint,
+        retainCandidate: retireRebuilt,
       }),
-      retireRebuilt,
     );
+
+    reloaded = await settleReloadWithinTimeout(construction);
   } catch (error: unknown) {
     reloaded = {
       status: 'failed',
@@ -239,10 +236,6 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   }
 
   if (reloaded.status === 'declined') {
-    if (reloaded.plugin !== undefined) {
-      retireRebuilt(reloaded.plugin);
-    }
-
     return deferred(
       options.effects,
       pluginId,
@@ -267,9 +260,6 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   }
 
   if (rebuiltPluginChangesFrozenSurface(previous, reloaded.plugin)) {
-    // The rebuilt instance may already hold factory-allocated resources, so
-    // it is retired (not dropped) even though it never serves a dispatch.
-    retireRebuilt(reloaded.plugin);
     return deferred(
       options.effects,
       pluginId,
@@ -279,7 +269,6 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   }
 
   if (options.swapEnabledPlugin(reloaded.plugin) === undefined) {
-    retireRebuilt(reloaded.plugin);
     return deferred(
       options.effects,
       pluginId,
@@ -305,42 +294,23 @@ export const runtimePluginReloadTimeoutMs = 10_000;
 /**
  * Bounds the reloader like every other plugin dispatch: a factory that never
  * settles must not block the per-session turn queue after the turn is
- * already durable. A factory that settles late may still have built an
- * instance, so the loser of the race is handed to ordinary retirement: it
- * joins whichever ordered terminal phases have not run yet, and one that
- * arrives after the last phase is deliberately dropped — the process is
- * exiting, and dispatching it out of band is what would let a never-served
- * instance write after the live instance's final state.
+ * already durable. Candidate ownership is transferred by the reloader at the
+ * instant a valid factory result exists, independently of whether this timeout
+ * race has already settled. The instance owner tracks that raw construction,
+ * so terminal dispatch cannot overtake a late result.
  */
 async function settleReloadWithinTimeout(
   pending: Promise<RuntimePluginReloadResult>,
-  retireLateInstance: (plugin: RuntimePlugin) => void,
 ): Promise<RuntimePluginReloadResult> {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  let timedOut = false;
   const timeout = new Promise<RuntimePluginReloadResult>(resolve => {
     timeoutId = setTimeout(() => {
-      timedOut = true;
       resolve({
         status: 'failed',
         message: `the reloader did not settle within ${String(runtimePluginReloadTimeoutMs)}ms`,
       });
     }, runtimePluginReloadTimeoutMs);
   });
-
-  pending
-    .then(late => {
-      if (!timedOut) {
-        return;
-      }
-
-      if (late.status === 'rebuilt') {
-        retireLateInstance(late.plugin);
-      } else if (late.status === 'declined' && late.plugin !== undefined) {
-        retireLateInstance(late.plugin);
-      }
-    })
-    .catch(() => undefined);
 
   try {
     return await Promise.race([pending, timeout]);

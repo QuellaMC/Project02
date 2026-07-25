@@ -38,18 +38,6 @@ import {
   type RuntimePluginConfigControlHostState,
 } from './state.ts';
 
-function controlStateLocation(state: RuntimePluginConfigControlHostState): {
-  readonly scope: 'global' | 'character';
-  readonly runtimeLocation: RuntimePluginConfigControlHostState['runtimeLocation'];
-  readonly env?: NodeJS.ProcessEnv;
-} {
-  return {
-    scope: state.configScope,
-    runtimeLocation: state.runtimeLocation,
-    ...(state.env === undefined ? {} : {env: state.env}),
-  };
-}
-
 export const runtimePluginConfigUpdateExecutionTimeoutMs = 5_000;
 
 export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool {
@@ -135,9 +123,7 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     actor: 'agent',
     operation,
   });
-  const target = requiredRuntimePluginConfigControl(
-    options.state,
-  ).resolveTarget(controlStateLocation(options.state));
+  const target = options.state.configControl.target;
 
   if (target.canonicalConfigPath !== options.effect.targetConfigPath) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
@@ -267,9 +253,7 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
     return false;
   }
 
-  const target = requiredRuntimePluginConfigControl(
-    options.state,
-  ).resolveTarget(controlStateLocation(options.state));
+  const target = options.state.configControl.target;
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
@@ -428,9 +412,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   let targetConfigPath: string;
 
   try {
-    const target = requiredRuntimePluginConfigControl(
-      options.state,
-    ).resolveTarget(controlStateLocation(options.state));
+    const target = options.state.configControl.target;
     const prepared = requiredRuntimePluginConfigControl(
       options.state,
     ).prepareOperation({

@@ -10,6 +10,7 @@ import type {
   RuntimePluginContext,
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
+  RuntimePluginManifest,
   RuntimePluginProvidedTool,
   RuntimePluginSourceReference,
 } from '../api/types.ts';
@@ -17,6 +18,7 @@ import {mergedRedactionLabels} from '../api/evidence-policy.ts';
 
 export function normalizeEvidenceSnapshots(options: {
   readonly plugin: RuntimePlugin;
+  readonly pluginId?: string | undefined;
   readonly context: RuntimePluginContext;
   readonly value: unknown;
 }): readonly RuntimePluginEvidenceSnapshot[] {
@@ -31,6 +33,7 @@ export function normalizeEvidenceSnapshots(options: {
 
       assertSnapshotPluginId({
         plugin: options.plugin,
+        pluginId: options.pluginId,
         actualPluginId: evidence.pluginId,
         field: 'evidence.pluginId',
       });
@@ -47,18 +50,22 @@ export function normalizeEvidenceSnapshots(options: {
 
 export function createHookFailureEvidence(options: {
   readonly plugin: RuntimePlugin;
+  readonly policyManifest?: RuntimePluginManifest | undefined;
+  readonly pluginId?: string | undefined;
   readonly context: RuntimePluginContext;
   readonly evidenceKind: RuntimePluginEvidenceKind;
   readonly status: RuntimePluginEvidenceStatus;
   readonly summary: string;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RuntimePluginEvidenceSnapshot {
+  const policyManifest = options.policyManifest ?? options.plugin.manifest;
+
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,
     traceId: options.context.traceId,
     createdAt: options.context.timestamp,
     kind: 'runtime_plugin_evidence_snapshot',
-    pluginId: options.plugin.manifest.id,
+    pluginId: options.pluginId ?? options.plugin.manifest.id,
     evidenceKind: options.evidenceKind,
     status: options.status,
     summary: options.summary,
@@ -66,12 +73,12 @@ export function createHookFailureEvidence(options: {
       ? {}
       : {policyOutcome: options.policyOutcome}),
     redactionLabels: mergedRedactionLabels({
-      plugin: options.plugin,
+      manifest: policyManifest,
       context: options.context,
     }),
-    ...(options.plugin.manifest.config.fingerprint === undefined
+    ...(policyManifest.config.fingerprint === undefined
       ? {}
-      : {configFingerprint: options.plugin.manifest.config.fingerprint}),
+      : {configFingerprint: policyManifest.config.fingerprint}),
   });
 }
 
@@ -96,16 +103,17 @@ export function failurePolicyOutcomeOption(
 
 export function assertSnapshotPluginId(options: {
   readonly plugin: RuntimePlugin;
+  readonly pluginId?: string | undefined;
   readonly actualPluginId: string;
   readonly field: string;
 }): void {
-  if (options.actualPluginId === options.plugin.manifest.id) {
+  const pluginId = options.pluginId ?? options.plugin.manifest.id;
+
+  if (options.actualPluginId === pluginId) {
     return;
   }
 
-  throw new TypeError(
-    `${options.field} must match plugin "${options.plugin.manifest.id}".`,
-  );
+  throw new TypeError(`${options.field} must match plugin "${pluginId}".`);
 }
 
 function assertSnapshotRuntimeIdentity(options: {

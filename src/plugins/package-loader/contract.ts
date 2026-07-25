@@ -14,7 +14,6 @@ export type RuntimePluginPackageProvenance = 'bundled' | 'operator';
 
 export type RuntimePluginPackageSource = {
   readonly root: string;
-  readonly provenance: RuntimePluginPackageProvenance;
 };
 
 export type RuntimePluginPackageDiagnostic = {

@@ -14,7 +14,6 @@ import {
   loadProject02RuntimeConfig,
   runtimeControlEnvVarNames,
   runtimeConfigEnvVarName,
-  runtimeConfigVersion,
   resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {
@@ -55,13 +54,13 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(loaded.source).toBe('none');
-    expect(resolved.project02.storeRoot).toBe(storeRoot);
+    expect(resolved.project02.storeRoot).toBe(realpathSync.native(storeRoot));
     expect(Object.hasOwn(resolved, 'storeRoot')).toBe(false);
     expect(Object.hasOwn(resolved, 'defaultMemoryProvider')).toBe(false);
     expect(Object.hasOwn(resolved, 'roleModelProvider')).toBe(false);
     const inspection = createRuntimeConfigInspectShape(resolved);
 
-    expect(inspection.project02.storeRoot).toBe(storeRoot);
+    expect(inspection.project02.storeRoot).toBe(realpathSync.native(storeRoot));
     expect(Object.hasOwn(inspection, 'storeRoot')).toBe(false);
     expect(Object.hasOwn(inspection, 'defaultMemoryProvider')).toBe(false);
     expect(Object.hasOwn(inspection, 'roleModelProvider')).toBe(false);
@@ -105,64 +104,46 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(loaded.source).toBe('path');
-    expect(resolved.project02.storeRoot).toBe('explicit-store');
+    expect(resolved.project02.storeRoot).toBe(
+      join(process.cwd(), 'explicit-store'),
+    );
   });
 
   it('includes plugin enablement in the effective config fingerprint', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-plugin-fingerprint-',
     );
-    const withoutPlugin = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({
-        loadedConfig: {
-          source: 'path',
-          path: join(storeRoot, 'without.json'),
-          config: {
-            version: runtimeConfigVersion,
+    const withoutPluginPath = writeRuntimeConfig(
+      join(storeRoot, 'without.json'),
+      {},
+    );
+    const withEnabledPluginPath = writeRuntimeConfig(
+      join(storeRoot, 'with.json'),
+      {
+        plugins: {
+          memory: {
+            enabled: true,
           },
-          diagnostics: [],
         },
+      },
+    );
+    const withoutPlugin = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({
+          configPath: withoutPluginPath,
+        }),
+        configPath: withoutPluginPath,
         storeRoot: storeRoot,
       }),
-      loadedConfig: {
-        source: 'path',
-        path: join(storeRoot, 'without.json'),
-        config: {
-          version: runtimeConfigVersion,
-        },
-        diagnostics: [],
-      },
     });
     const withEnabledPlugin = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({
-        loadedConfig: {
-          source: 'path',
-          path: join(storeRoot, 'with.json'),
-          config: {
-            version: runtimeConfigVersion,
-            plugins: {
-              memory: {
-                enabled: true,
-              },
-            },
-          },
-          diagnostics: [],
-        },
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({
+          configPath: withEnabledPluginPath,
+        }),
+        configPath: withEnabledPluginPath,
         storeRoot: storeRoot,
       }),
-      loadedConfig: {
-        source: 'path',
-        path: join(storeRoot, 'with.json'),
-        config: {
-          version: runtimeConfigVersion,
-          plugins: {
-            memory: {
-              enabled: true,
-            },
-          },
-        },
-        diagnostics: [],
-      },
     });
 
     expect(withEnabledPlugin.effectiveConfigFingerprint).not.toBe(
@@ -198,14 +179,16 @@ describe('runtime config loading and resolution', () => {
       source: 'default',
       path: selectedPath,
     });
-    expect(resolved.project02.storeRoot).toBe(selectedStoreRoot);
+    expect(resolved.project02.storeRoot).toBe(
+      realpathSync.native(selectedStoreRoot),
+    );
   });
 
-  it('infers store root from existing store-default config selected by path or env', () => {
+  it('does not infer a home from an explicit or env-selected config filename', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-store-default-infer-',
     );
-    const seededStoreRoot = realpathSync.native(storeRoot);
+    const defaultHomeRoot = join(process.cwd(), '.project02');
     const configPath = defaultRuntimeConfigPath(storeRoot);
 
     writeRuntimeConfig(configPath, {});
@@ -223,22 +206,22 @@ describe('runtime config loading and resolution', () => {
       resolveProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({loadedConfig: explicitLoaded}),
       }).project02.storeRoot,
-    ).toBe(seededStoreRoot);
+    ).toBe(defaultHomeRoot);
     expect(
       resolveProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({loadedConfig: envLoaded}),
       }).project02.storeRoot,
-    ).toBe(seededStoreRoot);
+    ).toBe(defaultHomeRoot);
   });
 
-  it('infers store root from canonical symlink targets for store-default configs selected by path or env', () => {
+  it('does not infer a home from a standalone config symlink target', () => {
     const targetStoreRoot = createTestTempRoot(
       'project02-config-store-default-link-target-',
     );
     const linkStoreRoot = createTestTempRoot(
       'project02-config-store-default-link-selected-',
     );
-    const seededStoreRoot = realpathSync.native(targetStoreRoot);
+    const defaultHomeRoot = join(process.cwd(), '.project02');
     const targetConfigPath = defaultRuntimeConfigPath(targetStoreRoot);
     const linkConfigPath = defaultRuntimeConfigPath(linkStoreRoot);
 
@@ -260,12 +243,12 @@ describe('runtime config loading and resolution', () => {
       resolveProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({loadedConfig: explicitLoaded}),
       }).project02.storeRoot,
-    ).toBe(seededStoreRoot);
+    ).toBe(defaultHomeRoot);
     expect(
       resolveProject02RuntimeConfig({
         ...runtimeConfigSnapshotForTest({loadedConfig: envLoaded}),
       }).project02.storeRoot,
-    ).toBe(seededStoreRoot);
+    ).toBe(defaultHomeRoot);
   });
 
   it('rejects unknown top-level config fields and blocks default activation', async () => {
@@ -1389,26 +1372,23 @@ describe('runtime config loading and resolution', () => {
   it('blocks all plugin factory creation when activation diagnostics contain plugin errors', async () => {
     const characterPlugin = createCharacterStatePlugin();
     const memoryPlugin = requiredSecretPlugin();
-    const configPath = writeRuntimeConfig(
-      join(
-        createTestTempRoot('project02-config-plugin-error-blocks-all-'),
-        'config.json',
-      ),
-      {
-        plugins: {
-          'memory.required': {
-            enabled: true,
-          },
+    const storeRoot = createTestTempRoot(
+      'project02-config-plugin-error-blocks-all-',
+    );
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        'memory.required': {
+          enabled: true,
         },
       },
-    );
+    });
     let characterFactoryCalls = 0;
     let memoryFactoryCalls = 0;
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadProject02RuntimeConfig({configPath}),
+          loadedConfig: loadProject02RuntimeConfig({configPath, storeRoot}),
         }),
 
         factories: {
@@ -1656,7 +1636,7 @@ describe('runtime config loading and resolution', () => {
         pluginId: 'memory.required',
         // Plugin state is character-scoped: factories receive the active
         // character's data root, not the shared home.
-        storeRoot: characterDataDirPath(storeRoot, 'mira'),
+        storeRoot: characterDataDirPath(realpathSync.native(storeRoot), 'mira'),
         apiKeyValue: 'from-manifest-backed-factory',
         redactedApiKeyValue: '[redacted]',
       },
@@ -1761,6 +1741,7 @@ describe('runtime config loading and resolution', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadProject02RuntimeConfig({configPath}),
+          configPath,
           storeRoot: cliStoreRoot,
           env: {[envVar]: 'from-configured-store-root'},
         }),
@@ -1780,10 +1761,10 @@ describe('runtime config loading and resolution', () => {
     });
 
     expect(factoryStoreRoot).toBe(
-      characterDataDirPath(configuredStoreRoot, 'mira'),
+      characterDataDirPath(realpathSync.native(configuredStoreRoot), 'mira'),
     );
     expect(configured.resolvedConfig.project02.storeRoot).toBe(
-      configuredStoreRoot,
+      realpathSync.native(configuredStoreRoot),
     );
   });
 

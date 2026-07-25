@@ -1,4 +1,5 @@
 import type {RuntimePluginConfigValueType} from '../../plugins/api/index.ts';
+import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
@@ -83,6 +84,23 @@ export type Project02RuntimePluginConfig = {
 };
 
 export type RuntimeConfigSource = 'none' | 'default' | 'path' | 'env';
+export type SelectedProject02RuntimeConfigOwner =
+  Readonly<{kind: 'home'; homeRoot: string}> | Readonly<{kind: 'standalone'}>;
+export type SelectedProject02RuntimeConfigLocation = {
+  readonly source: Exclude<RuntimeConfigSource, 'none'>;
+  /** Operator-facing path retained for diagnostics and drift checks. */
+  readonly path: string;
+  /** Physical identity selected before any load or mutation begins. */
+  readonly canonicalPath: string;
+  /** Owner of the selected file, distinct from its effective runtime home. */
+  readonly owner: SelectedProject02RuntimeConfigOwner;
+  /**
+   * Explicit runtime home selected alongside a standalone config path.
+   * Config content may override this for the effective runtime, but the
+   * selection must not be reconstructed after loading.
+   */
+  readonly runtimeHomeRoot?: string;
+};
 export type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
 
 export type RuntimeConfigFieldScope = 'global' | 'character';
@@ -134,12 +152,34 @@ export type RuntimeConfigDiagnosticPluginMetadata = {
 export type LoadedProject02RuntimeConfig = {
   readonly source: RuntimeConfigSource;
   readonly path?: string;
+  /** Immutable operator selection provenance, independent from file absence. */
+  readonly selectedConfig?: SelectedProject02RuntimeConfigLocation;
+  /**
+   * The bounded authored JSON object. It remains available when schema
+   * validation fails so control can edit the real document and validate the
+   * complete candidate instead of rebuilding from bootstrap state.
+   */
+  readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
+/** A real global load, with the selected file provenance retained. */
+export type SelectedLoadedProject02RuntimeConfig =
+  LoadedProject02RuntimeConfig & {
+    readonly path: string;
+    readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
+  };
+
 export type RuntimeConfigFieldSource =
   'config' | 'default' | 'missing' | 'plaintext_override' | `env:${string}`;
+
+/**
+ * Which authored config layer supplies an effective plugin field. This is
+ * intentionally separate from RuntimeConfigFieldSource, which describes how
+ * the field resolves (for example config versus env).
+ */
+export type RuntimeConfigEffectiveSource = 'default' | RuntimeConfigFieldScope;
 
 export type ResolvedRuntimeConfigField = {
   readonly name: string;
@@ -207,10 +247,13 @@ export type RuntimePluginConfigFieldInspectShape = {
   readonly allowedValues?: readonly string[];
   readonly agentMutable: boolean;
   readonly reloadRequired: boolean;
+  /** Value authored in the inspection's explicit mutation target only. */
   readonly authored: {
     readonly configured: boolean;
     readonly value?: RuntimeConfigValue;
   };
+  /** Layer supplying the effective value after global/character resolution. */
+  readonly effectiveSource: RuntimeConfigEffectiveSource;
   readonly effective: RedactedRuntimeConfigField;
 };
 

@@ -1,9 +1,8 @@
 import {createInterface} from 'node:readline/promises';
 
 import {
-  createRuntimeConfigMutationBase,
+  createRuntimeConfigAuthoredSnapshot,
   layeredRuntimeConfigFingerprintForScope,
-  loadProject02RuntimeConfigWithLocation,
   readCharacterOverlayForScope,
   type RuntimeConfigDiagnostic,
   runtimeConfigVersion,
@@ -11,7 +10,6 @@ import {
 } from '../../runtime/config/index.ts';
 import {
   askForNumber,
-  runtimeConfigLocation,
   writeDiagnostics,
   writeLine,
   type RuntimeConfigConsoleContext,
@@ -107,16 +105,8 @@ function consoleLoadDiagnostics(loaded: {
 function loadConsoleSnapshot(
   context: RuntimeConfigConsoleContext,
 ): RuntimeConfigConsoleSnapshot {
-  const {loadedConfig: loaded, runtimeLocation} =
-    loadProject02RuntimeConfigWithLocation({
-      selection: {
-        ...runtimeConfigLocation(context),
-        ...(context.character === undefined
-          ? {}
-          : {character: context.character}),
-      },
-      ...(context.env === undefined ? {} : {env: context.env}),
-    });
+  const loaded = context.loadedConfig;
+  const runtimeLocation = context.runtimeLocation;
   const {diagnostics, blockingDiagnostic} = consoleLoadDiagnostics(loaded);
 
   if (blockingDiagnostic !== undefined) {
@@ -125,13 +115,14 @@ function loadConsoleSnapshot(
     );
   }
 
-  const config = createRuntimeConfigMutationBase({
-    loadedConfig: loaded,
-    configPath: runtimeLocation.globalConfigPath,
-    ...(runtimeLocation.selection.storeRoot === undefined
-      ? {}
-      : {storeRoot: runtimeLocation.selection.storeRoot}),
-  });
+  const authoredSnapshot = createRuntimeConfigAuthoredSnapshot(loaded);
+  const config = authoredSnapshot.validatedConfig;
+
+  if (config === undefined) {
+    throw new TypeError(
+      'Cannot open config console without a valid authored or bootstrap config.',
+    );
+  }
   const overlay = readCharacterOverlayForScope(
     runtimeLocation.characterScope,
   ).overlay;
@@ -139,7 +130,7 @@ function loadConsoleSnapshot(
     diagnostic => diagnostic.severity === 'error',
   );
 
-  if (context.character !== undefined && overlayError !== undefined) {
+  if (context.scope === 'character' && overlayError !== undefined) {
     throw new TypeError(
       'Cannot open config console because the character overlay is ' +
         `invalid: ${overlayError.message}`,
@@ -149,7 +140,7 @@ function loadConsoleSnapshot(
   return Object.freeze({
     loadedConfig: loaded,
     runtimeLocation,
-    scope: context.character === undefined ? 'global' : 'character',
+    scope: context.scope,
     config,
     overlay,
     diagnostics: Object.freeze(diagnostics),
@@ -159,7 +150,7 @@ function loadConsoleSnapshot(
       characterScope: runtimeLocation.characterScope,
       overlay,
     }),
-    ...(context.character === undefined
+    ...(context.scope === 'global'
       ? {}
       : {
           scopedConfig:

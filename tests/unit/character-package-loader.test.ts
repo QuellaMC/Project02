@@ -1,7 +1,8 @@
-import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
+import {mkdirSync, renameSync, symlinkSync, writeFileSync} from 'node:fs';
+import type * as NodeFs from 'node:fs';
 import {join} from 'node:path';
 
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
@@ -10,6 +11,11 @@ import {
   discoverCharacterPackages,
   operatorCharacterPackagesRoot,
 } from '../../src/characters/loader/discovery.ts';
+
+afterEach(() => {
+  vi.doUnmock('node:fs');
+  vi.resetModules();
+});
 
 function writeCharacterPackage(
   root: string,
@@ -179,6 +185,222 @@ describe('character package discovery', () => {
       expect.objectContaining({
         code: 'invalid_package_directory',
         characterId: 'linked',
+      }),
+    ]);
+  });
+
+  it('rejects a package replaced by an outside directory after source enumeration', async () => {
+    const parentRoot = createTestTempRoot();
+    const sourceRoot = join(parentRoot, 'source');
+    const externalRoot = join(parentRoot, 'external');
+    const packageRoot = writeCharacterPackage(sourceRoot, 'swapped');
+    const externalPackageRoot = writeCharacterPackage(externalRoot, 'swapped');
+    const parkedPackageRoot = join(parentRoot, 'parked');
+    let swapped = false;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        readdirSync(path: NodeFs.PathLike, options?: unknown) {
+          const entries = Reflect.apply(actual.readdirSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === sourceRoot && !swapped) {
+            swapped = true;
+            renameSync(packageRoot, parkedPackageRoot);
+            renameSync(externalPackageRoot, packageRoot);
+          }
+
+          return entries;
+        },
+      };
+    });
+    const {discoverCharacterPackages: discoverAfterEnumeration} =
+      await import('../../src/characters/loader/discovery.ts');
+
+    const discovery = discoverAfterEnumeration({
+      sources: [{root: sourceRoot, provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_unavailable',
+        path: sourceRoot,
+      }),
+    ]);
+  });
+
+  it('rejects packages read from a source root replaced after enumeration', async () => {
+    const parentRoot = createTestTempRoot();
+    const sourceRoot = join(parentRoot, 'source');
+    const externalRoot = join(parentRoot, 'external');
+    const parkedSourceRoot = join(parentRoot, 'parked-source');
+
+    writeCharacterPackage(sourceRoot, 'swapped');
+    writeCharacterPackage(externalRoot, 'swapped', {
+      displayName: 'Outside',
+    });
+    let swapped = false;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        readdirSync(path: NodeFs.PathLike, options?: unknown) {
+          const entries = Reflect.apply(actual.readdirSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === sourceRoot && !swapped) {
+            swapped = true;
+            renameSync(sourceRoot, parkedSourceRoot);
+            renameSync(externalRoot, sourceRoot);
+          }
+
+          return entries;
+        },
+      };
+    });
+    const {discoverCharacterPackages: discoverAfterEnumeration} =
+      await import('../../src/characters/loader/discovery.ts');
+
+    const discovery = discoverAfterEnumeration({
+      sources: [{root: sourceRoot, provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_unavailable',
+        path: sourceRoot,
+        provenance: 'operator',
+      }),
+    ]);
+  });
+
+  it('rejects an outside descriptor read through an ancestor ABA swap', async () => {
+    const parentRoot = createTestTempRoot();
+    const boundAncestor = join(parentRoot, 'bound');
+    const externalAncestor = join(parentRoot, 'external');
+    const parkedAncestor = join(parentRoot, 'parked');
+    const sourceRoot = join(boundAncestor, 'source');
+    const externalSourceRoot = join(externalAncestor, 'source');
+    const packageRoot = writeCharacterPackage(sourceRoot, 'swapped');
+
+    writeCharacterPackage(externalSourceRoot, 'swapped', {
+      displayName: 'Outside',
+    });
+    let swapped = false;
+    let restored = false;
+    let packageRealpathCount = 0;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        readdirSync(path: NodeFs.PathLike, options?: unknown) {
+          const entries = Reflect.apply(actual.readdirSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === sourceRoot && !swapped) {
+            swapped = true;
+            renameSync(boundAncestor, parkedAncestor);
+            renameSync(externalAncestor, boundAncestor);
+          }
+          return entries;
+        },
+        realpathSync(path: NodeFs.PathLike, options?: unknown) {
+          const realPath = Reflect.apply(actual.realpathSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === packageRoot && swapped && !restored) {
+            packageRealpathCount += 1;
+            if (packageRealpathCount === 2) {
+              renameSync(boundAncestor, externalAncestor);
+              renameSync(parkedAncestor, boundAncestor);
+              restored = true;
+            }
+          }
+          return realPath;
+        },
+      };
+    });
+    const {discoverCharacterPackages: discoverDuringAncestorSwap} =
+      await import('../../src/characters/loader/discovery.ts');
+
+    const discovery = discoverDuringAncestorSwap({
+      sources: [{root: sourceRoot, provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_unavailable',
+        path: sourceRoot,
+      }),
+    ]);
+  });
+
+  it('rejects a package replaced immediately after its directory check', async () => {
+    const parentRoot = createTestTempRoot();
+    const sourceRoot = join(parentRoot, 'source');
+    const externalRoot = join(parentRoot, 'external');
+    const packageRoot = writeCharacterPackage(sourceRoot, 'swapped');
+    const externalPackageRoot = writeCharacterPackage(externalRoot, 'swapped', {
+      displayName: 'Outside',
+    });
+    const parkedPackageRoot = join(parentRoot, 'parked');
+    let packageRootInspected = false;
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        lstatSync(path: NodeFs.PathLike, options?: unknown) {
+          const stat = Reflect.apply(actual.lstatSync, actual, [
+            path,
+            options,
+          ]) as unknown;
+
+          if (path === packageRoot && !packageRootInspected) {
+            packageRootInspected = true;
+            renameSync(packageRoot, parkedPackageRoot);
+            symlinkSync(externalPackageRoot, packageRoot, 'dir');
+          }
+
+          return stat;
+        },
+      };
+    });
+    const {discoverCharacterPackages: discoverAfterDirectoryCheck} =
+      await import('../../src/characters/loader/discovery.ts');
+
+    const discovery = discoverAfterDirectoryCheck({
+      sources: [{root: sourceRoot, provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_unavailable',
+        path: sourceRoot,
       }),
     ]);
   });

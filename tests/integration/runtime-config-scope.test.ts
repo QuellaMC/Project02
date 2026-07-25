@@ -1,10 +1,21 @@
-import {existsSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  realpathSync,
+  renameSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
 import {
   characterOnlyConfigPlugin,
+  requiredSecretPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {
@@ -14,10 +25,12 @@ import {
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   applyRuntimeConfigControlOperation,
+  bindProject02CharacterRuntimeLocation,
   characterOverlayConfigPath,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
   loadProject02RuntimeConfig,
+  loadProject02RuntimeConfigWithLocation,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
   inspectRuntimePluginConfig,
@@ -27,7 +40,9 @@ import {
 import {
   characterDataDirPath,
   ensureCharacterDataMarker,
+  ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
+import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
 
 function seededHome(): {
   readonly homeRoot: string;
@@ -49,6 +64,382 @@ function seededHome(): {
 }
 
 describe('scope-aware runtime config mutations', () => {
+  it('rejects a missing bound home that becomes a symlink before secret control', async () => {
+    const configRoot = createTestTempRoot(
+      'project02-config-missing-home-anchor-',
+    );
+    const missingHome = join(configRoot, 'runtime-home');
+    const redirectedHome = createTestTempRoot(
+      'project02-config-missing-home-redirect-',
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: missingHome,
+    });
+    const envVar = 'PROJECT02_MISSING_HOME_SECRET';
+
+    await ensureInitializedProject02Home({homeRoot: redirectedHome});
+    const snapshot = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath},
+      env: {[envVar]: 'secret'},
+    });
+    const runtimeLocation = bindProject02CharacterRuntimeLocation({
+      configLocation: snapshot.configLocation,
+      characterId: 'mira',
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation,
+      env: {[envVar]: 'secret'},
+      scope: 'global',
+    });
+
+    symlinkSync(redirectedHome, missingHome);
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'plugin_config',
+          manifest: requiredSecretPlugin('scope.missing-home').manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'secret_set',
+            fieldName: 'apiKey',
+            envVar,
+            secretValue: 'secret',
+          },
+        },
+      }),
+    ).toThrow(RuntimeConfigConflictError);
+    expect(existsSync(join(redirectedHome, '.env'))).toBe(false);
+  });
+
+  it('rejects an existing bound home replaced at the same path', async () => {
+    const configRoot = createTestTempRoot(
+      'project02-config-replaced-home-config-',
+    );
+    const homeRoot = join(configRoot, 'runtime-home');
+    const displacedHome = join(configRoot, 'runtime-home-before');
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: homeRoot,
+    });
+    const envVar = 'PROJECT02_REPLACED_HOME_SECRET';
+
+    mkdirSync(homeRoot);
+    await ensureInitializedProject02Home({homeRoot});
+    const snapshot = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath},
+      env: {[envVar]: 'secret'},
+    });
+    const runtimeLocation = bindProject02CharacterRuntimeLocation({
+      configLocation: snapshot.configLocation,
+      characterId: 'mira',
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation,
+      env: {[envVar]: 'secret'},
+      scope: 'global',
+    });
+
+    renameSync(homeRoot, displacedHome);
+    mkdirSync(homeRoot);
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'plugin_config',
+          manifest: requiredSecretPlugin('scope.replaced-home').manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'secret_set',
+            fieldName: 'apiKey',
+            envVar,
+            secretValue: 'secret',
+          },
+        },
+      }),
+    ).toThrow(RuntimeConfigConflictError);
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
+    expect(existsSync(join(displacedHome, '.env'))).toBe(false);
+  });
+
+  it('allows a standalone config edit but rejects its foreign effective home for state control', () => {
+    const configRoot = createTestTempRoot(
+      'project02-config-standalone-foreign-config-',
+    );
+    const foreignHome = createTestTempRoot(
+      'project02-config-standalone-foreign-home-',
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: foreignHome,
+    });
+    const envVar = 'PROJECT02_FOREIGN_HOME_SECRET';
+
+    writeFileSync(join(foreignHome, 'notes.txt'), 'foreign content\n', 'utf8');
+    const snapshot = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath},
+      env: {[envVar]: 'secret'},
+    });
+    const globalTarget = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: snapshot.configLocation,
+      env: {[envVar]: 'secret'},
+      scope: 'global',
+    });
+
+    applyRuntimeConfigControlOperation({
+      target: globalTarget,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Standalone Edit',
+        },
+      },
+    });
+    expect(
+      (
+        JSON.parse(readFileSync(configPath, 'utf8')) as {
+          readonly project02: {readonly userDisplayName: string};
+        }
+      ).project02.userDisplayName,
+    ).toBe('Standalone Edit');
+
+    const runtimeLocation = bindProject02CharacterRuntimeLocation({
+      configLocation: snapshot.configLocation,
+      characterId: 'mira',
+    });
+    const secretTarget = resolveRuntimeConfigScopeTarget({
+      runtimeLocation,
+      env: {[envVar]: 'secret'},
+      scope: 'global',
+    });
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target: secretTarget,
+        request: {
+          kind: 'plugin_config',
+          manifest: requiredSecretPlugin('scope.foreign-home').manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'secret_set',
+            fieldName: 'apiKey',
+            envVar,
+            secretValue: 'secret',
+          },
+        },
+      }),
+    ).toThrow(/contains foreign entries/);
+    expect(() =>
+      resolveRuntimeConfigScopeTarget({
+        runtimeLocation,
+        env: {},
+        scope: 'character',
+      }),
+    ).toThrow(/contains foreign entries/);
+    expect(existsSync(join(foreignHome, '.env'))).toBe(false);
+    expect(existsSync(join(foreignHome, '.locks'))).toBe(false);
+  });
+
+  it('rejects a foreign candidate home without granting it target authority', async () => {
+    const configRoot = createTestTempRoot(
+      'project02-config-foreign-candidate-config-',
+    );
+    const currentHome = createTestTempRoot(
+      'project02-config-foreign-candidate-current-',
+    );
+    const foreignHome = createTestTempRoot(
+      'project02-config-foreign-candidate-home-',
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: currentHome,
+    });
+    const originalConfig = readFileSync(configPath, 'utf8');
+
+    await ensureInitializedProject02Home({homeRoot: currentHome});
+    writeFileSync(join(foreignHome, 'notes.txt'), 'foreign content\n', 'utf8');
+    const snapshot = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath},
+      env: {},
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: snapshot.configLocation,
+      env: {},
+      scope: 'global',
+    });
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.storeRoot',
+            value: foreignHome,
+          },
+        },
+      }),
+    ).toThrow(/contains foreign entries/);
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
+    expect(existsSync(join(foreignHome, '.locks'))).toBe(false);
+  });
+
+  it('repairs a standalone config whose current effective home is unusable', () => {
+    const configRoot = createTestTempRoot(
+      'project02-config-repair-invalid-home-',
+    );
+    const invalidHome = join(configRoot, 'not-a-directory');
+    const repairedHome = createTestTempRoot(
+      'project02-config-repair-valid-home-',
+    );
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: invalidHome,
+    });
+
+    writeFileSync(invalidHome, 'not a directory\n', 'utf8');
+    const snapshot = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath},
+      env: {},
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: snapshot.configLocation,
+      env: {},
+      scope: 'global',
+    });
+
+    applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.storeRoot',
+          value: repairedHome,
+        },
+      },
+    });
+
+    expect(
+      (
+        JSON.parse(readFileSync(configPath, 'utf8')) as {
+          readonly project02: {readonly storeRoot: string};
+        }
+      ).project02.storeRoot,
+    ).toBe(repairedHome);
+  });
+
+  it('keeps secret writes at the bound physical home after an authored alias moves', async () => {
+    const configRoot = createTestTempRoot(
+      'project02-config-bound-home-config-',
+    );
+    const firstHome = createTestTempRoot('project02-config-bound-home-first-');
+    const secondHome = createTestTempRoot(
+      'project02-config-bound-home-second-',
+    );
+    const authoredHome = join(configRoot, 'runtime-home');
+    const configPath = writeRuntimeConfig(join(configRoot, 'runtime.json'), {
+      storeRoot: authoredHome,
+    });
+    const envVar = 'PROJECT02_BOUND_HOME_SECRET';
+
+    await ensureInitializedProject02Home({homeRoot: firstHome});
+    await ensureInitializedProject02Home({homeRoot: secondHome});
+    symlinkSync(firstHome, authoredHome);
+
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({
+        configPath,
+        env: {[envVar]: 'bound-secret'},
+      }),
+      env: {[envVar]: 'bound-secret'},
+      scope: 'global',
+    });
+
+    unlinkSync(authoredHome);
+    symlinkSync(secondHome, authoredHome);
+
+    const result = applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'plugin_config',
+        manifest: requiredSecretPlugin('scope.bound-home').manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'secret_set',
+          fieldName: 'apiKey',
+          envVar,
+          secretValue: 'bound-secret',
+        },
+      },
+    });
+
+    expect(result.envPath).toBe(join(realpathSync.native(firstHome), '.env'));
+    expect(readFileSync(join(firstHome, '.env'), 'utf8')).toContain(
+      `${envVar}="bound-secret"`,
+    );
+    expect(existsSync(join(secondHome, '.env'))).toBe(false);
+  });
+
+  it('guards the selected home separately from the authored runtime home', async () => {
+    const selectedHomeRoot = createTestTempRoot(
+      'project02-config-selected-owner-',
+    );
+    const effectiveHomeRoot = createTestTempRoot(
+      'project02-config-effective-home-',
+    );
+    const configPath = join(selectedHomeRoot, 'config.json');
+
+    await ensureInitializedProject02Home({homeRoot: effectiveHomeRoot});
+    const effectiveConfigPath = writeRuntimeConfig(
+      join(effectiveHomeRoot, 'config.json'),
+      {project02: {userDisplayName: 'Effective Home'}},
+    );
+    writeRuntimeConfig(configPath, {
+      project02: {storeRoot: effectiveHomeRoot},
+    });
+    writeFileSync(
+      join(selectedHomeRoot, 'notes.txt'),
+      'foreign selected-home content\n',
+    );
+    const configBefore = readFileSync(configPath, 'utf8');
+    const effectiveConfigBefore = readFileSync(effectiveConfigPath, 'utf8');
+    const effectiveLocksBefore = readdirSync(
+      join(effectiveHomeRoot, '.locks'),
+    ).sort();
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: selectedHomeRoot,
+        env: {},
+      }),
+      env: {},
+      scope: 'global',
+    });
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target,
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Must Not Land',
+          },
+        },
+      }),
+    ).toThrow(/contains foreign entries/);
+    expect(readFileSync(configPath, 'utf8')).toBe(configBefore);
+    expect(existsSync(join(selectedHomeRoot, '.locks'))).toBe(false);
+    expect(readFileSync(effectiveConfigPath, 'utf8')).toBe(
+      effectiveConfigBefore,
+    );
+    expect(readdirSync(join(effectiveHomeRoot, '.locks')).sort()).toEqual(
+      effectiveLocksBefore,
+    );
+  });
+
   it('writes character-scoped fields to the overlay and only the overlay', async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const globalBefore = readFileSync(configPath, 'utf8');
@@ -76,7 +467,9 @@ describe('scope-aware runtime config mutations', () => {
       },
     });
 
-    expect(result.configPath).toBe(characterOverlayConfigPath(dataRoot));
+    expect(result.configPath).toBe(
+      canonicalRuntimeConfigPath(characterOverlayConfigPath(dataRoot)),
+    );
     expect(result.config).toEqual({
       version: runtimeConfigVersion,
       project02: {userDisplayName: 'Overlay Name'},
@@ -332,22 +725,24 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(target).toMatchObject({
       scope: 'character',
-      configPath: characterOverlayConfigPath(
-        characterDataDirPath(homeRoot, 'nova'),
+      configPath: canonicalRuntimeConfigPath(
+        characterOverlayConfigPath(characterDataDirPath(homeRoot, 'nova')),
       ),
       runtimeLocation: {
-        globalConfigPath: configPath,
-        homeRoot,
+        selectedConfig: {path: configPath},
+        homeRoot: canonicalRuntimeConfigPath(homeRoot),
         characterScope: {characterId: 'nova'},
       },
     });
     expect(dataRoot).toContain('character-data');
   });
 
-  it('rejects an overlay-only selection before resolving a target', () => {
+  it('rejects an overlay-only selection before resolving a target', async () => {
     const homeRoot = createTestTempRoot('project02-config-scope-owner-');
     const novaRoot = characterDataDirPath(homeRoot, 'nova');
     const novaOverlayPath = characterOverlayConfigPath(novaRoot);
+
+    await ensureInitializedProject02Home({homeRoot});
 
     expect(() =>
       resolveRuntimeConfigScopeTarget({
@@ -359,7 +754,7 @@ describe('scope-aware runtime config mutations', () => {
         env: {},
         scope: 'character',
       }),
-    ).toThrow('is a character overlay');
+    ).toThrow('is inside a character-data directory');
     expect(existsSync(novaRoot)).toBe(false);
   });
 });
@@ -367,42 +762,33 @@ describe('scope-aware runtime config mutations', () => {
 describe('plugin manifest config scope policy', () => {
   it('rejects global character-only enablement and non-secret fields while allowing global secret refs', () => {
     const plugin = characterOnlyConfigPlugin('scope.character-only');
+    const configPath = join(
+      createTestTempRoot('project02-config-scope-policy-'),
+      'config.json',
+    );
+    const loadedConfig = Object.freeze({
+      source: 'path' as const,
+      path: configPath,
+      config: {
+        version: runtimeConfigVersion,
+        plugins: {
+          [plugin.manifest.id]: {
+            enabled: true,
+            config: {
+              setting: 'global-value',
+              apiKey: {$env: 'CHARACTER_ONLY_API_KEY'},
+            },
+          },
+        },
+      } as const,
+      diagnostics: Object.freeze([]),
+    });
     const resolved = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: {
-          source: 'path',
-          config: {
-            version: runtimeConfigVersion,
-            plugins: {
-              [plugin.manifest.id]: {
-                enabled: true,
-                config: {
-                  setting: 'global-value',
-                  apiKey: {$env: 'CHARACTER_ONLY_API_KEY'},
-                },
-              },
-            },
-          },
-          diagnostics: [],
-        },
+        loadedConfig,
         env: {CHARACTER_ONLY_API_KEY: 'secret'},
       }),
-      loadedConfig: {
-        source: 'path',
-        config: {
-          version: runtimeConfigVersion,
-          plugins: {
-            [plugin.manifest.id]: {
-              enabled: true,
-              config: {
-                setting: 'global-value',
-                apiKey: {$env: 'CHARACTER_ONLY_API_KEY'},
-              },
-            },
-          },
-        },
-        diagnostics: [],
-      },
+      loadedConfig,
       pluginManifests: [plugin.manifest],
       validateInactivePluginConfigs: true,
       env: {CHARACTER_ONLY_API_KEY: 'secret'},
@@ -568,6 +954,7 @@ describe('character-scoped plugin control capability', () => {
         characterScope: characterScope,
         env: {},
       }),
+      targetScope: 'character',
       manifest: plugin.manifest,
       pluginManifests: [plugin.manifest],
 
@@ -575,7 +962,7 @@ describe('character-scoped plugin control capability', () => {
     }).fingerprint;
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const globalBefore = readFileSync(configPath, 'utf8');
-    const target = capability.resolveTarget({
+    const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
         characterScope,
@@ -627,8 +1014,46 @@ describe('character-scoped plugin control capability', () => {
   });
 });
 
-describe('plugin inspection authored views', () => {
-  it('reports global-authored values when asked, without changing the layered fingerprint', async () => {
+describe('plugin inspection target authorship', () => {
+  it('reports an inherited global field as effective but not authored in the character target', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+    const plugin = structuredConfigPlugin('scope.inherited-authorship');
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'scope.inherited-authorship': {
+          enabled: true,
+          config: {settings: {from: 'global'}},
+        },
+      },
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {});
+
+    const inspected = inspectRuntimePluginConfig({
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      targetScope: 'character',
+      manifest: plugin.manifest,
+      pluginManifests: [plugin.manifest],
+      env: {},
+    });
+    const settings = inspected.fields.find(field => field.name === 'settings');
+
+    expect(settings).toMatchObject({
+      authored: {configured: false},
+      effectiveSource: 'global',
+      effective: {
+        source: 'config',
+        resolved: true,
+        value: {from: 'global'},
+      },
+    });
+  });
+
+  it('reports each target document without changing effective provenance or the layered fingerprint', async () => {
     const {homeRoot, configPath, dataRoot} = seededHome();
     const plugin = structuredConfigPlugin('scope.authored-view');
 
@@ -659,7 +1084,10 @@ describe('plugin inspection authored views', () => {
     });
     applyRuntimeConfigControlOperation({
       target,
-      expectedFingerprint: inspectRuntimePluginConfig(base).fingerprint,
+      expectedFingerprint: inspectRuntimePluginConfig({
+        ...base,
+        targetScope: 'character',
+      }).fingerprint,
       request: {
         kind: 'plugin_config',
         manifest: plugin.manifest,
@@ -671,19 +1099,21 @@ describe('plugin inspection authored views', () => {
         },
       },
     });
-    const merged = inspectRuntimePluginConfig(base);
+    const characterView = inspectRuntimePluginConfig({
+      ...base,
+      targetScope: 'character',
+    });
     const globalView = inspectRuntimePluginConfig({
       ...base,
-      authoredView: 'global',
+      targetScope: 'global',
     });
     const authoredSettings = (
       inspected: ReturnType<typeof inspectRuntimePluginConfig>,
     ) => inspected.fields.find(field => field.name === 'settings')?.authored;
 
-    // The merged view surfaces the overlay rung; the global view is for
-    // surfaces that stage global-file edits and must not present the
-    // overlay-authored value as editable.
-    expect(authoredSettings(merged)).toMatchObject({
+    // Each target reports only its own authored rung while sharing the same
+    // effective layered value and fingerprint.
+    expect(authoredSettings(characterView)).toMatchObject({
       configured: true,
       value: {from: 'overlay'},
     });
@@ -691,8 +1121,20 @@ describe('plugin inspection authored views', () => {
       configured: true,
       value: {from: 'global'},
     });
+    expect(
+      characterView.fields.find(field => field.name === 'settings'),
+    ).toMatchObject({
+      effectiveSource: 'character',
+      effective: {value: {from: 'overlay'}},
+    });
+    expect(
+      globalView.fields.find(field => field.name === 'settings'),
+    ).toMatchObject({
+      effectiveSource: 'character',
+      effective: {value: {from: 'overlay'}},
+    });
     // Both views fingerprint the same layered document.
-    expect(globalView.fingerprint).toBe(merged.fingerprint);
+    expect(globalView.fingerprint).toBe(characterView.fingerprint);
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(true);
   });
 });
@@ -795,8 +1237,84 @@ describe('stale global expectations', () => {
   });
 });
 
+describe('character targets bound to an activated runtime', () => {
+  it('keeps writing Mira after the global default changes to Nova', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-bound-character-');
+    const globalConfigPath = join(homeRoot, 'config.json');
+    const miraDataRoot = characterDataDirPath(homeRoot, 'mira');
+    const novaDataRoot = characterDataDirPath(homeRoot, 'nova');
+
+    writeRuntimeConfig(globalConfigPath, {
+      project02: {character: 'mira'},
+    });
+    const originalGlobalConfig = loadProject02RuntimeConfig({
+      storeRoot: homeRoot,
+      env: {},
+    }).config;
+
+    if (originalGlobalConfig === undefined) {
+      throw new Error('Expected the Mira global config to load.');
+    }
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: miraDataRoot},
+      characterId: 'mira',
+    });
+    const miraTarget = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({
+        storeRoot: homeRoot,
+        characterId: 'mira',
+        env: {},
+      }),
+      env: {},
+      scope: 'character',
+    });
+
+    writeRuntimeConfig(globalConfigPath, {
+      project02: {character: 'nova'},
+    });
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target: miraTarget,
+        expectedFingerprint: createLayeredRuntimeConfigFingerprint({
+          globalConfig: originalGlobalConfig,
+          characterId: 'mira',
+          overlayConfig: null,
+        }),
+        request: {
+          kind: 'document',
+          operation: {
+            kind: 'set',
+            path: 'project02.userDisplayName',
+            value: 'Stale Mira',
+          },
+        },
+      }),
+    ).toThrow(RuntimeConfigConflictError);
+    expect(existsSync(characterOverlayConfigPath(miraDataRoot))).toBe(false);
+
+    const result = applyRuntimeConfigControlOperation({
+      target: miraTarget,
+      request: {
+        kind: 'document',
+        operation: {
+          kind: 'set',
+          path: 'project02.userDisplayName',
+          value: 'Still Mira',
+        },
+      },
+    });
+
+    expect(result.configPath).toBe(
+      canonicalRuntimeConfigPath(characterOverlayConfigPath(miraDataRoot)),
+    );
+    expect(result.config.project02?.userDisplayName).toBe('Still Mira');
+    expect(existsSync(characterOverlayConfigPath(novaDataRoot))).toBe(false);
+  });
+});
+
 describe('global writes that move the character selection', () => {
-  it('reports the new character layer in the returned fingerprint', async () => {
+  it('keeps the bound character layer until a fresh runtime is resolved', async () => {
     const homeRoot = createTestTempRoot('project02-scope-switch-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
@@ -854,17 +1372,19 @@ describe('global writes that move the character selection', () => {
       },
     });
 
-    // The returned fingerprint is composed for the newly selected
-    // character's layer, ready to chain into the next scoped step.
+    // The control target belongs to the already-running Mira runtime.
+    // Changing the authored default does not silently retarget that host's
+    // reconciliation to Nova.
     expect(switched.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
         globalConfig: switched.config,
-        characterId: 'nova',
-        overlayConfig: {
-          version: runtimeConfigVersion,
-          project02: {userDisplayName: 'Nova User'},
-        },
+        characterId: 'mira',
+        overlayConfig: null,
       }),
     );
+    expect(
+      runtimeLocationForTest({storeRoot: homeRoot, env: {}}).characterScope
+        .characterId,
+    ).toBe('nova');
   });
 });

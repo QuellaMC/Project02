@@ -19,7 +19,6 @@ const bundledPackageDiscovery = discoverRuntimePluginPackages({
   sources: [
     {
       root: bundledRuntimePluginPackageRoot,
-      provenance: 'bundled',
     },
   ],
   reservedPluginIds: hostFirstPartyRuntimePluginIds,

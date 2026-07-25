@@ -12,10 +12,19 @@ import {fileURLToPath} from 'node:url';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
-  readBoundedPackageJsonFile,
+  packageDirectorySnapshotsEqual,
+  parseBoundedPackageJsonSource,
   scanPackageSourceRoot,
+  snapshotPackageDirectory,
+  snapshotPackageDirectoryFromSource,
   type BoundedPackageJsonRejectionReason,
+  type PackageDirectorySnapshot,
 } from '../../shared/package-metadata.ts';
+import {
+  capturePackageFiles,
+  PackageCaptureError,
+  readCapturedPackageFile,
+} from '../../shared/package-capture.ts';
 import {
   characterPackageDescriptorFileName,
   parseCharacterPackageDescriptor,
@@ -95,6 +104,7 @@ export function discoverCharacterPackages(options: {
   const diagnostics: CharacterPackageDiagnostic[] = [];
 
   for (const source of options.sources) {
+    const sourceDirectory = snapshotPackageDirectory(source.root);
     const scan = scanPackageSourceRoot(source.root);
 
     if (scan.status === 'unavailable') {
@@ -108,46 +118,62 @@ export function discoverCharacterPackages(options: {
         continue;
       }
 
-      diagnostics.push(
-        characterDiagnostic({
-          code: 'package_source_unavailable',
-          message: 'Character package source is unavailable.',
-          path: source.root,
-          provenance: source.provenance,
-        }),
-      );
+      diagnostics.push(characterPackageSourceUnavailable(source));
       continue;
     }
 
+    if (sourceDirectory === undefined) {
+      diagnostics.push(characterPackageSourceUnavailable(source));
+      continue;
+    }
+    // Character packages are data-only, so stage the complete source read
+    // and publish nothing until the source directory still has the identity
+    // that owned enumeration.
+    const sourceCandidates: DiscoveredCharacterPackage[] = [];
+    const sourceDiagnostics: CharacterPackageDiagnostic[] = [];
+
     for (const candidate of scan.candidates) {
       const packageRoot = join(source.root, candidate.name);
+      const packageDirectory = snapshotPackageDirectoryFromSource({
+        sourceDirectory,
+        packageName: candidate.name,
+      });
 
-      if (candidate.kind === 'symbolic_link') {
-        diagnostics.push(
-          characterDiagnostic({
-            code: 'invalid_package_directory',
-            message:
-              'Character package directories must not be symbolic links.',
-            path: packageRoot,
+      if (packageDirectory === undefined) {
+        sourceDiagnostics.push(
+          invalidCharacterPackageDirectory({
+            packageRoot,
             provenance: source.provenance,
-            characterId: candidate.name,
           }),
         );
         continue;
       }
 
       const discovered = discoverCharacterPackage({
-        packageRoot,
+        packageDirectory,
         provenance: source.provenance,
       });
 
       if ('diagnostic' in discovered) {
-        diagnostics.push(discovered.diagnostic);
+        sourceDiagnostics.push(discovered.diagnostic);
         continue;
       }
 
-      candidates.push(discovered.package);
+      sourceCandidates.push(discovered.package);
     }
+
+    if (
+      !packageDirectorySnapshotsEqual(
+        sourceDirectory,
+        snapshotPackageDirectory(source.root),
+      )
+    ) {
+      diagnostics.push(characterPackageSourceUnavailable(source));
+      continue;
+    }
+
+    candidates.push(...sourceCandidates);
+    diagnostics.push(...sourceDiagnostics);
   }
 
   const characters = applyCharacterIdentityPolicy({candidates, diagnostics});
@@ -163,29 +189,81 @@ export function discoverCharacterPackages(options: {
   } satisfies CharacterPackageDiscovery);
 }
 
+function characterPackageSourceUnavailable(
+  source: CharacterPackageSource,
+): CharacterPackageDiagnostic {
+  return characterDiagnostic({
+    code: 'package_source_unavailable',
+    message: 'Character package source is unavailable.',
+    path: source.root,
+    provenance: source.provenance,
+  });
+}
+
 type DiscoverCharacterPackageResult =
   | {readonly package: DiscoveredCharacterPackage}
   | {readonly diagnostic: CharacterPackageDiagnostic};
 
 function discoverCharacterPackage(options: {
-  readonly packageRoot: string;
+  readonly packageDirectory: PackageDirectorySnapshot;
   readonly provenance: CharacterPackageProvenance;
 }): DiscoverCharacterPackageResult {
-  const characterId = basename(options.packageRoot);
-  const descriptorPath = join(
-    options.packageRoot,
-    characterPackageDescriptorFileName,
-  );
-  const descriptor = readCharacterDescriptorFile({
-    path: descriptorPath,
-    provenance: options.provenance,
-    characterId,
-  });
+  const packageRoot = options.packageDirectory.packageRoot;
+  const characterId = basename(packageRoot);
+  const descriptorPath = join(packageRoot, characterPackageDescriptorFileName);
+  let descriptor: ReturnType<typeof parseBoundedPackageJsonSource>;
 
-  if ('diagnostic' in descriptor) {
-    return descriptor;
+  try {
+    const artifact = capturePackageFiles({
+      packageDirectory: options.packageDirectory,
+      relativePaths: [characterPackageDescriptorFileName],
+      maxBytes: maxCharacterPackageDescriptorBytes,
+    });
+    const source = readCapturedPackageFile(
+      artifact,
+      characterPackageDescriptorFileName,
+    );
+
+    if (source === undefined) {
+      throw new TypeError('Captured character descriptor is unavailable.');
+    }
+    descriptor = parseBoundedPackageJsonSource({
+      source,
+      maxBytes: maxCharacterPackageDescriptorBytes,
+      boundaryField: 'Character package descriptor',
+    });
+  } catch (error: unknown) {
+    if (
+      error instanceof PackageCaptureError &&
+      basename(error.path) === characterPackageDescriptorFileName
+    ) {
+      return {
+        diagnostic: invalidCharacterDescriptor({
+          path: descriptorPath,
+          provenance: options.provenance,
+          characterId,
+          reason: packageCaptureDescriptorReason(error),
+        }),
+      };
+    }
+    return {
+      diagnostic: invalidCharacterPackageDirectory({
+        packageRoot,
+        provenance: options.provenance,
+      }),
+    };
   }
 
+  if (descriptor.status === 'rejected') {
+    return {
+      diagnostic: invalidCharacterDescriptor({
+        path: descriptorPath,
+        provenance: options.provenance,
+        characterId,
+        reason: descriptor.reason,
+      }),
+    };
+  }
   const parsed = parseCharacterPackageDescriptor(descriptor.value);
 
   if (parsed.status === 'rejected') {
@@ -216,40 +294,54 @@ function discoverCharacterPackage(options: {
     package: Object.freeze({
       definition: parsed.definition,
       provenance: options.provenance,
-      packageRoot: options.packageRoot,
+      packageRoot,
       descriptorPath,
     } satisfies DiscoveredCharacterPackage),
   };
 }
 
-type ReadCharacterDescriptorFileResult =
-  {readonly value: unknown} | {readonly diagnostic: CharacterPackageDiagnostic};
+function invalidCharacterPackageDirectory(options: {
+  readonly packageRoot: string;
+  readonly provenance: CharacterPackageProvenance;
+}): CharacterPackageDiagnostic {
+  return characterDiagnostic({
+    code: 'invalid_package_directory',
+    message: 'Character package directories must be real directories.',
+    path: options.packageRoot,
+    provenance: options.provenance,
+    characterId: basename(options.packageRoot),
+  });
+}
 
-function readCharacterDescriptorFile(options: {
+function invalidCharacterDescriptor(options: {
   readonly path: string;
   readonly provenance: CharacterPackageProvenance;
   readonly characterId: string;
-}): ReadCharacterDescriptorFileResult {
-  const reject = (message: string): ReadCharacterDescriptorFileResult => ({
-    diagnostic: characterDiagnostic({
-      code: 'invalid_descriptor',
-      message,
-      path: options.path,
-      provenance: options.provenance,
-      characterId: options.characterId,
-    }),
-  });
-  const descriptor = readBoundedPackageJsonFile({
+  readonly reason: BoundedPackageJsonRejectionReason;
+}): CharacterPackageDiagnostic {
+  return characterDiagnostic({
+    code: 'invalid_descriptor',
+    message: characterDescriptorReadMessage(options.reason),
     path: options.path,
-    maxBytes: maxCharacterPackageDescriptorBytes,
-    boundaryField: 'Character package descriptor',
+    provenance: options.provenance,
+    characterId: options.characterId,
   });
+}
 
-  if (descriptor.status === 'rejected') {
-    return reject(characterDescriptorReadMessage(descriptor.reason));
+function packageCaptureDescriptorReason(
+  error: PackageCaptureError,
+): BoundedPackageJsonRejectionReason {
+  switch (error.reason) {
+    case 'symbolic_link':
+      return 'symbolic_link';
+    case 'not_regular':
+      return 'not_file';
+    case 'too_large':
+      return 'too_large';
+    case 'changed':
+    case 'unreadable':
+      return 'unreadable';
   }
-
-  return {value: descriptor.value};
 }
 
 function characterDescriptorReadMessage(

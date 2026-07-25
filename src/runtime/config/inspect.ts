@@ -1,12 +1,15 @@
 import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
 import type {
-  LoadedProject02RuntimeConfig,
+  Project02RuntimeConfig,
   ResolvedProject02RuntimeConfig,
   RuntimeConfigInspectShape,
+  RuntimeConfigEffectiveSource,
+  RuntimeConfigFieldScope,
   RuntimePluginConfigActivationInspectShape,
   RuntimePluginConfigInspectShape,
   RuntimeConfigValue,
 } from './types.ts';
+import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
@@ -25,15 +28,24 @@ export function createRuntimeConfigInspectShape(
 }
 
 export function createRuntimePluginConfigInspectShape(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
+  readonly targetScope: RuntimeConfigFieldScope;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
   readonly fingerprint: string;
   readonly activation?: RuntimePluginConfigActivationInspectShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
+  const targetConfig =
+    options.targetScope === 'global'
+      ? options.layeredConfig.globalConfig
+      : options.layeredConfig.characterConfig;
   const authoredPlugin = ownJsonRecordValue(
-    options.loadedConfig.config?.plugins,
+    targetConfig?.plugins,
+    options.manifest.id,
+  );
+  const effectivePlugin = ownJsonRecordValue(
+    options.layeredConfig.effective.config?.plugins,
     options.manifest.id,
   );
   const effectiveFields = ownJsonRecordValue(
@@ -48,7 +60,9 @@ export function createRuntimePluginConfigInspectShape(options: {
   }
 
   const configuredEnabled =
-    authoredPlugin?.enabled ??
+    (options.targetScope === 'character'
+      ? effectivePlugin?.enabled
+      : authoredPlugin?.enabled) ??
     options.defaultEnabled ??
     options.manifest.activation.defaultEnabled;
   const diagnostics = Object.freeze(
@@ -118,6 +132,11 @@ export function createRuntimePluginConfigInspectShape(options: {
                   ),
                 }),
           }),
+          effectiveSource: effectivePluginConfigFieldSource({
+            layeredConfig: options.layeredConfig,
+            pluginId: options.manifest.id,
+            fieldName: field.name,
+          }),
           effective,
         });
       }),
@@ -125,6 +144,41 @@ export function createRuntimePluginConfigInspectShape(options: {
     diagnostics,
     fingerprint: options.fingerprint,
   } satisfies RuntimePluginConfigInspectShape);
+}
+
+function effectivePluginConfigFieldSource(options: {
+  readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
+  readonly pluginId: string;
+  readonly fieldName: string;
+}): RuntimeConfigEffectiveSource {
+  if (
+    authoredPluginConfigField(
+      options.layeredConfig.characterConfig,
+      options.pluginId,
+      options.fieldName,
+    ) !== undefined
+  ) {
+    return 'character';
+  }
+
+  return authoredPluginConfigField(
+    options.layeredConfig.globalConfig,
+    options.pluginId,
+    options.fieldName,
+  ) === undefined
+    ? 'default'
+    : 'global';
+}
+
+function authoredPluginConfigField(
+  config: Project02RuntimeConfig | undefined,
+  pluginId: string,
+  fieldName: string,
+): RuntimeConfigValue | undefined {
+  return ownJsonRecordValue(
+    ownJsonRecordValue(config?.plugins, pluginId)?.config,
+    fieldName,
+  );
 }
 
 function runtimePluginConfigActivationInspection(options: {

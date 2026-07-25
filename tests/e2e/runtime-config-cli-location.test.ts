@@ -28,6 +28,10 @@ const installedSecretFactories = Object.freeze({
   }),
 });
 
+function physicalEnvPath(storeRoot: string): string {
+  return join(realpathSync.native(storeRoot), '.env');
+}
+
 describe('runtime config CLI location selection', () => {
   it('prints the env-selected config path from PROJECT02_RUNTIME_CONFIG', async () => {
     const configRoot = createTestTempRoot('project02-config-path-env-');
@@ -79,7 +83,7 @@ describe('runtime config CLI location selection', () => {
         },
         {
           args: ['env-path'] as const,
-          expected: join(storeRoot, '.env'),
+          expected: physicalEnvPath(storeRoot),
         },
       ]) {
         let stdout = '';
@@ -169,7 +173,7 @@ describe('runtime config CLI location selection', () => {
         JSON.parse(setStdout) as {readonly configPath: string},
       ).toMatchObject({
         configPath,
-        envPath: join(storeRoot, '.env'),
+        envPath: physicalEnvPath(storeRoot),
       });
       expect(setStderr).toBe('');
       expect(
@@ -232,7 +236,7 @@ describe('runtime config CLI location selection', () => {
       expect(JSON.parse(stdout) as {readonly configPath: string}).toMatchObject(
         {
           configPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
       );
       expect(
@@ -304,7 +308,7 @@ describe('runtime config CLI location selection', () => {
       expect(JSON.parse(stdout) as {readonly configPath: string}).toMatchObject(
         {
           configPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
       );
       expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toBe(
@@ -356,12 +360,12 @@ describe('runtime config CLI location selection', () => {
         {
           args: ['--store', storeRoot] as const,
           configPath: storeConfigPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
         {
           args: ['--config', configPath] as const,
           configPath,
-          envPath: join(configStoreRoot, '.env'),
+          envPath: physicalEnvPath(configStoreRoot),
         },
       ]) {
         let stdout = '';
@@ -452,12 +456,12 @@ describe('runtime config CLI location selection', () => {
         {
           args: ['--store', storeRoot] as const,
           configPath: storeConfigPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
         {
           args: ['--config', configPath] as const,
           configPath,
-          envPath: join(configStoreRoot, '.env'),
+          envPath: physicalEnvPath(configStoreRoot),
         },
       ]) {
         let stdout = '';
@@ -541,7 +545,7 @@ describe('runtime config CLI location selection', () => {
           stderr: collect(() => {}),
         }),
       ).toBe(0);
-      expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
+      expect(envPathStdout).toBe(`${physicalEnvPath(storeRoot)}\n`);
 
       expect(
         await runRuntimeConfigCliFromArgs(
@@ -576,7 +580,7 @@ describe('runtime config CLI location selection', () => {
 
       expect(setOutput).toMatchObject({
         configPath,
-        envPath: join(storeRoot, '.env'),
+        envPath: physicalEnvPath(storeRoot),
       });
       expect(afterSet).toMatchObject({
         project02: {
@@ -945,13 +949,12 @@ describe('runtime config CLI location selection', () => {
       }),
     ).toBe(0);
 
-    expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+    expect(stdout).toBe(`${physicalEnvPath(storeRoot)}\n`);
     expect(stderr).toBe('');
   });
 
-  it('prints env-path from an inferred store-default config root', async () => {
+  it('uses the default runtime home for a standalone config filename', async () => {
     const storeRoot = createTestTempRoot('project02-config-env-path-inferred-');
-    const seededStoreRoot = realpathSync.native(storeRoot);
     const configPath = writeRuntimeConfig(
       defaultRuntimeConfigPath(storeRoot),
       {},
@@ -970,7 +973,7 @@ describe('runtime config CLI location selection', () => {
       }),
     ).toBe(0);
 
-    expect(stdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
+    expect(stdout).toBe(`${join(process.cwd(), '.project02', '.env')}\n`);
     expect(stderr).toBe('');
   });
 
@@ -987,6 +990,6 @@ describe('runtime config CLI location selection', () => {
       }),
     ).toBe(0);
 
-    expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+    expect(stdout).toBe(`${physicalEnvPath(storeRoot)}\n`);
   });
 });

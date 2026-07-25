@@ -6,14 +6,12 @@
  * host construction (same inversion as fileStore and config control).
  */
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
-import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {
-  createRuntimeConfigMutationBase,
+  createRuntimeConfigAuthoredSnapshot,
   diagnosticsHaveErrors,
   layeredRuntimeConfigFingerprintForScope,
   loadProject02RuntimeConfigForLocation,
   readCharacterOverlayForScope,
-  resolveProject02RuntimeLocation,
   resolveLayeredProject02RuntimeConfig,
   runtimeConfigDiagnosticMatchesPlugin,
   type ResolvedProject02RuntimeLocation,
@@ -64,21 +62,14 @@ export function createConfiguredRuntimePluginReloader(options: {
       // and rebuild declines exactly like a global edit.
       const loadAuthoredState = () => {
         const loaded = loadProject02RuntimeConfigForLocation(runtimeLocation);
-        const freshLocation = resolveProject02RuntimeLocation({
-          loadedConfig: loaded,
-          selection: runtimeLocation.selection,
-          selectedConfig: {
-            source: runtimeLocation.configSource,
-            path: runtimeLocation.globalConfigPath,
-          },
-        });
 
         return {
           loaded,
-          runtimeLocation: freshLocation,
-          // The guarded loader refuses a data directory rebound to
-          // another character mid-run, exactly as startup would.
-          overlay: readCharacterOverlayForScope(freshLocation.characterScope)
+          runtimeLocation,
+          // A running host owns one activated character location. Config
+          // edits that change the future home or default character take
+          // effect only when a fresh host is constructed.
+          overlay: readCharacterOverlayForScope(runtimeLocation.characterScope)
             .overlay,
         };
       };
@@ -86,13 +77,8 @@ export function createConfiguredRuntimePluginReloader(options: {
         state: ReturnType<typeof loadAuthoredState>,
       ) =>
         layeredRuntimeConfigFingerprintForScope({
-          globalConfig: createRuntimeConfigMutationBase({
-            loadedConfig: state.loaded,
-            configPath: state.runtimeLocation.globalConfigPath,
-            ...(state.runtimeLocation.selection.storeRoot === undefined
-              ? {}
-              : {storeRoot: state.runtimeLocation.selection.storeRoot}),
-          }),
+          globalConfig: createRuntimeConfigAuthoredSnapshot(state.loaded)
+            .document,
           characterScope: state.runtimeLocation.characterScope,
           overlay: state.overlay,
         });
@@ -111,9 +97,7 @@ export function createConfiguredRuntimePluginReloader(options: {
         overlayConfig: authoredState.overlay,
         pluginManifests,
         defaultEnabledPluginIds,
-        ...(pluginConfigControl.env === undefined
-          ? {}
-          : {env: pluginConfigControl.env}),
+        env: pluginConfigControl.configControl.target.env,
       });
 
       // Mirror the update tool's inspection scope: only global diagnostics
@@ -133,40 +117,28 @@ export function createConfiguredRuntimePluginReloader(options: {
         };
       }
 
-      const plugin = await entry.load({
-        pluginId: entry.manifest.id,
-        manifest: entry.manifest,
-        storeRoot: authoredState.runtimeLocation.characterScope.dataRoot,
-        resolvedConfig:
-          ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ?? {},
-        redactedConfig:
-          ownJsonRecordValue(
-            freshResolvedConfig.redactedPluginConfigs,
-            pluginId,
-          ) ?? {},
-      });
+      const plugin = await entry.load(
+        {
+          pluginId: entry.manifest.id,
+          manifest: entry.manifest,
+          storeRoot: authoredState.runtimeLocation.characterScope.dataRoot,
+          resolvedConfig:
+            ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ??
+            {},
+          redactedConfig:
+            ownJsonRecordValue(
+              freshResolvedConfig.redactedPluginConfigs,
+              pluginId,
+            ) ?? {},
+        },
+        {retainRejectedCandidate: reloadOptions.retainCandidate},
+      );
 
-      if (plugin.manifest.id !== entry.manifest.id) {
-        // An id-drifted instance cannot be handed back for retirement:
-        // terminal dispatch would resolve access by its own (wrong) id.
-        // The factory violated the id contract; declining without the
-        // instance is the only safe disposal.
-        return {
-          status: 'declined',
-          reason: `the rebuilt plugin "${pluginId}" returned a different plugin id`,
-        };
-      }
-
-      if (!canonicalJsonValuesEqual(plugin.manifest, entry.manifest)) {
-        return {
-          status: 'declined',
-          reason: `the rebuilt plugin "${pluginId}" no longer matches its declared manifest`,
-          // The factory already ran: hand the instance back so the host
-          // retires it into the terminal-lifecycle list instead of leaking
-          // whatever the factory allocated.
-          plugin,
-        };
-      }
+      // The host's retirement lifecycle becomes the sole owner as soon as a
+      // package-accepted factory result exists. Any later authored-state read
+      // may fail; a successful swap explicitly makes it live again. Package
+      // rejection transfers its candidate through the load options above.
+      reloadOptions.retainCandidate(plugin);
 
       // The factory await is a real window: another writer may have moved
       // the authored config while it ran, and swapping in an instance built
@@ -179,7 +151,6 @@ export function createConfiguredRuntimePluginReloader(options: {
         return {
           status: 'declined',
           reason: `the authored config for plugin "${pluginId}" moved while the factory was rebuilding`,
-          plugin,
         };
       }
 

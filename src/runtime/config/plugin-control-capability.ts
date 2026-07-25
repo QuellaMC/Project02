@@ -7,7 +7,6 @@ import {redactRuntimeConfigValue} from './redact.ts';
 import {
   applyRuntimeConfigControlOperation,
   prepareRuntimeConfigControlOperation,
-  resolveRuntimeConfigScopeTarget,
 } from './scope.ts';
 
 /**
@@ -19,7 +18,6 @@ import {
  */
 export type RuntimePluginConfigControlCapability = Readonly<{
   validateOperation: typeof validateRuntimePluginConfigControlOperation;
-  resolveTarget: typeof resolveRuntimeConfigScopeTarget;
   prepareOperation: typeof prepareRuntimeConfigControlOperation;
   applyOperation: typeof applyRuntimeConfigControlOperation;
   inspectConfig: typeof inspectRuntimePluginConfig;
@@ -30,7 +28,6 @@ export type RuntimePluginConfigControlCapability = Readonly<{
 export function createRuntimePluginConfigControlCapability(): RuntimePluginConfigControlCapability {
   return Object.freeze({
     validateOperation: validateRuntimePluginConfigControlOperation,
-    resolveTarget: resolveRuntimeConfigScopeTarget,
     prepareOperation: prepareRuntimeConfigControlOperation,
     applyOperation: applyRuntimeConfigControlOperation,
     inspectConfig: inspectRuntimePluginConfig,

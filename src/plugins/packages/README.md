@@ -17,11 +17,11 @@ src/plugins/packages/<id>/
 
 ## Descriptor
 
-`project02.plugin.json` is the single authored source of the manifest. It is
-validated twice with one shared implementation
-(`src/plugins/api/package-descriptor.ts`): at discovery by the package
-loader, and by your own module when it self-reads the manifest. Point your
-editor at the schema for autocomplete and inline validation:
+`project02.plugin.json` is the single authored source of the manifest. The
+package loader captures and validates it during discovery, then passes that
+same manifest to the factory. The factory must use `input.manifest`; it must
+not read or validate a second manifest copy. Point your editor at the schema
+for autocomplete and inline validation:
 
 ```json
 {"$schema": "../../../../schemas/project02.plugin.schema.json"}
@@ -42,6 +42,12 @@ keep `index.ts` to one line:
 ```ts
 export {createProject02Plugin} from './plugin.ts';
 ```
+
+Operator packages are captured as one immutable, self-contained executable
+artifact. Executable modules use `.ts`, `.js`, or `.mjs`; relative imports
+must stay inside the package, and Node built-ins remain available. Changing
+any source file publishes new behavior only after a fresh discovery/host
+construction, never inside an already discovered host.
 
 ## The factory contract
 

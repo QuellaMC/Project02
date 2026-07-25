@@ -1,17 +1,14 @@
-import {createRuntimeConfigMutationBase} from './mutate.ts';
+import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
 } from './overlay.ts';
 import {
+  assertResolvedProject02HomeAdoptable,
   loadProject02RuntimeConfigForLocation,
-  resolveProject02RuntimeLocation,
   type ResolvedProject02RuntimeLocation,
 } from './location.ts';
-import {
-  mergedLoadedConfigForOverlay,
-  resolveLayeredProject02RuntimeConfig,
-} from './resolve-layered.ts';
+import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
@@ -28,12 +25,14 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
+  LoadedProject02RuntimeConfig,
   RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
   RuntimePluginConfigActivationInspectShape,
   RuntimePluginConfigInspectShape,
 } from './types.ts';
+import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
@@ -86,18 +85,14 @@ export type RuntimePluginConfigFieldControlOperation =
 export function inspectRuntimePluginConfig(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
-  /**
-   * Which layer the authored values report from. 'merged' (default) is
-   * the layered truth; 'global' is for surfaces that stage global-file
-   * edits and must not present overlay-authored values as editable.
-   * The fingerprint stays layered either way.
-   */
-  readonly authoredView?: 'merged' | 'global';
+  /** The one document this inspection's control operation can mutate. */
+  readonly targetScope: 'global' | 'character';
   readonly manifest: RuntimePluginManifest;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly activation?: RuntimePluginConfigActivationInspectShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
   const loadedConfig = loadProject02RuntimeConfigForLocation(
     options.runtimeLocation,
   );
@@ -110,29 +105,21 @@ export function inspectRuntimePluginConfig(options: {
     options.manifest,
     options.pluginManifests,
   );
-  const resolvedConfig = resolveLayeredProject02RuntimeConfig({
-    loadedConfig,
-    runtimeLocation: options.runtimeLocation,
-    overlayConfig,
-    pluginManifests: manifests,
-    validateInactivePluginConfigs: true,
-    ...(options.env === undefined ? {} : {env: options.env}),
-  });
-  const mutationBase = createRuntimeConfigMutationBase({
-    loadedConfig,
-    configPath: options.runtimeLocation.globalConfigPath,
-    ...(options.runtimeLocation.selection.storeRoot === undefined
-      ? {}
-      : {storeRoot: options.runtimeLocation.selection.storeRoot}),
-  });
+  const {layeredConfig, resolvedConfig} =
+    resolveLayeredProject02RuntimeConfigWithSnapshot({
+      loadedConfig,
+      runtimeLocation: options.runtimeLocation,
+      overlayConfig,
+      pluginManifests: manifests,
+      validateInactivePluginConfigs: true,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    });
+  const mutationBase =
+    createRuntimeConfigAuthoredSnapshot(loadedConfig).document;
 
   return createRuntimePluginConfigInspectShape({
-    // Authored values come from the merged view by default: a field
-    // authored only in the overlay must read as configured, not unset.
-    loadedConfig:
-      options.authoredView === 'global'
-        ? loadedConfig
-        : mergedLoadedConfigForOverlay(loadedConfig, overlayConfig),
+    layeredConfig,
+    targetScope: options.targetScope,
     resolvedConfig,
     manifest: options.manifest,
     ...(options.activation === undefined
@@ -150,7 +137,7 @@ export function inspectRuntimePluginConfig(options: {
 }
 
 function layeredControlFingerprint(options: {
-  readonly globalConfig: Project02RuntimeConfig;
+  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlayConfig:
     ReturnType<typeof readCharacterOverlayForScope>['overlay'] | undefined;
@@ -235,23 +222,15 @@ function assertRuntimePluginConfigCandidateValid(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
 }): void {
-  const loadedConfig = Object.freeze({
-    source: 'path',
-    path: options.runtimeLocation.globalConfigPath,
+  const loadedConfig: LoadedProject02RuntimeConfig = Object.freeze({
+    source: options.runtimeLocation.selectedConfig.source,
+    path: options.runtimeLocation.selectedConfig.path,
     config: options.config,
     diagnostics: Object.freeze([]),
-  } as const);
-  const runtimeLocation = resolveProject02RuntimeLocation({
-    loadedConfig,
-    selection: options.runtimeLocation.selection,
-    selectedConfig: {
-      source: options.runtimeLocation.configSource,
-      path: options.runtimeLocation.globalConfigPath,
-    },
   });
   const resolved = resolveProject02RuntimeConfig({
     loadedConfig,
-    runtimeLocation,
+    runtimeLocation: options.runtimeLocation,
     pluginManifests: [options.manifest],
     skipPluginScopeValidation: true,
     ...(options.env === undefined ? {} : {env: options.env}),

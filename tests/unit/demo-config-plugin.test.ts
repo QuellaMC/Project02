@@ -50,7 +50,7 @@ async function demoConfigStyleDirectives(
 describe('demo-config plugin package', () => {
   it('is discovered as a bundled package with agent-mutable style fields', () => {
     const discovery = discoverRuntimePluginPackages({
-      sources: [{root: bundledRuntimePluginPackageRoot, provenance: 'bundled'}],
+      sources: [{root: bundledRuntimePluginPackageRoot}],
       reservedPluginIds: hostFirstPartyRuntimePluginIds,
     });
     const discovered = discovery.packages.find(

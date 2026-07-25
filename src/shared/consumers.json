@@ -1,17 +1,6 @@
 {
-  "canonical-json.ts": [
-    "app",
-    "cli",
-    "plugins",
-    "role-model",
-    "runtime"
-  ],
-  "identifier.ts": [
-    "characters",
-    "plugins",
-    "role-model",
-    "runtime"
-  ],
+  "canonical-json.ts": ["app", "cli", "plugins", "role-model", "runtime"],
+  "identifier.ts": ["characters", "plugins", "role-model", "runtime"],
   "json-boundary.ts": [
     "app",
     "characters",
@@ -20,22 +9,9 @@
     "role-model",
     "runtime"
   ],
-  "node-error.ts": [
-    "characters",
-    "plugins",
-    "runtime"
-  ],
-  "package-metadata.ts": [
-    "characters",
-    "plugins"
-  ],
-  "redaction.ts": [
-    "plugins",
-    "role-model",
-    "runtime"
-  ],
-  "secret-marker.ts": [
-    "characters",
-    "runtime"
-  ]
+  "node-error.ts": ["characters", "plugins", "runtime"],
+  "package-capture.ts": ["characters", "plugins"],
+  "package-metadata.ts": ["characters", "plugins"],
+  "redaction.ts": ["plugins", "role-model", "runtime"],
+  "secret-marker.ts": ["characters", "runtime"]
 }

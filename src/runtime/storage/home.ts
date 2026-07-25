@@ -6,7 +6,8 @@
  * the session store's initialization path.
  */
 import type {Dirent} from 'node:fs';
-import {lstat, mkdir, readdir} from 'node:fs/promises';
+import {lstatSync, readdirSync} from 'node:fs';
+import {mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -66,14 +67,27 @@ export async function ensureInitializedProject02Home(
  * before authoring settings into a directory the runtime would refuse
  * to adopt.
  */
-export async function assertProject02HomeAdoptable(
+export function assertProject02HomeAdoptable(
   options: Project02HomeLayoutOptions = {},
 ): Promise<void> {
+  return Promise.resolve().then(() => {
+    assertProject02HomeAdoptableSync(options);
+  });
+}
+
+/**
+ * Synchronous ownership admission for synchronous control transactions.
+ * The async public entry delegates here so every writer applies exactly the
+ * same home rules before creating locks or files.
+ */
+export function assertProject02HomeAdoptableSync(
+  options: Project02HomeLayoutOptions = {},
+): void {
   const layout = createProject02HomeLayout(options);
   const marker = readStorageSchemaMarker(layout);
 
   if (marker === undefined) {
-    if (await project02HomeHasForeignContent(layout)) {
+    if (project02HomeHasForeignContent(layout)) {
       throw new LocalRuntimeStorageContractError(
         'missing_file',
         `Project02 home "${layout.homeRoot}" contains foreign entries and no home marker; choose an empty or existing Project02 home directory.`,
@@ -88,8 +102,8 @@ export async function assertProject02HomeAdoptable(
   // An initialized home is only usable if character data can actually
   // live in it — and if its own control entries are real: a symlinked
   // lock root or config file would route writes outside the home.
-  await assertRealCharacterDataRootIfPresent(layout);
-  await assertRealHomeControlEntries(layout);
+  assertRealCharacterDataRootIfPresent(layout);
+  assertRealHomeControlEntries(layout);
 }
 
 function assertProject02HomeMarker(
@@ -112,7 +126,7 @@ function assertProject02HomeMarker(
 async function ensureRealCharacterDataRoot(
   layout: Project02HomeLayout,
 ): Promise<void> {
-  const state = await assertRealCharacterDataRootIfPresent(layout);
+  const state = assertRealCharacterDataRootIfPresent(layout);
 
   if (state === 'absent') {
     await mkdir(layout.characterDataRoot, {recursive: true});
@@ -126,14 +140,22 @@ async function ensureRealCharacterDataRoot(
  * errors priority over env-file problems, so only the mutation guards
  * call this.
  */
-export async function assertRealHomeEnvFile(
+export function assertRealHomeEnvFile(
   options: Project02HomeLayoutOptions = {},
 ): Promise<void> {
+  return Promise.resolve().then(() => {
+    assertRealHomeEnvFileSync(options);
+  });
+}
+
+export function assertRealHomeEnvFileSync(
+  options: Project02HomeLayoutOptions = {},
+): void {
   const layout = createProject02HomeLayout(options);
   let stats;
 
   try {
-    stats = await lstat(layout.envPath);
+    stats = lstatSync(layout.envPath);
   } catch {
     return;
   }
@@ -147,9 +169,7 @@ export async function assertRealHomeEnvFile(
   }
 }
 
-async function assertRealHomeControlEntries(
-  layout: Project02HomeLayout,
-): Promise<void> {
+function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
   for (const entry of [
     {path: layout.locksRoot, kind: 'directory' as const, label: 'lock root'},
     {path: layout.configPath, kind: 'file' as const, label: 'config file'},
@@ -157,7 +177,7 @@ async function assertRealHomeControlEntries(
     let stats;
 
     try {
-      stats = await lstat(entry.path);
+      stats = lstatSync(entry.path);
     } catch {
       continue;
     }
@@ -176,13 +196,13 @@ async function assertRealHomeControlEntries(
   }
 }
 
-async function assertRealCharacterDataRootIfPresent(
+function assertRealCharacterDataRootIfPresent(
   layout: Project02HomeLayout,
-): Promise<'absent' | 'present'> {
+): 'absent' | 'present' {
   let stats;
 
   try {
-    stats = await lstat(layout.characterDataRoot);
+    stats = lstatSync(layout.characterDataRoot);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return 'absent';
@@ -206,13 +226,11 @@ async function assertRealCharacterDataRootIfPresent(
   return 'present';
 }
 
-async function project02HomeHasForeignContent(
-  layout: Project02HomeLayout,
-): Promise<boolean> {
+function project02HomeHasForeignContent(layout: Project02HomeLayout): boolean {
   let entries;
 
   try {
-    entries = await readdir(layout.homeRoot, {withFileTypes: true});
+    entries = readdirSync(layout.homeRoot, {withFileTypes: true});
   } catch (error: unknown) {
     if (
       isNodeErrorWithCode(error, 'ENOENT') ||

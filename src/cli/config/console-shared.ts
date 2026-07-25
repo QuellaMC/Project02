@@ -5,14 +5,15 @@
  */
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
+  assertResolvedProject02HomeAdoptable,
   assertScopedGlobalLayerLoadable,
   readCharacterOverlayForScope,
   redactRuntimeConfigText,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigValueMatchesField,
-  type createRuntimeConfigMutationBase,
-  type loadProject02RuntimeConfig,
+  type createRuntimeConfigAuthoredSnapshot,
+  type LoadedProject02RuntimeConfig,
   type LoadedProject02CharacterOverlayConfig,
   type Project02RuntimeConfig,
   type ResolvedProject02RuntimeLocation,
@@ -21,11 +22,7 @@ import {
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
-import {
-  assertProject02HomeAdoptable,
-  assertRealHomeEnvFile,
-  ensureCharacterDataDir,
-} from '../../runtime/storage/index.ts';
+import {ensureCharacterDataDir} from '../../runtime/storage/index.ts';
 
 export type RuntimeConfigConsolePromptAdapter = {
   question(prompt: string): Promise<string | undefined>;
@@ -33,13 +30,16 @@ export type RuntimeConfigConsolePromptAdapter = {
 
 export type RuntimeConfigConsoleOptions = {
   readonly stdout: NodeJS.WritableStream;
+  /** Config and activated location captured by the one CLI startup pass. */
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly runtimeEnv?: NodeJS.ProcessEnv;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-  /** Present when the console operates on one character's overlay. */
-  readonly character?: string;
+  /** Explicit operator target; never inferred again from loaded config. */
+  readonly scope: 'global' | 'character';
+  /** Presentation-only CLI prefix captured before raw flags leave the edge. */
+  readonly secretSetCommandPrefix: string;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
@@ -49,10 +49,12 @@ export type RuntimeConfigConsoleContext = RuntimeConfigConsoleOptions & {
 };
 
 export type RuntimeConfigConsoleSnapshot = {
-  readonly loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly scope: 'global' | 'character';
-  readonly config: ReturnType<typeof createRuntimeConfigMutationBase>;
+  readonly config: NonNullable<
+    ReturnType<typeof createRuntimeConfigAuthoredSnapshot>['validatedConfig']
+  >;
   readonly overlay: LoadedProject02CharacterOverlayConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
@@ -71,11 +73,9 @@ export type StagedRuntimeConfigChange = {
 /**
  * Commit-time preparation of a console write: guards and the identity
  * marker land only when the user actually saves, so a read-only console
- * session never creates durable state. Unscoped commits refuse a home
- * the runtime would not adopt (explicit --config and env-selected
- * paths keep standalone-file semantics); scoped commits re-validate
- * the layers the save mutates — exactly as the non-UI verbs do —
- * before ensure materializes the marker.
+ * session never creates durable state. Global admission belongs to the
+ * target-bound control transaction; scoped commits additionally re-validate
+ * the layers and initialize the activated character directory.
  */
 export async function ensureConsoleCommitTarget(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
@@ -83,22 +83,10 @@ export async function ensureConsoleCommitTarget(options: {
   readonly env?: NodeJS.ProcessEnv;
 }): Promise<void> {
   if (options.scope === 'global') {
-    if (
-      options.runtimeLocation.configSource === 'path' ||
-      options.runtimeLocation.configSource === 'env'
-    ) {
-      return;
-    }
-
-    await assertProject02HomeAdoptable({
-      homeRoot: options.runtimeLocation.homeRoot,
-    });
-    await assertRealHomeEnvFile({
-      homeRoot: options.runtimeLocation.homeRoot,
-    });
     return;
   }
 
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
   assertScopedGlobalLayerLoadable({
     runtimeLocation: options.runtimeLocation,
     ...(options.env === undefined ? {} : {env: options.env}),
@@ -282,7 +270,9 @@ export function formatInspectedFieldValue(
     : field.effective.value;
   const suffix = field.authored.configured
     ? 'authored'
-    : field.effective.source;
+    : field.effectiveSource === 'default'
+      ? field.effective.source
+      : field.effectiveSource;
 
   return `${formatCurrentValue(value, field.defaultValueSummary)} [${suffix}]`;
 }
@@ -325,16 +315,26 @@ export function writeDiagnostics(
   }
 }
 
-export function runtimeConfigLocation(options: {
+export function runtimeConfigSecretSetCommandPrefix(options: {
   readonly configPath?: string;
   readonly storeRoot?: string;
-}): {readonly configPath?: string; readonly storeRoot?: string} {
-  return {
+}): string {
+  const locationArgs = [
+    ...(options.storeRoot === undefined
+      ? []
+      : ['--store', shellQuoteConsoleCommandArgument(options.storeRoot)]),
     ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  };
+      ? []
+      : ['--config', shellQuoteConsoleCommandArgument(options.configPath)]),
+  ];
+
+  return `pnpm runtime-config${
+    locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`
+  }`;
+}
+
+export function shellQuoteConsoleCommandArgument(value: string): string {
+  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }
 
 export function writeLine(stdout: NodeJS.WritableStream, value: string): void {

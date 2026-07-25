@@ -1,51 +1,123 @@
 /**
- * Registry for plugin instances that stopped (or never started) serving:
- * swap-superseded predecessors, guard-declined rebuilds, and reload
- * factories that settled after losing their timeout race.
+ * Ownership registry for plugin instances that no longer serve.
  *
- * The model is deliberately plain — a list plus two invariants:
- *
- * - An instance is retired at most once and never while it is live; an
- *   instance that returns to live duty gives up its retired slot.
- * - Retired instances are dispatched ONLY inside the host's ordered
- *   terminal phases (retired before live, so the live instance's writes
- *   land last). There is no out-of-band dispatch: an instance retired
- *   between phases joins the next phase, and one retired after the last
- *   phase is deliberately dropped — this is a single-process runtime that
- *   is about to exit, and salvage dispatch outside the ordered phases is
- *   exactly what would let a stale instance overwrite final state.
+ * Construction adopts a candidate before any post-factory check. A
+ * successful swap removes the new live instance from this registry and
+ * retires the replaced one. The same owner tracks raw construction and final
+ * reconciliation; terminal dispatch quiesces that work before consuming the
+ * resulting ordered target list.
  */
-import type {RuntimePlugin} from '../api/index.ts';
+import type {RuntimePlugin, RuntimePluginManifest} from '../api/index.ts';
 
-export type RetiredRuntimePluginLifecycle = {
-  /** Retire an instance; applies the at-most-once / not-live invariants. */
-  readonly retire: (plugin: RuntimePlugin) => void;
-  /** A swap made this instance live again; it gives up any retired slot. */
-  readonly unretire: (plugin: RuntimePlugin) => void;
-  /** Retired instances in retirement order, for terminal dispatch. */
-  readonly retiredPlugins: () => readonly RuntimePlugin[];
+export type RuntimePluginLifecycleTarget = {
+  readonly plugin: RuntimePlugin;
+  readonly catalogManifest: RuntimePluginManifest;
 };
 
-export function createRetiredRuntimePluginLifecycle(config: {
+export function runtimePluginLifecycleTarget(
+  plugin: RuntimePlugin,
+  catalogManifest: RuntimePluginManifest,
+): RuntimePluginLifecycleTarget {
+  return Object.freeze({plugin, catalogManifest});
+}
+
+export type RuntimePluginInstanceOwnership = {
+  readonly retire: (
+    plugin: RuntimePlugin,
+    catalogManifest: RuntimePluginManifest,
+  ) => void;
+  readonly replaceLive: (plugin: RuntimePlugin) => RuntimePlugin | undefined;
+  readonly track: <T>(work: Promise<T>) => Promise<T>;
+  readonly quiesce: () => Promise<void>;
+  readonly terminalTargets: (
+    livePlugins: readonly RuntimePlugin[],
+  ) => readonly RuntimePluginLifecycleTarget[];
+};
+
+export function createRuntimePluginInstanceOwnership(config: {
   readonly isLive: (plugin: RuntimePlugin) => boolean;
-}): RetiredRuntimePluginLifecycle {
-  const retired: RuntimePlugin[] = [];
+  readonly swapEnabledPlugin: (
+    next: RuntimePlugin,
+  ) => RuntimePlugin | undefined;
+  readonly catalogManifestForPluginId: (
+    pluginId: string,
+  ) => RuntimePluginManifest;
+}): RuntimePluginInstanceOwnership {
+  const retired: RuntimePluginLifecycleTarget[] = [];
+  const inFlight = new Set<Promise<unknown>>();
+  const remove = (plugin: RuntimePlugin): void => {
+    const index = retired.findIndex(target => target.plugin === plugin);
 
-  return {
-    retire: plugin => {
-      if (config.isLive(plugin) || retired.includes(plugin)) {
-        return;
-      }
-
-      retired.push(plugin);
-    },
-    unretire: plugin => {
-      const index = retired.indexOf(plugin);
-
-      if (index !== -1) {
-        retired.splice(index, 1);
-      }
-    },
-    retiredPlugins: () => Object.freeze([...retired]),
+    if (index !== -1) {
+      retired.splice(index, 1);
+    }
   };
+  const retire = (
+    plugin: RuntimePlugin,
+    catalogManifest: RuntimePluginManifest,
+  ): void => {
+    if (
+      config.isLive(plugin) ||
+      retired.some(target => target.plugin === plugin)
+    ) {
+      return;
+    }
+
+    retired.push(runtimePluginLifecycleTarget(plugin, catalogManifest));
+  };
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    inFlight.add(work);
+    void work.then(
+      () => {
+        inFlight.delete(work);
+      },
+      () => {
+        inFlight.delete(work);
+      },
+    );
+    return work;
+  };
+
+  return Object.freeze({
+    retire,
+    replaceLive(plugin) {
+      const previous = config.swapEnabledPlugin(plugin);
+
+      if (previous === undefined) {
+        return undefined;
+      }
+
+      remove(plugin);
+      retire(previous, config.catalogManifestForPluginId(previous.manifest.id));
+      return previous;
+    },
+    track,
+    async quiesce() {
+      while (inFlight.size > 0) {
+        await Promise.allSettled([...inFlight]);
+      }
+    },
+    terminalTargets: livePlugins =>
+      Object.freeze([
+        ...retired,
+        ...runtimePluginLifecycleTargets(
+          livePlugins,
+          config.catalogManifestForPluginId,
+        ),
+      ]),
+  });
+}
+
+export function runtimePluginLifecycleTargets(
+  plugins: readonly RuntimePlugin[],
+  catalogManifestForPluginId?: (pluginId: string) => RuntimePluginManifest,
+): readonly RuntimePluginLifecycleTarget[] {
+  return Object.freeze(
+    plugins.map(plugin =>
+      runtimePluginLifecycleTarget(
+        plugin,
+        catalogManifestForPluginId?.(plugin.manifest.id) ?? plugin.manifest,
+      ),
+    ),
+  );
 }

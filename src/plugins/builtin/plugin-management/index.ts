@@ -31,7 +31,6 @@ import {
   type RuntimePluginListHostState,
 } from './list.ts';
 import {
-  assertRuntimePluginConfigControlCapabilityPresent,
   createRuntimePluginConfigControlHostStateSnapshot,
   type RuntimePluginConfigControlHostState,
 } from './state.ts';
@@ -46,12 +45,6 @@ const runtimePluginManagementPluginInstances = new WeakSet<RuntimePlugin>();
 export function createRuntimePluginManagementPlugin(
   options: CreateRuntimePluginManagementPluginOptions,
 ): RuntimePlugin {
-  if (options.pluginConfigControl !== undefined) {
-    assertRuntimePluginConfigControlCapabilityPresent(
-      options.pluginConfigControl,
-    );
-  }
-
   const pluginConfigControl =
     options.pluginConfigControl === undefined
       ? undefined
@@ -197,11 +190,13 @@ export {
   type RuntimePluginListHostState,
 } from './list.ts';
 export {
+  createRuntimePluginConfigControlBinding,
   createRuntimePluginConfigControlHostStateSnapshot,
   createRuntimePluginInventoryHostStateSnapshot,
   isRuntimeConfigConflictError,
   requiredRuntimePluginConfigControl,
   runtimeConfigConflictErrorCode,
+  type RuntimePluginConfigControlBinding,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
 } from './state.ts';

@@ -1,3 +1,5 @@
+import {join} from 'node:path';
+
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -9,6 +11,7 @@ import {
   resolveProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {runtimeConfigSnapshotForTest} from '../support/runtime-config.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {resolveRuntimePluginActivation} from '../../src/app/index.ts';
 
 describe('runtime config readiness classification', () => {
@@ -156,8 +159,13 @@ describe('runtime config diagnostic plugin matching', () => {
   });
 
   it('attributes generated unknown dotted-plugin diagnostics to the exact plugin id', () => {
+    const configPath = join(
+      createTestTempRoot('project02-runtime-config-diagnostics-'),
+      'config.json',
+    );
     const loadedConfig = Object.freeze({
-      source: 'default' as const,
+      source: 'path' as const,
+      path: configPath,
       config: Object.freeze({
         version: runtimeConfigVersion,
         plugins: Object.freeze({
@@ -172,7 +180,7 @@ describe('runtime config diagnostic plugin matching', () => {
       pluginManifests: [],
     });
     const activation = resolveRuntimePluginActivation({
-      loadedConfig,
+      effectiveConfig: loadedConfig,
       resolvedConfig,
       pluginManifests: [],
       strictUnknownPlugins: true,

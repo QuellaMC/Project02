@@ -32,6 +32,7 @@ import {
   inspectRuntimePluginConfig,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
+import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 import {
   runtimePluginConfigControlStateForTest,
   writeRuntimeConfig,
@@ -154,6 +155,7 @@ describe('host-owned runtime plugin management tools', () => {
     const targetManifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -623,6 +625,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const fingerprint = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -690,6 +693,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -723,6 +727,7 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -752,6 +757,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const fingerprint = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -804,6 +810,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -834,6 +841,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -981,6 +989,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const fingerprint = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1127,6 +1136,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const fingerprint = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1202,6 +1212,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1235,6 +1246,7 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1279,6 +1291,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1331,6 +1344,7 @@ describe('host-owned runtime plugin management tools', () => {
     ).toThrow('does not match its validated config candidate');
 
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1357,6 +1371,8 @@ describe('host-owned runtime plugin management tools', () => {
         },
       },
     } as const;
+
+    await ensureInitializedProject02Home({homeRoot: storeRoot});
     const configPathA = writeRuntimeConfig(
       join(storeRoot, 'config-a.json'),
       authoredConfig,
@@ -1366,6 +1382,7 @@ describe('host-owned runtime plugin management tools', () => {
       authoredConfig,
     );
     const beforeA = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPathA,
         storeRoot: storeRoot,
@@ -1374,6 +1391,7 @@ describe('host-owned runtime plugin management tools', () => {
       pluginManifests: [manifest],
     });
     const beforeB = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPathB,
         storeRoot: storeRoot,
@@ -1423,6 +1441,7 @@ describe('host-owned runtime plugin management tools', () => {
     ).toThrow('targets another runtime config path');
 
     const afterA = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPathA,
         storeRoot: storeRoot,
@@ -1431,6 +1450,7 @@ describe('host-owned runtime plugin management tools', () => {
       pluginManifests: [manifest],
     });
     const afterB = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPathB,
         storeRoot: storeRoot,
@@ -1459,6 +1479,7 @@ describe('host-owned runtime plugin management tools', () => {
     const mutatedPluginId = 'test.mutated-after-preview';
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1510,6 +1531,41 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(loaded.config?.plugins?.[originalPluginId]).toBeUndefined();
     expect(loaded.config?.plugins?.[mutatedPluginId]).toBeUndefined();
+  });
+
+  it('rejects caller-assembled runtime locations before advertising config tools', () => {
+    const storeRoot = createTestTempRoot(
+      'project02-plugin-config-location-binding-',
+    );
+    const manifest = configurablePluginManifest();
+    const configPathA = writeRuntimeConfig(join(storeRoot, 'config-a.json'), {
+      plugins: {
+        [manifest.id]: {
+          config: {tone: 'cool'},
+        },
+      },
+    });
+    const location = runtimeLocationForTest({
+      configPath: configPathA,
+      storeRoot,
+    });
+    const callerOwnedLocation = {
+      ...location,
+      selectedConfig: {...location.selectedConfig},
+      characterScope: {...location.characterScope},
+    };
+
+    expect(() =>
+      createRuntimePluginHost({
+        storeRoot,
+        pluginConfigControl: runtimePluginConfigControlStateForTest({
+          runtimeLocation: callerOwnedLocation,
+          control: testRuntimePluginConfigControlCapability,
+          pluginManifests: [manifest],
+        }),
+        toolConfirmationHandler: () => ({status: 'approved'}),
+      }),
+    ).toThrow('resolveProject02ConfigLocation');
   });
 
   it('shares one immutable manifest snapshot with cold discovery and config control', async () => {
@@ -1611,6 +1667,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1662,6 +1719,7 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1686,6 +1744,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1720,6 +1779,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1737,6 +1797,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1792,6 +1853,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1827,6 +1889,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1847,6 +1910,7 @@ describe('host-owned runtime plugin management tools', () => {
       const manifest = configurablePluginManifest();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
       const before = inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1906,6 +1970,7 @@ describe('host-owned runtime plugin management tools', () => {
       const manifest = configurablePluginManifest();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
       const before = inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1953,6 +2018,7 @@ describe('host-owned runtime plugin management tools', () => {
       await vi.advanceTimersByTimeAsync(approvalDelayMs + 1);
       const result = await updatePromise;
       const after = inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1971,6 +2037,7 @@ describe('host-owned runtime plugin management tools', () => {
 
       await vi.advanceTimersByTimeAsync(approvalDelayMs + 1);
       const afterLateApproval = inspectRuntimePluginConfig({
+        targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1995,6 +2062,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -2036,6 +2104,7 @@ describe('host-owned runtime plugin management tools', () => {
       testContext(),
     );
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -2067,6 +2136,7 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -2099,6 +2169,7 @@ describe('host-owned runtime plugin management tools', () => {
       expectedFingerprint: before.fingerprint,
     });
     const after = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -2132,6 +2203,7 @@ describe('host-owned runtime plugin management tools', () => {
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     const before = inspectRuntimePluginConfig({
+      targetScope: 'global',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,

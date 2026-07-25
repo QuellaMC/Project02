@@ -3,8 +3,17 @@
  * discovery. Callers retain ownership of source policy, diagnostics,
  * descriptor parsing, and package identity.
  */
-import {lstatSync, readFileSync, readdirSync} from 'node:fs';
-import type {Dirent} from 'node:fs';
+import {lstatSync, readFileSync, readdirSync, realpathSync} from 'node:fs';
+import type {BigIntStats, Dirent} from 'node:fs';
+import {
+  basename,
+  dirname,
+  join,
+  parse as parsePath,
+  relative,
+  resolve,
+  sep,
+} from 'node:path';
 
 import {
   createJsonBoundarySnapshot,
@@ -13,7 +22,6 @@ import {
 
 export type PackageSourceCandidate = {
   readonly name: string;
-  readonly kind: 'directory' | 'symbolic_link';
 };
 
 export type PackageSourceScanResult =
@@ -25,6 +33,112 @@ export type PackageSourceScanResult =
       readonly status: 'unavailable';
       readonly error: unknown;
     };
+
+export type PackageDirectorySnapshot = {
+  readonly packageRoot: string;
+  readonly realPackageRoot: string;
+  readonly packageIdentity: string;
+  readonly canonicalAncestry: readonly PackageDirectoryAncestryEntry[];
+};
+
+export type PackageDirectoryAncestryEntry = {
+  readonly path: string;
+  readonly device: string;
+  readonly inode: string;
+  readonly type: 'directory';
+};
+
+export function snapshotPackageDirectory(
+  packageRoot: string,
+): PackageDirectorySnapshot | undefined {
+  const normalizedRoot = resolve(packageRoot);
+
+  try {
+    const initialStat = lstatSync(normalizedRoot, {bigint: true});
+
+    if (initialStat.isSymbolicLink() || !initialStat.isDirectory()) {
+      return undefined;
+    }
+    const realPackageRoot = realpathSync(normalizedRoot);
+    const canonicalAncestry =
+      snapshotCanonicalDirectoryAncestry(realPackageRoot);
+    const finalStat = lstatSync(normalizedRoot, {bigint: true});
+
+    if (
+      finalStat.isSymbolicLink() ||
+      !finalStat.isDirectory() ||
+      filesystemMetadataIdentity(initialStat) !==
+        filesystemMetadataIdentity(finalStat) ||
+      realpathSync(normalizedRoot) !== realPackageRoot
+    ) {
+      return undefined;
+    }
+
+    return Object.freeze({
+      packageRoot: normalizedRoot,
+      realPackageRoot,
+      packageIdentity: filesystemMetadataIdentity(finalStat),
+      canonicalAncestry,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
+export function snapshotPackageDirectoryFromSource(options: {
+  readonly sourceDirectory: PackageDirectorySnapshot;
+  readonly packageName: string;
+}): PackageDirectorySnapshot | undefined {
+  if (
+    basename(options.packageName) !== options.packageName ||
+    options.packageName === '.' ||
+    options.packageName === '..'
+  ) {
+    return undefined;
+  }
+  const packageRoot = join(
+    options.sourceDirectory.packageRoot,
+    options.packageName,
+  );
+  const snapshot = snapshotPackageDirectory(
+    join(options.sourceDirectory.realPackageRoot, options.packageName),
+  );
+
+  if (
+    snapshot === undefined ||
+    dirname(snapshot.realPackageRoot) !==
+      options.sourceDirectory.realPackageRoot ||
+    !directoryAncestryStartsWith(
+      snapshot.canonicalAncestry,
+      options.sourceDirectory.canonicalAncestry,
+    )
+  ) {
+    return undefined;
+  }
+  return Object.freeze({...snapshot, packageRoot});
+}
+
+export function packageDirectorySnapshotsEqual(
+  left: PackageDirectorySnapshot,
+  right: PackageDirectorySnapshot | undefined,
+): boolean {
+  return (
+    right !== undefined &&
+    left.packageRoot === right.packageRoot &&
+    left.realPackageRoot === right.realPackageRoot &&
+    left.packageIdentity === right.packageIdentity &&
+    directoryAncestriesEqual(left.canonicalAncestry, right.canonicalAncestry)
+  );
+}
+
+export function packageDirectorySnapshotIsCurrent(
+  snapshot: PackageDirectorySnapshot,
+): boolean {
+  return packageDirectorySnapshotsEqual(
+    snapshot,
+    snapshotPackageDirectory(snapshot.packageRoot),
+  );
+}
 
 export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
   let entries: Dirent[];
@@ -40,7 +154,6 @@ export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
     .map(entry =>
       Object.freeze({
         name: entry.name,
-        kind: entry.isSymbolicLink() ? 'symbolic_link' : 'directory',
       } satisfies PackageSourceCandidate),
     )
     .sort((left, right) => compareText(left.name, right.name));
@@ -69,36 +182,15 @@ export type BoundedPackageJsonReadResult =
       readonly reason: BoundedPackageJsonRejectionReason;
     };
 
-export function readBoundedPackageJsonFile(options: {
-  readonly path: string | URL;
+export function parseBoundedPackageJsonSource(options: {
+  readonly source: string | Uint8Array;
   readonly maxBytes: number;
   readonly boundaryField: string;
 }): BoundedPackageJsonReadResult {
-  let metadataStat;
-
-  try {
-    metadataStat = lstatSync(options.path);
-  } catch {
-    return rejectedPackageJson('unreadable');
-  }
-
-  if (metadataStat.isSymbolicLink()) {
-    return rejectedPackageJson('symbolic_link');
-  }
-  if (!metadataStat.isFile()) {
-    return rejectedPackageJson('not_file');
-  }
-  if (metadataStat.size > options.maxBytes) {
-    return rejectedPackageJson('too_large');
-  }
-
-  let source: string;
-
-  try {
-    source = readFileSync(options.path, 'utf8');
-  } catch {
-    return rejectedPackageJson('unreadable');
-  }
+  const source =
+    typeof options.source === 'string'
+      ? options.source
+      : Buffer.from(options.source).toString('utf8');
 
   if (Buffer.byteLength(source, 'utf8') > options.maxBytes) {
     return rejectedPackageJson('too_large');
@@ -122,6 +214,141 @@ export function readBoundedPackageJsonFile(options: {
   } catch {
     return rejectedPackageJson('unsafe_json');
   }
+}
+
+export function readBoundedPackageJsonFile(options: {
+  readonly path: string | URL;
+  readonly maxBytes: number;
+  readonly boundaryField: string;
+}): BoundedPackageJsonReadResult {
+  let metadataStat: BigIntStats;
+
+  try {
+    metadataStat = lstatSync(options.path, {bigint: true});
+  } catch {
+    return rejectedPackageJson('unreadable');
+  }
+
+  if (metadataStat.isSymbolicLink()) {
+    return rejectedPackageJson('symbolic_link');
+  }
+  if (!metadataStat.isFile()) {
+    return rejectedPackageJson('not_file');
+  }
+  if (metadataStat.size > BigInt(options.maxBytes)) {
+    return rejectedPackageJson('too_large');
+  }
+
+  let source: string;
+
+  try {
+    source = readFileSync(options.path, 'utf8');
+  } catch {
+    return rejectedPackageJson('unreadable');
+  }
+
+  let finalMetadataStat: BigIntStats;
+
+  try {
+    finalMetadataStat = lstatSync(options.path, {bigint: true});
+  } catch {
+    return rejectedPackageJson('unreadable');
+  }
+
+  if (
+    finalMetadataStat.isSymbolicLink() ||
+    !finalMetadataStat.isFile() ||
+    filesystemMetadataIdentity(finalMetadataStat) !==
+      filesystemMetadataIdentity(metadataStat)
+  ) {
+    return rejectedPackageJson('unreadable');
+  }
+
+  return parseBoundedPackageJsonSource({
+    source,
+    maxBytes: options.maxBytes,
+    boundaryField: options.boundaryField,
+  });
+}
+
+export function filesystemMetadataIdentity(stat: BigIntStats): string {
+  return [
+    stat.dev,
+    stat.ino,
+    stat.mode,
+    stat.size,
+    stat.mtimeNs,
+    stat.ctimeNs,
+  ].join(':');
+}
+
+function snapshotCanonicalDirectoryAncestry(
+  canonicalPath: string,
+): readonly PackageDirectoryAncestryEntry[] {
+  const parsed = parsePath(canonicalPath);
+  const suffix = relative(parsed.root, canonicalPath);
+  const components = suffix === '' ? [] : suffix.split(sep).filter(Boolean);
+  const paths = [parsed.root];
+  let currentPath = parsed.root;
+
+  for (const component of components) {
+    currentPath = join(currentPath, component);
+    paths.push(currentPath);
+  }
+
+  return Object.freeze(
+    paths.map(path => {
+      const stat = lstatSync(path, {bigint: true});
+
+      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+        throw new TypeError('Canonical package ancestry must be directories.');
+      }
+      return Object.freeze({
+        path,
+        device: String(stat.dev),
+        inode: String(stat.ino),
+        type: 'directory',
+      } satisfies PackageDirectoryAncestryEntry);
+    }),
+  );
+}
+
+function directoryAncestriesEqual(
+  left: readonly PackageDirectoryAncestryEntry[],
+  right: readonly PackageDirectoryAncestryEntry[],
+): boolean {
+  return (
+    left.length === right.length &&
+    left.every((entry, index) => {
+      const candidate = right[index];
+
+      return (
+        candidate !== undefined &&
+        entry.path === candidate.path &&
+        entry.device === candidate.device &&
+        entry.inode === candidate.inode
+      );
+    })
+  );
+}
+
+function directoryAncestryStartsWith(
+  ancestry: readonly PackageDirectoryAncestryEntry[],
+  expectedPrefix: readonly PackageDirectoryAncestryEntry[],
+): boolean {
+  return (
+    ancestry.length === expectedPrefix.length + 1 &&
+    expectedPrefix.every((entry, index) => {
+      const candidate = ancestry[index];
+
+      return (
+        candidate !== undefined &&
+        entry.path === candidate.path &&
+        entry.device === candidate.device &&
+        entry.inode === candidate.inode
+      );
+    })
+  );
 }
 
 function rejectedPackageJson(

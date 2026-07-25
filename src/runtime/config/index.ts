@@ -13,11 +13,19 @@ export {
   shouldReadDefaultDotEnvForRuntimeLocation,
 } from './env-file.ts';
 export {
+  assertResolvedProject02HomeAdoptable,
+  assertResolvedProject02HomeCurrent,
+  assertSelectedProject02HomeAdoptable,
+  bindProject02CharacterRuntimeLocation,
   loadProject02RuntimeConfigForLocation,
   loadProject02RuntimeConfigWithLocation,
-  resolveProject02RuntimeLocation,
+  requireResolvedProject02ConfigLocation,
+  requireResolvedProject02RuntimeLocation,
+  requireResolvedRuntimeConfigScopeTarget,
+  resolveProject02ConfigLocation,
+  resolveRuntimeConfigScopeTarget,
   runtimeConfigLocationUsesDefaultConfigPath,
-  sameRuntimeConfigCharacterScope,
+  type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeLocationCliState,
@@ -59,9 +67,13 @@ export {
   type RuntimeConfigCharacterOverlaySnapshot,
 } from './overlay.ts';
 export {
+  createLayeredProject02RuntimeConfigSnapshot,
   mergeCharacterOverlayDocument,
-  mergedLoadedConfigForOverlay,
   resolveLayeredProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
+  type EffectiveProject02RuntimeConfigSnapshot,
+  type LayeredProject02RuntimeConfigSnapshot,
+  type ResolvedLayeredProject02RuntimeConfigSnapshot,
   type ResolveLayeredProject02RuntimeConfigOptions,
 } from './resolve-layered.ts';
 export {
@@ -70,7 +82,6 @@ export {
   assertScopedMutationOperationAllowed,
   applyRuntimeConfigControlOperation,
   prepareRuntimeConfigControlOperation,
-  resolveRuntimeConfigScopeTarget,
   type RuntimeConfigCharacterMaterialization,
   type RuntimeConfigCharacterMaterializationOutcome,
   type RuntimeConfigControlApplyResult,
@@ -80,8 +91,9 @@ export {
 export {
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
-  createRuntimeConfigMutationBase,
+  createRuntimeConfigAuthoredSnapshot,
   getRedactedRuntimeConfigValueAtPath,
+  type RuntimeConfigAuthoredSnapshot,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 export {redactRuntimeConfigText, redactRuntimeConfigValue} from './redact.ts';
@@ -95,7 +107,10 @@ export {
   diagnosticsHaveErrors,
   pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
+  resolveRuntimePluginConfigs,
   runtimeConfigDiagnosticMatchesPlugin,
+  type ResolveRuntimePluginConfigsOptions,
+  type ResolvedRuntimePluginConfigs,
 } from './resolve.ts';
 export {
   project02RuntimeConfigFieldDefinitions,
@@ -118,10 +133,12 @@ export {
   type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticOrigin,
+  type RuntimeConfigEffectiveSource,
   type RuntimeConfigFieldScope,
   type RuntimeConfigInspectShape,
   type RedactedPluginRuntimeConfig,
   type ResolvedPluginRuntimeConfig,
+  type SelectedLoadedProject02RuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,

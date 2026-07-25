@@ -1,6 +1,8 @@
 import {
   applyRuntimeConfigControlOperation,
   assertGlobalConfigLoadableForCharacterScope,
+  assertResolvedProject02HomeAdoptable,
+  assertSelectedProject02HomeAdoptable,
   createRuntimeConfigInspectShape,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
@@ -12,14 +14,11 @@ import {
   runtimeConfigLocationUsesDefaultConfigPath,
   RuntimeEnvFileError,
   type LoadedProject02RuntimeConfig,
+  type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
-import {
-  assertProject02HomeAdoptable,
-  assertRealHomeEnvFile,
-} from '../../runtime/storage/index.ts';
 import {
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
@@ -35,6 +34,7 @@ import {
   runRuntimeConfigConsole,
   type RuntimeConfigConsolePromptAdapter,
 } from './console.ts';
+import {runtimeConfigSecretSetCommandPrefix} from './console-shared.ts';
 import {
   assertNoExtraArgs,
   parseRuntimeConfigCliArgs,
@@ -94,15 +94,29 @@ export function runRuntimeConfigCliFromArgs(
         continueAfterActivationErrors: true,
       });
 
+      if (startup.status === 'character_invalid') {
+        throw new RuntimeConfigCliUsageError(
+          (startup.characterActivation.status === 'failed'
+            ? startup.characterActivation.messages[0]
+            : undefined) ?? 'Character activation failed.',
+        );
+      }
+
       return await runRuntimeConfigConsole({
         stdout: options.stdout,
+        loadedConfig: startup.loadedConfig,
+        runtimeLocation: startup.runtimeLocation,
         ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
         env: startup.configEnv,
         runtimeEnv:
           startup.status === 'resolved'
             ? startup.runtimeEnv
             : startup.configEnv,
-        ...parsedArgs.location,
+        scope:
+          parsedArgs.location.character === undefined ? 'global' : 'character',
+        secretSetCommandPrefix: runtimeConfigSecretSetCommandPrefix(
+          parsedArgs.location,
+        ),
         ...(options.factories === undefined
           ? {}
           : {factories: options.factories}),
@@ -215,15 +229,6 @@ async function runRuntimePluginSecretSetCommand(
     );
   }
 
-  await assertCommandHomeAdoptable(startup.runtimeLocation);
-
-  // The secret lands at the RESOLVED home's .env — which may differ
-  // from the selected one when the config's own storeRoot points
-  // elsewhere — so validate the env file where the write will happen.
-  await assertRealHomeEnvFile({
-    homeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
-  });
-
   const result = applyRuntimePluginSecretSetCommand({
     runtimeLocation: startup.runtimeLocation,
     runtimeEnv:
@@ -255,18 +260,19 @@ async function runRuntimeConfigDocumentCommand(
     ),
   };
 
-  // Reads and writes alike treat a --store selection as a home; a
-  // directory the runtime would not adopt is refused before any value
-  // is reported or written. Standalone --config and env-selected
-  // paths keep their file semantics.
-  await assertCommandHomeAdoptable(configStartup.runtimeLocation);
-
   if (parsed.command.kind === 'path') {
-    options.stdout.write(`${configStartup.runtimeLocation.globalConfigPath}\n`);
+    assertReadableSelectedHome(configStartup.runtimeLocation);
+    options.stdout.write(
+      `${configStartup.runtimeLocation.selectedConfig.path}\n`,
+    );
     return 0;
   }
 
   if (parsed.command.kind === 'env_path') {
+    assertReadableSelectedHome(configStartup.runtimeLocation);
+    assertResolvedProject02HomeAdoptable(configStartup.runtimeLocation, {
+      requireRealEnvFile: true,
+    });
     assertRuntimeConfigLoadedForEnvPath(
       configStartup.loadedConfig,
       configStartup.runtimeLocation,
@@ -278,6 +284,7 @@ async function runRuntimeConfigDocumentCommand(
   }
 
   if (parsed.command.kind === 'get') {
+    assertReadableSelectedHome(configStartup.runtimeLocation);
     assertRuntimeConfigLoaded(configStartup.loadedConfig);
     const value = getRedactedRuntimeConfigValueAtPath(
       configStartup.loadedConfig.config,
@@ -498,7 +505,10 @@ function writeCharacterScopedRuntimeConfigResult(options: {
   readonly stdout: NodeJS.WritableStream;
   readonly command: RuntimeConfigCliArgs['command'];
   readonly startup: CharacterScopedRuntimeCliStartup;
-  readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly target: Extract<
+    ResolvedRuntimeConfigScopeTarget,
+    {readonly scope: 'character'}
+  >;
 }): number {
   const {command, startup, target} = options;
 
@@ -559,28 +569,25 @@ function assertScopedStartupConfigReadable(
 }
 
 /**
- * A command that treats the selected store as a home — mutations and
- * scoped reads alike — refuses a directory the runtime would not
- * adopt. Explicit --config and env-selected paths are standalone
- * config files with no home semantics.
+ * Read-only commands that treat the selected store as a home refuse a
+ * directory the runtime would not adopt. Mutations are admitted by the
+ * immutable transaction target itself. Explicit --config and env-selected
+ * paths remain standalone files with no home semantics.
  */
-async function assertCommandHomeAdoptable(
-  runtimeLocation: ResolvedProject02RuntimeLocation,
-): Promise<void> {
-  if (
-    runtimeLocation.configSource === 'path' ||
-    runtimeLocation.configSource === 'env'
-  ) {
-    return;
-  }
-
-  await assertProject02HomeAdoptable({homeRoot: runtimeLocation.homeRoot});
-  await assertRealHomeEnvFile({homeRoot: runtimeLocation.homeRoot});
+function assertReadableSelectedHome(
+  runtimeLocation: ResolvedProject02ConfigLocation,
+): void {
+  assertSelectedProject02HomeAdoptable(runtimeLocation, {
+    requireRealEnvFile: true,
+  });
 }
 
 function writeCharacterScopedValue(options: {
   readonly stdout: NodeJS.WritableStream;
-  readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly target: Extract<
+    ResolvedRuntimeConfigScopeTarget,
+    {readonly scope: 'character'}
+  >;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly path: string;
 }): number {
@@ -721,7 +728,7 @@ function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
 
 function assertRuntimeConfigLoadedForEnvPath(
   loaded: LoadedProject02RuntimeConfig,
-  runtimeLocation: ResolvedProject02RuntimeLocation,
+  runtimeLocation: ResolvedProject02ConfigLocation,
 ): void {
   if (!diagnosticsHaveErrors(loaded.diagnostics)) {
     return;

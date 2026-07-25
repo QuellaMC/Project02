@@ -1,15 +1,14 @@
 /**
  * Layered config resolution: plugin-manifest defaults < global config <
- * character overlay. The merge produces one plain runtime-config
- * document and delegates to the untouched global resolver, so every
- * downstream consumer keeps seeing exactly one config shape. The merged
- * document keeps the global path and store root: an overlay can only
- * override the character-scoped project02 fields plus per-plugin
- * enablement and field-level plugin config.
+ * character overlay. The snapshot keeps both authored documents separate
+ * from one plain effective document, then delegates that document to the
+ * same effective resolver as the global loader path. The merge can only
+ * override character-scoped project02 fields plus per-plugin enablement and
+ * field-level plugin config.
  */
 import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
 import {
-  resolveProject02RuntimeConfig,
+  resolveEffectiveProject02RuntimeConfig,
   type ResolveProject02RuntimeConfigOptions,
 } from './resolve.ts';
 import {
@@ -25,18 +24,82 @@ import {
   type Project02RuntimeConfig,
   type Project02RuntimePluginConfig,
   type ResolvedProject02RuntimeConfig,
+  type RuntimeConfigDiagnostic,
   type RuntimeConfigValue,
 } from './types.ts';
+
+export type EffectiveProject02RuntimeConfigSnapshot = {
+  readonly config?: Project02RuntimeConfig;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+};
+
+export type LayeredProject02RuntimeConfigSnapshot = {
+  readonly globalConfig?: Project02RuntimeConfig;
+  readonly characterConfig?: Project02RuntimeConfig;
+  readonly effective: EffectiveProject02RuntimeConfigSnapshot;
+};
+
+export type ResolvedLayeredProject02RuntimeConfigSnapshot = {
+  readonly layeredConfig: LayeredProject02RuntimeConfigSnapshot;
+  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
+};
 
 export type ResolveLayeredProject02RuntimeConfigOptions =
   ResolveProject02RuntimeConfigOptions & {
     readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   };
 
+/**
+ * The raw authored layers and their effective merge captured together. Reads,
+ * mutation-target authorship, and effective provenance can therefore refer to
+ * the same documents without reconstructing ownership from the merged value.
+ */
+export function createLayeredProject02RuntimeConfigSnapshot(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
+}): LayeredProject02RuntimeConfigSnapshot {
+  const characterConfig = options.overlayConfig?.config;
+  const effectiveConfig =
+    characterConfig === undefined
+      ? options.loadedConfig.config
+      : mergeCharacterOverlayDocument(
+          options.loadedConfig.config,
+          characterConfig,
+        );
+  const effective = Object.freeze({
+    ...(effectiveConfig === undefined ? {} : {config: effectiveConfig}),
+    diagnostics: Object.freeze([
+      ...options.loadedConfig.diagnostics,
+      ...(options.overlayConfig?.diagnostics ?? []),
+    ]),
+  } satisfies EffectiveProject02RuntimeConfigSnapshot);
+
+  return Object.freeze({
+    ...(options.loadedConfig.config === undefined
+      ? {}
+      : {globalConfig: options.loadedConfig.config}),
+    ...(characterConfig === undefined ? {} : {characterConfig}),
+    effective,
+  });
+}
+
 export function resolveLayeredProject02RuntimeConfig(
   options: ResolveLayeredProject02RuntimeConfigOptions,
 ): ResolvedProject02RuntimeConfig {
-  const {overlayConfig, ...globalOptions} = options;
+  return resolveLayeredProject02RuntimeConfigWithSnapshot(options)
+    .resolvedConfig;
+}
+
+export function resolveLayeredProject02RuntimeConfigWithSnapshot(
+  options: ResolveLayeredProject02RuntimeConfigOptions,
+): ResolvedLayeredProject02RuntimeConfigSnapshot {
+  const {overlayConfig, loadedConfig, ...effectiveOptions} = options;
+  const layeredConfig = createLayeredProject02RuntimeConfigSnapshot({
+    loadedConfig,
+    ...(overlayConfig === undefined ? {} : {overlayConfig}),
+  });
+  const source = loadedConfig.source;
+  const path = loadedConfig.path;
 
   // No overlay file, no override, nothing to report: the layered
   // resolve is the global resolve, fingerprint included.
@@ -45,17 +108,22 @@ export function resolveLayeredProject02RuntimeConfig(
     (overlayConfig.config === undefined &&
       overlayConfig.diagnostics.length === 0)
   ) {
-    return resolveProject02RuntimeConfig(globalOptions);
+    return Object.freeze({
+      layeredConfig,
+      resolvedConfig: resolveEffectiveProject02RuntimeConfig({
+        ...effectiveOptions,
+        config: layeredConfig.effective.config,
+        source,
+        ...(path === undefined ? {} : {path}),
+        diagnostics: layeredConfig.effective.diagnostics,
+      }),
+    });
   }
 
-  const merged = mergedLoadedConfigForOverlay(
-    globalOptions.loadedConfig,
-    overlayConfig,
-  );
-  const manifests = globalOptions.pluginManifests ?? [];
+  const manifests = effectiveOptions.pluginManifests ?? [];
   const scopeDiagnostics = [
     ...runtimePluginScopeDiagnostics({
-      config: globalOptions.loadedConfig.config,
+      config: loadedConfig.config,
       manifests,
       authoredScope: 'global',
     }),
@@ -71,63 +139,21 @@ export function resolveLayeredProject02RuntimeConfig(
       }),
     ),
   ];
-  const scopedMerged = Object.freeze({
-    ...merged,
-    diagnostics: Object.freeze([...merged.diagnostics, ...scopeDiagnostics]),
-  } satisfies LoadedProject02RuntimeConfig);
-
-  return resolveProject02RuntimeConfig({
-    ...globalOptions,
-    skipPluginScopeValidation: true,
-    loadedConfig: withActiveCharacter(
-      scopedMerged,
-      options.runtimeLocation.characterScope.characterId,
-    ),
-  });
-}
-
-function withActiveCharacter(
-  loadedConfig: LoadedProject02RuntimeConfig,
-  characterId: string,
-): LoadedProject02RuntimeConfig {
-  return Object.freeze({
-    ...loadedConfig,
-    config: Object.freeze({
-      version: runtimeConfigVersion,
-      ...loadedConfig.config,
-      project02: Object.freeze({
-        ...loadedConfig.config?.project02,
-        character: characterId,
-      }),
-    } satisfies Project02RuntimeConfig),
-  });
-}
-
-/**
- * The loaded-config view over both layers: the merged document plus the
- * combined diagnostics, with the global path kept. The resolver and the
- * activation ladder both judge this one shape, so an overlay's explicit
- * enablement rung carries the same weight as a global one.
- */
-export function mergedLoadedConfigForOverlay(
-  loadedConfig: LoadedProject02RuntimeConfig,
-  overlayConfig: LoadedProject02CharacterOverlayConfig,
-): LoadedProject02RuntimeConfig {
-  const globalDocument = loadedConfig.config;
-  const merged =
-    overlayConfig.config === undefined
-      ? globalDocument
-      : mergeCharacterOverlayDocument(globalDocument, overlayConfig.config);
 
   return Object.freeze({
-    source: loadedConfig.source,
-    ...(loadedConfig.path === undefined ? {} : {path: loadedConfig.path}),
-    ...(merged === undefined ? {} : {config: merged}),
-    diagnostics: Object.freeze([
-      ...loadedConfig.diagnostics,
-      ...overlayConfig.diagnostics,
-    ]),
-  } satisfies LoadedProject02RuntimeConfig);
+    layeredConfig,
+    resolvedConfig: resolveEffectiveProject02RuntimeConfig({
+      ...effectiveOptions,
+      config: layeredConfig.effective.config,
+      source,
+      ...(path === undefined ? {} : {path}),
+      diagnostics: Object.freeze([
+        ...layeredConfig.effective.diagnostics,
+        ...scopeDiagnostics,
+      ]),
+      skipPluginScopeValidation: true,
+    }),
+  });
 }
 
 /**

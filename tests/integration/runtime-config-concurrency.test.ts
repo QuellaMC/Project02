@@ -5,6 +5,8 @@ import {join} from 'node:path';
 
 import {afterEach, describe, expect, it} from 'vitest';
 
+import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
+
 const tempRoots: string[] = [];
 
 afterEach(async () => {
@@ -91,9 +93,9 @@ async function runConfigMutationChild(options: {
     "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
-    'const { runtimeLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] }, env: {} });',
+    'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] }, env: {} });',
     'applyRuntimeConfigControlOperation({',
-    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation, env: {}, scope: 'global' }),",
+    "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation: configLocation, env: {}, scope: 'global' }),",
     "  request: { kind: 'plugin_activation', manifest: requiredSecretPlugin(process.argv[3]).manifest, enabled: true }",
     '});',
   ].join('\n');
@@ -114,12 +116,13 @@ async function runSecretMutationChild(options: {
 }): Promise<void> {
   const script = [
     "import { existsSync } from 'node:fs';",
-    "const { applyRuntimeConfigControlOperation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
+    "const { applyRuntimeConfigControlOperation, bindProject02CharacterRuntimeLocation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
     "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
     'const env = { [process.argv[5]]: process.argv[6] };',
-    'const { runtimeLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1], configPath: process.argv[3] }, env });',
+    'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1], configPath: process.argv[3] }, env });',
+    "const runtimeLocation = bindProject02CharacterRuntimeLocation({ configLocation, characterId: 'mira' });",
     'applyRuntimeConfigControlOperation({',
     "  target: resolveRuntimeConfigScopeTarget({ runtimeLocation, env, scope: 'global' }),",
     '  request: {',
@@ -179,5 +182,6 @@ async function runMutationChildProcess(options: {
 async function createTempStoreRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'project02-config-concurrency-'));
   tempRoots.push(root);
+  await ensureInitializedProject02Home({homeRoot: root});
   return root;
 }

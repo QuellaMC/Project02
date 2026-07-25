@@ -26,6 +26,7 @@ import {
   ensureConsoleCommitTarget,
   formatInspectedFieldValue,
   previewAndCommitChange,
+  shellQuoteConsoleCommandArgument,
   writeDiagnostics,
   writeLine,
   type RuntimeConfigConsoleContext,
@@ -85,9 +86,7 @@ export async function runPluginConfigSection(
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
-    // An unscoped console stages global-file edits: its authored view
-    // must not present overlay-authored values as editable here.
-    ...(snapshot.scope === 'global' ? {authoredView: 'global' as const} : {}),
+    targetScope: snapshot.scope,
     manifest,
     pluginManifests: manifests,
     ...(activation === undefined ? {} : {activation}),
@@ -397,21 +396,13 @@ function writeSecretConfigInstructions(
   manifest: RuntimePluginManifest,
   field: RuntimePluginConfigField,
 ): void {
-  const locationArgs = [
-    ...(context.storeRoot === undefined
-      ? []
-      : ['--store', shellQuote(context.storeRoot)]),
-    ...(context.configPath === undefined
-      ? []
-      : ['--config', shellQuote(context.configPath)]),
-  ];
   const envVar = field.envVar ?? suggestedSecretEnvVar(manifest.id, field.name);
   const commandArgs = [
     'secret',
     'set',
-    shellQuote(manifest.id),
-    shellQuote(field.name),
-    shellQuote(envVar),
+    shellQuoteConsoleCommandArgument(manifest.id),
+    shellQuoteConsoleCommandArgument(field.name),
+    shellQuoteConsoleCommandArgument(envVar),
   ];
 
   writeLine(
@@ -421,7 +412,7 @@ function writeSecretConfigInstructions(
   writeLine(context.stdout, `Set ${envVar} in the environment, then run:`);
   writeLine(
     context.stdout,
-    `pnpm runtime-config${locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`} -- ${commandArgs.join(' ')}`,
+    `${context.secretSetCommandPrefix} -- ${commandArgs.join(' ')}`,
   );
 }
 
@@ -429,8 +420,4 @@ function suggestedSecretEnvVar(pluginId: string, fieldName: string): string {
   return `${pluginId}_${fieldName}`
     .replaceAll(/[^A-Za-z0-9]+/g, '_')
     .toUpperCase();
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }

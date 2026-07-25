@@ -1,10 +1,14 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
-import {ensureCharacterDataMarker} from '../../src/runtime/storage/index.ts';
+import {
+  ensureCharacterDataMarker,
+  ensureInitializedProject02Home,
+} from '../../src/runtime/storage/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
   existsSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -17,6 +21,7 @@ import {
   writeRuntimeConfig,
   runtimeLocationForTest,
 } from '../support/runtime-config.ts';
+import {withScopedProcessEnv} from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
 import {
@@ -256,7 +261,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.runtimeConfig).toMatchObject({
       source: 'path',
       path: configPath,
-      project02: {storeRoot},
+      project02: {storeRoot: realpathSync.native(storeRoot)},
     });
     expect(output.plugins).toEqual(
       expect.arrayContaining([
@@ -287,8 +292,6 @@ describe('inspect CLI plugin evidence', () => {
     const configPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
       storeRoot,
     });
-    const previousCwd = process.cwd();
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
 
     writeFileSync(
@@ -304,40 +307,37 @@ describe('inspect CLI plugin evidence', () => {
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
-    try {
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
-      process.chdir(cwdRoot);
-
-      const exitCode = await runInspectCliFromArgs(['--sessions'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-      });
-      const output = JSON.parse(stdout) as {
-        readonly runtimeConfig: {
-          readonly source: string;
-          readonly path: string;
-          readonly project02: {readonly storeRoot: string};
+    await withScopedProcessEnv(
+      {cwd: cwdRoot, env: {[runtimeConfigEnvVarName]: undefined}},
+      async () => {
+        const exitCode = await runInspectCliFromArgs(['--sessions'], {
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+        });
+        const output = JSON.parse(stdout) as {
+          readonly runtimeConfig: {
+            readonly source: string;
+            readonly path: string;
+            readonly project02: {readonly storeRoot: string};
+          };
+          readonly sessions: readonly {readonly sessionId: string}[];
         };
-        readonly sessions: readonly {readonly sessionId: string}[];
-      };
 
-      expect(exitCode).toBe(0);
-      expect(output.runtimeConfig).toMatchObject({
-        source: 'env',
-        path: configPath,
-        project02: {storeRoot},
-      });
-      expect(output.sessions).toContainEqual(
-        expect.objectContaining({
-          sessionId: 'session-cwd-config',
-        }),
-      );
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(output.runtimeConfig).toMatchObject({
+          source: 'env',
+          path: configPath,
+          project02: {storeRoot: realpathSync.native(storeRoot)},
+        });
+        expect(output.sessions).toContainEqual(
+          expect.objectContaining({
+            sessionId: 'session-cwd-config',
+          }),
+        );
+      },
+    );
   });
 
   it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
@@ -351,8 +351,6 @@ describe('inspect CLI plugin evidence', () => {
     const defaultConfigPath = writeRuntimeConfig(join(cwdRoot, 'config.json'), {
       storeRoot: defaultStoreRoot,
     });
-    const previousCwd = process.cwd();
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
 
     writeFileSync(
@@ -368,41 +366,38 @@ describe('inspect CLI plugin evidence', () => {
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
-    try {
-      process.env[runtimeConfigEnvVarName] = defaultConfigPath;
-      process.chdir(cwdRoot);
-
-      const exitCode = await runInspectCliFromArgs(
-        ['--store', selectedStoreRoot, '--sessions'],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(() => {}),
-        },
-      );
-      const output = JSON.parse(stdout) as {
-        readonly runtimeConfig: {
-          readonly source: string;
-          readonly project02: {readonly storeRoot: string};
+    await withScopedProcessEnv(
+      {cwd: cwdRoot, env: {[runtimeConfigEnvVarName]: defaultConfigPath}},
+      async () => {
+        const exitCode = await runInspectCliFromArgs(
+          ['--store', selectedStoreRoot, '--sessions'],
+          {
+            stdout: collect(chunk => {
+              stdout += chunk;
+            }),
+            stderr: collect(() => {}),
+          },
+        );
+        const output = JSON.parse(stdout) as {
+          readonly runtimeConfig: {
+            readonly source: string;
+            readonly project02: {readonly storeRoot: string};
+          };
+          readonly sessions: readonly {readonly sessionId: string}[];
         };
-        readonly sessions: readonly {readonly sessionId: string}[];
-      };
 
-      expect(exitCode).toBe(0);
-      expect(output.runtimeConfig).toMatchObject({
-        source: 'none',
-        project02: {storeRoot: selectedStoreRoot},
-      });
-      expect(output.sessions).toContainEqual(
-        expect.objectContaining({
-          sessionId: 'session-selected-store',
-        }),
-      );
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(output.runtimeConfig).toMatchObject({
+          source: 'none',
+          project02: {storeRoot: realpathSync.native(selectedStoreRoot)},
+        });
+        expect(output.sessions).toContainEqual(
+          expect.objectContaining({
+            sessionId: 'session-selected-store',
+          }),
+        );
+      },
+    );
   });
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
@@ -410,8 +405,6 @@ describe('inspect CLI plugin evidence', () => {
     const selectedStoreRoot = createTestTempRoot(
       'project02-inspect-selected-dotenv-error-',
     );
-    const previousCwd = process.cwd();
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
@@ -424,44 +417,41 @@ describe('inspect CLI plugin evidence', () => {
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
-    try {
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
-      process.chdir(cwdRoot);
-
-      const exitCode = await runInspectCliFromArgs(
-        ['--store', selectedStoreRoot, '--sessions'],
-        {
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
-        },
-      );
-      const output = JSON.parse(stdout) as {
-        readonly runtimeConfig: {
-          readonly source: string;
-          readonly project02: {readonly storeRoot: string};
+    await withScopedProcessEnv(
+      {cwd: cwdRoot, env: {[runtimeConfigEnvVarName]: undefined}},
+      async () => {
+        const exitCode = await runInspectCliFromArgs(
+          ['--store', selectedStoreRoot, '--sessions'],
+          {
+            stdout: collect(chunk => {
+              stdout += chunk;
+            }),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
+        const output = JSON.parse(stdout) as {
+          readonly runtimeConfig: {
+            readonly source: string;
+            readonly project02: {readonly storeRoot: string};
+          };
+          readonly sessions: readonly {readonly sessionId: string}[];
         };
-        readonly sessions: readonly {readonly sessionId: string}[];
-      };
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toBe('');
-      expect(output.runtimeConfig).toMatchObject({
-        source: 'none',
-        project02: {storeRoot: selectedStoreRoot},
-      });
-      expect(output.sessions).toContainEqual(
-        expect.objectContaining({
-          sessionId: 'session-selected-before-cwd-dotenv',
-        }),
-      );
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe('');
+        expect(output.runtimeConfig).toMatchObject({
+          source: 'none',
+          project02: {storeRoot: realpathSync.native(selectedStoreRoot)},
+        });
+        expect(output.sessions).toContainEqual(
+          expect.objectContaining({
+            sessionId: 'session-selected-before-cwd-dotenv',
+          }),
+        );
+      },
+    );
   });
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
@@ -480,8 +470,6 @@ describe('inspect CLI plugin evidence', () => {
         storeRoot: selectedStoreRoot,
       },
     );
-    const previousCwd = process.cwd();
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
@@ -494,43 +482,40 @@ describe('inspect CLI plugin evidence', () => {
       createdAt: '2026-06-22T00:00:00.000Z',
     });
 
-    try {
-      process.env[runtimeConfigEnvVarName] = configPath;
-      process.chdir(cwdRoot);
-
-      const exitCode = await runInspectCliFromArgs(['--sessions'], {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-      });
-      const output = JSON.parse(stdout) as {
-        readonly runtimeConfig: {
-          readonly source: string;
-          readonly path: string;
-          readonly project02: {readonly storeRoot: string};
+    await withScopedProcessEnv(
+      {cwd: cwdRoot, env: {[runtimeConfigEnvVarName]: configPath}},
+      async () => {
+        const exitCode = await runInspectCliFromArgs(['--sessions'], {
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(chunk => {
+            stderr += chunk;
+          }),
+        });
+        const output = JSON.parse(stdout) as {
+          readonly runtimeConfig: {
+            readonly source: string;
+            readonly path: string;
+            readonly project02: {readonly storeRoot: string};
+          };
+          readonly sessions: readonly {readonly sessionId: string}[];
         };
-        readonly sessions: readonly {readonly sessionId: string}[];
-      };
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toBe('');
-      expect(output.runtimeConfig).toMatchObject({
-        source: 'env',
-        path: configPath,
-        project02: {storeRoot: selectedStoreRoot},
-      });
-      expect(output.sessions).toContainEqual(
-        expect.objectContaining({
-          sessionId: 'session-env-selected-before-cwd-dotenv',
-        }),
-      );
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe('');
+        expect(output.runtimeConfig).toMatchObject({
+          source: 'env',
+          path: configPath,
+          project02: {storeRoot: realpathSync.native(selectedStoreRoot)},
+        });
+        expect(output.sessions).toContainEqual(
+          expect.objectContaining({
+            sessionId: 'session-env-selected-before-cwd-dotenv',
+          }),
+        );
+      },
+    );
   });
 
   it('uses declared plugin manifests for inspect without constructing plugins', async () => {
@@ -870,6 +855,30 @@ describe('inspect CLI plugin evidence', () => {
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
   });
 
+  // Storage staying clean is startup-seam behavior, asserted once in
+  // tests/unit/runtime-config-overlay.test.ts. This covers only the inspect
+  // CLI's own job: routing character_invalid to an exit code and message.
+  it('maps an invalid explicit character to a usage error', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-inspect-invalid-character-',
+    );
+    let stderr = '';
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--character', '../bad', '--sessions'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Character "../bad" was not found');
+  });
+
   it('keeps an explicit home when its global config and overlay are absent', async () => {
     const homeRoot = createTestTempRoot('project02-inspect-absent-layers-');
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
@@ -894,7 +903,10 @@ describe('inspect CLI plugin evidence', () => {
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({
       runtimeConfig: {
-        project02: {storeRoot: homeRoot, character: 'mira'},
+        project02: {
+          storeRoot: realpathSync.native(homeRoot),
+          character: 'mira',
+        },
       },
       sessions: [],
     });
@@ -905,6 +917,8 @@ describe('inspect CLI plugin evidence', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = join(dataRoot, 'config.json');
     let stderr = '';
+
+    await ensureInitializedProject02Home({homeRoot});
 
     const exitCode = await runInspectCliFromArgs(
       ['--character', 'mira', '--sessions'],
@@ -918,7 +932,8 @@ describe('inspect CLI plugin evidence', () => {
     );
 
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('is a character overlay');
+    expect(stderr).toContain('is inside a character-data directory');
+    expect(stderr).toContain('Use --store with --character');
     expect(existsSync(dataRoot)).toBe(false);
   });
 
@@ -1580,13 +1595,4 @@ function createInspectSessionEndFixturePlugin(
       },
     },
   });
-}
-
-function restoreProcessEnvValue(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    Reflect.deleteProperty(process.env, name);
-    return;
-  }
-
-  process.env[name] = value;
 }

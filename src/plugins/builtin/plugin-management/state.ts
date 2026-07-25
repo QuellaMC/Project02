@@ -2,7 +2,10 @@ import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {RuntimePluginManifest} from '../../api/types.ts';
 import type {RuntimePluginConfigActivationInspectShape} from '../../../runtime/config/index.ts';
 import type {RuntimePluginConfigControlCapability} from '../../../runtime/config/index.ts';
-import type {ResolvedProject02RuntimeLocation} from '../../../runtime/config/index.ts';
+import {
+  requireResolvedRuntimeConfigScopeTarget,
+  type ResolvedRuntimeConfigScopeTarget,
+} from '../../../runtime/config/index.ts';
 
 /**
  * Manifest inventory a host can serve without any config mutation
@@ -14,63 +17,56 @@ export type RuntimePluginInventoryHostState = {
     Record<string, RuntimePluginConfigActivationInspectShape>
   >;
   readonly defaultEnabledPluginIds?: readonly string[];
-  readonly runtimeLocation?: ResolvedProject02RuntimeLocation;
-  readonly env?: NodeJS.ProcessEnv;
 };
 
 /**
- * Inventory plus the config-control capability. The capability is part
- * of the type, so a control-less config-control state cannot be
- * expressed in TypeScript; the runtime guards below remain as the
- * backstop for untyped callers.
+ * One construction-time binding for every value that decides where config
+ * reads and writes go. Keeping these values together prevents a host from
+ * mixing a control capability, scope, and location captured at different
+ * times.
  */
+export type RuntimePluginConfigControlBinding = Readonly<{
+  /** Injected by the composition root; plugins never import the functions. */
+  control: RuntimePluginConfigControlCapability;
+  target: ResolvedRuntimeConfigScopeTarget;
+}>;
+
 export type RuntimePluginConfigControlHostState =
   RuntimePluginInventoryHostState & {
-    readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-    readonly configScope: 'global' | 'character';
-    /** Injected by the composition root; plugins never import the functions. */
-    readonly control: RuntimePluginConfigControlCapability;
+    readonly configControl: RuntimePluginConfigControlBinding;
   };
 
-/** Wide shape the runtime backstops accept: untyped callers may omit control. */
-type MaybeRuntimePluginConfigControlHostState =
-  RuntimePluginInventoryHostState & {
-    readonly control?: RuntimePluginConfigControlCapability;
-  };
-
-export function requiredRuntimePluginConfigControl(
-  state: MaybeRuntimePluginConfigControlHostState,
-): RuntimePluginConfigControlCapability {
-  if (state.control === undefined) {
-    throw new Error(
-      'Runtime plugin config tools require a host config-control capability.',
-    );
-  }
-
-  return state.control;
-}
+const runtimePluginConfigControlBindings =
+  new WeakSet<RuntimePluginConfigControlBinding>();
 
 /**
- * Fails plugin-management construction, not first tool invocation, when
- * config-control state carries no capability: every config tool handler
- * requires it, so a control-less state would advertise config tools to the
- * model that fail on each call. TypeScript callers cannot express that
- * state since control became a required property; this remains for
- * untyped callers, and the invocation-time check is the last backstop.
+ * Canonicalizes the complete routing binding at the composition boundary.
+ * Capability methods and every nested location object are copied into a
+ * frozen snapshot, so later caller mutation cannot retarget an advertised
+ * config tool.
  */
-export function assertRuntimePluginConfigControlCapabilityPresent(
-  state: MaybeRuntimePluginConfigControlHostState,
-): void {
-  if (state.control !== undefined) {
-    return;
+export function createRuntimePluginConfigControlBinding(
+  binding: RuntimePluginConfigControlBinding,
+): RuntimePluginConfigControlBinding {
+  if (runtimePluginConfigControlBindings.has(binding)) {
+    return binding;
   }
 
-  throw new TypeError(
-    'Runtime plugin config-control state was supplied without its host ' +
-      'config-control capability ("control"). Attach control or compose the ' +
-      'host through the configured plugin activation factory; pass ' +
-      'pluginInventoryState instead for an inventory-only host.',
-  );
+  requiredRecord(binding, 'Runtime plugin config-control binding');
+
+  const snapshot = Object.freeze({
+    control: runtimePluginConfigControlCapabilitySnapshot(binding.control),
+    target: requireResolvedRuntimeConfigScopeTarget(binding.target),
+  });
+
+  runtimePluginConfigControlBindings.add(snapshot);
+  return snapshot;
+}
+
+export function requiredRuntimePluginConfigControl(
+  state: RuntimePluginConfigControlHostState,
+): RuntimePluginConfigControlCapability {
+  return state.configControl.control;
 }
 
 export const runtimeConfigConflictErrorCode = 'runtime_config_conflict';
@@ -117,11 +113,10 @@ export function createRuntimePluginConfigControlHostStateSnapshot(
     return state;
   }
 
+  const configControl = configControlBindingFromHostState(state);
   const snapshot = Object.freeze({
     ...inventoryHostStateSnapshotFields(state),
-    runtimeLocation: state.runtimeLocation,
-    configScope: state.configScope,
-    control: state.control,
+    configControl,
   } satisfies RuntimePluginConfigControlHostState);
 
   runtimePluginConfigControlHostStateSnapshots.add(snapshot);
@@ -164,11 +159,71 @@ function inventoryHostStateSnapshotFields(
             ...new Set(state.defaultEnabledPluginIds),
           ]),
         }),
-    ...(state.runtimeLocation === undefined
-      ? {}
-      : {runtimeLocation: state.runtimeLocation}),
-    ...(state.env === undefined ? {} : {env: Object.freeze({...state.env})}),
   };
+}
+
+function configControlBindingFromHostState(
+  state: RuntimePluginConfigControlHostState,
+): RuntimePluginConfigControlBinding {
+  const candidate = state as unknown as Record<string, unknown>;
+  const configControl = candidate['configControl'];
+
+  if (configControl === undefined) {
+    throw new TypeError(
+      'Runtime plugin config-control state requires a configControl binding ' +
+        'created with createRuntimePluginConfigControlBinding().',
+    );
+  }
+
+  return createRuntimePluginConfigControlBinding(
+    configControl as RuntimePluginConfigControlBinding,
+  );
+}
+
+function runtimePluginConfigControlCapabilitySnapshot(
+  control: RuntimePluginConfigControlCapability,
+): RuntimePluginConfigControlCapability {
+  const capability = requiredRecord(
+    control,
+    'Runtime plugin config-control capability ("control")',
+  );
+
+  for (const methodName of [
+    'validateOperation',
+    'prepareOperation',
+    'applyOperation',
+    'inspectConfig',
+    'redactValue',
+    'createConflictError',
+  ] as const) {
+    assertFunction(capability[methodName], `control.${methodName}`);
+  }
+
+  return Object.freeze({
+    validateOperation: control.validateOperation,
+    prepareOperation: control.prepareOperation,
+    applyOperation: control.applyOperation,
+    inspectConfig: control.inspectConfig,
+    redactValue: control.redactValue,
+    createConflictError: control.createConflictError,
+  } satisfies RuntimePluginConfigControlCapability);
+}
+
+function requiredRecord(
+  value: unknown,
+  field: string,
+): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new TypeError(`${field} must be an object.`);
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function assertFunction(value: unknown, field: string): void {
+  if (typeof value !== 'function') {
+    throw new TypeError(`${field} must be a function.`);
+  }
 }
 
 function assertUniquePluginConfigControlManifestIds(

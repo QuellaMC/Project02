@@ -55,6 +55,7 @@ export {
   assertCharacterDataDirReadable,
   ensureCharacterDataDir,
   ensureCharacterDataMarker,
+  isProject02CharacterDataOwnedPath,
   recordMaterializedCharacterPackageVersion,
   requireCharacterDataMarker,
   type EnsureCharacterDataMarkerResult,

@@ -17,14 +17,17 @@ import {
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {
   applyRuntimeConfigControlOperation,
+  assertResolvedProject02HomeAdoptable,
   assertScopedMutationOperationAllowed,
+  bindProject02CharacterRuntimeLocation,
+  createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
+  configuredProject02CharacterId,
   defaultDotEnvForRuntimeLocation,
   diagnosticsHaveErrors,
   readCharacterOverlayForScope,
   loadProject02RuntimeConfigWithLocation,
   loadRuntimeConfigEnvFile,
-  mergedLoadedConfigForOverlay,
   readDefaultDotEnvFile,
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigMutationError,
@@ -37,11 +40,11 @@ import {
   type RuntimeConfigControlOperation,
   type RuntimeConfigControlRequest,
   type RuntimeConfigDiagnostic,
+  type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
 import {
-  assertProject02HomeAdoptable,
   ensureCharacterDataDir,
   LocalRuntimeStorageContractError,
   recordMaterializedCharacterPackageVersion,
@@ -86,7 +89,7 @@ type RuntimeCliCharacterConfigRequest = NonNullable<
 >;
 
 type RuntimeCliStartupBase = {
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -94,7 +97,11 @@ type RuntimeCliStartupBase = {
 
 type RuntimeCliConfigStartupResult = RuntimeCliStartupBase;
 
-type RuntimeCliActivationStartupBase = RuntimeCliStartupBase & {
+type RuntimeCliActivationStartupBase = Omit<
+  RuntimeCliStartupBase,
+  'runtimeLocation'
+> & {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly characterActivation: Project02CharacterActivation;
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
@@ -195,13 +202,14 @@ export function resolveRuntimeCliStartup(
     mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
   const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
-  const {loadedConfig, runtimeLocation} =
-    loadProject02RuntimeConfigWithLocation({
+  const {loadedConfig, configLocation} = loadProject02RuntimeConfigWithLocation(
+    {
       selection: location,
       env: configEnv,
-    });
+    },
+  );
   const startupBase = {
-    runtimeLocation,
+    runtimeLocation: configLocation,
     cwdDotEnv,
     configEnv,
     loadedConfig,
@@ -213,7 +221,10 @@ export function resolveRuntimeCliStartup(
 
   return resolveRuntimeCliActivationStartup({
     options,
-    runtimeLocation,
+    configLocation,
+    ...(location.character === undefined
+      ? {}
+      : {characterOverride: location.character}),
     suppliedEnv,
     cwdDotEnv,
     configEnv,
@@ -232,16 +243,20 @@ export function resolveRuntimeCliStartup(
  */
 async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly configLocation: ResolvedProject02ConfigLocation;
+  readonly characterOverride?: string;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): Promise<RuntimeCliStartupResult> {
-  const {options, runtimeLocation, loadedConfig} = input;
-  const activeCharacterId = runtimeLocation.characterScope.characterId;
-  const homeRoot = runtimeLocation.homeRoot;
+  const {options, configLocation, loadedConfig} = input;
+  const activeCharacterId = configuredProject02CharacterId(
+    loadedConfig.config,
+    input.characterOverride,
+  );
+  const homeRoot = configLocation.homeRoot;
   const characterActivation = prepareProject02CharacterActivation({
     storeRoot: homeRoot,
     configuredCharacterId: activeCharacterId,
@@ -254,6 +269,17 @@ async function resolveRuntimeCliActivationStartup(input: {
       characterActivation,
     });
   }
+
+  const runtimeLocation = bindProject02CharacterRuntimeLocation({
+    configLocation,
+    characterId: characterActivation.profile.id,
+  });
+  const activationStartupBase = {
+    ...input.startupBase,
+    runtimeLocation,
+  };
+
+  assertResolvedProject02HomeAdoptable(runtimeLocation);
 
   // One filesystem discovery for the whole startup: every activation
   // plan — pre-materialization, post-materialization, and the final
@@ -272,10 +298,12 @@ async function resolveRuntimeCliActivationStartup(input: {
       overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
     const catalogSnapshot = classifyRuntimePluginCatalogDiscovery({
       discovery: catalogDiscovery,
-      classificationConfig:
-        overlayLoadedConfig === undefined
-          ? loadedConfig
-          : mergedLoadedConfigForOverlay(loadedConfig, overlayLoadedConfig),
+      classificationConfig: createLayeredProject02RuntimeConfigSnapshot({
+        loadedConfig,
+        ...(overlayLoadedConfig === undefined
+          ? {}
+          : {overlayConfig: overlayLoadedConfig}),
+      }).effective,
     });
 
     return {
@@ -291,7 +319,7 @@ async function resolveRuntimeCliActivationStartup(input: {
         catalogSnapshot,
       }),
       base: {
-        ...input.startupBase,
+        ...activationStartupBase,
         characterActivation,
         ...overlayForPlan,
         catalogSnapshot,
@@ -313,12 +341,6 @@ async function resolveRuntimeCliActivationStartup(input: {
       activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
     });
   }
-
-  // The home itself must be adoptable before any startup — read-only
-  // included — reports config or sessions from it; a marker-less
-  // directory holding foreign content fails check and inspect exactly
-  // as the writers refuse it.
-  await assertProject02HomeAdoptable({homeRoot});
 
   // An invalid pre-existing overlay must not create durable state
   // either: read it before the home or character marker would be written.
@@ -368,6 +390,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   if (materialization.status === 'failed') {
     return Object.freeze({
       ...input.startupBase,
+      runtimeLocation,
       status: 'character_invalid',
       characterActivation: materialization.characterActivation,
     });
@@ -470,6 +493,7 @@ async function materializeCharacterDataDir(input: {
   const characterId = input.characterActivation.profile.id;
 
   try {
+    assertResolvedProject02HomeAdoptable(input.runtimeLocation);
     const dataRoot = await ensureCharacterDataDir({
       homeRoot: input.runtimeLocation.homeRoot,
       characterId,

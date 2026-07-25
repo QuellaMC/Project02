@@ -3,9 +3,14 @@
  * package entry and validates that its factory returns the manifest it
  * was discovered with.
  */
-import {pathToFileURL} from 'node:url';
+import {createRequire} from 'node:module';
 
-import type {RuntimePluginFactoryInput} from '../api/factory.ts';
+import type {
+  RuntimePluginFactoryFunction,
+  RuntimePluginFactoryInput,
+  RuntimePluginPackageLoadFunction,
+  RuntimePluginPackageLoadOptions,
+} from '../api/factory.ts';
 import {createRuntimePlugin} from '../api/constructors.ts';
 import {isRecord} from '../api/validation-primitives.ts';
 import type {
@@ -14,25 +19,123 @@ import type {
   RuntimePluginManifest,
 } from '../api/types.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
+import {
+  activateRuntimePluginPackageArtifact,
+  type RuntimePluginPackageArtifact,
+} from './artifact.ts';
 
-export async function loadRuntimePluginPackage(options: {
-  readonly entryPath: string;
+type RuntimePluginPackageFactory = (
+  input: RuntimePluginFactoryInput,
+) => unknown;
+
+type RuntimePluginPackageLoaderSource =
+  | {
+      readonly kind: 'bound';
+      readonly factory: RuntimePluginFactoryFunction;
+    }
+  | {
+      readonly kind: 'captured';
+      readonly artifact: RuntimePluginPackageArtifact;
+      readonly entryRelativePath: string;
+    };
+
+type NativeDynamicImport = (specifier: string) => Promise<unknown>;
+
+let nativeDynamicImport: NativeDynamicImport | undefined;
+
+function requireNativeDynamicImport(): NativeDynamicImport {
+  if (nativeDynamicImport !== undefined) {
+    return nativeDynamicImport;
+  }
+  const nativeImportModule: unknown = createRequire(import.meta.url)(
+    './native-import.cjs',
+  );
+
+  if (typeof nativeImportModule !== 'function') {
+    throw new TypeError('Native runtime plugin importer is unavailable.');
+  }
+  nativeDynamicImport = specifier => {
+    const result: unknown = Reflect.apply(nativeImportModule, undefined, [
+      specifier,
+    ]);
+
+    return Promise.resolve(result);
+  };
+  return nativeDynamicImport;
+}
+
+export function createRuntimePluginPackageLoader(options: {
   readonly manifest: RuntimePluginManifest;
-  readonly input: RuntimePluginFactoryInput;
-}): Promise<RuntimePlugin> {
-  if (
-    options.input.pluginId !== options.manifest.id ||
-    !canonicalJsonValuesEqual(options.input.manifest, options.manifest)
-  ) {
-    throw new TypeError(
-      `Runtime plugin package factory input does not match "${options.manifest.id}".`,
-    );
+  readonly source: RuntimePluginPackageLoaderSource;
+}): RuntimePluginPackageLoadFunction {
+  let factoryPromise: Promise<RuntimePluginPackageFactory> | undefined;
+
+  return async (input, loadOptions) => {
+    if (
+      input.pluginId !== options.manifest.id ||
+      !canonicalJsonValuesEqual(input.manifest, options.manifest)
+    ) {
+      throw new TypeError(
+        `Runtime plugin package factory input does not match "${options.manifest.id}".`,
+      );
+    }
+
+    const factory =
+      options.source.kind === 'bound'
+        ? options.source.factory
+        : await (factoryPromise ??= importRuntimePluginPackageFactory({
+            artifact: options.source.artifact,
+            entryRelativePath: options.source.entryRelativePath,
+            manifest: options.manifest,
+          }));
+
+    const candidate = await constructRuntimePluginPackage({
+      factory,
+      manifest: options.manifest,
+      input,
+    });
+
+    return acceptRuntimePluginPackageCandidate({
+      manifest: options.manifest,
+      candidate,
+      ...(loadOptions?.retainRejectedCandidate === undefined
+        ? {}
+        : {
+            retainRejectedCandidate: loadOptions.retainRejectedCandidate,
+          }),
+    });
+  };
+}
+
+export function acceptRuntimePluginPackageCandidate(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly candidate: RuntimePlugin;
+  readonly retainRejectedCandidate?:
+    RuntimePluginPackageLoadOptions['retainRejectedCandidate'] | undefined;
+}): RuntimePlugin {
+  if (canonicalJsonValuesEqual(options.candidate.manifest, options.manifest)) {
+    return options.candidate;
   }
 
+  options.retainRejectedCandidate?.(options.candidate);
+  throw new TypeError(
+    `Runtime plugin package "${options.manifest.id}" factory returned a different manifest.`,
+  );
+}
+
+async function importRuntimePluginPackageFactory(options: {
+  readonly artifact: RuntimePluginPackageArtifact;
+  readonly entryRelativePath: string;
+  readonly manifest: RuntimePluginManifest;
+}): Promise<RuntimePluginPackageFactory> {
+  const entryUrl = activateRuntimePluginPackageArtifact({
+    artifact: options.artifact,
+    entryRelativePath: options.entryRelativePath,
+  });
   let moduleNamespace: unknown;
 
   try {
-    moduleNamespace = await import(pathToFileURL(options.entryPath).href);
+    moduleNamespace = await requireNativeDynamicImport()(entryUrl);
   } catch {
     throw new TypeError(
       `Runtime plugin package "${options.manifest.id}" entry could not be imported.`,
@@ -64,6 +167,15 @@ export async function loadRuntimePluginPackage(options: {
     );
   }
 
+  return input =>
+    Reflect.apply(createProject02Plugin, undefined, [input]) as unknown;
+}
+
+async function constructRuntimePluginPackage(options: {
+  readonly factory: RuntimePluginPackageFactory;
+  readonly manifest: RuntimePluginManifest;
+  readonly input: RuntimePluginFactoryInput;
+}): Promise<RuntimePlugin> {
   const factoryInput = Object.freeze({
     ...options.input,
     pluginId: options.manifest.id,
@@ -72,9 +184,7 @@ export async function loadRuntimePluginPackage(options: {
   let factoryOutput: unknown;
 
   try {
-    factoryOutput = await Reflect.apply(createProject02Plugin, undefined, [
-      factoryInput,
-    ]);
+    factoryOutput = await options.factory(factoryInput);
   } catch {
     throw new TypeError(
       `Runtime plugin package "${options.manifest.id}" factory failed during construction.`,
@@ -92,12 +202,6 @@ export async function loadRuntimePluginPackage(options: {
   } catch {
     throw new TypeError(
       `Runtime plugin package "${options.manifest.id}" factory returned an invalid plugin definition.`,
-    );
-  }
-
-  if (!canonicalJsonValuesEqual(plugin.manifest, options.manifest)) {
-    throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" factory returned a different manifest.`,
     );
   }
 

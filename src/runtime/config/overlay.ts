@@ -38,6 +38,7 @@ import {
   type RuntimeConfigDiagnosticOrigin,
   type RuntimeConfigValue,
 } from './types.ts';
+import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export type LoadedProject02CharacterOverlayConfig = {
   readonly scope: 'character';
@@ -209,7 +210,7 @@ export function readCharacterOverlayForScope(
  * so any two sites comparing fingerprints compose them identically.
  */
 export function layeredRuntimeConfigFingerprintForScope(options: {
-  readonly globalConfig: Project02RuntimeConfig;
+  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
 }): string {

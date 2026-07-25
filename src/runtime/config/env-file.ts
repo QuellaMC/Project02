@@ -2,7 +2,10 @@ import {existsSync, readFileSync} from 'node:fs';
 import {parseEnv} from 'node:util';
 
 import {defaultRuntimeConfigEnvPath} from './load.ts';
-import type {ResolvedProject02RuntimeLocation} from './location.ts';
+import {
+  assertResolvedProject02HomeAdoptable,
+  type ResolvedProject02RuntimeLocation,
+} from './location.ts';
 import {runtimeConfigEnvVarName} from './types.ts';
 
 /**
@@ -34,6 +37,7 @@ export function loadRuntimeConfigEnvFile(options: {
   readonly env?: NodeJS.ProcessEnv;
   readonly envDefaults?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
   const envPath = runtimeConfigEnvPathForLocation(options.runtimeLocation);
   const env = options.env ?? process.env;
 

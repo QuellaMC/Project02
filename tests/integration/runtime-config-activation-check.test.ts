@@ -746,9 +746,58 @@ describe('runtime config activation checks and construction', () => {
         }),
       }),
     ).rejects.toThrow(
-      'Plugin package loader "memory.contract" returned a manifest that differs from its declared manifest "memory.contract".',
+      'Runtime plugin package "memory.contract" factory returned a different manifest.',
     );
     expect(cleanupCalls).toBe(1);
+  });
+
+  it('cleans rejected factory candidates under catalog identity and access', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-candidate-identity-cleanup-',
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const catalogPlugin = firstPartyPlugin('catalog.authorized');
+    const cleanupContexts: RuntimePluginContext[] = [];
+    const driftedCandidate = fileStoreSessionEndPlugin(
+      'candidate.drifted',
+      context => {
+        cleanupContexts.push(context);
+      },
+    );
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        [catalogPlugin.manifest.id]: {
+          enabled: true,
+        },
+      },
+    });
+    await initializeCharacterDataForHost(storeRoot);
+
+    await expect(
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            storeRoot,
+          }),
+          factories: {
+            [catalogPlugin.manifest.id]: {
+              manifest: catalogPlugin.manifest,
+              create: () => driftedCandidate,
+            },
+          },
+        }),
+      }),
+    ).rejects.toThrow(
+      'Runtime plugin package "catalog.authorized" factory returned a different manifest.',
+    );
+
+    expect(cleanupContexts).toHaveLength(1);
+    expect(cleanupContexts[0]).toMatchObject({
+      pluginId: catalogPlugin.manifest.id,
+    });
+    expect(cleanupContexts[0]?.fileStore).toBeUndefined();
   });
 
   it('closes already-created plugins when a later manifest-backed factory throws', async () => {
@@ -1007,13 +1056,15 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
-    // The guarded initializer rejects the unusable store with its own
-    // precise error before any factory can construct against it.
+    // Bound-home admission rejects the unusable store before package
+    // discovery or any factory can construct against it.
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadProject02RuntimeConfig({configPath}),
-          storeRoot: invalidStoreRoot,
+          loadedConfig: loadProject02RuntimeConfig({
+            configPath,
+            storeRoot: invalidStoreRoot,
+          }),
         }),
 
         factories: {
@@ -1035,7 +1086,7 @@ describe('runtime config activation checks and construction', () => {
           },
         },
       }),
-    ).toThrow('Could not inspect the character-data root');
+    ).toThrow('Could not inspect local runtime storage schema marker');
 
     expect(factoryCalls).toBe(0);
     expect(cleanupContexts).toHaveLength(0);

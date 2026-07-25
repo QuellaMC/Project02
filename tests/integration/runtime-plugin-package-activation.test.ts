@@ -337,28 +337,25 @@ describe('configured runtime plugin package activation', () => {
     ).toThrow('without a data marker');
   });
 
-  it('refuses direct host creation on a home the runtime would not adopt', async () => {
+  it('refuses activation planning on a home the runtime would not adopt', async () => {
     const storeRoot = createTestTempRoot('project02-package-foreign-home-');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
 
-    const plan = prepareConfiguredProject02PluginActivation({
-      ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
-        storeRoot: storeRoot,
+    // The resolved-home owner rejects before package discovery or host
+    // construction can consume paths beneath an unadopted directory.
+    expect(() =>
+      prepareConfiguredProject02PluginActivation({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          storeRoot: storeRoot,
+        }),
       }),
-    });
-
-    // Host construction never creates durable character state: on an
-    // unadopted home it refuses because the initializer has not run.
-    await expect(
-      createConfiguredProject02PluginHostFromPlan({activationPlan: plan}),
-    ).rejects.toThrow('is not initialized in this home');
+    ).toThrow('foreign entries');
     expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
 
-    // The initializer itself is where the home guard lives: it refuses
-    // to adopt the foreign home instead of marking it.
+    // Direct initialization applies the same ownership rule.
     await expect(
       initializeProject02CharacterRuntime({location: {storeRoot}, env: {}}),
     ).rejects.toThrow('foreign entries');

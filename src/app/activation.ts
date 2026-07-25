@@ -1,18 +1,13 @@
 import {
   createProject02HomeLayout,
-  createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
   LocalRuntimeStorageContractError,
   requireCharacterDataMarker,
-  type RuntimePluginFileStoreProvider,
 } from '../runtime/storage/index.ts';
 import {
-  createRuntimePluginContext,
+  createRuntimePluginConfigControlBinding,
   createRuntimePluginHost,
   hostFirstPartyRuntimePluginIds,
   isHostScopedFirstPartyRuntimePluginId,
-  runRuntimePluginSessionEndHooks,
-  runRuntimePluginShutdownHooks,
   runtimePluginAccessSnapshot,
   runtimePluginId,
   type RuntimePlugin,
@@ -34,15 +29,18 @@ import {
 } from '../plugins/package-loader/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
+  assertResolvedProject02HomeAdoptable,
+  createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
-  createRuntimeConfigMutationBase,
+  createRuntimeConfigAuthoredSnapshot,
   createRuntimePluginConfigControlCapability,
   diagnosticsHaveErrors,
   layeredRuntimeConfigFingerprintForScope,
-  mergedLoadedConfigForOverlay,
   readCharacterOverlayForScope,
-  resolveLayeredProject02RuntimeConfig,
+  resolveRuntimeConfigScopeTarget,
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
   runtimeConfigDiagnosticMatchesPlugin,
+  type EffectiveProject02RuntimeConfigSnapshot,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeLocation,
@@ -50,13 +48,17 @@ import {
   type RuntimeConfigDiagnostic,
   type RuntimePluginConfigActivationInspectShape,
 } from '../runtime/config/index.ts';
-import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {createConfiguredRuntimePluginReloader} from './plugin-reload.ts';
 import {
   composeRuntimePluginCatalog,
   defaultRuntimePluginHostServiceEntries,
   type RuntimePluginFactoryDefinition,
 } from './plugin-catalog.ts';
+import {
+  cleanupPartiallyInstantiatedPlugins,
+  configuredRuntimePluginFileStoreProvider,
+  instantiateRuntimePluginPackages,
+} from './plugin-construction.ts';
 
 export type {
   RuntimePluginFactoryFunction,
@@ -147,25 +149,6 @@ export type RuntimePluginCatalogDiscovery = {
   readonly discoveredPluginIds: ReadonlySet<string>;
 };
 
-// The host must not import the file-store engine (arch rule: plugins never
-// value-import runtime storage); the composition root supplies it instead.
-const configuredRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
-  Object.freeze({
-    createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
-  });
-
-const configuredPluginConstructionCleanupSessionId =
-  'configured-plugin-construction-cleanup';
-const configuredPluginConstructionCleanupMessage =
-  'configured plugin construction failed before host creation';
-const configuredPluginConstructionCleanupCharacter = Object.freeze({
-  id: 'project02-runtime-config',
-  displayName: 'Project02 Runtime Config',
-});
-const configuredPluginConstructionCleanupOptions = Object.freeze({
-  allowFileStoreWrites: false,
-} satisfies RuntimePluginSessionEndOptions);
 const selectedAsDefaultMemoryProviderReason =
   'selected_as_default_memory_provider';
 
@@ -187,6 +170,8 @@ export function createRuntimePluginCatalogSnapshot(options: {
    */
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+
   return classifyRuntimePluginCatalogDiscovery({
     discovery: discoverRuntimePluginCatalog({
       storeRoot: options.runtimeLocation.homeRoot,
@@ -194,13 +179,12 @@ export function createRuntimePluginCatalogSnapshot(options: {
         ? {}
         : {factoryOverrides: options.factoryOverrides}),
     }),
-    classificationConfig:
-      options.overlayConfig === undefined
-        ? options.loadedConfig
-        : mergedLoadedConfigForOverlay(
-            options.loadedConfig,
-            options.overlayConfig,
-          ),
+    classificationConfig: createLayeredProject02RuntimeConfigSnapshot({
+      loadedConfig: options.loadedConfig,
+      ...(options.overlayConfig === undefined
+        ? {}
+        : {overlayConfig: options.overlayConfig}),
+    }).effective,
   });
 }
 
@@ -218,11 +202,9 @@ export function discoverRuntimePluginCatalog(options: {
     sources: [
       {
         root: bundledRuntimePluginPackageRoot,
-        provenance: 'bundled',
       },
       {
         root: operatorPackageRoot,
-        provenance: 'operator',
       },
     ],
     reservedPluginIds: hostFirstPartyRuntimePluginIds,
@@ -275,7 +257,7 @@ export function discoverRuntimePluginCatalog(options: {
  */
 export function classifyRuntimePluginCatalogDiscovery(options: {
   readonly discovery: RuntimePluginCatalogDiscovery;
-  readonly classificationConfig: LoadedProject02RuntimeConfig;
+  readonly classificationConfig: EffectiveProject02RuntimeConfigSnapshot;
 }): RuntimePluginCatalogSnapshot {
   const {discovery} = options;
 
@@ -288,7 +270,7 @@ export function classifyRuntimePluginCatalogDiscovery(options: {
       ...discovery.packageDiagnostics.map(diagnostic =>
         runtimePluginPackageDiagnostic({
           diagnostic,
-          loadedConfig: options.classificationConfig,
+          effectiveConfig: options.classificationConfig,
           discoveredPluginIds: discovery.discoveredPluginIds,
         }),
       ),
@@ -315,6 +297,8 @@ export function prepareConfiguredProject02PluginActivation(options: {
       'Runtime plugin factories and a catalog snapshot cannot both be provided.',
     );
   }
+
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
 
   // One character scope and one overlay snapshot feed the catalog
   // classification, the layered resolve, the construction snapshot, and
@@ -348,38 +332,35 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const catalogEntries = Object.freeze({...composition.catalogEntries});
   const pluginManifests = activationPluginManifests(catalogEntries);
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
-  const resolvedConfig = resolveLayeredProject02RuntimeConfig({
-    loadedConfig: options.loadedConfig,
+  const configControlTarget = resolveRuntimeConfigScopeTarget({
     runtimeLocation: options.runtimeLocation,
-    overlayConfig,
-    pluginManifests,
-    defaultEnabledPluginIds,
-    validateInactivePluginConfigs:
-      options.validateInactivePluginConfigs === true,
+    scope: 'character',
     ...(options.env === undefined ? {} : {env: options.env}),
   });
+  const {layeredConfig, resolvedConfig} =
+    resolveLayeredProject02RuntimeConfigWithSnapshot({
+      loadedConfig: options.loadedConfig,
+      runtimeLocation: options.runtimeLocation,
+      overlayConfig,
+      pluginManifests,
+      defaultEnabledPluginIds,
+      validateInactivePluginConfigs:
+        options.validateInactivePluginConfigs === true,
+      env: configControlTarget.env,
+    });
   const activation = resolveRuntimePluginActivation({
     pluginManifests,
     defaultEnabledPluginIds,
     resolvedConfig,
     // The enablement ladder judges the merged view, so an overlay's
     // explicit enabled rung carries the same weight as a global one.
-    loadedConfig: mergedLoadedConfigForOverlay(
-      options.loadedConfig,
-      overlayConfig,
-    ),
+    effectiveConfig: layeredConfig.effective,
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
   });
-  const globalMutationBase = createRuntimeConfigMutationBase({
-    loadedConfig: options.loadedConfig,
-    ...(resolvedConfig.path === undefined
-      ? {}
-      : {configPath: resolvedConfig.path}),
-    ...(options.runtimeLocation.selection.storeRoot === undefined
-      ? {}
-      : {storeRoot: options.runtimeLocation.selection.storeRoot}),
-  });
+  const globalMutationBase = createRuntimeConfigAuthoredSnapshot(
+    options.loadedConfig,
+  ).document;
 
   return Object.freeze({
     runtimeLocation: options.runtimeLocation,
@@ -394,16 +375,14 @@ export function prepareConfiguredProject02PluginActivation(options: {
     }),
     pluginConfigControl: Object.freeze({
       pluginManifests,
-      control: createRuntimePluginConfigControlCapability(),
       activationByPluginId: runtimePluginConfigActivationByPluginId(activation),
       defaultEnabledPluginIds: Object.freeze([
         ...composition.defaultEnabledPluginIds,
       ]),
-      runtimeLocation: options.runtimeLocation,
-      configScope: 'character',
-      ...(options.env === undefined
-        ? {}
-        : {env: Object.freeze({...options.env})}),
+      configControl: createRuntimePluginConfigControlBinding({
+        control: createRuntimePluginConfigControlCapability(),
+        target: configControlTarget,
+      }),
     }),
   } satisfies PreparedProject02PluginActivationPlan);
 }
@@ -462,6 +441,8 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   const {activationPlan} = options;
   const {catalogEntries} = activationPlan;
 
+  assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
+
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
 
@@ -495,7 +476,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   // diagnostics.
   assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
-  const plugins = await instantiateRuntimePluginPackages({
+  const instantiated = await instantiateRuntimePluginPackages({
     catalogEntries,
     runtimeLocation: activationPlan.runtimeLocation,
     resolvedConfig: activationPlan.resolvedConfig,
@@ -504,11 +485,13 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     sessionIdentity: options.sessionIdentity,
     constructionCleanup: options.constructionCleanup,
   });
+  const {plugins} = instantiated;
   let host: RuntimePluginHost;
 
   try {
     host = createRuntimePluginHost({
       plugins,
+      lifecycleTargets: instantiated.lifecycleTargets,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
       storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
@@ -521,9 +504,9 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
-      plugins,
+      targets: instantiated.lifecycleTargets,
+      accessByPluginId: instantiated.accessByPluginId,
       runtimeLocation: activationPlan.runtimeLocation,
-      resolvedConfig: activationPlan.resolvedConfig,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       constructionCleanup: options.constructionCleanup,
@@ -576,14 +559,14 @@ export function resolveRuntimePluginActivation(options: {
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
   readonly catalogDiagnostics?: readonly RuntimeConfigDiagnostic[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
   readonly strictUnknownPlugins?: boolean;
 }): RuntimePluginActivationResult {
   const pluginManifests =
     options.pluginManifests ??
     options.plugins?.map(plugin => plugin.manifest) ??
     [];
-  const config = options.loadedConfig.config;
+  const config = options.effectiveConfig.config;
   const pluginIds = new Set(pluginManifests.map(manifest => manifest.id));
   const baseDiagnostics: readonly RuntimeConfigDiagnostic[] = Object.freeze([
     ...unknownPluginDiagnostics({
@@ -599,9 +582,6 @@ export function resolveRuntimePluginActivation(options: {
     ...options.resolvedConfig.diagnostics,
     ...(options.catalogDiagnostics ?? []),
   ]);
-  const loadedConfigHasErrors = diagnosticsHaveErrors(
-    options.loadedConfig.diagnostics,
-  );
   const globalConfigErrors = hasGlobalRuntimeConfigErrors({
     diagnostics: baseDiagnostics,
     knownPluginIds: pluginIds,
@@ -615,8 +595,7 @@ export function resolveRuntimePluginActivation(options: {
       options.defaultEnabledPluginIds?.has(manifest.id) === true;
     const configErrors =
       !isRuntimePluginInventoryRecoveryManifest(manifest) &&
-      (loadedConfigHasErrors ||
-        globalConfigErrors ||
+      (globalConfigErrors ||
         pluginHasRuntimeConfigErrors({
           diagnostics: baseDiagnostics,
           pluginId: manifest.id,
@@ -787,74 +766,9 @@ function isKnownPluginRuntimeConfigDiagnostic(options: {
   return false;
 }
 
-async function instantiateRuntimePluginPackages(options: {
-  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly enabledPluginIds: readonly string[];
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-}): Promise<readonly RuntimePlugin[]> {
-  const plugins: RuntimePlugin[] = [];
-  const enabledPluginIds = new Set(options.enabledPluginIds);
-
-  try {
-    for (const [pluginId, entry] of Object.entries(options.catalogEntries)) {
-      if (
-        entry.catalogKind === 'host_service' ||
-        !enabledPluginIds.has(entry.manifest.id)
-      ) {
-        continue;
-      }
-
-      const plugin = await entry.load({
-        pluginId: entry.manifest.id,
-        manifest: entry.manifest,
-        storeRoot: options.runtimeLocation.characterScope.dataRoot,
-        resolvedConfig:
-          ownJsonRecordValue(
-            options.resolvedConfig.pluginConfigs,
-            entry.manifest.id,
-          ) ?? {},
-        redactedConfig:
-          ownJsonRecordValue(
-            options.resolvedConfig.redactedPluginConfigs,
-            entry.manifest.id,
-          ) ?? {},
-      });
-      plugins.push(plugin);
-
-      if (plugin.manifest.id !== entry.manifest.id) {
-        throw new TypeError(
-          `Plugin package loader "${pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${entry.manifest.id}".`,
-        );
-      }
-
-      if (!runtimePluginManifestsMatch(plugin.manifest, entry.manifest)) {
-        throw new TypeError(
-          `Plugin package loader "${pluginId}" returned a manifest that differs from its declared manifest "${entry.manifest.id}".`,
-        );
-      }
-    }
-  } catch (error: unknown) {
-    await cleanupPartiallyInstantiatedPlugins({
-      plugins,
-      runtimeLocation: options.runtimeLocation,
-      resolvedConfig: options.resolvedConfig,
-      sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity,
-      constructionCleanup: options.constructionCleanup,
-    });
-    throw error;
-  }
-
-  return Object.freeze(plugins);
-}
-
 function runtimePluginPackageDiagnostic(options: {
   readonly diagnostic: RuntimePluginPackageDiagnostic;
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
   readonly discoveredPluginIds: ReadonlySet<string>;
 }): RuntimeConfigDiagnostic {
   const {diagnostic} = options;
@@ -864,7 +778,7 @@ function runtimePluginPackageDiagnostic(options: {
   ].filter((pluginId): pluginId is string => pluginId !== undefined);
   const configuredPluginId = diagnosticPluginIds.find(
     pluginId =>
-      ownJsonRecordValue(options.loadedConfig.config?.plugins, pluginId)
+      ownJsonRecordValue(options.effectiveConfig.config?.plugins, pluginId)
         ?.enabled === true,
   );
   const pluginId =
@@ -892,67 +806,6 @@ function runtimePluginPackageDiagnostic(options: {
         scope: 'plugin',
         pluginId,
       });
-}
-
-async function cleanupPartiallyInstantiatedPlugins(options: {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-}): Promise<void> {
-  if (options.plugins.length === 0) {
-    return;
-  }
-
-  const sessionId =
-    options.sessionId ?? configuredPluginConstructionCleanupSessionId;
-  const context = createRuntimePluginContext({
-    eventId: 'evt_configured_plugin_construction_cleanup',
-    traceId: 'trace_configured_plugin_construction_cleanup',
-    createdAt: '1970-01-01T00:00:00.000Z',
-    sessionId,
-    eventType: 'USER_MESSAGE',
-    currentUserMessage: configuredPluginConstructionCleanupMessage,
-    character: configuredPluginConstructionCleanupCharacter,
-  });
-  try {
-    await runRuntimePluginSessionEndHooks({
-      plugins: options.plugins,
-      context,
-      storeRoot: options.runtimeLocation.characterScope.dataRoot,
-      createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
-      sessionId,
-      sessionIdentity: options.sessionIdentity,
-      hookOptions: {
-        ...options.constructionCleanup,
-        ...configuredPluginConstructionCleanupOptions,
-      },
-    });
-  } catch {
-    // Construction cleanup is best-effort and must not mask the factory or host error.
-  }
-
-  try {
-    await runRuntimePluginShutdownHooks({
-      plugins: options.plugins,
-      context,
-      storeRoot: options.runtimeLocation.characterScope.dataRoot,
-      createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
-      sessionId,
-      sessionIdentity: options.sessionIdentity,
-    });
-  } catch {
-    // Shutdown is best-effort and must not mask the factory or host error.
-  }
-}
-
-function runtimePluginManifestsMatch(
-  actual: RuntimePluginManifest,
-  expected: RuntimePluginManifest,
-): boolean {
-  return canonicalJsonValuesEqual(actual, expected);
 }
 
 function activationPluginManifests(
@@ -993,8 +846,6 @@ function runtimePluginInventoryStateForInvalidConfig(
     ...(state.defaultEnabledPluginIds === undefined
       ? {}
       : {defaultEnabledPluginIds: state.defaultEnabledPluginIds}),
-    runtimeLocation: state.runtimeLocation,
-    ...(state.env === undefined ? {} : {env: state.env}),
   });
 }
 

@@ -1,4 +1,4 @@
-import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -582,5 +582,27 @@ describe('startup with a character overlay', () => {
       throw new Error('Expected character_invalid.');
     }
     expect(startup.characterActivation).toMatchObject({status: 'failed'});
+  });
+
+  it('returns character_invalid before deriving storage for an invalid explicit id', async () => {
+    const homeRoot = createTestTempRoot();
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot, character: '../bad'},
+      env: {},
+      factories: {},
+    });
+
+    expect(startup.status).toBe('character_invalid');
+    if (startup.status !== 'character_invalid') {
+      throw new Error('Expected character_invalid.');
+    }
+    expect(startup.characterActivation).toMatchObject({
+      status: 'failed',
+      configuredCharacterId: '../bad',
+    });
+    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
+    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
   });
 });

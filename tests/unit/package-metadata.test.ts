@@ -5,6 +5,7 @@ import {join} from 'node:path';
 import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
+  parseBoundedPackageJsonSource,
   readBoundedPackageJsonFile,
   scanPackageSourceRoot,
 } from '../../src/shared/package-metadata.ts';
@@ -27,11 +28,7 @@ describe('scanPackageSourceRoot', () => {
 
     expect(scanPackageSourceRoot(root)).toEqual({
       status: 'scanned',
-      candidates: [
-        {name: 'alpha', kind: 'directory'},
-        {name: 'linked', kind: 'symbolic_link'},
-        {name: 'zeta', kind: 'directory'},
-      ],
+      candidates: [{name: 'alpha'}, {name: 'linked'}, {name: 'zeta'}],
     });
   });
 
@@ -173,5 +170,26 @@ describe('readBoundedPackageJsonFile', () => {
       status: 'rejected',
       reason: expectedReason,
     });
+  });
+});
+
+describe('parseBoundedPackageJsonSource', () => {
+  it('parses an immutable safe JSON snapshot from captured bytes', () => {
+    const result = parseBoundedPackageJsonSource({
+      source: Buffer.from('{"nested":{"enabled":true}}\n', 'utf8'),
+      maxBytes: 1_024,
+      boundaryField: 'Test package metadata',
+    });
+
+    expect(result).toEqual({
+      status: 'accepted',
+      value: {nested: {enabled: true}},
+    });
+    if (result.status === 'accepted') {
+      expect(Object.isFrozen(result.value)).toBe(true);
+      if (typeof result.value === 'object' && result.value !== null) {
+        expect(Object.isFrozen(Reflect.get(result.value, 'nested'))).toBe(true);
+      }
+    }
   });
 });

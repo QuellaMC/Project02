@@ -4,14 +4,14 @@
  * and the existing enforcement judges the finished activation.
  */
 import type {CharacterPluginExpectations} from '../characters/index.ts';
+import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
   validateRuntimePluginManifest,
   type RuntimePluginManifest,
 } from '../plugins/index.ts';
 import {
   createRuntimeConfigDiagnostic,
-  resolveProject02RuntimeLocation,
-  resolveProject02RuntimeConfig,
+  resolveRuntimePluginConfigs,
   runtimeConfigDiagnosticIsReadinessFailure,
   validateProject02RuntimeConfig,
   runtimeConfigVersion,
@@ -70,7 +70,7 @@ export function planCharacterPackagePluginMaterialization(options: {
       : {
           plugins: Object.fromEntries(
             allPluginIds.map(pluginId => {
-              const config = expectations.config[pluginId];
+              const config = ownJsonRecordValue(expectations.config, pluginId);
 
               return [
                 pluginId,
@@ -96,16 +96,8 @@ export function planCharacterPackagePluginMaterialization(options: {
     );
   }
 
-  const loadedConfig = {
-    source: 'none',
+  const resolved = resolveRuntimePluginConfigs({
     config: validated.config,
-    diagnostics: Object.freeze([]),
-  } as const;
-  const resolved = resolveProject02RuntimeConfig({
-    loadedConfig,
-    runtimeLocation: resolveProject02RuntimeLocation({
-      loadedConfig,
-    }),
     pluginManifests: options.pluginManifests,
     validateInactivePluginConfigs: true,
     authoredScope: 'character',

@@ -2,6 +2,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
@@ -18,6 +19,7 @@ import {
 import {
   characterDataDirPath,
   ensureCharacterDataMarker,
+  ensureInitializedProject02Home,
   requireCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
@@ -48,9 +50,30 @@ async function runConfigCli(
 }
 
 describe('runtime-config --character verbs', () => {
+  // Storage staying clean is startup-seam behavior, asserted once in
+  // tests/unit/runtime-config-overlay.test.ts. This covers only the config
+  // CLI's own job: routing character_invalid to an exit code and message.
+  it('maps an invalid explicit character to a usage error', async () => {
+    const homeRoot = createTestTempRoot('project02-config-invalid-character-');
+
+    const result = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      '../bad',
+      'path',
+    ]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('Character "../bad" was not found');
+  });
+
   it('routes set/unset/get/path at the named character overlay', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-');
-    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const dataRoot = characterDataDirPath(
+      realpathSync.native(homeRoot),
+      'mira',
+    );
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
@@ -68,7 +91,11 @@ describe('runtime-config --character verbs', () => {
     ]);
 
     expect(set.code).toBe(0);
-    expect(JSON.parse(set.stdout)).toMatchObject({configPath: overlayPath});
+    expect(JSON.parse(set.stdout)).toMatchObject({
+      configPath: characterOverlayConfigPath(
+        characterDataDirPath(realpathSync.native(homeRoot), 'mira'),
+      ),
+    });
     expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toEqual({
       version: 'project02.config.v2',
       project02: {userDisplayName: 'Overlay Name'},
@@ -577,6 +604,9 @@ describe('overlay files reached through --config directly', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
+    await ensureInitializedProject02Home({homeRoot});
+    const homeEntriesBefore = readdirSync(homeRoot).sort();
+
     const rejected = await runConfigCli([
       '--store',
       homeRoot,
@@ -588,17 +618,12 @@ describe('overlay files reached through --config directly', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('is a character overlay');
-    expect(rejected.stderr).toContain(`--store "${homeRoot}"`);
-    expect(rejected.stderr).toContain('--character "mira"');
-    expect(rejected.stderr).toContain(
-      'instead of selecting a character overlay with --config',
-    );
-    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
-    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(rejected.stderr).toContain('is inside a character-data directory');
+    expect(rejected.stderr).toContain('Use --store with --character');
+    expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, '.env'))).toBe(false);
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
-    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(readdirSync(homeRoot).sort()).toEqual(homeEntriesBefore);
   });
 
   it('rejects an overlay selected by the config environment variable without side effects', async () => {
@@ -606,19 +631,21 @@ describe('overlay files reached through --config directly', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
+    await ensureInitializedProject02Home({homeRoot});
+    const homeEntriesBefore = readdirSync(homeRoot).sort();
+
     const rejected = await runConfigCli(
       ['set', 'project02.userDisplayName', 'Bob'],
       {[runtimeConfigEnvVarName]: overlayPath},
     );
 
     expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('is a character overlay');
-    expect(rejected.stderr).toContain(runtimeConfigEnvVarName);
-    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
-    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(rejected.stderr).toContain('is inside a character-data directory');
+    expect(rejected.stderr).toContain('Use --store with --character');
+    expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, '.env'))).toBe(false);
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
-    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(readdirSync(homeRoot).sort()).toEqual(homeEntriesBefore);
   });
 
   it('rejects an outside symlink whose canonical target is an overlay', async () => {
@@ -627,7 +654,9 @@ describe('overlay files reached through --config directly', () => {
     const overlayPath = characterOverlayConfigPath(dataRoot);
     const selectedPath = join(homeRoot, 'runtime.json');
 
+    await ensureInitializedProject02Home({homeRoot});
     symlinkSync(overlayPath, selectedPath);
+    const homeEntriesBefore = readdirSync(homeRoot).sort();
 
     const rejected = await runConfigCli([
       '--config',
@@ -638,13 +667,12 @@ describe('overlay files reached through --config directly', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('is a character overlay');
-    expect(rejected.stderr).toContain(`--store "${realpathSync(homeRoot)}"`);
-    expect(existsSync(join(homeRoot, 'character-data'))).toBe(false);
-    expect(existsSync(join(homeRoot, '.locks'))).toBe(false);
+    expect(rejected.stderr).toContain('is inside a character-data directory');
+    expect(rejected.stderr).toContain('Use --store with --character');
+    expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, '.env'))).toBe(false);
     expect(existsSync(join(homeRoot, 'config.json'))).toBe(false);
-    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(readdirSync(homeRoot).sort()).toEqual(homeEntriesBefore);
   });
 
   it('keeps an explicit global config compatible with character scope', async () => {

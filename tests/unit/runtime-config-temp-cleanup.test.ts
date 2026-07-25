@@ -8,12 +8,13 @@ import {
   runtimeConfigVersion,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
+import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
 import {runtimeLocationForTest} from '../support/runtime-config.ts';
 
 describe('runtime config atomic temporary-file cleanup', () => {
-  it('removes an abandoned plaintext env replacement under the env lock', () => {
+  it('removes an abandoned plaintext env replacement under the env lock', async () => {
     const storeRoot = createTestTempRoot('project02-config-dead-temp-');
     const configPath = join(storeRoot, 'config.json');
     const abandonedPath = join(
@@ -25,6 +26,7 @@ describe('runtime config atomic temporary-file cleanup', () => {
       '.unrelated.2147483647.00000000-0000-4000-8000-000000000000.tmp',
     );
 
+    await ensureInitializedProject02Home({homeRoot: storeRoot});
     writeFileSync(
       configPath,
       `${JSON.stringify({

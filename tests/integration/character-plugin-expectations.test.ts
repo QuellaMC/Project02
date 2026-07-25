@@ -1,10 +1,17 @@
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
 import {
   enforceCharacterPluginExpectations,
+  planCharacterPackagePluginMaterialization,
   resolveRuntimeCliStartup,
 } from '../../src/app/index.ts';
 import type {CharacterPluginExpectations} from '../../src/characters/index.ts';
@@ -129,6 +136,26 @@ describe('character plugin enforcement', () => {
       'runtime-config --character seeded plugin enable disabled-required',
     );
   });
+});
+
+describe('character plugin materialization planning', () => {
+  it.each(['toString', 'constructor'] as const)(
+    'treats prototype-colliding plugin id %s as an ordinary own-property lookup',
+    pluginId => {
+      const plan = planCharacterPackagePluginMaterialization({
+        expectations: expectations({required: [pluginId]}),
+        pluginManifests: [],
+      });
+
+      expect(plan).toEqual({
+        status: 'ready',
+        document: {
+          version: 'project02.config.v2',
+          plugins: {[pluginId]: {enabled: true}},
+        },
+      });
+    },
+  );
 });
 
 describe('first-selection materialization through startup', () => {
@@ -447,7 +474,9 @@ describe('first-selection materialization through startup', () => {
 
     // The recovery command names the selected home so it edits the
     // right store.
-    expect(disabled?.message).toContain(`--store ${homeRoot} `);
+    expect(disabled?.message).toContain(
+      `--store ${realpathSync.native(homeRoot)} `,
+    );
     expect(disabled?.message).toContain(
       '--character seeded plugin enable demo-config',
     );

@@ -13,6 +13,7 @@ import {
   writeRuntimeConfig,
   runtimeLocationForTest,
 } from '../support/runtime-config.ts';
+import {withScopedProcessEnv} from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
 import {createConversationSession} from '../../src/core/index.ts';
@@ -704,6 +705,36 @@ describe('chat CLI trace summary', () => {
 });
 
 describe('chat CLI character selection', () => {
+  // Storage staying clean is startup-seam behavior, asserted once in
+  // tests/unit/runtime-config-overlay.test.ts. This covers only the chat
+  // CLI's own job: routing character_invalid to an exit code and message.
+  it('maps an invalid explicit character to a usage error', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-invalid-character-');
+    let stderr = '';
+
+    const exitCode = await runChatCliFromArgs(
+      [
+        '--store',
+        storeRoot,
+        '--character',
+        '../bad',
+        '--new-session',
+        'invalid-character',
+      ],
+      {
+        stdin: Readable.from([]),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Character "../bad" was not found');
+  });
+
   it('speaks as an operator-installed character selected by config', async () => {
     const storeRoot = createTestTempRoot('project02-chat-character-swap-');
     let stdout = '';
@@ -915,10 +946,6 @@ describe('chat CLI provider selection', () => {
   it('lets the selected store env override the cwd dotenv defaults', async () => {
     const cwdRoot = createTestTempRoot('project02-chat-cwd-env-');
     const storeRoot = createTestTempRoot('project02-chat-store-env-');
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stderr = '';
 
     writeFileSync(
@@ -931,33 +958,33 @@ describe('chat CLI provider selection', () => {
       `${roleModelProviderEnvName}=nvidia\n${nvidiaApiKeyEnvName}=\n`,
     );
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
-      process.chdir(cwdRoot);
-
-      const exitCode = await runChatCliFromArgs(
-        ['--store', storeRoot, '--new-session', 'selected-store-env'],
-        {
-          stdin: Readable.from(['hello\n']),
-          stdout: collect(() => {}),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: undefined,
         },
-      );
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--store', storeRoot, '--new-session', 'selected-store-env'],
+          {
+            stdin: Readable.from(['hello\n']),
+            stdout: collect(() => {}),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toContain(
-        `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`,
-      );
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stderr).toContain(
+          `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`,
+        );
+      },
+    );
   });
 
   it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
@@ -969,10 +996,6 @@ describe('chat CLI provider selection', () => {
       'project02-chat-selected-config-store-',
     );
     const sessionId = 'selected-store-config';
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     const defaultConfigPath = writeRuntimeConfig(
       join(defaultStoreRoot, 'config.json'),
       {
@@ -987,46 +1010,46 @@ describe('chat CLI provider selection', () => {
       'utf8',
     );
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      process.env[runtimeConfigEnvVarName] = defaultConfigPath;
-      process.chdir(cwdRoot);
-
-      const exitCode = await runChatCliFromArgs(
-        ['--store', selectedStoreRoot, '--new-session', sessionId],
-        {
-          stdin: Readable.from(['/exit\n']),
-          stdout: collect(() => {}),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: defaultConfigPath,
         },
-      );
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--store', selectedStoreRoot, '--new-session', sessionId],
+          {
+            stdin: Readable.from(['/exit\n']),
+            stdout: collect(() => {}),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toBe('');
-      await expect(
-        createLocalRuntimeSessionStore({
-          storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
-          characterId: 'mira',
-        }).readSession(sessionId),
-      ).resolves.toMatchObject({
-        sessionId,
-      });
-      expect(
-        existsSync(
-          createLocalRuntimeStorageLayout({
-            storeRoot: characterDataDirPath(defaultStoreRoot, 'mira'),
-          }).sessionCatalogPath,
-        ),
-      ).toBe(false);
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe('');
+        await expect(
+          createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+            characterId: 'mira',
+          }).readSession(sessionId),
+        ).resolves.toMatchObject({
+          sessionId,
+        });
+        expect(
+          existsSync(
+            createLocalRuntimeStorageLayout({
+              storeRoot: characterDataDirPath(defaultStoreRoot, 'mira'),
+            }).sessionCatalogPath,
+          ),
+        ).toBe(false);
+      },
+    );
   });
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
@@ -1035,51 +1058,47 @@ describe('chat CLI provider selection', () => {
       'project02-chat-selected-dotenv-error-',
     );
     const sessionId = 'selected-store-before-cwd-dotenv';
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
-      process.chdir(cwdRoot);
-
-      const exitCode = await runChatCliFromArgs(
-        ['--store', storeRoot, '--new-session', sessionId],
-        {
-          stdin: Readable.from(['/exit\n']),
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: undefined,
         },
-      );
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--store', storeRoot, '--new-session', sessionId],
+          {
+            stdin: Readable.from(['/exit\n']),
+            stdout: collect(chunk => {
+              stdout += chunk;
+            }),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      expect(exitCode).toBe(0);
-      expect(stdout).toContain('Mira is ready.');
-      expect(stderr).toBe('');
-      await expect(
-        createLocalRuntimeSessionStore({
-          storeRoot: characterDataDirPath(storeRoot, 'mira'),
-          characterId: 'mira',
-        }).readSession(sessionId),
-      ).resolves.toMatchObject({
-        sessionId,
-      });
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain('Mira is ready.');
+        expect(stderr).toBe('');
+        await expect(
+          createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(storeRoot, 'mira'),
+            characterId: 'mira',
+          }).readSession(sessionId),
+        ).resolves.toMatchObject({
+          sessionId,
+        });
+      },
+    );
   });
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
@@ -1097,48 +1116,47 @@ describe('chat CLI provider selection', () => {
       },
     );
     const sessionId = 'env-selected-store-before-cwd-dotenv';
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      process.env[runtimeConfigEnvVarName] = configPath;
-      process.chdir(cwdRoot);
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: configPath,
+        },
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--new-session', sessionId],
+          {
+            stdin: Readable.from(['/exit\n']),
+            stdout: collect(chunk => {
+              stdout += chunk;
+            }),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      const exitCode = await runChatCliFromArgs(['--new-session', sessionId], {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-      });
-
-      expect(exitCode).toBe(0);
-      expect(stdout).toContain('Mira is ready.');
-      expect(stderr).toBe('');
-      await expect(
-        createLocalRuntimeSessionStore({
-          storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
-          characterId: 'mira',
-        }).readSession(sessionId),
-      ).resolves.toMatchObject({
-        sessionId,
-      });
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain('Mira is ready.');
+        expect(stderr).toBe('');
+        await expect(
+          createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+            characterId: 'mira',
+          }).readSession(sessionId),
+        ).resolves.toMatchObject({
+          sessionId,
+        });
+      },
+    );
   });
 
   it('loads the runtime store env before selecting the default chat provider', async () => {
@@ -1391,6 +1409,7 @@ describe('chat CLI plugin lifecycle', () => {
       plugin: configurablePlugin,
     });
     const fingerprint = inspectRuntimePluginConfig({
+      targetScope: 'character',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1460,6 +1479,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
     );
     const committed = inspectRuntimePluginConfig({
+      targetScope: 'character',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1498,6 +1518,7 @@ describe('chat CLI plugin lifecycle', () => {
         plugin: configurablePlugin,
       });
       const before = inspectRuntimePluginConfig({
+        targetScope: 'character',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1578,6 +1599,7 @@ describe('chat CLI plugin lifecycle', () => {
       expect(stderr).toBe('');
       expect(stdout).toContain('Mira: Plugin config request finished.');
       const after = inspectRuntimePluginConfig({
+        targetScope: 'character',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1613,6 +1635,7 @@ describe('chat CLI plugin lifecycle', () => {
       plugin: configurablePlugin,
     });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'character',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1689,6 +1712,7 @@ describe('chat CLI plugin lifecycle', () => {
       },
     );
     const after = inspectRuntimePluginConfig({
+      targetScope: 'character',
       runtimeLocation: runtimeLocationForTest({
         configPath: configPath,
         storeRoot: storeRoot,
@@ -1723,6 +1747,7 @@ describe('chat CLI plugin lifecycle', () => {
         plugin: configurablePlugin,
       });
       const before = inspectRuntimePluginConfig({
+        targetScope: 'character',
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
           storeRoot: storeRoot,
@@ -1810,6 +1835,7 @@ describe('chat CLI plugin lifecycle', () => {
       expect(stdout).toContain('Plugin tone was not changed.');
       expect(
         inspectRuntimePluginConfig({
+          targetScope: 'character',
           runtimeLocation: runtimeLocationForTest({
             configPath: configPath,
             storeRoot: storeRoot,
@@ -2869,15 +2895,6 @@ function writeRuntimeEnv(storeRoot: string, content: string): void {
     content,
     'utf8',
   );
-}
-
-function restoreProcessEnvValue(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    Reflect.deleteProperty(process.env, name);
-    return;
-  }
-
-  process.env[name] = value;
 }
 
 async function waitForMicrotasks(predicate: () => boolean): Promise<void> {
