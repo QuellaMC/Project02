@@ -347,13 +347,22 @@ describe('character package discovery', () => {
       sources: [{root: sourceRoot, provenance: 'operator'}],
     });
 
+    // An ancestor that is swapped and restored mid-scan can be caught by the
+    // per-package ancestry guard or by the closing source-root equality check,
+    // depending on where the rename lands between those reads. Both are
+    // correct refusals, so pin the contract — no outside descriptor is ever
+    // published, and the swap is reported as an error — instead of pinning
+    // which guard happened to win the race.
     expect(discovery.characters).toEqual([]);
-    expect(discovery.diagnostics).toEqual([
-      expect.objectContaining({
-        code: 'package_source_unavailable',
-        path: sourceRoot,
-      }),
-    ]);
+    expect(discovery.diagnostics).not.toEqual([]);
+    for (const diagnostic of discovery.diagnostics) {
+      expect(diagnostic.severity).toBe('error');
+      expect([
+        'package_source_unavailable',
+        'invalid_package_directory',
+      ]).toContain(diagnostic.code);
+      expect(diagnostic.path.startsWith(boundAncestor)).toBe(true);
+    }
   });
 
   it('rejects a package replaced immediately after its directory check', async () => {

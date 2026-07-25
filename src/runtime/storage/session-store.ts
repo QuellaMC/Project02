@@ -1,5 +1,11 @@
-import {readFileSync, readdirSync, statSync, type Dirent} from 'node:fs';
-import {mkdir, readFile, readdir, rmdir, stat} from 'node:fs/promises';
+import {
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  type Dirent,
+  type Stats,
+} from 'node:fs';
+import {lstat, mkdir, readFile, readdir, rmdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -735,30 +741,12 @@ async function assertSessionDirectoryReadableAsync(
     sessionId,
   }).sessionRoot;
 
-  try {
-    if (!(await stat(sessionRoot)).isDirectory()) {
-      throw new LocalRuntimeStorageContractError(
-        'read_failed',
-        `Local runtime session path is not a directory: ${sessionRoot}.`,
-      );
-    }
-  } catch (error: unknown) {
-    if (error instanceof LocalRuntimeStorageContractError) {
-      throw error;
-    }
-
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      throw new LocalRuntimeStorageContractError(
-        'missing_file',
-        `Required local runtime session directory is missing: ${sessionRoot}.`,
-      );
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not inspect local runtime session directory: ${sessionRoot}.`,
-    );
-  }
+  assertRealStorageDirectory({
+    stats: await readLinkStats(sessionRoot),
+    path: sessionRoot,
+    label: 'local runtime session directory',
+    onMissing: 'reject',
+  });
 }
 
 function assertSessionDirectoryReadable(
@@ -770,28 +758,86 @@ function assertSessionDirectoryReadable(
     sessionId,
   }).sessionRoot;
 
-  try {
-    if (!statSync(sessionRoot).isDirectory()) {
-      throw new LocalRuntimeStorageContractError(
-        'read_failed',
-        `Local runtime session path is not a directory: ${sessionRoot}.`,
-      );
-    }
-  } catch (error: unknown) {
-    if (error instanceof LocalRuntimeStorageContractError) {
-      throw error;
-    }
+  assertRealStorageDirectory({
+    stats: readLinkStatsSync(sessionRoot),
+    path: sessionRoot,
+    label: 'local runtime session directory',
+    onMissing: 'reject',
+  });
+}
 
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      throw new LocalRuntimeStorageContractError(
-        'missing_file',
-        `Required local runtime session directory is missing: ${sessionRoot}.`,
-      );
+type StorageDirectoryStatsResult =
+  | {readonly status: 'stats'; readonly stats: Stats}
+  | {readonly status: 'missing'}
+  | {readonly status: 'unreadable'};
+
+function readLinkStatsSync(path: string): StorageDirectoryStatsResult {
+  try {
+    return {status: 'stats', stats: lstatSync(path)};
+  } catch (error: unknown) {
+    return classifyStorageDirectoryStatsError(error);
+  }
+}
+
+async function readLinkStats(
+  path: string,
+): Promise<StorageDirectoryStatsResult> {
+  try {
+    return {status: 'stats', stats: await lstat(path)};
+  } catch (error: unknown) {
+    return classifyStorageDirectoryStatsError(error);
+  }
+}
+
+function classifyStorageDirectoryStatsError(
+  error: unknown,
+): StorageDirectoryStatsResult {
+  return isNodeErrorWithCode(error, 'ENOENT') ||
+    isNodeErrorWithCode(error, 'ENOTDIR')
+    ? {status: 'missing'}
+    : {status: 'unreadable'};
+}
+
+/**
+ * Rejects storage directories that are absent, not directories, or symbolic
+ * links. Symlinked roots are refused before any read or lock so evidence reads
+ * and control files cannot be routed outside the selected character data root
+ * — the same lstat rule the character-data and home guards already apply.
+ *
+ * `onMissing: 'allow'` is for paths a caller may legitimately create later; it
+ * still rejects a symlink that exists at the path today.
+ */
+function assertRealStorageDirectory(options: {
+  readonly stats: StorageDirectoryStatsResult;
+  readonly path: string;
+  readonly label: string;
+  readonly onMissing: 'reject' | 'allow';
+}): void {
+  if (options.stats.status === 'missing') {
+    if (options.onMissing === 'allow') {
+      return;
     }
 
     throw new LocalRuntimeStorageContractError(
+      'missing_file',
+      `Required ${options.label} is missing: ${options.path}.`,
+    );
+  }
+
+  if (options.stats.status === 'unreadable') {
+    throw new LocalRuntimeStorageContractError(
       'read_failed',
-      `Could not inspect local runtime session directory: ${sessionRoot}.`,
+      `Could not inspect ${options.label}: ${options.path}.`,
+    );
+  }
+
+  if (
+    options.stats.stats.isSymbolicLink() ||
+    !options.stats.stats.isDirectory()
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'read_failed',
+      `Local runtime ${options.label} must be a real directory: ${options.path}.`,
     );
   }
 }
@@ -839,28 +885,15 @@ async function withSessionCatalogMutationLock<Result>(
 async function assertStoreRootCanHostMutationLock(
   layout: LocalRuntimeStorageLayout,
 ): Promise<void> {
-  try {
-    if (!(await stat(layout.storeRoot)).isDirectory()) {
-      throw new LocalRuntimeStorageContractError(
-        'read_failed',
-        `Local runtime store root is not a directory: ${layout.storeRoot}.`,
-      );
-    }
-  } catch (error: unknown) {
-    if (error instanceof LocalRuntimeStorageContractError) {
-      throw error;
-    }
-
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return;
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not inspect local runtime store root: ${layout.storeRoot}.`,
-      {cause: error},
-    );
-  }
+  // Runs before the lock root is prepared: a symlinked store root would
+  // otherwise place `.locks` in the link target before the marker guard
+  // rejects the store. An absent root is fine — it is created under the lock.
+  assertRealStorageDirectory({
+    stats: await readLinkStats(layout.storeRoot),
+    path: layout.storeRoot,
+    label: 'store root',
+    onMissing: 'allow',
+  });
 }
 
 function decodeSessionMetadata(line: string): LocalRuntimeSessionMetadata {
