@@ -9,6 +9,7 @@ import {
   confirmationRequirementValues,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
+  legacyRuntimePluginConfigScope,
   runtimePluginConfigScopeValues,
   runtimePluginConfigValueTypeValues,
   runtimePluginContextItemKindValues,
@@ -507,7 +508,14 @@ function requiredConfigMetadata(
     );
   }
 
-  const scope = value['scope'];
+  // A descriptor authored before this field existed omits it entirely; its
+  // previous semantics map exactly onto the legacy default, so accept that
+  // rather than rejecting an already-installed package. A present-but-invalid
+  // value is still an authoring error.
+  const scope =
+    value['scope'] === undefined
+      ? legacyRuntimePluginConfigScope
+      : value['scope'];
 
   if (!isOneOf(scope, runtimePluginConfigScopeValues)) {
     return reject(
