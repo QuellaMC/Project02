@@ -6,7 +6,10 @@ import {
   type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions,
 } from './layout-contract.ts';
-import {assertLocalRuntimeSessionReadable} from './session-store.ts';
+import {
+  assertLocalRuntimeSessionDirectoryIsReal,
+  assertLocalRuntimeSessionReadable,
+} from './session-store.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   localRuntimeMutationLockOwnerOwnsResource,
@@ -84,15 +87,21 @@ export class FileRuntimeLogStoreState {
   }
 
   assertSessionReadable(): void {
-    if (this.sessionReadabilityChecked) {
-      return;
-    }
-
-    assertLocalRuntimeSessionReadable({
+    const sessionOptions = {
       storeRoot: this.options.storeRoot,
       sessionId: this.paths.sessionId,
       characterId: this.options.characterId,
-    });
+    };
+
+    if (this.sessionReadabilityChecked) {
+      // Session identity is settled, but the directory being a real directory is
+      // a live filesystem property: a swap to a symlink after the first read
+      // would otherwise let later appends write through the link.
+      assertLocalRuntimeSessionDirectoryIsReal(sessionOptions);
+      return;
+    }
+
+    assertLocalRuntimeSessionReadable(sessionOptions);
     this.sessionReadabilityChecked = true;
   }
 

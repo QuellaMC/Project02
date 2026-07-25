@@ -32,6 +32,7 @@ import {isRecord} from './layout-contract.ts';
 import type {ConversationLogRecord} from '../evidence/records.ts';
 import {atomicReplaceFile} from './atomic-file.ts';
 import {
+  assertCharacterDataDirAdoptable,
   assertCharacterDataDirReadable,
   ensureCharacterDataMarker,
   requireCharacterDataMarker,
@@ -143,7 +144,7 @@ export async function acquireLocalRuntimeSessionWriterLease(
   const layout = createLocalRuntimeStorageLayout(options);
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
 
-  await assertStoreRootCanHostMutationLock(layout);
+  assertStoreRootCanHostMutationLock(layout);
 
   return await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
@@ -744,9 +745,28 @@ async function assertSessionDirectoryReadableAsync(
   assertRealStorageDirectory({
     stats: await readLinkStats(sessionRoot),
     path: sessionRoot,
-    label: 'local runtime session directory',
+    label: 'session directory',
     onMissing: 'reject',
   });
+}
+
+/**
+ * Re-checks the one part of session readability that the filesystem can change
+ * underneath a live store: whether the session directory is still a real
+ * directory rather than a symlink.
+ *
+ * Session identity — the character-data marker and the catalog entry — is stable
+ * once observed, so callers may cache it. This check must not be cached: a
+ * directory swapped for a link after the first read would otherwise let later
+ * appends open the fixed evidence paths through the link.
+ */
+export function assertLocalRuntimeSessionDirectoryIsReal(
+  options: AssertLocalRuntimeSessionReadableOptions,
+): void {
+  assertSessionDirectoryReadable(
+    createLocalRuntimeStorageLayout(options),
+    normalizeLocalRuntimeSessionId(options.sessionId),
+  );
 }
 
 function assertSessionDirectoryReadable(
@@ -761,7 +781,7 @@ function assertSessionDirectoryReadable(
   assertRealStorageDirectory({
     stats: readLinkStatsSync(sessionRoot),
     path: sessionRoot,
-    label: 'local runtime session directory',
+    label: 'session directory',
     onMissing: 'reject',
   });
 }
@@ -869,7 +889,7 @@ async function withSessionCatalogMutationLock<Result>(
   layout: LocalRuntimeStorageLayout,
   operation: () => Promise<Result>,
 ): Promise<Result> {
-  await assertStoreRootCanHostMutationLock(layout);
+  assertStoreRootCanHostMutationLock(layout);
   const lease = await acquireLocalRuntimeMutationLock({
     locksRoot: layout.locksRoot,
     resourceKey: 'session-catalog',
@@ -882,18 +902,16 @@ async function withSessionCatalogMutationLock<Result>(
   }
 }
 
-async function assertStoreRootCanHostMutationLock(
+function assertStoreRootCanHostMutationLock(
   layout: LocalRuntimeStorageLayout,
-): Promise<void> {
-  // Runs before the lock root is prepared: a symlinked store root would
-  // otherwise place `.locks` in the link target before the marker guard
-  // rejects the store. An absent root is fine — it is created under the lock.
-  assertRealStorageDirectory({
-    stats: await readLinkStats(layout.storeRoot),
-    path: layout.storeRoot,
-    label: 'store root',
-    onMissing: 'allow',
-  });
+): void {
+  // Runs before the lock root is prepared, because acquiring the lock creates
+  // the store root and `.locks` recursively. Checking only the store root is
+  // not enough: an absent root beneath a symlinked `character-data` parent
+  // would still let that recursive create land in the link target before the
+  // ownership guard rejected the store. Reuse the adoptability guard so the
+  // whole boundary — parent, root, and control entries — is settled first.
+  assertCharacterDataDirAdoptable({storeRoot: layout.storeRoot});
 }
 
 function decodeSessionMetadata(line: string): LocalRuntimeSessionMetadata {
