@@ -174,7 +174,7 @@ async function acquireNormalizedMutationLock(
   normalized: NormalizedMutationLockOptions,
   ownerToken: LocalRuntimeMutationLockOwnerToken | undefined,
 ): Promise<LocalRuntimeMutationLockLease> {
-  const startedAt = Date.now();
+  const wait = startMutationLockWait(normalized);
 
   await prepareLocksRoot(normalized.locksRoot);
 
@@ -195,21 +195,7 @@ async function acquireNormalizedMutationLock(
       continue;
     }
 
-    const elapsedMs = Date.now() - startedAt;
-
-    if (elapsedMs >= normalized.waitTimeoutMs) {
-      throw new LocalRuntimeMutationLockBusyError(
-        normalized.busyCode,
-        `Local runtime mutation resource is busy: ${normalized.resourceKey}.`,
-      );
-    }
-
-    await delay(
-      Math.min(
-        randomizedRetryDelayMs(),
-        Math.max(1, normalized.waitTimeoutMs - elapsedMs),
-      ),
-    );
+    await delay(wait.remainingRetryDelayMs());
   }
 }
 
@@ -280,7 +266,7 @@ function acquireNormalizedMutationLockSync(
   normalized: NormalizedMutationLockOptions,
   ownerToken: LocalRuntimeMutationLockOwnerToken | undefined,
 ): LocalRuntimeMutationLockLeaseSync {
-  const startedAt = Date.now();
+  const wait = startMutationLockWait(normalized);
 
   prepareLocksRootSync(normalized.locksRoot);
 
@@ -301,21 +287,7 @@ function acquireNormalizedMutationLockSync(
       continue;
     }
 
-    const elapsedMs = Date.now() - startedAt;
-
-    if (elapsedMs >= normalized.waitTimeoutMs) {
-      throw new LocalRuntimeMutationLockBusyError(
-        normalized.busyCode,
-        `Local runtime mutation resource is busy: ${normalized.resourceKey}.`,
-      );
-    }
-
-    sleepSync(
-      Math.min(
-        randomizedRetryDelayMs(),
-        Math.max(1, normalized.waitTimeoutMs - elapsedMs),
-      ),
-    );
+    sleepSync(wait.remainingRetryDelayMs());
   }
 }
 
@@ -1156,6 +1128,65 @@ function isMutationLockReclamationIntentOwner(
 
 function ownerPath(lockPath: string): string {
   return join(lockPath, 'owner.json');
+}
+
+type MutationLockWait = {
+  /**
+   * Returns how long to sleep before the next acquisition attempt, throwing the
+   * busy error once the resource has stopped making progress.
+   */
+  remainingRetryDelayMs(): number;
+};
+
+/**
+ * Tracks a contended acquisition as a *stall* budget rather than a total one.
+ *
+ * `waitTimeoutMs` bounds how long the resource may sit without progress, not how
+ * long this caller may queue. A fair queue of N contenders takes N times the
+ * per-holder work to drain, so a total budget rejects healthy waiters purely
+ * because the queue is long — and it does so first on the slowest machine, which
+ * makes the failure look like flake instead of saturation.
+ *
+ * Progress is observed through the owner nonce: a different nonce means some
+ * other contender both acquired and released while we waited, so the resource is
+ * alive and this caller's budget restarts. A holder that dies without releasing
+ * is still handled by reclamation, and a holder that hangs forever never changes
+ * the nonce, so it still trips the budget.
+ */
+function startMutationLockWait(
+  normalized: NormalizedMutationLockOptions,
+): MutationLockWait {
+  let deadlineStartedAt = Date.now();
+  let observedNonce = readMutationLockOwnerSync(normalized.lockPath)?.nonce;
+
+  return {
+    remainingRetryDelayMs(): number {
+      const currentNonce = readMutationLockOwnerSync(
+        normalized.lockPath,
+      )?.nonce;
+
+      if (currentNonce !== undefined && currentNonce !== observedNonce) {
+        // Hand-off observed: the queue is draining, so stop counting against
+        // this caller.
+        observedNonce = currentNonce;
+        deadlineStartedAt = Date.now();
+      }
+
+      const stalledMs = Date.now() - deadlineStartedAt;
+
+      if (stalledMs >= normalized.waitTimeoutMs) {
+        throw new LocalRuntimeMutationLockBusyError(
+          normalized.busyCode,
+          `Local runtime mutation resource is busy: ${normalized.resourceKey}.`,
+        );
+      }
+
+      return Math.min(
+        randomizedRetryDelayMs(),
+        Math.max(1, normalized.waitTimeoutMs - stalledMs),
+      );
+    },
+  };
 }
 
 function randomizedRetryDelayMs(): number {

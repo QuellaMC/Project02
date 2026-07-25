@@ -638,7 +638,75 @@ describe('local runtime mutation locks', () => {
     ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
     await foreign.release();
   });
+
+  it('restarts the wait budget while the lock keeps changing hands', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const target = {locksRoot, resourceKey: 'draining-queue'};
+    const waitTimeoutMs = 200;
+    const handOffCount = 4;
+    const holder = await acquireLocalRuntimeMutationLock({
+      ...target,
+      waitTimeoutMs: 0,
+    });
+    const ownerFile = join(lockPathForTarget(target), 'owner.json');
+    const heldOwner = JSON.parse(await readFile(ownerFile, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    // Publish a fresh nonce under the same live pid, which is what a contender
+    // sees when the queue hands the lock to the next waiter. The lock itself
+    // stays held the whole time, so acquisition keeps failing and only the
+    // observed hand-offs can extend the wait.
+    const handOffs = (async () => {
+      for (let index = 0; index < handOffCount; index += 1) {
+        await delay(waitTimeoutMs / 2);
+        await writeFile(
+          ownerFile,
+          `${JSON.stringify({...heldOwner, nonce: `hand-off-${String(index)}`})}\n`,
+          'utf8',
+        );
+      }
+    })();
+    const startedAt = Date.now();
+
+    // A total-time budget would reject at `waitTimeoutMs` regardless of the
+    // hand-offs; a stall budget only gives up once they stop.
+    await expect(
+      acquireLocalRuntimeMutationLock({...target, waitTimeoutMs}),
+    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    expect(Date.now() - startedAt).toBeGreaterThan(
+      (waitTimeoutMs / 2) * handOffCount,
+    );
+
+    await handOffs;
+    await holder.release();
+  });
+
+  it('rejects a contender once the holder stops making progress', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const target = {locksRoot, resourceKey: 'stalled-holder'};
+    // Held for the whole wait and never released, so the owner nonce never
+    // changes: a stall budget still has to give up here.
+    const holder = await acquireLocalRuntimeMutationLock({
+      ...target,
+      waitTimeoutMs: 0,
+    });
+    const startedAt = Date.now();
+
+    await expect(
+      acquireLocalRuntimeMutationLock({...target, waitTimeoutMs: 200}),
+    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200);
+
+    await holder.release();
+  });
 });
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>(resolveDelay => {
+    setTimeout(resolveDelay, milliseconds);
+  });
+}
 
 function lockPathForTarget(target: {
   readonly locksRoot: string;
