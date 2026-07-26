@@ -4,6 +4,20 @@ export function isProject02Identifier(value: unknown): boolean {
   return typeof value === 'string' && project02IdentifierPattern.test(value);
 }
 
+/**
+ * The key two identifiers collide on when one names a durable directory.
+ *
+ * Case-insensitive volumes (default macOS and Windows) are the reason: ids
+ * that fold together address one directory there and two directories
+ * elsewhere, so a runtime that treats them as distinct is only portable by
+ * accident. ASCII lowercasing is the complete fold for the accepted
+ * charset above rather than an approximation of one; widening the pattern
+ * to non-ASCII means widening this fold in the same edit.
+ */
+export function project02IdentifierCollisionKey(id: string): string {
+  return id.toLowerCase();
+}
+
 export function displayNameFromProject02Identifier(id: string): string {
   return id
     .split(/[._-]/u)

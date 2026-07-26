@@ -10,6 +10,7 @@
 import {basename, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
+import {project02IdentifierCollisionKey} from '../../shared/identifier.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   packageDirectorySnapshotsEqual,
@@ -363,6 +364,14 @@ function characterDescriptorReadMessage(
   }
 }
 
+/**
+ * One definition owns a character id per runtime — and the id it owns is
+ * the durable `character-data/<id>/` directory name, so candidates are
+ * grouped by what the filesystem can tell apart rather than by the exact
+ * string. `mira` and `Mira` address one directory on a case-insensitive
+ * volume, so accepting both would hand the second selection an identity
+ * mismatch against the marker the first stamped.
+ */
 function applyCharacterIdentityPolicy(options: {
   readonly candidates: readonly DiscoveredCharacterPackage[];
   readonly diagnostics: CharacterPackageDiagnostic[];
@@ -373,16 +382,18 @@ function applyCharacterIdentityPolicy(options: {
   >();
 
   for (const candidate of options.candidates) {
-    const characterId = candidate.definition.identity.id;
-    const matching = candidatesByCharacterId.get(characterId) ?? [];
+    const collisionKey = project02IdentifierCollisionKey(
+      candidate.definition.identity.id,
+    );
+    const matching = candidatesByCharacterId.get(collisionKey) ?? [];
 
     matching.push(candidate);
-    candidatesByCharacterId.set(characterId, matching);
+    candidatesByCharacterId.set(collisionKey, matching);
   }
 
   const characters: DiscoveredCharacterPackage[] = [];
 
-  for (const [characterId, matching] of [...candidatesByCharacterId].sort(
+  for (const [, matching] of [...candidatesByCharacterId].sort(
     ([left], [right]) => compareText(left, right),
   )) {
     const first = matching[0];
@@ -392,16 +403,26 @@ function applyCharacterIdentityPolicy(options: {
       continue;
     }
 
+    const collidingIds = [
+      ...new Set(matching.map(candidate => candidate.definition.identity.id)),
+    ].sort(compareText);
+    const quotedIds = collidingIds.map(id => `"${id}"`).join(' and ');
+    const message =
+      collidingIds.length === 1
+        ? `Character package id ${quotedIds} is defined in more than one ` +
+          'place; remove or rename one of the packages.'
+        : `Character package ids ${quotedIds} differ only by case and ` +
+          'would share one character-data directory; remove or rename one ' +
+          'of the packages.';
+
     for (const candidate of matching) {
       options.diagnostics.push(
         characterDiagnostic({
           code: 'duplicate_character_id',
-          message:
-            `Character package id "${characterId}" is defined in more than ` +
-            'one place; remove or rename one of the packages.',
+          message,
           path: candidate.descriptorPath,
           provenance: candidate.provenance,
-          characterId,
+          characterId: candidate.definition.identity.id,
         }),
       );
     }

@@ -150,6 +150,38 @@ describe('character package discovery', () => {
     }
   });
 
+  it('rejects character ids that differ only by case', () => {
+    const storeRoot = createTestTempRoot();
+    const operatorRoot = operatorCharacterPackagesRoot(storeRoot);
+
+    // Distinct ids, one character-data directory on a case-insensitive
+    // filesystem: whichever selection ran first would stamp the shared
+    // marker and the other would fail as an identity mismatch.
+    writeCharacterPackage(operatorRoot, 'Mira', {displayName: 'Upper Mira'});
+
+    const discovery = discoverCharacterPackages({
+      sources: defaultCharacterPackageSources(storeRoot),
+    });
+
+    expect(
+      discovery.characters.map(character => character.definition.identity.id),
+    ).not.toContain('mira');
+    expect(
+      discovery.characters.map(character => character.definition.identity.id),
+    ).not.toContain('Mira');
+    const duplicates = discovery.diagnostics.filter(
+      diagnostic => diagnostic.code === 'duplicate_character_id',
+    );
+
+    expect(duplicates).toHaveLength(2);
+    for (const diagnostic of duplicates) {
+      expect(diagnostic.message).toContain('"Mira"');
+      expect(diagnostic.message).toContain('"mira"');
+      expect(diagnostic.message).toContain('differ only by case');
+      expect(diagnostic.message).toContain('remove or rename');
+    }
+  });
+
   it('rejects a package whose folder does not match its identity id', () => {
     const root = createTestTempRoot();
 
