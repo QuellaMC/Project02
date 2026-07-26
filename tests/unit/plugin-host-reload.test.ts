@@ -727,6 +727,51 @@ describe('runtime plugin host live config reload', () => {
     }
   });
 
+  it('tears down a candidate that arrives after quiescing gives up', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const terminalLog: string[] = [];
+      let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
+      const host = reloadHost({
+        initial: terminalReloadFixturePlugin('v1', terminalLog),
+        reloader: {
+          reload: (_pluginId, reloadOptions) =>
+            new Promise(resolve => {
+              settleLate = plugin => {
+                reloadOptions.retainCandidate(plugin);
+                resolve({status: 'rebuilt', plugin});
+              };
+            }),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      const shutdown = host.shutdown(testPluginContext());
+
+      // Outlives the quiesce bound, so shutdown proceeds without it.
+      await vi.advanceTimersByTimeAsync(runtimePluginQuiesceTimeoutMs);
+      await shutdown;
+      expect(terminalLog).toEqual(['v1:shutdown']);
+
+      // The abandoned factory was never cancelled, so it can still produce an
+      // instance. Nothing will read the retired list again, so this candidate
+      // must be torn down on arrival rather than filed away holding whatever
+      // its factory opened.
+      settleLate?.(terminalReloadFixturePlugin('late', terminalLog));
+      await vi.runAllTimersAsync();
+
+      expect(terminalLog).toEqual(['v1:shutdown', 'late:shutdown']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('defers when the host has no reloader', async () => {
     const host = reloadHost({});
 

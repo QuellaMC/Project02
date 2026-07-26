@@ -105,6 +105,7 @@ import {
 import {
   createRuntimePluginInstanceOwnership,
   runtimePluginLifecycleTargets,
+  type RuntimePluginInstanceOwnership,
   type RuntimePluginLifecycleTarget,
 } from './instance-lifecycle.ts';
 import {
@@ -485,18 +486,16 @@ export function createRuntimePluginHost(
     },
     shutdown(context) {
       terminalStarted = true;
-      shutdownResult ??= (async () => {
-        await instanceOwnership.quiesce();
-        return await runRuntimePluginShutdownHooksForTargets({
-          targets: instanceOwnership.terminalTargets(livePlugins()),
-          context,
-          accessByPluginId,
-          storeRoot: options.storeRoot,
-          sessionId: options.sessionId,
-          sessionIdentity,
-          createFileStore: options.fileStore?.createFileStore,
-        });
-      })();
+      shutdownResult ??= runFinalShutdownPhase({
+        instanceOwnership,
+        livePlugins,
+        context,
+        accessByPluginId,
+        storeRoot: options.storeRoot,
+        sessionId: options.sessionId,
+        sessionIdentity,
+        createFileStore: options.fileStore?.createFileStore,
+      });
 
       return shutdownResult;
     },
@@ -752,6 +751,39 @@ export async function runRuntimePluginSessionEndHooksForTargets(
     evidenceKind: 'session_end',
     hookForPlugin: plugin => plugin.lifecycleHooks.onSessionEnd,
   });
+}
+
+/**
+ * Runs shutdown, the last phase, and closes instance ownership around it.
+ *
+ * Quiescing is bounded, so a reload factory that outlived its own deadline can
+ * still produce a candidate after this point. Nothing reads the retired list
+ * again, so late arrivals are torn down as they appear rather than filed where
+ * no dispatch will reach them, holding whatever their factory opened.
+ */
+async function runFinalShutdownPhase(
+  options: Omit<
+    RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions,
+    'targets'
+  > & {
+    readonly instanceOwnership: RuntimePluginInstanceOwnership;
+    readonly livePlugins: () => readonly RuntimePlugin[];
+  },
+): Promise<RuntimePluginHookHostResult> {
+  await options.instanceOwnership.quiesce();
+
+  const dispatch = async (
+    targets: readonly RuntimePluginLifecycleTarget[],
+  ): Promise<RuntimePluginHookHostResult> =>
+    await runRuntimePluginShutdownHooksForTargets({...options, targets});
+
+  options.instanceOwnership.close(target => {
+    void dispatch([target]);
+  });
+
+  return await dispatch(
+    options.instanceOwnership.terminalTargets(options.livePlugins()),
+  );
 }
 
 export async function runRuntimePluginShutdownHooksForTargets(

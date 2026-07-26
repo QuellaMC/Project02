@@ -29,6 +29,15 @@ export type RuntimePluginInstanceOwnership = {
   readonly replaceLive: (plugin: RuntimePlugin) => RuntimePlugin | undefined;
   readonly track: <T>(work: Promise<T>) => Promise<T>;
   readonly quiesce: () => Promise<void>;
+  /**
+   * Ends ownership before the final phase reads its targets.
+   *
+   * After this, nothing else will consume the retired list, so a candidate that
+   * still arrives is handed to `disposeLate` instead of being filed there.
+   */
+  readonly close: (
+    disposeLate: (target: RuntimePluginLifecycleTarget) => void,
+  ) => void;
   readonly terminalTargets: (
     livePlugins: readonly RuntimePlugin[],
   ) => readonly RuntimePluginLifecycleTarget[];
@@ -49,6 +58,8 @@ export function createRuntimePluginInstanceOwnership(config: {
     config.quiesceTimeoutMs ?? runtimePluginQuiesceTimeoutMs;
   const retired: RuntimePluginLifecycleTarget[] = [];
   const inFlight = new Set<Promise<unknown>>();
+  let disposeLateTarget:
+    ((target: RuntimePluginLifecycleTarget) => void) | undefined;
   const remove = (plugin: RuntimePlugin): void => {
     const index = retired.findIndex(target => target.plugin === plugin);
 
@@ -67,7 +78,17 @@ export function createRuntimePluginInstanceOwnership(config: {
       return;
     }
 
-    retired.push(runtimePluginLifecycleTarget(plugin, catalogManifest));
+    const target = runtimePluginLifecycleTarget(plugin, catalogManifest);
+
+    if (disposeLateTarget !== undefined) {
+      // Ownership is closed: the final phase has already read its targets, so
+      // filing this would leave the instance holding whatever its factory
+      // opened -- timers, connections -- with no teardown left to run.
+      disposeLateTarget(target);
+      return;
+    }
+
+    retired.push(target);
   };
   const track = <T>(work: Promise<T>): Promise<T> => {
     inFlight.add(work);
@@ -115,6 +136,9 @@ export function createRuntimePluginInstanceOwnership(config: {
           return;
         }
       }
+    },
+    close(disposeLate) {
+      disposeLateTarget ??= disposeLate;
     },
     terminalTargets: livePlugins =>
       Object.freeze([
