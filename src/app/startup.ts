@@ -126,6 +126,49 @@ type RuntimeCliStartupResult =
       readonly runtimeEnv: NodeJS.ProcessEnv;
     });
 
+type StartupPreEnvState = {
+  readonly overlayForPlan:
+    | Record<string, never>
+    | {readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig};
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
+  readonly activationPlanBeforeRuntimeEnv: PreparedProject02PluginActivationPlan;
+  // Everything but the activation plan: each exit pairs its own plan
+  // with the status that describes it.
+  readonly base: Omit<RuntimeCliActivationStartupBase, 'activationPlan'>;
+};
+
+/**
+ * A startup that survived every env-independent rejection. It carries
+ * the validated package document plus the two closures the commit needs
+ * to re-derive state over post-commit config — nothing that could
+ * itself reject the startup before the write.
+ */
+type PlannedRuntimeCliActivationStartup = {
+  readonly startupBase: RuntimeCliStartupBase;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly buildPreEnvState: (
+    overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
+  ) => StartupPreEnvState;
+  readonly readRuntimeEnvFileUnlessBlocked: (
+    diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
+  ) => NodeJS.ProcessEnv | undefined;
+  readonly document: Project02RuntimeConfig;
+  readonly request?: RuntimeConfigControlRequest;
+};
+
+function rejectedStartup(result: RuntimeCliStartupResult): {
+  readonly outcome: 'rejected';
+  readonly result: RuntimeCliStartupResult;
+} {
+  return Object.freeze({outcome: 'rejected', result: Object.freeze(result)});
+}
+
 /**
  * The one character-runtime initializer for embedded consumers: runs
  * the exact CLI startup sequence — character activation, guarded
@@ -235,12 +278,16 @@ export function resolveRuntimeCliStartup(
 }
 
 /**
- * The one activation-stage sequence every CLI shares: character
- * activation first (a bad selection is a character_invalid, and no
- * plugin resources exist yet), then character-data initialization for
- * every selected-character surface, then the overlay read and activation over both
- * config layers, and the character's plugin expectations merged into
- * the activation diagnostics.
+ * The one activation-stage sequence every CLI shares, in two phases.
+ *
+ * Everything that can reject a startup is decided first, by a
+ * synchronous planner, and only a plan that survived all of it reaches
+ * the commit below. That split is the rule this function exists to
+ * enforce: no durable effect may precede a validation that could have
+ * rejected the startup. It is enforced structurally rather than by
+ * review, because `planRuntimeCliActivationStartup` is not `async` and
+ * the only durable effect in the startup path is — so a write moved
+ * into the planning phase is a type error, not a bug found later.
  */
 async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
@@ -252,6 +299,37 @@ async function resolveRuntimeCliActivationStartup(input: {
   readonly startupBase: RuntimeCliStartupBase;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
 }): Promise<RuntimeCliStartupResult> {
+  const planned = planRuntimeCliActivationStartup(input);
+
+  if (planned.outcome === 'rejected') {
+    return planned.result;
+  }
+
+  return await commitPlannedRuntimeCliActivationStartup(planned.plan);
+}
+
+/**
+ * Phase one: every decision that can reject this startup, made before
+ * anything durable exists. A `rejected` outcome is a finished
+ * RuntimeCliStartupResult; a `committable` outcome carries the
+ * validated package document plus the state the commit needs, and says
+ * that nothing left can reject the startup except the write itself.
+ */
+function planRuntimeCliActivationStartup(input: {
+  readonly options: RuntimeCliActivationStartupOptions;
+  readonly configLocation: ResolvedProject02ConfigLocation;
+  readonly characterOverride?: string;
+  readonly suppliedEnv: NodeJS.ProcessEnv;
+  readonly cwdDotEnv: NodeJS.ProcessEnv;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly startupBase: RuntimeCliStartupBase;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+}):
+  | {readonly outcome: 'rejected'; readonly result: RuntimeCliStartupResult}
+  | {
+      readonly outcome: 'committable';
+      readonly plan: PlannedRuntimeCliActivationStartup;
+    } {
   const {options, configLocation, loadedConfig} = input;
   const activeCharacterId = configuredProject02CharacterId(
     loadedConfig.config,
@@ -264,7 +342,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   });
 
   if (characterActivation.status === 'failed') {
-    return Object.freeze({
+    return rejectedStartup({
       ...input.startupBase,
       status: 'character_invalid',
       characterActivation,
@@ -294,7 +372,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   });
   const buildPreEnvState = (
     overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
-  ) => {
+  ): StartupPreEnvState => {
     const overlayForPlan =
       overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
     const catalogSnapshot = classifyRuntimePluginCatalogDiscovery({
@@ -336,7 +414,7 @@ async function resolveRuntimeCliActivationStartup(input: {
       loadCharacterOverlayForStartup(runtimeLocation),
     );
 
-    return Object.freeze({
+    return rejectedStartup({
       ...invalidState.base,
       status: 'config_invalid',
       activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
@@ -350,7 +428,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   if (diagnosticsHaveErrors(preexistingOverlay.diagnostics)) {
     const invalidState = buildPreEnvState(preexistingOverlay);
 
-    return Object.freeze({
+    return rejectedStartup({
       ...invalidState.base,
       status: 'config_invalid',
       activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
@@ -366,7 +444,7 @@ async function resolveRuntimeCliActivationStartup(input: {
   });
 
   if (preflight.diagnostics.length > 0) {
-    return Object.freeze({
+    return rejectedStartup({
       ...preMaterializationState.base,
       status: 'config_invalid',
       activationPlan: withActivationDiagnostics(
@@ -387,26 +465,56 @@ async function resolveRuntimeCliActivationStartup(input: {
     continueAfterActivationErrors: options.continueAfterActivationErrors,
   });
 
-  // The read happens here, ahead of the first durable effect this startup
-  // has: the initializer below commits the overlay and stamps the data
-  // marker, and an unreadable env file has to be reported instead of
-  // reported after the edit already landed.
+  // Still phase one, and that is the point: the env file is read while
+  // rejecting is still free. An unreadable file has to be reported
+  // instead of reported after the commit below already landed.
   readRuntimeEnvFileUnlessBlocked(
     preMaterializationState.activationPlanBeforeRuntimeEnv.activation
       .diagnostics,
   );
 
+  return Object.freeze({
+    outcome: 'committable',
+    plan: Object.freeze({
+      startupBase: input.startupBase,
+      configEnv: input.configEnv,
+      loadedConfig,
+      characterActivation,
+      runtimeLocation,
+      buildPreEnvState,
+      readRuntimeEnvFileUnlessBlocked,
+      document: preflight.packagePlan.document,
+      ...(preflight.request === undefined ? {} : {request: preflight.request}),
+    }),
+  });
+}
+
+/**
+ * Phase two: the durable write, and the plans that can only be built
+ * once it lands. Every rejection reachable from here is caused by the
+ * commit itself — a failed write, or config the commit just changed.
+ */
+async function commitPlannedRuntimeCliActivationStartup(
+  plan: PlannedRuntimeCliActivationStartup,
+): Promise<RuntimeCliStartupResult> {
+  const {
+    loadedConfig,
+    characterActivation,
+    runtimeLocation,
+    buildPreEnvState,
+    readRuntimeEnvFileUnlessBlocked,
+  } = plan;
   const materialization = await materializeCharacterDataDir({
     characterActivation,
     runtimeLocation,
-    configEnv: input.configEnv,
-    document: preflight.packagePlan.document,
-    ...(preflight.request === undefined ? {} : {request: preflight.request}),
+    configEnv: plan.configEnv,
+    document: plan.document,
+    ...(plan.request === undefined ? {} : {request: plan.request}),
   });
 
   if (materialization.status === 'failed') {
     return Object.freeze({
-      ...input.startupBase,
+      ...plan.startupBase,
       runtimeLocation,
       status: 'character_invalid',
       characterActivation: materialization.characterActivation,
