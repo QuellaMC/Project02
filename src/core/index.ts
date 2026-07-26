@@ -12,6 +12,7 @@ export {
   type VisibleMessageRole,
 } from './message/message.ts';
 export {
+  characterLength,
   isValidSpeakerDisplayName,
   maxSpeakerDisplayNameLength,
   normalizeOneLineMessage,

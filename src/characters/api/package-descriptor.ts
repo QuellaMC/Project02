@@ -6,6 +6,7 @@
  * and ignored so descriptors can reference the editor schema in schemas/.
  */
 import {
+  characterLength,
   freezeCharacterProfile,
   isValidSpeakerDisplayName,
   maxSpeakerDisplayNameLength,
@@ -269,7 +270,10 @@ function parseCharacterPersona(value: unknown): CharacterPersonaParseResult {
     if (
       typeof section !== 'string' ||
       section.trim().length === 0 ||
-      section.length > maxCharacterPersonaSectionLength
+      // Code points, matching the published schema's `maxLength`. Counting
+      // UTF-16 units would reject an editor-valid package whose sections use
+      // astral characters at half the documented length.
+      characterLength(section) > maxCharacterPersonaSectionLength
     ) {
       return rejectedDescriptor(
         'invalid_persona',

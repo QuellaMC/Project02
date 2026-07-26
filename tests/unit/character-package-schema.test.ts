@@ -121,6 +121,32 @@ describe('character package descriptor schema parity', () => {
     });
   });
 
+  it.each([
+    ['persona.system', 'system'],
+    ['identity.displayName', 'displayName'],
+  ])('measures the %s bound in code points, like the schema', (_label, key) => {
+    // A schema `maxLength` counts code points; `String.length` counts UTF-16
+    // units, so astral characters count twice and an editor-valid package
+    // would be rejected at activation for half its documented length.
+    const astral = '😀';
+    const descriptor =
+      key === 'system'
+        ? {...validDescriptor(), persona: {system: [astral.repeat(4_000)]}}
+        : {
+            ...validDescriptor(),
+            identity: {
+              id: 'test-scaffold-char',
+              displayName: astral.repeat(128),
+            },
+          };
+
+    expect(
+      validateAgainstSchema(descriptor),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseCharacterPackageDescriptor(descriptor).status).toBe('accepted');
+  });
+
   it('preserves package-authored nested config key order', () => {
     const parsed = parseCharacterPackageDescriptor({
       ...validDescriptor(),

@@ -48,6 +48,22 @@ export function normalizeOneLineMessage(message: string | undefined): string {
 }
 
 /**
+ * Counts characters the way a published JSON Schema `maxLength` does.
+ *
+ * `String.length` counts UTF-16 code units, so any astral character -- emoji,
+ * many CJK extension ideographs -- counts twice. A bound stated in a schema
+ * the package author validates against therefore has to be measured in code
+ * points here, or an editor-valid package is rejected at activation for being
+ * half its documented length.
+ */
+export function characterLength(value: string): number {
+  // `Array.from` iterates code points, matching how a JSON Schema counts.
+  // Both callers bound short strings, so this stays simple rather than
+  // guarding the common all-BMP case.
+  return Array.from(value).length;
+}
+
+/**
  * Bound shared by every speaker display name, character or user.
  *
  * The name is stamped into `speakerName` on each message, so it repeats per
@@ -69,7 +85,7 @@ export function isValidSpeakerDisplayName(value: unknown): value is string {
   return (
     typeof value === 'string' &&
     value.length > 0 &&
-    value.length <= maxSpeakerDisplayNameLength &&
+    characterLength(value) <= maxSpeakerDisplayNameLength &&
     value === value.trim() &&
     !lineBreakPattern.test(value)
   );
