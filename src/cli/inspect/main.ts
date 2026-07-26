@@ -12,8 +12,11 @@ import {
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
+  formatRejectedRuntimeCliStartup,
+  interpretRuntimeCliStartup,
+} from '../shared/startup-outcome.ts';
+import {
   createRuntimeConfigInspectShape,
-  runtimeConfigDiagnosticAttribution,
   RuntimeEnvFileError,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigDiagnostic,
@@ -113,39 +116,29 @@ export async function runInspectCliFromArgs(
         ? {}
         : {factories: options.factories}),
     });
-    const characterActivation = startup.characterActivation;
+    const interpreted = interpretRuntimeCliStartup(startup);
 
-    if (
-      startup.status === 'character_invalid' ||
-      characterActivation.status === 'failed'
-    ) {
+    if (interpreted.outcome === 'rejected') {
       throw new InspectCliUsageError(
-        (characterActivation.status === 'failed'
-          ? characterActivation.messages[0]
-          : undefined) ?? 'Character activation failed.',
+        formatRejectedRuntimeCliStartup(interpreted),
       );
     }
 
-    if (startup.status === 'config_invalid') {
-      const configError =
-        startup.activationPlan.resolvedConfig.diagnostics.find(
-          diagnostic => diagnostic.severity === 'error',
-        );
-
-      throw new InspectCliUsageError(
-        configError === undefined
-          ? 'Runtime config is invalid.'
-          : `${runtimeConfigDiagnosticAttribution(configError)}${
-              configError.message
-            }`,
-      );
+    // A broken unrelated character package leaves the selected one
+    // usable. Reporting healthy state without saying so would give the
+    // operator no indication the installed package needs fixing, so the
+    // warnings go to stderr and leave the stdout JSON contract intact.
+    for (const warning of interpreted.warnings) {
+      options.stderr.write(`Warning: ${warning}\n`);
     }
+
+    const usable = interpreted.startup;
 
     if (parsedArgs.mode === 'sessions') {
       await writeSessionList(
         options.stdout,
-        startup.activationPlan,
-        startup.runtimeLocation,
+        usable.activationPlan,
+        usable.runtimeLocation,
       );
       return 0;
     }
@@ -153,9 +146,9 @@ export async function runInspectCliFromArgs(
     await writeSessionEvidence(
       parsedArgs,
       options.stdout,
-      startup.activationPlan,
-      characterActivation.profile,
-      startup.runtimeLocation,
+      usable.activationPlan,
+      usable.characterActivation.profile,
+      usable.runtimeLocation,
     );
     return 0;
   } catch (error: unknown) {
@@ -316,8 +309,17 @@ async function writeSessionEvidence(
     characterId: runtimeLocation.characterScope.characterId,
   });
   const session = await sessionStore.readSession(args.sessionId);
-  // The character boundary holds at inspection too: foreign evidence
-  // copied into a data directory must fail here exactly as durable chat does.
+  // boundCharacter is passed for a wrong-answer check, not a security
+  // one: there is no attacker in a local app. It catches a session whose
+  // evidence names a different character than the directory it sits in —
+  // reachable by a bug in our own write path, an interrupted migration,
+  // or a home folder synced between machines. Unchecked, inspect would
+  // print another character's transcript as if it were this one, and the
+  // operator would have no way to tell.
+  //
+  // No boundUserSpeaker, though: the user speaker id is the same constant
+  // for every record in a single-user app, so binding it would compare
+  // that constant to itself.
   const logStore = createFileRuntimeLogStore({
     ...storage,
     sessionId: session.sessionId,

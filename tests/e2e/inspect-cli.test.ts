@@ -621,6 +621,44 @@ describe('inspect CLI plugin evidence', () => {
     expect(stderr).toContain('Error:');
   });
 
+  it('warns about a broken installed character while inspecting a healthy one', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-warn-');
+    const brokenRoot = join(storeRoot, 'characters', 'broken');
+    let stdout = '';
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(brokenRoot, {recursive: true});
+    // An unrelated installed package is broken. The selected character
+    // still resolves, so inspect succeeds — but reporting otherwise
+    // healthy state without mentioning the broken package leaves the
+    // operator no indication it needs fixing.
+    writeFileSync(
+      join(brokenRoot, 'project02.character.json'),
+      '{not json',
+      'utf8',
+    );
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stderr).toContain('Warning:');
+    expect(stderr).toContain('invalid_descriptor');
+    // The warning goes to stderr only: stdout stays the JSON contract.
+    expect(JSON.parse(stdout)).toMatchObject({sessions: []});
+  });
+
   it('reports a foreign home instead of an empty session list', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-foreign-home-');
     let stderr = '';

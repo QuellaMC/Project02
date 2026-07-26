@@ -110,7 +110,7 @@ type RuntimeCliActivationStartupBase = Omit<
   readonly characterConfigMutation?: RuntimeConfigControlApplyResult;
 };
 
-type RuntimeCliStartupResult =
+export type RuntimeCliStartupResult =
   | (RuntimeCliStartupBase & {
       readonly status: 'character_invalid';
       readonly characterActivation: Project02CharacterActivation;

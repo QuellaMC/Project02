@@ -23,6 +23,7 @@ export {
 export {
   initializeProject02CharacterRuntime,
   resolveRuntimeCliStartup,
+  type RuntimeCliStartupResult,
 } from './startup.ts';
 export {
   defaultProject02CharacterId,
