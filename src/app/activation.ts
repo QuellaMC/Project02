@@ -441,7 +441,18 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   const {activationPlan} = options;
   const {catalogEntries} = activationPlan;
 
+  // Both guards are preconditions of the resolved location, not of the
+  // plugins built from it, so they run before any branch. Host
+  // construction is downstream of character initialization: it asserts
+  // the guarded initializer already ran (identity marker present and
+  // matching) and never creates durable character state itself — a
+  // direct caller on an uninitialized home used to get a partially
+  // initialized character with no package defaults and no diagnostics.
+  // An activation error does not lift that obligation: the error host
+  // is still a host, and returning one bound to no character marker is
+  // exactly what this boundary exists to prevent.
   assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
+  assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
@@ -467,14 +478,6 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       runtimeLocation: activationPlan.runtimeLocation,
     } satisfies Project02ConfiguredPluginHost);
   }
-
-  // Host construction is downstream of character initialization: it
-  // asserts the guarded initializer already ran (identity marker
-  // present and matching) and never creates durable character state
-  // itself — a direct caller on an uninitialized home used to get a
-  // partially initialized character with no package defaults and no
-  // diagnostics.
-  assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
   const instantiated = await instantiateRuntimePluginPackages({
     catalogEntries,

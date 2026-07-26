@@ -109,6 +109,36 @@ describe('runtime config activation planning', () => {
     expect(existsSync(join(storeRoot, 'character-data', 'mira'))).toBe(false);
   });
 
+  it('refuses an uninitialized home even when the plan already has errors', async () => {
+    const storeRoot = createTestTempRoot('project02-config-host-error-plan-');
+    const plugin = requiredSecretPlugin('memory.uninitialized-error');
+
+    // An activation error is not a reason to skip the initialization
+    // check: the error host is still a host, and returning one bound to
+    // no character marker is what the direct-construction boundary
+    // exists to prevent.
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {[plugin.manifest.id]: {enabled: true}},
+    });
+
+    await expect(
+      createConfiguredProject02PluginHostFromPlan({
+        activationPlan: prepareConfiguredProject02PluginActivation({
+          ...runtimeConfigSnapshotForTest({
+            loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          }),
+          factories: {
+            [plugin.manifest.id]: {
+              manifest: plugin.manifest,
+              create: () => plugin,
+            },
+          },
+        }),
+      }),
+    ).rejects.toThrow('is not initialized in this home');
+    expect(existsSync(join(storeRoot, 'character-data', 'mira'))).toBe(false);
+  });
+
   it('matches shared-startup activation when constructing after the initializer', async () => {
     const storeRoot = createTestTempRoot('project02-config-host-parity-');
 
@@ -255,6 +285,8 @@ describe('runtime config activation planning', () => {
         },
       },
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
@@ -715,6 +747,8 @@ describe('runtime config activation planning', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
@@ -743,6 +777,8 @@ describe('runtime config activation planning', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'memory.typo',
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
@@ -838,6 +874,8 @@ describe('runtime config activation planning', () => {
       defaultMemoryProvider: plugin.manifest.id,
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
@@ -907,6 +945,8 @@ describe('runtime config activation planning', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
@@ -969,6 +1009,8 @@ describe('runtime config activation planning', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: plugin.manifest.id,
     });
+
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({

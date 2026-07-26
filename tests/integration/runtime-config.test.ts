@@ -1382,6 +1382,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
+    await initializeCharacterDataForHost(storeRoot);
     let characterFactoryCalls = 0;
     let memoryFactoryCalls = 0;
 
@@ -1794,6 +1795,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
+    await initializeCharacterDataForHost(storeRoot);
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
@@ -1868,6 +1870,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
@@ -1935,6 +1938,7 @@ describe('runtime config loading and resolution', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       defaultMemoryProvider: 'character-state',
     });
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
@@ -2005,6 +2009,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
@@ -2081,6 +2086,7 @@ describe('runtime config loading and resolution', () => {
         },
       },
     });
+    await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan: prepareConfiguredProject02PluginActivation({
