@@ -298,20 +298,26 @@ export async function recordMaterializedCharacterPackageVersion(options: {
   readonly packageVersion: string;
 }): Promise<LocalRuntimeCharacterDataStorageSchemaMarker> {
   const layout = createLocalRuntimeStorageLayout(options.storageOptions);
-  const result = await updateStorageSchemaMarker(layout, current => {
-    const marker = assertExpectedCharacterDataMarker(
-      layout,
-      current,
-      options.characterId,
-    );
+  const result = await updateStorageSchemaMarker(
+    layout,
+    current => {
+      const marker = assertExpectedCharacterDataMarker(
+        layout,
+        current,
+        options.characterId,
+      );
 
-    return createLocalRuntimeStorageSchemaMarker({
-      scope: 'character-data',
-      characterId: marker.characterId,
-      createdAt: marker.createdAt,
-      materializedCharacterPackageVersion: options.packageVersion,
-    });
-  });
+      return createLocalRuntimeStorageSchemaMarker({
+        scope: 'character-data',
+        characterId: marker.characterId,
+        createdAt: marker.createdAt,
+        materializedCharacterPackageVersion: options.packageVersion,
+      });
+    },
+    () => {
+      assertCharacterDataDirAdoptable(options.storageOptions);
+    },
+  );
 
   return assertExpectedCharacterDataMarker(
     layout,

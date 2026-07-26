@@ -1,4 +1,4 @@
-import {existsSync, readFileSync} from 'node:fs';
+import {cpSync, existsSync, readFileSync, rmSync, symlinkSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -56,6 +56,36 @@ describe('character data marker', () => {
       createdAt: '2026-07-23T00:00:00.000Z',
       materializedCharacterPackageVersion: '1.1.0',
     });
+  });
+
+  it('refuses to record a version through a swapped data directory', async () => {
+    const homeRoot = createTestTempRoot('project02-character-swapped-');
+    const elsewhere = createTestTempRoot('project02-character-outside-');
+    const dataRoot = await ensureCharacterDataDir({
+      homeRoot,
+      characterId: 'mira',
+      now: () => '2026-07-23T00:00:00.000Z',
+    });
+
+    // The overlay committed against the real directory; the directory is
+    // then swapped for a link to an outside copy carrying a matching
+    // marker. Recording the version must not rewrite that outside marker.
+    cpSync(dataRoot, join(elsewhere, 'mira'), {recursive: true});
+    rmSync(dataRoot, {recursive: true});
+    symlinkSync(join(elsewhere, 'mira'), dataRoot);
+
+    await expect(
+      recordMaterializedCharacterPackageVersion({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: 'mira',
+        packageVersion: '1.1.0',
+      }),
+    ).rejects.toThrow('must be a real directory');
+    expect(
+      decodeStorageSchemaMarker(
+        readFileSync(join(elsewhere, 'mira', 'schema.json'), 'utf8'),
+      ),
+    ).not.toHaveProperty('materializedCharacterPackageVersion');
   });
 
   it('initializes from a padded character ID without leaving a rejected home', async () => {
