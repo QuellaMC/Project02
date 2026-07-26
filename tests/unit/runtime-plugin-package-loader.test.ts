@@ -142,6 +142,64 @@ describe('runtime plugin package loader', () => {
     );
   });
 
+  it('counts directories against the capture budget', () => {
+    const root = createTestTempRoot('project02-plugin-artifact-dirs-');
+    const packageRoot = join(root, 'wide');
+
+    mkdirSync(packageRoot, {recursive: true});
+    // Empty directories consume no bytes and are not files, so counting only
+    // files let a package traverse and snapshot without limit.
+    for (let index = 0; index < 6; index += 1) {
+      mkdirSync(join(packageRoot, `d${String(index)}`));
+    }
+    const packageDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (packageDirectory === undefined) {
+      throw new Error('Expected package directory snapshot.');
+    }
+
+    expect(() =>
+      capturePackageDirectoryArtifact({
+        packageDirectory,
+        maxFiles: 4,
+        maxBytes: 1_024,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: PackageCaptureError.name,
+        reason: 'too_large',
+      }),
+    );
+  });
+
+  it('bounds how deep a captured package may nest', () => {
+    const root = createTestTempRoot('project02-plugin-artifact-deep-');
+    const packageRoot = join(root, 'deep');
+    // Capture recurses per level, so depth is stack depth. A long path is
+    // rejected by some filesystems first; the bound must not depend on that.
+    const nested = join(packageRoot, ...Array.from({length: 70}, () => 'n'));
+
+    mkdirSync(nested, {recursive: true});
+    const packageDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (packageDirectory === undefined) {
+      throw new Error('Expected package directory snapshot.');
+    }
+
+    expect(() =>
+      capturePackageDirectoryArtifact({
+        packageDirectory,
+        maxFiles: 2_048,
+        maxBytes: 1_024,
+      }),
+    ).toThrow(
+      expect.objectContaining({
+        name: PackageCaptureError.name,
+        reason: 'too_large',
+      }),
+    );
+  });
+
   it('cold-discovers an immutable package without importing its entry', () => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const manifest = testPluginManifest('memory.cold');

@@ -57,9 +57,25 @@ export class PackageCaptureError extends Error {
 type PackageCaptureState = {
   readonly directories: Set<string>;
   readonly files: Map<string, CapturedPackageFile>;
-  fileCount: number;
+  /**
+   * Every captured entry, directory or file, counted against `maxFiles`.
+   *
+   * Directories are recorded and recursed into, so counting only files let a
+   * package of empty directories traverse without limit: it consumed no bytes
+   * and never reached the file cap.
+   */
+  entryCount: number;
   totalBytes: number;
 };
+
+/**
+ * Bounds how deep a captured package may nest.
+ *
+ * `captureDirectory` recurses per level, so depth is stack depth. Most
+ * filesystems reject a long enough path first, but that is a platform
+ * accident: this makes the limit a package diagnostic instead.
+ */
+const maxPackageCaptureDepth = 64;
 
 export function capturePackageDirectoryArtifact(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
@@ -79,7 +95,7 @@ export function capturePackageDirectoryArtifact(options: {
   const state: PackageCaptureState = {
     directories: new Set(),
     files: new Map(),
-    fileCount: 0,
+    entryCount: 0,
     totalBytes: 0,
   };
 
@@ -89,6 +105,7 @@ export function capturePackageDirectoryArtifact(options: {
     maxFiles: options.maxFiles,
     maxBytes: options.maxBytes,
     fileByteLimits,
+    depth: 0,
     state,
   });
   assertBoundPackage(options.packageDirectory);
@@ -131,7 +148,7 @@ export function capturePackageFiles(options: {
   const state: PackageCaptureState = {
     directories: new Set(),
     files: new Map(),
-    fileCount: 0,
+    entryCount: 0,
     totalBytes: 0,
   };
 
@@ -197,10 +214,15 @@ function captureDirectory(options: {
   readonly maxFiles: number;
   readonly maxBytes: number;
   readonly fileByteLimits: ReadonlyMap<string, number> | undefined;
+  readonly depth: number;
   readonly state: PackageCaptureState;
 }): void {
   assertBoundPackage(options.packageDirectory);
   assertBoundDirectory(options.directory);
+
+  if (options.depth > maxPackageCaptureDepth) {
+    throw captureError(options.directory.realPackageRoot, 'too_large');
+  }
   let names: string[];
 
   try {
@@ -236,8 +258,12 @@ function captureDirectory(options: {
         directory.realPackageRoot,
       );
 
+      if (options.state.entryCount >= options.maxFiles) {
+        throw captureError(absolutePath, 'too_large');
+      }
+      options.state.entryCount += 1;
       options.state.directories.add(relativePath);
-      captureDirectory({...options, directory});
+      captureDirectory({...options, directory, depth: options.depth + 1});
       continue;
     }
     if (!stat.isFile()) {
@@ -270,7 +296,7 @@ function captureFile(options: {
   );
 
   if (
-    options.state.fileCount >= options.maxFiles ||
+    options.state.entryCount >= options.maxFiles ||
     options.initialStat.size > BigInt(maxReadableBytes)
   ) {
     throw captureError(options.absolutePath, 'too_large');
@@ -285,7 +311,7 @@ function captureFile(options: {
   if (options.state.totalBytes + source.byteLength > options.maxBytes) {
     throw captureError(options.absolutePath, 'too_large');
   }
-  options.state.fileCount += 1;
+  options.state.entryCount += 1;
   options.state.totalBytes += source.byteLength;
   options.state.files.set(
     relativePath,
