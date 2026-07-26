@@ -1,3 +1,7 @@
+import {
+  isValidSpeakerDisplayName,
+  maxSpeakerDisplayNameLength,
+} from '../../core/index.ts';
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
 
@@ -15,6 +19,15 @@ export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly agentMutable: false;
   readonly reloadRequired: boolean;
   readonly scopes: readonly RuntimeConfigFieldScope[];
+  /**
+   * Narrows `valueType` where the field's real rule is stricter.
+   *
+   * Declared with the field so every authoring path -- load, mutate, scoped
+   * control -- accepts exactly what the consuming boundary accepts. A field
+   * whose value must satisfy a downstream contract states that here rather
+   * than letting each caller re-derive it.
+   */
+  readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
 
 const globalOnlyFieldScopes = Object.freeze([
@@ -72,6 +85,8 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'string',
     defaultValueSummary: 'mira',
+    acceptsValue: value =>
+      typeof value === 'string' && isProject02Identifier(value.trim()),
     redactionLabels: Object.freeze([]),
     scopes: globalOnlyFieldScopes,
     agentMutable: false,
@@ -103,11 +118,21 @@ const project02ConfigFieldDefinitions = Object.freeze([
       "Speaker name stamped on the local user's messages. Applies to new " +
       'sessions; existing sessions keep their historical name.',
     invalidValueCode: 'runtime_config_string_invalid',
-    invalidValueMessage: 'Runtime config field must be a non-empty string.',
+    invalidValueMessage:
+      'Project02 userDisplayName must be a non-empty single-line string of ' +
+      `at most ${String(maxSpeakerDisplayNameLength)} characters.`,
     required: false,
     secret: false,
     valueType: 'string',
     defaultValueSummary: 'You',
+    // The session stamps this onto every user message, so authoring must
+    // accept exactly what `createUserSpeaker` accepts. Otherwise the config
+    // validates here and chat or relay throws later, after the plugin host
+    // is already built. Checked against the trimmed value because resolution
+    // trims before constructing the speaker; a newline or an over-length name
+    // is what trimming cannot repair.
+    acceptsValue: value =>
+      typeof value === 'string' && isValidSpeakerDisplayName(value.trim()),
     redactionLabels: Object.freeze([]),
     scopes: characterScopedFieldScopes,
     agentMutable: false,
@@ -181,8 +206,7 @@ export function project02RuntimeConfigValueMatchesField(
 ): boolean {
   return (
     runtimeConfigValueMatchesField(value, field) &&
-    (field.path !== 'project02.character' ||
-      (typeof value === 'string' && isProject02Identifier(value.trim())))
+    (field.acceptsValue?.(value) ?? true)
   );
 }
 

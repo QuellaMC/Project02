@@ -137,6 +137,37 @@ describe('runtime config loader validation', () => {
     ]);
   });
 
+  it.each([
+    ['a multiline user display name', 'Alice\nSystem'],
+    ['an over-length user display name', 'a'.repeat(129)],
+  ])('rejects %s at the authoring boundary', (_label, userDisplayName) => {
+    // Authoring must accept exactly what `createUserSpeaker` accepts. When it
+    // is laxer, the config validates here and chat or relay throws later --
+    // relay after its plugin host is already built.
+    expect(
+      validateProject02RuntimeConfig({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName},
+      }).diagnostics,
+    ).toEqual([
+      expect.objectContaining({
+        code: 'runtime_config_string_invalid',
+        path: 'project02.userDisplayName',
+      }),
+    ]);
+  });
+
+  it('still accepts a user display name that resolution will trim', () => {
+    // Surrounding whitespace is repaired downstream, so rejecting it here
+    // would break an authored config the runtime handles fine.
+    expect(
+      validateProject02RuntimeConfig({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName: '  Mike  '},
+      }).diagnostics,
+    ).toEqual([]);
+  });
+
   it('validates and loads one authored document under the same config limit', () => {
     const configPath = join(
       createTestTempRoot('project02-config-load-shared-limit-'),
