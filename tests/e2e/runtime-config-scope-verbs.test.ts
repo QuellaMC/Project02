@@ -22,13 +22,23 @@ import {
   ensureInitializedProject02Home,
   requireCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
+const secretPlugin = requiredSecretPlugin('memory.scope-readiness');
+const secretFactories = Object.freeze({
+  [secretPlugin.manifest.id]: Object.freeze({
+    manifest: secretPlugin.manifest,
+    create: () => secretPlugin,
+  }),
+});
+
 async function runConfigCli(
   args: readonly string[],
   env: NodeJS.ProcessEnv = {},
+  factories?: Parameters<typeof runRuntimeConfigCliFromArgs>[1]['factories'],
 ): Promise<{
   readonly code: number;
   readonly stdout: string;
@@ -44,6 +54,7 @@ async function runConfigCli(
       stderr += chunk;
     }),
     env,
+    ...(factories === undefined ? {} : {factories}),
   });
 
   return {code, stdout, stderr};
@@ -433,6 +444,84 @@ describe('runtime-config --character verbs', () => {
 
     expect(rejected.code).toBe(1);
     expect(rejected.stderr).toContain('failed to load');
+  });
+
+  it('keeps scoped reads available while a required secret is missing', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-readiness-');
+    const dataRoot = characterDataDirPath(
+      realpathSync.native(homeRoot),
+      'mira',
+    );
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {userDisplayName: 'Global Name'},
+      plugins: {[secretPlugin.manifest.id]: {enabled: true}},
+    });
+
+    // A missing secret says the environment is incomplete, not that the
+    // document is wrong -- and the overlay path is exactly what an
+    // operator needs to read to repair it.
+    const path = await runConfigCli(
+      ['--store', homeRoot, '--character', 'mira', 'path'],
+      {},
+      secretFactories,
+    );
+
+    expect(path.code).toBe(0);
+    expect(path.stdout.trim()).toBe(characterOverlayConfigPath(dataRoot));
+
+    const get = await runConfigCli(
+      [
+        '--store',
+        homeRoot,
+        '--character',
+        'mira',
+        'get',
+        'project02.userDisplayName',
+      ],
+      {},
+      secretFactories,
+    );
+
+    expect(get.code).toBe(0);
+    expect(JSON.parse(get.stdout)).toMatchObject({value: 'Global Name'});
+
+    const set = await runConfigCli(
+      [
+        '--store',
+        homeRoot,
+        '--character',
+        'mira',
+        'set',
+        'project02.userDisplayName',
+        'Overlay Name',
+      ],
+      {},
+      secretFactories,
+    );
+
+    expect(set.code).toBe(0);
+  });
+
+  it('still rejects a scoped read over an authoring error', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-authoring-');
+
+    // A plaintext secret is an invalid authored document, not an
+    // incomplete environment: no verb may read past it.
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      plugins: {
+        [secretPlugin.manifest.id]: {enabled: true, config: {apiKey: 'oops'}},
+      },
+    });
+
+    const rejected = await runConfigCli(
+      ['--store', homeRoot, '--character', 'mira', 'path'],
+      {},
+      secretFactories,
+    );
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('must use an env ref');
   });
 
   it('rejects a scoped read from a directory marked for another character', async () => {

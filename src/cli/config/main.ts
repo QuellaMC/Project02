@@ -9,6 +9,7 @@ import {
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticAttribution,
+  runtimeConfigDiagnosticIsReadinessFailure,
   RuntimeConfigMutationError,
   runtimeConfigEnvPathForLocation,
   runtimeConfigLocationUsesDefaultConfigPath,
@@ -553,12 +554,26 @@ function writeCharacterScopedRuntimeConfigResult(options: {
   return 0;
 }
 
+/**
+ * Blocks a scoped verb on an invalid authored document, not on an
+ * incomplete environment.
+ *
+ * The distinction is the shared classifier's, not this command's: a
+ * missing required value or secret says activation is not ready yet,
+ * which is precisely the state an operator runs `path` and `get` to
+ * inspect and `set` to repair. Materialization already draws the line
+ * here, so deferring to the same predicate keeps one answer for
+ * "does this diagnostic stop config work" instead of a per-verb
+ * allowlist that a new resolver error code could fall through.
+ */
 function assertScopedStartupConfigReadable(
   startup: CharacterScopedRuntimeCliStartup,
 ): void {
   assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
   const blocking = startup.activationPlan.resolvedConfig.diagnostics.find(
-    diagnostic => diagnostic.severity === 'error',
+    diagnostic =>
+      diagnostic.severity === 'error' &&
+      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
   );
 
   if (blocking !== undefined) {
