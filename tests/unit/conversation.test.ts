@@ -575,7 +575,7 @@ describe('conversation core', () => {
       createUserSpeaker('a'.repeat(maxSpeakerDisplayNameLength + 1)),
     ).toThrow(/at most 128 characters/);
 
-    // Chat and relay interpolate the name before a colon, so a newline would
+    // Chat interpolates the name before a colon, so a newline would
     // let it forge additional output lines.
     expect(() => createUserSpeaker('Mira\nError: failed')).toThrow(
       /single-line/,

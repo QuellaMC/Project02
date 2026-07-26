@@ -78,8 +78,8 @@ export const maxSpeakerDisplayNameLength = 128;
  *
  * One line, trimmed, non-empty, bounded — the same rule the published character
  * schema states as `^\S(.*\S)?$` with `maxLength: 128`. The one-line part
- * matters beyond tidiness: names are interpolated before a colon in chat and
- * relay output, so an embedded newline lets a name forge additional lines.
+ * matters beyond tidiness: names are interpolated before a colon in chat
+ * output, so an embedded newline lets a name forge additional lines.
  */
 export function isValidSpeakerDisplayName(value: unknown): value is string {
   return (

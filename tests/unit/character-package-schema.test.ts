@@ -400,7 +400,7 @@ describe('character package descriptor schema parity', () => {
       'a multiline display name',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
-        // Chat and relay print `<name>: <text>`, so a newline here would let an
+        // Chat prints `<name>: <text>`, so a newline here would let an
         // accepted package forge extra terminal lines.
         identity: {
           ...(descriptor['identity'] as Record<string, unknown>),

@@ -127,7 +127,7 @@ const project02ConfigFieldDefinitions = Object.freeze([
     defaultValueSummary: 'You',
     // The session stamps this onto every user message, so authoring must
     // accept exactly what `createUserSpeaker` accepts. Otherwise the config
-    // validates here and chat or relay throws later, after the plugin host
+    // validates here and chat throws later, after the plugin host
     // is already built. Checked against the trimmed value because resolution
     // trims before constructing the speaker; a newline or an over-length name
     // is what trimming cannot repair.

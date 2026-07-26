@@ -142,8 +142,8 @@ describe('runtime config loader validation', () => {
     ['an over-length user display name', 'a'.repeat(129)],
   ])('rejects %s at the authoring boundary', (_label, userDisplayName) => {
     // Authoring must accept exactly what `createUserSpeaker` accepts. When it
-    // is laxer, the config validates here and chat or relay throws later --
-    // relay after its plugin host is already built.
+    // is laxer, the config validates here and chat throws later -- after its
+    // plugin host is already built.
     expect(
       validateProject02RuntimeConfig({
         version: runtimeConfigVersion,

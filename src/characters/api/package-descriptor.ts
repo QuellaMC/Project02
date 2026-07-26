@@ -207,8 +207,8 @@ function parseCharacterIdentity(value: unknown): CharacterIdentityParseResult {
   const displayName = value['displayName'];
 
   // Shared with the user speaker: both are stamped into `speakerName`, and both
-  // are interpolated before a colon in chat and relay output, so a multiline
-  // name would let an accepted package forge extra lines.
+  // are interpolated before a colon in chat output, so a multiline name
+  // would let an accepted package forge extra lines.
   if (!isValidSpeakerDisplayName(displayName)) {
     return rejectedDescriptor(
       'invalid_identity',
