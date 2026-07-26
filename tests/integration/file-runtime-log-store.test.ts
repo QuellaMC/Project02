@@ -601,6 +601,31 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
+  it('rejects a persisted characterRef that disagrees with the decision context', () => {
+    const tamperedRecord: unknown = structuredClone(
+      legacySchema1PatchCompletedEvent('tampered-character-ref'),
+    );
+    const roleModelIOSnapshot = isTestRecord(tamperedRecord)
+      ? tamperedRecord['roleModelIOSnapshot']
+      : undefined;
+
+    if (!isTestRecord(roleModelIOSnapshot)) {
+      throw new Error('Expected role-model IO snapshot fixture.');
+    }
+
+    // Two character identities in one snapshot: the package provenance
+    // claims nova while the turn was decided as the fixture character.
+    roleModelIOSnapshot['characterRef'] = {
+      id: 'nova',
+      version: '1.0.0',
+      personaFingerprint: 'fp-foreign',
+    };
+
+    expect(() =>
+      decodeRawEventLogRecord(JSON.stringify(tamperedRecord)),
+    ).toThrow('characterRef id must match the decision-context character');
+  });
+
   it('normalizes missing legacy requested tool names from replayable raw evidence', async () => {
     const storedRecord = await persistedDisallowedToolRejectionRecord(
       'legacy-missing-requested-tool-names',

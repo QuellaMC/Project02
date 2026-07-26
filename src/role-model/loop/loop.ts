@@ -31,6 +31,7 @@ import {
   type RoleModelToolObservation,
 } from '../api/contracts.ts';
 import {
+  assertRoleModelCharacterRefMatchesCharacter,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
@@ -177,12 +178,12 @@ export const defaultRoleModelMaxToolRounds = 99;
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions,
 ): Promise<RoleModelLoopExecutionResult> {
-  if (
-    options.characterRef !== undefined &&
-    options.characterRef.id !== options.decisionContext.characterSnapshot.id
-  ) {
-    throw new TypeError(
-      'Role-model characterRef id must match the decision-context character.',
+  // The snapshot constructor enforces this too, but rejecting up front
+  // keeps a contradictory ref from reaching the provider at all.
+  if (options.characterRef !== undefined) {
+    assertRoleModelCharacterRefMatchesCharacter(
+      options.characterRef,
+      options.decisionContext.characterSnapshot,
     );
   }
 

@@ -56,6 +56,7 @@ export {
   roleModelUnsupportedEffectRejectionReason,
 } from './api/contracts.ts';
 export {
+  assertRoleModelCharacterRefMatchesCharacter,
   createAcceptedRoleModelDecisionResult,
   createCharacterDecision,
   createDecisionContext,
