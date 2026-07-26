@@ -221,6 +221,48 @@ describe('character package discovery', () => {
     ]);
   });
 
+  it('reads a descriptor reached through a link inside the package', () => {
+    const root = createTestTempRoot();
+    const packageRoot = writeCharacterPackage(root, 'inside-link');
+    const descriptorPath = join(packageRoot, 'project02.character.json');
+
+    renameSync(descriptorPath, join(packageRoot, 'authored.json'));
+    symlinkSync('authored.json', descriptorPath);
+
+    const discovery = discoverCharacterPackages({
+      sources: [{root, provenance: 'operator'}],
+    });
+
+    expect(discovery.diagnostics).toEqual([]);
+    expect(
+      discovery.characters.map(character => character.definition.identity.id),
+    ).toEqual(['inside-link']);
+  });
+
+  it('rejects a descriptor link that leaves the package', () => {
+    const parentRoot = createTestTempRoot();
+    const root = join(parentRoot, 'source');
+    const packageRoot = writeCharacterPackage(root, 'outside-link');
+    const descriptorPath = join(packageRoot, 'project02.character.json');
+
+    renameSync(descriptorPath, join(parentRoot, 'authored.json'));
+    symlinkSync(join(parentRoot, 'authored.json'), descriptorPath);
+
+    const discovery = discoverCharacterPackages({
+      sources: [{root, provenance: 'operator'}],
+    });
+
+    expect(discovery.characters).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'invalid_descriptor',
+        message: 'Character package descriptor must be a regular file.',
+        path: descriptorPath,
+        characterId: 'outside-link',
+      }),
+    ]);
+  });
+
   it('rejects a package replaced by an outside directory after source enumeration', async () => {
     const parentRoot = createTestTempRoot();
     const sourceRoot = join(parentRoot, 'source');

@@ -27,6 +27,8 @@ import {
 import {
   capturePackageDirectoryArtifact,
   PackageCaptureError,
+  planPackageDirectoryCapture,
+  readPlannedPackageFile,
 } from '../../src/shared/package-capture.ts';
 import {snapshotPackageDirectory} from '../../src/shared/package-metadata.ts';
 import {createDemoConfigPluginManifest} from '../../src/plugins/packages/demo-config/plugin.ts';
@@ -38,10 +40,56 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 
 afterEach(() => {
   vi.doUnmock('node:fs');
+  vi.doUnmock('node:crypto');
   vi.resetModules();
 });
 
 describe('runtime plugin package loader', () => {
+  it('discovers a package without reading its module bytes', async () => {
+    const root = createTestTempRoot('project02-plugin-lazy-bytes-');
+    const manifest = testPluginManifest('memory.lazy-bytes');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entry: './index.mjs',
+      entrySource: 'export const createProject02Plugin = () => {};\n',
+    });
+    const packageRoot = join(root, manifest.id);
+    const opened: string[] = [];
+
+    vi.resetModules();
+    vi.doMock('node:fs', async () => {
+      const actual = await vi.importActual<typeof NodeFs>('node:fs');
+
+      return {
+        ...actual,
+        openSync(path: NodeFs.PathLike, ...rest: readonly unknown[]): number {
+          opened.push(String(path));
+
+          return Reflect.apply(actual.openSync, actual, [
+            path,
+            ...rest,
+          ]) as number;
+        },
+      };
+    });
+    const {discoverRuntimePluginPackages: discover} =
+      await import('../../src/plugins/package-loader/index.ts');
+    const discovery = discover({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.diagnostics).toEqual([]);
+    // Discovery reads the two metadata files it must parse to build a manifest,
+    // and nothing else. Module bytes wait for an import that may never happen.
+    expect(opened.filter(path => path.startsWith(packageRoot)).sort()).toEqual([
+      join(packageRoot, 'package.json'),
+      join(packageRoot, 'project02.plugin.json'),
+    ]);
+  });
+
   it('frames artifact paths and bytes without NUL-delimiter collisions', () => {
     const root = createTestTempRoot('project02-plugin-artifact-id-');
     const packageRoot = join(root, 'collision');
@@ -170,6 +218,45 @@ describe('runtime plugin package loader', () => {
         reason: 'too_large',
       }),
     );
+  });
+
+  it('bounds a deferred read by the limit its walk resolved', () => {
+    const root = createTestTempRoot('project02-plugin-lazy-limit-');
+    const packageRoot = join(root, 'bounded');
+    const descriptorRelativePath = 'project02.plugin.json';
+    const descriptorPath = join(packageRoot, descriptorRelativePath);
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(descriptorPath, Buffer.alloc(16));
+    const packageDirectory = snapshotPackageDirectory(packageRoot);
+
+    if (packageDirectory === undefined) {
+      throw new Error('Expected package directory snapshot.');
+    }
+    const planned = planPackageDirectoryCapture({
+      packageDirectory,
+      maxFiles: 10,
+      maxBytes: 1_024,
+      fileByteLimits: new Map([[descriptorRelativePath, 32]]),
+    });
+    const file = planned.files.get(descriptorRelativePath);
+
+    if (file === undefined) {
+      throw new Error('Expected the descriptor to be planned.');
+    }
+    // The walk accepted 16 bytes under a 32-byte limit. Growing past the limit
+    // before the read means the plan's bound is what refuses it, not the size
+    // the walk happened to see.
+    writeFileSync(descriptorPath, Buffer.alloc(64));
+
+    expect(() => readPlannedPackageFile({packageDirectory, file})).toThrow(
+      expect.objectContaining({
+        name: PackageCaptureError.name,
+        reason: 'too_large',
+      }),
+    );
+    writeFileSync(descriptorPath, Buffer.alloc(24));
+    expect(readPlannedPackageFile({packageDirectory, file})).toHaveLength(24);
   });
 
   it('bounds how deep a captured package may nest', () => {
@@ -874,7 +961,7 @@ describe('runtime plugin package loader', () => {
     expect(Object.isFrozen(plugin.lifecycleHooks)).toBe(true);
   });
 
-  it('loads the discovered entry artifact after its source path is replaced', async () => {
+  it('refuses an entry repointed outside its package after discovery', async () => {
     const parentRoot = createTestTempRoot('project02-plugin-entry-swap-');
     const root = join(parentRoot, 'source');
     const manifest = testPluginManifest('memory.entry-swap');
@@ -904,11 +991,9 @@ describe('runtime plugin package loader', () => {
     unlinkSync(entryPath);
     symlinkSync(outsideEntryPath, entryPath);
 
-    await expect(
-      instantiateOnlyPackage(discovery, root),
-    ).resolves.toMatchObject({
-      manifest: {id: manifest.id},
-    });
+    await expect(instantiateOnlyPackage(discovery, root)).rejects.toThrow(
+      'entry could not be imported',
+    );
     expect(existsSync(markerPath)).toBe(false);
   });
 
@@ -974,9 +1059,45 @@ describe('runtime plugin package loader', () => {
   });
 
   it('loads transitive modules from the discovered artifact', async () => {
-    const parentRoot = createTestTempRoot('project02-plugin-module-graph-');
-    const root = join(parentRoot, 'source');
+    const root = createTestTempRoot('project02-plugin-module-graph-');
     const manifest = testPluginManifest('memory.module-graph');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entry: './index.mjs',
+      entrySource: [
+        "import {createPlugin} from './helper.mjs';",
+        'export const createProject02Plugin = createPlugin;',
+        '',
+      ].join('\n'),
+    });
+    writeFileSync(
+      join(root, manifest.id, 'helper.mjs'),
+      [
+        'export function createPlugin(input) {',
+        '  return { manifest: input.manifest, providedTools: [], lifecycleHooks: {} };',
+        '}',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    await expect(
+      instantiateOnlyPackage(discovery, root),
+    ).resolves.toMatchObject({
+      manifest: {id: manifest.id},
+    });
+  });
+
+  it('loads module bytes as they are on disk at load', async () => {
+    const parentRoot = createTestTempRoot('project02-plugin-module-edit-');
+    const root = join(parentRoot, 'source');
+    const manifest = testPluginManifest('memory.module-edit');
     const markerPath = join(parentRoot, 'changed-helper-imported');
 
     writeTestPackage({
@@ -1024,7 +1145,7 @@ describe('runtime plugin package loader', () => {
     ).resolves.toMatchObject({
       manifest: {id: manifest.id},
     });
-    expect(existsSync(markerPath)).toBe(false);
+    expect(existsSync(markerPath)).toBe(true);
   });
 
   it('rejects a transitive module format outside the package contract', async () => {
@@ -1579,12 +1700,13 @@ describe('runtime plugin package loader', () => {
     });
   });
 
-  it('diagnoses package-directory and entry symbolic links', () => {
+  it('diagnoses links that leave the package', () => {
     const parentRoot = createTestTempRoot('project02-plugin-packages-');
     const root = join(parentRoot, 'source');
     const directoryPluginId = 'memory.directory-symlink';
     const directoryTarget = join(parentRoot, 'directory-target');
-    const entryManifest = testPluginManifest('memory.entry-symlink');
+    const sourceManifest = testPluginManifest('memory.outside-source-symlink');
+    const sourceTarget = join(parentRoot, 'source-target.ts');
     const metadataManifest = testPluginManifest('memory.metadata-symlink');
     const metadataTarget = join(parentRoot, 'descriptor-target.json');
 
@@ -1593,18 +1715,14 @@ describe('runtime plugin package loader', () => {
     symlinkSync(directoryTarget, join(root, directoryPluginId), 'dir');
     writeTestPackage({
       root,
-      manifest: entryManifest,
+      manifest: sourceManifest,
       entrySource: validEntrySource(),
     });
-    const entryPackageRoot = join(root, entryManifest.id);
+    writeFileSync(sourceTarget, validEntrySource(), 'utf8');
+    const outsideSourcePath = join(root, sourceManifest.id, 'index.ts');
 
-    writeFileSync(
-      join(entryPackageRoot, 'target.ts'),
-      validEntrySource(),
-      'utf8',
-    );
-    unlinkSync(join(entryPackageRoot, 'index.ts'));
-    symlinkSync('target.ts', join(entryPackageRoot, 'index.ts'));
+    unlinkSync(outsideSourcePath);
+    symlinkSync(sourceTarget, outsideSourcePath);
     writeTestPackage({
       root,
       manifest: metadataManifest,
@@ -1634,20 +1752,48 @@ describe('runtime plugin package loader', () => {
         pluginId: directoryPluginId,
       }),
       expect.objectContaining({
-        code: 'invalid_package',
-        message:
-          'Runtime plugin packages must contain only stable regular files and directories.',
-        path: join(root, entryManifest.id, 'index.ts'),
-        pluginId: entryManifest.id,
-      }),
-      expect.objectContaining({
         code: 'invalid_descriptor',
-        message:
-          'Runtime plugin package descriptor must not be a symbolic link.',
+        message: 'Runtime plugin package descriptor must be a regular file.',
         path: metadataPath,
         pluginId: metadataManifest.id,
       }),
+      expect.objectContaining({
+        code: 'invalid_package',
+        message:
+          'Runtime plugin packages must contain only stable regular files and directories.',
+        path: outsideSourcePath,
+        pluginId: sourceManifest.id,
+      }),
     ]);
+  });
+
+  it('loads an entry reached through a link inside the package', async () => {
+    const root = createTestTempRoot('project02-plugin-inside-symlink-');
+    const manifest = testPluginManifest('memory.inside-symlink');
+
+    writeTestPackage({
+      root,
+      manifest,
+      entrySource: validEntrySource(),
+    });
+    const packageRoot = join(root, manifest.id);
+    const entryPath = join(packageRoot, 'index.ts');
+
+    writeFileSync(join(packageRoot, 'target.ts'), validEntrySource(), 'utf8');
+    unlinkSync(entryPath);
+    symlinkSync('target.ts', entryPath);
+
+    const discovery = discoverRuntimePluginPackages({
+      sources: [{root}],
+      reservedPluginIds: [],
+    });
+
+    expect(discovery.diagnostics).toEqual([]);
+    await expect(
+      instantiateOnlyPackage(discovery, root),
+    ).resolves.toMatchObject({
+      manifest: {id: manifest.id},
+    });
   });
 });
 

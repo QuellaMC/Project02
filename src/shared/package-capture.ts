@@ -1,8 +1,15 @@
 /**
  * Physical package capture shared by data-only character packages and
  * executable plugin packages. A capture is rooted in one already-bound
- * package directory, traverses only its canonical tree, and returns copied
- * bytes after the complete ancestry and every opened file still match.
+ * package directory and traverses only its canonical tree, so every path it
+ * describes belongs to the package it was rooted in.
+ *
+ * Walking and reading are separate. `planPackageDirectoryCapture` stats every
+ * entry and enforces every limit without reading a byte; `capturePackageFiles`
+ * plans and reads a few named files; `readPlannedPackageFile` reads one planned
+ * file whenever its caller actually needs it. A caller that only needs to know
+ * whether a tree is capturable pays no memory for its contents, and because
+ * both answers come from the same walk they cannot drift.
  */
 import {
   closeSync,
@@ -37,15 +44,57 @@ export type CapturedPackageArtifact = {
   readonly files: ReadonlyMap<string, CapturedPackageFile>;
 };
 
+/**
+ * One regular file the walk accepted, described by its stat alone.
+ *
+ * `maxReadableBytes` is resolved here rather than at read time so a planned
+ * file carries its own bound: a later reader does not need the limits the walk
+ * ran under, and cannot widen them. It bounds one file. The aggregate `maxBytes`
+ * is a walk-time bound on the tree as the walk found it, not a running total
+ * over reads that may happen much later.
+ *
+ * `identity` is the file's filesystem identity as the walk saw it. A later read
+ * is bounded but not pinned to it — a package edited underneath a running
+ * process is read as it is then — so it describes the walk, not a promise about
+ * the bytes.
+ *
+ * `absolutePath` is where the package names the file, not necessarily the file
+ * itself: a link is resolved to the contained file it names, and resolved again
+ * at read time rather than remembered, so a name that comes to point somewhere
+ * else is re-judged instead of trusted.
+ */
+export type PlannedPackageFile = {
+  readonly absolutePath: string;
+  readonly relativePath: string;
+  readonly identity: string;
+  readonly maxReadableBytes: number;
+  readonly type: 'file';
+};
+
+export type PlannedPackageCapture = {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly directories: ReadonlySet<string>;
+  readonly files: ReadonlyMap<string, PlannedPackageFile>;
+};
+
+/**
+ * Why a package could not be captured.
+ *
+ * A file link is not among them: the walk resolves one to the real file it
+ * names and captures that, so a link is only rejected for what it points at
+ * — nothing (`not_regular`), or a file that moved out from under the plan
+ * (`changed`).
+ */
+export type PackageCaptureRejectionReason =
+  'changed' | 'not_regular' | 'too_large' | 'unreadable';
+
 export class PackageCaptureError extends Error {
   readonly path: string;
-  readonly reason:
-    'changed' | 'symbolic_link' | 'not_regular' | 'too_large' | 'unreadable';
+  readonly reason: PackageCaptureRejectionReason;
 
   constructor(options: {
     readonly path: string;
-    readonly reason:
-      'changed' | 'symbolic_link' | 'not_regular' | 'too_large' | 'unreadable';
+    readonly reason: PackageCaptureRejectionReason;
   }) {
     super('Package could not be captured.');
     this.name = 'PackageCaptureError';
@@ -56,7 +105,7 @@ export class PackageCaptureError extends Error {
 
 type PackageCaptureState = {
   readonly directories: Set<string>;
-  readonly files: Map<string, CapturedPackageFile>;
+  readonly files: Map<string, PlannedPackageFile>;
   /**
    * Every captured entry, directory or file, counted against `maxFiles`.
    *
@@ -68,30 +117,34 @@ type PackageCaptureState = {
   totalBytes: number;
 };
 
+type PackageCaptureLimits = {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly maxFiles: number;
+  readonly maxBytes: number;
+  readonly fileByteLimits?: ReadonlyMap<string, number>;
+};
+
 /**
  * Bounds how deep a captured package may nest.
  *
- * `captureDirectory` recurses per level, so depth is stack depth. Most
+ * `planDirectory` recurses per level, so depth is stack depth. Most
  * filesystems reject a long enough path first, but that is a platform
  * accident: this makes the limit a package diagnostic instead.
  */
 const maxPackageCaptureDepth = 64;
 
-export function capturePackageDirectoryArtifact(options: {
-  readonly packageDirectory: PackageDirectorySnapshot;
-  readonly maxFiles: number;
-  readonly maxBytes: number;
-  readonly fileByteLimits?: ReadonlyMap<string, number>;
-}): CapturedPackageArtifact {
-  if (
-    !Number.isSafeInteger(options.maxFiles) ||
-    options.maxFiles < 1 ||
-    !Number.isSafeInteger(options.maxBytes) ||
-    options.maxBytes < 1
-  ) {
-    throw new TypeError('Package capture limits must be positive integers.');
-  }
-  const fileByteLimits = normalizeFileByteLimits(options.fileByteLimits);
+/**
+ * Walks the package tree with stat only.
+ *
+ * Every rejection a reading capture can raise while walking is raised here too
+ * — a non-regular entry, an unreadable directory, an entry or byte budget
+ * overrun, an over-deep tree, a package that changed mid-walk — because stat is
+ * what those decisions were always made on. What is missing is only the bytes.
+ */
+export function planPackageDirectoryCapture(
+  options: PackageCaptureLimits,
+): PlannedPackageCapture {
+  const limits = requiredCaptureLimits(options);
   const state: PackageCaptureState = {
     directories: new Set(),
     files: new Map(),
@@ -99,12 +152,9 @@ export function capturePackageDirectoryArtifact(options: {
     totalBytes: 0,
   };
 
-  captureDirectory({
+  planDirectory({
     directory: options.packageDirectory,
-    packageDirectory: options.packageDirectory,
-    maxFiles: options.maxFiles,
-    maxBytes: options.maxBytes,
-    fileByteLimits,
+    limits,
     depth: 0,
     state,
   });
@@ -114,7 +164,92 @@ export function capturePackageDirectoryArtifact(options: {
     packageDirectory: options.packageDirectory,
     directories: state.directories,
     files: state.files,
+  } satisfies PlannedPackageCapture);
+}
+
+/**
+ * Reads the bytes of one planned file, whenever its caller needs them.
+ *
+ * What the plan supplies is the file's own byte limit and the promise that the
+ * walk accepted this path; what is re-checked now is everything about the file
+ * itself — still inside the package, still a regular file, still within that
+ * limit, still whole. The walk's stat is deliberately not re-imposed: a package
+ * edited underneath a running process is read as it is then, because refusing it
+ * would turn an ordinary edit into a failure the operator cannot act on.
+ *
+ * The package snapshot is not re-asserted either. It says the tree still matches
+ * the walk, which a deferred read has no reason to require and every reason not
+ * to — a package legitimately reinstalled after discovery would otherwise become
+ * unloadable.
+ */
+export function readPlannedPackageFile(options: {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly file: PlannedPackageFile;
+}): Buffer {
+  const resolved = resolveContainedPackageFile({
+    packageDirectory: options.packageDirectory,
+    path: options.file.absolutePath,
+  });
+
+  if (resolved === undefined) {
+    throw captureError(options.file.absolutePath, 'not_regular');
+  }
+  return readBoundRegularFile({
+    path: resolved.readPath,
+    maxBytes: options.file.maxReadableBytes,
+  });
+}
+
+export function capturePackageDirectoryArtifact(
+  options: PackageCaptureLimits,
+): CapturedPackageArtifact {
+  const planned = planPackageDirectoryCapture(options);
+  const files = new Map<string, CapturedPackageFile>();
+
+  for (const [relativePath, file] of planned.files) {
+    files.set(
+      relativePath,
+      Object.freeze({
+        absolutePath: file.absolutePath,
+        relativePath,
+        source: readPlannedPackageFile({
+          packageDirectory: planned.packageDirectory,
+          file,
+        }),
+        type: 'file',
+      } satisfies CapturedPackageFile),
+    );
+  }
+  assertBoundPackage(options.packageDirectory);
+
+  return Object.freeze({
+    packageDirectory: planned.packageDirectory,
+    directories: planned.directories,
+    files,
   } satisfies CapturedPackageArtifact);
+}
+
+function requiredCaptureLimits(options: PackageCaptureLimits): {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly maxFiles: number;
+  readonly maxBytes: number;
+  readonly fileByteLimits: ReadonlyMap<string, number> | undefined;
+} {
+  if (
+    !Number.isSafeInteger(options.maxFiles) ||
+    options.maxFiles < 1 ||
+    !Number.isSafeInteger(options.maxBytes) ||
+    options.maxBytes < 1
+  ) {
+    throw new TypeError('Package capture limits must be positive integers.');
+  }
+
+  return Object.freeze({
+    packageDirectory: options.packageDirectory,
+    maxFiles: options.maxFiles,
+    maxBytes: options.maxBytes,
+    fileByteLimits: normalizeFileByteLimits(options.fileByteLimits),
+  });
 }
 
 export function capturePackageFiles(options: {
@@ -145,12 +280,18 @@ export function capturePackageFiles(options: {
   ) {
     throw new TypeError('Package capture paths must be unique and relative.');
   }
+  const limits = requiredCaptureLimits({
+    packageDirectory: options.packageDirectory,
+    maxFiles: paths.size,
+    maxBytes: options.maxBytes,
+  });
   const state: PackageCaptureState = {
     directories: new Set(),
     files: new Map(),
     entryCount: 0,
     totalBytes: 0,
   };
+  const files = new Map<string, CapturedPackageFile>();
 
   for (const relativePath of paths) {
     const absolutePath = resolve(
@@ -167,35 +308,40 @@ export function capturePackageFiles(options: {
       throw new TypeError('Package capture path escaped its package.');
     }
     assertBoundPackage(options.packageDirectory);
-    let stat: BigIntStats;
+    const resolved = resolveContainedPackageFile({
+      packageDirectory: options.packageDirectory,
+      path: absolutePath,
+    });
 
-    try {
-      stat = lstatSync(absolutePath, {bigint: true});
-    } catch {
-      throw captureError(absolutePath, 'unreadable');
-    }
-    if (stat.isSymbolicLink()) {
-      throw captureError(absolutePath, 'symbolic_link');
-    }
-    if (!stat.isFile()) {
+    if (resolved === undefined) {
       throw captureError(absolutePath, 'not_regular');
     }
-    captureFile({
+    const planned = planFile({
       absolutePath,
-      initialStat: stat,
-      packageDirectory: options.packageDirectory,
-      maxFiles: paths.size,
-      maxBytes: options.maxBytes,
-      fileByteLimits: undefined,
+      stat: resolved.stat,
+      limits,
       state,
     });
+
+    files.set(
+      relativePath,
+      Object.freeze({
+        absolutePath,
+        relativePath,
+        source: readPlannedPackageFile({
+          packageDirectory: options.packageDirectory,
+          file: planned,
+        }),
+        type: 'file',
+      } satisfies CapturedPackageFile),
+    );
   }
   assertBoundPackage(options.packageDirectory);
 
   return Object.freeze({
     packageDirectory: options.packageDirectory,
     directories: state.directories,
-    files: state.files,
+    files,
   } satisfies CapturedPackageArtifact);
 }
 
@@ -208,16 +354,15 @@ export function readCapturedPackageFile(
   return file === undefined ? undefined : Buffer.from(file.source);
 }
 
-function captureDirectory(options: {
+function planDirectory(options: {
   readonly directory: PackageDirectorySnapshot;
-  readonly packageDirectory: PackageDirectorySnapshot;
-  readonly maxFiles: number;
-  readonly maxBytes: number;
-  readonly fileByteLimits: ReadonlyMap<string, number> | undefined;
+  readonly limits: ReturnType<typeof requiredCaptureLimits>;
   readonly depth: number;
   readonly state: PackageCaptureState;
 }): void {
-  assertBoundPackage(options.packageDirectory);
+  const packageDirectory = options.limits.packageDirectory;
+
+  assertBoundPackage(packageDirectory);
   assertBoundDirectory(options.directory);
 
   if (options.depth > maxPackageCaptureDepth) {
@@ -231,109 +376,175 @@ function captureDirectory(options: {
     throw captureError(options.directory.realPackageRoot, 'unreadable');
   }
   assertBoundDirectory(options.directory);
-  assertBoundPackage(options.packageDirectory);
+  assertBoundPackage(packageDirectory);
 
   for (const name of names) {
     const absolutePath = join(options.directory.realPackageRoot, name);
     let stat: BigIntStats;
 
-    assertBoundPackage(options.packageDirectory);
+    assertBoundPackage(packageDirectory);
     try {
       stat = lstatSync(absolutePath, {bigint: true});
     } catch {
       throw captureError(absolutePath, 'unreadable');
     }
-    assertBoundPackage(options.packageDirectory);
+    assertBoundPackage(packageDirectory);
 
     if (stat.isSymbolicLink()) {
-      throw captureError(absolutePath, 'symbolic_link');
+      const linked = resolveContainedPackageFile({
+        packageDirectory,
+        path: absolutePath,
+      });
+
+      if (linked === undefined) {
+        // A link to anything but a contained regular file: a directory link
+        // would let the walk cycle, a link out of the package would let it
+        // describe a tree it does not own, and a dangling link has nothing to
+        // read at all.
+        throw captureError(absolutePath, 'not_regular');
+      }
+      const planned = planFile({
+        ...options,
+        absolutePath,
+        stat: linked.stat,
+      });
+
+      options.state.files.set(planned.relativePath, planned);
+      continue;
     }
     if (stat.isDirectory()) {
       const directory = snapshotContainedDirectory({
-        packageDirectory: options.packageDirectory,
+        packageDirectory,
         path: absolutePath,
       });
       const relativePath = packageRelativePath(
-        options.packageDirectory.realPackageRoot,
+        packageDirectory.realPackageRoot,
         directory.realPackageRoot,
       );
 
-      if (options.state.entryCount >= options.maxFiles) {
+      if (options.state.entryCount >= options.limits.maxFiles) {
         throw captureError(absolutePath, 'too_large');
       }
       options.state.entryCount += 1;
       options.state.directories.add(relativePath);
-      captureDirectory({...options, directory, depth: options.depth + 1});
+      planDirectory({...options, directory, depth: options.depth + 1});
       continue;
     }
     if (!stat.isFile()) {
       throw captureError(absolutePath, 'not_regular');
     }
-    captureFile({...options, absolutePath, initialStat: stat});
+    const planned = planFile({...options, absolutePath, stat});
+
+    options.state.files.set(planned.relativePath, planned);
   }
 
   assertBoundDirectory(options.directory);
-  assertBoundPackage(options.packageDirectory);
+  assertBoundPackage(packageDirectory);
 }
 
-function captureFile(options: {
-  readonly absolutePath: string;
-  readonly initialStat: BigIntStats;
+/**
+ * Resolves a package path to the contained regular file it names.
+ *
+ * A plain file resolves to itself and a link resolves to its target, so the
+ * walk and every later read agree on what a path means without either needing
+ * to know which it was. Only a contained regular file resolves: a link out of
+ * the package would let the walk describe one tree while a read returns another,
+ * and a directory link would let the walk cycle.
+ *
+ * The walk and the read call this separately rather than sharing a remembered
+ * result, so a path that comes to name something else is re-judged at the moment
+ * it is used.
+ */
+function resolveContainedPackageFile(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
-  readonly maxFiles: number;
-  readonly maxBytes: number;
-  readonly fileByteLimits: ReadonlyMap<string, number> | undefined;
+  readonly path: string;
+}):
+  | {
+      readonly readPath: string;
+      readonly stat: BigIntStats;
+    }
+  | undefined {
+  try {
+    const readPath = realpathSync(options.path);
+
+    if (
+      packageRelativePathIfContained(
+        options.packageDirectory.realPackageRoot,
+        readPath,
+      ) === undefined
+    ) {
+      return undefined;
+    }
+    const stat = lstatSync(readPath, {bigint: true});
+
+    return stat.isFile() ? Object.freeze({readPath, stat}) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Accepts one regular file against the remaining budgets, from its stat.
+ *
+ * The stat's size is what the budgets are spent on, and the bound that survives
+ * on the planned file is re-checked against the descriptor when the bytes are
+ * read, so a file that grew after the walk is refused at the read rather than
+ * silently outspending the accounting.
+ */
+function planFile(options: {
+  readonly absolutePath: string;
+  readonly stat: BigIntStats;
+  readonly limits: ReturnType<typeof requiredCaptureLimits>;
   readonly state: PackageCaptureState;
-}): void {
+}): PlannedPackageFile {
   const relativePath = packageRelativePath(
-    options.packageDirectory.realPackageRoot,
+    options.limits.packageDirectory.realPackageRoot,
     options.absolutePath,
   );
-  const remainingBytes = options.maxBytes - options.state.totalBytes;
+  const remainingBytes = options.limits.maxBytes - options.state.totalBytes;
   const maxReadableBytes = Math.min(
     remainingBytes,
-    options.fileByteLimits?.get(relativePath) ?? remainingBytes,
+    options.limits.fileByteLimits?.get(relativePath) ?? remainingBytes,
   );
 
   if (
-    options.state.entryCount >= options.maxFiles ||
-    options.initialStat.size > BigInt(maxReadableBytes)
+    options.state.entryCount >= options.limits.maxFiles ||
+    options.stat.size > BigInt(maxReadableBytes)
   ) {
     throw captureError(options.absolutePath, 'too_large');
   }
-  const source = readBoundRegularFile({
-    path: options.absolutePath,
-    expected: options.initialStat,
-    packageDirectory: options.packageDirectory,
-    maxBytes: maxReadableBytes,
-  });
-
-  if (options.state.totalBytes + source.byteLength > options.maxBytes) {
-    throw captureError(options.absolutePath, 'too_large');
-  }
   options.state.entryCount += 1;
-  options.state.totalBytes += source.byteLength;
-  options.state.files.set(
+  options.state.totalBytes += Number(options.stat.size);
+
+  return Object.freeze({
+    absolutePath: options.absolutePath,
     relativePath,
-    Object.freeze({
-      absolutePath: options.absolutePath,
-      relativePath,
-      source,
-      type: 'file',
-    }),
-  );
+    identity: filesystemMetadataIdentity(options.stat),
+    maxReadableBytes,
+    type: 'file',
+  } satisfies PlannedPackageFile);
 }
 
+/**
+ * Reads one already-resolved regular file, whole and unchanged.
+ *
+ * The checks here are about this read: the descriptor is a regular file within
+ * its limit, the bytes are exactly the file, and nothing rewrote it while it was
+ * being read. Whether the surrounding package is still the one that was walked
+ * is a separate question, and belongs to whoever knows when the walk happened —
+ * an immediate capture asserts it around the whole operation, and a deferred
+ * read deliberately does not.
+ */
 function readBoundRegularFile(options: {
   readonly path: string;
-  readonly expected: BigIntStats;
-  readonly packageDirectory: PackageDirectorySnapshot;
   readonly maxBytes: number;
 }): Buffer {
   let descriptor: number | undefined;
 
   try {
-    assertBoundPackage(options.packageDirectory);
+    // The path is already canonical, so opening without following is not a
+    // restriction on links — it is what keeps the descriptor bound to a real
+    // file rather than to a name that could be repointed after resolution.
     descriptor = openSync(
       options.path,
       constants.O_RDONLY | constants.O_NOFOLLOW,
@@ -341,15 +552,11 @@ function readBoundRegularFile(options: {
     const openedStat = fstatSync(descriptor, {bigint: true});
 
     if (!openedStat.isFile()) {
-      throw captureError(options.path, 'changed');
+      throw captureError(options.path, 'not_regular');
     }
     if (openedStat.size > BigInt(options.maxBytes)) {
       throw captureError(options.path, 'too_large');
     }
-    if (!filesystemStatsEqual(options.expected, openedStat)) {
-      throw captureError(options.path, 'changed');
-    }
-    assertBoundPackage(options.packageDirectory);
     const source = readExactlyFromDescriptor({
       descriptor,
       path: options.path,
@@ -364,7 +571,6 @@ function readBoundRegularFile(options: {
       throw captureError(options.path, 'changed');
     }
     assertBoundRegularFile(options.path, finalOpenedStat);
-    assertBoundPackage(options.packageDirectory);
     return source;
   } catch (error: unknown) {
     if (error instanceof PackageCaptureError) {
@@ -517,7 +723,7 @@ function normalizeFileByteLimits(
 
 function captureError(
   path: string,
-  reason: PackageCaptureError['reason'],
+  reason: PackageCaptureRejectionReason,
 ): PackageCaptureError {
   return new PackageCaptureError({path, reason});
 }

@@ -333,8 +333,6 @@ function packageCaptureDescriptorReason(
   error: PackageCaptureError,
 ): BoundedPackageJsonRejectionReason {
   switch (error.reason) {
-    case 'symbolic_link':
-      return 'symbolic_link';
     case 'not_regular':
       return 'not_file';
     case 'too_large':

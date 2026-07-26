@@ -1,10 +1,17 @@
 /**
  * Immutable executable artifact boundary for runtime plugin packages.
  *
- * Discovery captures every regular file while the package identities are
- * stable. Loading later evaluates only those captured bytes through a private
- * module URL, so neither the entry path nor a transitive relative import can
- * follow a changed source tree.
+ * Discovery walks every regular file while the package identities are stable,
+ * but reads none of them: an artifact is a plan, and the plan is what makes
+ * the package importable through a private module URL, so neither the entry
+ * path nor a transitive relative import can name a file the walk did not
+ * accept.
+ *
+ * Bytes are read when a module is actually evaluated, and only for that
+ * module. Every discovered package would otherwise sit in memory for a run
+ * that imports one of them, or none. The cost is that a file edited between
+ * discovery and load is read as it is now — a package that changes underneath
+ * a running process was never going to be the version that was walked.
  */
 import {createHash} from 'node:crypto';
 import {
@@ -17,9 +24,11 @@ import {extname, isAbsolute, relative, resolve, sep} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import {
-  capturePackageDirectoryArtifact,
   PackageCaptureError,
-  type CapturedPackageFile,
+  planPackageDirectoryCapture,
+  readPlannedPackageFile,
+  type PackageCaptureRejectionReason,
+  type PlannedPackageFile,
 } from '../../shared/package-capture.ts';
 import type {PackageDirectorySnapshot} from '../../shared/package-metadata.ts';
 import {maxRuntimePluginPackageMetadataBytes} from '../api/package-descriptor.ts';
@@ -28,7 +37,7 @@ import type {RuntimePluginPackageProvenance} from './contract.ts';
 const runtimePluginArtifactProtocol = 'project02-plugin:';
 const maxRuntimePluginArtifactFiles = 2_048;
 const maxRuntimePluginArtifactBytes = 64 * 1024 * 1024;
-const runtimePluginArtifactIdVersion = 'project02.plugin-artifact.v1';
+const runtimePluginArtifactIdVersion = 'project02.plugin-artifact.v2';
 const runtimePluginMetadataFileByteLimits: ReadonlyMap<string, number> =
   new Map([
     ['package.json', maxRuntimePluginPackageMetadataBytes],
@@ -40,7 +49,7 @@ export type RuntimePluginPackageArtifact = {
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly provenance: RuntimePluginPackageProvenance;
   readonly directories: ReadonlySet<string>;
-  readonly files: ReadonlyMap<string, CapturedPackageFile>;
+  readonly files: ReadonlyMap<string, PlannedPackageFile>;
 };
 
 type RuntimePluginArtifactAddress = {
@@ -57,13 +66,11 @@ type RuntimePluginArtifactNextResolve = (
 
 export class RuntimePluginPackageArtifactError extends Error {
   readonly path: string;
-  readonly reason:
-    'changed' | 'symbolic_link' | 'not_regular' | 'too_large' | 'unreadable';
+  readonly reason: PackageCaptureRejectionReason;
 
   constructor(options: {
     readonly path: string;
-    readonly reason:
-      'changed' | 'symbolic_link' | 'not_regular' | 'too_large' | 'unreadable';
+    readonly reason: PackageCaptureRejectionReason;
   }) {
     super('Runtime plugin package could not be captured.');
     this.name = 'RuntimePluginPackageArtifactError';
@@ -79,10 +86,10 @@ export function captureRuntimePluginPackageArtifact(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly provenance: RuntimePluginPackageProvenance;
 }): RuntimePluginPackageArtifact {
-  let captured: ReturnType<typeof capturePackageDirectoryArtifact>;
+  let captured: ReturnType<typeof planPackageDirectoryCapture>;
 
   try {
-    captured = capturePackageDirectoryArtifact({
+    captured = planPackageDirectoryCapture({
       packageDirectory: options.packageDirectory,
       maxFiles: maxRuntimePluginArtifactFiles,
       maxBytes: maxRuntimePluginArtifactBytes,
@@ -149,9 +156,21 @@ export function activateRuntimePluginPackageArtifact(options: {
   return createArtifactUrl(options.artifact.id, entryRelativePath);
 }
 
+/**
+ * The private module URL's hostname, and the key artifacts are activated
+ * under.
+ *
+ * It hashes the walk — every path plus the filesystem identity of each file —
+ * rather than file contents, because contents are no longer read at discovery.
+ * That is what this identifier needs: two different packages get two different
+ * ids, and an edited package gets a new one, so the resolve and load hooks
+ * cannot route an import into an artifact it does not belong to. It is not a
+ * content digest, and nothing treats it as one: a file touched without being
+ * edited also yields a new id, which is harmless for a lookup key.
+ */
 function createArtifactId(options: {
   readonly directories: ReadonlySet<string>;
-  readonly files: ReadonlyMap<string, CapturedPackageFile>;
+  readonly files: ReadonlyMap<string, PlannedPackageFile>;
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly provenance: RuntimePluginPackageProvenance;
 }): string {
@@ -181,7 +200,7 @@ function createArtifactId(options: {
   for (const [relativePath, file] of files) {
     updateArtifactIdFrame(hash, 'entry-type', file.type);
     updateArtifactIdFrame(hash, 'file-path', relativePath);
-    updateArtifactIdFrame(hash, 'file-source', file.source);
+    updateArtifactIdFrame(hash, 'file-identity', file.identity);
   }
   return hash.digest('hex');
 }
@@ -231,7 +250,7 @@ function runtimePluginArtifactsEqual(
   for (const [path, leftFile] of left.files) {
     const rightFile = right.files.get(path);
 
-    if (rightFile === undefined || !leftFile.source.equals(rightFile.source)) {
+    if (rightFile === undefined || leftFile.identity !== rightFile.identity) {
       return false;
     }
   }
@@ -276,12 +295,38 @@ function ensureRuntimePluginArtifactHooks(): void {
       }
       return {
         format: runtimePluginArtifactModuleFormat(address.relativePath),
-        source: file.source,
+        // The one place plugin bytes are read, and only for a module actually
+        // being evaluated. The walk already decided this path belongs to the
+        // package; the read re-checks that it still names a contained regular
+        // file within its own limit.
+        source: readPlannedArtifactFile(address.artifact, file),
         shortCircuit: true,
       };
     },
   });
   artifactHooksRegistered = true;
+}
+
+function readPlannedArtifactFile(
+  artifact: RuntimePluginPackageArtifact,
+  file: PlannedPackageFile,
+): Buffer {
+  try {
+    return readPlannedPackageFile({
+      packageDirectory: artifact.packageDirectory,
+      file,
+    });
+  } catch (error: unknown) {
+    if (!(error instanceof PackageCaptureError)) {
+      throw error;
+    }
+    // A path the walk accepted that no longer names a readable file inside the
+    // package is not loadable. The importer reports this as an entry that could
+    // not be imported, which is what it is.
+    throw new TypeError('Runtime plugin artifact module is unavailable.', {
+      cause: error,
+    });
+  }
 }
 
 function resolveFromArtifact(options: {

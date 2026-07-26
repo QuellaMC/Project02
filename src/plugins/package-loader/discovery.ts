@@ -10,7 +10,7 @@ import {
   capturePackageFiles,
   PackageCaptureError,
   readCapturedPackageFile,
-  type CapturedPackageArtifact,
+  readPlannedPackageFile,
 } from '../../shared/package-capture.ts';
 import {
   packageDirectorySnapshotsEqual,
@@ -50,6 +50,19 @@ const bundledRuntimePluginPackageDirectory =
 type DiscoveredRuntimePluginPackageCandidate = {
   readonly package: DiscoveredRuntimePluginPackage;
   readonly descriptorPath: string;
+};
+
+/**
+ * The metadata files as descriptor parsing needs them, independent of whether
+ * they were read eagerly or are read on demand.
+ *
+ * The bundled path captures two named files up front; the operator path holds
+ * a walk it reads from. Both answer the same two questions, so descriptor
+ * parsing does not need to know which it has.
+ */
+type RuntimePluginPackageMetadataSource = {
+  readonly directories: ReadonlySet<string>;
+  readonly readFile: (relativePath: string) => Buffer | undefined;
 };
 
 type RuntimePluginPackageSnapshot = {
@@ -275,7 +288,7 @@ function readRuntimePluginPackageSnapshot(options: {
   const metadata = readRuntimePluginPackageMetadata({
     packageDirectory,
     provenance: 'operator',
-    artifact,
+    metadataSource: plannedArtifactMetadataSource(artifact),
   });
 
   if (!artifact.files.has(metadata.entryRelativePath)) {
@@ -296,11 +309,44 @@ function readRuntimePluginPackageSnapshot(options: {
   } satisfies RuntimePluginPackageSnapshot);
 }
 
+/**
+ * Reads the operator package's metadata from its walk.
+ *
+ * A metadata file that no longer matches the walk reads as absent, which the
+ * descriptor parser already reports as unreadable — the same outcome as a
+ * package whose metadata could not be captured at all.
+ */
+function plannedArtifactMetadataSource(
+  artifact: RuntimePluginPackageArtifact,
+): RuntimePluginPackageMetadataSource {
+  return Object.freeze({
+    directories: artifact.directories,
+    readFile: relativePath => {
+      const file = artifact.files.get(relativePath);
+
+      if (file === undefined) {
+        return undefined;
+      }
+      try {
+        return readPlannedPackageFile({
+          packageDirectory: artifact.packageDirectory,
+          file,
+        });
+      } catch (error: unknown) {
+        if (error instanceof PackageCaptureError) {
+          return undefined;
+        }
+        throw error;
+      }
+    },
+  });
+}
+
 function readBundledRuntimePluginPackageSnapshot(
   packageDirectory: PackageDirectorySnapshot,
 ): RuntimePluginPackageSnapshot {
   const pluginId = basename(packageDirectory.packageRoot);
-  let artifact: CapturedPackageArtifact;
+  let artifact: ReturnType<typeof capturePackageFiles>;
 
   try {
     artifact = capturePackageFiles({
@@ -327,7 +373,10 @@ function readBundledRuntimePluginPackageSnapshot(
   const metadata = readRuntimePluginPackageMetadata({
     packageDirectory,
     provenance: 'bundled',
-    artifact,
+    metadataSource: Object.freeze({
+      directories: artifact.directories,
+      readFile: relativePath => readCapturedPackageFile(artifact, relativePath),
+    }),
   });
 
   return Object.freeze({
@@ -339,13 +388,13 @@ function readBundledRuntimePluginPackageSnapshot(
 function readRuntimePluginPackageMetadata(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly provenance: RuntimePluginPackageProvenance;
-  readonly artifact: Pick<CapturedPackageArtifact, 'directories' | 'files'>;
+  readonly metadataSource: RuntimePluginPackageMetadataSource;
 }): Omit<RuntimePluginPackageSnapshot, 'source'> {
   const packageDirectory = options.packageDirectory;
   const packageJsonPath = join(packageDirectory.packageRoot, 'package.json');
   const pluginId = basename(packageDirectory.packageRoot);
   const packageJson = parsePackageArtifactJson({
-    artifact: options.artifact,
+    metadataSource: options.metadataSource,
     relativePath: 'package.json',
     path: packageJsonPath,
     code: 'invalid_package_json',
@@ -370,7 +419,7 @@ function readRuntimePluginPackageMetadata(options: {
     'project02.plugin.json',
   );
   const descriptor = parsePackageArtifactJson({
-    artifact: options.artifact,
+    metadataSource: options.metadataSource,
     relativePath: 'project02.plugin.json',
     path: descriptorPath,
     code: 'invalid_descriptor',
@@ -505,13 +554,11 @@ function artifactMetadataDiscoveryError(options: {
   readonly provenance: RuntimePluginPackageProvenance;
 }): RuntimePluginPackageDiscoveryError {
   const reason: BoundedPackageJsonRejectionReason =
-    options.error.reason === 'symbolic_link'
-      ? 'symbolic_link'
-      : options.error.reason === 'not_regular'
-        ? 'not_file'
-        : options.error.reason === 'too_large'
-          ? 'too_large'
-          : 'unreadable';
+    options.error.reason === 'not_regular'
+      ? 'not_file'
+      : options.error.reason === 'too_large'
+        ? 'too_large'
+        : 'unreadable';
 
   return packageDiscoveryError({
     code: options.code,
@@ -638,7 +685,7 @@ function applyPackageIdentityPolicy(options: {
 }
 
 function parsePackageArtifactJson(options: {
-  readonly artifact: Pick<CapturedPackageArtifact, 'directories' | 'files'>;
+  readonly metadataSource: RuntimePluginPackageMetadataSource;
   readonly relativePath: string;
   readonly path: string;
   readonly code: string;
@@ -646,15 +693,12 @@ function parsePackageArtifactJson(options: {
   readonly provenance: RuntimePluginPackageProvenance;
   readonly pluginId: string;
 }) {
-  const source = readCapturedPackageFile(
-    options.artifact,
-    options.relativePath,
-  );
+  const source = options.metadataSource.readFile(options.relativePath);
   const metadata =
     source === undefined
       ? ({
           status: 'rejected',
-          reason: options.artifact.directories.has(options.relativePath)
+          reason: options.metadataSource.directories.has(options.relativePath)
             ? 'not_file'
             : 'unreadable',
         } as const)
