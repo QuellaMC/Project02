@@ -380,6 +380,22 @@ async function resolveRuntimeCliActivationStartup(input: {
     throw new TypeError('Character package materialization planning drifted.');
   }
 
+  const readRuntimeEnvFileUnlessBlocked = createStartupRuntimeEnvFileReader({
+    runtimeLocation,
+    suppliedEnv: input.suppliedEnv,
+    cwdDotEnv: input.cwdDotEnv,
+    continueAfterActivationErrors: options.continueAfterActivationErrors,
+  });
+
+  // The read happens here, ahead of the first durable effect this startup
+  // has: the initializer below commits the overlay and stamps the data
+  // marker, and an unreadable env file has to be reported instead of
+  // reported after the edit already landed.
+  readRuntimeEnvFileUnlessBlocked(
+    preMaterializationState.activationPlanBeforeRuntimeEnv.activation
+      .diagnostics,
+  );
+
   const materialization = await materializeCharacterDataDir({
     characterActivation,
     runtimeLocation,
@@ -423,12 +439,13 @@ async function resolveRuntimeCliActivationStartup(input: {
     });
   }
 
-  if (
-    options.continueAfterActivationErrors !== true &&
-    activationDiagnosticsCanBypassRuntimeEnvFile(
-      activationPlanBeforeRuntimeEnv.activation.diagnostics,
-    )
-  ) {
+  // Asked again over the post-materialization diagnostics: materializing
+  // the character can add the error that blocks this startup.
+  const runtimeEnv = readRuntimeEnvFileUnlessBlocked(
+    activationPlanBeforeRuntimeEnv.activation.diagnostics,
+  );
+
+  if (runtimeEnv === undefined) {
     return Object.freeze({
       ...materializedBase,
       status: 'activation_blocked_before_runtime_env',
@@ -436,11 +453,6 @@ async function resolveRuntimeCliActivationStartup(input: {
     });
   }
 
-  const runtimeEnv = loadRuntimeEnv({
-    runtimeLocation,
-    suppliedEnv: input.suppliedEnv,
-    cwdDotEnv: input.cwdDotEnv,
-  });
   const activationPlan = withActivationDiagnostics(
     prepareActivationPlan({
       loadedConfig,
@@ -798,18 +810,68 @@ function withActivationDiagnostics(
   });
 }
 
-function activationDiagnosticsCanBypassRuntimeEnvFile(
+/**
+ * Reads the home env file at most once per startup, and only for a
+ * startup that needs it: `undefined` says this activation is blocked by
+ * an env-independent error, so the file is not read at all. The reader is
+ * asked twice — before materialization commits anything durable, and again
+ * over the post-materialization diagnostics — and the cache is what makes
+ * the second ask free.
+ */
+function createStartupRuntimeEnvFileReader(options: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly suppliedEnv: NodeJS.ProcessEnv;
+  readonly cwdDotEnv: NodeJS.ProcessEnv;
+  readonly continueAfterActivationErrors: boolean | undefined;
+}): (
   diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
-): boolean {
-  const errors = diagnostics.filter(
+) => NodeJS.ProcessEnv | undefined {
+  let cached: NodeJS.ProcessEnv | undefined;
+
+  return diagnostics =>
+    startupReadsRuntimeEnvFile({
+      continueAfterActivationErrors: options.continueAfterActivationErrors,
+      diagnostics,
+    })
+      ? (cached ??= loadRuntimeEnv({
+          runtimeLocation: options.runtimeLocation,
+          suppliedEnv: options.suppliedEnv,
+          cwdDotEnv: options.cwdDotEnv,
+        }))
+      : undefined;
+}
+
+/**
+ * The one answer to "does this startup read the home env file", asked
+ * both before materialization commits and before the final activation
+ * plan resolves.
+ *
+ * An activation already blocked by an env-independent error must not have
+ * that error displaced by an env-file failure, so those startups skip the
+ * read entirely. A missing secret is the exception in the other
+ * direction: the env file is where the secret would come from, so
+ * skipping the read would be reporting a diagnostic the read might have
+ * removed. One predicate keeps both call sites in agreement — if only
+ * the second one skipped, materialization would have already read (and
+ * failed on) a file the startup then decided not to need.
+ */
+function startupReadsRuntimeEnvFile(options: {
+  readonly continueAfterActivationErrors: boolean | undefined;
+  readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
+}): boolean {
+  if (options.continueAfterActivationErrors === true) {
+    return true;
+  }
+
+  const errors = options.diagnostics.filter(
     diagnostic => diagnostic.severity === 'error',
   );
 
   return (
-    errors.length > 0 &&
-    errors.every(
+    errors.length === 0 ||
+    errors.some(
       diagnostic =>
-        diagnostic.code !== 'runtime_config_required_secret_missing',
+        diagnostic.code === 'runtime_config_required_secret_missing',
     )
   );
 }

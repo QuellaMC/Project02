@@ -367,6 +367,32 @@ describe('runtime-config --character verbs', () => {
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
+  it('rejects a scoped edit when the shared env file cannot be read', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-env-dir-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // The env file is unreadable, and the CLI reports that. It must report
+    // it before the overlay is committed: an edit that exits non-zero after
+    // durably writing "Bob" is worse than one that never ran.
+    mkdirSync(join(homeRoot, '.env'));
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+    expect(existsSync(dataRoot)).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
   it('rejects a scoped get from a foreign home even with no data directory', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-get-foreign-');
 
