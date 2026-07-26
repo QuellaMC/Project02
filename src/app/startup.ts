@@ -14,6 +14,7 @@ import {
   enforceCharacterPluginExpectations,
   planCharacterPackagePluginMaterialization,
 } from './character-plugins.ts';
+import {installedRuntimePluginCatalogEntry} from '../plugins/index.ts';
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {
   applyRuntimeConfigControlOperation,
@@ -578,12 +579,12 @@ function resolveCharacterConfigStartupRequest(options: {
     return options.request;
   }
 
-  const definition = options.plan.catalogEntries[options.request.pluginId];
+  const definition = installedRuntimePluginCatalogEntry(
+    options.plan.catalogEntries,
+    options.request.pluginId,
+  );
 
-  if (
-    definition === undefined ||
-    definition.manifest.id !== options.request.pluginId
-  ) {
+  if (definition === undefined) {
     throw new RuntimeConfigMutationError(
       `Plugin "${options.request.pluginId}" is not installed.`,
     );

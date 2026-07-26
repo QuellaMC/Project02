@@ -15,6 +15,7 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../api/contract.ts';
+import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import type {RuntimePlugin, RuntimePluginManifest} from '../api/types.ts';
 import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 
@@ -33,6 +34,29 @@ export type RuntimePluginHostServiceCatalogEntry = {
 
 export type RuntimePluginCatalogEntry =
   RuntimePluginHostServiceCatalogEntry | RuntimePluginPackageCatalogEntry;
+
+/**
+ * The one answer to "does this requested id name an installed plugin".
+ *
+ * Requested ids arrive from operator arguments and model tool input, so
+ * the catalog map is read as data: `constructor`, `toString`, and every
+ * other `Object.prototype` key resolve to an inherited function on a
+ * plain index, which then fails on `.manifest` instead of reporting the
+ * plugin as uninstalled. The manifest must also claim the key it was
+ * filed under, because a catalog entry keyed by one id and manifesting
+ * another would otherwise apply an edit to a different plugin than the
+ * caller named.
+ */
+export function installedRuntimePluginCatalogEntry(
+  catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,
+  pluginId: string,
+): RuntimePluginCatalogEntry | undefined {
+  const entry = ownJsonRecordValue(catalogEntries, pluginId);
+
+  return entry === undefined || entry.manifest.id !== pluginId
+    ? undefined
+    : entry;
+}
 
 export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
   Record<string, RuntimePluginHostServiceCatalogEntry>

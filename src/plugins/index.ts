@@ -12,6 +12,7 @@ export {
   defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds,
   hostScopedFirstPartyRuntimePluginIds,
+  installedRuntimePluginCatalogEntry,
   isHostOwnedFirstPartyRuntimePluginId,
   isHostScopedFirstPartyRuntimePluginId,
   type RuntimePluginCatalogEntry,

@@ -264,6 +264,30 @@ describe('runtime-config --character verbs', () => {
     });
   });
 
+  it.each(['constructor', 'toString', 'hasOwnProperty'])(
+    'reports an inherited object key like "%s" as an uninstalled plugin',
+    async pluginId => {
+      const homeRoot = createTestTempRoot('project02-scope-verbs-inherited-');
+
+      writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+
+      const rejected = await runConfigCli([
+        '--store',
+        homeRoot,
+        '--character',
+        'mira',
+        'plugin',
+        'enable',
+        pluginId,
+      ]);
+
+      expect(rejected.code).toBe(1);
+      expect(rejected.stderr).toContain(
+        `Plugin "${pluginId}" is not installed`,
+      );
+    },
+  );
+
   it('refuses to write character data into a directory that is not a Project02 home', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-foreign-');
 

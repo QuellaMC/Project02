@@ -24,8 +24,10 @@ import {
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
-import type {RuntimePluginCatalogEntry} from '../../plugins/index.ts';
-import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {
+  installedRuntimePluginCatalogEntry,
+  type RuntimePluginCatalogEntry,
+} from '../../plugins/index.ts';
 import {
   isLocalRuntimeTerminalError,
   formatCliTerminalErrorMessage,
@@ -363,15 +365,12 @@ async function runManifestAwarePluginActivation(options: {
     );
   }
 
-  const definition = ownJsonRecordValue(
+  const definition = installedRuntimePluginCatalogEntry(
     startup.activationPlan.catalogEntries,
     options.operation.pluginId,
   );
 
-  if (
-    definition === undefined ||
-    definition.manifest.id !== options.operation.pluginId
-  ) {
+  if (definition === undefined) {
     throw new RuntimeConfigCliUsageError(
       `Plugin "${options.operation.pluginId}" is not installed.`,
     );
@@ -679,15 +678,12 @@ function applyRuntimePluginSecretSetCommand(options: {
     {readonly kind: 'secret_set'}
   >['operation'];
 }) {
-  const definition = ownJsonRecordValue(
+  const definition = installedRuntimePluginCatalogEntry(
     options.catalogEntries,
     options.operation.pluginId,
   );
 
-  if (
-    definition === undefined ||
-    definition.manifest.id !== options.operation.pluginId
-  ) {
+  if (definition === undefined) {
     throw new RuntimeConfigCliUsageError(
       `Plugin "${options.operation.pluginId}" is not installed.`,
     );

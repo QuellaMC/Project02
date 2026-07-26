@@ -16,11 +16,12 @@ import {
   runtimeConfigDiagnosticMatchesPlugin,
   type ResolvedProject02RuntimeLocation,
 } from '../runtime/config/index.ts';
-import type {
-  RuntimePluginCatalogEntry,
-  RuntimePluginConfigControlHostState,
-  RuntimePluginReloader,
-  RuntimePluginReloadResult,
+import {
+  installedRuntimePluginCatalogEntry,
+  type RuntimePluginCatalogEntry,
+  type RuntimePluginConfigControlHostState,
+  type RuntimePluginReloader,
+  type RuntimePluginReloadResult,
 } from '../plugins/index.ts';
 import type {ResolvedProject02RuntimeConfig} from '../runtime/config/index.ts';
 
@@ -47,7 +48,10 @@ export function createConfiguredRuntimePluginReloader(options: {
 
   return Object.freeze({
     async reload(pluginId, reloadOptions): Promise<RuntimePluginReloadResult> {
-      const entry = catalogEntries[pluginId];
+      const entry = installedRuntimePluginCatalogEntry(
+        catalogEntries,
+        pluginId,
+      );
 
       if (entry === undefined || entry.catalogKind !== 'package') {
         return {
