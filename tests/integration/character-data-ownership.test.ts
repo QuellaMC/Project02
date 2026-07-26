@@ -187,6 +187,26 @@ describe('character data ownership marker', () => {
     expect(readFileSync(schemaPath(dataRoot), 'utf8')).toBe(markerBefore);
   });
 
+  it('accepts a padded character ID against the canonical marker it wrote', async () => {
+    const dataRoot = createTestTempRoot();
+
+    // The marker constructor canonicalizes before writing, so comparing a
+    // raw request against it made a padded ID claim the directory, stamp
+    // `mira`, and then mismatch against its own write.
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: ' mira ',
+      now: () => '2026-07-23T00:00:00.000Z',
+    });
+
+    expect(
+      requireCharacterDataMarker({
+        storageOptions: {storeRoot: dataRoot},
+        characterId: ' mira ',
+      }),
+    ).toMatchObject({scope: 'character-data', characterId: 'mira'});
+  });
+
   it('returns the validated marker from the readable character-data seam', async () => {
     const dataRoot = createTestTempRoot();
 

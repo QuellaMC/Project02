@@ -340,21 +340,33 @@ function requireCharacterDataMarkerScope(
   return marker;
 }
 
+/**
+ * Compares a requested character against the one the directory records.
+ *
+ * The requested id is normalized first because the stored one always is:
+ * `createLocalRuntimeStorageSchemaMarker` canonicalizes before writing.
+ * Comparing a raw request against a canonical marker made a padded id
+ * like `' mira '` claim the directory, write `mira` into the marker, and
+ * then fail against its own write — a mismatch reported between two
+ * spellings of one character. Normalizing both sides is what makes this
+ * an identity comparison rather than a string comparison.
+ */
 function assertExpectedCharacterDataMarker(
   layout: LocalRuntimeStorageLayout,
   marker: LocalRuntimeStorageSchemaMarker,
   characterId: string,
 ): LocalRuntimeCharacterDataStorageSchemaMarker {
   const characterDataMarker = requireCharacterDataMarkerScope(layout, marker);
+  const requestedCharacterId = normalizeLocalRuntimeCharacterId(characterId);
 
-  if (characterDataMarker.characterId !== characterId) {
+  if (characterDataMarker.characterId !== requestedCharacterId) {
     throw new LocalRuntimeStorageContractError(
       'character_identity_mismatch',
       `Character data directory "${layout.storeRoot}" holds history for ` +
         `character "${characterDataMarker.characterId}" but character ` +
-        `"${characterId}" was requested. Select ` +
+        `"${requestedCharacterId}" was requested. Select ` +
         `"${characterDataMarker.characterId}", or create fresh data for ` +
-        `"${characterId}".`,
+        `"${requestedCharacterId}".`,
     );
   }
 

@@ -89,6 +89,22 @@ describe('local runtime session store', () => {
     expect(await reopened.listSessions()).toEqual([selected, second]);
   });
 
+  it('creates sessions for a padded character ID instead of mismatching its own marker', async () => {
+    const storeRoot = await createTempStoreRoot();
+    // An embedded caller can hand this seam an unnormalized ID. The marker
+    // it writes is canonical, so a raw comparison failed the store against
+    // the identity it had just stamped, after durable state existed.
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: ' mira ',
+      now: fixedClock(['2026-07-26T00:00:00.000Z']),
+    });
+
+    const created = await store.createSession({sessionId: 'padded-id'});
+
+    await expect(store.readSession('padded-id')).resolves.toEqual(created);
+  });
+
   it('rejects a non-canonical creation clock without bricking the store', async () => {
     const storeRoot = await createTempStoreRoot();
     const invalid = createLocalRuntimeSessionStore({
