@@ -47,6 +47,13 @@ export type LoadedProject02CharacterOverlayConfig = {
   // type structurally incompatible with the global loaded config.
   readonly source: 'none' | 'overlay';
   readonly path?: string;
+  /**
+   * The bounded authored JSON object, retained on the same terms as the
+   * global loaded config: it survives failed schema validation so the
+   * control seam can repair the real document instead of rebuilding a
+   * minimal one and discarding everything the operator authored.
+   */
+  readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
@@ -121,6 +128,9 @@ function loadProject02CharacterOverlayConfig(options: {
     ...options,
     path,
     origin,
+    ...(accepted.authoredDocument === undefined
+      ? {}
+      : {authoredDocument: accepted.authoredDocument}),
     ...(accepted.config === undefined ? {} : {config: accepted.config}),
     diagnostics: [
       ...accepted.diagnostics,
@@ -133,6 +143,7 @@ function loadedOverlay(options: {
   readonly characterId: string;
   readonly path: string;
   readonly origin: RuntimeConfigDiagnosticOrigin;
+  readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 }): LoadedProject02CharacterOverlayConfig {
@@ -145,6 +156,12 @@ function loadedOverlay(options: {
     characterId: options.characterId,
     source: 'overlay',
     path: options.path,
+    ...(options.authoredDocument === undefined
+      ? {}
+      : {authoredDocument: options.authoredDocument}),
+    // An invalid overlay keeps its authored document but never its
+    // validated config: resolution, fingerprints, and reads must still
+    // treat it as unusable — only repair may look at the raw bytes.
     ...(options.config === undefined || hasErrors
       ? {}
       : {config: options.config}),

@@ -13,6 +13,12 @@
  */
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
+  isJsonBoundaryObject,
+  ownJsonRecordValue,
+  type JsonBoundaryObject,
+  type JsonBoundaryValue,
+} from '../../shared/json-boundary.ts';
+import {
   assertRuntimeConfigControlOperation,
   runtimePluginConfigControlMutation,
   type RuntimeConfigControlOperation,
@@ -374,21 +380,28 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
 
   const overlay = requiredCharacterOverlay(options.snapshot);
 
+  // The authored document when the file was readable, so a repair edits
+  // the operator's real bytes; the minimal versioned document only when
+  // there is nothing on disk to edit. Never the global bootstrap, which
+  // would seed a store root into the overlay.
   const overlayBase =
-    overlay.config ??
+    overlay.authoredDocument ??
     Object.freeze({
       version: runtimeConfigVersion,
     } satisfies Project02RuntimeConfig);
   const materialization = mergeCharacterMaterializationIntoOverlay({
     current: overlayBase,
     materialization: options.characterMaterialization,
-    overlayAbsent: overlay.config === undefined,
+    overlayAbsent: overlay.authoredDocument === undefined,
   });
   const preparedCandidate = prepareRuntimeConfigMutationCandidate({
     loadedConfig: {
       source: 'path',
       path: options.target.configPath,
-      config: materialization.config,
+      // The overlay's own authored layer: the shared preparer applies
+      // the operation to these bytes and validates the whole candidate,
+      // exactly as it does for the global document.
+      authoredDocument: materialization.document,
       diagnostics: Object.freeze([]),
     },
     ...(options.operation === undefined ? {} : {operation: options.operation}),
@@ -463,31 +476,44 @@ function assertCharacterScopedControlOperation(
 
 type CharacterMaterializationMerge =
   RuntimeConfigCharacterMaterializationOutcome & {
-    readonly config: Project02RuntimeConfig;
+    readonly document: JsonBoundaryObject;
   };
 
+/**
+ * Fills package-owned defaults into the overlay's authored document.
+ * It only ever adds what is missing, so it composes with repair: an
+ * authored value the package also defines stays exactly as written,
+ * including one that is currently invalid and about to be fixed.
+ */
 function mergeCharacterMaterializationIntoOverlay(options: {
-  readonly current: Project02RuntimeConfig;
+  readonly current: JsonBoundaryObject;
   readonly materialization: RuntimeConfigCharacterMaterialization | undefined;
   readonly overlayAbsent: boolean;
 }): CharacterMaterializationMerge {
-  if (options.materialization === undefined) {
-    return Object.freeze({
-      config: options.current,
-      configChanged: false,
-      autoEnabledPluginIds: Object.freeze([]),
-    });
+  if (
+    options.materialization === undefined ||
+    (!options.overlayAbsent && !options.materialization.fillMissingFields)
+  ) {
+    return unmaterializedOverlayDocument(options.current, false);
   }
 
-  if (!options.overlayAbsent && !options.materialization.fillMissingFields) {
-    return Object.freeze({
-      config: options.current,
-      configChanged: false,
-      autoEnabledPluginIds: Object.freeze([]),
-    });
+  const currentPlugins = authoredOverlaySection(options.current, 'plugins');
+
+  // A malformed plugins section cannot be materialized into. Leaving it
+  // untouched keeps the authored bytes intact for the candidate
+  // validation, which names the real problem instead of this merge
+  // inventing a second error for the same document.
+  if (
+    currentPlugins === undefined &&
+    options.current['plugins'] !== undefined
+  ) {
+    return unmaterializedOverlayDocument(
+      options.current,
+      options.overlayAbsent,
+    );
   }
 
-  const nextPlugins = {...options.current.plugins};
+  const nextPlugins: Record<string, JsonBoundaryValue> = {...currentPlugins};
   const autoEnabledPluginIds: string[] = [];
   let fieldsChanged = false;
 
@@ -495,15 +521,16 @@ function mergeCharacterMaterializationIntoOverlay(options: {
     options.materialization.document.plugins ?? {},
   ).sort((left, right) => left.localeCompare(right))) {
     const defaults = options.materialization.document.plugins?.[pluginId];
+    const authored = ownJsonRecordValue(currentPlugins, pluginId);
 
-    if (defaults === undefined) {
+    if (
+      defaults === undefined ||
+      (authored !== undefined && !isJsonBoundaryObject(authored))
+    ) {
       continue;
     }
 
-    const merged = mergeCharacterPluginMaterialization(
-      nextPlugins[pluginId],
-      defaults,
-    );
+    const merged = mergeCharacterPluginMaterialization(authored, defaults);
 
     if (!merged.changed) {
       continue;
@@ -516,7 +543,7 @@ function mergeCharacterMaterializationIntoOverlay(options: {
     }
   }
 
-  const config = fieldsChanged
+  const document = fieldsChanged
     ? Object.freeze({
         ...options.current,
         plugins: Object.freeze(nextPlugins),
@@ -524,7 +551,7 @@ function mergeCharacterMaterializationIntoOverlay(options: {
     : options.current;
 
   return Object.freeze({
-    config,
+    document,
     configChanged: options.overlayAbsent || fieldsChanged,
     autoEnabledPluginIds: Object.freeze(
       autoEnabledPluginIds.sort((left, right) => left.localeCompare(right)),
@@ -532,28 +559,53 @@ function mergeCharacterMaterializationIntoOverlay(options: {
   });
 }
 
+function unmaterializedOverlayDocument(
+  document: JsonBoundaryObject,
+  configChanged: boolean,
+): CharacterMaterializationMerge {
+  return Object.freeze({
+    document,
+    configChanged,
+    autoEnabledPluginIds: Object.freeze([]),
+  });
+}
+
+function authoredOverlaySection(
+  document: JsonBoundaryObject,
+  key: string,
+): JsonBoundaryObject | undefined {
+  const value = document[key];
+
+  return value !== undefined && isJsonBoundaryObject(value) ? value : undefined;
+}
+
 function mergeCharacterPluginMaterialization(
-  existing: Project02RuntimePluginConfig | undefined,
+  existing: JsonBoundaryObject | undefined,
   defaults: Project02RuntimePluginConfig,
 ): {
-  readonly plugin: Project02RuntimePluginConfig;
+  readonly plugin: JsonBoundaryObject;
   readonly changed: boolean;
   readonly autoEnabled: boolean;
 } {
+  const authoredEnabled = existing?.['enabled'];
   const enablementAdded =
-    existing?.enabled === undefined && defaults.enabled !== undefined;
+    authoredEnabled === undefined && defaults.enabled !== undefined;
   const config = mergeMissingCharacterPluginConfig({
-    current: existing?.config,
+    current: authoredOverlaySection(existing ?? {}, 'config'),
     defaults: defaults.config,
     createEmpty: existing === undefined,
   });
   const changed =
     existing === undefined || enablementAdded || config.fieldsChanged;
-  const enabled = existing?.enabled ?? defaults.enabled;
+  const enabled = authoredEnabled ?? defaults.enabled;
 
   return Object.freeze({
+    // The authored wrapper is preserved rather than rebuilt: an
+    // unknown or invalid field an operator wrote stays in the document
+    // for the candidate validation to name.
     plugin: changed
       ? Object.freeze({
+          ...existing,
           ...(enabled === undefined ? {} : {enabled}),
           ...(config.value === undefined ? {} : {config: config.value}),
         })
@@ -564,11 +616,11 @@ function mergeCharacterPluginMaterialization(
 }
 
 function mergeMissingCharacterPluginConfig(options: {
-  readonly current: Project02RuntimePluginConfig['config'];
+  readonly current: JsonBoundaryObject | undefined;
   readonly defaults: Project02RuntimePluginConfig['config'];
   readonly createEmpty: boolean;
 }): {
-  readonly value: Project02RuntimePluginConfig['config'];
+  readonly value: JsonBoundaryObject | undefined;
   readonly fieldsChanged: boolean;
 } {
   const missingEntries = Object.entries(options.defaults ?? {})

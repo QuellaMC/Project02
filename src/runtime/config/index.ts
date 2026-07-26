@@ -91,8 +91,10 @@ export {
 export {
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
+  blockingRuntimeConfigLayerDiagnostic,
   createRuntimeConfigAuthoredSnapshot,
   getRedactedRuntimeConfigValueAtPath,
+  type AuthoredRuntimeConfigLayer,
   type RuntimeConfigAuthoredSnapshot,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';

@@ -21,6 +21,7 @@ import {
   assertResolvedProject02HomeAdoptable,
   assertScopedMutationOperationAllowed,
   bindProject02CharacterRuntimeLocation,
+  blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
   configuredProject02CharacterId,
@@ -424,8 +425,15 @@ function planRuntimeCliActivationStartup(input: {
   // An invalid pre-existing overlay must not create durable state
   // either: read it before the home or character marker would be written.
   const preexistingOverlay = loadCharacterOverlayForStartup(runtimeLocation);
+  const repairsCharacterOverlay = startupRepairsCharacterOverlay({
+    overlay: preexistingOverlay,
+    request: options.characterConfigRequest,
+  });
 
-  if (diagnosticsHaveErrors(preexistingOverlay.diagnostics)) {
+  if (
+    diagnosticsHaveErrors(preexistingOverlay.diagnostics) &&
+    !repairsCharacterOverlay
+  ) {
     const invalidState = buildPreEnvState(preexistingOverlay);
 
     return rejectedStartup({
@@ -441,6 +449,7 @@ function planRuntimeCliActivationStartup(input: {
     plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
     catalogSnapshot: preMaterializationState.catalogSnapshot,
     request: options.characterConfigRequest,
+    repairsCharacterOverlay,
   });
 
   if (preflight.diagnostics.length > 0) {
@@ -717,11 +726,35 @@ function resolveCharacterConfigStartupRequest(options: {
   });
 }
 
+/**
+ * Whether this startup is the one repairing the overlay it just read.
+ *
+ * A config mutation is exactly the operator action that fixes an invalid
+ * authored value, so refusing to run it over an invalid overlay would
+ * leave the file editable only by hand — the asymmetry the global
+ * document does not have. The permission is narrow and safe: it needs a
+ * requested mutation, it needs authored bytes to edit (the same
+ * repairability rule both scopes share), and the transaction still
+ * validates the complete candidate before writing. A repair that would
+ * leave the overlay invalid is rejected there, and a startup that is
+ * merely reading an invalid overlay is rejected here as before.
+ */
+function startupRepairsCharacterOverlay(options: {
+  readonly overlay: LoadedProject02CharacterOverlayConfig;
+  readonly request: RuntimeCliCharacterConfigRequest | undefined;
+}): boolean {
+  return (
+    options.request !== undefined &&
+    blockingRuntimeConfigLayerDiagnostic(options.overlay) === undefined
+  );
+}
+
 function prepareCharacterMaterializationPreflight(options: {
   readonly expectations: CharacterPluginExpectations | undefined;
   readonly plan: PreparedProject02PluginActivationPlan;
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
   readonly request: RuntimeCliCharacterConfigRequest | undefined;
+  readonly repairsCharacterOverlay: boolean;
 }) {
   const request = resolveCharacterConfigStartupRequest({
     request: options.request,
@@ -739,7 +772,10 @@ function prepareCharacterMaterializationPreflight(options: {
     packagePlan,
     diagnostics: Object.freeze([
       ...(packagePlan.status === 'invalid' ? packagePlan.diagnostics : []),
-      ...materializationConfigPreflightDiagnostics(options.plan),
+      ...materializationConfigPreflightDiagnostics(
+        options.plan,
+        options.repairsCharacterOverlay,
+      ),
       ...declaredInvalidPackageDiagnostics({
         expectations: options.expectations,
         catalogSnapshot: options.catalogSnapshot,
@@ -750,6 +786,7 @@ function prepareCharacterMaterializationPreflight(options: {
 
 function materializationConfigPreflightDiagnostics(
   plan: PreparedProject02PluginActivationPlan,
+  repairsCharacterOverlay: boolean,
 ): readonly RuntimeConfigDiagnostic[] {
   return Object.freeze(
     plan.resolvedConfig.diagnostics.filter(
@@ -760,7 +797,12 @@ function materializationConfigPreflightDiagnostics(
         // initialization); every other error describes an invalid
         // authored global or overlay value and must fail before
         // materialization writes anything.
-        !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
+        !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
+        // Except the overlay's own errors when this startup is the
+        // repair: those describe the very values the requested mutation
+        // is about to rewrite. Global-document errors still block,
+        // because no character-scoped mutation can fix them.
+        !(repairsCharacterOverlay && diagnostic.origin?.scope === 'character'),
     ),
   );
 }

@@ -18,6 +18,7 @@ import {
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
+  type RuntimeConfigDiagnostic,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
 } from './types.ts';
@@ -210,6 +211,41 @@ export type RuntimeConfigAuthoredSnapshot = Readonly<{
   validatedConfig?: Project02RuntimeConfig;
 }>;
 
+/**
+ * One authored layer as the mutation machinery sees it, independent of
+ * which file it came from. A layer is repairable exactly when its
+ * authored document was readable: the edit then applies to the real
+ * bytes and the complete candidate is validated afterwards, so an
+ * invalid field can be fixed in place instead of only by hand.
+ */
+export type AuthoredRuntimeConfigLayer = {
+  readonly authoredDocument?: JsonBoundaryObject;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+};
+
+/**
+ * The one definition of "this layer failed to load so badly that no edit
+ * can be based on it". Absence is not such a failure — it is the state a
+ * bootstrap or a first overlay write is for — and neither is an invalid
+ * value inside a document that was read, because that is precisely what
+ * repair fixes. Every remaining error means there are no authored bytes
+ * to edit: unparseable JSON, an unreadable file, a rejected symlink.
+ *
+ * Global and character scope share this predicate so that "can I repair
+ * it with the CLI" has one answer per layer instead of one per file.
+ */
+export function blockingRuntimeConfigLayerDiagnostic(
+  layer: AuthoredRuntimeConfigLayer,
+): RuntimeConfigDiagnostic | undefined {
+  return layer.authoredDocument === undefined
+    ? layer.diagnostics.find(
+        diagnostic =>
+          diagnostic.severity === 'error' &&
+          diagnostic.code !== 'runtime_config_missing',
+      )
+    : undefined;
+}
+
 export function createRuntimeConfigAuthoredSnapshot(
   loadedConfig: LoadedProject02RuntimeConfig,
 ): RuntimeConfigAuthoredSnapshot {
@@ -272,14 +308,9 @@ export function prepareRuntimeConfigMutationCandidate(options: {
   readonly validateCandidate?:
     ((config: Project02RuntimeConfig) => void) | undefined;
 }): PreparedRuntimeConfigMutationCandidate {
-  const blockingDiagnostic =
-    options.loadedConfig.authoredDocument === undefined
-      ? options.loadedConfig.diagnostics.find(
-          diagnostic =>
-            diagnostic.severity === 'error' &&
-            diagnostic.code !== 'runtime_config_missing',
-        )
-      : undefined;
+  const blockingDiagnostic = blockingRuntimeConfigLayerDiagnostic(
+    options.loadedConfig,
+  );
 
   if (blockingDiagnostic !== undefined) {
     throw new TypeError(

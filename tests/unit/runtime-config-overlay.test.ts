@@ -13,6 +13,7 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 import {
   assertScopedMutationOperationAllowed,
+  blockingRuntimeConfigLayerDiagnostic,
   characterOverlayConfigPath,
   readCharacterOverlayForScope,
   runtimeConfigDiagnosticAttribution,
@@ -247,6 +248,40 @@ describe('character overlay config loader', () => {
       expect(loaded.diagnostics).toEqual([]);
     },
   );
+
+  it('retains the authored document of an invalid overlay but no config', () => {
+    const dataRoot = overlayDataRoot();
+
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {userDisplayName: 42},
+    });
+
+    const overlay = loadCharacterOverlay(dataRoot);
+
+    // Repairable: the authored bytes survive validation failure, so the
+    // control seam can edit the real document. Unusable: no validated
+    // config, so resolution and reads still treat the overlay as broken.
+    expect(overlay.authoredDocument).toEqual({
+      version: runtimeConfigVersion,
+      project02: {userDisplayName: 42},
+    });
+    expect(overlay.config).toBeUndefined();
+    expect(blockingRuntimeConfigLayerDiagnostic(overlay)).toBeUndefined();
+  });
+
+  it('reports no authored document when the overlay is not readable JSON', () => {
+    const dataRoot = overlayDataRoot();
+
+    writeFileSync(characterOverlayConfigPath(dataRoot), '{not json\n');
+
+    const overlay = loadCharacterOverlay(dataRoot);
+
+    // Nothing to base an edit on, so this layer stays unrepairable.
+    expect(overlay.authoredDocument).toBeUndefined();
+    expect(blockingRuntimeConfigLayerDiagnostic(overlay)).toMatchObject({
+      code: 'runtime_config_malformed_json',
+    });
+  });
 
   it('stays structurally incompatible with the global loaded-config type', () => {
     // Structural guard (R7): an overlay must never reach the global
@@ -562,6 +597,30 @@ describe('startup with a character overlay', () => {
         diagnostic => diagnostic.code === 'runtime_config_field_global_only',
       ),
     ).toMatchObject([{origin: {characterId: 'mira'}}]);
+  });
+
+  it('blocks a read-only startup on a repairable overlay value', async () => {
+    const homeRoot = createTestTempRoot();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // Authored bytes are readable, so the config CLI could repair this
+    // overlay. A startup that is not repairing it must still refuse: the
+    // permission is granted by a requested mutation, never by the shape
+    // of the invalid value.
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {userDisplayName: 42},
+    });
+
+    const startup = await resolveRuntimeCliStartup({
+      location: {storeRoot: homeRoot},
+      env: {},
+      factories: {},
+    });
+
+    expect(startup.status).toBe('config_invalid');
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
   });
 
   it('fails startup as character_invalid for an unknown configured character', async () => {

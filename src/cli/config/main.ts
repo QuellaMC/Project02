@@ -441,7 +441,7 @@ async function runCharacterScopedRuntimeConfigCommand(
   }
 
   if (command.kind !== 'check') {
-    assertScopedStartupConfigReadable(startup);
+    assertScopedStartupConfigReadable(startup, command.kind === 'mutate');
   }
 
   const target = resolveRuntimeConfigScopeTarget({
@@ -567,12 +567,18 @@ function writeCharacterScopedRuntimeConfigResult(options: {
  */
 function assertScopedStartupConfigReadable(
   startup: CharacterScopedRuntimeCliStartup,
+  mutatesOverlay: boolean,
 ): void {
   assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
   const blocking = startup.activationPlan.resolvedConfig.diagnostics.find(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
+      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
+      // A mutation is the repair, and by this point it has already
+      // committed: an overlay error still reported here describes a
+      // value the write did not fix, which the transaction would have
+      // rejected. Read-only verbs keep blocking on any overlay error.
+      !(mutatesOverlay && diagnostic.origin?.scope === 'character'),
   );
 
   if (blocking !== undefined) {

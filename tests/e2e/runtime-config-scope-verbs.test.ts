@@ -15,6 +15,7 @@ import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {
   characterOverlayConfigPath,
   runtimeConfigEnvVarName,
+  runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
@@ -657,6 +658,117 @@ describe('runtime-config --character verbs', () => {
     // home marker.
     expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('repairs an invalid authored overlay value, preserving the rest', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-repair-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    // Authored by hand and invalid: userDisplayName must be a string.
+    writeFileSync(
+      characterOverlayConfigPath(dataRoot),
+      `${JSON.stringify({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName: 42},
+        plugins: {demo: {enabled: false, config: {tone: 'warm'}}},
+      })}\n`,
+    );
+
+    const repaired = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(repaired.stderr).toBe('');
+    expect(repaired.code).toBe(0);
+    // The edit applied to the authored document, so config the operator
+    // wrote but did not name survives the repair — the same guarantee
+    // the global document already gives.
+    const written = JSON.parse(
+      readFileSync(characterOverlayConfigPath(dataRoot), 'utf8'),
+    ) as Record<string, unknown>;
+
+    expect(written['project02']).toEqual({userDisplayName: 'Bob'});
+    expect(written['plugins']).toMatchObject({
+      demo: {enabled: false, config: {tone: 'warm'}},
+    });
+  });
+
+  it('does not write when an overlay repair leaves another invalid field', async () => {
+    const homeRoot = createTestTempRoot(
+      'project02-scope-verbs-repair-partial-',
+    );
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeFileSync(
+      characterOverlayConfigPath(dataRoot),
+      `${JSON.stringify({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName: 42, roleModelProvider: 'unsupported'},
+      })}\n`,
+    );
+    const before = readFileSync(characterOverlayConfigPath(dataRoot), 'utf8');
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Bob',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('Error:');
+    expect(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')).toBe(
+      before,
+    );
+  });
+
+  it('still refuses to read an invalid overlay it is not repairing', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-repair-read-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeFileSync(
+      characterOverlayConfigPath(dataRoot),
+      `${JSON.stringify({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName: 42},
+      })}\n`,
+    );
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.userDisplayName',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain('[character mira]');
   });
 
   it('refuses to initialize a marker-less directory holding foreign content', async () => {

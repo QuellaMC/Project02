@@ -25,6 +25,7 @@ import {
   RuntimeConfigLocationError,
 } from './load.ts';
 import {
+  blockingRuntimeConfigLayerDiagnostic,
   canonicalRuntimeConfigMutationPath,
   commitPreparedRuntimeConfigMutation,
   createRuntimeConfigAuthoredSnapshot,
@@ -379,6 +380,11 @@ function runtimeConfigMutationMovesEffectiveHome(
   );
 }
 
+/**
+ * The overlay obeys the same repairability rule as the global document:
+ * an invalid authored value is what `set` and `unset` are for, so only a
+ * layer with no readable authored bytes blocks the mutation.
+ */
 function assertCharacterOverlayMutable(
   target: ResolvedRuntimeConfigScopeTarget,
   overlay: LoadedProject02CharacterOverlayConfig | undefined,
@@ -387,9 +393,7 @@ function assertCharacterOverlayMutable(
     return;
   }
 
-  const blocking = overlay.diagnostics.find(
-    diagnostic => diagnostic.severity === 'error',
-  );
+  const blocking = blockingRuntimeConfigLayerDiagnostic(overlay);
 
   if (blocking !== undefined) {
     throw new RuntimeConfigMutationError(
