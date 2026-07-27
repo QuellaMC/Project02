@@ -12,14 +12,14 @@
  * both answers come from the same walk they cannot drift.
  */
 import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readdirSync,
-  readSync,
-} from 'node:fs';
-import type {BigIntStats} from 'node:fs';
+  closeFileSync,
+  fileSystemConstants,
+  listDirectoryNamesSync,
+  openFileSync,
+  readBytesFromFileSync,
+  statFileSync,
+  type BigIntStats,
+} from './file-system.ts';
 import {isAbsolute, join, resolve, sep} from 'node:path';
 
 import {
@@ -375,7 +375,9 @@ function planDirectory(options: {
   let names: string[];
 
   try {
-    names = readdirSync(options.directory.realPackageRoot).sort(compareText);
+    names = listDirectoryNamesSync(options.directory.realPackageRoot).sort(
+      compareText,
+    );
   } catch {
     throw captureError(options.directory.realPackageRoot, 'unreadable');
   }
@@ -546,11 +548,11 @@ function readBoundRegularFile(options: {
     // The path is already canonical, so opening without following is not a
     // restriction on links — it is what keeps the descriptor bound to a real
     // file rather than to a name that could be repointed after resolution.
-    descriptor = openSync(
+    descriptor = openFileSync(
       options.path,
-      constants.O_RDONLY | constants.O_NOFOLLOW,
+      fileSystemConstants.O_RDONLY | fileSystemConstants.O_NOFOLLOW,
     );
-    const openedStat = fstatSync(descriptor, {bigint: true});
+    const openedStat = statFileSync(descriptor);
 
     if (!openedStat.isFile()) {
       throw captureError(options.path, 'not_regular');
@@ -563,7 +565,7 @@ function readBoundRegularFile(options: {
       path: options.path,
       byteLength: Number(openedStat.size),
     });
-    const finalOpenedStat = fstatSync(descriptor, {bigint: true});
+    const finalOpenedStat = statFileSync(descriptor);
 
     if (
       !filesystemStatsEqual(openedStat, finalOpenedStat) ||
@@ -580,7 +582,7 @@ function readBoundRegularFile(options: {
     throw captureError(options.path, 'unreadable');
   } finally {
     if (descriptor !== undefined) {
-      closeSync(descriptor);
+      closeFileSync(descriptor);
     }
   }
 }
@@ -594,7 +596,7 @@ function readExactlyFromDescriptor(options: {
   let offset = 0;
 
   while (offset < source.byteLength) {
-    const bytesRead = readSync(
+    const bytesRead = readBytesFromFileSync(
       options.descriptor,
       source,
       offset,
@@ -608,7 +610,15 @@ function readExactlyFromDescriptor(options: {
     offset += bytesRead;
   }
 
-  if (readSync(options.descriptor, Buffer.allocUnsafe(1), 0, 1, null) !== 0) {
+  if (
+    readBytesFromFileSync(
+      options.descriptor,
+      Buffer.allocUnsafe(1),
+      0,
+      1,
+      null,
+    ) !== 0
+  ) {
     throw captureError(options.path, 'changed');
   }
   return source;

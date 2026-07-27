@@ -17,11 +17,15 @@
  * decides whether one is acceptable, and it raises no domain errors. It reports
  * what is there; the caller says what it accepts and throws its own type.
  */
-import {lstatSync, readlinkSync, realpathSync} from 'node:fs';
-import type {BigIntStats} from 'node:fs';
-import {lstat} from 'node:fs/promises';
 import {basename, dirname, isAbsolute, relative, resolve, sep} from 'node:path';
 
+import {
+  lstatPath,
+  lstatPathSync,
+  nativeRealPathSync,
+  readLinkTargetSync,
+  type BigIntStats,
+} from './file-system.ts';
 import {isNodeErrorWithCode} from './node-error.ts';
 
 export class PathResolutionError extends Error {
@@ -66,7 +70,7 @@ export function describeRealEntry(path: string): RealEntry {
   let stats: BigIntStats;
 
   try {
-    stats = lstatSync(path, {bigint: true});
+    stats = lstatPathSync(path);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT')
       ? Object.freeze({kind: 'absent', error})
@@ -86,7 +90,7 @@ export async function describeRealEntryAsync(path: string): Promise<RealEntry> {
   let stats: BigIntStats;
 
   try {
-    stats = await lstat(path, {bigint: true});
+    stats = await lstatPath(path);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT')
       ? Object.freeze({kind: 'absent', error})
@@ -129,7 +133,7 @@ export type CanonicalPathOptions = {
 /**
  * Canonicalizes a path that need not exist.
  *
- * `realpathSync` fails on the first missing component, but callers routinely
+ * The OS resolver fails on the first missing component, but callers routinely
  * name something they are about to create, so the missing tail is resolved
  * component by component against the deepest existing ancestor.
  *
@@ -153,7 +157,7 @@ function canonicalAbsolutePath(
   followedLinks: Set<string>,
 ): string {
   try {
-    return realpathSync.native(path);
+    return nativeRealPathSync(path);
   } catch {
     const linkTarget = followDanglingLinks
       ? danglingLinkTarget(path, followedLinks)
@@ -170,7 +174,7 @@ function danglingLinkTarget(
   followedLinks: Set<string>,
 ): string | undefined {
   try {
-    if (!lstatSync(path).isSymbolicLink()) {
+    if (!lstatPathSync(path).isSymbolicLink()) {
       return undefined;
     }
 
@@ -181,7 +185,7 @@ function danglingLinkTarget(
     }
 
     followedLinks.add(path);
-    return resolve(dirname(path), readlinkSync(path));
+    return resolve(dirname(path), readLinkTargetSync(path));
   } catch (error: unknown) {
     if (error instanceof PathResolutionError) {
       throw error;

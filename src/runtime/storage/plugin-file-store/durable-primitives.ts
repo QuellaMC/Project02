@@ -1,13 +1,14 @@
 import {createHash, type Hash} from 'node:crypto';
-import {
-  type Dirent,
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-} from 'node:fs';
 import {join, parse, resolve} from 'node:path';
 
+import {
+  listDirectoryEntriesSync,
+  lstatPathSync,
+  readFileBytesSync,
+  readTextFileSync,
+  removePathSync,
+  type Dirent,
+} from '../../../shared/file-system.ts';
 import {
   canonicalPath,
   describeRealEntry,
@@ -249,7 +250,7 @@ export function assertRegularFile(path: string, label: string): void {
 export function readOptionalRegularFile(path: string): string | undefined {
   try {
     assertRegularFile(path, 'Plugin fileStore path');
-    return readFileSync(path, 'utf8');
+    return readTextFileSync(path);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return undefined;
@@ -264,7 +265,7 @@ export function readOptionalRegularFileBuffer(
 ): Buffer | undefined {
   try {
     assertRegularFile(path, 'Plugin fileStore path');
-    return readFileSync(path);
+    return readFileBytesSync(path);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return undefined;
@@ -338,7 +339,7 @@ export function readPersistedDurableRevision(root: string): number | undefined {
   const revisionPath = join(root, durableRevisionFileName);
 
   try {
-    const parsed = Number(readFileSync(revisionPath, 'utf8').trim());
+    const parsed = Number(readTextFileSync(revisionPath).trim());
 
     if (Number.isSafeInteger(parsed) && parsed >= 0) {
       return parsed;
@@ -400,7 +401,7 @@ function readDurablePathModesFile(
   const modesPath = join(root, durablePathModesFileName);
 
   try {
-    const parsed = JSON.parse(readFileSync(modesPath, 'utf8')) as unknown;
+    const parsed = JSON.parse(readTextFileSync(modesPath)) as unknown;
 
     if (!isPlainObject(parsed)) {
       throw new TypeError('Plugin file store path modes are malformed.');
@@ -449,9 +450,7 @@ export function writeDurablePathModes(
 
 function durablePathModesFileStamp(root: string): string {
   try {
-    const stat = lstatSync(join(root, durablePathModesFileName), {
-      bigint: true,
-    });
+    const stat = lstatPathSync(join(root, durablePathModesFileName));
 
     return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(
       ':',
@@ -518,7 +517,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(directory, {withFileTypes: true});
+    entries = listDirectoryEntriesSync(directory);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;
@@ -536,7 +535,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
     }
 
     if (entry.isFile() && isAbandonedAtomicReplacementFile(entry.name)) {
-      rmSync(entryPath, {force: true});
+      removePathSync(entryPath, {force: true});
     }
   }
 }
@@ -544,7 +543,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
 function countDurableStoreEntries(directory: string): number {
   let count = 0;
 
-  for (const entry of readdirSync(directory, {withFileTypes: true})) {
+  for (const entry of listDirectoryEntriesSync(directory)) {
     if (
       entry.name === durableRevisionFileName ||
       entry.name === durablePathModesFileName ||
@@ -569,7 +568,7 @@ function countDurableStoreEntries(directory: string): number {
     }
 
     if (entry.name.endsWith('.jsonl')) {
-      count += readFileSync(entryPath, 'utf8').match(/\n/gu)?.length ?? 0;
+      count += readTextFileSync(entryPath).match(/\n/gu)?.length ?? 0;
       continue;
     }
 
@@ -625,7 +624,7 @@ function assertDurableJsonlPathMode(options: {
   if (options.path.endsWith('.jsonl')) {
     try {
       const records = parseRuntimePluginJsonlContent(
-        readFileSync(options.filePath, 'utf8'),
+        readTextFileSync(options.filePath),
       );
 
       if (records.length !== 1 || !Array.isArray(records[0])) {
@@ -643,7 +642,7 @@ function assertDurableJsonlPathMode(options: {
   }
 
   try {
-    JSON.parse(readFileSync(options.filePath, 'utf8'));
+    JSON.parse(readTextFileSync(options.filePath));
   } catch (error: unknown) {
     if (isMissingFileError(error) || error instanceof SyntaxError) {
       return;
@@ -667,7 +666,7 @@ function assertDurableJsonPathMode(options: {
   }
 
   try {
-    lstatSync(options.filePath);
+    lstatPathSync(options.filePath);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;

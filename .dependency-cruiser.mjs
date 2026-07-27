@@ -62,6 +62,18 @@ export default {
       to: { path: '^src/', pathNot: ['^src/shared/'] }
     },
     {
+      name: 'fs-only-in-file-system-seam',
+      comment:
+        'Rule 2c — node:fs is importable from src/shared/file-system.ts and ' +
+        'nowhere else, so "which files touch the disk" has a one-word ' +
+        'answer. Add the operation to the seam instead of reaching past it. ' +
+        'Green with no exemptions: a violation here means a second ' +
+        'filesystem boundary is growing.',
+      severity: 'error',
+      from: { path: '^src/', pathNot: ['^src/shared/file-system\\.ts$'] },
+      to: { path: '^fs(/promises)?$', dependencyTypes: ['core'] }
+    },
+    {
       name: 'contracts-no-impl-value-deps',
       comment:
         'Rule 3 — contract files (contract.ts, contracts.ts, *-contract.ts) ' +

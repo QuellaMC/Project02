@@ -7,7 +7,7 @@
  * and commits to the target captured before preparation. Selector drift
  * conflicts; it never retargets or restarts the transaction.
  */
-import {existsSync} from 'node:fs';
+import {pathExistsSync} from '../../shared/file-system.ts';
 import {dirname} from 'node:path';
 
 import {createProject02HomeLayout} from '../storage/layout-contract.ts';
@@ -499,7 +499,7 @@ function runtimeConfigControlOverlayLockTarget(options: {
     canonicalPath,
   };
 
-  if (!existsSync(dirname(canonicalPath))) {
+  if (!pathExistsSync(dirname(canonicalPath))) {
     return Object.freeze(overlay);
   }
 
@@ -629,7 +629,7 @@ function assertRuntimeConfigOverlayLockStillBound(
     return;
   }
 
-  const parentExists = existsSync(dirname(overlay.canonicalPath));
+  const parentExists = pathExistsSync(dirname(overlay.canonicalPath));
 
   if (
     canonicalRuntimeConfigMutationPath(overlay.displayPath) !==

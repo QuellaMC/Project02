@@ -24,8 +24,7 @@
  *   Those are "the plugin asked for something invalid", not "the store is
  *   damaged", and the plugin host branches on them.
  */
-import {readFileSync} from 'node:fs';
-
+import {readTextFileSync} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
@@ -36,7 +35,7 @@ import {LocalRuntimeStorageContractError} from './layout-contract.ts';
  */
 export function readOptionalStoreText(path: string): string | undefined {
   try {
-    return readFileSync(path, 'utf8');
+    return readTextFileSync(path);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;
@@ -52,7 +51,7 @@ export function readOptionalStoreText(path: string): string | undefined {
  */
 export function readStoreText(path: string): string {
   try {
-    return readFileSync(path, 'utf8');
+    return readTextFileSync(path);
   } catch (error: unknown) {
     throw storeReadFailed(path, error);
   }

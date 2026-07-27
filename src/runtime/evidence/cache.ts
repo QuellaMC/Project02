@@ -1,4 +1,4 @@
-import {statSync} from 'node:fs';
+import {statPathSync} from '../../shared/file-system.ts';
 import {basename} from 'node:path';
 import {
   CompleteJsonLinesError,
@@ -182,7 +182,7 @@ function readRuntimeEvidenceFileStamp(
   filePath: string,
 ): RuntimeEvidenceFileStamp {
   try {
-    const stat = statSync(filePath, {bigint: true});
+    const stat = statPathSync(filePath);
 
     return Object.freeze({
       exists: true,

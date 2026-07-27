@@ -1,4 +1,9 @@
-import {existsSync, readFileSync, statSync} from 'node:fs';
+import {
+  pathExistsSync,
+  readTextFileSync,
+  statPathSync,
+  type BigIntStats,
+} from '../../shared/file-system.ts';
 import {dirname} from 'node:path';
 
 import {
@@ -108,7 +113,7 @@ export function loadSelectedProject02RuntimeConfig(
 
   assertSelectedRuntimeConfigStillBound(selectedConfig);
 
-  if (!existsSync(selectedConfig.canonicalPath)) {
+  if (!pathExistsSync(selectedConfig.canonicalPath)) {
     if (selectedConfig.source === 'default') {
       return registerSelectedLoadedProject02RuntimeConfigSnapshot({
         source: 'none',
@@ -267,10 +272,10 @@ function readRuntimeConfigSource(path: string):
       readonly status: 'rejected';
       readonly diagnostic: RuntimeConfigDiagnostic;
     } {
-  let fileStat: ReturnType<typeof statSync>;
+  let fileStat: BigIntStats;
 
   try {
-    fileStat = statSync(path);
+    fileStat = statPathSync(path);
   } catch {
     return {
       status: 'rejected',
@@ -293,7 +298,7 @@ function readRuntimeConfigSource(path: string):
     };
   }
 
-  if (fileStat.size > maxProject02RuntimeConfigBytes) {
+  if (fileStat.size > BigInt(maxProject02RuntimeConfigBytes)) {
     return {
       status: 'rejected',
       diagnostic: runtimeConfigLimitDiagnostic(
@@ -305,7 +310,7 @@ function readRuntimeConfigSource(path: string):
   let source: string;
 
   try {
-    source = readFileSync(path, 'utf8');
+    source = readTextFileSync(path);
   } catch {
     return {
       status: 'rejected',

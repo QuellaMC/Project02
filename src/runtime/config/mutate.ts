@@ -1,4 +1,4 @@
-import {unlinkSync} from 'node:fs';
+import {unlinkPathSync} from '../../shared/file-system.ts';
 
 import {
   createJsonBoundaryObjectSnapshot,
@@ -795,7 +795,7 @@ function restorePreviousConfigState(
       // check-then-act version raced anything else cleaning up the same
       // failed mutation.
       try {
-        unlinkSync(previousConfigState.path);
+        unlinkPathSync(previousConfigState.path);
       } catch (error: unknown) {
         if (!isNodeErrorWithCode(error, 'ENOENT')) {
           throw error;

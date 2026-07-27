@@ -1,6 +1,14 @@
-import {readFileSync, readdirSync, type Dirent} from 'node:fs';
-import {mkdir, readFile, readdir, rmdir} from 'node:fs/promises';
 import {join} from 'node:path';
+import {
+  listDirectoryEntries,
+  listDirectoryNames,
+  listDirectoryNamesSync,
+  makeDirectory,
+  readTextFile,
+  readTextFileSync,
+  removeDirectory,
+  type Dirent,
+} from '../../shared/file-system.ts';
 import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
@@ -377,7 +385,7 @@ async function createSessionsRoot(
   layout: LocalRuntimeStorageLayout,
 ): Promise<void> {
   try {
-    await mkdir(layout.sessionsRoot, {recursive: true});
+    await makeDirectory(layout.sessionsRoot, {recursive: true});
   } catch {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -390,7 +398,7 @@ async function createStoreRoot(
   layout: LocalRuntimeStorageLayout,
 ): Promise<void> {
   try {
-    await mkdir(layout.storeRoot, {recursive: true});
+    await makeDirectory(layout.storeRoot, {recursive: true});
   } catch {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -405,7 +413,7 @@ async function readSessionCatalog(
   let catalog: string;
 
   try {
-    catalog = await readFile(layout.sessionCatalogPath, 'utf8');
+    catalog = await readTextFile(layout.sessionCatalogPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       if (await localRuntimeSessionsRootHasDurableEvidence(layout)) {
@@ -431,7 +439,7 @@ async function readSessionCatalogEntry(
   let catalog: string;
 
   try {
-    catalog = await readFile(layout.sessionCatalogPath, 'utf8');
+    catalog = await readTextFile(layout.sessionCatalogPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       await assertRequestedSessionIsNotMissingFromCatalog(layout, sessionId);
@@ -466,7 +474,7 @@ function readSessionCatalogEntrySync(
   let catalog: string;
 
   try {
-    catalog = readFileSync(layout.sessionCatalogPath, 'utf8');
+    catalog = readTextFileSync(layout.sessionCatalogPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       assertRequestedSessionIsNotMissingFromCatalogSync(layout, sessionId);
@@ -596,7 +604,7 @@ async function assertSessionCatalogCoversDurableSessionDirectories(
   let entries: Dirent[];
 
   try {
-    entries = await readdir(layout.sessionsRoot, {withFileTypes: true});
+    entries = await listDirectoryEntries(layout.sessionsRoot);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return;
@@ -655,7 +663,7 @@ async function localRuntimeSessionsRootHasDurableEvidence(
   layout: LocalRuntimeStorageLayout,
 ): Promise<boolean> {
   try {
-    const entries = await readdir(layout.sessionsRoot, {withFileTypes: true});
+    const entries = await listDirectoryEntries(layout.sessionsRoot);
 
     for (const entry of entries) {
       if (!entry.isDirectory()) {
@@ -688,7 +696,7 @@ async function localRuntimeSessionDirectoryHasDurableEvidence(
   sessionRoot: string,
 ): Promise<boolean> {
   try {
-    return (await readdir(sessionRoot)).length > 0;
+    return (await listDirectoryNames(sessionRoot)).length > 0;
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
@@ -705,7 +713,7 @@ function localRuntimeSessionDirectoryHasDurableEvidenceSync(
   sessionRoot: string,
 ): boolean {
   try {
-    return readdirSync(sessionRoot).length > 0;
+    return listDirectoryNamesSync(sessionRoot).length > 0;
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
@@ -1014,7 +1022,7 @@ async function createSessionDirectory(
   }
 
   try {
-    await mkdir(sessionRoot);
+    await makeDirectory(sessionRoot);
     return {path: sessionRoot, created: true};
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'EEXIST')) {
@@ -1038,7 +1046,7 @@ async function rollbackCreatedSessionDirectory(
   originalError: unknown,
 ): Promise<never> {
   try {
-    await rmdir(sessionRoot);
+    await removeDirectory(sessionRoot);
   } catch (cleanupError: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',

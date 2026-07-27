@@ -1,16 +1,20 @@
 import {randomUUID} from 'node:crypto';
-import {
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
 import {hostname} from 'node:os';
 import {basename, join} from 'node:path';
-import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {
+  listDirectoryNamesSync,
+  makeDirectory,
+  makeDirectorySync,
+  readTextFile,
+  readTextFileSync,
+  removePath,
+  removePathSync,
+  renamePathSync,
+  statPathNumericSync,
+  writeTextFile,
+  writeTextFileSync,
+  type Stats,
+} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {processIsAlive} from './process-liveness.ts';
 
@@ -563,7 +567,7 @@ function errorFromUnknown(error: unknown, message: string): Error {
 
 async function prepareLocksRoot(locksRoot: string): Promise<void> {
   try {
-    await mkdir(locksRoot, {recursive: true});
+    await makeDirectory(locksRoot, {recursive: true});
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -575,7 +579,7 @@ async function prepareLocksRoot(locksRoot: string): Promise<void> {
 
 function prepareLocksRootSync(locksRoot: string): void {
   try {
-    mkdirSync(locksRoot, {recursive: true});
+    makeDirectorySync(locksRoot, {recursive: true});
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -593,7 +597,7 @@ async function tryCreateMutationLock(
   }
 
   try {
-    await mkdir(options.lockPath);
+    await makeDirectory(options.lockPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'EEXIST')) {
       return undefined;
@@ -617,11 +621,11 @@ async function tryCreateMutationLock(
   } satisfies MutationLockOwner;
 
   try {
-    await writeFile(ownerPath(options.lockPath), `${JSON.stringify(owner)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    await writeTextFile(
+      ownerPath(options.lockPath),
+      `${JSON.stringify(owner)}\n`,
+      {flag: 'wx', mode: 0o600},
+    );
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;
@@ -669,7 +673,7 @@ function tryCreateMutationLockSync(
   }
 
   try {
-    mkdirSync(options.lockPath);
+    makeDirectorySync(options.lockPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'EEXIST')) {
       return undefined;
@@ -693,11 +697,11 @@ function tryCreateMutationLockSync(
   } satisfies MutationLockOwner;
 
   try {
-    writeFileSync(ownerPath(options.lockPath), `${JSON.stringify(owner)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    writeTextFileSync(
+      ownerPath(options.lockPath),
+      `${JSON.stringify(owner)}\n`,
+      {flag: 'wx', mode: 0o600},
+    );
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;
@@ -747,7 +751,7 @@ async function releaseOwnedMutationLock(
     return;
   }
 
-  await rm(lockPath, {force: true, recursive: true});
+  await removePath(lockPath, {force: true, recursive: true});
 }
 
 function releaseOwnedMutationLockSync(lockPath: string, nonce: string): void {
@@ -757,7 +761,7 @@ function releaseOwnedMutationLockSync(lockPath: string, nonce: string): void {
     return;
   }
 
-  rmSync(lockPath, {force: true, recursive: true});
+  removePathSync(lockPath, {force: true, recursive: true});
 }
 
 function reclaimAbandonedMutationLock(
@@ -800,10 +804,10 @@ function reclaimAbandonedMutationLockSync(
     return reclaimObservedMutationLockSync(options, owner);
   }
 
-  let observedLockStat: ReturnType<typeof statSync>;
+  let observedLockStat: Stats;
 
   try {
-    observedLockStat = statSync(options.lockPath);
+    observedLockStat = statPathNumericSync(options.lockPath);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT');
   }
@@ -822,10 +826,10 @@ function reclaimAbandonedMutationLockSync(
       return reclaimObservedMutationLockUnderIntentSync(options, currentOwner);
     }
 
-    let currentLockStat: ReturnType<typeof statSync>;
+    let currentLockStat: Stats;
 
     try {
-      currentLockStat = statSync(options.lockPath);
+      currentLockStat = statPathNumericSync(options.lockPath);
     } catch (error: unknown) {
       return isNodeErrorWithCode(error, 'ENOENT');
     }
@@ -913,16 +917,16 @@ function withMutationLockReclamationIntentSync(
   let created = false;
 
   try {
-    mkdirSync(intentPath);
+    makeDirectorySync(intentPath);
     created = true;
-    writeFileSync(ownerPath(intentPath), `${JSON.stringify(intentOwner)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    writeTextFileSync(
+      ownerPath(intentPath),
+      `${JSON.stringify(intentOwner)}\n`,
+      {flag: 'wx', mode: 0o600},
+    );
   } catch (error: unknown) {
     if (created) {
-      rmSync(intentPath, {force: true, recursive: true});
+      removePathSync(intentPath, {force: true, recursive: true});
     }
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -934,7 +938,7 @@ function withMutationLockReclamationIntentSync(
   try {
     return operation();
   } finally {
-    rmSync(intentPath, {force: true, recursive: true});
+    removePathSync(intentPath, {force: true, recursive: true});
   }
 }
 
@@ -945,7 +949,7 @@ function hasActiveMutationLockReclamationIntentSync(
   let entries: readonly string[];
 
   try {
-    entries = readdirSync(options.locksRoot);
+    entries = listDirectoryNamesSync(options.locksRoot);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
@@ -968,17 +972,17 @@ function hasActiveMutationLockReclamationIntentSync(
 
     if (owner !== undefined) {
       if (owner.hostname === hostname() && !processIsAlive(owner.pid)) {
-        rmSync(intentPath, {force: true, recursive: true});
+        removePathSync(intentPath, {force: true, recursive: true});
         continue;
       }
 
       return true;
     }
 
-    let intentStat: ReturnType<typeof statSync>;
+    let intentStat: Stats;
 
     try {
-      intentStat = statSync(intentPath);
+      intentStat = statPathNumericSync(intentPath);
     } catch (error: unknown) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
         continue;
@@ -994,7 +998,7 @@ function hasActiveMutationLockReclamationIntentSync(
       return true;
     }
 
-    rmSync(intentPath, {force: true, recursive: true});
+    removePathSync(intentPath, {force: true, recursive: true});
   }
 
   return false;
@@ -1006,7 +1010,7 @@ function readMutationLockReclamationIntentOwnerSync(
   let raw: string;
 
   try {
-    raw = readFileSync(ownerPath(intentPath), 'utf8');
+    raw = readTextFileSync(ownerPath(intentPath));
   } catch {
     return undefined;
   }
@@ -1025,12 +1029,12 @@ function quarantineMutationLockSync(
   const quarantinePath = `${options.lockPath}.stale-${randomUUID()}`;
 
   try {
-    renameSync(options.lockPath, quarantinePath);
+    renamePathSync(options.lockPath, quarantinePath);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT');
   }
 
-  rmSync(quarantinePath, {force: true, recursive: true});
+  removePathSync(quarantinePath, {force: true, recursive: true});
   return true;
 }
 
@@ -1040,7 +1044,7 @@ async function readMutationLockOwner(
   let raw: string;
 
   try {
-    raw = await readFile(ownerPath(lockPath), 'utf8');
+    raw = await readTextFile(ownerPath(lockPath));
   } catch {
     return undefined;
   }
@@ -1060,7 +1064,7 @@ function readMutationLockOwnerSync(
   let raw: string;
 
   try {
-    raw = readFileSync(ownerPath(lockPath), 'utf8');
+    raw = readTextFileSync(ownerPath(lockPath));
   } catch {
     return undefined;
   }

@@ -1,6 +1,6 @@
-import {readFileSync} from 'node:fs';
 import {parseEnv} from 'node:util';
 
+import {readTextFileSync} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
 import {defaultRuntimeConfigEnvPath} from './load.ts';
@@ -129,7 +129,7 @@ function runtimeConfigEnvSelectsConfig(env: NodeJS.ProcessEnv): boolean {
  */
 function readOptionalEnvFile(path: string): string | undefined {
   try {
-    return readFileSync(path, 'utf8');
+    return readTextFileSync(path);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;

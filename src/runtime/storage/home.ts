@@ -5,9 +5,11 @@
  * per-character data dirs carry their own 'character-data' markers via
  * the session store's initialization path.
  */
-import type {Dirent} from 'node:fs';
-import {readdirSync} from 'node:fs';
-import {mkdir} from 'node:fs/promises';
+import {
+  listDirectoryEntriesSync,
+  makeDirectory,
+  type Dirent,
+} from '../../shared/file-system.ts';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -130,7 +132,7 @@ async function ensureRealCharacterDataRoot(
   const state = assertRealCharacterDataRootIfPresent(layout);
 
   if (state === 'absent') {
-    await mkdir(layout.characterDataRoot, {recursive: true});
+    await makeDirectory(layout.characterDataRoot, {recursive: true});
   }
 }
 
@@ -226,7 +228,7 @@ function project02HomeHasForeignContent(layout: Project02HomeLayout): boolean {
   let entries;
 
   try {
-    entries = readdirSync(layout.homeRoot, {withFileTypes: true});
+    entries = listDirectoryEntriesSync(layout.homeRoot);
   } catch (error: unknown) {
     if (
       isNodeErrorWithCode(error, 'ENOENT') ||

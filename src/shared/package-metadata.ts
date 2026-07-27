@@ -4,14 +4,16 @@
  * descriptor parsing, and package identity.
  */
 import {
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
-import type {BigIntStats, Dirent} from 'node:fs';
+  listDirectoryEntriesSync,
+  lstatPathSync,
+  readTextFileSync,
+  realPathSync,
+  statPathSync,
+  type BigIntStats,
+  type Dirent,
+} from './file-system.ts';
 import {basename, dirname, join, parse as parsePath, resolve} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 import {
   createJsonBoundarySnapshot,
@@ -78,24 +80,24 @@ function snapshotDirectory(
   // Following pins the identity of the directory a linked root names, which is
   // the state the rest of discovery reads. Not following reports a link as
   // neither a directory nor equal to itself, which is the strict rejection.
-  const statRoot = options.followRootLink ? statSync : lstatSync;
+  const statRoot = options.followRootLink ? statPathSync : lstatPathSync;
 
   try {
-    const initialStat = statRoot(normalizedRoot, {bigint: true});
+    const initialStat = statRoot(normalizedRoot);
 
     if (!initialStat.isDirectory()) {
       return undefined;
     }
-    const realPackageRoot = realpathSync(normalizedRoot);
+    const realPackageRoot = realPathSync(normalizedRoot);
     const canonicalAncestry =
       snapshotCanonicalDirectoryAncestry(realPackageRoot);
-    const finalStat = statRoot(normalizedRoot, {bigint: true});
+    const finalStat = statRoot(normalizedRoot);
 
     if (
       !finalStat.isDirectory() ||
       filesystemMetadataIdentity(initialStat) !==
         filesystemMetadataIdentity(finalStat) ||
-      realpathSync(normalizedRoot) !== realPackageRoot
+      realPathSync(normalizedRoot) !== realPackageRoot
     ) {
       return undefined;
     }
@@ -170,7 +172,7 @@ export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(root, {withFileTypes: true});
+    entries = listDirectoryEntriesSync(root);
   } catch (error: unknown) {
     return Object.freeze({status: 'unavailable', error});
   }
@@ -242,13 +244,29 @@ export function readBoundedPackageJsonFile(options: {
   readonly maxBytes: number;
   readonly boundaryField: string;
 }): BoundedPackageJsonReadResult {
+  let path: string;
+
+  // A package reading its own descriptor has a `file:` URL, not a path.
+  // Converting here rather than accepting URLs through the filesystem seam
+  // keeps every path in this codebase a string by the time it reaches the
+  // disk, and a URL that names no file is unreadable — the same answer the
+  // stat below would have given.
+  try {
+    path =
+      typeof options.path === 'string'
+        ? options.path
+        : fileURLToPath(options.path);
+  } catch {
+    return rejectedPackageJson('unreadable');
+  }
+
   let metadataStat: BigIntStats;
 
   // Stat through links: what matters is that the path names a regular file
   // small enough to read, not how it was spelled. A dangling link stats as
   // unreadable, which is what it is.
   try {
-    metadataStat = statSync(options.path, {bigint: true});
+    metadataStat = statPathSync(path);
   } catch {
     return rejectedPackageJson('unreadable');
   }
@@ -263,7 +281,7 @@ export function readBoundedPackageJsonFile(options: {
   let source: string;
 
   try {
-    source = readFileSync(options.path, 'utf8');
+    source = readTextFileSync(path);
   } catch {
     return rejectedPackageJson('unreadable');
   }
@@ -271,7 +289,7 @@ export function readBoundedPackageJsonFile(options: {
   let finalMetadataStat: BigIntStats;
 
   try {
-    finalMetadataStat = statSync(options.path, {bigint: true});
+    finalMetadataStat = statPathSync(path);
   } catch {
     return rejectedPackageJson('unreadable');
   }

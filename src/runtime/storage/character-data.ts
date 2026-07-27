@@ -1,4 +1,4 @@
-import {readdirSync} from 'node:fs';
+import {listDirectoryNamesSync} from '../../shared/file-system.ts';
 import {basename, dirname, join} from 'node:path';
 
 import {describeRealEntry, pathIsAtOrBelow} from '../../shared/real-path.ts';
@@ -178,14 +178,14 @@ function readAdoptableCharacterDataMarker(
     return requireCharacterDataMarkerScope(layout, marker);
   }
 
-  const foreignEntry = readdirSync(layout.storeRoot).find(entry => {
+  const foreignEntry = listDirectoryNamesSync(layout.storeRoot).find(entry => {
     const entryPath = join(layout.storeRoot, entry);
 
     if (
       entryPath === layout.configPath ||
       entryPath === layout.locksRoot ||
       (entryPath === layout.sessionsRoot &&
-        readdirSync(layout.sessionsRoot).length === 0)
+        listDirectoryNamesSync(layout.sessionsRoot).length === 0)
     ) {
       return false;
     }
