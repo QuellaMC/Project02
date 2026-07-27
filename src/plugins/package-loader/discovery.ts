@@ -728,8 +728,6 @@ function runtimePluginMetadataReadMessage(
   switch (reason) {
     case 'unreadable':
       return `Runtime plugin package ${label} is unreadable.`;
-    case 'symbolic_link':
-      return `Runtime plugin package ${label} must not be a symbolic link.`;
     case 'not_file':
       return `Runtime plugin package ${label} must be a regular file.`;
     case 'too_large':

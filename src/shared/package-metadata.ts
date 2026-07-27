@@ -198,12 +198,7 @@ export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
 }
 
 export type BoundedPackageJsonRejectionReason =
-  | 'unreadable'
-  | 'symbolic_link'
-  | 'not_file'
-  | 'too_large'
-  | 'invalid_json'
-  | 'unsafe_json';
+  'unreadable' | 'not_file' | 'too_large' | 'invalid_json' | 'unsafe_json';
 
 export type BoundedPackageJsonReadResult =
   | {
@@ -256,15 +251,15 @@ export function readBoundedPackageJsonFile(options: {
 }): BoundedPackageJsonReadResult {
   let metadataStat: BigIntStats;
 
+  // Stat through links: what matters is that the path names a regular file
+  // small enough to read, not how it was spelled. A dangling link stats as
+  // unreadable, which is what it is.
   try {
-    metadataStat = lstatSync(options.path, {bigint: true});
+    metadataStat = statSync(options.path, {bigint: true});
   } catch {
     return rejectedPackageJson('unreadable');
   }
 
-  if (metadataStat.isSymbolicLink()) {
-    return rejectedPackageJson('symbolic_link');
-  }
   if (!metadataStat.isFile()) {
     return rejectedPackageJson('not_file');
   }
@@ -283,13 +278,12 @@ export function readBoundedPackageJsonFile(options: {
   let finalMetadataStat: BigIntStats;
 
   try {
-    finalMetadataStat = lstatSync(options.path, {bigint: true});
+    finalMetadataStat = statSync(options.path, {bigint: true});
   } catch {
     return rejectedPackageJson('unreadable');
   }
 
   if (
-    finalMetadataStat.isSymbolicLink() ||
     !finalMetadataStat.isFile() ||
     filesystemMetadataIdentity(finalMetadataStat) !==
       filesystemMetadataIdentity(metadataStat)

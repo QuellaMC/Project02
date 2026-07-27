@@ -156,9 +156,40 @@ describe('readBoundedPackageJsonFile', () => {
     ).toEqual({status: 'rejected', reason});
   });
 
+  it('reads a descriptor reached through a link', () => {
+    const root = createTestTempRoot('project02-package-json-link-');
+    const path = join(root, 'metadata.json');
+    const target = join(root, 'target.json');
+
+    writeFileSync(target, '{"linked":true}\n', 'utf8');
+    symlinkSync(target, path);
+
+    expect(
+      readBoundedPackageJsonFile({
+        path,
+        maxBytes: 1_024,
+        boundaryField: 'Test package metadata',
+      }),
+    ).toEqual({status: 'accepted', value: {linked: true}});
+  });
+
+  it('rejects a dangling link as unreadable', () => {
+    const root = createTestTempRoot('project02-package-json-dangling-');
+    const path = join(root, 'metadata.json');
+
+    symlinkSync(join(root, 'missing.json'), path);
+
+    expect(
+      readBoundedPackageJsonFile({
+        path,
+        maxBytes: 1_024,
+        boundaryField: 'Test package metadata',
+      }),
+    ).toEqual({status: 'rejected', reason: 'unreadable'});
+  });
+
   it.each([
     ['unreadable', 'unreadable'],
-    ['symbolic link', 'symbolic_link'],
     ['non-file', 'not_file'],
     ['oversized input', 'too_large'],
     ['invalid JSON', 'invalid_json'],
@@ -166,14 +197,9 @@ describe('readBoundedPackageJsonFile', () => {
   ] as const)('rejects %s with a neutral reason', (_case, expectedReason) => {
     const root = createTestTempRoot('project02-package-json-');
     const path = join(root, 'metadata.json');
-    const target = join(root, 'target.json');
 
     switch (expectedReason) {
       case 'unreadable':
-        break;
-      case 'symbolic_link':
-        writeFileSync(target, '{}\n', 'utf8');
-        symlinkSync(target, path);
         break;
       case 'not_file':
         mkdirSync(path);

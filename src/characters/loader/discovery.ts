@@ -349,8 +349,6 @@ function characterDescriptorReadMessage(
   switch (reason) {
     case 'unreadable':
       return 'Character package descriptor is unreadable.';
-    case 'symbolic_link':
-      return 'Character package descriptor must not be a symbolic link.';
     case 'not_file':
       return 'Character package descriptor must be a regular file.';
     case 'too_large':
