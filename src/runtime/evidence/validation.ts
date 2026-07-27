@@ -1,4 +1,3 @@
-import {existsSync, readFileSync} from 'node:fs';
 import {
   type CharacterProfile,
   ConversationRehydrationError,
@@ -33,6 +32,7 @@ import {
   splitCompleteJsonLines,
 } from '../storage/json-lines.ts';
 import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
+import {readOptionalStoreText} from '../storage/store-file.ts';
 import {preparedRuntimePluginConfigEffectHasApprovalEvidence} from '../../plugins/api/index.ts';
 import type {
   DurableRuntimeSessionEvidence,
@@ -2291,7 +2291,7 @@ function readJsonLines<T>(options: {
   readonly missingFileIsAllowed: () => boolean;
   readonly emptyFileIsAllowed: () => boolean;
 }): T[] {
-  const content = readLogFile(options.filePath);
+  const content = readOptionalStoreText(options.filePath);
 
   if (content === undefined) {
     if (!options.missingFileIsAllowed()) {
@@ -2346,22 +2346,7 @@ function rawEventsRequireConversationLog(
 }
 
 function logFileHasContent(filePath: string): boolean {
-  const content = readLogFile(filePath);
+  const content = readOptionalStoreText(filePath);
 
   return content !== undefined && content.length > 0;
-}
-
-function readLogFile(filePath: string): string | undefined {
-  try {
-    if (!existsSync(filePath)) {
-      return undefined;
-    }
-
-    return readFileSync(filePath, 'utf8');
-  } catch {
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not read local runtime log file: ${filePath}.`,
-    );
-  }
 }

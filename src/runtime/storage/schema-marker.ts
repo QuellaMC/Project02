@@ -1,5 +1,3 @@
-import {readFileSync} from 'node:fs';
-
 import {describeRealEntry} from '../../shared/real-path.ts';
 import {atomicReplaceFile} from './atomic-file.ts';
 import {
@@ -9,6 +7,7 @@ import {
   type LocalRuntimeStorageSchemaMarker,
 } from './layout-contract.ts';
 import {acquireLocalRuntimeMutationLock} from './mutation-lock.ts';
+import {readStoreText} from './store-file.ts';
 
 const storageSchemaMarkerLockResourceKey = 'storage-schema';
 
@@ -54,18 +53,7 @@ export function readStorageSchemaMarker(
     );
   }
 
-  let source: string;
-
-  try {
-    source = readFileSync(location.schemaPath, 'utf8');
-  } catch {
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not read local runtime storage schema marker: ${location.schemaPath}.`,
-    );
-  }
-
-  return decodeStorageSchemaMarker(source.trim());
+  return decodeStorageSchemaMarker(readStoreText(location.schemaPath).trim());
 }
 
 export async function ensureStorageSchemaMarker(

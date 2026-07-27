@@ -1,4 +1,4 @@
-import {existsSync, readFileSync, unlinkSync} from 'node:fs';
+import {unlinkSync} from 'node:fs';
 
 import {
   createJsonBoundaryObjectSnapshot,
@@ -8,10 +8,12 @@ import {
   type JsonBoundaryObject,
   type JsonBoundaryValue,
 } from '../../shared/json-boundary.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
 } from '../storage/atomic-file.ts';
+import {readOptionalStoreText} from '../storage/store-file.ts';
 import {
   isRuntimeControlEnvVarName,
   runtimeConfigVersion,
@@ -713,16 +715,22 @@ type PreviousConfigState = {
 };
 
 function snapshotPreviousConfigState(path: string): PreviousConfigState {
-  if (!existsSync(path)) {
-    return Object.freeze({
-      path,
-    } satisfies PreviousConfigState);
-  }
+  // Wrapped like every other file access in this module. Before, a read
+  // failure here escaped as a raw filesystem error and bypassed the CLI's
+  // error formatting entirely — the operator got a stack trace instead of
+  // a message.
+  try {
+    const text = readOptionalStoreText(path);
 
-  return Object.freeze({
-    path,
-    text: readFileSync(path, 'utf8'),
-  } satisfies PreviousConfigState);
+    return Object.freeze(
+      text === undefined ? {path} : {path, text},
+    ) satisfies PreviousConfigState;
+  } catch (error: unknown) {
+    throw mutationFileAccessError(
+      `Could not read runtime config file at ${path}.`,
+      error,
+    );
+  }
 }
 
 function prepareEnvSecretWrite(
@@ -768,7 +776,7 @@ function writePreparedEnvSecret(secretWrite: PreparedEnvSecretWrite): void {
 
 function readExistingEnvSecretFile(envPath: string): string {
   try {
-    return existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+    return readOptionalStoreText(envPath) ?? '';
   } catch (error: unknown) {
     throw mutationFileAccessError(
       `Could not read runtime config env file at ${envPath}.`,
@@ -782,9 +790,18 @@ function restorePreviousConfigState(
 ): Error | undefined {
   try {
     if (previousConfigState.text === undefined) {
-      if (existsSync(previousConfigState.path)) {
+      // There was no config file to roll back to, so removing it is the
+      // restore. Unlink and accept ENOENT rather than checking first: the
+      // check-then-act version raced anything else cleaning up the same
+      // failed mutation.
+      try {
         unlinkSync(previousConfigState.path);
+      } catch (error: unknown) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) {
+          throw error;
+        }
       }
+
       return undefined;
     }
 

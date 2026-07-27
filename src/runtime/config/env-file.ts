@@ -1,5 +1,7 @@
-import {existsSync, readFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {parseEnv} from 'node:util';
+
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
 import {defaultRuntimeConfigEnvPath} from './load.ts';
 import {
@@ -41,16 +43,16 @@ export function loadRuntimeConfigEnvFile(options: {
   const envPath = runtimeConfigEnvPathForLocation(options.runtimeLocation);
   const env = options.env ?? process.env;
 
-  if (!existsSync(envPath)) {
-    return {...(options.envDefaults ?? {}), ...env};
-  }
-
   try {
-    return {
-      ...(options.envDefaults ?? {}),
-      ...parseEnv(readFileSync(envPath, 'utf8')),
-      ...env,
-    };
+    const source = readOptionalEnvFile(envPath);
+
+    return source === undefined
+      ? {...(options.envDefaults ?? {}), ...env}
+      : {
+          ...(options.envDefaults ?? {}),
+          ...parseEnv(source),
+          ...env,
+        };
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${
@@ -64,12 +66,10 @@ export function loadRuntimeConfigEnvFile(options: {
 export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
   const envPath = '.env';
 
-  if (!existsSync(envPath)) {
-    return {};
-  }
-
   try {
-    return parseEnv(readFileSync(envPath, 'utf8'));
+    const source = readOptionalEnvFile(envPath);
+
+    return source === undefined ? {} : parseEnv(source);
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load .env file: ${
@@ -113,4 +113,28 @@ export function defaultDotEnvForRuntimeLocation(
 
 function runtimeConfigEnvSelectsConfig(env: NodeJS.ProcessEnv): boolean {
   return (env[runtimeConfigEnvVarName]?.trim().length ?? 0) > 0;
+}
+
+/**
+ * Read an env file that may not exist, without asking first. The
+ * `existsSync`-then-read version this replaces reported a file created
+ * between the two calls as absent, and a file deleted between them as a
+ * crash.
+ *
+ * This does not borrow the store's read primitive: `.env` is resolved
+ * against the working directory, not the store, and env failures reach
+ * the operator as `RuntimeEnvFileError` — which all three CLIs print
+ * verbatim and one branches on. A store `read_failed` would replace a
+ * message naming the operator's own file with a generic one.
+ */
+function readOptionalEnvFile(path: string): string | undefined {
+  try {
+    return readFileSync(path, 'utf8');
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return undefined;
+    }
+
+    throw error;
+  }
 }

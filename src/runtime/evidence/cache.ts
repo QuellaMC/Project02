@@ -1,10 +1,4 @@
-import {
-  type Dirent,
-  readFileSync,
-  readdirSync,
-  statSync,
-  unlinkSync,
-} from 'node:fs';
+import {statSync} from 'node:fs';
 import {basename} from 'node:path';
 import {
   CompleteJsonLinesError,
@@ -15,10 +9,11 @@ import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeSessionPaths,
 } from '../storage/layout-contract.ts';
+import {cleanupAbandonedAtomicReplacementsIn} from '../storage/atomic-file.ts';
 import {
-  atomicReplacementFileBelongsToTarget,
-  isAbandonedAtomicReplacementFile,
-} from '../storage/atomic-file.ts';
+  readOptionalStoreText,
+  storeWriteFailed,
+} from '../storage/store-file.ts';
 import {decodeConversationLogRecord} from '../storage/conversation-codec.ts';
 import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
 import {decodeRuntimeTraceEntry} from '../storage/trace-codec.ts';
@@ -133,21 +128,14 @@ function readStampedRuntimeEvidenceFile(
     return undefined;
   }
 
-  try {
-    const content = readFileSync(filePath, 'utf8');
-    onEvidenceFileRead?.({filePath, attempt});
-    return content;
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return undefined;
-    }
+  const content = readOptionalStoreText(filePath);
 
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not read local runtime log file: ${filePath}.`,
-      {cause: error},
-    );
+  if (content === undefined) {
+    return undefined;
   }
+
+  onEvidenceFileRead?.({filePath, attempt});
+  return content;
 }
 
 function decodeRuntimeEvidenceJsonLines<T>(options: {
@@ -248,52 +236,13 @@ function sameRuntimeEvidenceFileStamp(
 export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
   paths: LocalRuntimeSessionPaths,
 ): void {
-  let entries: Dirent[];
-
   try {
-    entries = readdirSync(paths.sessionRoot, {withFileTypes: true});
+    cleanupAbandonedAtomicReplacementsIn(paths.sessionRoot, [
+      basename(paths.tracePath),
+      basename(paths.rawEventsPath),
+      basename(paths.conversationPath),
+    ]);
   } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return;
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not inspect local runtime evidence temporary files: ${paths.sessionRoot}.`,
-      {cause: error},
-    );
-  }
-
-  const targetNames = [
-    basename(paths.tracePath),
-    basename(paths.rawEventsPath),
-    basename(paths.conversationPath),
-  ];
-
-  for (const entry of entries) {
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    if (
-      !targetNames.some(targetName =>
-        atomicReplacementFileBelongsToTarget(entry.name, targetName),
-      ) ||
-      !isAbandonedAtomicReplacementFile(entry.name)
-    ) {
-      continue;
-    }
-
-    try {
-      unlinkSync(`${paths.sessionRoot}/${entry.name}`);
-    } catch (error: unknown) {
-      if (!isNodeErrorWithCode(error, 'ENOENT')) {
-        throw new LocalRuntimeStorageContractError(
-          'write_failed',
-          `Could not remove abandoned local runtime evidence temporary file: ${entry.name}.`,
-          {cause: error},
-        );
-      }
-    }
+    throw storeWriteFailed(paths.sessionRoot, error);
   }
 }

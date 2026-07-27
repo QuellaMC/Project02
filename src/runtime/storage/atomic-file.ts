@@ -103,11 +103,28 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
 export function cleanupAbandonedAtomicReplacementFilesSync(
   targetPath: string,
 ): void {
-  const targetDirectory = dirname(targetPath);
+  cleanupAbandonedAtomicReplacementsIn(dirname(targetPath), [
+    basename(targetPath),
+  ]);
+}
+
+/**
+ * Remove abandoned atomic replacements for several targets sharing one
+ * directory. Session evidence keeps three log files side by side, so
+ * scanning once for all of them beats three passes over the same entries.
+ *
+ * A missing directory is nothing to clean, not a failure. Files that
+ * vanish mid-scan are equally fine — another process finishing the same
+ * cleanup is the expected race, not an error.
+ */
+export function cleanupAbandonedAtomicReplacementsIn(
+  directory: string,
+  targetNames: readonly string[],
+): void {
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(targetDirectory, {withFileTypes: true});
+    entries = readdirSync(directory, {withFileTypes: true});
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return;
@@ -119,14 +136,16 @@ export function cleanupAbandonedAtomicReplacementFilesSync(
   for (const entry of entries) {
     if (
       !entry.isFile() ||
-      !atomicReplacementFileBelongsToTarget(entry.name, targetPath) ||
+      !targetNames.some(targetName =>
+        atomicReplacementFileBelongsToTarget(entry.name, targetName),
+      ) ||
       !isAbandonedAtomicReplacementFile(entry.name)
     ) {
       continue;
     }
 
     try {
-      unlinkSync(join(targetDirectory, entry.name));
+      unlinkSync(join(directory, entry.name));
     } catch (error: unknown) {
       if (!isNodeErrorWithCode(error, 'ENOENT')) {
         throw error;
