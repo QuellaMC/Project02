@@ -330,13 +330,6 @@ export function writeToFileSync(
   writeFileSync(fileDescriptor, content);
 }
 
-export function writeBytesToFileSync(
-  fileDescriptor: number,
-  bytes: Uint8Array,
-): number {
-  return writeSync(fileDescriptor, bytes);
-}
-
 /**
  * One write syscall's worth of text, returning how much of it landed.
  * `writeToFileSync` above loops until the whole content is written; this
