@@ -1,7 +1,7 @@
-import {lstatSync, readdirSync} from 'node:fs';
-import {basename, dirname, isAbsolute, join, relative, sep} from 'node:path';
+import {readdirSync} from 'node:fs';
+import {basename, dirname, join} from 'node:path';
 
-import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {describeRealEntry, pathIsAtOrBelow} from '../../shared/real-path.ts';
 import {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 import {
   characterDataDirPath,
@@ -94,17 +94,6 @@ function recognizedStorageMarker(
   }
 }
 
-function pathIsAtOrBelow(path: string, root: string): boolean {
-  const relativePath = relative(root, path);
-
-  return (
-    relativePath.length === 0 ||
-    (!isAbsolute(relativePath) &&
-      relativePath !== '..' &&
-      !relativePath.startsWith(`..${sep}`))
-  );
-}
-
 /**
  * The one writer-side initializer for character data. It preflights
  * ownership before the home can be marked, initializes the home, then
@@ -160,22 +149,18 @@ function readAdoptableCharacterDataMarker(
   const layout = createLocalRuntimeStorageLayout(options);
   assertRealCharacterDataParent(layout);
 
-  let rootStats;
+  const root = describeRealEntry(layout.storeRoot);
 
-  try {
-    rootStats = lstatSync(layout.storeRoot);
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return undefined;
-    }
-
+  if (root.kind === 'absent') {
+    return undefined;
+  }
+  if (root.kind === 'unreadable') {
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect character data directory: ${layout.storeRoot}.`,
     );
   }
-
-  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+  if (root.kind !== 'directory') {
     throw new LocalRuntimeStorageContractError(
       'missing_file',
       `Character data directory "${layout.storeRoot}" must be a real directory inside the Project02 home.`,
@@ -382,22 +367,18 @@ function assertRealCharacterDataParent(
     return;
   }
 
-  let parentStats;
+  const parent = describeRealEntry(parentRoot);
 
-  try {
-    parentStats = lstatSync(parentRoot);
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return;
-    }
-
+  if (parent.kind === 'absent') {
+    return;
+  }
+  if (parent.kind === 'unreadable') {
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect the character-data root: ${parentRoot}.`,
     );
   }
-
-  if (parentStats.isSymbolicLink() || !parentStats.isDirectory()) {
+  if (parent.kind !== 'directory') {
     throw new LocalRuntimeStorageContractError(
       'missing_file',
       `Character data root "${parentRoot}" must be a real directory inside the Project02 home.`,
@@ -406,35 +387,34 @@ function assertRealCharacterDataParent(
 }
 
 function assertRealDataControlFile(filePath: string, label: string): void {
-  let stats;
-
-  try {
-    stats = lstatSync(filePath);
-  } catch {
-    return;
-  }
-
-  if (stats.isSymbolicLink() || !stats.isFile()) {
-    throw new LocalRuntimeStorageContractError(
-      'missing_file',
-      `${label} "${filePath}" must be a real file inside the data directory.`,
-    );
-  }
+  assertRealDataControlEntry(filePath, label, 'file');
 }
 
 function assertRealDataControlRoot(rootPath: string, label: string): void {
-  let stats;
+  assertRealDataControlEntry(rootPath, label, 'directory');
+}
 
-  try {
-    stats = lstatSync(rootPath);
-  } catch {
-    return;
-  }
+/**
+ * Control entries the data directory owns must be real: a link would carry
+ * this character's history, locks, or settings outside the directory its
+ * marker vouches for. Absent is fine — the runtime creates them on demand —
+ * and so is unreadable, which the reader that opens it reports precisely.
+ */
+function assertRealDataControlEntry(
+  path: string,
+  label: string,
+  kind: 'file' | 'directory',
+): void {
+  const entry = describeRealEntry(path);
 
-  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+  if (
+    entry.kind !== 'absent' &&
+    entry.kind !== 'unreadable' &&
+    entry.kind !== kind
+  ) {
     throw new LocalRuntimeStorageContractError(
       'missing_file',
-      `${label} "${rootPath}" must be a real directory inside the data directory.`,
+      `${label} "${path}" must be a real ${kind} inside the data directory.`,
     );
   }
 }

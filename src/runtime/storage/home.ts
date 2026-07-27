@@ -6,11 +6,12 @@
  * the session store's initialization path.
  */
 import type {Dirent} from 'node:fs';
-import {lstatSync, readdirSync} from 'node:fs';
+import {readdirSync} from 'node:fs';
 import {mkdir} from 'node:fs/promises';
 import {join} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {describeRealEntry, type RealEntry} from '../../shared/real-path.ts';
 import {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 import {
   createLocalRuntimeStorageSchemaMarker,
@@ -152,15 +153,8 @@ export function assertRealHomeEnvFileSync(
   options: Project02HomeLayoutOptions = {},
 ): void {
   const layout = createProject02HomeLayout(options);
-  let stats;
 
-  try {
-    stats = lstatSync(layout.envPath);
-  } catch {
-    return;
-  }
-
-  if (stats.isSymbolicLink() || !stats.isFile()) {
+  if (isPresentButNot(describeRealEntry(layout.envPath), 'file')) {
     throw new LocalRuntimeStorageContractError(
       'missing_file',
       `Project02 home "${layout.homeRoot}" has an env file that is not ` +
@@ -174,18 +168,7 @@ function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
     {path: layout.locksRoot, kind: 'directory' as const, label: 'lock root'},
     {path: layout.configPath, kind: 'file' as const, label: 'config file'},
   ]) {
-    let stats;
-
-    try {
-      stats = lstatSync(entry.path);
-    } catch {
-      continue;
-    }
-
-    if (
-      stats.isSymbolicLink() ||
-      (entry.kind === 'directory' ? !stats.isDirectory() : !stats.isFile())
-    ) {
+    if (isPresentButNot(describeRealEntry(entry.path), entry.kind)) {
       throw new LocalRuntimeStorageContractError(
         'missing_file',
         `Project02 home "${layout.homeRoot}" has a ${entry.label} that ` +
@@ -196,25 +179,38 @@ function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
   }
 }
 
+/**
+ * True when something is at the path but is not the kind the home requires.
+ * An absent entry is not a violation — these are control paths the runtime
+ * creates on demand — and neither is one that cannot be inspected: the reader
+ * that actually opens it reports that far more precisely than this guard.
+ */
+function isPresentButNot(
+  entry: RealEntry,
+  kind: 'file' | 'directory',
+): boolean {
+  return (
+    entry.kind !== 'absent' &&
+    entry.kind !== 'unreadable' &&
+    entry.kind !== kind
+  );
+}
+
 function assertRealCharacterDataRootIfPresent(
   layout: Project02HomeLayout,
 ): 'absent' | 'present' {
-  let stats;
+  const entry = describeRealEntry(layout.characterDataRoot);
 
-  try {
-    stats = lstatSync(layout.characterDataRoot);
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return 'absent';
-    }
-
+  if (entry.kind === 'absent') {
+    return 'absent';
+  }
+  if (entry.kind === 'unreadable') {
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect the character-data root: ${layout.characterDataRoot}.`,
     );
   }
-
-  if (stats.isSymbolicLink() || !stats.isDirectory()) {
+  if (entry.kind !== 'directory') {
     throw new LocalRuntimeStorageContractError(
       'missing_file',
       `Project02 home "${layout.homeRoot}" has a character-data entry ` +

@@ -1,6 +1,6 @@
-import {lstatSync, readFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 
-import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {describeRealEntry} from '../../shared/real-path.ts';
 import {atomicReplaceFile} from './atomic-file.ts';
 import {
   decodeStorageSchemaMarker,
@@ -30,29 +30,24 @@ export type UpdateStorageSchemaMarkerResult = {
 export function readStorageSchemaMarker(
   location: Pick<StorageSchemaMarkerLocation, 'schemaPath'>,
 ): LocalRuntimeStorageSchemaMarker | undefined {
-  let markerStats;
+  const marker = describeRealEntry(location.schemaPath);
 
-  try {
-    markerStats = lstatSync(location.schemaPath);
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return undefined;
-    }
-
+  if (marker.kind === 'absent') {
+    return undefined;
+  }
+  if (marker.kind === 'unreadable') {
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect local runtime storage schema marker: ${location.schemaPath}.`,
     );
   }
-
-  if (markerStats.isSymbolicLink()) {
+  if (marker.kind === 'link') {
     throw new LocalRuntimeStorageContractError(
       'malformed_schema_marker',
       `Local runtime storage schema marker "${location.schemaPath}" is a symlink; the marker must be a regular file inside its storage directory.`,
     );
   }
-
-  if (!markerStats.isFile()) {
+  if (marker.kind !== 'file') {
     throw new LocalRuntimeStorageContractError(
       'malformed_schema_marker',
       `Local runtime storage schema marker "${location.schemaPath}" must be a regular file inside its storage directory.`,

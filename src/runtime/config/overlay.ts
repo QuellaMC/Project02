@@ -8,8 +8,7 @@
  * 'overlay' — so an overlay can never reach the global resolvers or
  * re-derive a store root from its own path.
  */
-import {lstatSync} from 'node:fs';
-
+import {describeRealEntry} from '../../shared/real-path.ts';
 import {
   createLocalRuntimeStorageLayout,
   type LocalRuntimeCharacterDataStorageSchemaMarker,
@@ -68,17 +67,11 @@ function loadProject02CharacterOverlayConfig(options: {
 }): LoadedProject02CharacterOverlayConfig {
   const path = characterOverlayConfigPath(options.dataRoot);
 
-  // lstat, not existence: a dangling symlink is a non-regular overlay
+  // The entry, not existence: a dangling symlink is a non-regular overlay
   // entry, never an absent overlay.
-  let overlayStats;
+  const overlayEntry = describeRealEntry(path);
 
-  try {
-    overlayStats = lstatSync(path);
-  } catch {
-    overlayStats = undefined;
-  }
-
-  if (overlayStats === undefined) {
+  if (overlayEntry.kind === 'absent' || overlayEntry.kind === 'unreadable') {
     return Object.freeze({
       scope: 'character',
       characterId: options.characterId,
@@ -95,7 +88,7 @@ function loadProject02CharacterOverlayConfig(options: {
 
   // The overlay must live inside the identity-marked data directory: a
   // symlinked file would let authored settings live outside it.
-  if (overlayStats.isSymbolicLink()) {
+  if (overlayEntry.kind === 'link') {
     return loadedOverlay({
       ...options,
       path,

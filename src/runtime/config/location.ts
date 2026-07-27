@@ -1,7 +1,6 @@
-import {lstatSync} from 'node:fs';
 import {dirname} from 'node:path';
 
-import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {describeRealEntry} from '../../shared/real-path.ts';
 import {
   characterDataDirPath,
   createLocalRuntimeStorageLayout,
@@ -659,15 +658,12 @@ function runtimeHomeDirectoryIdentityAt(
 function runtimeHomeEntryIdentityAt(
   path: string,
 ): RuntimeHomeEntryIdentity | undefined {
-  let stats;
+  const entry = describeRealEntry(path);
 
-  try {
-    stats = lstatSync(path, {bigint: true});
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return undefined;
-    }
-
+  if (entry.kind === 'absent') {
+    return undefined;
+  }
+  if (entry.kind === 'unreadable') {
     throw new RuntimeConfigLocationError(
       `Could not inspect resolved Project02 home path "${path}".`,
     );
@@ -675,10 +671,9 @@ function runtimeHomeEntryIdentityAt(
 
   return Object.freeze({
     path,
-    device: stats.dev,
-    inode: stats.ino,
-    kind:
-      !stats.isSymbolicLink() && stats.isDirectory() ? 'directory' : 'other',
+    device: entry.stats.dev,
+    inode: entry.stats.ino,
+    kind: entry.kind === 'directory' ? 'directory' : 'other',
   });
 }
 

@@ -3,11 +3,16 @@ import {
   type Dirent,
   lstatSync,
   readFileSync,
-  realpathSync,
   readdirSync,
   rmSync,
 } from 'node:fs';
-import {basename, dirname, join, parse, resolve, sep} from 'node:path';
+import {join, parse, resolve} from 'node:path';
+
+import {
+  canonicalPath,
+  describeRealEntry,
+  firstUnacceptableComponent,
+} from '../../../shared/real-path.ts';
 
 import {
   atomicReplaceFileSync,
@@ -172,60 +177,26 @@ function singleMutationLockError(error: unknown): unknown {
 }
 
 export function canonicalDurablePluginStoreRoot(storeRoot: string): string {
-  let current = resolve(storeRoot);
-  const missingParts: string[] = [];
+  const canonical = canonicalPath(storeRoot);
 
-  for (;;) {
-    try {
-      const canonical = join(realpathSync(current), ...missingParts);
-
-      assertSafeDurableDirectoryPath(canonical, 'Plugin fileStore store root');
-      return canonical;
-    } catch (error: unknown) {
-      if (!isMissingFileError(error)) {
-        throw error;
-      }
-
-      const parent = dirname(current);
-
-      if (parent === current) {
-        throw error;
-      }
-
-      missingParts.unshift(basename(current));
-      current = parent;
-    }
-  }
+  assertSafeDurableDirectoryPath(canonical, 'Plugin fileStore store root');
+  return canonical;
 }
 
 function assertSafeDurableDirectoryPath(path: string, label: string): void {
   const absolute = resolve(path);
-  const root = parse(absolute).root;
-  const parts = absolute.slice(root.length).split(sep).filter(Boolean);
-  let current = root;
+  const offending = firstUnacceptableComponent({
+    root: parse(absolute).root,
+    path: absolute,
+    accept: ['directory'],
+  });
 
-  for (const part of parts) {
-    current = join(current, part);
-
-    try {
-      const stat = lstatSync(current);
-
-      if (stat.isSymbolicLink()) {
-        throw new TypeError(
-          `${label} must be a real directory and cannot contain symlinks.`,
-        );
-      }
-
-      if (!stat.isDirectory()) {
-        throw new TypeError(`${label} must be a real directory.`);
-      }
-    } catch (error: unknown) {
-      if (isMissingFileError(error)) {
-        return;
-      }
-
-      throw error;
-    }
+  if (offending !== undefined) {
+    throw new TypeError(
+      offending.kind === 'link'
+        ? `${label} must be a real directory and cannot contain symlinks.`
+        : `${label} must be a real directory.`,
+    );
   }
 }
 
@@ -247,35 +218,30 @@ export function assertSafeDurablePluginPath(
   safePath: string,
 ): void {
   assertSafeDurablePluginRoot(root);
-  let current = root;
+  const offending = firstUnacceptableComponent({
+    root,
+    path: join(root, ...safePath.split('/')),
+    accept: ['directory', 'file'],
+  });
 
-  for (const part of safePath.split('/')) {
-    current = join(current, part);
-
-    try {
-      const stat = lstatSync(current);
-
-      if (stat.isSymbolicLink()) {
-        throw new TypeError('Plugin fileStore paths cannot contain symlinks.');
-      }
-
-      if (!stat.isDirectory() && !stat.isFile()) {
-        throw new TypeError('Plugin fileStore contains an unsupported entry.');
-      }
-    } catch (error: unknown) {
-      if (isMissingFileError(error)) {
-        return;
-      }
-
-      throw error;
-    }
+  if (offending !== undefined) {
+    throw new TypeError(
+      offending.kind === 'link'
+        ? 'Plugin fileStore paths cannot contain symlinks.'
+        : 'Plugin fileStore contains an unsupported entry.',
+    );
   }
 }
 
 export function assertRegularFile(path: string, label: string): void {
-  const stat = lstatSync(path);
+  const entry = describeRealEntry(path);
 
-  if (stat.isSymbolicLink() || !stat.isFile()) {
+  if (entry.kind === 'absent' || entry.kind === 'unreadable') {
+    // `readOptionalRegularFile` reads "not there yet" off the error code, so
+    // the original has to reach it rather than a message written over it.
+    throw entry.error;
+  }
+  if (entry.kind !== 'file') {
     throw new TypeError(`${label} must be a regular file.`);
   }
 }

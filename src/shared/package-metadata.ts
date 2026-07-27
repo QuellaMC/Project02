@@ -11,20 +11,13 @@ import {
   statSync,
 } from 'node:fs';
 import type {BigIntStats, Dirent} from 'node:fs';
-import {
-  basename,
-  dirname,
-  join,
-  parse as parsePath,
-  relative,
-  resolve,
-  sep,
-} from 'node:path';
+import {basename, dirname, join, parse as parsePath, resolve} from 'node:path';
 
 import {
   createJsonBoundarySnapshot,
   type JsonBoundaryValue,
 } from './json-boundary.ts';
+import {describeRealEntry, pathComponentChain} from './real-path.ts';
 
 export type PackageSourceCandidate = {
   readonly name: string;
@@ -310,30 +303,29 @@ export function filesystemMetadataIdentity(stat: BigIntStats): string {
 }
 
 function snapshotCanonicalDirectoryAncestry(
-  canonicalPath: string,
+  packagePath: string,
 ): readonly PackageDirectoryAncestryEntry[] {
-  const parsed = parsePath(canonicalPath);
-  const suffix = relative(parsed.root, canonicalPath);
-  const components = suffix === '' ? [] : suffix.split(sep).filter(Boolean);
-  const paths = [parsed.root];
-  let currentPath = parsed.root;
+  const chain = pathComponentChain({
+    root: parsePath(packagePath).root,
+    path: packagePath,
+    includeRoot: true,
+  });
 
-  for (const component of components) {
-    currentPath = join(currentPath, component);
-    paths.push(currentPath);
+  if (chain === undefined) {
+    throw new TypeError('Canonical package ancestry must be absolute.');
   }
 
   return Object.freeze(
-    paths.map(path => {
-      const stat = lstatSync(path, {bigint: true});
+    chain.map(path => {
+      const entry = describeRealEntry(path);
 
-      if (stat.isSymbolicLink() || !stat.isDirectory()) {
+      if (entry.kind !== 'directory') {
         throw new TypeError('Canonical package ancestry must be directories.');
       }
       return Object.freeze({
         path,
-        device: String(stat.dev),
-        inode: String(stat.ino),
+        device: String(entry.stats.dev),
+        inode: String(entry.stats.ino),
         type: 'directory',
       } satisfies PackageDirectoryAncestryEntry);
     }),

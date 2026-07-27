@@ -1,14 +1,13 @@
-import {
-  lstatSync,
-  readFileSync,
-  readdirSync,
-  type Dirent,
-  type Stats,
-} from 'node:fs';
-import {lstat, mkdir, readFile, readdir, rmdir} from 'node:fs/promises';
+import {readFileSync, readdirSync, type Dirent} from 'node:fs';
+import {mkdir, readFile, readdir, rmdir} from 'node:fs/promises';
 import {join} from 'node:path';
 import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {
+  describeRealEntry,
+  describeRealEntryAsync,
+  type RealEntry,
+} from '../../shared/real-path.ts';
 
 import {
   createConversationSession,
@@ -743,7 +742,7 @@ async function assertSessionDirectoryReadableAsync(
   }).sessionRoot;
 
   assertRealStorageDirectory({
-    stats: await readLinkStats(sessionRoot),
+    entry: await describeRealEntryAsync(sessionRoot),
     path: sessionRoot,
     label: 'session directory',
     onMissing: 'reject',
@@ -779,61 +778,35 @@ function assertSessionDirectoryReadable(
   }).sessionRoot;
 
   assertRealStorageDirectory({
-    stats: readLinkStatsSync(sessionRoot),
+    entry: describeRealEntry(sessionRoot),
     path: sessionRoot,
     label: 'session directory',
     onMissing: 'reject',
   });
 }
 
-type StorageDirectoryStatsResult =
-  | {readonly status: 'stats'; readonly stats: Stats}
-  | {readonly status: 'missing'}
-  | {readonly status: 'unreadable'};
-
-function readLinkStatsSync(path: string): StorageDirectoryStatsResult {
-  try {
-    return {status: 'stats', stats: lstatSync(path)};
-  } catch (error: unknown) {
-    return classifyStorageDirectoryStatsError(error);
-  }
-}
-
-async function readLinkStats(
-  path: string,
-): Promise<StorageDirectoryStatsResult> {
-  try {
-    return {status: 'stats', stats: await lstat(path)};
-  } catch (error: unknown) {
-    return classifyStorageDirectoryStatsError(error);
-  }
-}
-
-function classifyStorageDirectoryStatsError(
-  error: unknown,
-): StorageDirectoryStatsResult {
-  return isNodeErrorWithCode(error, 'ENOENT') ||
-    isNodeErrorWithCode(error, 'ENOTDIR')
-    ? {status: 'missing'}
-    : {status: 'unreadable'};
-}
-
 /**
  * Rejects storage directories that are absent, not directories, or symbolic
  * links. Symlinked roots are refused before any read or lock so evidence reads
  * and control files cannot be routed outside the selected character data root
- * — the same lstat rule the character-data and home guards already apply.
+ * — the same rule the character-data and home guards already apply.
  *
- * `onMissing: 'allow'` is for paths a caller may legitimately create later; it
- * still rejects a symlink that exists at the path today.
+ * A path under a non-directory parent is reported as missing rather than
+ * unreadable: nothing can be at it, so the caller's answer is the same as for
+ * an empty parent.
  */
 function assertRealStorageDirectory(options: {
-  readonly stats: StorageDirectoryStatsResult;
+  readonly entry: RealEntry;
   readonly path: string;
   readonly label: string;
   readonly onMissing: 'reject' | 'allow';
 }): void {
-  if (options.stats.status === 'missing') {
+  const entry = options.entry;
+
+  if (
+    entry.kind === 'absent' ||
+    (entry.kind === 'unreadable' && isNodeErrorWithCode(entry.error, 'ENOTDIR'))
+  ) {
     if (options.onMissing === 'allow') {
       return;
     }
@@ -844,17 +817,14 @@ function assertRealStorageDirectory(options: {
     );
   }
 
-  if (options.stats.status === 'unreadable') {
+  if (entry.kind === 'unreadable') {
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Could not inspect ${options.label}: ${options.path}.`,
     );
   }
 
-  if (
-    options.stats.stats.isSymbolicLink() ||
-    !options.stats.stats.isDirectory()
-  ) {
+  if (entry.kind !== 'directory') {
     throw new LocalRuntimeStorageContractError(
       'read_failed',
       `Local runtime ${options.label} must be a real directory: ${options.path}.`,

@@ -1,8 +1,7 @@
 import {createHash} from 'node:crypto';
-import {realpathSync} from 'node:fs';
-import {basename, dirname, join, resolve} from 'node:path';
+import {join} from 'node:path';
 
-import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {canonicalPath} from '../../shared/real-path.ts';
 
 export type LocalRuntimeMutationLockTarget = {
   readonly locksRoot: string;
@@ -27,7 +26,10 @@ export function normalizeMutationLockTarget(
     );
   }
 
-  const locksRoot = canonicalMutationLocksRoot(target.locksRoot);
+  // Two spellings of one lock root must hash to one lock file, so the root is
+  // canonicalized before the resource key is joined onto it. The root need not
+  // exist yet: acquiring the lock creates it.
+  const locksRoot = canonicalPath(target.locksRoot);
   const hash = createHash('sha256').update(resourceKey).digest('hex');
 
   return Object.freeze({
@@ -60,30 +62,6 @@ export function normalizeMutationLockTargets(
       compareCodeUnits(left.lockPath, right.lockPath),
     ),
   );
-}
-
-function canonicalMutationLocksRoot(locksRoot: string): string {
-  let current = resolve(locksRoot);
-  const missingParts: string[] = [];
-
-  for (;;) {
-    try {
-      return join(realpathSync.native(current), ...missingParts);
-    } catch (error: unknown) {
-      if (!isNodeErrorWithCode(error, 'ENOENT')) {
-        throw error;
-      }
-
-      const parent = dirname(current);
-
-      if (parent === current) {
-        return resolve(current, ...missingParts);
-      }
-
-      missingParts.unshift(basename(current));
-      current = parent;
-    }
-  }
 }
 
 function compareCodeUnits(left: string, right: string): number {

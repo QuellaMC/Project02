@@ -15,14 +15,12 @@ import {
   closeSync,
   constants,
   fstatSync,
-  lstatSync,
   openSync,
   readdirSync,
   readSync,
-  realpathSync,
 } from 'node:fs';
 import type {BigIntStats} from 'node:fs';
-import {isAbsolute, join, relative, resolve, sep} from 'node:path';
+import {isAbsolute, join, resolve, sep} from 'node:path';
 
 import {
   filesystemMetadataIdentity,
@@ -30,6 +28,12 @@ import {
   snapshotPackageDirectory,
   type PackageDirectorySnapshot,
 } from './package-metadata.ts';
+import {
+  canonicalPath,
+  describeRealEntry,
+  relativePathIfContained,
+  resolveContainedPath,
+} from './real-path.ts';
 
 export type CapturedPackageFile = {
   readonly absolutePath: string;
@@ -300,7 +304,7 @@ export function capturePackageFiles(options: {
     );
 
     if (
-      packageRelativePathIfContained(
+      relativePathIfContained(
         options.packageDirectory.realPackageRoot,
         absolutePath,
       ) !== relativePath
@@ -380,17 +384,18 @@ function planDirectory(options: {
 
   for (const name of names) {
     const absolutePath = join(options.directory.realPackageRoot, name);
-    let stat: BigIntStats;
 
     assertBoundPackage(packageDirectory);
-    try {
-      stat = lstatSync(absolutePath, {bigint: true});
-    } catch {
+    const entry = describeRealEntry(absolutePath);
+
+    // An entry the directory listed a moment ago and no longer has is as
+    // uncapturable as one that cannot be stat'd, so both read as unreadable.
+    if (entry.kind === 'absent' || entry.kind === 'unreadable') {
       throw captureError(absolutePath, 'unreadable');
     }
     assertBoundPackage(packageDirectory);
 
-    if (stat.isSymbolicLink()) {
+    if (entry.kind === 'link') {
       const linked = resolveContainedPackageFile({
         packageDirectory,
         path: absolutePath,
@@ -412,7 +417,7 @@ function planDirectory(options: {
       options.state.files.set(planned.relativePath, planned);
       continue;
     }
-    if (stat.isDirectory()) {
+    if (entry.kind === 'directory') {
       const directory = snapshotContainedDirectory({
         packageDirectory,
         path: absolutePath,
@@ -430,10 +435,10 @@ function planDirectory(options: {
       planDirectory({...options, directory, depth: options.depth + 1});
       continue;
     }
-    if (!stat.isFile()) {
+    if (entry.kind !== 'file') {
       throw captureError(absolutePath, 'not_regular');
     }
-    const planned = planFile({...options, absolutePath, stat});
+    const planned = planFile({...options, absolutePath, stat: entry.stats});
 
     options.state.files.set(planned.relativePath, planned);
   }
@@ -464,23 +469,19 @@ function resolveContainedPackageFile(options: {
       readonly stat: BigIntStats;
     }
   | undefined {
-  try {
-    const readPath = realpathSync(options.path);
+  const resolved = resolveContainedPath({
+    root: options.packageDirectory.realPackageRoot,
+    path: options.path,
+  });
 
-    if (
-      packageRelativePathIfContained(
-        options.packageDirectory.realPackageRoot,
-        readPath,
-      ) === undefined
-    ) {
-      return undefined;
-    }
-    const stat = lstatSync(readPath, {bigint: true});
-
-    return stat.isFile() ? Object.freeze({readPath, stat}) : undefined;
-  } catch {
+  if (resolved.status !== 'contained') {
     return undefined;
   }
+  const entry = describeRealEntry(resolved.canonicalPath);
+
+  return entry.kind === 'file'
+    ? Object.freeze({readPath: resolved.canonicalPath, stat: entry.stats})
+    : undefined;
 }
 
 /**
@@ -621,7 +622,7 @@ function snapshotContainedDirectory(options: {
 
   if (
     snapshot === undefined ||
-    packageRelativePathIfContained(
+    relativePathIfContained(
       options.packageDirectory.realPackageRoot,
       snapshot.realPackageRoot,
     ) === undefined
@@ -643,19 +644,20 @@ function assertBoundDirectory(snapshot: PackageDirectorySnapshot): void {
   }
 }
 
+/**
+ * Re-checks that an open file is still the one the read was bounded against.
+ *
+ * The path must still be its own canonical spelling: this runs on a path the
+ * caller already resolved, so a link appearing at it means the file was
+ * replaced between the resolve and the read.
+ */
 function assertBoundRegularFile(path: string, expected: BigIntStats): void {
-  let current: BigIntStats;
+  const current = describeRealEntry(path);
 
-  try {
-    current = lstatSync(path, {bigint: true});
-  } catch {
-    throw captureError(path, 'changed');
-  }
   if (
-    current.isSymbolicLink() ||
-    !current.isFile() ||
-    !filesystemStatsEqual(expected, current) ||
-    realpathSync(path) !== path
+    current.kind !== 'file' ||
+    !filesystemStatsEqual(expected, current.stats) ||
+    canonicalPath(path) !== path
   ) {
     throw captureError(path, 'changed');
   }
@@ -666,28 +668,12 @@ function filesystemStatsEqual(left: BigIntStats, right: BigIntStats): boolean {
 }
 
 function packageRelativePath(root: string, path: string): string {
-  const relativePath = packageRelativePathIfContained(root, path);
+  const relativePath = relativePathIfContained(root, path);
 
   if (relativePath === undefined || relativePath === '') {
     throw captureError(path, 'changed');
   }
   return relativePath;
-}
-
-function packageRelativePathIfContained(
-  root: string,
-  path: string,
-): string | undefined {
-  const relativePath = relative(resolve(root), resolve(path));
-
-  if (
-    relativePath === '..' ||
-    relativePath.startsWith(`..${sep}`) ||
-    isAbsolute(relativePath)
-  ) {
-    return undefined;
-  }
-  return normalizeRelativePath(relativePath);
 }
 
 function normalizeRelativePath(path: string): string {
