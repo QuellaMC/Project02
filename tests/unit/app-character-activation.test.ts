@@ -77,6 +77,41 @@ describe('project02 character activation', () => {
     expect(activation.warnings[0]).toContain('invalid_descriptor');
   });
 
+  it('names the folder mismatch when the selected character sits in a misspelled folder', () => {
+    const storeRoot = createTestTempRoot();
+
+    writeOperatorCharacter(
+      storeRoot,
+      'wrong',
+      `${JSON.stringify({
+        format: 'project02.character.v1',
+        identity: {id: 'nova', displayName: 'Nova'},
+        persona: {system: ['You are Nova.']},
+        meta: {version: '1.0.0'},
+      })}\n`,
+    );
+
+    const activation = prepareProject02CharacterActivation({
+      storeRoot,
+      configuredCharacterId: 'nova',
+    });
+
+    expect(activation.status).toBe('failed');
+    if (activation.status !== 'failed') {
+      throw new Error('Expected failed activation.');
+    }
+
+    // Attributing this only to the folder would drop it into the
+    // unrelated-package warnings and leave the operator with "nova was
+    // not found; install it" — advice that cannot work, because nova is
+    // installed and only the folder name is wrong.
+    expect(
+      activation.messages.some(message =>
+        message.includes('package_id_mismatch'),
+      ),
+    ).toBe(true);
+  });
+
   it('fails when the configured character id is defined in more than one root', () => {
     const storeRoot = createTestTempRoot();
 

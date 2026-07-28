@@ -196,6 +196,9 @@ describe('character package discovery', () => {
       expect.objectContaining({
         code: 'package_id_mismatch',
         characterId: 'folder-name',
+        // Selection is by declared id, so the diagnostic has to name it
+        // too or it is invisible to the character it concerns.
+        claimedCharacterId: 'other-id',
         provenance: 'operator',
       }),
     ]);

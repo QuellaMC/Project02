@@ -90,7 +90,17 @@ export type CharacterPackageDiagnostic = {
   readonly message: string;
   readonly path: string;
   readonly provenance: CharacterPackageProvenance;
+  /** The folder the package was found in. */
   readonly characterId?: string;
+  /**
+   * The id the descriptor declares, when it disagrees with the folder.
+   * A selection is made by declared id, so a diagnostic naming only the
+   * folder is invisible to the character it actually concerns: a
+   * misspelled folder holding the selected character would report
+   * "not found" and send the operator to install or reconfigure it,
+   * never to the rename that fixes it.
+   */
+  readonly claimedCharacterId?: string;
 };
 
 export type CharacterPackageDiscovery = {
@@ -287,6 +297,7 @@ function discoverCharacterPackage(options: {
         path: descriptorPath,
         provenance: options.provenance,
         characterId,
+        claimedCharacterId: parsed.definition.identity.id,
       }),
     };
   }
@@ -439,6 +450,9 @@ function characterDiagnostic(
     ...(options.characterId === undefined
       ? {}
       : {characterId: options.characterId}),
+    ...(options.claimedCharacterId === undefined
+      ? {}
+      : {claimedCharacterId: options.claimedCharacterId}),
   } satisfies CharacterPackageDiagnostic);
 }
 

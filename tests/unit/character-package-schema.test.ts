@@ -83,6 +83,15 @@ describe('character package descriptor schema parity', () => {
         meta: {version: '1.0.0'},
       },
     });
+
+    // Discovery folds character ids case-insensitively, so on a
+    // case-sensitive filesystem a differently-cased sibling is a package
+    // mkdir would accept and discovery would then reject as a duplicate
+    // — taking the original down with it. The scaffold refuses under the
+    // same fold discovery judges by, and names the directory in the way.
+    expect(() =>
+      scaffoldCharacterPackage({id: 'TEST.Scaffold-Char', packagesRoot}),
+    ).toThrow(`already exists: ${packageRoot}`);
   });
 
   it('accepts a plugins block through both the schema and the code validator', () => {

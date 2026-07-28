@@ -71,7 +71,13 @@ function loadProject02CharacterOverlayConfig(options: {
   // entry, never an absent overlay.
   const overlayEntry = describeRealEntry(path);
 
-  if (overlayEntry.kind === 'absent' || overlayEntry.kind === 'unreadable') {
+  // Only ENOENT means there is no overlay. An entry we could not inspect
+  // — a per-entry ACL, a transient filesystem error — is an overlay whose
+  // contents are unknown, and reporting it as absent would resolve the
+  // character against inherited global values, fingerprint as null, and
+  // let materialization rewrite settings the operator did author. The
+  // read below already fails closed on exactly this, so it decides.
+  if (overlayEntry.kind === 'absent') {
     return Object.freeze({
       scope: 'character',
       characterId: options.characterId,

@@ -46,19 +46,14 @@ export function prepareProject02CharacterActivation(
   const discovery = discoverCharacterPackages({
     sources: defaultCharacterPackageSources(options.storeRoot),
   });
+  const blocking = (diagnostic: CharacterPackageDiagnostic): boolean =>
+    diagnosticConcernsCharacter(diagnostic, configuredCharacterId) ||
+    diagnostic.code === 'package_source_unavailable';
   const blockingMessages = discovery.diagnostics
-    .filter(
-      diagnostic =>
-        diagnostic.characterId === configuredCharacterId ||
-        diagnostic.code === 'package_source_unavailable',
-    )
+    .filter(blocking)
     .map(formatCharacterDiagnostic);
   const warnings = discovery.diagnostics
-    .filter(
-      diagnostic =>
-        diagnostic.characterId !== configuredCharacterId &&
-        diagnostic.code !== 'package_source_unavailable',
-    )
+    .filter(diagnostic => !blocking(diagnostic))
     .map(formatCharacterDiagnostic);
   const match = discovery.characters.find(
     character => character.definition.identity.id === configuredCharacterId,
@@ -104,6 +99,25 @@ export function prepareProject02CharacterActivation(
     }),
     warnings: Object.freeze(warnings),
   });
+}
+
+/**
+ * Whether a package diagnostic is about the character being activated.
+ *
+ * A package is selected by the id its descriptor declares, so a
+ * diagnostic naming a different folder can still be the reason the
+ * selected character is missing — a folder mismatch is exactly that
+ * case. Matching either id is what turns "nova was not found; install
+ * it" into the mismatch that says which folder to rename.
+ */
+function diagnosticConcernsCharacter(
+  diagnostic: CharacterPackageDiagnostic,
+  characterId: string,
+): boolean {
+  return (
+    diagnostic.characterId === characterId ||
+    diagnostic.claimedCharacterId === characterId
+  );
 }
 
 function formatCharacterDiagnostic(
