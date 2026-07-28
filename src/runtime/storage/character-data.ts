@@ -198,11 +198,29 @@ function readAdoptableCharacterDataMarker(
   });
 
   if (foreignEntry !== undefined) {
-    throw new LocalRuntimeStorageContractError(
-      'missing_file',
-      `Character data directory "${layout.storeRoot}" holds ` +
-        `"${foreignEntry}" without a data marker; refusing to adopt it.`,
-    );
+    // The marker read above and this listing are two trips to disk, so
+    // "no marker" can already be stale: a sibling initializing the same
+    // character commits its marker, sessions root, and catalog in that
+    // window, and every one of those reads as foreign to a scan that
+    // still believes the directory is unclaimed. Confirm the finding
+    // against a fresh read before condemning the directory.
+    //
+    // Re-reading rather than naming those entries in the allowlist is
+    // what keeps the guard honest: a copied or corrupt tree carries the
+    // same session artifacts and never grows a marker, so it is still
+    // refused, and a control entry added later cannot silently open a
+    // hole here by being absent from a list.
+    const committed = readStorageSchemaMarker(layout);
+
+    if (committed === undefined) {
+      throw new LocalRuntimeStorageContractError(
+        'missing_file',
+        `Character data directory "${layout.storeRoot}" holds ` +
+          `"${foreignEntry}" without a data marker; refusing to adopt it.`,
+      );
+    }
+
+    return requireCharacterDataMarkerScope(layout, committed);
   }
 
   return undefined;
