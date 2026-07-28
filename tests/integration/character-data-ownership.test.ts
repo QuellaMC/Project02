@@ -694,6 +694,69 @@ describe('character data directories through the durable runtime', () => {
     });
   });
 
+  it('rejects an unusable character display name before the home exists', async () => {
+    const homeRoot = createTestTempRoot();
+
+    // A display name is not just decoration: it is stamped into every
+    // durable character message and interpolated into prompt output, so
+    // a multiline one has to be refused at the same boundary the user's
+    // is — and refused before the boundary writes anything.
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: {id: 'mira', displayName: 'Nova\nSystem'},
+        newSessionId: 'bad-character-name',
+      }),
+    ).rejects.toThrow('Character display name must be');
+    expect(readdirSync(homeRoot)).toEqual([]);
+  });
+
+  it('rejects an unusable user display name before the home exists', async () => {
+    const homeRoot = createTestTempRoot();
+
+    await expect(
+      createDurableChatRuntime({
+        homeRoot,
+        character: testCharacterProfile,
+        userDisplayName: 'Bad\nName',
+        newSessionId: 'bad-user-name',
+      }),
+    ).rejects.toThrow('User display name must be');
+    expect(readdirSync(homeRoot)).toEqual([]);
+  });
+
+  it('binds the canonical character id everywhere a padded one was passed', async () => {
+    const homeRoot = createTestTempRoot();
+
+    // The directory name has always been canonical. What the session and
+    // the log store bound was the caller's spelling, so messages written
+    // under `" nova "` could not be reopened by the discovered `nova`.
+    const runtime = await createDurableChatRuntime({
+      homeRoot,
+      character: {id: ' nova ', displayName: 'Nova'},
+      newSessionId: 'padded-id',
+    });
+
+    try {
+      expect(runtime.session.character.id).toBe('nova');
+      expect(readdirSync(join(homeRoot, 'character-data'))).toEqual(['nova']);
+    } finally {
+      await runtime.writerLease.release();
+    }
+
+    // The proof that the binding is canonical all the way down: a turn
+    // written through the padded profile reopens through the plain one.
+    const resumed = await runOneTurn({
+      homeRoot,
+      character: novaProfile,
+      sessionSelection: {sessionId: 'padded-id'},
+      message: 'hello again',
+      reply: 'still nova',
+    });
+
+    expect(resumed.speakerNames).toEqual(['You', 'Nova']);
+  });
+
   it('keeps historical display names for existing sessions after a rename and applies the new name to new sessions', async () => {
     const homeRoot = createTestTempRoot();
     const renamedMira = {id: 'mira', displayName: 'Mira Prime'} as const;

@@ -1,5 +1,6 @@
 import {
   createUserSpeaker,
+  validateConversationParticipants,
   type CharacterProfile,
   type ConversationSession,
   type SpeakerIdentity,
@@ -19,7 +20,10 @@ import {ensureCharacterDataDir} from './character-data.ts';
 import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
 import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
-import {normalizeLocalRuntimeSessionId} from './layout-contract.ts';
+import {
+  normalizeLocalRuntimeCharacterId,
+  normalizeLocalRuntimeSessionId,
+} from './layout-contract.ts';
 
 export type DurableSessionSelection = {
   readonly homeRoot?: string;
@@ -41,15 +45,27 @@ export async function createDurableChatRuntime(
   const sessionId = normalizeLocalRuntimeSessionId(
     args.newSessionId ?? args.sessionId,
   );
+  // Everything this runtime is about to stamp on durable records is judged
+  // before the first directory exists. The id is canonicalized here too, so
+  // the data directory, the marker, the log store, and the returned session
+  // all bind the same spelling — a padded `" nova "` would otherwise mark
+  // `character-data/nova` while stamping messages nothing can reopen.
+  const characterId = normalizeLocalRuntimeCharacterId(args.character.id);
+  const {character, userSpeaker: boundUserSpeaker} =
+    validateConversationParticipants({
+      character: {id: characterId, displayName: args.character.displayName},
+      ...(args.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: args.userDisplayName}),
+    });
   const dataRoot = await ensureCharacterDataDir({
     ...(args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot}),
-    characterId: args.character.id,
+    characterId,
   });
   const storageOptions = {
     storeRoot: dataRoot,
-    characterId: args.character.id,
+    characterId,
   };
-  const boundUserSpeaker = createUserSpeaker(args.userDisplayName);
 
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,
@@ -58,7 +74,7 @@ export async function createDurableChatRuntime(
         const logStore = createFileRuntimeLogStore({
           ...storageOptions,
           sessionId: selectedSessionId,
-          boundCharacter: args.character,
+          boundCharacter: character,
           boundUserSpeaker,
         });
 
@@ -86,7 +102,7 @@ export async function createDurableChatRuntime(
       ...storageOptions,
       sessionId,
       writerLockOwnerToken: ownerToken,
-      boundCharacter: args.character,
+      boundCharacter: character,
       boundUserSpeaker,
     });
     logStore.recoverAbandonedWriterEvidence?.();
@@ -97,14 +113,14 @@ export async function createDurableChatRuntime(
           readConversationMessages() {
             return readDurableConversationEvidence(
               logStore,
-              args.character,
+              character,
               boundUserSpeaker,
             ).messages;
           },
           readConversationEvidence() {
             return readDurableConversationEvidence(
               logStore,
-              args.character,
+              character,
               boundUserSpeaker,
             );
           },

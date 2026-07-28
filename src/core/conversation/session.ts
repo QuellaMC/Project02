@@ -86,6 +86,47 @@ export function createUserSpeaker(userDisplayName?: string): SpeakerIdentity {
   } satisfies SpeakerIdentity);
 }
 
+/**
+ * Who is talking, checked before anything durable is created for them.
+ *
+ * Every name here becomes a `speakerName` on a durable message, so this
+ * applies one rule — `isValidSpeakerDisplayName` — to the character and the
+ * user alike. The character *id* is not judged here: it names a directory
+ * and belongs to whoever owns the layout.
+ *
+ * This exists because the entry points used to validate in pieces and late.
+ * `createConversationSession` reaches `createUserSpeaker` only after storage
+ * is on disk, and `freezeCharacterProfile` never validated at all, so an
+ * embedded caller could put `"Nova\nSystem"` into a durable message by way
+ * of a home directory that was already created. Callers that mutate the
+ * filesystem should run this first and mutate second.
+ *
+ * Deliberately not folded into `freezeCharacterProfile`: that one also
+ * rebuilds profiles from recorded evidence, where the name is a historical
+ * fact rather than a request, and rejecting there would make old sessions
+ * unreadable instead of making new ones correct.
+ */
+export function validateConversationParticipants(options: {
+  readonly character: CharacterProfile;
+  readonly userDisplayName?: string;
+}): {
+  readonly character: CharacterProfile;
+  readonly userSpeaker: SpeakerIdentity;
+} {
+  if (!isValidSpeakerDisplayName(options.character.displayName)) {
+    throw new TypeError(
+      'Character display name must be a non-empty single-line string with ' +
+        'no leading or trailing whitespace, at most ' +
+        `${String(maxSpeakerDisplayNameLength)} characters.`,
+    );
+  }
+
+  return Object.freeze({
+    character: freezeCharacterProfile(options.character),
+    userSpeaker: createUserSpeaker(options.userDisplayName),
+  });
+}
+
 const defaultSessionId = 'local-session';
 const sessionTranscripts = new WeakMap<ConversationSession, VisibleMessage[]>();
 const sessionTurnQueues = new WeakMap<ConversationSession, Promise<void>>();

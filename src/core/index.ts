@@ -51,6 +51,7 @@ export {
   runCharacterTurn,
   selectRecentVisibleMessages,
   validateCharacterAgentReply,
+  validateConversationParticipants,
   validateRestoredVisibleTranscript,
   type CharacterAgent,
   type CharacterAgentInput,
