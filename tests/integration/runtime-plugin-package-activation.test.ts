@@ -1,5 +1,12 @@
 import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -573,6 +580,81 @@ describe('configured runtime plugin package activation', () => {
       [demoConfigPluginId]: 'bundled',
       [manifest.id]: 'operator',
     });
+  });
+
+  it('resolves an entry link target’s own relative imports beside the target', async () => {
+    const storeRoot = createTestTempRoot('project02-package-entry-link-');
+    const manifest = testPackageManifest('operator.entry-link');
+    const packageRoot = join(storeRoot, 'plugins', manifest.id);
+    const capturePath = join(storeRoot, 'entry-link-helper.txt');
+
+    writeOperatorPackage({
+      storeRoot,
+      manifest,
+      entrySource: 'unused: replaced by a link below',
+    });
+    // index.mjs -> sub/target.mjs, and the target imports its own
+    // sibling. A relative specifier is resolved against the importer's
+    // directory, and the importer is the file the bytes came from, not
+    // the name that led to it — reading the link's own path as the
+    // parent would look for sub/helper.mjs beside index.mjs, where
+    // nothing is, and reject a package that is entirely self-contained.
+    mkdirSync(join(packageRoot, 'sub'), {recursive: true});
+    writeFileSync(
+      join(packageRoot, 'sub', 'helper.mjs'),
+      'export const label = "from-sub-helper";\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(packageRoot, 'sub', 'target.mjs'),
+      [
+        "import { writeFileSync } from 'node:fs';",
+        "import { label } from './helper.mjs';",
+        'export function createProject02Plugin(input) {',
+        `  writeFileSync(${JSON.stringify(capturePath)}, label, 'utf8');`,
+        '  return {',
+        '    manifest: input.manifest,',
+        '    providedTools: [],',
+        '    lifecycleHooks: {},',
+        '  };',
+        '}',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    unlinkSync(join(packageRoot, 'index.mjs'));
+    symlinkSync(
+      join(packageRoot, 'sub', 'target.mjs'),
+      join(packageRoot, 'index.mjs'),
+      'file',
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    await initializeCharacterDataForHost(storeRoot);
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
+    });
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan,
+    });
+
+    // The factory only runs if the target's own import resolved, and
+    // the captured value is the one the sibling module exports.
+    expect(
+      configured.activation.plugins.find(
+        plugin => plugin.pluginId === manifest.id,
+      ),
+    ).toMatchObject({enabled: true, activationStatus: 'active'});
+    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
+      manifest.id,
+    ]);
+    expect(readFileSync(capturePath, 'utf8')).toBe('from-sub-helper');
   });
 });
 

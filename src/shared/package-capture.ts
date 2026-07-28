@@ -190,18 +190,36 @@ export function readPlannedPackageFile(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly file: PlannedPackageFile;
 }): Buffer {
-  const resolved = resolveContainedPackageFile({
-    packageDirectory: options.packageDirectory,
-    path: options.file.absolutePath,
-  });
+  const readPath = plannedPackageFileReadPath(options);
 
-  if (resolved === undefined) {
+  if (readPath === undefined) {
     throw captureError(options.file.absolutePath, 'not_regular');
   }
   return readBoundRegularFile({
-    path: resolved.readPath,
+    path: readPath,
     maxBytes: options.file.maxReadableBytes,
   });
+}
+
+/**
+ * Where a planned file's bytes actually live, or undefined when its path no
+ * longer names a contained regular file.
+ *
+ * This is not `absolutePath`: that is where the package names the file, and a
+ * link names one place while the bytes are in another. Reading needs the
+ * second, and so does resolving a module's own relative imports — those are
+ * relative to the file that holds them, not to the name that led there. Both
+ * ask at the moment they need it rather than carrying an answer from the walk,
+ * so a path that comes to name something else is re-judged then.
+ */
+export function plannedPackageFileReadPath(options: {
+  readonly packageDirectory: PackageDirectorySnapshot;
+  readonly file: PlannedPackageFile;
+}): string | undefined {
+  return resolveContainedPackageFile({
+    packageDirectory: options.packageDirectory,
+    path: options.file.absolutePath,
+  })?.readPath;
 }
 
 export function capturePackageDirectoryArtifact(

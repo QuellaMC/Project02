@@ -26,6 +26,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {
   PackageCaptureError,
   planPackageDirectoryCapture,
+  plannedPackageFileReadPath,
   readPlannedPackageFile,
   type PackageCaptureRejectionReason,
   type PlannedPackageFile,
@@ -342,7 +343,21 @@ function resolveFromArtifact(options: {
   if (parentFile === undefined) {
     throw new TypeError('Runtime plugin artifact parent is unavailable.');
   }
-  const physicalParentUrl = pathToFileURL(parentFile.absolutePath).href;
+  // The directory a relative specifier is resolved against is the one
+  // holding the importing module's bytes, which is the file the plan
+  // reads — not the path the package named it by. Those differ for a
+  // link: an entry linked to sub/target.mjs would otherwise have its own
+  // ./helper.mjs looked for beside the link, and a self-contained
+  // package would fail to import a file the walk already accepted.
+  const physicalParentPath = plannedPackageFileReadPath({
+    packageDirectory: options.parentAddress.artifact.packageDirectory,
+    file: parentFile,
+  });
+
+  if (physicalParentPath === undefined) {
+    throw new TypeError('Runtime plugin artifact parent is unavailable.');
+  }
+  const physicalParentUrl = pathToFileURL(physicalParentPath).href;
 
   if (isBuiltin(options.specifier)) {
     return options.nextResolve(options.specifier, {
