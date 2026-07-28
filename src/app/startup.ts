@@ -35,6 +35,8 @@ import {
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticIsReadinessFailure,
   shouldReadDefaultDotEnvForRuntimeLocation,
+  simulateCharacterOverlayCandidate,
+  withRuntimeConfigDiagnosticOrigin,
   type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
   type Project02RuntimeConfig,
@@ -51,6 +53,7 @@ import {
   LocalRuntimeStorageContractError,
   recordMaterializedCharacterPackageVersion,
   requireCharacterDataMarker,
+  type LocalRuntimeCharacterDataStorageSchemaMarker,
 } from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
@@ -63,6 +66,17 @@ type RuntimeCliStartupCommonOptions = {
 type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage?: 'activation';
   readonly continueAfterActivationErrors?: boolean;
+  /**
+   * The caller's own judgment of the runtime env, run in phase one over
+   * the same env the resolved startup returns. A caller that rejects on
+   * an env value — `PROJECT02_ROLE_MODEL_PROVIDER`, say — cannot make
+   * that call before startup, because the env file lives under a home
+   * this function is the one that resolves; without this hook the
+   * rejection lands after the home and character-data markers are
+   * already written. Throwing here rejects the startup with nothing
+   * durable created; the thrown error reaches the caller unchanged.
+   */
+  readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
   /**
    * Optional first scoped edit. The initializer composes it with
    * package materialization and commits one locked overlay candidate.
@@ -422,18 +436,15 @@ function planRuntimeCliActivationStartup(input: {
     });
   }
 
-  // An invalid pre-existing overlay must not create durable state
-  // either: read it before the home or character marker would be written.
+  // Read before anything is written. Bytes that cannot be parsed cannot
+  // be simulated either, so an overlay with no authored document is
+  // rejected here; every other overlay error is judged below against the
+  // document this startup would actually write.
   const preexistingOverlay = loadCharacterOverlayForStartup(runtimeLocation);
-  const repairsCharacterOverlay = startupRepairsCharacterOverlay({
-    overlay: preexistingOverlay,
-    request: options.characterConfigRequest,
-  });
+  const unreadableOverlay =
+    blockingRuntimeConfigLayerDiagnostic(preexistingOverlay);
 
-  if (
-    diagnosticsHaveErrors(preexistingOverlay.diagnostics) &&
-    !repairsCharacterOverlay
-  ) {
+  if (unreadableOverlay !== undefined) {
     const invalidState = buildPreEnvState(preexistingOverlay);
 
     return rejectedStartup({
@@ -449,7 +460,6 @@ function planRuntimeCliActivationStartup(input: {
     plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
     catalogSnapshot: preMaterializationState.catalogSnapshot,
     request: options.characterConfigRequest,
-    repairsCharacterOverlay,
   });
 
   if (preflight.diagnostics.length > 0) {
@@ -467,6 +477,44 @@ function planRuntimeCliActivationStartup(input: {
     throw new TypeError('Character package materialization planning drifted.');
   }
 
+  // The overlay as it will be, not as it is. Every remaining phase-one
+  // decision — required plugins, the env-file gate, the caller's env
+  // judgment — is made over this, so a startup is admitted on the state
+  // the commit produces rather than on the not-yet-set-up state it
+  // replaces.
+  const simulated = simulateCharacterMaterialization({
+    runtimeLocation,
+    configEnv: input.configEnv,
+    characterActivation,
+    document: preflight.packagePlan.document,
+    ...(preflight.request === undefined ? {} : {request: preflight.request}),
+  });
+
+  if (simulated.status === 'invalid') {
+    return rejectedStartup({
+      ...preMaterializationState.base,
+      status: 'config_invalid',
+      activationPlan: withActivationDiagnostics(
+        preMaterializationState.activationPlanBeforeRuntimeEnv,
+        [
+          withRuntimeConfigDiagnosticOrigin(
+            createRuntimeConfigDiagnostic(
+              'error',
+              'character_config_candidate_invalid',
+              simulated.message,
+            ),
+            {
+              scope: 'character',
+              characterId: characterActivation.profile.id,
+              path: runtimeLocation.overlayPath,
+            },
+          ),
+        ],
+      ),
+    });
+  }
+
+  const plannedState = buildPreEnvState(simulated.overlay);
   const readRuntimeEnvFileUnlessBlocked = createStartupRuntimeEnvFileReader({
     runtimeLocation,
     suppliedEnv: input.suppliedEnv,
@@ -477,10 +525,16 @@ function planRuntimeCliActivationStartup(input: {
   // Still phase one, and that is the point: the env file is read while
   // rejecting is still free. An unreadable file has to be reported
   // instead of reported after the commit below already landed.
-  readRuntimeEnvFileUnlessBlocked(
-    preMaterializationState.activationPlanBeforeRuntimeEnv.activation
-      .diagnostics,
+  const plannedRuntimeEnv = readRuntimeEnvFileUnlessBlocked(
+    plannedState.activationPlanBeforeRuntimeEnv.activation.diagnostics,
   );
+
+  // The caller judges that same env here, for the same reason. A
+  // blocked activation never read the file, so there is nothing to
+  // judge — that startup is already rejected by phase two.
+  if (plannedRuntimeEnv !== undefined) {
+    options.validateRuntimeEnv?.(plannedRuntimeEnv);
+  }
 
   return Object.freeze({
     outcome: 'committable',
@@ -588,6 +642,68 @@ async function commitPlannedRuntimeCliActivationStartup(
     status: 'resolved',
     runtimeEnv,
     activationPlan,
+  });
+}
+
+/**
+ * The read-only twin of `materializeCharacterDataDir`: the overlay that
+ * commit would write, without writing it.
+ *
+ * Both call the same config seam with the same inputs, so what phase one
+ * admits and what phase two produces cannot drift. The one asymmetry is
+ * deliberate — the marker this startup has not created yet is not
+ * required here, because creating it is what is being decided.
+ */
+function simulateCharacterMaterialization(input: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly document: Project02RuntimeConfig;
+  readonly request?: RuntimeConfigControlRequest;
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+}):
+  | {
+      readonly status: 'valid';
+      readonly overlay: LoadedProject02CharacterOverlayConfig;
+    }
+  | {readonly status: 'invalid'; readonly message: string} {
+  const characterId = input.characterActivation.profile.id;
+  const marker = readCharacterDataMarkerForStartup(input.runtimeLocation);
+  const simulated = simulateCharacterOverlayCandidate({
+    target: resolveRuntimeConfigScopeTarget({
+      runtimeLocation: input.runtimeLocation,
+      env: input.configEnv,
+      scope: 'character',
+    }),
+    characterMaterialization: {
+      document: input.document,
+      fillMissingFields:
+        marker?.materializedCharacterPackageVersion !==
+        input.characterActivation.definition.meta.version,
+    },
+    ...(input.request === undefined ? {} : {request: input.request}),
+  });
+
+  if (simulated.status === 'invalid') {
+    return simulated;
+  }
+
+  return Object.freeze({
+    status: 'valid',
+    // The candidate validated, so it carries a config: every plan built
+    // from here reads the overlay this startup is about to write. It
+    // carries no authored document, because there are none yet — this
+    // overlay describes a file that has not been written.
+    overlay: Object.freeze({
+      scope: 'character',
+      characterId,
+      source: 'overlay',
+      path: input.runtimeLocation.overlayPath,
+      config: simulated.document,
+      diagnostics: Object.freeze([]),
+    } satisfies LoadedProject02CharacterOverlayConfig),
   });
 }
 
@@ -726,35 +842,11 @@ function resolveCharacterConfigStartupRequest(options: {
   });
 }
 
-/**
- * Whether this startup is the one repairing the overlay it just read.
- *
- * A config mutation is exactly the operator action that fixes an invalid
- * authored value, so refusing to run it over an invalid overlay would
- * leave the file editable only by hand — the asymmetry the global
- * document does not have. The permission is narrow and safe: it needs a
- * requested mutation, it needs authored bytes to edit (the same
- * repairability rule both scopes share), and the transaction still
- * validates the complete candidate before writing. A repair that would
- * leave the overlay invalid is rejected there, and a startup that is
- * merely reading an invalid overlay is rejected here as before.
- */
-function startupRepairsCharacterOverlay(options: {
-  readonly overlay: LoadedProject02CharacterOverlayConfig;
-  readonly request: RuntimeCliCharacterConfigRequest | undefined;
-}): boolean {
-  return (
-    options.request !== undefined &&
-    blockingRuntimeConfigLayerDiagnostic(options.overlay) === undefined
-  );
-}
-
 function prepareCharacterMaterializationPreflight(options: {
   readonly expectations: CharacterPluginExpectations | undefined;
   readonly plan: PreparedProject02PluginActivationPlan;
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
   readonly request: RuntimeCliCharacterConfigRequest | undefined;
-  readonly repairsCharacterOverlay: boolean;
 }) {
   const request = resolveCharacterConfigStartupRequest({
     request: options.request,
@@ -772,10 +864,7 @@ function prepareCharacterMaterializationPreflight(options: {
     packagePlan,
     diagnostics: Object.freeze([
       ...(packagePlan.status === 'invalid' ? packagePlan.diagnostics : []),
-      ...materializationConfigPreflightDiagnostics(
-        options.plan,
-        options.repairsCharacterOverlay,
-      ),
+      ...materializationConfigPreflightDiagnostics(options.plan),
       ...declaredInvalidPackageDiagnostics({
         expectations: options.expectations,
         catalogSnapshot: options.catalogSnapshot,
@@ -784,9 +873,15 @@ function prepareCharacterMaterializationPreflight(options: {
   });
 }
 
+/**
+ * Errors that describe the config as it stands, before materialization
+ * runs. Only the ones no write could fix belong here; the overlay's own
+ * values are judged later against the document this startup would
+ * actually produce, so a run carrying an edit is not blocked by the very
+ * value it repairs — nor admitted by leaving a second one unchecked.
+ */
 function materializationConfigPreflightDiagnostics(
   plan: PreparedProject02PluginActivationPlan,
-  repairsCharacterOverlay: boolean,
 ): readonly RuntimeConfigDiagnostic[] {
   return Object.freeze(
     plan.resolvedConfig.diagnostics.filter(
@@ -798,11 +893,10 @@ function materializationConfigPreflightDiagnostics(
         // authored global or overlay value and must fail before
         // materialization writes anything.
         !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
-        // Except the overlay's own errors when this startup is the
-        // repair: those describe the very values the requested mutation
-        // is about to rewrite. Global-document errors still block,
-        // because no character-scoped mutation can fix them.
-        !(repairsCharacterOverlay && diagnostic.origin?.scope === 'character'),
+        // Overlay errors excepted: the simulated candidate below is the
+        // authority on those, and it judges the merged result rather
+        // than the bytes this startup is about to replace.
+        diagnostic.origin?.scope !== 'character',
     ),
   );
 }
@@ -866,6 +960,17 @@ function loadCharacterOverlayForStartup(
   // character, holding foreign content, or reached through a symlink
   // fails check and inspect exactly as durable materialization does.
   return readCharacterOverlayForScope(runtimeLocation.characterScope).overlay;
+}
+
+/**
+ * The data marker through the same guarded read, absent when this
+ * startup has not created the directory yet — which is exactly the
+ * state that makes every package field missing and worth filling.
+ */
+function readCharacterDataMarkerForStartup(
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): LocalRuntimeCharacterDataStorageSchemaMarker | undefined {
+  return readCharacterOverlayForScope(runtimeLocation.characterScope).marker;
 }
 
 function resolveCwdDotEnv(options: {

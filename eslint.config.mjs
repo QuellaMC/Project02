@@ -88,10 +88,13 @@ export default tseslint.config(
       // for character-origin attribution on config diagnostics, then +5
       // for consuming startup's shared character activation and its
       // character_invalid status, then +3 for the --character flag, then
-      // +1 to validate session args before startup materializes state.
+      // +1 to validate session args before startup materializes state,
+      // then +19 for the store-consent gate: the --init-carrying store
+      // state replacing the bare location state, and the gate call that
+      // asks before any startup creates a home.
       'max-lines': [
         'error',
-        {max: 1179, skipBlankLines: true, skipComments: true},
+        {max: 1198, skipBlankLines: true, skipComments: true},
       ],
     },
   },

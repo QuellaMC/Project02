@@ -73,10 +73,15 @@ import {
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
-  parseRuntimeLocationFlag,
+  emptyRuntimeStoreCliState,
+  parseRuntimeStoreFlag,
   RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState,
+  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
+import {
+  assertProject02StoreConsent,
+  Project02StoreConsentError,
+} from '../shared/store-consent.ts';
 import {
   createSelectedRoleModelAdapter,
   parseProviderName,
@@ -117,6 +122,7 @@ type RunChatCliOptions = Omit<ChatCliOptions, 'pluginHost'> & {
 
 type ChatCliArgs = {
   readonly traceMode: boolean;
+  readonly init: boolean;
   readonly provider?: ChatProviderName;
   readonly storeRoot?: string;
   readonly configPath?: string;
@@ -322,6 +328,16 @@ export async function runChatCliFromArgs(
     // startup materializes any durable character state.
     validateDurableSessionArgs(parsedArgs);
 
+    // And before that state is created at all, if the operator never
+    // asked for a store here.
+    await assertProject02StoreConsent({
+      location: parsedArgs,
+      init: parsedArgs.init,
+      stdout: options.stdout,
+      stdin: options.stdin,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    });
+
     const startup = await resolveRuntimeCliStartup({
       location: parsedArgs,
       ...(options.env === undefined ? {} : {env: options.env}),
@@ -329,6 +345,15 @@ export async function runChatCliFromArgs(
         ? {}
         : {factories: options.factories}),
       continueAfterActivationErrors: options.pluginHost !== undefined,
+      // The same selection run below, run early: an unusable
+      // PROJECT02_ROLE_MODEL_PROVIDER is this command's error, and it
+      // has to be reported before startup writes the home and
+      // character-data markers. The configured file value is left out
+      // deliberately — it is a fallback, and cannot rescue an env value
+      // that does not name a provider.
+      validateRuntimeEnv: env => {
+        selectChatProvider(parsedArgs.provider, env);
+      },
     });
 
     if (startup.status === 'character_invalid') {
@@ -1188,7 +1213,7 @@ function writeTraceSummary(
 function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let traceMode = false;
   let provider: ChatProviderName | undefined;
-  let location: RuntimeLocationCliState = {};
+  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
   let sessionId: string | undefined;
   let newSessionId: string | undefined;
 
@@ -1225,15 +1250,15 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
       continue;
     }
 
-    const locationResult = parseRuntimeLocationFlag({
+    const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: location,
+      state: store,
     });
 
-    if (locationResult.status === 'matched') {
-      location = locationResult.state;
-      index = locationResult.nextIndex;
+    if (storeResult.status === 'matched') {
+      store = storeResult.state;
+      index = storeResult.nextIndex;
       continue;
     }
 
@@ -1276,8 +1301,11 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
     );
   }
 
+  const {location} = store;
+
   return {
     traceMode,
+    init: store.init,
     ...providerOption(provider),
     ...(location.character === undefined
       ? {}
@@ -1312,6 +1340,7 @@ function isFormattedTerminalError(
 ): error is
   | ChatCliUsageError
   | ChatCliStartupError
+  | Project02StoreConsentError
   | RoleModelProviderSelectionError
   | RuntimeLocationCliUsageError
   | RuntimeEnvFileError
@@ -1319,6 +1348,7 @@ function isFormattedTerminalError(
   return (
     error instanceof ChatCliUsageError ||
     error instanceof ChatCliStartupError ||
+    error instanceof Project02StoreConsentError ||
     error instanceof RoleModelProviderSelectionError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||

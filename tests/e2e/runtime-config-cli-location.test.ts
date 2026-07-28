@@ -16,6 +16,7 @@ import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
+  initializeTestStore,
   requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
@@ -134,6 +135,7 @@ describe('runtime config CLI location selection', () => {
     let setStderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(storeRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -211,6 +213,7 @@ describe('runtime config CLI location selection', () => {
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(storeRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -283,6 +286,7 @@ describe('runtime config CLI location selection', () => {
       `${envVar}="${secretValue}"\n`,
       'utf8',
     );
+    await initializeTestStore(storeRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -351,6 +355,8 @@ describe('runtime config CLI location selection', () => {
     const secretValue = 'from-process-env';
 
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(storeRoot);
+    await initializeTestStore(configStoreRoot);
 
     try {
       process.env[envVar] = secretValue;
@@ -447,6 +453,8 @@ describe('runtime config CLI location selection', () => {
       `${envVar}="${secretValue}"\n`,
       'utf8',
     );
+    await initializeTestStore(storeRoot);
+    await initializeTestStore(configStoreRoot);
 
     try {
       Reflect.deleteProperty(process.env, envVar);
@@ -522,6 +530,7 @@ describe('runtime config CLI location selection', () => {
       `${runtimeConfigEnvVarName}=${configPath}\n`,
       'utf8',
     );
+    await initializeTestStore(storeRoot);
 
     try {
       Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
@@ -641,6 +650,11 @@ describe('runtime config CLI location selection', () => {
       `${runtimeConfigEnvVarName}=${dotenvConfigPath}\n`,
       'utf8',
     );
+    // Only the two homes the mutations write into: the dotenv- and
+    // process-selected stores stay uninitialized, which is part of what
+    // "the explicit location won" means here.
+    await initializeTestStore(explicitStoreRoot);
+    await initializeTestStore(selectedStoreRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = processConfigPath;

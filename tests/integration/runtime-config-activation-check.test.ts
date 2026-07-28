@@ -725,6 +725,7 @@ describe('runtime config activation checks and construction', () => {
         activationPlan: prepareConfiguredProject02PluginActivation({
           ...runtimeConfigSnapshotForTest({
             loadedConfig: loadedConfig,
+            storeRoot,
             env: {
               [envVar]: 'same-id-different-manifest-secret',
             },
@@ -1262,6 +1263,7 @@ describe('runtime config activation checks and construction', () => {
       activationPlan: prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
           loadedConfig: loadedConfig,
+          storeRoot,
           env: {
             [envVar]: 'same-id-matching-manifest-secret',
           },

@@ -5,8 +5,10 @@
  * IO and no runtime access beyond reading the supplied env.
  */
 import {
-  parseRuntimeLocationFlag,
+  emptyRuntimeStoreCliState,
+  parseRuntimeStoreFlag,
   type RuntimeLocationCliState,
+  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
 import type {
   RuntimeConfigMutationOperation,
@@ -57,13 +59,15 @@ export type RuntimeConfigCliArgs = {
 
 export type RuntimeConfigCliParsedArgs = {
   readonly location: RuntimeLocationCliState;
+  /** The operator agreed on the command line to create a missing store. */
+  readonly init: boolean;
   readonly commandArgs: readonly string[];
 };
 
 export function parseRuntimeConfigCliArgs(
   args: readonly string[],
 ): RuntimeConfigCliParsedArgs {
-  let location: RuntimeLocationCliState = {};
+  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
   const commandArgs: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -78,15 +82,15 @@ export function parseRuntimeConfigCliArgs(
       break;
     }
 
-    const locationResult = parseRuntimeLocationFlag({
+    const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: location,
+      state: store,
     });
 
-    if (locationResult.status === 'matched') {
-      location = locationResult.state;
-      index = locationResult.nextIndex;
+    if (storeResult.status === 'matched') {
+      store = storeResult.state;
+      index = storeResult.nextIndex;
       continue;
     }
 
@@ -95,7 +99,8 @@ export function parseRuntimeConfigCliArgs(
   }
 
   return {
-    location,
+    location: store.location,
+    init: store.init,
     commandArgs,
   };
 }

@@ -104,8 +104,9 @@ export async function ensureCharacterDataDir(options: {
   readonly characterId: string;
   readonly now?: () => string;
 }): Promise<string> {
-  const homeOptions =
-    options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot};
+  const homeOptions = {
+    ...(options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot}),
+  };
   // Normalize once, before anything is written. The path helper and the marker
   // constructor each normalize on their own, so carrying the raw ID further
   // would verify the persisted marker against a value that never reaches

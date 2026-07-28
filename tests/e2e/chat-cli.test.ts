@@ -13,7 +13,10 @@ import {
   writeRuntimeConfig,
   runtimeLocationForTest,
 } from '../support/runtime-config.ts';
-import {withScopedProcessEnv} from '../support/runtime-config-fixtures.ts';
+import {
+  createInitializedTestStoreRoot,
+  withScopedProcessEnv,
+} from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
 import {createConversationSession} from '../../src/core/index.ts';
@@ -732,7 +735,7 @@ describe('chat CLI character selection', () => {
     );
 
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('Character "../bad" was not found');
+    expect(stderr).toContain('--character must start with a letter');
   });
 
   it('speaks as an operator-installed character selected by config', async () => {
@@ -883,7 +886,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('reports an invalid provider environment value as a CLI error', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-chat-provider-invalid-env-',
     );
     let stderr = '';
@@ -901,6 +904,35 @@ describe('chat CLI provider selection', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('must be either "local" or "nvidia"');
+    // The env is judged in the startup planning phase, so the value that
+    // makes this command unusable is reported before the run sets up the
+    // character. The store itself is arrangement — the operator already
+    // has one — so what a rejected run must not leave behind is the
+    // character data directory this command would have created.
+    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
+  });
+
+  it('reports an invalid provider value from the home env file before materializing character state', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-provider-env-file-');
+    let stderr = '';
+    writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=bogus\n`);
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'invalid-provider-env-file'],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('must be either "local" or "nvidia"');
+    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
   });
 
   it('releases the durable writer lease when the provider turn fails', async () => {
@@ -992,7 +1024,7 @@ describe('chat CLI provider selection', () => {
     const defaultStoreRoot = createTestTempRoot(
       'project02-chat-default-config-store-',
     );
-    const selectedStoreRoot = createTestTempRoot(
+    const selectedStoreRoot = await createInitializedTestStoreRoot(
       'project02-chat-selected-config-store-',
     );
     const sessionId = 'selected-store-config';
@@ -1054,7 +1086,7 @@ describe('chat CLI provider selection', () => {
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
     const cwdRoot = createTestTempRoot('project02-chat-cwd-dotenv-error-');
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-chat-selected-dotenv-error-',
     );
     const sessionId = 'selected-store-before-cwd-dotenv';
@@ -1103,7 +1135,7 @@ describe('chat CLI provider selection', () => {
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
     const cwdRoot = createTestTempRoot('project02-chat-env-cwd-dotenv-error-');
-    const selectedStoreRoot = createTestTempRoot(
+    const selectedStoreRoot = await createInitializedTestStoreRoot(
       'project02-chat-env-selected-store-',
     );
     const configRoot = createTestTempRoot(

@@ -1,4 +1,4 @@
-import {unlinkPathSync} from '../../shared/file-system.ts';
+import {pathExistsSync, unlinkPathSync} from '../../shared/file-system.ts';
 
 import {
   createJsonBoundaryObjectSnapshot,
@@ -13,6 +13,8 @@ import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
 } from '../storage/atomic-file.ts';
+import {ensureInitializedProject02Home} from '../storage/home.ts';
+import type {Project02HomeLayout} from '../storage/layout-contract.ts';
 import {readOptionalStoreText} from '../storage/store-file.ts';
 import {
   isRuntimeControlEnvVarName,
@@ -181,6 +183,44 @@ function bootstrapRuntimeConfig(options: {
   }
 
   return {version: runtimeConfigVersion};
+}
+
+/**
+ * Creates a store complete, or not at all.
+ *
+ * A store is born exactly once, and everything that makes it one — the
+ * marker, the character-data root, the global config document — comes
+ * from this single call. Creation used to be spread across routes:
+ * `check` produced a marker with no config, a global `set` produced a
+ * config with no marker, and each left a directory that answered "is
+ * this a store?" differently depending on which command got there
+ * first. One birth, one answer.
+ *
+ * It lives here rather than in `runtime/storage` because the config
+ * document's shape belongs to this module, and this module already
+ * depends on storage — storage owns the layout, config owns the
+ * document, and composing them in that direction keeps the dependency
+ * pointing the way it already points.
+ *
+ * Idempotent, so every route may call it and all but the first find
+ * the store already there. The document is written only when genuinely
+ * absent: a store can be created around a config the operator authored
+ * by hand, and that document is theirs to keep.
+ */
+export async function ensureInitializedProject02Store(options: {
+  readonly homeRoot?: string;
+}): Promise<Project02HomeLayout> {
+  const layout = await ensureInitializedProject02Home(options);
+
+  if (!pathExistsSync(layout.configPath)) {
+    writeJsonAtomic(
+      layout.configPath,
+      bootstrapRuntimeConfig({storeRoot: layout.homeRoot}),
+      0o600,
+    );
+  }
+
+  return layout;
 }
 
 /**

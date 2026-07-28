@@ -5,7 +5,9 @@ import {
   hostScopedFirstPartyRuntimePluginIds,
   runtimePluginContractVersion,
 } from '../../src/plugins/index.ts';
+import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {ensureCharacterDataDir} from '../../src/runtime/storage/index.ts';
+import {createTestTempRoot} from './temp-root.ts';
 
 /**
  * Marks the character's data directory initialized so a host can be
@@ -17,6 +19,38 @@ export async function initializeCharacterDataForHost(
   characterId = 'mira',
 ): Promise<void> {
   await ensureCharacterDataDir({homeRoot: storeRoot, characterId});
+}
+
+/**
+ * Creates a Project02 store at the given path and returns it.
+ *
+ * The CLIs refuse to create a store the operator never asked for, so a
+ * test exercising anything past that gate has to arrange one — the same
+ * way a test needing a config file writes one. Use this wherever the
+ * store's existence is setup rather than the subject; a test about the
+ * gate itself wants a bare `createTestTempRoot`.
+ *
+ * It runs the same initializer the CLIs run, so the arranged store is
+ * the store the product makes — marker, character-data root, and global
+ * config together. A test that arranged less would be exercising a
+ * state no command can produce. What a rejected run must still not
+ * leave is `character-data/<id>/`, an `.env`, or an edited document.
+ *
+ * Takes a path rather than making one because the home a run selects is
+ * not always a root a test named: `--config` points at a file, and the
+ * home it resolves is `<cwd>/.project02` unless the document says
+ * otherwise. Those tests arrange that path directly.
+ */
+export async function initializeTestStore(homeRoot: string): Promise<string> {
+  await ensureInitializedProject02Store({homeRoot});
+  return homeRoot;
+}
+
+/** A fresh temp root that is already a Project02 store. */
+export async function createInitializedTestStoreRoot(
+  prefix = 'project02-test-',
+): Promise<string> {
+  return initializeTestStore(createTestTempRoot(prefix));
 }
 
 export function requiredSecretPlugin(id = 'memory.required') {

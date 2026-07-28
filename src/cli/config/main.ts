@@ -34,6 +34,10 @@ import {
 } from '../shared/terminal-errors.ts';
 import {RuntimeLocationCliUsageError} from '../shared/runtime-location-flags.ts';
 import {
+  assertProject02StoreConsent,
+  Project02StoreConsentError,
+} from '../shared/store-consent.ts';
+import {
   runRuntimeConfigConsole,
   type RuntimeConfigConsolePromptAdapter,
 } from './console.ts';
@@ -88,6 +92,7 @@ export function runRuntimeConfigCliFromArgs(
       }
 
       assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
+      await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
       const startup = await resolveRuntimeCliStartup({
         location: parsedArgs.location,
         ...(options.env === undefined ? {} : {env: options.env}),
@@ -127,6 +132,42 @@ export function runRuntimeConfigCliFromArgs(
       });
     })
     .catch((error: unknown) => handleRuntimeConfigCliError(error, options));
+}
+
+/**
+ * Asks before a route that would create one. Every caller runs this
+ * after its command has parsed: a malformed command line is a usage
+ * error whatever store it names, and asking first would answer the
+ * wrong question — offering to create a store for a command that was
+ * never going to run.
+ *
+ * Read verbs (`path`, `env-path`, `get` at global scope) never call
+ * it. They create nothing today, and `path` in particular is how an
+ * operator asks where a store *would* live.
+ *
+ * `creates` says which of the two things a route brings into being, so
+ * the gate can tell a run that stands up a home from one that only
+ * writes the config document it was pointed at.
+ */
+function assertRuntimeConfigCliStoreConsent(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  options: RuntimeConfigCliOptions,
+  creates: 'home' | 'selected-config' = 'home',
+): Promise<void> {
+  return assertProject02StoreConsent({
+    location: parsedArgs.location,
+    init: parsedArgs.init,
+    stdout: options.stdout,
+    creates,
+    // The same env staging the command itself will use, so the gate
+    // judges the home the command would actually resolve.
+    cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
+      parsedArgs,
+      options.env ?? process.env,
+    ),
+    ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+  });
 }
 
 async function runRuntimeConfigCliFromArgsSync(
@@ -170,19 +211,21 @@ async function runRuntimeConfigCheckCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
 ): Promise<number> {
+  // Check parses without env — only `secret set` reads one, and this
+  // route is reached only for `check` — so a malformed command line is
+  // rejected before anything is asked for or created.
+  const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
+
+  if (command.kind !== 'check') {
+    throw new TypeError('Runtime config check command parsing drifted.');
+  }
+
+  await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
   const startup = await resolveRuntimeCliStartup({
     location: parsedArgs.location,
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.factories === undefined ? {} : {factories: options.factories}),
   });
-  const command = parseRuntimeConfigCommand(
-    parsedArgs.commandArgs,
-    startup.configEnv,
-  );
-
-  if (command.kind !== 'check') {
-    throw new TypeError('Runtime config check command parsing drifted.');
-  }
 
   if (startup.status === 'character_invalid') {
     throw new RuntimeConfigCliUsageError(
@@ -210,19 +253,31 @@ async function runRuntimePluginSecretSetCommand(
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
 ): Promise<number> {
-  const startup = await resolveRuntimeConfigCliActivationStartup({
-    parsedArgs,
-    options,
-    cwdDotEnv,
-  });
+  // Secret set is the one verb that reads env while parsing, so it
+  // stages env through the config-stage startup — which creates
+  // nothing — rather than the activation startup that does. The
+  // command is then rejected, and the store offered, in that order:
+  // both before anything is written.
   const command = parseRuntimeConfigCommand(
     parsedArgs.commandArgs,
-    startup.configEnv,
+    resolveRuntimeCliStartup({
+      stage: 'config',
+      location: parsedArgs.location,
+      cwdDotEnv,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    }).configEnv,
   );
 
   if (command.kind !== 'secret_set') {
     throw new TypeError('Runtime config secret-set command parsing drifted.');
   }
+
+  await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+  const startup = await resolveRuntimeConfigCliActivationStartup({
+    parsedArgs,
+    options,
+    cwdDotEnv,
+  });
 
   if (startup.status === 'character_invalid') {
     throw new RuntimeConfigCliUsageError(
@@ -302,7 +357,14 @@ async function runRuntimeConfigDocumentCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
+  // Every read verb returned above, so what is left writes. Plugin
+  // activation resolves its manifest through the activation startup,
+  // which stands up the home; the plain document write touches only
+  // the selected config, which standalone is just the file the
+  // operator named.
   if (isPluginActivationOperation(parsed.command.operation)) {
+    await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+
     return runManifestAwarePluginActivation({
       parsedArgs,
       options,
@@ -311,6 +373,11 @@ async function runRuntimeConfigDocumentCommand(
     });
   }
 
+  await assertRuntimeConfigCliStoreConsent(
+    parsedArgs,
+    options,
+    'selected-config',
+  );
   const target = resolveRuntimeConfigScopeTarget({
     runtimeLocation: configStartup.runtimeLocation,
     env: configStartup.configEnv,
@@ -418,6 +485,10 @@ async function runCharacterScopedRuntimeConfigCommand(
   const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
 
   assertCharacterScopedParsedCommandAllowed(command);
+  // Every scoped verb runs the activation startup, which materializes
+  // the character's data directory — so unlike global scope, the read
+  // verbs create too and none of them are exempt.
+  await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
   const characterConfigRequest =
     characterConfigStartupRequestForCommand(command);
   const startup = await resolveRuntimeCliStartup({
@@ -441,7 +512,7 @@ async function runCharacterScopedRuntimeConfigCommand(
   }
 
   if (command.kind !== 'check') {
-    assertScopedStartupConfigReadable(startup, command.kind === 'mutate');
+    assertScopedStartupConfigReadable(startup);
   }
 
   const target = resolveRuntimeConfigScopeTarget({
@@ -567,18 +638,12 @@ function writeCharacterScopedRuntimeConfigResult(options: {
  */
 function assertScopedStartupConfigReadable(
   startup: CharacterScopedRuntimeCliStartup,
-  mutatesOverlay: boolean,
 ): void {
   assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
   const blocking = startup.activationPlan.resolvedConfig.diagnostics.find(
     diagnostic =>
       diagnostic.severity === 'error' &&
-      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
-      // A mutation is the repair, and by this point it has already
-      // committed: an overlay error still reported here describes a
-      // value the write did not fix, which the transaction would have
-      // rejected. Read-only verbs keep blocking on any overlay error.
-      !(mutatesOverlay && diagnostic.origin?.scope === 'character'),
+      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
   );
 
   if (blocking !== undefined) {
@@ -778,6 +843,7 @@ function handleRuntimeConfigCliError(
   if (
     error instanceof RuntimeConfigCliUsageError ||
     error instanceof RuntimeLocationCliUsageError ||
+    error instanceof Project02StoreConsentError ||
     error instanceof RuntimeEnvFileError ||
     error instanceof RuntimeConfigMutationError ||
     error instanceof AggregateError ||
@@ -793,6 +859,7 @@ function handleRuntimeConfigCliError(
 
 if (isMainModule(import.meta.url)) {
   const exitCode = await runRuntimeConfigCliFromArgs(process.argv.slice(2), {
+    stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
   });

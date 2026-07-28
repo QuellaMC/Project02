@@ -4,6 +4,11 @@ import {join} from 'node:path';
 
 import {onTestFinished} from 'vitest';
 
+// Nothing here may import production code. Nearly every test file pulls
+// this module in, so a production import would load that graph before a
+// test's `vi.doMock('node:fs')` could intercept it. Store arrangement
+// that needs the runtime lives in `runtime-config-fixtures.ts`.
+
 /**
  * Creates a temp root whose path is already canonical.
  *

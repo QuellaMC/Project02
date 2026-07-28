@@ -28,10 +28,15 @@ import {
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
 import {
-  parseRuntimeLocationFlag,
+  emptyRuntimeStoreCliState,
+  parseRuntimeStoreFlag,
   RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState,
+  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
+import {
+  assertProject02StoreConsent,
+  Project02StoreConsentError,
+} from '../shared/store-consent.ts';
 import {
   createTurnEvidence,
   type InspectTurnEvidence,
@@ -52,6 +57,8 @@ class InspectCliUsageError extends Error {
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
+  /** Only read to ask whether an absent store should be created. */
+  readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
@@ -62,12 +69,14 @@ type InspectCliArgs =
       readonly storeRoot?: string;
       readonly configPath?: string;
       readonly character?: string;
+      readonly init: boolean;
     }
   | {
       readonly mode: 'session';
       readonly storeRoot?: string;
       readonly configPath?: string;
       readonly character?: string;
+      readonly init: boolean;
       readonly sessionId: string;
     };
 
@@ -109,6 +118,15 @@ export async function runInspectCliFromArgs(
         : options.env;
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
+    // Inspect reports on a store; it has no business making one. The
+    // startup below would, so the question is asked before it runs.
+    await assertProject02StoreConsent({
+      location: parsedArgs,
+      init: parsedArgs.init,
+      stdout: options.stdout,
+      ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
+      ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
+    });
     const startup = await resolveRuntimeCliStartup({
       location: parsedArgs,
       ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
@@ -155,6 +173,7 @@ export async function runInspectCliFromArgs(
     if (
       error instanceof InspectCliUsageError ||
       error instanceof RuntimeLocationCliUsageError ||
+      error instanceof Project02StoreConsentError ||
       error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
     ) {
@@ -167,7 +186,7 @@ export async function runInspectCliFromArgs(
 }
 
 function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
-  let location: RuntimeLocationCliState = {};
+  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
   let sessionsMode = false;
   let sessionId: string | undefined;
 
@@ -182,15 +201,15 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       continue;
     }
 
-    const locationResult = parseRuntimeLocationFlag({
+    const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: location,
+      state: store,
     });
 
-    if (locationResult.status === 'matched') {
-      location = locationResult.state;
-      index = locationResult.nextIndex;
+    if (storeResult.status === 'matched') {
+      store = storeResult.state;
+      index = storeResult.nextIndex;
       continue;
     }
 
@@ -227,9 +246,12 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     );
   }
 
+  const {location} = store;
+
   if (sessionsMode) {
     return {
       mode: 'sessions',
+      init: store.init,
       ...(location.storeRoot === undefined
         ? {}
         : {storeRoot: location.storeRoot}),
@@ -249,6 +271,7 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   return {
     mode: 'session',
     sessionId,
+    init: store.init,
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
@@ -365,6 +388,7 @@ function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
 
 if (isMainModule(import.meta.url)) {
   process.exitCode = await runInspectCliFromArgs(process.argv.slice(2), {
+    stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
   });

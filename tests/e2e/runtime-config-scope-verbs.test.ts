@@ -77,7 +77,7 @@ describe('runtime-config --character verbs', () => {
     ]);
 
     expect(result.code).toBe(1);
-    expect(result.stderr).toContain('Character "../bad" was not found');
+    expect(result.stderr).toContain('--character must start with a letter');
   });
 
   it('routes set/unset/get/path at the named character overlay', async () => {
@@ -366,6 +366,75 @@ describe('runtime-config --character verbs', () => {
     // data directory, no home marker.
     expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('rejects an edit that leaves a second authored value invalid', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-partial-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {roleModelProvider: 'nope', userDisplayName: 'Old'},
+    });
+
+    // An edit repairs the values it names, not the ones it does not. The
+    // overlay it would produce still carries the bad provider, so the
+    // command must fail on that before anything is created — not commit
+    // the store and then discover it inside the transaction.
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.userDisplayName',
+      'Mike',
+    ]);
+
+    expect(rejected.code).toBe(1);
+    expect(rejected.stderr).toContain(
+      'Project02 roleModelProvider must be "local" or "nvidia".',
+    );
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
+    // The overlay it refused to fix is the overlay it left alone.
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toMatchObject({
+      project02: {roleModelProvider: 'nope', userDisplayName: 'Old'},
+    });
+  });
+
+  it('commits an edit that repairs every invalid authored value', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-repair-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      project02: {roleModelProvider: 'nope', userDisplayName: 'Old'},
+    });
+
+    // The other side of the same rule: judging the assembled candidate
+    // must still admit the edit that makes it valid, or an invalid
+    // overlay would only be repairable by hand.
+    const repaired = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.roleModelProvider',
+      'local',
+    ]);
+
+    expect(repaired.code).toBe(0);
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toMatchObject({
+      project02: {roleModelProvider: 'local', userDisplayName: 'Old'},
+    });
   });
 
   it('rejects a scoped edit when the shared env file cannot be read', async () => {
@@ -934,7 +1003,12 @@ describe('overlay files reached through --config directly', () => {
       project02: {userDisplayName: 'Global Name'},
     });
 
+    // --store names the home the character lives in. Without it the
+    // config's own filename implies nothing, so the character scope
+    // would resolve against the default home under the cwd.
     const scopedGet = await runConfigCli([
+      '--store',
+      homeRoot,
       '--config',
       globalConfigPath,
       '--character',

@@ -107,9 +107,16 @@ type RuntimeConfigControlCandidateHome = {
 /**
  * Lock-free snapshot used only for effect preparation. Apply always reloads
  * and re-verifies the expectation under its complete lock set.
+ *
+ * `requireCharacterMarker` defaults to the commit's rule — a character-scoped
+ * target must already name an initialized data directory. A caller that is
+ * only simulating the write passes `false`: initialization is exactly what it
+ * is deciding whether to perform, so demanding the marker up front would
+ * refuse the question instead of answering it.
  */
 export function readRuntimeConfigControlSnapshot(
   target: ResolvedRuntimeConfigScopeTarget,
+  options: {readonly requireCharacterMarker?: boolean} = {},
 ): RuntimeConfigControlSnapshot {
   target = requireResolvedRuntimeConfigScopeTarget(target);
   assertRuntimeConfigTargetStillBound(target);
@@ -121,6 +128,7 @@ export function readRuntimeConfigControlSnapshot(
   return snapshotFromLoadedGlobal({
     target,
     loadedConfig,
+    requireCharacterMarker: options.requireCharacterMarker ?? true,
   });
 }
 
@@ -168,6 +176,9 @@ export function applyRuntimeConfigControlTransaction<T>(
     const snapshot = snapshotFromLoadedGlobal({
       target,
       loadedConfig,
+      // The commit's own rule, unconditionally: a character-scoped write
+      // lands only in a directory the initializer already claimed.
+      requireCharacterMarker: true,
     });
 
     if (options.expectedFingerprint !== undefined) {
@@ -289,6 +300,7 @@ export function assertGlobalConfigLoadableForCharacterScope(
 function snapshotFromLoadedGlobal(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly requireCharacterMarker: boolean;
 }): RuntimeConfigControlSnapshot {
   if (options.target.scope === 'character') {
     assertGlobalConfigLoadableForCharacterScope(options.loadedConfig);
@@ -307,6 +319,7 @@ function snapshotFromLoadedGlobal(options: {
       : readCharacterOverlayForScope(characterRuntimeLocation.characterScope);
 
   if (
+    options.requireCharacterMarker &&
     options.target.scope === 'character' &&
     characterOverlay?.marker === undefined
   ) {

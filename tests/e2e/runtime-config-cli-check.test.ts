@@ -6,10 +6,12 @@ import {
   defaultRuntimeConfigPath,
   runtimeConfigEnvVarName,
 } from '../../src/runtime/config/index.ts';
+import {defaultProject02HomeRoot} from '../../src/runtime/storage/index.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
+  initializeTestStore,
   requiredDottedConfigPlugin,
   requiredSecretPlugin,
   restoreProcessEnvValue,
@@ -358,6 +360,10 @@ describe('runtime config CLI reads and checks', () => {
       storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
+    // The authored storeRoot is the invalid value under test, so both
+    // runs fall back to the default home beside the cwd.
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
+    await initializeTestStore(storeRoot);
 
     try {
       process.chdir(cwdRoot);
@@ -427,6 +433,7 @@ describe('runtime config CLI reads and checks', () => {
       storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -615,6 +622,9 @@ describe('runtime config CLI reads and checks', () => {
       `${runtimeConfigEnvVarName}=${join(storeRoot, 'config.json')}\n${envVar}="${secretValue}"\n`,
       'utf8',
     );
+    // The selected config authors no storeRoot, so the home stays the
+    // default one beside the working directory.
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {
       Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
@@ -698,6 +708,7 @@ describe('runtime config CLI reads and checks', () => {
       `${envVar}="from-cwd-dotenv"\n`,
       'utf8',
     );
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {
       process.chdir(cwdRoot);

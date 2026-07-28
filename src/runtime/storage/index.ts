@@ -64,6 +64,7 @@ export {
   assertProject02HomeAdoptable,
   assertRealHomeEnvFile,
   ensureInitializedProject02Home,
+  project02HomeCreationIsNew,
   type EnsureInitializedProject02HomeOptions,
 } from './home.ts';
 export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';

@@ -33,6 +33,14 @@ export type EnsureInitializedProject02HomeOptions =
     readonly now?: () => string;
   };
 
+/**
+ * Marks a home and lays out the storage it owns.
+ *
+ * This is the storage half of a store. The other half is the global
+ * config document, whose shape belongs to `runtime/config` — see
+ * `ensureInitializedProject02Store` there, which is what CLIs call and
+ * what makes a store whole in one act.
+ */
 export async function ensureInitializedProject02Home(
   options: EnsureInitializedProject02HomeOptions = {},
 ): Promise<Project02HomeLayout> {
@@ -61,6 +69,43 @@ export async function ensureInitializedProject02Home(
 
   await ensureRealCharacterDataRoot(layout);
   return layout;
+}
+
+/**
+ * Whether a run here would conjure a home out of nothing — the one
+ * question a caller asking consent to create a store needs answered,
+ * and a different one from `assertProject02HomeAdoptable`'s "would the
+ * runtime accept this directory", which accepts exactly the empty
+ * directory consent is about.
+ *
+ * Nothing at all means nothing at all: absent, or present and empty.
+ * A directory holding anything else is not a fresh spot this run would
+ * take over, and the two ways that happens both belong to guards that
+ * can say more than a prompt could. Project02's own entries — an
+ * authored `config.json`, installed packages, existing character data,
+ * the marker itself — say the operator already put this store here,
+ * whether or not a runtime ever marked it; the initializer adopts it.
+ * Foreign entries say it is someone else's, and offering to create a
+ * store over them would replace a precise refusal with an offer that
+ * could not be honored.
+ *
+ * Read-only, and quiet about a root it cannot list: something is
+ * there, so it answers `false` and leaves the reporting to the reader
+ * that opens it.
+ */
+export function project02HomeCreationIsNew(
+  options: Project02HomeLayoutOptions = {},
+): boolean {
+  const layout = createProject02HomeLayout(options);
+
+  try {
+    return listDirectoryEntriesSync(layout.homeRoot).length === 0;
+  } catch (error: unknown) {
+    // Absent is the one case that is genuinely new. Anything else —
+    // a file where the home should be, a directory that cannot be
+    // read — is something the caller must not offer to overwrite.
+    return isNodeErrorWithCode(error, 'ENOENT');
+  }
 }
 
 /**

@@ -18,6 +18,7 @@ import {
 import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../src/app/index.ts';
 import {
+  createInitializedTestStoreRoot,
   requiredDottedConfigPlugin,
   requiredSecretPlugin,
   requiredSecretPluginWithManifestEnvVar,
@@ -108,7 +109,9 @@ describe('runtime config console UI', () => {
   });
 
   it('exits cleanly when the default prompt reaches stdin EOF', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-eof-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-console-eof-',
+    );
     let stdout = '';
     let stderr = '';
 
@@ -131,7 +134,7 @@ describe('runtime config console UI', () => {
   });
 
   it('accepts a quit command through the default terminal prompt', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-default-prompt-',
     );
     let stdout = '';
@@ -156,7 +159,9 @@ describe('runtime config console UI', () => {
   });
 
   it('groups default catalog plugins and system services in one selectable list', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-groups-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-console-groups-',
+    );
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
@@ -277,7 +282,7 @@ describe('runtime config console UI', () => {
   });
 
   it('selects a system service through the continuous plugin index', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-system-selection-',
     );
     let stdout = '';
@@ -351,7 +356,7 @@ describe('runtime config console UI', () => {
   });
 
   it('lists package factories separately from canonical bootstrap services', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-plugin-group-',
     );
     const plugin = requiredDottedConfigPlugin('sample.plugin', 'endpoint');
@@ -376,7 +381,7 @@ describe('runtime config console UI', () => {
   });
 
   it('reports a default terminal prompt input failure without hanging', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-input-failure-',
     );
     const input = new Readable({

@@ -165,6 +165,92 @@ export function applyRuntimeConfigControlOperation(options: {
   return withMaterializationOutcome(transaction.result, transaction.context);
 }
 
+export type SimulatedCharacterOverlayCandidate =
+  | {
+      readonly status: 'valid';
+      /**
+       * The overlay document the commit would write. Startup judges its
+       * plan against this rather than against the bytes on disk.
+       */
+      readonly document: Project02RuntimeConfig;
+      readonly configChanged: boolean;
+      readonly autoEnabledPluginIds: readonly string[];
+    }
+  | {readonly status: 'invalid'; readonly message: string};
+
+/**
+ * What the character overlay would contain if this materialization and
+ * edit were committed, without committing anything.
+ *
+ * Startup used to answer "may I proceed?" from the overlay on disk, then
+ * write, then discover the write was invalid — leaving a half-created
+ * store behind a failed command. It also had to exempt the overlay's own
+ * errors whenever a run carried an edit, on the theory that the edit
+ * fixed them; an edit only fixes the values it touches, so a second bad
+ * value slipped through to the commit. Simulating removes both: the plan
+ * is judged against the result, so an edit that fixes everything passes
+ * and one that leaves a value invalid is rejected before the first
+ * directory exists.
+ *
+ * This runs the commit's own preparation — same merge, same candidate
+ * validation — so the two cannot disagree. It never locks or writes, and
+ * it does not require the data directory to exist yet.
+ */
+export function simulateCharacterOverlayCandidate(options: {
+  readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly request?: RuntimeConfigControlRequest;
+  readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
+}): SimulatedCharacterOverlayCandidate {
+  const target = requireResolvedRuntimeConfigScopeTarget(options.target);
+
+  if (target.scope !== 'character') {
+    throw new TypeError(
+      'Character overlay simulation requires a character-scoped target.',
+    );
+  }
+
+  const mutation = normalizedControlMutation(target, options.request);
+
+  try {
+    const prepared = prepareScopedRuntimeConfigControlCandidate({
+      target,
+      snapshot: readRuntimeConfigControlSnapshot(target, {
+        requireCharacterMarker: false,
+      }),
+      ...(mutation.operation === undefined
+        ? {}
+        : {operation: mutation.operation}),
+      ...(options.characterMaterialization === undefined
+        ? {}
+        : {characterMaterialization: options.characterMaterialization}),
+      ...(mutation.validateCandidate === undefined
+        ? {}
+        : {validateCandidate: mutation.validateCandidate}),
+    });
+
+    return Object.freeze({
+      status: 'valid',
+      document: prepared.preparedCandidate.config,
+      configChanged: prepared.context.configChanged,
+      autoEnabledPluginIds: prepared.context.autoEnabledPluginIds,
+    });
+  } catch (error: unknown) {
+    // The candidate being unacceptable is the answer, not a failure:
+    // both the mutation seam's rejection and the validators' TypeError
+    // describe config this startup must refuse. Anything else is a real
+    // fault — a drifted target, an unreadable home — and keeps its own
+    // identity through the caller's terminal-error path.
+    if (
+      error instanceof RuntimeConfigMutationError ||
+      error instanceof TypeError
+    ) {
+      return Object.freeze({status: 'invalid', message: error.message});
+    }
+
+    throw error;
+  }
+}
+
 export function prepareRuntimeConfigControlOperation(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly request: RuntimePluginConfigControlRequest;

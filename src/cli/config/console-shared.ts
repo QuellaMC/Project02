@@ -24,10 +24,10 @@ import {
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
 import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {ensureCharacterDataDir} from '../../runtime/storage/index.ts';
+import type {CliPromptAdapter} from '../shared/prompt.ts';
 
-export type RuntimeConfigConsolePromptAdapter = {
-  question(prompt: string): Promise<string | undefined>;
-};
+/** The console asks its questions through the shared CLI adapter. */
+export type RuntimeConfigConsolePromptAdapter = CliPromptAdapter;
 
 export type RuntimeConfigConsoleOptions = {
   readonly stdout: NodeJS.WritableStream;

@@ -543,11 +543,18 @@ function assertCharacterRuntimeInitialized(
       error instanceof LocalRuntimeStorageContractError &&
       error.code === 'missing_file'
     ) {
+      // Both ways in are named because both audiences reach this: an
+      // embedded caller wants the exported initializer, an operator
+      // wants a command they can type. `--init` is part of that answer
+      // now — a CLI run against a store that does not exist stops at the
+      // consent gate instead of quietly making one, so "run any CLI
+      // startup" is only true once the operator has agreed to the store.
       throw new TypeError(
         `Character "${runtimeLocation.characterScope.characterId}" is not ` +
-          'initialized in this home. Run the character initializer ' +
-          '(initializeProject02CharacterRuntime, or any project02 CLI ' +
-          'startup) before constructing the plugin host.',
+          'initialized in this home. Run a project02 CLI command against ' +
+          'this store first (adding --init if the store itself is new), ' +
+          'or call initializeProject02CharacterRuntime, before ' +
+          'constructing the plugin host.',
         {cause: error},
       );
     }

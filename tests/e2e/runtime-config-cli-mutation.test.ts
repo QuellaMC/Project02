@@ -34,6 +34,7 @@ import {
 } from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
+  initializeTestStore,
   requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
@@ -571,7 +572,14 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(
       await runRuntimeConfigCliFromArgs(
-        ['--store', storeRoot, 'set', 'project02.roleModelProvider', 'local'],
+        [
+          '--store',
+          storeRoot,
+          '--init',
+          'set',
+          'project02.roleModelProvider',
+          'local',
+        ],
         {
           stdout: collect(chunk => {
             setStdout += chunk;
@@ -631,6 +639,7 @@ describe('runtime config CLI mutation and storage', () => {
           [
             '--store',
             relativeStoreRoot,
+            '--init',
             'set',
             'project02.roleModelProvider',
             'local',
@@ -912,8 +921,8 @@ describe('runtime config CLI mutation and storage', () => {
   });
 
   it('keeps location flags before -- while escaping later operands', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-cli-delimiter-store-',
+    const storeRoot = await initializeTestStore(
+      createTestTempRoot('project02-config-cli-delimiter-store-'),
     );
     const seededStoreRoot = realpathSync.native(storeRoot);
     const configPath = join(storeRoot, 'config.json');
@@ -1193,7 +1202,9 @@ describe('runtime config CLI mutation and storage', () => {
 
   it('writes secret env files under the configured store root', async () => {
     const configRoot = createTestTempRoot('project02-config-file-');
-    const storeRoot = createTestTempRoot('project02-config-effective-store-');
+    const storeRoot = await initializeTestStore(
+      createTestTempRoot('project02-config-effective-store-'),
+    );
     const configPath = join(configRoot, 'runtime.json');
 
     expect(
@@ -1233,7 +1244,11 @@ describe('runtime config CLI mutation and storage', () => {
   it.each(runtimeControlEnvVarNames)(
     'rejects reserved runtime control env var %s before creating secret files',
     async envVar => {
-      const storeRoot = createTestTempRoot('project02-config-secret-reserved-');
+      const storeRoot = await initializeTestStore(
+        createTestTempRoot('project02-config-secret-reserved-'),
+      );
+      const configPath = join(storeRoot, 'config.json');
+      const originalConfig = readFileSync(configPath, 'utf8');
       let stdout = '';
       let stderr = '';
 
@@ -1266,7 +1281,9 @@ describe('runtime config CLI mutation and storage', () => {
         `cannot use reserved Project02 runtime control env var "${envVar}"`,
       );
       expect(existsSync(join(storeRoot, '.env'))).toBe(false);
-      expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+      // The store was arranged, so "created no secret files" is now the
+      // config document sitting exactly as the initializer left it.
+      expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
     },
   );
 
@@ -1452,8 +1469,8 @@ describe('runtime config CLI mutation and storage', () => {
   });
 
   it('rejects secret writes when a dangling config symlink targets the runtime env path', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-secret-dangling-link-store-',
+    const storeRoot = await initializeTestStore(
+      createTestTempRoot('project02-config-secret-dangling-link-store-'),
     );
     const configRoot = createTestTempRoot(
       'project02-config-secret-dangling-link-config-',

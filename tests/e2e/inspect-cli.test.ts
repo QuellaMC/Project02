@@ -914,7 +914,7 @@ describe('inspect CLI plugin evidence', () => {
     );
 
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('Character "../bad" was not found');
+    expect(stderr).toContain('--character must start with a letter');
   });
 
   it('keeps an explicit home when its global config and overlay are absent', async () => {
