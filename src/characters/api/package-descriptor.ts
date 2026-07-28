@@ -3,7 +3,8 @@
  * parser the character loader uses at discovery. Character packages are
  * data-only — a descriptor and nothing else — so unlike plugin packages
  * there is no entry module and no factory contract. "$schema" is allowed
- * and ignored so descriptors can reference the editor schema in schemas/.
+ * so descriptors can reference the editor schema in schemas/; its value
+ * is checked for shape and otherwise unused.
  */
 import {
   characterLength,
@@ -14,6 +15,7 @@ import {
 } from '../../core/index.ts';
 import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
+import {packageDescriptorSchemaRefIsValid} from '../../shared/package-metadata.ts';
 import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 
 export const characterPackageDescriptorFormat = 'project02.character.v1';
@@ -122,6 +124,12 @@ export function parseCharacterPackageDescriptor(
     return rejectedDescriptor(
       'invalid_descriptor',
       `Character package descriptor contains unknown field "${unknownDescriptorField}".`,
+    );
+  }
+  if (!packageDescriptorSchemaRefIsValid(descriptor['$schema'])) {
+    return rejectedDescriptor(
+      'invalid_descriptor',
+      'Character package descriptor "$schema" must be a string.',
     );
   }
   if (descriptor['format'] !== characterPackageDescriptorFormat) {

@@ -138,6 +138,37 @@ describe('plugin package descriptor schema parity', () => {
       },
     ],
     [
+      'a non-string $schema reference',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        // The key is allowed and ignored, so nothing else validates it;
+        // without its own guard the code accepted a shape this schema
+        // rejects, and the mistake surfaced only in the other tool.
+        $schema: 42,
+      }),
+    ],
+    [
+      'a character-only plugin enabled by manifest default',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+
+        return {
+          ...descriptor,
+          manifest: {
+            ...manifest,
+            config: {
+              ...(manifest['config'] as Record<string, unknown>),
+              scope: 'character_only',
+            },
+            activation: {
+              ...(manifest['activation'] as Record<string, unknown>),
+              defaultEnabled: true,
+            },
+          },
+        };
+      },
+    ],
+    [
       'a secret agent-mutable config field',
       (descriptor: Record<string, unknown>) => {
         const manifest = descriptor['manifest'] as Record<string, unknown>;
@@ -178,13 +209,26 @@ describe('plugin package descriptor schema parity', () => {
     },
   );
 
-  it('allows and ignores the $schema key in both validators', () => {
+  it('accepts a string $schema key, and its absence, in both validators', () => {
     const descriptor = validDescriptor();
 
     expect(typeof descriptor['$schema']).toBe('string');
-    const parsed = parseRuntimePluginPackageDescriptor(descriptor);
+    expect(parseRuntimePluginPackageDescriptor(descriptor).status).toBe(
+      'accepted',
+    );
 
-    expect(parsed.status).toBe('accepted');
+    // Referencing the editor schema is optional, so an absent key stays
+    // acceptable to both validators.
+    const withoutSchemaRef = {...descriptor};
+
+    delete withoutSchemaRef['$schema'];
+    expect(
+      validateAgainstSchema(withoutSchemaRef),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseRuntimePluginPackageDescriptor(withoutSchemaRef).status).toBe(
+      'accepted',
+    );
   });
 
   it('bounds descriptor self-reads before parsing', () => {

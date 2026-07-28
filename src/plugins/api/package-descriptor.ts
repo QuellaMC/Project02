@@ -1,12 +1,16 @@
 /**
  * Single owner of the project02.plugin.json descriptor shape: the pure
  * parser used by package-loader discovery and the file reader packages
- * use to self-read their manifest. "$schema" is allowed and ignored so
- * descriptors can reference the editor schema in schemas/.
+ * use to self-read their manifest. "$schema" is allowed so descriptors
+ * can reference the editor schema in schemas/; its value is checked for
+ * shape and otherwise unused.
  */
 import {extname} from 'node:path';
 
-import {readBoundedPackageJsonFile} from '../../shared/package-metadata.ts';
+import {
+  packageDescriptorSchemaRefIsValid,
+  readBoundedPackageJsonFile,
+} from '../../shared/package-metadata.ts';
 import {createRuntimePluginManifest} from './manifest-validation.ts';
 import {isRecord} from './validation-primitives.ts';
 import type {RuntimePluginManifest} from './types.ts';
@@ -65,6 +69,12 @@ export function parseRuntimePluginPackageDescriptor(
     return rejectedDescriptor(
       'invalid_descriptor',
       `Runtime plugin package descriptor contains unknown field "${unknownDescriptorField}".`,
+    );
+  }
+  if (!packageDescriptorSchemaRefIsValid(descriptor['$schema'])) {
+    return rejectedDescriptor(
+      'invalid_descriptor',
+      'Runtime plugin package descriptor "$schema" must be a string.',
     );
   }
 

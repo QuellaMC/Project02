@@ -192,6 +192,20 @@ export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
   });
 }
 
+/**
+ * Whether a descriptor's `"$schema"` is usable as one.
+ *
+ * Both package descriptors allow the key and ignore its value, so it
+ * reaches no other validator — which left the code accepting shapes the
+ * published editor schemas reject, and an authoring mistake surfacing
+ * only in whichever tool the author was not using. The value is an
+ * editor's pointer to a schema document, so a string is the whole rule;
+ * absent stays fine, because referencing the schema is optional.
+ */
+export function packageDescriptorSchemaRefIsValid(value: unknown): boolean {
+  return value === undefined || typeof value === 'string';
+}
+
 export type BoundedPackageJsonRejectionReason =
   'unreadable' | 'not_file' | 'too_large' | 'invalid_json' | 'unsafe_json';
 

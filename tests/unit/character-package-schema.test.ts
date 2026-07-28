@@ -147,6 +147,26 @@ describe('character package descriptor schema parity', () => {
     expect(parseCharacterPackageDescriptor(descriptor).status).toBe('accepted');
   });
 
+  it('accepts a string $schema key, and its absence, in both validators', () => {
+    const descriptor = validDescriptor();
+
+    expect(typeof descriptor['$schema']).toBe('string');
+    expect(parseCharacterPackageDescriptor(descriptor).status).toBe('accepted');
+
+    // Referencing the editor schema is optional, so an absent key stays
+    // acceptable to both validators.
+    const withoutSchemaRef = {...descriptor};
+
+    delete withoutSchemaRef['$schema'];
+    expect(
+      validateAgainstSchema(withoutSchemaRef),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseCharacterPackageDescriptor(withoutSchemaRef).status).toBe(
+      'accepted',
+    );
+  });
+
   it('preserves package-authored nested config key order', () => {
     const parsed = parseCharacterPackageDescriptor({
       ...validDescriptor(),
@@ -322,6 +342,16 @@ describe('character package descriptor schema parity', () => {
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
         format: 'project02.character.v2',
+      }),
+    ],
+    [
+      'a non-string $schema reference',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        // The key is allowed and ignored, so nothing else validates it;
+        // without its own guard the code accepted a shape this schema
+        // rejects, and the mistake surfaced only in the other tool.
+        $schema: 42,
       }),
     ],
     [
