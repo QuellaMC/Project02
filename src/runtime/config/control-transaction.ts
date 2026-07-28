@@ -10,7 +10,6 @@
 import {pathExistsSync} from '../../shared/file-system.ts';
 import {dirname} from 'node:path';
 
-import {createProject02HomeLayout} from '../storage/layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLocksSync,
   LocalRuntimeMutationLocksAcquireError,
@@ -30,6 +29,7 @@ import {
   commitPreparedRuntimeConfigMutation,
   createRuntimeConfigAuthoredSnapshot,
   RuntimeConfigConflictError,
+  runtimeConfigControlFileLockTarget,
   RuntimeConfigMutationError,
   type PreparedRuntimeConfigMutationCandidate,
   type RuntimeConfigMutationResult,
@@ -518,12 +518,7 @@ function runtimeConfigControlOverlayLockTarget(options: {
 
   return Object.freeze({
     ...overlay,
-    target: Object.freeze({
-      locksRoot: createProject02HomeLayout({
-        homeRoot: dirname(canonicalPath),
-      }).locksRoot,
-      resourceKey: runtimeControlPathResourceKey(canonicalPath),
-    }),
+    target: runtimeConfigControlFileLockTarget(canonicalPath),
   });
 }
 
@@ -570,10 +565,10 @@ function createRuntimeConfigControlLockPlan(
     required: target.scope === 'character',
   });
   const targets = [
-    runtimeConfigControlLockTarget(canonicalGlobalConfigPath),
+    runtimeConfigControlFileLockTarget(canonicalGlobalConfigPath),
     ...(canonicalEnvPath === undefined
       ? []
-      : [runtimeConfigControlLockTarget(canonicalEnvPath)]),
+      : [runtimeConfigControlFileLockTarget(canonicalEnvPath)]),
     ...(overlay?.target === undefined ? [] : [overlay.target]),
   ];
 
@@ -606,7 +601,7 @@ function acquireRuntimeConfigControlLocks(
     const envFailed =
       plan.canonicalEnvPath !== undefined &&
       failedTarget?.resourceKey ===
-        runtimeControlPathResourceKey(plan.canonicalEnvPath);
+        runtimeConfigControlFileLockTarget(plan.canonicalEnvPath).resourceKey;
     const overlayFailed =
       plan.overlay?.target !== undefined &&
       failedTarget?.resourceKey === plan.overlay.target.resourceKey;
@@ -622,17 +617,6 @@ function acquireRuntimeConfigControlLocks(
       error,
     );
   }
-}
-
-function runtimeConfigControlLockTarget(
-  canonicalPath: string,
-): LocalRuntimeMutationLockTarget {
-  return Object.freeze({
-    locksRoot: createProject02HomeLayout({
-      homeRoot: dirname(canonicalPath),
-    }).locksRoot,
-    resourceKey: runtimeControlPathResourceKey(canonicalPath),
-  });
 }
 
 function assertRuntimeConfigOverlayLockStillBound(
@@ -653,10 +637,6 @@ function assertRuntimeConfigOverlayLockStillBound(
       'The selected character overlay path changed while its lock was acquired.',
     );
   }
-}
-
-function runtimeControlPathResourceKey(path: string): string {
-  return `runtime-control-file:${path}`;
 }
 
 function runtimeConfigControlFileError(

@@ -1,3 +1,5 @@
+import {dirname} from 'node:path';
+
 import {pathExistsSync, unlinkPathSync} from '../../shared/file-system.ts';
 
 import {
@@ -14,7 +16,14 @@ import {
   cleanupAbandonedAtomicReplacementFilesSync,
 } from '../storage/atomic-file.ts';
 import {ensureInitializedProject02Home} from '../storage/home.ts';
-import type {Project02HomeLayout} from '../storage/layout-contract.ts';
+import {
+  createProject02HomeLayout,
+  type Project02HomeLayout,
+} from '../storage/layout-contract.ts';
+import {
+  acquireLocalRuntimeMutationLock,
+  type LocalRuntimeMutationLockTarget,
+} from '../storage/mutation-lock.ts';
 import {readOptionalStoreText} from '../storage/store-file.ts';
 import {
   isRuntimeControlEnvVarName,
@@ -50,6 +59,27 @@ export type RuntimeConfigMutationResult = {
 export type PreparedRuntimeConfigMutationCandidate = {
   readonly config: Project02RuntimeConfig;
 };
+
+/**
+ * The mutation lock guarding one runtime control file.
+ *
+ * Every writer of a control document names its lock through here, so
+ * "the same file" means one lock rather than one per caller's spelling
+ * of it. The key is the canonical path because that is what makes two
+ * spellings — a link and its target, `--config` and the layout's own
+ * path — agree on being the same file; `canonicalRuntimeConfigPath`
+ * resolves through dangling links precisely so a file about to be
+ * created can be locked before it exists.
+ */
+export function runtimeConfigControlFileLockTarget(
+  canonicalPath: string,
+): LocalRuntimeMutationLockTarget {
+  return Object.freeze({
+    locksRoot: createProject02HomeLayout({homeRoot: dirname(canonicalPath)})
+      .locksRoot,
+    resourceKey: `runtime-control-file:${canonicalPath}`,
+  });
+}
 
 /**
  * Commits one already-prepared candidate to exact paths while the caller
@@ -206,18 +236,41 @@ function bootstrapRuntimeConfig(options: {
  * the store already there. The document is written only when genuinely
  * absent: a store can be created around a config the operator authored
  * by hand, and that document is theirs to keep.
+ *
+ * "Absent" is decided under the same lock every other writer of this
+ * file takes, and re-decided after acquiring it. Checking first and
+ * writing second leaves a window: two trips to disk, and a config
+ * authored between them is replaced by the bootstrap document with no
+ * error to notice — the operator's file is simply gone. Holding the
+ * lock across both makes the check and the write one decision. The
+ * marker written a line above already works this way; this is the
+ * store's other birth-time file catching up to it.
  */
 export async function ensureInitializedProject02Store(options: {
   readonly homeRoot?: string;
 }): Promise<Project02HomeLayout> {
   const layout = await ensureInitializedProject02Home(options);
 
-  if (!pathExistsSync(layout.configPath)) {
-    writeJsonAtomic(
-      layout.configPath,
-      bootstrapRuntimeConfig({storeRoot: layout.homeRoot}),
-      0o600,
-    );
+  if (pathExistsSync(layout.configPath)) {
+    return layout;
+  }
+
+  const lock = await acquireLocalRuntimeMutationLock(
+    runtimeConfigControlFileLockTarget(
+      canonicalRuntimeConfigMutationPath(layout.configPath),
+    ),
+  );
+
+  try {
+    if (!pathExistsSync(layout.configPath)) {
+      writeJsonAtomic(
+        layout.configPath,
+        bootstrapRuntimeConfig({storeRoot: layout.homeRoot}),
+        0o600,
+      );
+    }
+  } finally {
+    await lock.release();
   }
 
   return layout;
