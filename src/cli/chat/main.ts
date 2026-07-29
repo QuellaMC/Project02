@@ -60,6 +60,7 @@ import {
 import {
   diagnosticsHaveErrors,
   runtimeConfigDiagnosticAttribution,
+  runtimeConfigDiagnosticLocation,
   RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
@@ -646,14 +647,9 @@ function formatRuntimeConfigDiagnosticError(
   messagePrefix: string,
   diagnostic: RuntimeConfigDiagnostic,
 ): string {
-  const diagnosticLocation =
-    diagnostic.path === undefined
-      ? diagnostic.code
-      : `${diagnostic.code} at ${diagnostic.path}`;
-
   return (
     `${messagePrefix}: ${runtimeConfigDiagnosticAttribution(diagnostic)}` +
-    `${diagnostic.message} (${diagnosticLocation})`
+    `${diagnostic.message} (${runtimeConfigDiagnosticLocation(diagnostic)})`
   );
 }
 

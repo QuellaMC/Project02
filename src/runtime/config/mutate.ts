@@ -27,6 +27,7 @@ import {
 import {readOptionalStoreText} from '../storage/store-file.ts';
 import {
   isRuntimeControlEnvVarName,
+  runtimeConfigDiagnosticLocation,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
@@ -581,8 +582,13 @@ function validateMutatedRuntimeConfig(
   );
 
   if (blockingDiagnostic !== undefined) {
+    // With the field named, an operator can go fix it. Without it, a
+    // document with several plugins says only that one of them is
+    // wrong.
     throw new TypeError(
-      `Cannot mutate runtime config because the mutation would produce invalid config: ${blockingDiagnostic.message}`,
+      'Cannot mutate runtime config because the mutation would produce ' +
+        `invalid config: ${blockingDiagnostic.message} ` +
+        `(${runtimeConfigDiagnosticLocation(blockingDiagnostic)})`,
     );
   }
 

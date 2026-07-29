@@ -127,6 +127,7 @@ export {
   defaultProject02CharacterId,
   defaultProject02UserDisplayName,
   roleModelProviderEnvVarName,
+  runtimeConfigDiagnosticLocation,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
   runtimeControlEnvVarNames,

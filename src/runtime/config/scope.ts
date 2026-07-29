@@ -589,17 +589,16 @@ function mergeCharacterMaterializationIntoOverlay(options: {
   // untouched keeps the authored bytes intact for the candidate
   // validation, which names the real problem instead of this merge
   // inventing a second error for the same document.
-  if (
-    currentPlugins === undefined &&
-    options.current['plugins'] !== undefined
-  ) {
+  if (currentPlugins.status === 'malformed') {
     return unmaterializedOverlayDocument(
       options.current,
       options.overlayAbsent,
     );
   }
 
-  const nextPlugins: Record<string, JsonBoundaryValue> = {...currentPlugins};
+  const authoredPlugins =
+    currentPlugins.status === 'object' ? currentPlugins.value : undefined;
+  const nextPlugins: Record<string, JsonBoundaryValue> = {...authoredPlugins};
   const autoEnabledPluginIds: string[] = [];
   let fieldsChanged = false;
 
@@ -607,7 +606,7 @@ function mergeCharacterMaterializationIntoOverlay(options: {
     options.materialization.document.plugins ?? {},
   ).sort((left, right) => left.localeCompare(right))) {
     const defaults = options.materialization.document.plugins?.[pluginId];
-    const authored = ownJsonRecordValue(currentPlugins, pluginId);
+    const authored = ownJsonRecordValue(authoredPlugins, pluginId);
 
     if (
       defaults === undefined ||
@@ -656,13 +655,45 @@ function unmaterializedOverlayDocument(
   });
 }
 
+/**
+ * What a document holds at `key`, keeping "nothing is here" apart from
+ * "something is here, but it is not a section".
+ *
+ * Answering both with `undefined` is what let an authored value be
+ * overwritten. A merge that fills in what is missing reads "malformed"
+ * as "missing" and writes package defaults over the very bytes that are
+ * the problem — so the operator loses what they wrote to a run that
+ * reported nothing wrong. The two states differ in exactly the way that
+ * matters here: absent is a thing to fill in, malformed is a thing to
+ * report. Naming them separately makes every caller say which it means
+ * rather than leaving one of the two to be remembered.
+ */
+type AuthoredOverlaySection =
+  | {readonly status: 'absent'}
+  | {readonly status: 'malformed'}
+  | {readonly status: 'object'; readonly value: JsonBoundaryObject};
+
+const absentAuthoredOverlaySection: AuthoredOverlaySection = Object.freeze({
+  status: 'absent',
+});
+
+const malformedAuthoredOverlaySection: AuthoredOverlaySection = Object.freeze({
+  status: 'malformed',
+});
+
 function authoredOverlaySection(
   document: JsonBoundaryObject,
   key: string,
-): JsonBoundaryObject | undefined {
+): AuthoredOverlaySection {
   const value = document[key];
 
-  return value !== undefined && isJsonBoundaryObject(value) ? value : undefined;
+  if (value === undefined) {
+    return absentAuthoredOverlaySection;
+  }
+
+  return isJsonBoundaryObject(value)
+    ? Object.freeze({status: 'object', value})
+    : malformedAuthoredOverlaySection;
 }
 
 function mergeCharacterPluginMaterialization(
@@ -702,15 +733,27 @@ function mergeCharacterPluginMaterialization(
 }
 
 function mergeMissingCharacterPluginConfig(options: {
-  readonly current: JsonBoundaryObject | undefined;
+  readonly current: AuthoredOverlaySection;
   readonly defaults: Project02RuntimePluginConfig['config'];
   readonly createEmpty: boolean;
 }): {
   readonly value: JsonBoundaryObject | undefined;
   readonly fieldsChanged: boolean;
 } {
+  // A malformed config is not a missing one, so there is nothing here to
+  // fill in. Materializing into it would replace what the operator
+  // authored with package defaults and report success, which is the one
+  // outcome a merge that only ever adds must never produce. Contributing
+  // no value leaves the authored bytes in the plugin wrapper below, where
+  // the candidate validation names them as `plugins.<id>.config`.
+  if (options.current.status === 'malformed') {
+    return Object.freeze({value: undefined, fieldsChanged: false});
+  }
+
+  const current =
+    options.current.status === 'object' ? options.current.value : undefined;
   const missingEntries = Object.entries(options.defaults ?? {})
-    .filter(([fieldName]) => !Object.hasOwn(options.current ?? {}, fieldName))
+    .filter(([fieldName]) => !Object.hasOwn(current ?? {}, fieldName))
     .sort(([left], [right]) => left.localeCompare(right));
   const fieldsChanged = missingEntries.length > 0;
   const shouldMaterialize =
@@ -719,10 +762,10 @@ function mergeMissingCharacterPluginConfig(options: {
   return Object.freeze({
     value: shouldMaterialize
       ? Object.freeze({
-          ...options.current,
+          ...current,
           ...Object.fromEntries(missingEntries),
         })
-      : options.current,
+      : current,
     fieldsChanged,
   });
 }

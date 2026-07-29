@@ -149,6 +149,25 @@ export type RuntimeConfigDiagnosticPluginMetadata = {
   readonly pluginConfigField?: string;
 };
 
+/**
+ * A diagnostic's code and the field it is about, in the one spelling
+ * every operator-facing surface uses.
+ *
+ * "Plugin config must be an object" names no field, so an operator
+ * holding a document with several plugins has to guess which one the
+ * run meant. The path is already on the diagnostic; the only question
+ * is whether a given error message remembers to include it. Answering
+ * that here rather than at each throw site is what keeps a message
+ * built for a rejection as locatable as one built for the CLI.
+ */
+export function runtimeConfigDiagnosticLocation(
+  diagnostic: RuntimeConfigDiagnostic,
+): string {
+  return diagnostic.path === undefined
+    ? diagnostic.code
+    : `${diagnostic.code} at ${diagnostic.path}`;
+}
+
 export type LoadedProject02RuntimeConfig = {
   readonly source: RuntimeConfigSource;
   readonly path?: string;
