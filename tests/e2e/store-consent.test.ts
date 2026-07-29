@@ -283,14 +283,41 @@ describe('store consent gate', () => {
     expect(existsSync(join(configRoot, 'config.json'))).toBe(false);
   });
 
-  it('refuses an inspect run rather than creating the store it reports on', async () => {
+  it('reports on a store that does not exist without creating one', async () => {
     const storeRoot = createTestTempRoot('project02-consent-inspect-');
+    let stdout = '';
     let stderr = '';
 
     const exitCode = await runInspectCliFromArgs(
       ['--store', storeRoot, '--sessions'],
       {
-        stdin: pipedStdin(),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    // Inspect has no consent to ask for, because it never creates the
+    // store it describes. It reports what a run against this path would
+    // find — an empty store with no sessions — and leaves the path as it
+    // found it.
+    expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout)).toMatchObject({sessions: []});
+    expect(readdirSync(storeRoot)).toEqual([]);
+  });
+
+  it('rejects --init on inspect rather than accepting a flag it ignores', async () => {
+    const storeRoot = createTestTempRoot('project02-consent-inspect-init-');
+    let stderr = '';
+
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--sessions', '--init'],
+      {
         stdout: collect(() => {}),
         stderr: collect(chunk => {
           stderr += chunk;
@@ -300,7 +327,7 @@ describe('store consent gate', () => {
     );
 
     expect(exitCode).toBe(1);
-    expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);
+    expect(stderr).toContain('--init does not apply');
     expect(readdirSync(storeRoot)).toEqual([]);
   });
 

@@ -7,7 +7,6 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
   existsSync,
   mkdirSync,
-  readFileSync,
   realpathSync,
   symlinkSync,
   writeFileSync,
@@ -713,12 +712,11 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
-    expect(
-      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
-    ).toEqual({
-      version: 'project02.config.v2',
-      plugins: {'character-state': {enabled: true}},
-    });
+    // The overlay this run would have needed is the one it declined to
+    // write. Reporting on a store is not a reason to change it, so the
+    // view is built from the overlay a run *would* produce and the
+    // directory keeps only what was arranged here.
+    expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
   });
 
   it('reports a foreign entry in the data directory instead of an empty session list', async () => {

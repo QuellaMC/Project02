@@ -2,10 +2,15 @@
  * The one place a store is born, and the one place a CLI asks first.
  *
  * Every command used to create one silently at whatever `--store`
- * pointed at — including `inspect`, which is otherwise read-only — so a
- * typo produced a new home rather than an error. This gate answers the
- * question once, before any command reaches the startup that writes,
- * and when the answer is yes it performs the creation itself.
+ * pointed at, so a typo produced a new home rather than an error. This
+ * gate answers the question once, before any command reaches the
+ * startup that writes, and when the answer is yes it performs the
+ * creation itself.
+ *
+ * Only the commands that write stand here. `inspect` does not: it runs
+ * the report stage, which decides everything an activation decides and
+ * writes nothing, so there is no creation to consent to and nothing to
+ * refuse.
  *
  * Creating here rather than leaving it to each route is what makes a
  * store whole: one call to the initializer writes the marker, the

@@ -34,10 +34,6 @@ import {
   type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
 import {
-  assertProject02StoreConsent,
-  Project02StoreConsentError,
-} from '../shared/store-consent.ts';
-import {
   createTurnEvidence,
   type InspectTurnEvidence,
 } from '../../runtime/evidence/index.ts';
@@ -57,8 +53,6 @@ class InspectCliUsageError extends Error {
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
-  /** Only read to ask whether an absent store should be created. */
-  readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
@@ -69,14 +63,12 @@ type InspectCliArgs =
       readonly storeRoot?: string;
       readonly configPath?: string;
       readonly character?: string;
-      readonly init: boolean;
     }
   | {
       readonly mode: 'session';
       readonly storeRoot?: string;
       readonly configPath?: string;
       readonly character?: string;
-      readonly init: boolean;
       readonly sessionId: string;
     };
 
@@ -119,15 +111,12 @@ export async function runInspectCliFromArgs(
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
     // Inspect reports on a store; it has no business making one. The
-    // startup below would, so the question is asked before it runs.
-    await assertProject02StoreConsent({
-      location: parsedArgs,
-      init: parsedArgs.init,
-      stdout: options.stdout,
-      ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
-      ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
-    });
-    const startup = await resolveRuntimeCliStartup({
+    // report stage runs every decision an activation runs and describes
+    // what it would produce, so there is nothing to ask consent for and
+    // nothing to refuse: reading a store the operator has not set up
+    // yet tells them exactly that, and leaves the path empty.
+    const startup = resolveRuntimeCliStartup({
+      stage: 'report',
       location: parsedArgs,
       ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
       ...(options.factories === undefined
@@ -173,7 +162,6 @@ export async function runInspectCliFromArgs(
     if (
       error instanceof InspectCliUsageError ||
       error instanceof RuntimeLocationCliUsageError ||
-      error instanceof Project02StoreConsentError ||
       error instanceof RuntimeEnvFileError ||
       isLocalRuntimeTerminalError(error)
     ) {
@@ -199,6 +187,16 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
 
     if (arg === '--') {
       continue;
+    }
+
+    // Rejected rather than ignored: inspect creates nothing, so a flag
+    // asking it to would be accepted and do nothing, which is worse
+    // than being told it does not apply here.
+    if (arg === '--init') {
+      throw new InspectCliUsageError(
+        'inspect never creates a store, so --init does not apply. ' +
+          'Run chat or runtime-config with --init to create one.',
+      );
     }
 
     const storeResult = parseRuntimeStoreFlag({
@@ -251,7 +249,6 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   if (sessionsMode) {
     return {
       mode: 'sessions',
-      init: store.init,
       ...(location.storeRoot === undefined
         ? {}
         : {storeRoot: location.storeRoot}),
@@ -271,7 +268,6 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   return {
     mode: 'session',
     sessionId,
-    init: store.init,
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
@@ -388,7 +384,6 @@ function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
 
 if (isMainModule(import.meta.url)) {
   process.exitCode = await runInspectCliFromArgs(process.argv.slice(2), {
-    stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
   });

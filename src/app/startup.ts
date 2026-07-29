@@ -97,8 +97,26 @@ type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage: 'config';
 };
 
+/**
+ * The activation stage for a caller that only reports on a store.
+ *
+ * Same decisions, same rejections, no write: what a run would produce,
+ * described rather than performed. It is a separate stage rather than a
+ * flag on the activation one because "does this create the store" is
+ * the question the two callers differ on, and a caller should have to
+ * say which it is.
+ */
+type RuntimeCliReportStartupOptions = Omit<
+  RuntimeCliActivationStartupOptions,
+  'stage' | 'characterConfigRequest'
+> & {
+  readonly stage: 'report';
+};
+
 type RuntimeCliStartupOptions =
-  RuntimeCliActivationStartupOptions | RuntimeCliConfigStartupOptions;
+  | RuntimeCliActivationStartupOptions
+  | RuntimeCliConfigStartupOptions
+  | RuntimeCliReportStartupOptions;
 
 type RuntimeCliCharacterConfigRequest = NonNullable<
   RuntimeCliActivationStartupOptions['characterConfigRequest']
@@ -175,6 +193,12 @@ type PlannedRuntimeCliActivationStartup = {
   ) => NodeJS.ProcessEnv | undefined;
   readonly document: Project02RuntimeConfig;
   readonly request?: RuntimeConfigControlRequest;
+  /**
+   * The overlay the commit would write, already assembled to decide
+   * this startup was admissible. A reader finishes from it instead of
+   * from bytes no one has written yet.
+   */
+  readonly simulatedOverlay: LoadedProject02CharacterOverlayConfig;
 };
 
 function rejectedStartup(result: RuntimeCliStartupResult): {
@@ -247,11 +271,17 @@ export function resolveRuntimeCliStartup(
   options: RuntimeCliConfigStartupOptions,
 ): RuntimeCliConfigStartupResult;
 export function resolveRuntimeCliStartup(
+  options: RuntimeCliReportStartupOptions,
+): RuntimeCliStartupResult;
+export function resolveRuntimeCliStartup(
   options?: RuntimeCliActivationStartupOptions,
 ): Promise<RuntimeCliStartupResult>;
 export function resolveRuntimeCliStartup(
   options: RuntimeCliStartupOptions = {},
-): RuntimeCliConfigStartupResult | Promise<RuntimeCliStartupResult> {
+):
+  | RuntimeCliConfigStartupResult
+  | RuntimeCliStartupResult
+  | Promise<RuntimeCliStartupResult> {
   const location = Object.freeze({...(options.location ?? {})});
   const suppliedEnv = options.env ?? process.env;
   const cwdDotEnv = resolveCwdDotEnv({
@@ -278,8 +308,7 @@ export function resolveRuntimeCliStartup(
     return Object.freeze(startupBase);
   }
 
-  return resolveRuntimeCliActivationStartup({
-    options,
+  const activationInput = {
     configLocation,
     ...(location.character === undefined
       ? {}
@@ -289,7 +318,20 @@ export function resolveRuntimeCliStartup(
     configEnv,
     startupBase,
     loadedConfig,
-  });
+  };
+
+  if (options.stage === 'report') {
+    const planned = planRuntimeCliActivationStartup({
+      ...activationInput,
+      options,
+    });
+
+    return planned.outcome === 'rejected'
+      ? planned.result
+      : simulatePlannedRuntimeCliActivationStartup(planned.plan);
+  }
+
+  return resolveRuntimeCliActivationStartup({...activationInput, options});
 }
 
 /**
@@ -331,7 +373,11 @@ async function resolveRuntimeCliActivationStartup(input: {
  * that nothing left can reject the startup except the write itself.
  */
 function planRuntimeCliActivationStartup(input: {
-  readonly options: RuntimeCliActivationStartupOptions;
+  // Both stages plan the same way — that is what makes a report worth
+  // reading. They part company after this returns, over whether the
+  // plan is committed or described.
+  readonly options:
+    RuntimeCliActivationStartupOptions | RuntimeCliReportStartupOptions;
   readonly configLocation: ResolvedProject02ConfigLocation;
   readonly characterOverride?: string;
   readonly suppliedEnv: NodeJS.ProcessEnv;
@@ -459,7 +505,10 @@ function planRuntimeCliActivationStartup(input: {
     expectations: characterActivation.definition.plugins,
     plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
     catalogSnapshot: preMaterializationState.catalogSnapshot,
-    request: options.characterConfigRequest,
+    // A reader carries no edit: it describes the store as a run would
+    // find it, not as one particular edit would leave it.
+    request:
+      options.stage === 'report' ? undefined : options.characterConfigRequest,
   });
 
   if (preflight.diagnostics.length > 0) {
@@ -547,6 +596,7 @@ function planRuntimeCliActivationStartup(input: {
       buildPreEnvState,
       readRuntimeEnvFileUnlessBlocked,
       document: preflight.packagePlan.document,
+      simulatedOverlay: simulated.overlay,
       ...(preflight.request === undefined ? {} : {request: preflight.request}),
     }),
   });
@@ -560,16 +610,9 @@ function planRuntimeCliActivationStartup(input: {
 async function commitPlannedRuntimeCliActivationStartup(
   plan: PlannedRuntimeCliActivationStartup,
 ): Promise<RuntimeCliStartupResult> {
-  const {
-    loadedConfig,
-    characterActivation,
-    runtimeLocation,
-    buildPreEnvState,
-    readRuntimeEnvFileUnlessBlocked,
-  } = plan;
   const materialization = await materializeCharacterDataDir({
-    characterActivation,
-    runtimeLocation,
+    characterActivation: plan.characterActivation,
+    runtimeLocation: plan.runtimeLocation,
     configEnv: plan.configEnv,
     document: plan.document,
     ...(plan.request === undefined ? {} : {request: plan.request}),
@@ -578,31 +621,85 @@ async function commitPlannedRuntimeCliActivationStartup(
   if (materialization.status === 'failed') {
     return Object.freeze({
       ...plan.startupBase,
-      runtimeLocation,
+      runtimeLocation: plan.runtimeLocation,
       status: 'character_invalid',
       characterActivation: materialization.characterActivation,
     });
   }
 
-  const overlayLoadedConfig = loadCharacterOverlayForStartup(runtimeLocation);
+  // Read back rather than reused from the plan: the commit is what made
+  // these bytes, so the overlay every downstream plan judges is the one
+  // actually on disk.
+  return finishRuntimeCliActivationStartup({
+    plan,
+    overlayLoadedConfig: loadCharacterOverlayForStartup(plan.runtimeLocation),
+    diagnostics: materialization.diagnostics,
+    ...(materialization.configMutation === undefined
+      ? {}
+      : {configMutation: materialization.configMutation}),
+  });
+}
+
+/**
+ * Phase two without the write: the startup this plan would produce,
+ * reported from the overlay phase one already simulated.
+ *
+ * A reader — `inspect` — needs the same answer a run would get, and
+ * needs it without setting the store up on the operator's behalf.
+ * Reporting on state a command created while reporting is its own kind
+ * of wrong answer: the first `inspect` of a store would describe a
+ * store that existed because `inspect` ran.
+ *
+ * It is the same plan, finished the same way, so what a reader reports
+ * and what a run commits cannot drift. Only where the overlay comes
+ * from differs, and phase one already built that overlay to decide
+ * whether the commit was admissible at all.
+ */
+function simulatePlannedRuntimeCliActivationStartup(
+  plan: PlannedRuntimeCliActivationStartup,
+): RuntimeCliStartupResult {
+  return finishRuntimeCliActivationStartup({
+    plan,
+    overlayLoadedConfig: plan.simulatedOverlay,
+    diagnostics: Object.freeze([]),
+  });
+}
+
+/**
+ * The rest of a startup once the overlay is settled, shared by the
+ * commit and the simulation so both answer with one implementation.
+ */
+function finishRuntimeCliActivationStartup(input: {
+  readonly plan: PlannedRuntimeCliActivationStartup;
+  readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig;
+  readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
+  readonly configMutation?: RuntimeConfigControlApplyResult;
+}): RuntimeCliStartupResult {
+  const {
+    loadedConfig,
+    characterActivation,
+    runtimeLocation,
+    buildPreEnvState,
+    readRuntimeEnvFileUnlessBlocked,
+  } = input.plan;
   const {
     overlayForPlan,
     catalogSnapshot,
     activationPlanBeforeRuntimeEnv: unadornedActivationPlanBeforeRuntimeEnv,
     base,
-  } = buildPreEnvState(overlayLoadedConfig);
+  } = buildPreEnvState(input.overlayLoadedConfig);
   const materializedBase = {
     ...base,
-    ...(materialization.configMutation === undefined
+    ...(input.configMutation === undefined
       ? {}
-      : {characterConfigMutation: materialization.configMutation}),
+      : {characterConfigMutation: input.configMutation}),
   };
   const activationPlanBeforeRuntimeEnv = withActivationDiagnostics(
     unadornedActivationPlanBeforeRuntimeEnv,
-    materialization.diagnostics,
+    input.diagnostics,
   );
 
-  if (startupConfigHasErrors(loadedConfig, overlayLoadedConfig)) {
+  if (startupConfigHasErrors(loadedConfig, input.overlayLoadedConfig)) {
     return Object.freeze({
       ...materializedBase,
       status: 'config_invalid',
@@ -634,7 +731,7 @@ async function commitPlannedRuntimeCliActivationStartup(
       validateInactivePluginConfigs: true,
       catalogSnapshot,
     }),
-    materialization.diagnostics,
+    input.diagnostics,
   );
 
   return Object.freeze({
