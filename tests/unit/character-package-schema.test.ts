@@ -92,6 +92,27 @@ describe('character package descriptor schema parity', () => {
     expect(() =>
       scaffoldCharacterPackage({id: 'TEST.Scaffold-Char', packagesRoot}),
     ).toThrow(`already exists: ${packageRoot}`);
+
+    // And it leaves nothing behind when it refuses. A claim kept for an
+    // id that was never stamped would make the next attempt report a
+    // package that does not exist.
+    expect(readdirSync(packagesRoot)).toEqual(['test.scaffold-char']);
+
+    // The same id twice is refused by the claim itself rather than by a
+    // scan that ran before it, which is what makes two concurrent runs
+    // safe: exactly one gets the directory.
+    expect(() =>
+      scaffoldCharacterPackage({id: 'test.scaffold-char', packagesRoot}),
+    ).toThrow(`already exists: ${packageRoot}`);
+
+    // The loser must not overwrite the winner's descriptor. `mkdir` with
+    // `recursive: true` reports success on a directory it did not
+    // create, so this is the failure an exclusive create rules out.
+    expect(
+      JSON.parse(
+        readFileSync(join(packageRoot, 'project02.character.json'), 'utf8'),
+      ),
+    ).toEqual(raw);
   });
 
   it('accepts a plugins block through both the schema and the code validator', () => {

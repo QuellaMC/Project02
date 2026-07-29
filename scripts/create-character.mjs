@@ -5,7 +5,7 @@
  * schemas/project02.character.schema.json and the runtime validator;
  * tests/unit/character-package-schema.test.ts pins that.
  */
-import {mkdirSync, readdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, readdirSync, rmdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {
@@ -22,20 +22,56 @@ export function scaffoldCharacterPackage({id, packagesRoot}) {
   }
 
   const packageRoot = join(packagesRoot, id);
-  const conflicting = existingPackageDirectoryName({id, packagesRoot});
 
-  if (conflicting !== undefined) {
-    throw new Error(
-      `Character package directory already exists: ${join(packagesRoot, conflicting)}`,
-    );
+  // Claim the directory first, then look around from inside the claim.
+  // Scanning first and creating second leaves a window where a concurrent
+  // run stamps the sibling this one just decided was absent — and
+  // `recursive: true` reports success on a directory it did not create,
+  // so the loser would overwrite the winner's descriptor. Exclusive
+  // create is the one step that cannot be raced: exactly one caller gets
+  // the directory, everyone else gets EEXIST.
+  mkdirSync(packagesRoot, {recursive: true});
+
+  try {
+    mkdirSync(packageRoot);
+  } catch (error) {
+    if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+      // On a case-insensitive filesystem the claim is what catches a fold
+      // collision, and the directory in the way is not the one asked for.
+      // Naming the existing one is what tells the operator whether they
+      // repeated themselves or collided with different casing.
+      throw packageDirectoryExists(
+        collidingPackageDirectoryName({id, packagesRoot}) ?? id,
+        packagesRoot,
+      );
+    }
+    throw error;
   }
 
-  const displayName = displayNameFromProject02Identifier(id);
+  // On a case-sensitive filesystem the claim succeeds and the fold
+  // collision is still ahead, so the sibling list decides — now that this
+  // run's own directory is in it and a concurrent claimant either lost
+  // its exclusive create or is here to be found.
+  const conflicting = collidingPackageDirectoryName({id, packagesRoot});
 
-  mkdirSync(packageRoot, {recursive: true});
+  if (conflicting !== undefined) {
+    // Give the claim back. A directory left behind for an id the scaffold
+    // refused would make the *next* attempt fail with EEXIST and report a
+    // package that was never stamped.
+    rmdirSync(packageRoot);
+    throw packageDirectoryExists(conflicting, packagesRoot);
+  }
+
   writeFileSync(
     join(packageRoot, 'project02.character.json'),
-    `${JSON.stringify(descriptorTemplate({id, displayName}), null, 2)}\n`,
+    `${JSON.stringify(
+      descriptorTemplate({
+        id,
+        displayName: displayNameFromProject02Identifier(id),
+      }),
+      null,
+      2,
+    )}\n`,
     'utf8',
   );
 
@@ -43,35 +79,40 @@ export function scaffoldCharacterPackage({id, packagesRoot}) {
 }
 
 /**
- * The name of the sibling package directory a new id would collide with,
- * or undefined when the id is free.
+ * @param {string} directoryName
+ * @param {string} packagesRoot
+ * @return {Error}
+ */
+function packageDirectoryExists(directoryName, packagesRoot) {
+  return new Error(
+    `Character package directory already exists: ${join(packagesRoot, directoryName)}`,
+  );
+}
+
+/**
+ * The name of a *different* sibling package directory this id folds onto,
+ * or undefined when the id is free. Called while holding the claim on
+ * `<packagesRoot>/<id>`, so that entry is expected and skipped.
  *
- * An exact-path check is not the question. Discovery folds character ids
- * with project02IdentifierCollisionKey, so on a case-sensitive
- * filesystem `character:new Mira` beside an existing `mira` stamps a
- * package that mkdir accepts and discovery then reports as a duplicate —
- * making *both* undiscoverable, including the bundled default. The
- * scaffold has to refuse under the same fold discovery judges by.
+ * An exact-path check is not the question, which is why this survives the
+ * exclusive create above rather than being replaced by it. Discovery
+ * folds character ids with project02IdentifierCollisionKey, so on a
+ * case-sensitive filesystem `character:new Mira` beside an existing
+ * `mira` stamps a package that mkdir accepts and discovery then reports
+ * as a duplicate — making *both* undiscoverable, including the bundled
+ * default. The scaffold has to refuse under the same fold discovery
+ * judges by.
  *
  * @param {{id: string, packagesRoot: string}} options
  * @return {string | undefined}
  */
-function existingPackageDirectoryName({id, packagesRoot}) {
+function collidingPackageDirectoryName({id, packagesRoot}) {
   const collisionKey = project02IdentifierCollisionKey(id);
-  let entries;
 
-  try {
-    entries = readdirSync(packagesRoot, {withFileTypes: true});
-  } catch (error) {
-    // No packages root yet is no collision; mkdirSync creates it below.
-    if (error instanceof Error && 'code' in error && error.code === 'ENOENT') {
-      return undefined;
-    }
-    throw error;
-  }
-
-  return entries.find(
-    entry => project02IdentifierCollisionKey(entry.name) === collisionKey,
+  return readdirSync(packagesRoot, {withFileTypes: true}).find(
+    entry =>
+      entry.name !== id &&
+      project02IdentifierCollisionKey(entry.name) === collisionKey,
   )?.name;
 }
 
