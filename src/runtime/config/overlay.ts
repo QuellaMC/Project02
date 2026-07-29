@@ -174,10 +174,23 @@ function loadedOverlay(options: {
 
 /**
  * The overlay's contribution to the layered authored fingerprint: the
- * document itself, null when the file is absent, and an unreadable
- * sentinel when the file exists but cannot be trusted — each state must
- * fingerprint differently so currency gates decline on any overlay
- * change.
+ * validated config, null when the file is absent, the authored bytes
+ * when they are readable but do not validate, and an unreadable
+ * sentinel when even the bytes could not be obtained.
+ *
+ * A fingerprint exists to answer "did this change since I looked?", so
+ * every state it can distinguish, it must. An invalid overlay keeps its
+ * authored document precisely because an operator may still edit it —
+ * fix one of two bad fields, or replace it with different bad bytes —
+ * and answering all of those with one sentinel says the file has not
+ * moved. A currency gate would then commit against an expectation taken
+ * before the edit. Fingerprinting the retained document instead makes
+ * an edit to an invalid overlay as visible as an edit to a valid one.
+ *
+ * Wrapped rather than returned bare so that "these bytes did not
+ * validate" cannot fingerprint the same as some other overlay whose
+ * validated config happens to have that shape. The wrapper is what says
+ * which of the two this layer is.
  */
 export function characterOverlayFingerprintLayer(
   overlay: LoadedProject02CharacterOverlayConfig,
@@ -186,7 +199,13 @@ export function characterOverlayFingerprintLayer(
     return null;
   }
 
-  return overlay.config ?? Object.freeze({$overlayUnreadable: true});
+  if (overlay.config !== undefined) {
+    return overlay.config;
+  }
+
+  return overlay.authoredDocument === undefined
+    ? Object.freeze({$overlayUnreadable: true})
+    : Object.freeze({$overlayInvalid: overlay.authoredDocument});
 }
 
 export type RuntimeConfigCharacterOverlaySnapshot = {

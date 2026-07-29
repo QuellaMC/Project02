@@ -15,6 +15,8 @@ import {
   assertScopedMutationOperationAllowed,
   blockingRuntimeConfigLayerDiagnostic,
   characterOverlayConfigPath,
+  characterOverlayFingerprintLayer,
+  createRuntimeConfigFingerprint,
   readCharacterOverlayForScope,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigVersion,
@@ -312,6 +314,62 @@ describe('character overlay config loader', () => {
       code: 'runtime_config_version_unsupported',
       origin: {characterId: 'mira'},
     });
+  });
+
+  it('fingerprints an edit to an invalid overlay as a change', () => {
+    const dataRoot = overlayDataRoot();
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    // Two bad fields. An operator fixing one still holds an invalid
+    // overlay, which is exactly the case a single "unusable" sentinel
+    // could not tell from having fixed nothing.
+    writeRuntimeConfig(overlayPath, {
+      project02: {storeRoot: '/elsewhere', character: 'nova'},
+    });
+
+    const before = characterOverlayFingerprintLayer(
+      loadCharacterOverlay(dataRoot),
+    );
+
+    writeRuntimeConfig(overlayPath, {project02: {character: 'nova'}});
+
+    const after = characterOverlayFingerprintLayer(
+      loadCharacterOverlay(dataRoot),
+    );
+
+    // A currency gate holding `before` must decline against `after`.
+    // Both overlays are invalid; only the bytes moved, and the bytes are
+    // what an operator edits.
+    expect(before).not.toEqual(after);
+    expect(createRuntimeConfigFingerprint(before ?? {})).not.toBe(
+      createRuntimeConfigFingerprint(after ?? {}),
+    );
+  });
+
+  it('separates unusable-for-different-reasons overlays from each other', () => {
+    const dataRoot = overlayDataRoot();
+    const overlayPath = characterOverlayConfigPath(dataRoot);
+
+    writeRuntimeConfig(overlayPath, {project02: {storeRoot: '/elsewhere'}});
+
+    const invalid = characterOverlayFingerprintLayer(
+      loadCharacterOverlay(dataRoot),
+    );
+
+    // Bytes that never arrived cannot be fingerprinted as bytes, so that
+    // state keeps its own sentinel rather than borrowing the empty
+    // document's fingerprint.
+    expect(invalid).not.toEqual({$overlayUnreadable: true});
+
+    writeRuntimeConfig(overlayPath, {});
+
+    const empty = characterOverlayFingerprintLayer(
+      loadCharacterOverlay(dataRoot),
+    );
+
+    // A valid empty overlay and an invalid one must not agree either:
+    // the wrapper is what says which of the two this layer is.
+    expect(empty).not.toEqual(invalid);
   });
 });
 
