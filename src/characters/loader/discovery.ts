@@ -119,13 +119,16 @@ export function discoverCharacterPackages(options: {
     const scan = scanPackageSourceRoot(source.root);
 
     if (scan.status === 'unavailable') {
-      // A missing root or a root that is not a directory both mean "no
-      // packages here"; a corrupt store surfaces through the storage
-      // layer's own diagnostics instead.
-      if (
-        isNodeErrorWithCode(scan.error, 'ENOENT') ||
-        isNodeErrorWithCode(scan.error, 'ENOTDIR')
-      ) {
+      // Absent is the only state that means "no packages here". A root
+      // that exists as something other than a directory is a source that
+      // could not be read, and reporting it as empty makes installed
+      // characters vanish: selecting one then fails with "not found",
+      // sending the operator to install a package that is already there.
+      // Nothing else covers this — the home guard type-checks the data
+      // and lock roots but accepts whatever the packages root is — so
+      // silence here is silence everywhere. Plugin discovery already
+      // draws the line at ENOENT for the same reason.
+      if (isNodeErrorWithCode(scan.error, 'ENOENT')) {
         continue;
       }
 

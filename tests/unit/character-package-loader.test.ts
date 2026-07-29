@@ -92,18 +92,46 @@ describe('character package discovery', () => {
     );
   });
 
-  it('skips a root nested under a plain file without diagnostics', () => {
+  it('reports an operator root that exists as a plain file', () => {
+    const storeRoot = createTestTempRoot();
+    const operatorRoot = operatorCharacterPackagesRoot(storeRoot);
+
+    writeFileSync(operatorRoot, 'not a directory\n', 'utf8');
+
+    const discovery = discoverCharacterPackages({
+      sources: defaultCharacterPackageSources(storeRoot),
+    });
+
+    // Silence here would be indistinguishable from an empty store, and
+    // every installed operator character would then fail selection with
+    // "not found" — advice to install what is already installed.
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_unavailable',
+        path: operatorRoot,
+        provenance: 'operator',
+      }),
+    ]);
+  });
+
+  it('reports a root nested under a plain file', () => {
     const root = createTestTempRoot();
     const filePath = join(root, 'not-a-dir');
+    const sourceRoot = join(filePath, 'characters');
 
     writeFileSync(filePath, 'plain file\n', 'utf8');
 
     const discovery = discoverCharacterPackages({
-      sources: [{root: join(filePath, 'characters'), provenance: 'operator'}],
+      sources: [{root: sourceRoot, provenance: 'operator'}],
     });
 
     expect(discovery.characters).toEqual([]);
-    expect(discovery.diagnostics).toEqual([]);
+    expect(discovery.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'package_source_unavailable',
+        path: sourceRoot,
+      }),
+    ]);
   });
 
   it('skips a missing operator root without diagnostics', () => {
