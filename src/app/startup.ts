@@ -397,6 +397,17 @@ function planRuntimeCliActivationStartup(input: {
     input.characterOverride,
   );
   const homeRoot = configLocation.homeRoot;
+
+  // Judge the container before reading what is inside it. Character
+  // discovery reads `<home>/characters`, so on a home that is not a
+  // directory at all both guards refuse — and whichever runs first is
+  // the one the operator hears. Discovery answering first points at a
+  // subdirectory of a store whose real problem is the store itself.
+  //
+  // Same guard, same home target: binding the character below only adds
+  // the character scope, and carries this target through unchanged.
+  assertResolvedProject02HomeAdoptable(configLocation);
+
   const characterActivation = prepareProject02CharacterActivation({
     storeRoot: homeRoot,
     configuredCharacterId: activeCharacterId,
@@ -418,8 +429,6 @@ function planRuntimeCliActivationStartup(input: {
     ...input.startupBase,
     runtimeLocation,
   };
-
-  assertResolvedProject02HomeAdoptable(runtimeLocation);
 
   // One filesystem discovery for the whole startup: every activation
   // plan — pre-materialization, post-materialization, and the final
