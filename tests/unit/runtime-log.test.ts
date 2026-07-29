@@ -466,6 +466,59 @@ describe('runtime log store', () => {
     ).toBe('Custom Name');
   });
 
+  it('refuses a supplied character the store binding disagrees with', () => {
+    // The binding is a fact about the store, not a default the caller
+    // outranks. A supplied character used to win outright, and with no
+    // recorded evidence yet to compare against, `nova` messages landed
+    // in a `mira`-bound store; the refusal arrived on the terminal raw
+    // event, after the appends were durable.
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+    const nova = {id: 'nova', displayName: 'Nova'} as const;
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    expect(() =>
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        },
+        nova,
+      ),
+    ).toThrow(
+      'Durable character evidence must match the store-bound character',
+    );
+
+    // Nothing landed, and only the timing changed: message 1 is still
+    // free, the bound character still appends, and a renamed character
+    // stays appendable because the binding is compared by id.
+    expect(
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        },
+        {id: testCharacterProfile.id, displayName: 'Renamed Mira'},
+      ).id,
+    ).toBe('local-session:message-1');
+  });
+
   it('stamps user messages against the bound user speaker and rejects drift', () => {
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,

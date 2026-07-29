@@ -651,6 +651,25 @@ export function assertIncrementalConversationAppend(options: {
     }
   }
 
+  // The store's binding is a fact about the store, not a default the
+  // caller outranks. The precedence above reads the other way — a
+  // supplied character wins, and the loop only compares against evidence
+  // already recorded — so on a session with none, a caller could append
+  // `nova` into a store bound to `mira`. That append succeeded and
+  // mutated durable state; the refusal arrived one call later, on the
+  // terminal raw event, by which point the messages were on disk.
+  //
+  // Same rule, same function, same message as that later refusal and as
+  // every cold read: id only, so a renamed character's sessions stay
+  // appendable. Only the timing changes — the check now runs before the
+  // record is accepted rather than after.
+  validateDurableCharacterProfiles({
+    roleModelCharacter: expectedCharacter,
+    conversationCharacter: options.state.conversationCharacter,
+    boundCharacter: options.state.boundCharacter,
+    allowUnanchoredCustomCharacter: false,
+  });
+
   const speakerIsValid =
     options.record.role === 'user'
       ? userRecordSpeakerIsValid(
