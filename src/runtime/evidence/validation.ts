@@ -1,6 +1,7 @@
 import {
   type CharacterProfile,
   ConversationRehydrationError,
+  isValidSpeakerDisplayName,
   localUserSpeaker,
   type RuntimeEventIdentity,
   type SpeakerIdentity,
@@ -669,13 +670,21 @@ export function assertIncrementalConversationAppend(options: {
 // With no recorded and no store-bound user speaker, the first user
 // record anchors the session's speaker (a direct-runtime store may
 // carry a custom display name); the id is never negotiable.
+//
+// The anchoring name is judged by the same rule every other speaker
+// name is. A looser check here only decided *which* write produced an
+// unreadable session: a non-empty but multiline or overlong name was
+// accepted and appended, and the next read of that session ran it
+// through `createUserSpeaker`, which rejects it — so the store held
+// durable evidence that could never be opened again. Two boundaries
+// judging one field by two rules, with the lenient one writing first.
 function userRecordSpeakerIsValid(
   record: {readonly speakerId: string; readonly speakerName: string},
   expectedUserSpeaker: SpeakerIdentity | undefined,
 ): boolean {
   return expectedUserSpeaker === undefined
     ? record.speakerId === localUserSpeaker.id &&
-        record.speakerName.trim().length > 0
+        isValidSpeakerDisplayName(record.speakerName)
     : record.speakerId === expectedUserSpeaker.id &&
         record.speakerName === expectedUserSpeaker.displayName;
 }

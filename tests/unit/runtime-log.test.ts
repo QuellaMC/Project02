@@ -418,6 +418,54 @@ describe('runtime log store', () => {
     ).toThrow('speaker metadata is malformed');
   });
 
+  it('refuses an anchoring user name a later read would reject', () => {
+    // The anchoring name is judged by the rule every speaker name is
+    // judged by, not merely "non-empty". A multiline or overlong name
+    // used to append, and the next read of the session ran it through
+    // createUserSpeaker and threw — leaving durable evidence that could
+    // never be opened again. Refusing the write is the only outcome
+    // that does not strand the session.
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+
+    for (const speakerName of ['Bad\nName', ' Padded ', 'x'.repeat(129)]) {
+      expect(() =>
+        store.appendConversationMessage({
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName,
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        }),
+      ).toThrow('speaker metadata is malformed');
+    }
+
+    // Nothing landed: message 1 is still the slot a user record may
+    // take. Had a refused record been appended, the store would now
+    // require message 2 and the character role.
+    expect(
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Custom Name',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }).speakerName,
+    ).toBe('Custom Name');
+  });
+
   it('stamps user messages against the bound user speaker and rejects drift', () => {
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
