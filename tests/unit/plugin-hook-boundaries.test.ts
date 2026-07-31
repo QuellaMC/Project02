@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
@@ -24,7 +25,7 @@ describe('runtime plugin hook result boundaries', () => {
           sourceSystem: 'test',
         },
         declaredPlugins: ['before_role_model_call'],
-        config: {fields: []},
+        config: {scope: 'global_with_character_overrides', fields: []},
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,
@@ -78,7 +79,7 @@ describe('runtime plugin hook result boundaries', () => {
         sessionId: 'session-hook-aggregate-boundary',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: {id: 'mira', displayName: 'Mira'},
+        character: testCharacterProfile,
       }),
     );
 

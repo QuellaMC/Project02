@@ -1,4 +1,5 @@
 import type {RuntimePluginConfigValueType} from '../../plugins/api/index.ts';
+import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
@@ -41,10 +42,32 @@ export type RuntimeConfigValue =
 export type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
+export const defaultProject02CharacterId = 'mira';
+export const defaultProject02UserDisplayName = 'You';
+
+/**
+ * The active character id for a loaded config: an explicit override
+ * (e.g. a --character flag) beats the authored selection beats the
+ * default. Trimmed here — the one seam every reader shares — so a
+ * padded authored value never becomes a false missing-character error.
+ */
+export function configuredProject02CharacterId(
+  config: Project02RuntimeConfig | undefined,
+  override?: string,
+): string {
+  return (
+    override ??
+    config?.project02?.character ??
+    defaultProject02CharacterId
+  ).trim();
+}
+
 export type Project02HostConfig = Readonly<
   Record<string, RuntimeConfigValue | undefined>
 > & {
   readonly storeRoot?: string;
+  readonly character?: string;
+  readonly userDisplayName?: string;
   readonly defaultMemoryProvider?: string;
   readonly roleModelProvider?: Project02RoleModelProvider;
 };
@@ -61,13 +84,54 @@ export type Project02RuntimePluginConfig = {
 };
 
 export type RuntimeConfigSource = 'none' | 'default' | 'path' | 'env';
+export type SelectedProject02RuntimeConfigOwner =
+  Readonly<{kind: 'home'; homeRoot: string}> | Readonly<{kind: 'standalone'}>;
+export type SelectedProject02RuntimeConfigLocation = {
+  readonly source: Exclude<RuntimeConfigSource, 'none'>;
+  /** Operator-facing path retained for diagnostics and drift checks. */
+  readonly path: string;
+  /** Physical identity selected before any load or mutation begins. */
+  readonly canonicalPath: string;
+  /** Owner of the selected file, distinct from its effective runtime home. */
+  readonly owner: SelectedProject02RuntimeConfigOwner;
+  /**
+   * Explicit runtime home selected alongside a standalone config path.
+   * Config content may override this for the effective runtime, but the
+   * selection must not be reconstructed after loading.
+   */
+  readonly runtimeHomeRoot?: string;
+};
 export type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
+
+export type RuntimeConfigFieldScope = 'global' | 'character';
+
+/**
+ * Where a config-control consumer finds the active character's overlay:
+ * the character id and its character-data directory. Threaded from
+ * activation so every authored-fingerprint site reads the same pair.
+ */
+export type RuntimeConfigCharacterScope = {
+  readonly characterId: string;
+  readonly dataRoot: string;
+};
+
+/**
+ * Which config document a diagnostic came from. Global-document
+ * diagnostics carry no origin; character-overlay diagnostics name the
+ * character and overlay path so CLI output can attribute them.
+ */
+export type RuntimeConfigDiagnosticOrigin = {
+  readonly scope: RuntimeConfigFieldScope;
+  readonly characterId?: string;
+  readonly path?: string;
+};
 
 type RuntimeConfigDiagnosticBase = {
   readonly severity: RuntimeConfigDiagnosticSeverity;
   readonly code: string;
   readonly message: string;
   readonly path?: string;
+  readonly origin?: RuntimeConfigDiagnosticOrigin;
 };
 
 export type RuntimeConfigDiagnostic =
@@ -85,15 +149,56 @@ export type RuntimeConfigDiagnosticPluginMetadata = {
   readonly pluginConfigField?: string;
 };
 
+/**
+ * A diagnostic's code and the field it is about, in the one spelling
+ * every operator-facing surface uses.
+ *
+ * "Plugin config must be an object" names no field, so an operator
+ * holding a document with several plugins has to guess which one the
+ * run meant. The path is already on the diagnostic; the only question
+ * is whether a given error message remembers to include it. Answering
+ * that here rather than at each throw site is what keeps a message
+ * built for a rejection as locatable as one built for the CLI.
+ */
+export function runtimeConfigDiagnosticLocation(
+  diagnostic: RuntimeConfigDiagnostic,
+): string {
+  return diagnostic.path === undefined
+    ? diagnostic.code
+    : `${diagnostic.code} at ${diagnostic.path}`;
+}
+
 export type LoadedProject02RuntimeConfig = {
   readonly source: RuntimeConfigSource;
   readonly path?: string;
+  /** Immutable operator selection provenance, independent from file absence. */
+  readonly selectedConfig?: SelectedProject02RuntimeConfigLocation;
+  /**
+   * The bounded authored JSON object. It remains available when schema
+   * validation fails so control can edit the real document and validate the
+   * complete candidate instead of rebuilding from bootstrap state.
+   */
+  readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
+/** A real global load, with the selected file provenance retained. */
+export type SelectedLoadedProject02RuntimeConfig =
+  LoadedProject02RuntimeConfig & {
+    readonly path: string;
+    readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
+  };
+
 export type RuntimeConfigFieldSource =
   'config' | 'default' | 'missing' | 'plaintext_override' | `env:${string}`;
+
+/**
+ * Which authored config layer supplies an effective plugin field. This is
+ * intentionally separate from RuntimeConfigFieldSource, which describes how
+ * the field resolves (for example config versus env).
+ */
+export type RuntimeConfigEffectiveSource = 'default' | RuntimeConfigFieldScope;
 
 export type ResolvedRuntimeConfigField = {
   readonly name: string;
@@ -124,6 +229,8 @@ export type ResolvedProject02RuntimeConfig = {
   readonly path?: string;
   readonly project02: {
     readonly storeRoot: string;
+    readonly character: string;
+    readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
   };
@@ -140,6 +247,8 @@ export type RuntimeConfigInspectShape = {
   readonly path?: string;
   readonly project02: {
     readonly storeRoot: string;
+    readonly character: string;
+    readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
   };
@@ -157,10 +266,13 @@ export type RuntimePluginConfigFieldInspectShape = {
   readonly allowedValues?: readonly string[];
   readonly agentMutable: boolean;
   readonly reloadRequired: boolean;
+  /** Value authored in the inspection's explicit mutation target only. */
   readonly authored: {
     readonly configured: boolean;
     readonly value?: RuntimeConfigValue;
   };
+  /** Layer supplying the effective value after global/character resolution. */
+  readonly effectiveSource: RuntimeConfigEffectiveSource;
   readonly effective: RedactedRuntimeConfigField;
 };
 

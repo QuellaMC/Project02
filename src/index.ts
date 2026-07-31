@@ -14,5 +14,6 @@ export {runLocalUserMessageEvent} from './runtime/index.ts';
 export {createRuntimeLogStore} from './runtime/evidence/index.ts';
 export {
   createConfiguredProject02PluginHostFromPlan,
+  initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
 } from './app/index.ts';

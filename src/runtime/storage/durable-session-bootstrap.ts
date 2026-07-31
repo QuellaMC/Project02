@@ -1,24 +1,36 @@
-import type {ConversationSession} from '../../core/index.ts';
+import {
+  createUserSpeaker,
+  validateConversationParticipants,
+  type CharacterProfile,
+  type ConversationSession,
+  type SpeakerIdentity,
+} from '../../core/index.ts';
 import type {RuntimeLogStore} from '../evidence/records.ts';
 import {
   createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
 } from './file-runtime-log-store.ts';
-import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError,
   type LocalRuntimeSessionConversationEvidence,
 } from './session-store.ts';
+import {LocalRuntimeStorageContractError} from './layout-contract.ts';
+import {ensureCharacterDataDir} from './character-data.ts';
 import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
 import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
-import {normalizeLocalRuntimeSessionId} from './layout-contract.ts';
+import {
+  normalizeLocalRuntimeCharacterId,
+  normalizeLocalRuntimeSessionId,
+} from './layout-contract.ts';
 
 export type DurableSessionSelection = {
-  readonly storeRoot?: string;
+  readonly homeRoot?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
+  readonly character: CharacterProfile;
+  readonly userDisplayName?: string;
 };
 
 export type DurableChatRuntime = {
@@ -33,8 +45,28 @@ export async function createDurableChatRuntime(
   const sessionId = normalizeLocalRuntimeSessionId(
     args.newSessionId ?? args.sessionId,
   );
-  const storageOptions =
-    args.storeRoot === undefined ? {} : {storeRoot: args.storeRoot};
+  // Everything this runtime is about to stamp on durable records is judged
+  // before the first directory exists. The id is canonicalized here too, so
+  // the data directory, the marker, the log store, and the returned session
+  // all bind the same spelling — a padded `" nova "` would otherwise mark
+  // `character-data/nova` while stamping messages nothing can reopen.
+  const characterId = normalizeLocalRuntimeCharacterId(args.character.id);
+  const {character, userSpeaker: boundUserSpeaker} =
+    validateConversationParticipants({
+      character: {id: characterId, displayName: args.character.displayName},
+      ...(args.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: args.userDisplayName}),
+    });
+  const dataRoot = await ensureCharacterDataDir({
+    ...(args.homeRoot === undefined ? {} : {homeRoot: args.homeRoot}),
+    characterId,
+  });
+  const storageOptions = {
+    storeRoot: dataRoot,
+    characterId,
+  };
+
   const sessionStore = createLocalRuntimeSessionStore({
     ...storageOptions,
     sessionReadinessValidator: {
@@ -42,6 +74,8 @@ export async function createDurableChatRuntime(
         const logStore = createFileRuntimeLogStore({
           ...storageOptions,
           sessionId: selectedSessionId,
+          boundCharacter: character,
+          boundUserSpeaker,
         });
 
         logStore.readSessionEvidence();
@@ -68,6 +102,8 @@ export async function createDurableChatRuntime(
       ...storageOptions,
       sessionId,
       writerLockOwnerToken: ownerToken,
+      boundCharacter: character,
+      boundUserSpeaker,
     });
     logStore.recoverAbandonedWriterEvidence?.();
 
@@ -75,10 +111,18 @@ export async function createDurableChatRuntime(
       session: await sessionStore.rehydrateConversationSession(sessionId, {
         conversationLogReader: {
           readConversationMessages() {
-            return readDurableConversationEvidence(logStore).messages;
+            return readDurableConversationEvidence(
+              logStore,
+              character,
+              boundUserSpeaker,
+            ).messages;
           },
           readConversationEvidence() {
-            return readDurableConversationEvidence(logStore);
+            return readDurableConversationEvidence(
+              logStore,
+              character,
+              boundUserSpeaker,
+            );
           },
         },
       }),
@@ -93,11 +137,26 @@ export async function createDurableChatRuntime(
 
 export function readDurableConversationEvidence(
   logStore: RuntimeLogStore,
+  boundCharacter: CharacterProfile,
+  boundUserSpeaker?: SpeakerIdentity,
 ): LocalRuntimeSessionConversationEvidence {
   const evidence = logStore.readSessionEvidence().stored;
+  const recordedUserMessage = evidence.conversationMessages.find(
+    message => message.role === 'user',
+  );
 
   return Object.freeze({
-    character: durableRuntimeSessionCharacterProfile(evidence),
+    // Existing sessions keep their evidence-derived profiles (historical
+    // display names); the bound character and user speaker apply to
+    // evidence-empty sessions only.
+    character: durableRuntimeSessionCharacterProfile(evidence, boundCharacter),
+    userSpeaker:
+      recordedUserMessage === undefined
+        ? (boundUserSpeaker ?? createUserSpeaker())
+        : Object.freeze({
+            id: recordedUserMessage.speakerId,
+            displayName: recordedUserMessage.speakerName,
+          } satisfies SpeakerIdentity),
     messages: evidence.conversationMessages,
   } satisfies LocalRuntimeSessionConversationEvidence);
 }

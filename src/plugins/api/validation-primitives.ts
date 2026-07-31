@@ -1,4 +1,5 @@
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {isProject02Identifier} from '../../shared/identifier.ts';
 import {
   isJsonBoundaryCredentialKey,
   redactJsonBoundaryText,
@@ -168,7 +169,7 @@ export function requiredIdentifier(
     return stringValue;
   }
 
-  if (!/^[A-Za-z][A-Za-z0-9._-]{0,127}$/u.test(stringValue.value)) {
+  if (!isProject02Identifier(stringValue.value)) {
     return reject(
       'malformed_manifest',
       `Plugin field "${field}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`,

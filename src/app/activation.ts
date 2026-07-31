@@ -1,18 +1,13 @@
 import {
-  createLocalRuntimeStorageLayout,
-  createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
-  type RuntimePluginFileStoreProvider,
+  createProject02HomeLayout,
+  LocalRuntimeStorageContractError,
+  requireCharacterDataMarker,
 } from '../runtime/storage/index.ts';
 import {
-  createRuntimePluginContext,
+  createRuntimePluginConfigControlBinding,
   createRuntimePluginHost,
-  defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds,
-  isHostOwnedFirstPartyRuntimePluginId,
   isHostScopedFirstPartyRuntimePluginId,
-  runRuntimePluginSessionEndHooks,
-  runRuntimePluginShutdownHooks,
   runtimePluginAccessSnapshot,
   runtimePluginId,
   type RuntimePlugin,
@@ -20,12 +15,9 @@ import {
   type RuntimePluginCatalogEntry,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
-  type RuntimePluginFactoryDefinition as RuntimePluginFactoryDefinitionContract,
-  type RuntimePluginFactoryFunction,
   type RuntimePluginHost,
   type RuntimePluginKind,
   type RuntimePluginManifest,
-  type RuntimePluginPackageCatalogEntry,
   type RuntimePluginSessionEndOptions,
   type RuntimePluginToolConfirmationHandler,
 } from '../plugins/index.ts';
@@ -37,29 +29,42 @@ import {
 } from '../plugins/package-loader/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
+  assertResolvedProject02HomeAdoptable,
+  createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
-  createRuntimeConfigFingerprint,
-  createRuntimeConfigMutationBase,
+  createRuntimeConfigAuthoredSnapshot,
   createRuntimePluginConfigControlCapability,
   diagnosticsHaveErrors,
-  resolveProject02RuntimeConfig,
-  resolveProject02RuntimeStoreRoot,
+  layeredRuntimeConfigFingerprintForScope,
+  readCharacterOverlayForScope,
+  resolveRuntimeConfigScopeTarget,
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
   runtimeConfigDiagnosticMatchesPlugin,
+  type EffectiveProject02RuntimeConfigSnapshot,
+  type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
+  type ResolvedProject02RuntimeLocation,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
   type RuntimePluginConfigActivationInspectShape,
 } from '../runtime/config/index.ts';
-import {canonicalJsonValuesEqual} from '../shared/canonical-json.ts';
 import {createConfiguredRuntimePluginReloader} from './plugin-reload.ts';
+import {
+  composeRuntimePluginCatalog,
+  defaultRuntimePluginHostServiceEntries,
+  type RuntimePluginFactoryDefinition,
+} from './plugin-catalog.ts';
+import {
+  cleanupPartiallyInstantiatedPlugins,
+  configuredRuntimePluginFileStoreProvider,
+  instantiateRuntimePluginPackages,
+} from './plugin-construction.ts';
 
 export type {
   RuntimePluginFactoryFunction,
   RuntimePluginFactoryInput,
 } from '../plugins/index.ts';
-
-export type RuntimePluginFactoryDefinition =
-  RuntimePluginFactoryDefinitionContract<RuntimePluginFactoryFunction>;
+export type {RuntimePluginFactoryDefinition} from './plugin-catalog.ts';
 
 export type RuntimePluginActivationStatus = 'active' | 'disabled' | 'blocked';
 
@@ -91,9 +96,11 @@ export type Project02ConfiguredPluginHost = {
     Record<string, RuntimePluginPackageProvenance>
   >;
   readonly pluginConfigControl: RuntimePluginConfigControlHostState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
 };
 
 export type Project02ConfiguredPluginActivation = {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly activation: RuntimePluginActivationResult;
   readonly packageProvenanceByPluginId: Readonly<
@@ -121,47 +128,83 @@ export type RuntimePluginCatalogSnapshot = {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-// The host must not import the file-store engine (arch rule: plugins never
-// value-import runtime storage); the composition root supplies it instead.
-const configuredRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
-  Object.freeze({
-    createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
-  });
+/**
+ * One immutable filesystem discovery, classified per config layer:
+ * package scanning is config-free, so a startup discovers once and
+ * re-classifies the same manifests against each layer state instead of
+ * re-scanning — package defaults and final activation then always
+ * judge one manifest snapshot.
+ */
+export type RuntimePluginCatalogDiscovery = {
+  readonly storeRoot: string;
+  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
+  readonly defaultEnabledPluginIds: readonly string[];
+  readonly packageProvenanceByPluginId: Readonly<
+    Record<string, RuntimePluginPackageProvenance>
+  >;
+  /** Raw package diagnostics awaiting per-layer severity classification. */
+  readonly packageDiagnostics: readonly RuntimePluginPackageDiagnostic[];
+  /** Config-independent catalog errors (reserved system-service ids). */
+  readonly reservedIdDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly discoveredPluginIds: ReadonlySet<string>;
+};
 
-const configuredPluginConstructionCleanupSessionId =
-  'configured-plugin-construction-cleanup';
-const configuredPluginConstructionCleanupMessage =
-  'configured plugin construction failed before host creation';
-const configuredPluginConstructionCleanupCharacter = Object.freeze({
-  id: 'project02-runtime-config',
-  displayName: 'Project02 Runtime Config',
-});
-const configuredPluginConstructionCleanupOptions = Object.freeze({
-  allowFileStoreWrites: false,
-} satisfies RuntimePluginSessionEndOptions);
 const selectedAsDefaultMemoryProviderReason =
   'selected_as_default_memory_provider';
-const defaultRuntimePluginHostServiceEntries =
-  defaultRuntimePluginHostServiceCatalogEntries();
 
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  /**
+   * Test or embedding overrides extend the discovered catalog instead of
+   * replacing it. Character-package requirements must keep seeing bundled
+   * and operator-installed plugins on every startup path.
+   */
+  readonly factoryOverrides?: Readonly<
+    Record<string, RuntimePluginFactoryDefinition>
+  >;
+  /**
+   * When present, package diagnostics are classified against the merged
+   * two-layer view: an overlay-enabled broken package is as much an
+   * error as a globally enabled one.
+   */
+  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
-  const storeRoot = resolveProject02RuntimeStoreRoot(options);
-  const operatorPackageRoot = createLocalRuntimeStorageLayout({
-    storeRoot,
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+
+  return classifyRuntimePluginCatalogDiscovery({
+    discovery: discoverRuntimePluginCatalog({
+      storeRoot: options.runtimeLocation.homeRoot,
+      ...(options.factoryOverrides === undefined
+        ? {}
+        : {factoryOverrides: options.factoryOverrides}),
+    }),
+    classificationConfig: createLayeredProject02RuntimeConfigSnapshot({
+      loadedConfig: options.loadedConfig,
+      ...(options.overlayConfig === undefined
+        ? {}
+        : {overlayConfig: options.overlayConfig}),
+    }).effective,
+  });
+}
+
+export function discoverRuntimePluginCatalog(options: {
+  /** The resolved home; installed packages live at the home level. */
+  readonly storeRoot: string;
+  readonly factoryOverrides?: Readonly<
+    Record<string, RuntimePluginFactoryDefinition>
+  >;
+}): RuntimePluginCatalogDiscovery {
+  const operatorPackageRoot = createProject02HomeLayout({
+    homeRoot: options.storeRoot,
   }).pluginPackagesRoot;
   const discovery = discoverRuntimePluginPackages({
     sources: [
       {
         root: bundledRuntimePluginPackageRoot,
-        provenance: 'bundled',
       },
       {
         root: operatorPackageRoot,
-        provenance: 'operator',
       },
     ],
     reservedPluginIds: hostFirstPartyRuntimePluginIds,
@@ -169,7 +212,7 @@ export function createRuntimePluginCatalogSnapshot(options: {
   const ordinaryPackages = discovery.packages.filter(
     item => !isHostScopedFirstPartyRuntimePluginId(item.manifest.id),
   );
-  const bundledSystemServiceDiagnostics = discovery.packages
+  const reservedIdDiagnostics = discovery.packages
     .filter(item => isHostScopedFirstPartyRuntimePluginId(item.manifest.id))
     .map((item): RuntimeConfigDiagnostic =>
       Object.freeze({
@@ -180,112 +223,68 @@ export function createRuntimePluginCatalogSnapshot(options: {
         pluginId: item.manifest.id,
       }),
     );
-  const packageProvenanceByPluginId = Object.freeze(
-    Object.fromEntries(
-      ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
-    ),
-  );
-  const catalogEntries = Object.freeze({
-    ...defaultRuntimePluginHostServiceEntries,
-    ...Object.fromEntries(
-      ordinaryPackages.map(item => [item.manifest.id, item]),
-    ),
+  const composition = composeRuntimePluginCatalog({
+    discoveredPackages: ordinaryPackages,
+    ...(options.factoryOverrides === undefined
+      ? {}
+      : {factories: options.factoryOverrides}),
   });
-  const discoveredPluginIds = new Set([
-    ...ordinaryPackages.map(item => item.manifest.id),
-    ...Object.keys(defaultRuntimePluginHostServiceEntries),
-  ]);
-  const defaultEnabledPluginIds = new Set<string>();
-
-  for (const definition of Object.values(
-    defaultRuntimePluginHostServiceEntries,
-  )) {
-    if (definition.manifest.activation.defaultEnabled) {
-      defaultEnabledPluginIds.add(definition.manifest.id);
-    }
-  }
-  for (const item of ordinaryPackages) {
-    if (
-      item.provenance === 'bundled' &&
-      item.manifest.activation.defaultEnabled
-    ) {
-      defaultEnabledPluginIds.add(item.manifest.id);
-    }
-  }
 
   return Object.freeze({
-    storeRoot,
-    catalogEntries,
-    defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds]),
-    packageProvenanceByPluginId,
+    storeRoot: options.storeRoot,
+    catalogEntries: composition.catalogEntries,
+    defaultEnabledPluginIds: composition.defaultEnabledPluginIds,
+    packageProvenanceByPluginId: Object.freeze(
+      Object.fromEntries(
+        ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
+      ),
+    ),
+    packageDiagnostics: discovery.diagnostics,
+    reservedIdDiagnostics: Object.freeze(reservedIdDiagnostics),
+    discoveredPluginIds: new Set([
+      ...ordinaryPackages.map(item => item.manifest.id),
+      ...Object.keys(defaultRuntimePluginHostServiceEntries),
+      ...Object.keys(options.factoryOverrides ?? {}),
+    ]),
+  } satisfies RuntimePluginCatalogDiscovery);
+}
+
+/**
+ * Severity classification of one discovery against one config layer
+ * view: an overlay-enabled broken package is as much an error as a
+ * globally enabled one, and the same discovery re-classifies cheaply
+ * as the layer state changes.
+ */
+export function classifyRuntimePluginCatalogDiscovery(options: {
+  readonly discovery: RuntimePluginCatalogDiscovery;
+  readonly classificationConfig: EffectiveProject02RuntimeConfigSnapshot;
+}): RuntimePluginCatalogSnapshot {
+  const {discovery} = options;
+
+  return Object.freeze({
+    storeRoot: discovery.storeRoot,
+    catalogEntries: discovery.catalogEntries,
+    defaultEnabledPluginIds: discovery.defaultEnabledPluginIds,
+    packageProvenanceByPluginId: discovery.packageProvenanceByPluginId,
     diagnostics: Object.freeze([
-      ...discovery.diagnostics.map(diagnostic =>
+      ...discovery.packageDiagnostics.map(diagnostic =>
         runtimePluginPackageDiagnostic({
           diagnostic,
-          loadedConfig: options.loadedConfig,
-          discoveredPluginIds,
+          effectiveConfig: options.classificationConfig,
+          discoveredPluginIds: discovery.discoveredPluginIds,
         }),
       ),
-      ...bundledSystemServiceDiagnostics,
+      ...discovery.reservedIdDiagnostics,
     ]),
   } satisfies RuntimePluginCatalogSnapshot);
 }
 
-function composeRuntimePluginCatalog(
-  factories: Readonly<Record<string, RuntimePluginFactoryDefinition>>,
-): {
-  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
-  readonly defaultEnabledPluginIds: readonly string[];
-} {
-  const packageEntries = Object.fromEntries(
-    Object.entries(factories)
-      .filter(([pluginId]) => !isHostScopedFirstPartyRuntimePluginId(pluginId))
-      .map(([pluginId, definition]) => [
-        pluginId,
-        Object.freeze({
-          catalogKind: 'package',
-          manifest: definition.manifest,
-          load: input => definition.create(input),
-        } satisfies RuntimePluginPackageCatalogEntry),
-      ]),
-  );
-  const catalogEntries = Object.freeze({
-    ...defaultRuntimePluginHostServiceEntries,
-    ...packageEntries,
-  });
-  const defaultEnabledPluginIds = new Set<string>();
-
-  for (const [pluginId, definition] of Object.entries(
-    defaultRuntimePluginHostServiceEntries,
-  )) {
-    if (
-      pluginId === definition.manifest.id &&
-      isHostOwnedFirstPartyRuntimePluginId(pluginId) &&
-      definition.manifest.activation.defaultEnabled
-    ) {
-      defaultEnabledPluginIds.add(pluginId);
-    }
-  }
-  for (const [pluginId, definition] of Object.entries(packageEntries)) {
-    if (
-      pluginId === definition.manifest.id &&
-      !isHostOwnedFirstPartyRuntimePluginId(pluginId) &&
-      definition.manifest.activation.defaultEnabled
-    ) {
-      defaultEnabledPluginIds.add(pluginId);
-    }
-  }
-
-  return Object.freeze({
-    catalogEntries,
-    defaultEnabledPluginIds: Object.freeze([...defaultEnabledPluginIds]),
-  });
-}
-
 export function prepareConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   readonly strictUnknownPlugins?: boolean;
+  readonly validateInactivePluginConfigs?: boolean;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
@@ -299,22 +298,31 @@ export function prepareConfiguredProject02PluginActivation(options: {
     );
   }
 
-  const composition =
-    options.factories === undefined
-      ? (options.catalogSnapshot ??
-        createRuntimePluginCatalogSnapshot({
-          loadedConfig: options.loadedConfig,
-          ...(options.storeRoot === undefined
-            ? {}
-            : {storeRoot: options.storeRoot}),
-        }))
-      : Object.freeze({
-          storeRoot: resolveProject02RuntimeStoreRoot(options),
-          ...composeRuntimePluginCatalog(options.factories),
-          packageProvenanceByPluginId: Object.freeze({}),
-          diagnostics: Object.freeze([]),
-        } satisfies RuntimePluginCatalogSnapshot);
-  const expectedStoreRoot = resolveProject02RuntimeStoreRoot(options);
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+
+  // One character scope and one overlay snapshot feed the catalog
+  // classification, the layered resolve, the construction snapshot, and
+  // the control state, so every downstream site composes the same pair
+  // of documents — including direct callers that never went through
+  // startup. A supplied overlay is the scope authority: its character
+  // id may be a flag override the loaded config knows nothing about.
+  const characterScope = options.runtimeLocation.characterScope;
+  if (
+    options.overlayConfig !== undefined &&
+    options.overlayConfig.characterId !== characterScope.characterId
+  ) {
+    throw new TypeError(
+      'Runtime character overlay does not match the resolved runtime location.',
+    );
+  }
+  const overlayConfig =
+    options.overlayConfig ??
+    readCharacterOverlayForScope(characterScope).overlay;
+  const composition = activationCatalogComposition({
+    ...options,
+    overlayConfig,
+  });
+  const expectedStoreRoot = options.runtimeLocation.homeRoot;
 
   if (composition.storeRoot !== expectedStoreRoot) {
     throw new TypeError(
@@ -324,51 +332,85 @@ export function prepareConfiguredProject02PluginActivation(options: {
   const catalogEntries = Object.freeze({...composition.catalogEntries});
   const pluginManifests = activationPluginManifests(catalogEntries);
   const defaultEnabledPluginIds = new Set(composition.defaultEnabledPluginIds);
-  const resolvedConfig = resolveProject02RuntimeConfig({
-    loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    pluginManifests,
-    defaultEnabledPluginIds,
+  const configControlTarget = resolveRuntimeConfigScopeTarget({
+    runtimeLocation: options.runtimeLocation,
+    scope: 'character',
     ...(options.env === undefined ? {} : {env: options.env}),
   });
+  const {layeredConfig, resolvedConfig} =
+    resolveLayeredProject02RuntimeConfigWithSnapshot({
+      loadedConfig: options.loadedConfig,
+      runtimeLocation: options.runtimeLocation,
+      overlayConfig,
+      pluginManifests,
+      defaultEnabledPluginIds,
+      validateInactivePluginConfigs:
+        options.validateInactivePluginConfigs === true,
+      env: configControlTarget.env,
+    });
   const activation = resolveRuntimePluginActivation({
     pluginManifests,
     defaultEnabledPluginIds,
     resolvedConfig,
-    loadedConfig: options.loadedConfig,
+    // The enablement ladder judges the merged view, so an overlay's
+    // explicit enabled rung carries the same weight as a global one.
+    effectiveConfig: layeredConfig.effective,
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
   });
+  const globalMutationBase = createRuntimeConfigAuthoredSnapshot(
+    options.loadedConfig,
+  ).document;
 
   return Object.freeze({
+    runtimeLocation: options.runtimeLocation,
     catalogEntries,
     packageProvenanceByPluginId: composition.packageProvenanceByPluginId,
     resolvedConfig,
     activation,
-    authoredConfigFingerprint: createRuntimeConfigFingerprint(
-      createRuntimeConfigMutationBase({
-        loadedConfig: options.loadedConfig,
-        ...(resolvedConfig.path === undefined
-          ? {}
-          : {configPath: resolvedConfig.path}),
-        storeRoot: resolvedConfig.project02.storeRoot,
-      }),
-    ),
+    authoredConfigFingerprint: layeredRuntimeConfigFingerprintForScope({
+      globalConfig: globalMutationBase,
+      characterScope,
+      overlay: overlayConfig,
+    }),
     pluginConfigControl: Object.freeze({
       pluginManifests,
-      control: createRuntimePluginConfigControlCapability(),
       activationByPluginId: runtimePluginConfigActivationByPluginId(activation),
       defaultEnabledPluginIds: Object.freeze([
         ...composition.defaultEnabledPluginIds,
       ]),
-      ...(resolvedConfig.path === undefined
-        ? {}
-        : {configPath: resolvedConfig.path}),
-      ...(options.env === undefined
-        ? {}
-        : {env: Object.freeze({...options.env})}),
+      configControl: createRuntimePluginConfigControlBinding({
+        control: createRuntimePluginConfigControlCapability(),
+        target: configControlTarget,
+      }),
     }),
   } satisfies PreparedProject02PluginActivationPlan);
+}
+
+function activationCatalogComposition(options: {
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly overlayConfig: LoadedProject02CharacterOverlayConfig;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
+}): RuntimePluginCatalogSnapshot {
+  if (options.factories !== undefined) {
+    return Object.freeze({
+      storeRoot: options.runtimeLocation.homeRoot,
+      ...composeRuntimePluginCatalog({factories: options.factories}),
+      packageProvenanceByPluginId: Object.freeze({}),
+      diagnostics: Object.freeze([]),
+    } satisfies RuntimePluginCatalogSnapshot);
+  }
+
+  return (
+    options.catalogSnapshot ??
+    createRuntimePluginCatalogSnapshot({
+      loadedConfig: options.loadedConfig,
+      runtimeLocation: options.runtimeLocation,
+      overlayConfig: options.overlayConfig,
+    })
+  );
 }
 
 function runtimePluginConfigActivationByPluginId(
@@ -388,39 +430,6 @@ function runtimePluginConfigActivationByPluginId(
   );
 }
 
-export async function createConfiguredProject02PluginHost(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly strictUnknownPlugins?: boolean;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-  readonly toolConfirmationHandler?:
-    RuntimePluginToolConfirmationHandler | undefined;
-}): Promise<Project02ConfiguredPluginHost> {
-  const activationPlan = prepareConfiguredProject02PluginActivation({
-    loadedConfig: options.loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    strictUnknownPlugins: options.strictUnknownPlugins === true,
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(options.catalogSnapshot === undefined
-      ? {}
-      : {catalogSnapshot: options.catalogSnapshot}),
-  });
-
-  return createConfiguredProject02PluginHostFromPlan({
-    activationPlan,
-    sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity,
-    constructionCleanup: options.constructionCleanup,
-    toolConfirmationHandler: options.toolConfirmationHandler,
-  });
-}
-
 export async function createConfiguredProject02PluginHostFromPlan(options: {
   readonly activationPlan: PreparedProject02PluginActivationPlan;
   readonly sessionId?: string | undefined;
@@ -432,6 +441,19 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   const {activationPlan} = options;
   const {catalogEntries} = activationPlan;
 
+  // Both guards are preconditions of the resolved location, not of the
+  // plugins built from it, so they run before any branch. Host
+  // construction is downstream of character initialization: it asserts
+  // the guarded initializer already ran (identity marker present and
+  // matching) and never creates durable character state itself — a
+  // direct caller on an uninitialized home used to get a partially
+  // initialized character with no package defaults and no diagnostics.
+  // An activation error does not lift that obligation: the error host
+  // is still a host, and returning one bound to no character marker is
+  // exactly what this boundary exists to prevent.
+  assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
+  assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
+
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
 
@@ -439,7 +461,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
-        storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+        storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
         fileStore: configuredRuntimePluginFileStoreProvider,
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
@@ -453,24 +475,28 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       activation: activationPlan.activation,
       packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
       pluginConfigControl: activationPlan.pluginConfigControl,
+      runtimeLocation: activationPlan.runtimeLocation,
     } satisfies Project02ConfiguredPluginHost);
   }
 
-  const plugins = await instantiateRuntimePluginPackages({
+  const instantiated = await instantiateRuntimePluginPackages({
     catalogEntries,
+    runtimeLocation: activationPlan.runtimeLocation,
     resolvedConfig: activationPlan.resolvedConfig,
     enabledPluginIds: activationPlan.activation.enabledPluginIds,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
     constructionCleanup: options.constructionCleanup,
   });
+  const {plugins} = instantiated;
   let host: RuntimePluginHost;
 
   try {
     host = createRuntimePluginHost({
       plugins,
+      lifecycleTargets: instantiated.lifecycleTargets,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
-      storeRoot: activationPlan.resolvedConfig.project02.storeRoot,
+      storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
       toolConfirmationHandler: options.toolConfirmationHandler,
@@ -481,8 +507,9 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({
-      plugins,
-      resolvedConfig: activationPlan.resolvedConfig,
+      targets: instantiated.lifecycleTargets,
+      accessByPluginId: instantiated.accessByPluginId,
+      runtimeLocation: activationPlan.runtimeLocation,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       constructionCleanup: options.constructionCleanup,
@@ -497,7 +524,43 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     activation: activationPlan.activation,
     packageProvenanceByPluginId: activationPlan.packageProvenanceByPluginId,
     pluginConfigControl: activationPlan.pluginConfigControl,
+    runtimeLocation: activationPlan.runtimeLocation,
   } satisfies Project02ConfiguredPluginHost);
+}
+
+function assertCharacterRuntimeInitialized(
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): void {
+  try {
+    requireCharacterDataMarker({
+      storageOptions: {
+        storeRoot: runtimeLocation.characterScope.dataRoot,
+      },
+      characterId: runtimeLocation.characterScope.characterId,
+    });
+  } catch (error: unknown) {
+    if (
+      error instanceof LocalRuntimeStorageContractError &&
+      error.code === 'missing_file'
+    ) {
+      // Both ways in are named because both audiences reach this: an
+      // embedded caller wants the exported initializer, an operator
+      // wants a command they can type. `--init` is part of that answer
+      // now — a CLI run against a store that does not exist stops at the
+      // consent gate instead of quietly making one, so "run any CLI
+      // startup" is only true once the operator has agreed to the store.
+      throw new TypeError(
+        `Character "${runtimeLocation.characterScope.characterId}" is not ` +
+          'initialized in this home. Run a project02 CLI command against ' +
+          'this store first (adding --init if the store itself is new), ' +
+          'or call initializeProject02CharacterRuntime, before ' +
+          'constructing the plugin host.',
+        {cause: error},
+      );
+    }
+
+    throw error;
+  }
 }
 
 export function resolveRuntimePluginActivation(options: {
@@ -506,14 +569,14 @@ export function resolveRuntimePluginActivation(options: {
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
   readonly catalogDiagnostics?: readonly RuntimeConfigDiagnostic[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
   readonly strictUnknownPlugins?: boolean;
 }): RuntimePluginActivationResult {
   const pluginManifests =
     options.pluginManifests ??
     options.plugins?.map(plugin => plugin.manifest) ??
     [];
-  const config = options.loadedConfig.config;
+  const config = options.effectiveConfig.config;
   const pluginIds = new Set(pluginManifests.map(manifest => manifest.id));
   const baseDiagnostics: readonly RuntimeConfigDiagnostic[] = Object.freeze([
     ...unknownPluginDiagnostics({
@@ -529,9 +592,6 @@ export function resolveRuntimePluginActivation(options: {
     ...options.resolvedConfig.diagnostics,
     ...(options.catalogDiagnostics ?? []),
   ]);
-  const loadedConfigHasErrors = diagnosticsHaveErrors(
-    options.loadedConfig.diagnostics,
-  );
   const globalConfigErrors = hasGlobalRuntimeConfigErrors({
     diagnostics: baseDiagnostics,
     knownPluginIds: pluginIds,
@@ -545,8 +605,7 @@ export function resolveRuntimePluginActivation(options: {
       options.defaultEnabledPluginIds?.has(manifest.id) === true;
     const configErrors =
       !isRuntimePluginInventoryRecoveryManifest(manifest) &&
-      (loadedConfigHasErrors ||
-        globalConfigErrors ||
+      (globalConfigErrors ||
         pluginHasRuntimeConfigErrors({
           diagnostics: baseDiagnostics,
           pluginId: manifest.id,
@@ -717,72 +776,9 @@ function isKnownPluginRuntimeConfigDiagnostic(options: {
   return false;
 }
 
-async function instantiateRuntimePluginPackages(options: {
-  readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
-  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly enabledPluginIds: readonly string[];
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-}): Promise<readonly RuntimePlugin[]> {
-  const plugins: RuntimePlugin[] = [];
-  const enabledPluginIds = new Set(options.enabledPluginIds);
-
-  try {
-    for (const [pluginId, entry] of Object.entries(options.catalogEntries)) {
-      if (
-        entry.catalogKind === 'host_service' ||
-        !enabledPluginIds.has(entry.manifest.id)
-      ) {
-        continue;
-      }
-
-      const plugin = await entry.load({
-        pluginId: entry.manifest.id,
-        manifest: entry.manifest,
-        storeRoot: options.resolvedConfig.project02.storeRoot,
-        resolvedConfig:
-          ownJsonRecordValue(
-            options.resolvedConfig.pluginConfigs,
-            entry.manifest.id,
-          ) ?? {},
-        redactedConfig:
-          ownJsonRecordValue(
-            options.resolvedConfig.redactedPluginConfigs,
-            entry.manifest.id,
-          ) ?? {},
-      });
-      plugins.push(plugin);
-
-      if (plugin.manifest.id !== entry.manifest.id) {
-        throw new TypeError(
-          `Plugin package loader "${pluginId}" returned plugin "${plugin.manifest.id}" after declaring manifest "${entry.manifest.id}".`,
-        );
-      }
-
-      if (!runtimePluginManifestsMatch(plugin.manifest, entry.manifest)) {
-        throw new TypeError(
-          `Plugin package loader "${pluginId}" returned a manifest that differs from its declared manifest "${entry.manifest.id}".`,
-        );
-      }
-    }
-  } catch (error: unknown) {
-    await cleanupPartiallyInstantiatedPlugins({
-      plugins,
-      resolvedConfig: options.resolvedConfig,
-      sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity,
-      constructionCleanup: options.constructionCleanup,
-    });
-    throw error;
-  }
-
-  return Object.freeze(plugins);
-}
-
 function runtimePluginPackageDiagnostic(options: {
   readonly diagnostic: RuntimePluginPackageDiagnostic;
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
   readonly discoveredPluginIds: ReadonlySet<string>;
 }): RuntimeConfigDiagnostic {
   const {diagnostic} = options;
@@ -792,7 +788,7 @@ function runtimePluginPackageDiagnostic(options: {
   ].filter((pluginId): pluginId is string => pluginId !== undefined);
   const configuredPluginId = diagnosticPluginIds.find(
     pluginId =>
-      ownJsonRecordValue(options.loadedConfig.config?.plugins, pluginId)
+      ownJsonRecordValue(options.effectiveConfig.config?.plugins, pluginId)
         ?.enabled === true,
   );
   const pluginId =
@@ -820,66 +816,6 @@ function runtimePluginPackageDiagnostic(options: {
         scope: 'plugin',
         pluginId,
       });
-}
-
-async function cleanupPartiallyInstantiatedPlugins(options: {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly resolvedConfig: ResolvedProject02RuntimeConfig;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly constructionCleanup?: RuntimePluginSessionEndOptions | undefined;
-}): Promise<void> {
-  if (options.plugins.length === 0) {
-    return;
-  }
-
-  const sessionId =
-    options.sessionId ?? configuredPluginConstructionCleanupSessionId;
-  const context = createRuntimePluginContext({
-    eventId: 'evt_configured_plugin_construction_cleanup',
-    traceId: 'trace_configured_plugin_construction_cleanup',
-    createdAt: '1970-01-01T00:00:00.000Z',
-    sessionId,
-    eventType: 'USER_MESSAGE',
-    currentUserMessage: configuredPluginConstructionCleanupMessage,
-    character: configuredPluginConstructionCleanupCharacter,
-  });
-  try {
-    await runRuntimePluginSessionEndHooks({
-      plugins: options.plugins,
-      context,
-      storeRoot: options.resolvedConfig.project02.storeRoot,
-      createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
-      sessionId,
-      sessionIdentity: options.sessionIdentity,
-      hookOptions: {
-        ...options.constructionCleanup,
-        ...configuredPluginConstructionCleanupOptions,
-      },
-    });
-  } catch {
-    // Construction cleanup is best-effort and must not mask the factory or host error.
-  }
-
-  try {
-    await runRuntimePluginShutdownHooks({
-      plugins: options.plugins,
-      context,
-      storeRoot: options.resolvedConfig.project02.storeRoot,
-      createFileStore: configuredRuntimePluginFileStoreProvider.createFileStore,
-      sessionId,
-      sessionIdentity: options.sessionIdentity,
-    });
-  } catch {
-    // Shutdown is best-effort and must not mask the factory or host error.
-  }
-}
-
-function runtimePluginManifestsMatch(
-  actual: RuntimePluginManifest,
-  expected: RuntimePluginManifest,
-): boolean {
-  return canonicalJsonValuesEqual(actual, expected);
 }
 
 function activationPluginManifests(
@@ -920,8 +856,6 @@ function runtimePluginInventoryStateForInvalidConfig(
     ...(state.defaultEnabledPluginIds === undefined
       ? {}
       : {defaultEnabledPluginIds: state.defaultEnabledPluginIds}),
-    ...(state.configPath === undefined ? {} : {configPath: state.configPath}),
-    ...(state.env === undefined ? {} : {env: state.env}),
   });
 }
 

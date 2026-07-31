@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {createConversationSession} from '../../src/core/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
@@ -18,7 +19,9 @@ import {
 
 describe('plugin-driven tool loop progress and evidence', () => {
   it('does not expose plugin inventory through hidden runtime context', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
     const adapter: RoleModelAdapter = Object.freeze({
@@ -84,12 +87,23 @@ describe('plugin-driven tool loop progress and evidence', () => {
   it('shows interim visible_reply before executable tools without committing it', async () => {
     const sessionId = 'session-interim-visible-reload';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const session = createConversationSession({id: sessionId});
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot,
+      sessionId,
+    });
     const progress: unknown[] = [];
     const adapter = createSequencedAdapter([
       {
@@ -132,6 +146,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
 
     expect(result.status).toBe('completed');
     const reloadedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -190,7 +206,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('continues after interim visible_reply progress callback failures', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const progress: unknown[] = [];
     const adapter = createSequencedAdapter([
@@ -311,6 +329,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toBe(false);
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -330,6 +350,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toEqual(['runtime_turn_completed']);
 
     const restoredSession = createConversationSession({
+      character: testCharacterProfile,
       id: sessionId,
       visibleTranscript: reopenedLogStore.conversationMessages(),
     });
@@ -368,7 +389,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('preserves role-model evidence when interim visible_reply is invalid', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
@@ -484,7 +507,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('preserves prior tool evidence when a later interim visible_reply is invalid', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {

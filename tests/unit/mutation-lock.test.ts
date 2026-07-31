@@ -1,22 +1,27 @@
+import {createHash} from 'node:crypto';
 import {
   mkdir,
   mkdtemp,
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 
-import {afterEach, describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it, vi} from 'vitest';
 
 import {
   acquireLocalRuntimeMutationLocks,
+  acquireLocalRuntimeMutationLocksSync,
   acquireLocalRuntimeMutationLock,
   acquireLocalRuntimeMutationLockSync,
   createLocalRuntimeMutationLockOwnerToken,
+  localRuntimeMutationLockOwnerOwnsResource,
   LocalRuntimeMutationLockBusyError,
+  LocalRuntimeMutationLocksAcquireError,
   reclaimObservedLocalRuntimeMutationLock,
 } from '../../src/runtime/storage/mutation-lock.ts';
 
@@ -107,15 +112,113 @@ describe('local runtime mutation locks', () => {
     await next.release();
   });
 
-  it('acquires multiple resources in canonical order', async () => {
-    const locksRoot = await createTempLocksRoot();
-    const lease = await acquireLocalRuntimeMutationLocks({
-      locksRoot,
-      resourceKeys: ['äther', 'zeta', 'alpha', 'zeta'],
+  it('reenters the same physical lock root through filesystem aliases', async () => {
+    const {aliasLocksRoot, physicalLocksRoot} =
+      await createAliasedTempLocksRoots();
+    const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+    const outer = await acquireLocalRuntimeMutationLock({
+      locksRoot: physicalLocksRoot,
+      resourceKey: 'session-writer:alpha',
+      ownerToken,
       waitTimeoutMs: 0,
     });
 
-    expect(lease.resourceKeys).toEqual(['alpha', 'zeta', 'äther']);
+    expect(
+      localRuntimeMutationLockOwnerOwnsResource({
+        locksRoot: aliasLocksRoot,
+        resourceKey: 'session-writer:alpha',
+        ownerToken,
+      }),
+    ).toBe(true);
+
+    const nested = await acquireLocalRuntimeMutationLock({
+      locksRoot: aliasLocksRoot,
+      resourceKey: 'session-writer:alpha',
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+
+    expect(nested.lockPath).toBe(outer.lockPath);
+    await nested.release();
+    await outer.release();
+  });
+
+  it('gives each lock target its own stall budget', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const waitTimeoutMs = 200;
+    // Targets are acquired in hashed-path order, so ask for that order rather
+    // than assuming it: the point of the test is that the SECOND resource
+    // acquired still gets a full budget.
+    const probe = await acquireLocalRuntimeMutationLocks({
+      targets: ['a-first', 'b-second'].map(resourceKey => ({
+        locksRoot,
+        resourceKey,
+      })),
+      waitTimeoutMs: 0,
+    });
+    const [firstKey, secondKey] = probe.targets.map(
+      target => target.resourceKey,
+    );
+
+    await probe.release();
+
+    if (firstKey === undefined || secondKey === undefined) {
+      throw new Error('Expected two canonical lock targets.');
+    }
+
+    // Hold the first for most of one budget so the wait is spent legitimately
+    // queueing on a healthy resource, then release the second just after.
+    const first = await acquireLocalRuntimeMutationLock({
+      locksRoot,
+      resourceKey: firstKey,
+      waitTimeoutMs: 0,
+    });
+    const second = await acquireLocalRuntimeMutationLock({
+      locksRoot,
+      resourceKey: secondKey,
+      waitTimeoutMs: 0,
+    });
+
+    setTimeout(() => {
+      void first.release();
+    }, waitTimeoutMs * 0.75);
+    setTimeout(() => {
+      void second.release();
+    }, waitTimeoutMs * 1.5);
+
+    // A pooled budget would have been exhausted by queueing on the first
+    // target and would reject the second on its first contended attempt, even
+    // though that resource is healthy and about to be released.
+    const lease = await acquireLocalRuntimeMutationLocks({
+      targets: ['a-first', 'b-second'].map(resourceKey => ({
+        locksRoot,
+        resourceKey,
+      })),
+      waitTimeoutMs,
+    });
+
+    expect(lease.targets.map(target => target.resourceKey)).toEqual([
+      firstKey,
+      secondKey,
+    ]);
+    await lease.release();
+  });
+
+  it('acquires multiple resources in canonical order', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const lease = await acquireLocalRuntimeMutationLocks({
+      targets: ['äther', 'zeta', 'alpha', 'zeta'].map(resourceKey => ({
+        locksRoot,
+        resourceKey,
+      })),
+      waitTimeoutMs: 0,
+    });
+
+    expect(lease.targets.map(target => target.resourceKey).sort()).toEqual([
+      'alpha',
+      'zeta',
+      'äther',
+    ]);
     await expect(
       acquireLocalRuntimeMutationLock({
         locksRoot,
@@ -125,6 +228,231 @@ describe('local runtime mutation locks', () => {
     ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
 
     await lease.release();
+
+    const reversed = await acquireLocalRuntimeMutationLocks({
+      targets: ['alpha', 'zeta', 'äther'].map(resourceKey => ({
+        locksRoot,
+        resourceKey,
+      })),
+      waitTimeoutMs: 0,
+    });
+
+    expect(reversed.targets).toEqual(lease.targets);
+    await reversed.release();
+  });
+
+  it('deduplicates aliased physical lock roots before ordering batches', async () => {
+    const {aliasLocksRoot, physicalLocksRoot} =
+      await createAliasedTempLocksRoots();
+    const otherLocksRoot = await createTempLocksRoot();
+    const forward = await acquireLocalRuntimeMutationLocks({
+      targets: [
+        {locksRoot: aliasLocksRoot, resourceKey: 'shared'},
+        {locksRoot: otherLocksRoot, resourceKey: 'other'},
+        {locksRoot: physicalLocksRoot, resourceKey: 'shared'},
+      ],
+      waitTimeoutMs: 0,
+    });
+
+    expect(forward.targets).toHaveLength(2);
+    expect(
+      forward.targets.filter(target => target.resourceKey === 'shared'),
+    ).toHaveLength(1);
+    await expect(
+      acquireLocalRuntimeMutationLock({
+        locksRoot: aliasLocksRoot,
+        resourceKey: 'shared',
+        waitTimeoutMs: 0,
+      }),
+    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    await forward.release();
+
+    const reversed = await acquireLocalRuntimeMutationLocks({
+      targets: [
+        {locksRoot: physicalLocksRoot, resourceKey: 'shared'},
+        {locksRoot: otherLocksRoot, resourceKey: 'other'},
+        {locksRoot: aliasLocksRoot, resourceKey: 'shared'},
+      ],
+      waitTimeoutMs: 0,
+    });
+
+    expect(reversed.targets).toEqual(forward.targets);
+    await reversed.release();
+  });
+
+  it('keeps the same resource key distinct across lock roots', async () => {
+    const firstRoot = await createTempLocksRoot();
+    const secondRoot = await createTempLocksRoot();
+    const lease = await acquireLocalRuntimeMutationLocks({
+      targets: [
+        {locksRoot: secondRoot, resourceKey: 'shared'},
+        {locksRoot: firstRoot, resourceKey: 'shared'},
+        {locksRoot: secondRoot, resourceKey: 'shared'},
+      ],
+      waitTimeoutMs: 0,
+    });
+
+    expect(lease.targets).toHaveLength(2);
+    for (const locksRoot of [firstRoot, secondRoot]) {
+      await expect(
+        acquireLocalRuntimeMutationLock({
+          locksRoot,
+          resourceKey: 'shared',
+          waitTimeoutMs: 0,
+        }),
+      ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    }
+
+    await lease.release();
+  });
+
+  it('reports the failed batch target and rolls back earlier locks', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const targets = ['batch-first', 'batch-blocked']
+      .map(resourceKey => ({locksRoot, resourceKey}))
+      .sort((left, right) =>
+        lockPathForTarget(left).localeCompare(lockPathForTarget(right)),
+      );
+    const first = targets[0];
+    const blocked = targets[1];
+
+    if (first === undefined || blocked === undefined) {
+      throw new TypeError('Expected two mutation lock targets.');
+    }
+
+    const blocker = await acquireLocalRuntimeMutationLock({
+      ...blocked,
+      waitTimeoutMs: 0,
+    });
+    let failure: unknown;
+
+    try {
+      await acquireLocalRuntimeMutationLocks({
+        targets,
+        waitTimeoutMs: 0,
+      });
+    } catch (error: unknown) {
+      failure = error;
+    }
+
+    expect(failure).toBeInstanceOf(LocalRuntimeMutationLocksAcquireError);
+    expect(
+      failure instanceof LocalRuntimeMutationLocksAcquireError
+        ? failure.target
+        : undefined,
+    ).toEqual(blocked);
+
+    const reacquired = await acquireLocalRuntimeMutationLock({
+      ...first,
+      waitTimeoutMs: 0,
+    });
+
+    await reacquired.release();
+    await blocker.release();
+  });
+
+  it('shares one timeout budget across the whole batch', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const targets = ['budget-first', 'budget-blocked']
+      .map(resourceKey => ({locksRoot, resourceKey}))
+      .sort((left, right) =>
+        lockPathForTarget(left).localeCompare(lockPathForTarget(right)),
+      );
+    const blocked = targets[1];
+
+    if (blocked === undefined) {
+      throw new TypeError('Expected a blocked mutation lock target.');
+    }
+
+    const blocker = await acquireLocalRuntimeMutationLock({
+      ...blocked,
+      waitTimeoutMs: 0,
+    });
+    const clock = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(75)
+      .mockReturnValueOnce(75)
+      .mockReturnValueOnce(100)
+      .mockReturnValue(200);
+
+    try {
+      await expect(
+        acquireLocalRuntimeMutationLocks({
+          targets,
+          waitTimeoutMs: 100,
+        }),
+      ).rejects.toMatchObject({target: blocked});
+      expect(clock).toHaveBeenCalledTimes(6);
+    } finally {
+      clock.mockRestore();
+      await blocker.release();
+    }
+  });
+
+  it('deduplicates and reenters heterogeneous sync batches', async () => {
+    const firstRoot = await createTempLocksRoot();
+    const secondRoot = await createTempLocksRoot();
+    const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+    const ownedTarget = {locksRoot: firstRoot, resourceKey: 'owned'};
+    const otherTarget = {locksRoot: secondRoot, resourceKey: 'other'};
+    const outer = acquireLocalRuntimeMutationLockSync({
+      ...ownedTarget,
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+    const batch = acquireLocalRuntimeMutationLocksSync({
+      targets: [otherTarget, ownedTarget, otherTarget],
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+
+    expect(batch.targets).toHaveLength(2);
+    batch.release();
+    expect(() =>
+      acquireLocalRuntimeMutationLockSync({
+        ...ownedTarget,
+        waitTimeoutMs: 0,
+      }),
+    ).toThrow(LocalRuntimeMutationLockBusyError);
+
+    outer.release();
+    const next = acquireLocalRuntimeMutationLockSync({
+      ...ownedTarget,
+      waitTimeoutMs: 0,
+    });
+    next.release();
+  });
+
+  it('reenters aliased physical lock roots in sync batches', async () => {
+    const {aliasLocksRoot, physicalLocksRoot} =
+      await createAliasedTempLocksRoots();
+    const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+    const outer = acquireLocalRuntimeMutationLockSync({
+      locksRoot: physicalLocksRoot,
+      resourceKey: 'owned',
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+    const nested = acquireLocalRuntimeMutationLocksSync({
+      targets: [{locksRoot: aliasLocksRoot, resourceKey: 'owned'}],
+      ownerToken,
+      waitTimeoutMs: 0,
+    });
+
+    expect(nested.targets).toHaveLength(1);
+    nested.release();
+    expect(() =>
+      acquireLocalRuntimeMutationLockSync({
+        locksRoot: aliasLocksRoot,
+        resourceKey: 'owned',
+        waitTimeoutMs: 0,
+      }),
+    ).toThrow(LocalRuntimeMutationLockBusyError);
+
+    outer.release();
   });
 
   it('reclaims a same-host lock whose owner process is dead', async () => {
@@ -371,10 +699,104 @@ describe('local runtime mutation locks', () => {
     ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
     await foreign.release();
   });
+
+  it('restarts the wait budget while the lock keeps changing hands', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const target = {locksRoot, resourceKey: 'draining-queue'};
+    const waitTimeoutMs = 200;
+    const handOffCount = 4;
+    const holder = await acquireLocalRuntimeMutationLock({
+      ...target,
+      waitTimeoutMs: 0,
+    });
+    const ownerFile = join(lockPathForTarget(target), 'owner.json');
+    const heldOwner = JSON.parse(await readFile(ownerFile, 'utf8')) as Record<
+      string,
+      unknown
+    >;
+    // Publish a fresh nonce under the same live pid, which is what a contender
+    // sees when the queue hands the lock to the next waiter. The lock itself
+    // stays held the whole time, so acquisition keeps failing and only the
+    // observed hand-offs can extend the wait.
+    const handOffs = (async () => {
+      for (let index = 0; index < handOffCount; index += 1) {
+        await delay(waitTimeoutMs / 2);
+        await writeFile(
+          ownerFile,
+          `${JSON.stringify({...heldOwner, nonce: `hand-off-${String(index)}`})}\n`,
+          'utf8',
+        );
+      }
+    })();
+    const startedAt = Date.now();
+
+    // A total-time budget would reject at `waitTimeoutMs` regardless of the
+    // hand-offs; a stall budget only gives up once they stop.
+    await expect(
+      acquireLocalRuntimeMutationLock({...target, waitTimeoutMs}),
+    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    expect(Date.now() - startedAt).toBeGreaterThan(
+      (waitTimeoutMs / 2) * handOffCount,
+    );
+
+    await handOffs;
+    await holder.release();
+  });
+
+  it('rejects a contender once the holder stops making progress', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const target = {locksRoot, resourceKey: 'stalled-holder'};
+    // Held for the whole wait and never released, so the owner nonce never
+    // changes: a stall budget still has to give up here.
+    const holder = await acquireLocalRuntimeMutationLock({
+      ...target,
+      waitTimeoutMs: 0,
+    });
+    const startedAt = Date.now();
+
+    await expect(
+      acquireLocalRuntimeMutationLock({...target, waitTimeoutMs: 200}),
+    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
+    expect(Date.now() - startedAt).toBeGreaterThanOrEqual(200);
+
+    await holder.release();
+  });
 });
+
+async function delay(milliseconds: number): Promise<void> {
+  await new Promise<void>(resolveDelay => {
+    setTimeout(resolveDelay, milliseconds);
+  });
+}
+
+function lockPathForTarget(target: {
+  readonly locksRoot: string;
+  readonly resourceKey: string;
+}): string {
+  const hash = createHash('sha256').update(target.resourceKey).digest('hex');
+
+  return join(target.locksRoot, `${hash}.lock`);
+}
 
 async function createTempLocksRoot(): Promise<string> {
   const root = await mkdtemp(join(tmpdir(), 'project02-mutation-lock-'));
   tempRoots.push(root);
   return join(root, 'locks');
+}
+
+async function createAliasedTempLocksRoots(): Promise<{
+  readonly aliasLocksRoot: string;
+  readonly physicalLocksRoot: string;
+}> {
+  const root = await mkdtemp(join(tmpdir(), 'project02-mutation-lock-alias-'));
+  const physicalRoot = join(root, 'physical');
+
+  tempRoots.push(root);
+  await mkdir(physicalRoot);
+  await symlink(physicalRoot, join(root, 'alias'), 'dir');
+
+  return {
+    aliasLocksRoot: join(root, 'alias', '.locks'),
+    physicalLocksRoot: join(physicalRoot, '.locks'),
+  };
 }

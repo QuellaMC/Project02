@@ -1,12 +1,13 @@
 import {
-  applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
-  prepareRuntimePluginConfigControlOperation,
-  resolveRuntimeConfigControlTargetPath,
   validateRuntimePluginConfigControlOperation,
 } from './control.ts';
 import {RuntimeConfigConflictError} from './mutate.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
+import {
+  applyRuntimeConfigControlOperation,
+  prepareRuntimeConfigControlOperation,
+} from './scope.ts';
 
 /**
  * Host capability handed to the builtin plugin-management tools so they can
@@ -17,9 +18,8 @@ import {redactRuntimeConfigValue} from './redact.ts';
  */
 export type RuntimePluginConfigControlCapability = Readonly<{
   validateOperation: typeof validateRuntimePluginConfigControlOperation;
-  resolveTargetPath: typeof resolveRuntimeConfigControlTargetPath;
-  prepareOperation: typeof prepareRuntimePluginConfigControlOperation;
-  applyOperation: typeof applyRuntimePluginConfigControlOperation;
+  prepareOperation: typeof prepareRuntimeConfigControlOperation;
+  applyOperation: typeof applyRuntimeConfigControlOperation;
   inspectConfig: typeof inspectRuntimePluginConfig;
   redactValue: typeof redactRuntimeConfigValue;
   createConflictError: (message: string) => Error;
@@ -28,9 +28,8 @@ export type RuntimePluginConfigControlCapability = Readonly<{
 export function createRuntimePluginConfigControlCapability(): RuntimePluginConfigControlCapability {
   return Object.freeze({
     validateOperation: validateRuntimePluginConfigControlOperation,
-    resolveTargetPath: resolveRuntimeConfigControlTargetPath,
-    prepareOperation: prepareRuntimePluginConfigControlOperation,
-    applyOperation: applyRuntimePluginConfigControlOperation,
+    prepareOperation: prepareRuntimeConfigControlOperation,
+    applyOperation: applyRuntimeConfigControlOperation,
     inspectConfig: inspectRuntimePluginConfig,
     redactValue: redactRuntimeConfigValue,
     createConflictError: message => new RuntimeConfigConflictError(message),

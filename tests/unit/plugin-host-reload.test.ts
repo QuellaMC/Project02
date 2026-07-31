@@ -1,3 +1,4 @@
+import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
@@ -12,9 +13,10 @@ import type {
   RuntimePlugin,
   RuntimePluginManifest,
 } from '../../src/plugins/api/index.ts';
-import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import type {RuntimePluginReloader} from '../../src/plugins/host/index.ts';
 import {runtimePluginReloadTimeoutMs} from '../../src/plugins/host/reload.ts';
+import {runtimePluginQuiesceTimeoutMs} from '../../src/plugins/host/instance-lifecycle.ts';
 import {createPluginContextEvidence} from '../../src/plugins/api/evidence-helpers.ts';
 import {
   testIdentity,
@@ -38,6 +40,7 @@ function reloadFixtureManifest(): RuntimePluginManifest {
     },
     declaredPlugins: ['before_role_model_call', 'on_session_end'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'tone',
@@ -122,6 +125,32 @@ function reloadFixturePlugin(
   });
 }
 
+function terminalReloadFixturePlugin(
+  label: string,
+  terminalLog: string[],
+): RuntimePlugin {
+  return createRuntimePlugin({
+    manifest: createRuntimePluginManifest({
+      ...reloadFixtureManifest(),
+      declaredPlugins: [
+        'before_role_model_call',
+        'on_session_end',
+        'on_shutdown',
+      ],
+    }),
+    lifecycleHooks: {
+      onSessionEnd() {
+        terminalLog.push(`${label}:sessionEnd`);
+        return {status: 'completed' as const, evidence: []};
+      },
+      onShutdown() {
+        terminalLog.push(`${label}:shutdown`);
+        return {status: 'completed' as const, evidence: []};
+      },
+    },
+  });
+}
+
 function toneEffect(
   fieldName = 'tone',
   effectId = 'effect-tone-1',
@@ -148,10 +177,10 @@ function reloadHost(options: {
   return createRuntimePluginHost({
     plugins: [options.initial ?? reloadFixturePlugin('v1')],
     enabledPluginIds: [reloadPluginId],
-    pluginConfigControl: {
+    pluginConfigControl: runtimePluginConfigControlStateForTest({
       control: testRuntimePluginConfigControlCapability,
       pluginManifests: [reloadFixtureManifest()],
-    },
+    }),
     ...(options.reloader === undefined
       ? {}
       : {pluginReloader: options.reloader}),
@@ -337,8 +366,10 @@ describe('runtime plugin host live config reload', () => {
     const host = reloadHost({
       initial: reloadFixturePlugin('v1', sessionEndLog),
       reloader: {
-        reload: () =>
-          Promise.resolve({status: 'rebuilt', plugin: hollowRebuild}),
+        reload: (_pluginId, reloadOptions) => {
+          reloadOptions.retainCandidate(hollowRebuild);
+          return Promise.resolve({status: 'rebuilt', plugin: hollowRebuild});
+        },
       },
     });
 
@@ -388,12 +419,13 @@ describe('runtime plugin host live config reload', () => {
     const host = reloadHost({
       initial: reloadFixturePlugin('v1', sessionEndLog),
       reloader: {
-        reload: () =>
-          Promise.resolve({
+        reload: (_pluginId, reloadOptions) => {
+          reloadOptions.retainCandidate(orphan);
+          return Promise.resolve({
             status: 'declined',
             reason: 'manifest drifted after construction',
-            plugin: orphan,
-          }),
+          });
+        },
       },
     });
 
@@ -438,7 +470,7 @@ describe('runtime plugin host live config reload', () => {
     expect(sessionEndLog.sort()).toEqual(['v1', 'v2']);
   });
 
-  it('drops an id-drifted instance instead of retiring it under a wrong id', async () => {
+  it('retires an id-drifted instance without publishing it', async () => {
     const sessionEndLog: string[] = [];
     const drifted = createRuntimePlugin({
       manifest: createRuntimePluginManifest({
@@ -455,22 +487,23 @@ describe('runtime plugin host live config reload', () => {
     const host = reloadHost({
       initial: reloadFixturePlugin('v1', sessionEndLog),
       reloader: {
-        reload: () =>
-          Promise.resolve({
+        reload: (_pluginId, reloadOptions) => {
+          reloadOptions.retainCandidate(drifted);
+          return Promise.resolve({
             status: 'declined',
             reason: 'the factory returned a different plugin id',
-            plugin: drifted,
-          }),
+          });
+        },
       },
     });
 
     const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
 
     expect(result?.outcome).toBe('deferred');
-    // Terminal dispatch resolves access by the retired instance's own id, so
-    // an id-drifted product never enters ordinary lifecycle dispatch.
+    // The candidate never becomes live, but construction still transfers
+    // teardown ownership to the host.
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
-    expect(sessionEndLog).toEqual(['v1']);
+    expect(sessionEndLog).toEqual(['drifted', 'v1']);
   });
 
   it('does not retire the live instance when the factory returns it unchanged', async () => {
@@ -570,40 +603,21 @@ describe('runtime plugin host live config reload', () => {
     ).toBe(false);
   });
 
-  it('runs a late factory result inside the next ordered terminal phase only', async () => {
+  it('quiesces a timed-out reload before an ordered terminal phase', async () => {
     vi.useFakeTimers();
 
     try {
       const terminalLog: string[] = [];
-      const terminalManifest = createRuntimePluginManifest({
-        ...reloadFixtureManifest(),
-        declaredPlugins: [
-          'before_role_model_call',
-          'on_session_end',
-          'on_shutdown',
-        ],
-      });
-      const trackedPlugin = (label: string) =>
-        createRuntimePlugin({
-          manifest: terminalManifest,
-          lifecycleHooks: {
-            onSessionEnd() {
-              terminalLog.push(`${label}:sessionEnd`);
-              return {status: 'completed' as const, evidence: []};
-            },
-            onShutdown() {
-              terminalLog.push(`${label}:shutdown`);
-              return {status: 'completed' as const, evidence: []};
-            },
-          },
-        });
       let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
       const host = reloadHost({
-        initial: trackedPlugin('v1'),
+        initial: terminalReloadFixturePlugin('v1', terminalLog),
         reloader: {
-          reload: () =>
+          reload: (_pluginId, reloadOptions) =>
             new Promise(resolve => {
+              // A late factory still transfers teardown ownership the moment
+              // it produces the candidate, not through the settled result.
               settleLate = plugin => {
+                reloadOptions.retainCandidate(plugin);
                 resolve({status: 'rebuilt', plugin});
               };
             }),
@@ -616,21 +630,19 @@ describe('runtime plugin host live config reload', () => {
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
       expect((await resultPromise)?.outcome).toBe('failed');
 
-      await host.onSessionEnd(testPluginContext(), {
+      const sessionEnd = host.onSessionEnd(testPluginContext(), {
         allowFileStoreWrites: false,
       });
-      expect(terminalLog).toEqual(['v1:sessionEnd']);
 
-      // Settling between phases must NOT dispatch anything out of band —
-      // a never-served instance writing after the live instance's terminal
-      // writes is exactly what ordered dispatch exists to prevent.
-      settleLate?.(trackedPlugin('late'));
+      expect(terminalLog).toEqual([]);
+      settleLate?.(terminalReloadFixturePlugin('late', terminalLog));
       await vi.runAllTimersAsync();
-      expect(terminalLog).toEqual(['v1:sessionEnd']);
+      await sessionEnd;
+      expect(terminalLog).toEqual(['late:sessionEnd', 'v1:sessionEnd']);
 
-      // It joins the NEXT phase instead, retired before live.
       await host.shutdown(testPluginContext());
       expect(terminalLog).toEqual([
+        'late:sessionEnd',
         'v1:sessionEnd',
         'late:shutdown',
         'v1:shutdown',
@@ -640,18 +652,21 @@ describe('runtime plugin host live config reload', () => {
     }
   });
 
-  it('drops a factory result that settles after the final terminal phase', async () => {
+  it('quiesces a timed-out reload before the final terminal phase', async () => {
     vi.useFakeTimers();
 
     try {
-      const sessionEndLog: string[] = [];
+      const terminalLog: string[] = [];
       let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
       const host = reloadHost({
-        initial: reloadFixturePlugin('v1', sessionEndLog),
+        initial: terminalReloadFixturePlugin('v1', terminalLog),
         reloader: {
-          reload: () =>
+          reload: (_pluginId, reloadOptions) =>
             new Promise(resolve => {
+              // A late factory still transfers teardown ownership the moment
+              // it produces the candidate, not through the settled result.
               settleLate = plugin => {
+                reloadOptions.retainCandidate(plugin);
                 resolve({status: 'rebuilt', plugin});
               };
             }),
@@ -664,19 +679,94 @@ describe('runtime plugin host live config reload', () => {
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
       expect((await resultPromise)?.outcome).toBe('failed');
 
-      await host.onSessionEnd(testPluginContext(), {
-        allowFileStoreWrites: false,
-      });
-      await host.shutdown(testPluginContext());
-      const terminalLogLength = sessionEndLog.length;
+      const shutdown = host.shutdown(testPluginContext());
 
-      // Every ordered phase already ran; the deliberately simple contract
-      // drops the late result rather than dispatching it out of band in a
-      // process that is exiting.
-      settleLate?.(reloadFixturePlugin('late', sessionEndLog));
+      expect(terminalLog).toEqual([]);
+      settleLate?.(terminalReloadFixturePlugin('late', terminalLog));
       await vi.runAllTimersAsync();
-      expect(sessionEndLog).toHaveLength(terminalLogLength);
-      expect(sessionEndLog).not.toContain('late');
+      await shutdown;
+      expect(terminalLog).toEqual(['late:shutdown', 'v1:shutdown']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bounds terminal quiescing when a reload never settles', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const terminalLog: string[] = [];
+      const host = reloadHost({
+        initial: terminalReloadFixturePlugin('v1', terminalLog),
+        reloader: {
+          // Never settles and never produces a candidate. The reload race
+          // abandons this promise without cancelling it, so it stays tracked
+          // for the rest of the process.
+          reload: () => new Promise(() => undefined),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      // Terminal dispatch is the one phase that must always finish. Without a
+      // bound this never resolves and the session can never shut down.
+      const shutdown = host.shutdown(testPluginContext());
+
+      await vi.advanceTimersByTimeAsync(runtimePluginQuiesceTimeoutMs);
+      await shutdown;
+
+      // Giving up on the stuck reload must not skip teardown for the instance
+      // the host already owns.
+      expect(terminalLog).toEqual(['v1:shutdown']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('tears down a candidate that arrives after quiescing gives up', async () => {
+    vi.useFakeTimers();
+
+    try {
+      const terminalLog: string[] = [];
+      let settleLate: ((plugin: RuntimePlugin) => void) | undefined;
+      const host = reloadHost({
+        initial: terminalReloadFixturePlugin('v1', terminalLog),
+        reloader: {
+          reload: (_pluginId, reloadOptions) =>
+            new Promise(resolve => {
+              settleLate = plugin => {
+                reloadOptions.retainCandidate(plugin);
+                resolve({status: 'rebuilt', plugin});
+              };
+            }),
+        },
+      });
+      const resultPromise = host.reloadPluginForCommittedConfig?.([
+        toneEffect(),
+      ]);
+
+      await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
+      expect((await resultPromise)?.outcome).toBe('failed');
+
+      const shutdown = host.shutdown(testPluginContext());
+
+      // Outlives the quiesce bound, so shutdown proceeds without it.
+      await vi.advanceTimersByTimeAsync(runtimePluginQuiesceTimeoutMs);
+      await shutdown;
+      expect(terminalLog).toEqual(['v1:shutdown']);
+
+      // The abandoned factory was never cancelled, so it can still produce an
+      // instance. Nothing will read the retired list again, so this candidate
+      // must be torn down on arrival rather than filed away holding whatever
+      // its factory opened.
+      settleLate?.(terminalReloadFixturePlugin('late', terminalLog));
+      await vi.runAllTimersAsync();
+
+      expect(terminalLog).toEqual(['v1:shutdown', 'late:shutdown']);
     } finally {
       vi.useRealTimers();
     }

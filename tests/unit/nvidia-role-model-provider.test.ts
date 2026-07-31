@@ -1,3 +1,5 @@
+import {createRuntimePluginHost} from '../../src/plugins/index.ts';
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
@@ -26,7 +28,7 @@ import {
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
-import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import {testRuntimePluginConfigControlCapability} from '../support/plugin-host-fixtures.ts';
 import {createRuntimePluginContextItem} from '../../src/plugins/api/index.ts';
 import {
@@ -788,7 +790,7 @@ describe('NVIDIA role-model provider', () => {
     expect(
       tools.find(tool => tool.function.name === 'character_state_patch')
         ?.function.description,
-    ).toContain("Mira's internal Character State");
+    ).toContain("the character's internal Character State");
     expect(
       tools.find(tool => tool.function.name === 'runtime_plugin_list')?.function
         .parameters.additionalProperties,
@@ -801,10 +803,10 @@ describe('NVIDIA role-model provider', () => {
 
   it('uses canonical provider-safe names for every runtime plugin management tool', () => {
     const pluginHost = createRuntimePluginHost({
-      pluginConfigControl: {
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [],
-      },
+      }),
       toolConfirmationHandler: () => ({status: 'approved'}),
     });
     const inputEnvelope = createNvidiaTestInputEnvelope(
@@ -1665,10 +1667,7 @@ function createNvidiaTestInputEnvelope(
     ),
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia',
-      characterSnapshot: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      characterSnapshot: testCharacterProfile,
       recentVisibleMessages: [
         {
           id: 'm1',
@@ -1719,10 +1718,7 @@ function createNvidiaAliasCollisionInputEnvelope() {
     ),
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia-alias',
-      characterSnapshot: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      characterSnapshot: testCharacterProfile,
     }),
     pluginToolDefinitions: [
       ...createDefaultRoleModelPluginToolDefinitions(),
@@ -1754,10 +1750,7 @@ function createNvidiaNoVisibleReplyInputEnvelope() {
     ),
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia-no-visible-reply',
-      characterSnapshot: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      characterSnapshot: testCharacterProfile,
     }),
     pluginToolDefinitions: [],
   });

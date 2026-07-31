@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {createConversationSession} from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
@@ -17,7 +18,9 @@ import {
 
 describe('plugin-driven native tool loop routing', () => {
   it('feeds native assistant tool calls back as OpenAI tool result messages', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
     const adapter = createNativePluginListAdapter(messagesByRound);
@@ -72,7 +75,9 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('answers every native tool call when visible_reply shares an executable tool round', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
     const adapter =
@@ -142,7 +147,9 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('feeds native tool argument errors back as rejected tool result messages', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
     let index = 0;
@@ -243,7 +250,9 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('returns undeclared executable tools to the model without dispatching them', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
@@ -294,7 +303,9 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('does not synthesize Character State when the injected host omits it', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const pluginHost = createRuntimePluginHost({plugins: []});
     const adapter = createSequencedAdapter([
@@ -339,7 +350,9 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('logs only valid pluginStoreRevision metadata from accepted tool output', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const pluginHost = createPluginStoreRevisionFixtureHost();
     const adapter = createSequencedAdapter([

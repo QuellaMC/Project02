@@ -1,18 +1,22 @@
 import {randomUUID} from 'node:crypto';
-import {
-  chmodSync,
-  closeSync,
-  type Dirent,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readdirSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from 'node:fs';
-import {chmod, mkdir, open, rename, unlink} from 'node:fs/promises';
 import {basename, dirname, join} from 'node:path';
+import {
+  chmodPath,
+  chmodPathSync,
+  closeFileSync,
+  flushFileSync,
+  listDirectoryEntriesSync,
+  makeDirectory,
+  makeDirectorySync,
+  openFile,
+  openFileSync,
+  renamePath,
+  renamePathSync,
+  unlinkPath,
+  unlinkPathSync,
+  writeToFileSync,
+  type Dirent,
+} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {processIsAlive} from './process-liveness.ts';
 
@@ -32,11 +36,11 @@ export async function atomicReplaceFile(
   let temporaryFileExists = false;
 
   if (options.createParent !== false) {
-    await mkdir(targetDirectory, {recursive: true});
+    await makeDirectory(targetDirectory, {recursive: true});
   }
 
   try {
-    const handle = await open(temporaryPath, 'wx', mode);
+    const handle = await openFile(temporaryPath, 'wx', mode);
     temporaryFileExists = true;
 
     try {
@@ -47,13 +51,13 @@ export async function atomicReplaceFile(
     }
 
     await chmodIfSupported(temporaryPath, mode);
-    await rename(temporaryPath, options.targetPath);
+    await renamePath(temporaryPath, options.targetPath);
     temporaryFileExists = false;
     await chmodIfSupported(options.targetPath, mode);
     await syncDirectoryIfSupported(targetDirectory);
   } finally {
     if (temporaryFileExists) {
-      await unlink(temporaryPath).catch(() => {});
+      await unlinkPath(temporaryPath).catch(() => {});
     }
   }
 }
@@ -66,25 +70,25 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
   let fileDescriptor: number | undefined;
 
   if (options.createParent !== false) {
-    mkdirSync(targetDirectory, {recursive: true});
+    makeDirectorySync(targetDirectory, {recursive: true});
   }
 
   try {
-    fileDescriptor = openSync(temporaryPath, 'wx', mode);
+    fileDescriptor = openFileSync(temporaryPath, 'wx', mode);
     temporaryFileExists = true;
-    writeFileSync(fileDescriptor, options.content);
-    fsyncSync(fileDescriptor);
-    closeSync(fileDescriptor);
+    writeToFileSync(fileDescriptor, options.content);
+    flushFileSync(fileDescriptor);
+    closeFileSync(fileDescriptor);
     fileDescriptor = undefined;
     chmodSyncIfSupported(temporaryPath, mode);
-    renameSync(temporaryPath, options.targetPath);
+    renamePathSync(temporaryPath, options.targetPath);
     temporaryFileExists = false;
     chmodSyncIfSupported(options.targetPath, mode);
     syncDirectorySyncIfSupported(targetDirectory);
   } finally {
     if (fileDescriptor !== undefined) {
       try {
-        closeSync(fileDescriptor);
+        closeFileSync(fileDescriptor);
       } catch {
         // The original file operation failure remains authoritative.
       }
@@ -92,7 +96,7 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
 
     if (temporaryFileExists) {
       try {
-        unlinkSync(temporaryPath);
+        unlinkPathSync(temporaryPath);
       } catch {
         // The original file operation failure remains authoritative.
       }
@@ -103,11 +107,28 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
 export function cleanupAbandonedAtomicReplacementFilesSync(
   targetPath: string,
 ): void {
-  const targetDirectory = dirname(targetPath);
+  cleanupAbandonedAtomicReplacementsIn(dirname(targetPath), [
+    basename(targetPath),
+  ]);
+}
+
+/**
+ * Remove abandoned atomic replacements for several targets sharing one
+ * directory. Session evidence keeps three log files side by side, so
+ * scanning once for all of them beats three passes over the same entries.
+ *
+ * A missing directory is nothing to clean, not a failure. Files that
+ * vanish mid-scan are equally fine — another process finishing the same
+ * cleanup is the expected race, not an error.
+ */
+export function cleanupAbandonedAtomicReplacementsIn(
+  directory: string,
+  targetNames: readonly string[],
+): void {
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(targetDirectory, {withFileTypes: true});
+    entries = listDirectoryEntriesSync(directory);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return;
@@ -119,14 +140,16 @@ export function cleanupAbandonedAtomicReplacementFilesSync(
   for (const entry of entries) {
     if (
       !entry.isFile() ||
-      !atomicReplacementFileBelongsToTarget(entry.name, targetPath) ||
+      !targetNames.some(targetName =>
+        atomicReplacementFileBelongsToTarget(entry.name, targetName),
+      ) ||
       !isAbandonedAtomicReplacementFile(entry.name)
     ) {
       continue;
     }
 
     try {
-      unlinkSync(join(targetDirectory, entry.name));
+      unlinkPathSync(join(directory, entry.name));
     } catch (error: unknown) {
       if (!isNodeErrorWithCode(error, 'ENOENT')) {
         throw error;
@@ -183,9 +206,26 @@ export function isAbandonedAtomicReplacementFile(fileName: string): boolean {
   return identity !== undefined && !processIsAlive(identity.ownerPid);
 }
 
+/**
+ * True when an entry is an in-flight atomic replacement for one of the
+ * given control files. Directory-initialization guards use this so a
+ * sibling process mid-write never reads as foreign content; abandoned
+ * replacements (dead owner) stay foreign.
+ */
+export function isLiveAtomicReplacementForAnyTarget(
+  fileName: string,
+  targetPaths: readonly string[],
+): boolean {
+  return (
+    targetPaths.some(targetPath =>
+      atomicReplacementFileBelongsToTarget(fileName, targetPath),
+    ) && !isAbandonedAtomicReplacementFile(fileName)
+  );
+}
+
 async function chmodIfSupported(path: string, mode: number): Promise<void> {
   try {
-    await chmod(path, mode);
+    await chmodPath(path, mode);
   } catch {
     // Some filesystems do not support chmod.
   }
@@ -193,7 +233,7 @@ async function chmodIfSupported(path: string, mode: number): Promise<void> {
 
 function chmodSyncIfSupported(path: string, mode: number): void {
   try {
-    chmodSync(path, mode);
+    chmodPathSync(path, mode);
   } catch {
     // Some filesystems do not support chmod.
   }
@@ -201,7 +241,7 @@ function chmodSyncIfSupported(path: string, mode: number): void {
 
 async function syncDirectoryIfSupported(path: string): Promise<void> {
   try {
-    const handle = await open(path, 'r');
+    const handle = await openFile(path, 'r');
 
     try {
       await handle.sync();
@@ -217,14 +257,14 @@ function syncDirectorySyncIfSupported(path: string): void {
   let fileDescriptor: number | undefined;
 
   try {
-    fileDescriptor = openSync(path, 'r');
-    fsyncSync(fileDescriptor);
+    fileDescriptor = openFileSync(path, 'r');
+    flushFileSync(fileDescriptor);
   } catch {
     // Directory fsync is not available on every supported filesystem.
   } finally {
     if (fileDescriptor !== undefined) {
       try {
-        closeSync(fileDescriptor);
+        closeFileSync(fileDescriptor);
       } catch {
         // Best-effort directory durability must not mask a successful rename.
       }

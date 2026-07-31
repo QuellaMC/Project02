@@ -18,6 +18,7 @@ import type {
   RuntimePluginAccessSnapshot,
   RuntimePluginAfterTurnCommittedFailureBehavior,
   RuntimePluginBeforeRoleModelFailureBehavior,
+  RuntimePluginConfigScope,
   RuntimePluginConfigValueType,
   RuntimePluginConfirmationRequirement,
   RuntimePluginContextItemKind,
@@ -71,6 +72,7 @@ export type RuntimePluginConfigField = {
 };
 
 export type RuntimePluginConfigMetadata = {
+  readonly scope: RuntimePluginConfigScope;
   readonly fields: readonly RuntimePluginConfigField[];
   readonly fingerprint?: string;
 };

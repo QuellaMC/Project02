@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {
   createRuntimePlugin,
@@ -13,15 +14,21 @@ import {
   runtimePluginListToolName,
 } from '../../src/plugins/api/contract.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
-import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {
+  runtimeLocationForTest,
+  runtimePluginConfigControlStateForTest,
+} from '../support/runtime-config.ts';
 import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {resolveRuntimeConfigScopeTarget} from '../../src/runtime/config/index.ts';
 import {
   createRuntimePluginManagementPlugin,
   type RuntimePluginConfigControlHostState,
+  createRuntimePluginHost,
 } from '../../src/plugins/index.ts';
 import {
+  createRuntimePluginConfigControlBinding,
   createRuntimePluginConfigControlHostStateSnapshot,
   createRuntimePluginInventoryHostStateSnapshot,
 } from '../../src/plugins/builtin/plugin-management/state.ts';
@@ -85,8 +92,8 @@ describe('runtime plugin host catalog and routing', () => {
     );
   });
 
-  it('fails at construction when config-control state lacks its control capability', () => {
-    // The control property is required by the type, so this state is only
+  it('requires one configControl binding at construction', () => {
+    // The binding is required by the type, so this state is only
     // reachable from untyped callers; the cast exists to exercise that
     // runtime backstop.
     const controlLessState = {
@@ -95,7 +102,7 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect(() =>
       createRuntimePluginHost({pluginConfigControl: controlLessState}),
-    ).toThrow('without its host config-control capability');
+    ).toThrow('requires a configControl binding');
     expect(() =>
       createRuntimePluginManagementPlugin({
         hostStateForTurn: () => ({
@@ -106,13 +113,13 @@ describe('runtime plugin host catalog and routing', () => {
         }),
         pluginConfigControl: controlLessState,
       }),
-    ).toThrow('without its host config-control capability');
+    ).toThrow('requires a configControl binding');
     expect(() =>
       createRuntimePluginHost({
-        pluginConfigControl: {
+        pluginConfigControl: runtimePluginConfigControlStateForTest({
           control: testRuntimePluginConfigControlCapability,
           pluginManifests: [],
-        },
+        }),
       }),
     ).not.toThrow();
     expect(() =>
@@ -120,11 +127,59 @@ describe('runtime plugin host catalog and routing', () => {
     ).not.toThrow();
   });
 
-  it('strips the control capability when inventory-snapshotting a config-control snapshot', () => {
-    const controlSnapshot = createRuntimePluginConfigControlHostStateSnapshot({
-      control: testRuntimePluginConfigControlCapability,
+  it('rejects a malformed canonical configControl binding', () => {
+    const malformedBinding = {
       pluginManifests: [],
+      configControl: {
+        control: testRuntimePluginConfigControlCapability,
+      },
+    } as unknown as RuntimePluginConfigControlHostState;
+
+    expect(() =>
+      createRuntimePluginHost({pluginConfigControl: malformedBinding}),
+    ).toThrow('resolveRuntimeConfigScopeTarget');
+  });
+
+  it('accepts only constructor-owned immutable config targets', () => {
+    const runtimeLocation = testRuntimePluginConfigLocation();
+    const source = resolveRuntimeConfigScopeTarget({
+      runtimeLocation,
+      scope: 'character',
+      env: {},
     });
+    const mutableTarget = {
+      ...source,
+      runtimeLocation: {
+        ...runtimeLocation,
+        selectedConfig: {...runtimeLocation.selectedConfig},
+        characterScope: {...runtimeLocation.characterScope},
+      },
+    };
+
+    expect(() =>
+      createRuntimePluginConfigControlBinding({
+        control: testRuntimePluginConfigControlCapability,
+        target: mutableTarget,
+      }),
+    ).toThrow('resolveRuntimeConfigScopeTarget');
+
+    const configControl = createRuntimePluginConfigControlBinding({
+      control: testRuntimePluginConfigControlCapability,
+      target: source,
+    });
+
+    expect(configControl.target).toBe(source);
+    expect(Object.isFrozen(configControl.target)).toBe(true);
+    expect(Object.isFrozen(configControl.target.runtimeLocation)).toBe(true);
+  });
+
+  it('strips the control capability when inventory-snapshotting a config-control snapshot', () => {
+    const controlSnapshot = createRuntimePluginConfigControlHostStateSnapshot(
+      runtimePluginConfigControlStateForTest({
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [],
+      }),
+    );
     const inventorySnapshot =
       createRuntimePluginInventoryHostStateSnapshot(controlSnapshot);
 
@@ -132,10 +187,51 @@ describe('runtime plugin host catalog and routing', () => {
       createRuntimePluginConfigControlHostStateSnapshot(controlSnapshot),
     ).toBe(controlSnapshot);
     expect(inventorySnapshot).not.toBe(controlSnapshot);
-    expect(Object.hasOwn(inventorySnapshot, 'control')).toBe(false);
+    expect(Object.hasOwn(inventorySnapshot, 'configControl')).toBe(false);
     expect(
       createRuntimePluginInventoryHostStateSnapshot(inventorySnapshot),
     ).toBe(inventorySnapshot);
+  });
+
+  it('owns config-control environment only through the resolved target', () => {
+    const env = {PROJECT02_TEST_ENV: 'captured'};
+    const state = runtimePluginConfigControlStateForTest({
+      control: testRuntimePluginConfigControlCapability,
+      pluginManifests: [],
+      env,
+    });
+
+    env.PROJECT02_TEST_ENV = 'changed';
+
+    expect(Object.hasOwn(state, 'env')).toBe(false);
+    expect(state.configControl.target.env).toEqual({
+      PROJECT02_TEST_ENV: 'captured',
+    });
+    expect(Object.isFrozen(state.configControl.target.env)).toBe(true);
+  });
+
+  it('snapshots the process environment when config control receives no override', () => {
+    const envName = 'PROJECT02_CONFIG_TARGET_ENV_TEST';
+    const previous = process.env[envName];
+
+    try {
+      process.env[envName] = 'captured';
+      const state = runtimePluginConfigControlStateForTest({
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [],
+      });
+
+      process.env[envName] = 'changed';
+
+      expect(state.configControl.target.env[envName]).toBe('captured');
+      expect(Object.isFrozen(state.configControl.target.env)).toBe(true);
+    } finally {
+      if (previous === undefined) {
+        Reflect.deleteProperty(process.env, envName);
+      } else {
+        process.env[envName] = previous;
+      }
+    }
   });
 
   it('keeps real bootstrap constructors separate from ordinary package loaders', () => {
@@ -907,10 +1003,7 @@ describe('runtime plugin host catalog and routing', () => {
         sessionId: 'session-plugin-host',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        character: testCharacterProfile,
         committedAt: '2026-06-15T00:00:00.000Z',
         visibleMessages: [
           {
@@ -953,10 +1046,7 @@ describe('runtime plugin host catalog and routing', () => {
         sessionId: 'session-plugin-host',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'hello',
-        character: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        character: testCharacterProfile,
         committedAt: '2026-06-15T00:00:00.000Z',
         visibleMessages: [
           {
@@ -1108,3 +1198,13 @@ describe('runtime plugin host catalog and routing', () => {
     });
   });
 });
+
+function testRuntimePluginConfigLocation(): ReturnType<
+  typeof runtimeLocationForTest
+> {
+  return runtimeLocationForTest({
+    storeRoot: '/tmp/project02-config-binding-home',
+    characterId: 'mira',
+    env: {},
+  });
+}

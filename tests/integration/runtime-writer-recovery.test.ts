@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
@@ -22,12 +23,23 @@ describe('abandoned durable runtime writer recovery', () => {
       traceId: 'trace_completed_before_trace_crash',
       createdAt: '2026-07-11T00:00:00.000Z',
     } as const;
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: completedIdentity.createdAt,
     });
-    const session = createConversationSession({id: sessionId});
-    const initialLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const initialLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent('first input', completedIdentity),
@@ -53,7 +65,12 @@ describe('abandoned durable runtime writer recovery', () => {
       ),
     );
     const traceBeforeReadOnlyInspection = readFileSync(paths.tracePath, 'utf8');
-    const reopenedLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopenedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
 
     expect(
       reopenedLogStore
@@ -93,7 +110,7 @@ describe('abandoned durable runtime writer recovery', () => {
     ]);
   });
 
-  it('rolls back one coherent final open turn and records writer termination before the next turn', async () => {
+  it('rolls back one coherent final open turn when the bounded identity matches', async () => {
     const storeRoot = createTestTempRoot('project02-writer-recovery-');
     const sessionId = 'recover-open-turn';
     const abandonedIdentity = {
@@ -101,11 +118,20 @@ describe('abandoned durable runtime writer recovery', () => {
       traceId: 'trace_abandoned',
       createdAt: '2026-07-11T00:00:00.000Z',
     } as const;
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: abandonedIdentity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+      boundUserSpeaker: {id: 'local-user', displayName: 'You'},
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -140,7 +166,10 @@ describe('abandoned durable runtime writer recovery', () => {
     ]);
     const abandonedTempPath = `${paths.sessionRoot}/.conversation.jsonl.2147483647.123e4567-e89b-42d3-a456-426614174000.tmp`;
     writeFileSync(abandonedTempPath, 'secret partial content', 'utf8');
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -179,6 +208,134 @@ describe('abandoned durable runtime writer recovery', () => {
     expect(existsSync(abandonedTempPath)).toBe(false);
   });
 
+  it('rejects foreign recoverable evidence before changing any evidence file', async () => {
+    const storeRoot = createTestTempRoot('project02-writer-foreign-recovery-');
+    const sessionId = 'reject-foreign-open-turn';
+    const completedIdentity = {
+      eventId: 'evt_foreign_completed',
+      traceId: 'trace_foreign_completed',
+      createdAt: '2026-07-11T00:00:00.000Z',
+    } as const;
+    const foreignCharacter = {
+      id: 'nova',
+      displayName: 'Nova',
+    } as const;
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: completedIdentity.createdAt,
+    });
+    const boundedLogStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
+    const foreignStoreRoot = createTestTempRoot(
+      'project02-writer-foreign-source-',
+    );
+    await createLocalRuntimeSessionStore({
+      storeRoot: foreignStoreRoot,
+      characterId: foreignCharacter.id,
+    }).createSession({
+      sessionId,
+      createdAt: completedIdentity.createdAt,
+    });
+    const foreignLogStore = createFileRuntimeLogStore({
+      storeRoot: foreignStoreRoot,
+      sessionId,
+      characterId: foreignCharacter.id,
+      boundCharacter: foreignCharacter,
+    });
+
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('foreign input', completedIdentity),
+      session: createConversationSession({
+        id: sessionId,
+        character: foreignCharacter,
+      }),
+      logStore: foreignLogStore,
+      pluginHost: createRuntimePluginHost(),
+      agent: {reply: () => ({text: 'foreign reply'})},
+    });
+
+    const foreignPaths = foreignLogStore.localRuntimeSessionPaths;
+    const paths = boundedLogStore.localRuntimeSessionPaths;
+
+    if (foreignPaths === undefined || paths === undefined) {
+      throw new Error('Expected durable runtime paths.');
+    }
+
+    const abandonedIdentity = {
+      eventId: 'evt_foreign_abandoned',
+      traceId: 'trace_foreign_abandoned',
+      createdAt: '2026-07-11T00:00:01.000Z',
+    } as const;
+    writeJsonLines(paths.tracePath, [
+      ...readJsonLines(foreignPaths.tracePath),
+      {...abandonedIdentity, step: 'runtime_event_received'},
+    ]);
+    writeJsonLines(paths.rawEventsPath, [
+      ...readJsonLines(foreignPaths.rawEventsPath),
+      {
+        ...abandonedIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
+      },
+      {
+        ...abandonedIdentity,
+        kind: 'runtime_event_normalized',
+        eventType: 'USER_MESSAGE',
+      },
+    ]);
+    writeJsonLines(paths.conversationPath, [
+      ...readJsonLines(foreignPaths.conversationPath),
+      {
+        ...abandonedIdentity,
+        id: `${sessionId}:message-3`,
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'abandoned input',
+        committedAt: abandonedIdentity.createdAt,
+      },
+    ]);
+    const evidenceBeforeRecovery = {
+      trace: readFileSync(paths.tracePath, 'utf8'),
+      rawEvents: readFileSync(paths.rawEventsPath, 'utf8'),
+      conversation: readFileSync(paths.conversationPath, 'utf8'),
+    };
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('next input', {
+          eventId: 'evt_after_foreign_recovery',
+          traceId: 'trace_after_foreign_recovery',
+          createdAt: '2026-07-11T00:00:02.000Z',
+        }),
+        session: createConversationSession({
+          id: sessionId,
+          character: testCharacterProfile,
+        }),
+        logStore: boundedLogStore,
+        pluginHost: createRuntimePluginHost(),
+        agent: {reply: () => ({text: 'next reply'})},
+      }),
+    ).rejects.toBeDefined();
+
+    expect(readFileSync(paths.tracePath, 'utf8')).toBe(
+      evidenceBeforeRecovery.trace,
+    );
+    expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe(
+      evidenceBeforeRecovery.rawEvents,
+    );
+    expect(readFileSync(paths.conversationPath, 'utf8')).toBe(
+      evidenceBeforeRecovery.conversation,
+    );
+  });
+
   it('fails partial_write instead of guessing how to recover trace-only evidence', async () => {
     const storeRoot = createTestTempRoot('project02-writer-trace-only-');
     const sessionId = 'trace-only-turn';
@@ -187,11 +344,19 @@ describe('abandoned durable runtime writer recovery', () => {
       traceId: 'trace_trace_only',
       createdAt: '2026-07-11T00:00:00.000Z',
     } as const;
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: identity.createdAt,
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -205,7 +370,10 @@ describe('abandoned durable runtime writer recovery', () => {
     await expect(
       runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent('next input'),
-        session: createConversationSession({id: sessionId}),
+        session: createConversationSession({
+          id: sessionId,
+          character: testCharacterProfile,
+        }),
         logStore,
         pluginHost: createRuntimePluginHost(),
         agent: {reply: () => ({text: 'next reply'})},

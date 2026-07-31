@@ -5,27 +5,42 @@
  */
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
+  assertResolvedProject02HomeAdoptable,
+  assertScopedGlobalLayerLoadable,
+  readCharacterOverlayForScope,
   redactRuntimeConfigText,
+  RuntimeConfigMutationError,
+  runtimeConfigDiagnosticAttribution,
   runtimeConfigValueMatchesField,
-  type createRuntimeConfigMutationBase,
-  type loadProject02RuntimeConfig,
+  type createRuntimeConfigAuthoredSnapshot,
+  type LoadedProject02RuntimeConfig,
+  type LoadedProject02CharacterOverlayConfig,
+  type Project02RuntimeConfig,
+  type ResolvedProject02RuntimeLocation,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigValue,
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
+import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
+import {ensureCharacterDataDir} from '../../runtime/storage/index.ts';
+import type {CliPromptAdapter} from '../shared/prompt.ts';
 
-export type RuntimeConfigConsolePromptAdapter = {
-  question(prompt: string): Promise<string | undefined>;
-};
+/** The console asks its questions through the shared CLI adapter. */
+export type RuntimeConfigConsolePromptAdapter = CliPromptAdapter;
 
 export type RuntimeConfigConsoleOptions = {
   readonly stdout: NodeJS.WritableStream;
+  /** Config and activated location captured by the one CLI startup pass. */
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly runtimeEnv?: NodeJS.ProcessEnv;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
+  /** Explicit operator target; never inferred again from loaded config. */
+  readonly scope: 'global' | 'character';
+  /** Presentation-only CLI prefix captured before raw flags leave the edge. */
+  readonly secretSetCommandPrefix: string;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
@@ -35,10 +50,17 @@ export type RuntimeConfigConsoleContext = RuntimeConfigConsoleOptions & {
 };
 
 export type RuntimeConfigConsoleSnapshot = {
-  readonly loadedConfig: ReturnType<typeof loadProject02RuntimeConfig>;
-  readonly config: ReturnType<typeof createRuntimeConfigMutationBase>;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly scope: 'global' | 'character';
+  readonly config: NonNullable<
+    ReturnType<typeof createRuntimeConfigAuthoredSnapshot>['validatedConfig']
+  >;
+  readonly overlay: LoadedProject02CharacterOverlayConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;
+  /** The overlay document the scoped sections display and edit. */
+  readonly scopedConfig?: Project02RuntimeConfig;
 };
 
 export type StagedRuntimeConfigChange = {
@@ -46,8 +68,49 @@ export type StagedRuntimeConfigChange = {
   readonly oldValue: RuntimeConfigValue | undefined;
   readonly newValue: RuntimeConfigValue | undefined;
   readonly reloadRequired: boolean;
-  commit(): void;
+  commit(): void | Promise<void>;
 };
+
+/**
+ * Commit-time preparation of a console write: guards and the identity
+ * marker land only when the user actually saves, so a read-only console
+ * session never creates durable state. Global admission belongs to the
+ * target-bound control transaction; scoped commits additionally re-validate
+ * the layers and initialize the activated character directory.
+ */
+export async function ensureConsoleCommitTarget(options: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly scope: 'global' | 'character';
+  readonly env?: NodeJS.ProcessEnv;
+}): Promise<void> {
+  if (options.scope === 'global') {
+    return;
+  }
+
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+  assertScopedGlobalLayerLoadable({
+    runtimeLocation: options.runtimeLocation,
+    ...(options.env === undefined ? {} : {env: options.env}),
+  });
+
+  const overlay = readCharacterOverlayForScope(
+    options.runtimeLocation.characterScope,
+  ).overlay;
+  const overlayError = overlay.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (overlayError !== undefined) {
+    throw new RuntimeConfigMutationError(
+      `${runtimeConfigDiagnosticAttribution(overlayError)}${overlayError.message}`,
+    );
+  }
+
+  await ensureCharacterDataDir({
+    homeRoot: options.runtimeLocation.homeRoot,
+    characterId: options.runtimeLocation.characterScope.characterId,
+  });
+}
 
 export const cancelled = Symbol('runtime-config-console-cancelled');
 
@@ -69,7 +132,7 @@ export async function previewAndCommitChange(
     return;
   }
 
-  change.commit();
+  await change.commit();
   writeLine(context.stdout, `Saved ${change.target}.`);
 
   if (change.reloadRequired) {
@@ -208,7 +271,9 @@ export function formatInspectedFieldValue(
     : field.effective.value;
   const suffix = field.authored.configured
     ? 'authored'
-    : field.effective.source;
+    : field.effectiveSource === 'default'
+      ? field.effective.source
+      : field.effectiveSource;
 
   return `${formatCurrentValue(value, field.defaultValueSummary)} [${suffix}]`;
 }
@@ -244,22 +309,33 @@ export function writeDiagnostics(
   for (const diagnostic of diagnostics) {
     writeLine(
       stdout,
-      `- ${diagnostic.severity}: ${redactRuntimeConfigText(diagnostic.message)}`,
+      `- ${diagnostic.severity}: ${runtimeConfigDiagnosticAttribution(
+        diagnostic,
+      )}${redactRuntimeConfigText(diagnostic.message)}`,
     );
   }
 }
 
-export function runtimeConfigLocation(options: {
+export function runtimeConfigSecretSetCommandPrefix(options: {
   readonly configPath?: string;
   readonly storeRoot?: string;
-}): {readonly configPath?: string; readonly storeRoot?: string} {
-  return {
+}): string {
+  const locationArgs = [
+    ...(options.storeRoot === undefined
+      ? []
+      : ['--store', shellQuoteConsoleCommandArgument(options.storeRoot)]),
     ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  };
+      ? []
+      : ['--config', shellQuoteConsoleCommandArgument(options.configPath)]),
+  ];
+
+  return `pnpm runtime-config${
+    locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`
+  }`;
 }
+
+/** Console-facing name for the shared quoting helper. */
+export const shellQuoteConsoleCommandArgument = shellQuoteCommandArgument;
 
 export function writeLine(stdout: NodeJS.WritableStream, value: string): void {
   stdout.write(`${value}\n`);

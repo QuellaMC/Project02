@@ -1,20 +1,60 @@
 import {
-  createRuntimePluginCatalogSnapshot,
+  classifyRuntimePluginCatalogDiscovery,
+  discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
   type PreparedProject02PluginActivationPlan,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition,
 } from './activation.ts';
 import {
+  prepareProject02CharacterActivation,
+  type Project02CharacterActivation,
+} from './character.ts';
+import {
+  enforceCharacterPluginExpectations,
+  planCharacterPackagePluginMaterialization,
+} from './character-plugins.ts';
+import {installedRuntimePluginCatalogEntry} from '../plugins/index.ts';
+import type {CharacterPluginExpectations} from '../characters/index.ts';
+import {
+  applyRuntimeConfigControlOperation,
+  assertResolvedProject02HomeAdoptable,
+  assertScopedMutationOperationAllowed,
+  bindProject02CharacterRuntimeLocation,
+  blockingRuntimeConfigLayerDiagnostic,
+  createLayeredProject02RuntimeConfigSnapshot,
+  createRuntimeConfigDiagnostic,
+  configuredProject02CharacterId,
   defaultDotEnvForRuntimeLocation,
   diagnosticsHaveErrors,
-  loadProject02RuntimeConfig,
+  readCharacterOverlayForScope,
+  loadProject02RuntimeConfigWithLocation,
   loadRuntimeConfigEnvFile,
   readDefaultDotEnvFile,
+  resolveRuntimeConfigScopeTarget,
+  RuntimeConfigMutationError,
+  runtimeConfigDiagnosticIsReadinessFailure,
   shouldReadDefaultDotEnvForRuntimeLocation,
+  simulateCharacterOverlayCandidate,
+  withRuntimeConfigDiagnosticOrigin,
+  type LoadedProject02CharacterOverlayConfig,
   type LoadedProject02RuntimeConfig,
+  type Project02RuntimeConfig,
+  type RuntimeConfigControlApplyResult,
+  type RuntimeConfigControlOperation,
+  type RuntimeConfigControlRequest,
+  type RuntimeConfigDiagnostic,
+  type ResolvedProject02ConfigLocation,
+  type ResolvedProject02RuntimeLocation,
   type RuntimeLocationCliState,
 } from '../runtime/config/index.ts';
+import {
+  ensureCharacterDataDir,
+  LocalRuntimeStorageContractError,
+  recordMaterializedCharacterPackageVersion,
+  requireCharacterDataMarker,
+  type LocalRuntimeCharacterDataStorageSchemaMarker,
+} from '../runtime/storage/index.ts';
 
 type RuntimeCliStartupCommonOptions = {
   readonly location?: RuntimeLocationCliState;
@@ -26,17 +66,64 @@ type RuntimeCliStartupCommonOptions = {
 type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage?: 'activation';
   readonly continueAfterActivationErrors?: boolean;
+  /**
+   * The caller's own judgment of the runtime env, run in phase one over
+   * the same env the resolved startup returns. A caller that rejects on
+   * an env value — `PROJECT02_ROLE_MODEL_PROVIDER`, say — cannot make
+   * that call before startup, because the env file lives under a home
+   * this function is the one that resolves; without this hook the
+   * rejection lands after the home and character-data markers are
+   * already written. Throwing here rejects the startup with nothing
+   * durable created; the thrown error reaches the caller unchanged.
+   */
+  readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
+  /**
+   * Optional first scoped edit. The initializer composes it with
+   * package materialization and commits one locked overlay candidate.
+   */
+  readonly characterConfigRequest?:
+    | {
+        readonly kind: 'document';
+        readonly operation: RuntimeConfigControlOperation;
+      }
+    | {
+        readonly kind: 'plugin_activation';
+        readonly pluginId: string;
+        readonly enabled: boolean;
+      };
 };
 
 type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage: 'config';
 };
 
+/**
+ * The activation stage for a caller that only reports on a store.
+ *
+ * Same decisions, same rejections, no write: what a run would produce,
+ * described rather than performed. It is a separate stage rather than a
+ * flag on the activation one because "does this create the store" is
+ * the question the two callers differ on, and a caller should have to
+ * say which it is.
+ */
+type RuntimeCliReportStartupOptions = Omit<
+  RuntimeCliActivationStartupOptions,
+  'stage' | 'characterConfigRequest'
+> & {
+  readonly stage: 'report';
+};
+
 type RuntimeCliStartupOptions =
-  RuntimeCliActivationStartupOptions | RuntimeCliConfigStartupOptions;
+  | RuntimeCliActivationStartupOptions
+  | RuntimeCliConfigStartupOptions
+  | RuntimeCliReportStartupOptions;
+
+type RuntimeCliCharacterConfigRequest = NonNullable<
+  RuntimeCliActivationStartupOptions['characterConfigRequest']
+>;
 
 type RuntimeCliStartupBase = {
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
@@ -44,12 +131,23 @@ type RuntimeCliStartupBase = {
 
 type RuntimeCliConfigStartupResult = RuntimeCliStartupBase;
 
-type RuntimeCliActivationStartupBase = RuntimeCliStartupBase & {
+type RuntimeCliActivationStartupBase = Omit<
+  RuntimeCliStartupBase,
+  'runtimeLocation'
+> & {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly characterActivation: Project02CharacterActivation;
+  readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
   readonly activationPlan: PreparedProject02PluginActivationPlan;
+  readonly characterConfigMutation?: RuntimeConfigControlApplyResult;
 };
 
-type RuntimeCliStartupResult =
+export type RuntimeCliStartupResult =
+  | (RuntimeCliStartupBase & {
+      readonly status: 'character_invalid';
+      readonly characterActivation: Project02CharacterActivation;
+    })
   | (RuntimeCliActivationStartupBase & {
       readonly status: 'config_invalid';
     })
@@ -61,15 +159,129 @@ type RuntimeCliStartupResult =
       readonly runtimeEnv: NodeJS.ProcessEnv;
     });
 
+type StartupPreEnvState = {
+  readonly overlayForPlan:
+    | Record<string, never>
+    | {readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig};
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
+  readonly activationPlanBeforeRuntimeEnv: PreparedProject02PluginActivationPlan;
+  // Everything but the activation plan: each exit pairs its own plan
+  // with the status that describes it.
+  readonly base: Omit<RuntimeCliActivationStartupBase, 'activationPlan'>;
+};
+
+/**
+ * A startup that survived every env-independent rejection. It carries
+ * the validated package document plus the two closures the commit needs
+ * to re-derive state over post-commit config — nothing that could
+ * itself reject the startup before the write.
+ */
+type PlannedRuntimeCliActivationStartup = {
+  readonly startupBase: RuntimeCliStartupBase;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly buildPreEnvState: (
+    overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
+  ) => StartupPreEnvState;
+  readonly readRuntimeEnvFileUnlessBlocked: (
+    diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
+  ) => NodeJS.ProcessEnv | undefined;
+  readonly document: Project02RuntimeConfig;
+  readonly request?: RuntimeConfigControlRequest;
+  /**
+   * The overlay the commit would write, already assembled to decide
+   * this startup was admissible. A reader finishes from it instead of
+   * from bytes no one has written yet.
+   */
+  readonly simulatedOverlay: LoadedProject02CharacterOverlayConfig;
+};
+
+function rejectedStartup(result: RuntimeCliStartupResult): {
+  readonly outcome: 'rejected';
+  readonly result: RuntimeCliStartupResult;
+} {
+  return Object.freeze({outcome: 'rejected', result: Object.freeze(result)});
+}
+
+/**
+ * The one character-runtime initializer for embedded consumers: runs
+ * the exact CLI startup sequence — character activation, guarded
+ * character-data materialization with package-config defaults, layered
+ * activation planning — and throws on any non-resolved outcome instead
+ * of returning CLI statuses. Host construction is downstream of this:
+ * createConfiguredProject02PluginHostFromPlan refuses uninitialized
+ * character state instead of creating it.
+ */
+export async function initializeProject02CharacterRuntime(
+  options: RuntimeCliStartupCommonOptions & {
+    readonly continueAfterActivationErrors?: boolean;
+  } = {},
+): Promise<{
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+  readonly activationPlan: PreparedProject02PluginActivationPlan;
+  readonly runtimeEnv: NodeJS.ProcessEnv;
+}> {
+  const startup = await resolveRuntimeCliStartup({...options});
+
+  if (
+    startup.status === 'character_invalid' ||
+    startup.characterActivation.status !== 'resolved'
+  ) {
+    throw new TypeError(
+      'Character activation failed: ' +
+        (startup.characterActivation.status === 'failed'
+          ? (startup.characterActivation.messages[0] ??
+            'no character resolved.')
+          : 'no character resolved.'),
+    );
+  }
+
+  if (startup.status !== 'resolved') {
+    const blocking =
+      startup.activationPlan.activation.diagnostics.find(
+        diagnostic => diagnostic.severity === 'error',
+      ) ??
+      startup.loadedConfig.diagnostics.find(
+        diagnostic => diagnostic.severity === 'error',
+      );
+
+    throw new TypeError(
+      `Character runtime initialization failed (${startup.status}): ${
+        blocking?.message ?? 'invalid runtime config.'
+      }`,
+    );
+  }
+
+  return Object.freeze({
+    characterActivation: startup.characterActivation,
+    activationPlan: startup.activationPlan,
+    runtimeEnv: startup.runtimeEnv,
+  });
+}
+
 export function resolveRuntimeCliStartup(
   options: RuntimeCliConfigStartupOptions,
 ): RuntimeCliConfigStartupResult;
 export function resolveRuntimeCliStartup(
-  options?: RuntimeCliActivationStartupOptions,
+  options: RuntimeCliReportStartupOptions,
 ): RuntimeCliStartupResult;
 export function resolveRuntimeCliStartup(
+  options?: RuntimeCliActivationStartupOptions,
+): Promise<RuntimeCliStartupResult>;
+export function resolveRuntimeCliStartup(
   options: RuntimeCliStartupOptions = {},
-): RuntimeCliConfigStartupResult | RuntimeCliStartupResult {
+):
+  | RuntimeCliConfigStartupResult
+  | RuntimeCliStartupResult
+  | Promise<RuntimeCliStartupResult> {
   const location = Object.freeze({...(options.location ?? {})});
   const suppliedEnv = options.env ?? process.env;
   const cwdDotEnv = resolveCwdDotEnv({
@@ -79,12 +291,14 @@ export function resolveRuntimeCliStartup(
     mayReadProcessCwd: options.env === undefined || options.env === process.env,
   });
   const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...location,
-    env: configEnv,
-  });
+  const {loadedConfig, configLocation} = loadProject02RuntimeConfigWithLocation(
+    {
+      selection: location,
+      env: configEnv,
+    },
+  );
   const startupBase = {
-    location,
+    runtimeLocation: configLocation,
     cwdDotEnv,
     configEnv,
     loadedConfig,
@@ -94,68 +308,775 @@ export function resolveRuntimeCliStartup(
     return Object.freeze(startupBase);
   }
 
-  const catalogSnapshot =
-    options.factories === undefined
-      ? createRuntimePluginCatalogSnapshot({
-          loadedConfig,
-          ...(location.storeRoot === undefined
-            ? {}
-            : {storeRoot: location.storeRoot}),
-        })
-      : undefined;
-  const activationPlanBeforeRuntimeEnv = prepareActivationPlan({
+  const activationInput = {
+    configLocation,
+    ...(location.character === undefined
+      ? {}
+      : {characterOverride: location.character}),
+    suppliedEnv,
+    cwdDotEnv,
+    configEnv,
+    startupBase,
     loadedConfig,
-    location,
-    env: configEnv,
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
-  });
-  const base = {
-    ...startupBase,
-    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
   };
 
+  if (options.stage === 'report') {
+    const planned = planRuntimeCliActivationStartup({
+      ...activationInput,
+      options,
+    });
+
+    return planned.outcome === 'rejected'
+      ? planned.result
+      : simulatePlannedRuntimeCliActivationStartup(planned.plan);
+  }
+
+  return resolveRuntimeCliActivationStartup({...activationInput, options});
+}
+
+/**
+ * The one activation-stage sequence every CLI shares, in two phases.
+ *
+ * Everything that can reject a startup is decided first, by a
+ * synchronous planner, and only a plan that survived all of it reaches
+ * the commit below. That split is the rule this function exists to
+ * enforce: no durable effect may precede a validation that could have
+ * rejected the startup. It is enforced structurally rather than by
+ * review, because `planRuntimeCliActivationStartup` is not `async` and
+ * the only durable effect in the startup path is — so a write moved
+ * into the planning phase is a type error, not a bug found later.
+ */
+async function resolveRuntimeCliActivationStartup(input: {
+  readonly options: RuntimeCliActivationStartupOptions;
+  readonly configLocation: ResolvedProject02ConfigLocation;
+  readonly characterOverride?: string;
+  readonly suppliedEnv: NodeJS.ProcessEnv;
+  readonly cwdDotEnv: NodeJS.ProcessEnv;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly startupBase: RuntimeCliStartupBase;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+}): Promise<RuntimeCliStartupResult> {
+  const planned = planRuntimeCliActivationStartup(input);
+
+  if (planned.outcome === 'rejected') {
+    return planned.result;
+  }
+
+  return await commitPlannedRuntimeCliActivationStartup(planned.plan);
+}
+
+/**
+ * Phase one: every decision that can reject this startup, made before
+ * anything durable exists. A `rejected` outcome is a finished
+ * RuntimeCliStartupResult; a `committable` outcome carries the
+ * validated package document plus the state the commit needs, and says
+ * that nothing left can reject the startup except the write itself.
+ */
+function planRuntimeCliActivationStartup(input: {
+  // Both stages plan the same way — that is what makes a report worth
+  // reading. They part company after this returns, over whether the
+  // plan is committed or described.
+  readonly options:
+    RuntimeCliActivationStartupOptions | RuntimeCliReportStartupOptions;
+  readonly configLocation: ResolvedProject02ConfigLocation;
+  readonly characterOverride?: string;
+  readonly suppliedEnv: NodeJS.ProcessEnv;
+  readonly cwdDotEnv: NodeJS.ProcessEnv;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly startupBase: RuntimeCliStartupBase;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+}):
+  | {readonly outcome: 'rejected'; readonly result: RuntimeCliStartupResult}
+  | {
+      readonly outcome: 'committable';
+      readonly plan: PlannedRuntimeCliActivationStartup;
+    } {
+  const {options, configLocation, loadedConfig} = input;
+  const activeCharacterId = configuredProject02CharacterId(
+    loadedConfig.config,
+    input.characterOverride,
+  );
+  const homeRoot = configLocation.homeRoot;
+
+  // Judge the container before reading what is inside it. Character
+  // discovery reads `<home>/characters`, so on a home that is not a
+  // directory at all both guards refuse — and whichever runs first is
+  // the one the operator hears. Discovery answering first points at a
+  // subdirectory of a store whose real problem is the store itself.
+  //
+  // Same guard, same home target: binding the character below only adds
+  // the character scope, and carries this target through unchanged.
+  assertResolvedProject02HomeAdoptable(configLocation);
+
+  const characterActivation = prepareProject02CharacterActivation({
+    storeRoot: homeRoot,
+    configuredCharacterId: activeCharacterId,
+  });
+
+  if (characterActivation.status === 'failed') {
+    return rejectedStartup({
+      ...input.startupBase,
+      status: 'character_invalid',
+      characterActivation,
+    });
+  }
+
+  const runtimeLocation = bindProject02CharacterRuntimeLocation({
+    configLocation,
+    characterId: characterActivation.profile.id,
+  });
+  const activationStartupBase = {
+    ...input.startupBase,
+    runtimeLocation,
+  };
+
+  // One filesystem discovery for the whole startup: every activation
+  // plan — pre-materialization, post-materialization, and the final
+  // runtime-env one — judges the same manifest snapshot, and only the
+  // diagnostic classification re-runs as the overlay state changes.
+  const catalogDiscovery = discoverRuntimePluginCatalog({
+    storeRoot: homeRoot,
+    ...(options.factories === undefined
+      ? {}
+      : {factoryOverrides: options.factories}),
+  });
+  const buildPreEnvState = (
+    overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
+  ): StartupPreEnvState => {
+    const overlayForPlan =
+      overlayLoadedConfig === undefined ? {} : {overlayLoadedConfig};
+    const catalogSnapshot = classifyRuntimePluginCatalogDiscovery({
+      discovery: catalogDiscovery,
+      classificationConfig: createLayeredProject02RuntimeConfigSnapshot({
+        loadedConfig,
+        ...(overlayLoadedConfig === undefined
+          ? {}
+          : {overlayConfig: overlayLoadedConfig}),
+      }).effective,
+    });
+
+    return {
+      overlayForPlan,
+      catalogSnapshot,
+      activationPlanBeforeRuntimeEnv: prepareActivationPlan({
+        loadedConfig,
+        characterActivation,
+        ...overlayForPlan,
+        runtimeLocation,
+        env: input.configEnv,
+        validateInactivePluginConfigs: true,
+        catalogSnapshot,
+      }),
+      base: {
+        ...activationStartupBase,
+        characterActivation,
+        ...overlayForPlan,
+        catalogSnapshot,
+      },
+    };
+  };
+
+  // An invalid global config must not create durable state: report it
+  // (with the overlay read-only for attribution) before the home,
+  // or identity marker would be written.
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
+    const invalidState = buildPreEnvState(
+      loadCharacterOverlayForStartup(runtimeLocation),
+    );
+
+    return rejectedStartup({
+      ...invalidState.base,
+      status: 'config_invalid',
+      activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
+    });
+  }
+
+  // Read before anything is written. Bytes that cannot be parsed cannot
+  // be simulated either, so an overlay with no authored document is
+  // rejected here; every other overlay error is judged below against the
+  // document this startup would actually write.
+  const preexistingOverlay = loadCharacterOverlayForStartup(runtimeLocation);
+  const unreadableOverlay =
+    blockingRuntimeConfigLayerDiagnostic(preexistingOverlay);
+
+  if (unreadableOverlay !== undefined) {
+    const invalidState = buildPreEnvState(preexistingOverlay);
+
+    return rejectedStartup({
+      ...invalidState.base,
+      status: 'config_invalid',
+      activationPlan: invalidState.activationPlanBeforeRuntimeEnv,
+    });
+  }
+
+  const preMaterializationState = buildPreEnvState(preexistingOverlay);
+  const preflight = prepareCharacterMaterializationPreflight({
+    expectations: characterActivation.definition.plugins,
+    plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
+    catalogSnapshot: preMaterializationState.catalogSnapshot,
+    // A reader carries no edit: it describes the store as a run would
+    // find it, not as one particular edit would leave it.
+    request:
+      options.stage === 'report' ? undefined : options.characterConfigRequest,
+  });
+
+  if (preflight.diagnostics.length > 0) {
+    return rejectedStartup({
+      ...preMaterializationState.base,
+      status: 'config_invalid',
+      activationPlan: withActivationDiagnostics(
+        preMaterializationState.activationPlanBeforeRuntimeEnv,
+        preflight.diagnostics,
+      ),
+    });
+  }
+
+  if (preflight.packagePlan.status !== 'ready') {
+    throw new TypeError('Character package materialization planning drifted.');
+  }
+
+  // The overlay as it will be, not as it is. Every remaining phase-one
+  // decision — required plugins, the env-file gate, the caller's env
+  // judgment — is made over this, so a startup is admitted on the state
+  // the commit produces rather than on the not-yet-set-up state it
+  // replaces.
+  const simulated = simulateCharacterMaterialization({
+    runtimeLocation,
+    configEnv: input.configEnv,
+    characterActivation,
+    document: preflight.packagePlan.document,
+    ...(preflight.request === undefined ? {} : {request: preflight.request}),
+  });
+
+  if (simulated.status === 'invalid') {
+    return rejectedStartup({
+      ...preMaterializationState.base,
+      status: 'config_invalid',
+      activationPlan: withActivationDiagnostics(
+        preMaterializationState.activationPlanBeforeRuntimeEnv,
+        [
+          withRuntimeConfigDiagnosticOrigin(
+            createRuntimeConfigDiagnostic(
+              'error',
+              'character_config_candidate_invalid',
+              simulated.message,
+            ),
+            {
+              scope: 'character',
+              characterId: characterActivation.profile.id,
+              path: runtimeLocation.overlayPath,
+            },
+          ),
+        ],
+      ),
+    });
+  }
+
+  const plannedState = buildPreEnvState(simulated.overlay);
+  const readRuntimeEnvFileUnlessBlocked = createStartupRuntimeEnvFileReader({
+    runtimeLocation,
+    suppliedEnv: input.suppliedEnv,
+    cwdDotEnv: input.cwdDotEnv,
+    continueAfterActivationErrors: options.continueAfterActivationErrors,
+  });
+
+  // Still phase one, and that is the point: the env file is read while
+  // rejecting is still free. An unreadable file has to be reported
+  // instead of reported after the commit below already landed.
+  const plannedRuntimeEnv = readRuntimeEnvFileUnlessBlocked(
+    plannedState.activationPlanBeforeRuntimeEnv.activation.diagnostics,
+  );
+
+  // The caller judges that same env here, for the same reason. A
+  // blocked activation never read the file, so there is nothing to
+  // judge — that startup is already rejected by phase two.
+  if (plannedRuntimeEnv !== undefined) {
+    options.validateRuntimeEnv?.(plannedRuntimeEnv);
+  }
+
+  return Object.freeze({
+    outcome: 'committable',
+    plan: Object.freeze({
+      startupBase: input.startupBase,
+      configEnv: input.configEnv,
+      loadedConfig,
+      characterActivation,
+      runtimeLocation,
+      buildPreEnvState,
+      readRuntimeEnvFileUnlessBlocked,
+      document: preflight.packagePlan.document,
+      simulatedOverlay: simulated.overlay,
+      ...(preflight.request === undefined ? {} : {request: preflight.request}),
+    }),
+  });
+}
+
+/**
+ * Phase two: the durable write, and the plans that can only be built
+ * once it lands. Every rejection reachable from here is caused by the
+ * commit itself — a failed write, or config the commit just changed.
+ */
+async function commitPlannedRuntimeCliActivationStartup(
+  plan: PlannedRuntimeCliActivationStartup,
+): Promise<RuntimeCliStartupResult> {
+  const materialization = await materializeCharacterDataDir({
+    characterActivation: plan.characterActivation,
+    runtimeLocation: plan.runtimeLocation,
+    configEnv: plan.configEnv,
+    document: plan.document,
+    ...(plan.request === undefined ? {} : {request: plan.request}),
+  });
+
+  if (materialization.status === 'failed') {
     return Object.freeze({
-      ...base,
+      ...plan.startupBase,
+      runtimeLocation: plan.runtimeLocation,
+      status: 'character_invalid',
+      characterActivation: materialization.characterActivation,
+    });
+  }
+
+  // Read back rather than reused from the plan: the commit is what made
+  // these bytes, so the overlay every downstream plan judges is the one
+  // actually on disk.
+  return finishRuntimeCliActivationStartup({
+    plan,
+    overlayLoadedConfig: loadCharacterOverlayForStartup(plan.runtimeLocation),
+    diagnostics: materialization.diagnostics,
+    ...(materialization.configMutation === undefined
+      ? {}
+      : {configMutation: materialization.configMutation}),
+  });
+}
+
+/**
+ * Phase two without the write: the startup this plan would produce,
+ * reported from the overlay phase one already simulated.
+ *
+ * A reader — `inspect` — needs the same answer a run would get, and
+ * needs it without setting the store up on the operator's behalf.
+ * Reporting on state a command created while reporting is its own kind
+ * of wrong answer: the first `inspect` of a store would describe a
+ * store that existed because `inspect` ran.
+ *
+ * It is the same plan, finished the same way, so what a reader reports
+ * and what a run commits cannot drift. Only where the overlay comes
+ * from differs, and phase one already built that overlay to decide
+ * whether the commit was admissible at all.
+ */
+function simulatePlannedRuntimeCliActivationStartup(
+  plan: PlannedRuntimeCliActivationStartup,
+): RuntimeCliStartupResult {
+  return finishRuntimeCliActivationStartup({
+    plan,
+    overlayLoadedConfig: plan.simulatedOverlay,
+    diagnostics: Object.freeze([]),
+  });
+}
+
+/**
+ * The rest of a startup once the overlay is settled, shared by the
+ * commit and the simulation so both answer with one implementation.
+ */
+function finishRuntimeCliActivationStartup(input: {
+  readonly plan: PlannedRuntimeCliActivationStartup;
+  readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig;
+  readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
+  readonly configMutation?: RuntimeConfigControlApplyResult;
+}): RuntimeCliStartupResult {
+  const {
+    loadedConfig,
+    characterActivation,
+    runtimeLocation,
+    buildPreEnvState,
+    readRuntimeEnvFileUnlessBlocked,
+  } = input.plan;
+  const {
+    overlayForPlan,
+    catalogSnapshot,
+    activationPlanBeforeRuntimeEnv: unadornedActivationPlanBeforeRuntimeEnv,
+    base,
+  } = buildPreEnvState(input.overlayLoadedConfig);
+  const materializedBase = {
+    ...base,
+    ...(input.configMutation === undefined
+      ? {}
+      : {characterConfigMutation: input.configMutation}),
+  };
+  const activationPlanBeforeRuntimeEnv = withActivationDiagnostics(
+    unadornedActivationPlanBeforeRuntimeEnv,
+    input.diagnostics,
+  );
+
+  if (startupConfigHasErrors(loadedConfig, input.overlayLoadedConfig)) {
+    return Object.freeze({
+      ...materializedBase,
       status: 'config_invalid',
       activationPlan: activationPlanBeforeRuntimeEnv,
     });
   }
 
-  if (
-    options.continueAfterActivationErrors !== true &&
-    activationDiagnosticsCanBypassRuntimeEnvFile(
-      activationPlanBeforeRuntimeEnv.activation.diagnostics,
-    )
-  ) {
+  // Asked again over the post-materialization diagnostics: materializing
+  // the character can add the error that blocks this startup.
+  const runtimeEnv = readRuntimeEnvFileUnlessBlocked(
+    activationPlanBeforeRuntimeEnv.activation.diagnostics,
+  );
+
+  if (runtimeEnv === undefined) {
     return Object.freeze({
-      ...base,
+      ...materializedBase,
       status: 'activation_blocked_before_runtime_env',
       activationPlan: activationPlanBeforeRuntimeEnv,
     });
   }
 
-  const runtimeEnv = loadRuntimeEnv({
-    loadedConfig,
-    location,
-    suppliedEnv,
-    cwdDotEnv,
-  });
-  const activationPlan = prepareActivationPlan({
-    loadedConfig,
-    location,
-    env: runtimeEnv,
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(catalogSnapshot === undefined ? {} : {catalogSnapshot}),
-  });
+  const activationPlan = withActivationDiagnostics(
+    prepareActivationPlan({
+      loadedConfig,
+      characterActivation,
+      ...overlayForPlan,
+      runtimeLocation,
+      env: runtimeEnv,
+      validateInactivePluginConfigs: true,
+      catalogSnapshot,
+    }),
+    input.diagnostics,
+  );
 
   return Object.freeze({
-    ...base,
+    ...materializedBase,
     status: 'resolved',
     runtimeEnv,
     activationPlan,
   });
+}
+
+/**
+ * The read-only twin of `materializeCharacterDataDir`: the overlay that
+ * commit would write, without writing it.
+ *
+ * Both call the same config seam with the same inputs, so what phase one
+ * admits and what phase two produces cannot drift. The one asymmetry is
+ * deliberate — the marker this startup has not created yet is not
+ * required here, because creating it is what is being decided.
+ */
+function simulateCharacterMaterialization(input: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly document: Project02RuntimeConfig;
+  readonly request?: RuntimeConfigControlRequest;
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+}):
+  | {
+      readonly status: 'valid';
+      readonly overlay: LoadedProject02CharacterOverlayConfig;
+    }
+  | {readonly status: 'invalid'; readonly message: string} {
+  const characterId = input.characterActivation.profile.id;
+  const marker = readCharacterDataMarkerForStartup(input.runtimeLocation);
+  const simulated = simulateCharacterOverlayCandidate({
+    target: resolveRuntimeConfigScopeTarget({
+      runtimeLocation: input.runtimeLocation,
+      env: input.configEnv,
+      scope: 'character',
+    }),
+    characterMaterialization: {
+      document: input.document,
+      fillMissingFields:
+        marker?.materializedCharacterPackageVersion !==
+        input.characterActivation.definition.meta.version,
+    },
+    ...(input.request === undefined ? {} : {request: input.request}),
+  });
+
+  if (simulated.status === 'invalid') {
+    return simulated;
+  }
+
+  return Object.freeze({
+    status: 'valid',
+    // The candidate validated, so it carries a config: every plan built
+    // from here reads the overlay this startup is about to write. It
+    // carries no authored document, because there are none yet — this
+    // overlay describes a file that has not been written.
+    overlay: Object.freeze({
+      scope: 'character',
+      characterId,
+      source: 'overlay',
+      path: input.runtimeLocation.overlayPath,
+      config: simulated.document,
+      diagnostics: Object.freeze([]),
+    } satisfies LoadedProject02CharacterOverlayConfig),
+  });
+}
+
+/**
+ * Character selection initialization. The package plan and any
+ * existing config were validated before this function runs. It commits
+ * the overlay first through the target-aware config seam, then records
+ * the package version in the data marker.
+ */
+async function materializeCharacterDataDir(input: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly configEnv: NodeJS.ProcessEnv;
+  readonly document: Project02RuntimeConfig;
+  readonly request?: RuntimeConfigControlRequest;
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+}): Promise<
+  | {
+      readonly status: 'resolved';
+      readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+      readonly configMutation?: RuntimeConfigControlApplyResult;
+    }
+  | {
+      readonly status: 'failed';
+      readonly characterActivation: Extract<
+        Project02CharacterActivation,
+        {status: 'failed'}
+      >;
+    }
+> {
+  const characterId = input.characterActivation.profile.id;
+
+  try {
+    assertResolvedProject02HomeAdoptable(input.runtimeLocation);
+    const dataRoot = await ensureCharacterDataDir({
+      homeRoot: input.runtimeLocation.homeRoot,
+      characterId,
+    });
+    const marker = requireCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId,
+    });
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: input.runtimeLocation,
+      env: input.configEnv,
+      scope: 'character',
+    });
+    const applied = applyRuntimeConfigControlOperation({
+      target,
+      characterMaterialization: {
+        document: input.document,
+        fillMissingFields:
+          marker.materializedCharacterPackageVersion !==
+          input.characterActivation.definition.meta.version,
+      },
+      ...(input.request === undefined ? {} : {request: input.request}),
+    });
+
+    await recordMaterializedCharacterPackageVersion({
+      storageOptions: {storeRoot: dataRoot},
+      characterId,
+      packageVersion: input.characterActivation.definition.meta.version,
+    });
+
+    return Object.freeze({
+      status: 'resolved',
+      diagnostics: Object.freeze(
+        applied.materialization.autoEnabledPluginIds
+          .filter(
+            pluginId => applied.config.plugins?.[pluginId]?.enabled === true,
+          )
+          .map(pluginId =>
+            createRuntimeConfigDiagnostic(
+              'warning',
+              'character_package_plugin_auto_enabled',
+              `Character package "${characterId}" enabled plugin "${pluginId}" in the character config.`,
+              `plugins.${pluginId}.enabled`,
+              {pluginId},
+            ),
+          ),
+      ),
+      ...(input.request === undefined ? {} : {configMutation: applied}),
+    });
+  } catch (error: unknown) {
+    // Only an identity mismatch is character-shaped (wrong character for
+    // this data directory); every other storage error keeps its own
+    // formatted identity through the caller's terminal-error path.
+    if (
+      error instanceof LocalRuntimeStorageContractError &&
+      error.code === 'character_identity_mismatch'
+    ) {
+      return Object.freeze({
+        status: 'failed',
+        characterActivation: Object.freeze({
+          status: 'failed',
+          configuredCharacterId: characterId,
+          messages: Object.freeze([error.message]),
+        }),
+      });
+    }
+
+    throw error;
+  }
+}
+
+function resolveCharacterConfigStartupRequest(options: {
+  readonly request: RuntimeCliCharacterConfigRequest | undefined;
+  readonly plan: PreparedProject02PluginActivationPlan;
+}): RuntimeConfigControlRequest | undefined {
+  if (options.request === undefined) {
+    return undefined;
+  }
+
+  if (options.request.kind === 'document') {
+    assertScopedMutationOperationAllowed(options.request.operation);
+    return options.request;
+  }
+
+  const definition = installedRuntimePluginCatalogEntry(
+    options.plan.catalogEntries,
+    options.request.pluginId,
+  );
+
+  if (definition === undefined) {
+    throw new RuntimeConfigMutationError(
+      `Plugin "${options.request.pluginId}" is not installed.`,
+    );
+  }
+
+  return Object.freeze({
+    kind: 'plugin_activation',
+    manifest: definition.manifest,
+    enabled: options.request.enabled,
+  });
+}
+
+function prepareCharacterMaterializationPreflight(options: {
+  readonly expectations: CharacterPluginExpectations | undefined;
+  readonly plan: PreparedProject02PluginActivationPlan;
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
+  readonly request: RuntimeCliCharacterConfigRequest | undefined;
+}) {
+  const request = resolveCharacterConfigStartupRequest({
+    request: options.request,
+    plan: options.plan,
+  });
+  const packagePlan = planCharacterPackagePluginMaterialization({
+    expectations: options.expectations,
+    pluginManifests: Object.values(options.plan.catalogEntries).map(
+      entry => entry.manifest,
+    ),
+  });
+
+  return Object.freeze({
+    request,
+    packagePlan,
+    diagnostics: Object.freeze([
+      ...(packagePlan.status === 'invalid' ? packagePlan.diagnostics : []),
+      ...materializationConfigPreflightDiagnostics(options.plan),
+      ...declaredInvalidPackageDiagnostics({
+        expectations: options.expectations,
+        catalogSnapshot: options.catalogSnapshot,
+      }),
+    ]),
+  });
+}
+
+/**
+ * Errors that describe the config as it stands, before materialization
+ * runs. Only the ones no write could fix belong here; the overlay's own
+ * values are judged later against the document this startup would
+ * actually produce, so a run carrying an edit is not blocked by the very
+ * value it repairs — nor admitted by leaving a second one unchecked.
+ */
+function materializationConfigPreflightDiagnostics(
+  plan: PreparedProject02PluginActivationPlan,
+): readonly RuntimeConfigDiagnostic[] {
+  return Object.freeze(
+    plan.resolvedConfig.diagnostics.filter(
+      diagnostic =>
+        diagnostic.severity === 'error' &&
+        // Readiness failures are not proof that an authored document is
+        // malformed (runtime .env also loads only after durable
+        // initialization); every other error describes an invalid
+        // authored global or overlay value and must fail before
+        // materialization writes anything.
+        !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
+        // Overlay errors excepted: the simulated candidate below is the
+        // authority on those, and it judges the merged result rather
+        // than the bytes this startup is about to replace.
+        diagnostic.origin?.scope !== 'character',
+    ),
+  );
+}
+
+function declaredInvalidPackageDiagnostics(options: {
+  readonly expectations: CharacterPluginExpectations | undefined;
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot | undefined;
+}): readonly RuntimeConfigDiagnostic[] {
+  if (
+    options.expectations === undefined ||
+    options.catalogSnapshot === undefined
+  ) {
+    return Object.freeze([]);
+  }
+
+  const declaredIds = new Set([
+    ...options.expectations.required,
+    ...options.expectations.recommended,
+    ...Object.keys(options.expectations.config),
+  ]);
+
+  return Object.freeze(
+    options.catalogSnapshot.diagnostics
+      .filter(
+        diagnostic =>
+          diagnostic.code.startsWith('runtime_plugin_package_') &&
+          diagnostic.scope === 'plugin' &&
+          declaredIds.has(diagnostic.pluginId),
+      )
+      .map(diagnostic =>
+        Object.freeze({
+          ...diagnostic,
+          severity: 'error' as const,
+        }),
+      ),
+  );
+}
+
+function startupConfigHasErrors(
+  loadedConfig: LoadedProject02RuntimeConfig,
+  overlayLoadedConfig: LoadedProject02CharacterOverlayConfig | undefined,
+): boolean {
+  return (
+    diagnosticsHaveErrors(loadedConfig.diagnostics) ||
+    (overlayLoadedConfig !== undefined &&
+      diagnosticsHaveErrors(overlayLoadedConfig.diagnostics))
+  );
+}
+
+/**
+ * The overlay location derives from the loaded global config alone: the
+ * home root plus the configured character id. A store root or character
+ * id the storage layer rejects fails startup later with its own
+ * diagnostic; the overlay simply does not exist for it.
+ */
+function loadCharacterOverlayForStartup(
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): LoadedProject02CharacterOverlayConfig {
+  // The guarded loader holds the marker and adoptability rules for
+  // read-only startups too: a data directory marked for another
+  // character, holding foreign content, or reached through a symlink
+  // fails check and inspect exactly as durable materialization does.
+  return readCharacterOverlayForScope(runtimeLocation.characterScope).overlay;
+}
+
+/**
+ * The data marker through the same guarded read, absent when this
+ * startup has not created the directory yet — which is exactly the
+ * state that makes every package field missing and worth filling.
+ */
+function readCharacterDataMarkerForStartup(
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): LocalRuntimeCharacterDataStorageSchemaMarker | undefined {
+  return readCharacterOverlayForScope(runtimeLocation.characterScope).marker;
 }
 
 function resolveCwdDotEnv(options: {
@@ -181,17 +1102,13 @@ function resolveCwdDotEnv(options: {
 }
 
 function loadRuntimeEnv(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
   return Object.freeze(
     loadRuntimeConfigEnvFile({
-      loadedConfig: options.loadedConfig,
-      ...(options.location.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.location.storeRoot}),
+      runtimeLocation: options.runtimeLocation,
       env: options.suppliedEnv,
       envDefaults: options.cwdDotEnv,
     }),
@@ -200,36 +1117,122 @@ function loadRuntimeEnv(options: {
 
 function prepareActivationPlan(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly location: RuntimeLocationCliState;
+  readonly characterActivation: Extract<
+    Project02CharacterActivation,
+    {status: 'resolved'}
+  >;
+  readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env: NodeJS.ProcessEnv;
+  readonly validateInactivePluginConfigs?: boolean;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
-  return prepareConfiguredProject02PluginActivation({
+  const plan = prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
-    ...(options.location.storeRoot === undefined
+    runtimeLocation: options.runtimeLocation,
+    ...(options.overlayLoadedConfig === undefined
       ? {}
-      : {storeRoot: options.location.storeRoot}),
+      : {overlayConfig: options.overlayLoadedConfig}),
     env: options.env,
+    validateInactivePluginConfigs:
+      options.validateInactivePluginConfigs === true,
     ...(options.factories === undefined ? {} : {factories: options.factories}),
     ...(options.catalogSnapshot === undefined
       ? {}
       : {catalogSnapshot: options.catalogSnapshot}),
   });
+  const enforcement = enforceCharacterPluginExpectations({
+    expectations: options.characterActivation.definition.plugins,
+    characterId: options.characterActivation.profile.id,
+    activation: plan.activation,
+    installedPluginIds: new Set(Object.keys(plan.catalogEntries)),
+    storeRoot: plan.resolvedConfig.project02.storeRoot,
+  });
+
+  return enforcement.length === 0
+    ? plan
+    : withActivationDiagnostics(plan, enforcement);
 }
 
-function activationDiagnosticsCanBypassRuntimeEnvFile(
+function withActivationDiagnostics(
+  plan: PreparedProject02PluginActivationPlan,
+  extraDiagnostics: readonly RuntimeConfigDiagnostic[],
+): PreparedProject02PluginActivationPlan {
+  return Object.freeze({
+    ...plan,
+    activation: Object.freeze({
+      ...plan.activation,
+      diagnostics: Object.freeze([
+        ...plan.activation.diagnostics,
+        ...extraDiagnostics,
+      ]),
+    }),
+  });
+}
+
+/**
+ * Reads the home env file at most once per startup, and only for a
+ * startup that needs it: `undefined` says this activation is blocked by
+ * an env-independent error, so the file is not read at all. The reader is
+ * asked twice — before materialization commits anything durable, and again
+ * over the post-materialization diagnostics — and the cache is what makes
+ * the second ask free.
+ */
+function createStartupRuntimeEnvFileReader(options: {
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly suppliedEnv: NodeJS.ProcessEnv;
+  readonly cwdDotEnv: NodeJS.ProcessEnv;
+  readonly continueAfterActivationErrors: boolean | undefined;
+}): (
   diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
-): boolean {
-  const errors = diagnostics.filter(
+) => NodeJS.ProcessEnv | undefined {
+  let cached: NodeJS.ProcessEnv | undefined;
+
+  return diagnostics =>
+    startupReadsRuntimeEnvFile({
+      continueAfterActivationErrors: options.continueAfterActivationErrors,
+      diagnostics,
+    })
+      ? (cached ??= loadRuntimeEnv({
+          runtimeLocation: options.runtimeLocation,
+          suppliedEnv: options.suppliedEnv,
+          cwdDotEnv: options.cwdDotEnv,
+        }))
+      : undefined;
+}
+
+/**
+ * The one answer to "does this startup read the home env file", asked
+ * both before materialization commits and before the final activation
+ * plan resolves.
+ *
+ * An activation already blocked by an env-independent error must not have
+ * that error displaced by an env-file failure, so those startups skip the
+ * read entirely. A missing secret is the exception in the other
+ * direction: the env file is where the secret would come from, so
+ * skipping the read would be reporting a diagnostic the read might have
+ * removed. One predicate keeps both call sites in agreement — if only
+ * the second one skipped, materialization would have already read (and
+ * failed on) a file the startup then decided not to need.
+ */
+function startupReadsRuntimeEnvFile(options: {
+  readonly continueAfterActivationErrors: boolean | undefined;
+  readonly diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'];
+}): boolean {
+  if (options.continueAfterActivationErrors === true) {
+    return true;
+  }
+
+  const errors = options.diagnostics.filter(
     diagnostic => diagnostic.severity === 'error',
   );
 
   return (
-    errors.length > 0 &&
-    errors.every(
+    errors.length === 0 ||
+    errors.some(
       diagnostic =>
-        diagnostic.code !== 'runtime_config_required_secret_missing',
+        diagnostic.code === 'runtime_config_required_secret_missing',
     )
   );
 }

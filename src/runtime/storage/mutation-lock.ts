@@ -1,16 +1,20 @@
-import {createHash, randomUUID} from 'node:crypto';
-import {
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import {randomUUID} from 'node:crypto';
 import {hostname} from 'node:os';
 import {basename, join} from 'node:path';
-import {mkdir, readFile, rm, writeFile} from 'node:fs/promises';
+import {
+  listDirectoryNamesSync,
+  makeDirectory,
+  makeDirectorySync,
+  readTextFile,
+  readTextFileSync,
+  removePath,
+  removePathSync,
+  renamePathSync,
+  statPathNumericSync,
+  writeTextFile,
+  writeTextFileSync,
+  type Stats,
+} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {processIsAlive} from './process-liveness.ts';
 
@@ -18,6 +22,14 @@ import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeStorageContractErrorCode,
 } from './layout-contract.ts';
+import {
+  normalizeMutationLockTarget,
+  normalizeMutationLockTargets,
+  type LocalRuntimeMutationLockTarget,
+  type NormalizedMutationLockTarget,
+} from './mutation-lock-target.ts';
+
+export type {LocalRuntimeMutationLockTarget} from './mutation-lock-target.ts';
 
 export const defaultLocalRuntimeMutationLockWaitTimeoutMs = 10_000;
 export const defaultLocalRuntimeMutationLockIncompleteGraceMs = 30_000;
@@ -40,9 +52,9 @@ export type LocalRuntimeMutationLockOwnerToken = object;
 
 export type AcquireLocalRuntimeMutationLocksOptions = Omit<
   AcquireLocalRuntimeMutationLockOptions,
-  'resourceKey'
+  'locksRoot' | 'resourceKey'
 > & {
-  readonly resourceKeys: readonly string[];
+  readonly targets: readonly LocalRuntimeMutationLockTarget[];
 };
 
 export type LocalRuntimeMutationLockLease = {
@@ -58,12 +70,12 @@ export type LocalRuntimeMutationLockLeaseSync = {
 };
 
 export type LocalRuntimeMutationLocksLease = {
-  readonly resourceKeys: readonly string[];
+  readonly targets: readonly LocalRuntimeMutationLockTarget[];
   release(): Promise<void>;
 };
 
 export type LocalRuntimeMutationLocksLeaseSync = {
-  readonly resourceKeys: readonly string[];
+  readonly targets: readonly LocalRuntimeMutationLockTarget[];
   release(): void;
 };
 
@@ -91,6 +103,19 @@ export class LocalRuntimeMutationLockBusyError extends LocalRuntimeStorageContra
   constructor(code: LocalRuntimeMutationLockBusyCode, message: string) {
     super(code, message);
     this.name = 'LocalRuntimeMutationLockBusyError';
+  }
+}
+
+export class LocalRuntimeMutationLocksAcquireError extends Error {
+  readonly target: LocalRuntimeMutationLockTarget;
+
+  constructor(target: LocalRuntimeMutationLockTarget, cause: unknown) {
+    super(
+      `Could not acquire local runtime mutation lock for ${target.resourceKey}.`,
+      {cause},
+    );
+    this.name = 'LocalRuntimeMutationLocksAcquireError';
+    this.target = target;
   }
 }
 
@@ -128,8 +153,10 @@ export function localRuntimeMutationLockOwnerOwnsResource(options: {
     return false;
   }
 
-  const hash = createHash('sha256').update(resourceKey).digest('hex');
-  const lockPath = join(options.locksRoot, `${hash}.lock`);
+  const {lockPath} = normalizeMutationLockTarget({
+    locksRoot: options.locksRoot,
+    resourceKey,
+  });
 
   return (
     (asyncOwnedMutationLocks.get(options.ownerToken)?.get(lockPath)?.count ??
@@ -143,12 +170,20 @@ export async function acquireLocalRuntimeMutationLock(
   options: AcquireLocalRuntimeMutationLockOptions,
 ): Promise<LocalRuntimeMutationLockLease> {
   const normalized = normalizeMutationLockOptions(options);
-  const startedAt = Date.now();
+
+  return acquireNormalizedMutationLock(normalized, options.ownerToken);
+}
+
+async function acquireNormalizedMutationLock(
+  normalized: NormalizedMutationLockOptions,
+  ownerToken: LocalRuntimeMutationLockOwnerToken | undefined,
+): Promise<LocalRuntimeMutationLockLease> {
+  const wait = startMutationLockWait(normalized);
 
   await prepareLocksRoot(normalized.locksRoot);
 
   for (;;) {
-    const reentered = reenterAsyncMutationLock(options.ownerToken, normalized);
+    const reentered = reenterAsyncMutationLock(ownerToken, normalized);
 
     if (reentered !== undefined) {
       return reentered;
@@ -157,58 +192,43 @@ export async function acquireLocalRuntimeMutationLock(
     const lease = await tryCreateMutationLock(normalized);
 
     if (lease !== undefined) {
-      return registerAsyncMutationLockOwner(
-        options.ownerToken,
-        normalized,
-        lease,
-      );
+      return registerAsyncMutationLockOwner(ownerToken, normalized, lease);
     }
 
     if (reclaimAbandonedMutationLock(normalized)) {
       continue;
     }
 
-    const elapsedMs = Date.now() - startedAt;
-
-    if (elapsedMs >= normalized.waitTimeoutMs) {
-      throw new LocalRuntimeMutationLockBusyError(
-        normalized.busyCode,
-        `Local runtime mutation resource is busy: ${normalized.resourceKey}.`,
-      );
-    }
-
-    await delay(
-      Math.min(
-        randomizedRetryDelayMs(),
-        Math.max(1, normalized.waitTimeoutMs - elapsedMs),
-      ),
-    );
+    await delay(wait.remainingRetryDelayMs());
   }
 }
 
 export async function acquireLocalRuntimeMutationLocks(
   options: AcquireLocalRuntimeMutationLocksOptions,
 ): Promise<LocalRuntimeMutationLocksLease> {
-  const resourceKeys = canonicalResourceKeys(options.resourceKeys);
+  const {targets: inputTargets, ...lockOptions} = options;
+  const normalizedTargets = normalizeMutationLockTargets(inputTargets);
+  const targets = publicMutationLockTargets(normalizedTargets);
   const leases: LocalRuntimeMutationLockLease[] = [];
-  const startedAt = Date.now();
 
   try {
-    for (const resourceKey of resourceKeys) {
-      const configuredWaitMs =
-        options.waitTimeoutMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
-      const remainingWaitMs = Math.max(
-        0,
-        configuredWaitMs - (Date.now() - startedAt),
-      );
-
-      leases.push(
-        await acquireLocalRuntimeMutationLock({
-          ...options,
-          resourceKey,
-          waitTimeoutMs: remainingWaitMs,
-        }),
-      );
+    for (const target of normalizedTargets) {
+      try {
+        leases.push(
+          await acquireNormalizedMutationLock(
+            normalizedMutationLockOptionsForTarget(target, {
+              ...lockOptions,
+              waitTimeoutMs: waitTimeoutMsPerTarget(options.waitTimeoutMs),
+            }),
+            options.ownerToken,
+          ),
+        );
+      } catch (error: unknown) {
+        throw new LocalRuntimeMutationLocksAcquireError(
+          publicMutationLockTarget(target),
+          error,
+        );
+      }
     }
   } catch (error: unknown) {
     await releaseAsyncMutationLocksReverse(leases);
@@ -218,7 +238,7 @@ export async function acquireLocalRuntimeMutationLocks(
   let released = false;
 
   return Object.freeze({
-    resourceKeys,
+    targets,
     async release() {
       if (released) {
         return;
@@ -234,12 +254,20 @@ export function acquireLocalRuntimeMutationLockSync(
   options: AcquireLocalRuntimeMutationLockOptions,
 ): LocalRuntimeMutationLockLeaseSync {
   const normalized = normalizeMutationLockOptions(options);
-  const startedAt = Date.now();
+
+  return acquireNormalizedMutationLockSync(normalized, options.ownerToken);
+}
+
+function acquireNormalizedMutationLockSync(
+  normalized: NormalizedMutationLockOptions,
+  ownerToken: LocalRuntimeMutationLockOwnerToken | undefined,
+): LocalRuntimeMutationLockLeaseSync {
+  const wait = startMutationLockWait(normalized);
 
   prepareLocksRootSync(normalized.locksRoot);
 
   for (;;) {
-    const reentered = reenterSyncMutationLock(options.ownerToken, normalized);
+    const reentered = reenterSyncMutationLock(ownerToken, normalized);
 
     if (reentered !== undefined) {
       return reentered;
@@ -248,58 +276,43 @@ export function acquireLocalRuntimeMutationLockSync(
     const lease = tryCreateMutationLockSync(normalized);
 
     if (lease !== undefined) {
-      return registerSyncMutationLockOwner(
-        options.ownerToken,
-        normalized,
-        lease,
-      );
+      return registerSyncMutationLockOwner(ownerToken, normalized, lease);
     }
 
     if (reclaimAbandonedMutationLockSync(normalized)) {
       continue;
     }
 
-    const elapsedMs = Date.now() - startedAt;
-
-    if (elapsedMs >= normalized.waitTimeoutMs) {
-      throw new LocalRuntimeMutationLockBusyError(
-        normalized.busyCode,
-        `Local runtime mutation resource is busy: ${normalized.resourceKey}.`,
-      );
-    }
-
-    sleepSync(
-      Math.min(
-        randomizedRetryDelayMs(),
-        Math.max(1, normalized.waitTimeoutMs - elapsedMs),
-      ),
-    );
+    sleepSync(wait.remainingRetryDelayMs());
   }
 }
 
 export function acquireLocalRuntimeMutationLocksSync(
   options: AcquireLocalRuntimeMutationLocksOptions,
 ): LocalRuntimeMutationLocksLeaseSync {
-  const resourceKeys = canonicalResourceKeys(options.resourceKeys);
+  const {targets: inputTargets, ...lockOptions} = options;
+  const normalizedTargets = normalizeMutationLockTargets(inputTargets);
+  const targets = publicMutationLockTargets(normalizedTargets);
   const leases: LocalRuntimeMutationLockLeaseSync[] = [];
-  const startedAt = Date.now();
 
   try {
-    for (const resourceKey of resourceKeys) {
-      const configuredWaitMs =
-        options.waitTimeoutMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
-      const remainingWaitMs = Math.max(
-        0,
-        configuredWaitMs - (Date.now() - startedAt),
-      );
-
-      leases.push(
-        acquireLocalRuntimeMutationLockSync({
-          ...options,
-          resourceKey,
-          waitTimeoutMs: remainingWaitMs,
-        }),
-      );
+    for (const target of normalizedTargets) {
+      try {
+        leases.push(
+          acquireNormalizedMutationLockSync(
+            normalizedMutationLockOptionsForTarget(target, {
+              ...lockOptions,
+              waitTimeoutMs: waitTimeoutMsPerTarget(options.waitTimeoutMs),
+            }),
+            options.ownerToken,
+          ),
+        );
+      } catch (error: unknown) {
+        throw new LocalRuntimeMutationLocksAcquireError(
+          publicMutationLockTarget(target),
+          error,
+        );
+      }
     }
   } catch (error: unknown) {
     releaseSyncMutationLocksReverse(leases);
@@ -309,7 +322,7 @@ export function acquireLocalRuntimeMutationLocksSync(
   let released = false;
 
   return Object.freeze({
-    resourceKeys,
+    targets,
     release() {
       if (released) {
         return;
@@ -321,10 +334,7 @@ export function acquireLocalRuntimeMutationLocksSync(
   } satisfies LocalRuntimeMutationLocksLeaseSync);
 }
 
-type NormalizedMutationLockOptions = {
-  readonly locksRoot: string;
-  readonly resourceKey: string;
-  readonly lockPath: string;
+type NormalizedMutationLockOptions = NormalizedMutationLockTarget & {
   readonly waitTimeoutMs: number;
   readonly incompleteGraceMs: number;
   readonly busyCode: LocalRuntimeMutationLockBusyCode;
@@ -333,14 +343,19 @@ type NormalizedMutationLockOptions = {
 function normalizeMutationLockOptions(
   options: AcquireLocalRuntimeMutationLockOptions,
 ): NormalizedMutationLockOptions {
-  const resourceKey = options.resourceKey.trim();
+  return normalizedMutationLockOptionsForTarget(
+    normalizeMutationLockTarget(options),
+    options,
+  );
+}
 
-  if (resourceKey.length === 0) {
-    throw new TypeError(
-      'Local runtime mutation lock resource key must be non-empty.',
-    );
-  }
-
+function normalizedMutationLockOptionsForTarget(
+  target: NormalizedMutationLockTarget,
+  options: Omit<
+    AcquireLocalRuntimeMutationLockOptions,
+    'locksRoot' | 'resourceKey'
+  >,
+): NormalizedMutationLockOptions {
   const waitTimeoutMs = normalizeNonNegativeSafeInteger(
     options.waitTimeoutMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs,
     'waitTimeoutMs',
@@ -350,38 +365,28 @@ function normalizeMutationLockOptions(
       defaultLocalRuntimeMutationLockIncompleteGraceMs,
     'incompleteGraceMs',
   );
-  const hash = createHash('sha256').update(resourceKey).digest('hex');
 
   return {
-    locksRoot: options.locksRoot,
-    resourceKey,
-    lockPath: join(options.locksRoot, `${hash}.lock`),
+    ...target,
     waitTimeoutMs,
     incompleteGraceMs,
     busyCode: options.busyCode ?? 'storage_busy',
   };
 }
 
-function canonicalResourceKeys(
-  resourceKeys: readonly string[],
-): readonly string[] {
-  const normalized = resourceKeys.map(resourceKey => resourceKey.trim());
+function publicMutationLockTargets(
+  targets: readonly NormalizedMutationLockTarget[],
+): readonly LocalRuntimeMutationLockTarget[] {
+  return Object.freeze(targets.map(publicMutationLockTarget));
+}
 
-  if (normalized.some(resourceKey => resourceKey.length === 0)) {
-    throw new TypeError(
-      'Local runtime mutation lock resource keys must be non-empty.',
-    );
-  }
-
-  return Object.freeze(
-    [...new Set(normalized)].sort((left, right) => {
-      if (left < right) {
-        return -1;
-      }
-
-      return left > right ? 1 : 0;
-    }),
-  );
+function publicMutationLockTarget(
+  target: NormalizedMutationLockTarget,
+): LocalRuntimeMutationLockTarget {
+  return Object.freeze({
+    locksRoot: target.displayLocksRoot,
+    resourceKey: target.resourceKey,
+  });
 }
 
 function reenterAsyncMutationLock(
@@ -562,7 +567,7 @@ function errorFromUnknown(error: unknown, message: string): Error {
 
 async function prepareLocksRoot(locksRoot: string): Promise<void> {
   try {
-    await mkdir(locksRoot, {recursive: true});
+    await makeDirectory(locksRoot, {recursive: true});
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -574,7 +579,7 @@ async function prepareLocksRoot(locksRoot: string): Promise<void> {
 
 function prepareLocksRootSync(locksRoot: string): void {
   try {
-    mkdirSync(locksRoot, {recursive: true});
+    makeDirectorySync(locksRoot, {recursive: true});
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -592,7 +597,7 @@ async function tryCreateMutationLock(
   }
 
   try {
-    await mkdir(options.lockPath);
+    await makeDirectory(options.lockPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'EEXIST')) {
       return undefined;
@@ -616,11 +621,11 @@ async function tryCreateMutationLock(
   } satisfies MutationLockOwner;
 
   try {
-    await writeFile(ownerPath(options.lockPath), `${JSON.stringify(owner)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    await writeTextFile(
+      ownerPath(options.lockPath),
+      `${JSON.stringify(owner)}\n`,
+      {flag: 'wx', mode: 0o600},
+    );
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;
@@ -668,7 +673,7 @@ function tryCreateMutationLockSync(
   }
 
   try {
-    mkdirSync(options.lockPath);
+    makeDirectorySync(options.lockPath);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'EEXIST')) {
       return undefined;
@@ -692,11 +697,11 @@ function tryCreateMutationLockSync(
   } satisfies MutationLockOwner;
 
   try {
-    writeFileSync(ownerPath(options.lockPath), `${JSON.stringify(owner)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    writeTextFileSync(
+      ownerPath(options.lockPath),
+      `${JSON.stringify(owner)}\n`,
+      {flag: 'wx', mode: 0o600},
+    );
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;
@@ -746,7 +751,7 @@ async function releaseOwnedMutationLock(
     return;
   }
 
-  await rm(lockPath, {force: true, recursive: true});
+  await removePath(lockPath, {force: true, recursive: true});
 }
 
 function releaseOwnedMutationLockSync(lockPath: string, nonce: string): void {
@@ -756,7 +761,7 @@ function releaseOwnedMutationLockSync(lockPath: string, nonce: string): void {
     return;
   }
 
-  rmSync(lockPath, {force: true, recursive: true});
+  removePathSync(lockPath, {force: true, recursive: true});
 }
 
 function reclaimAbandonedMutationLock(
@@ -799,10 +804,10 @@ function reclaimAbandonedMutationLockSync(
     return reclaimObservedMutationLockSync(options, owner);
   }
 
-  let observedLockStat: ReturnType<typeof statSync>;
+  let observedLockStat: Stats;
 
   try {
-    observedLockStat = statSync(options.lockPath);
+    observedLockStat = statPathNumericSync(options.lockPath);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT');
   }
@@ -821,10 +826,10 @@ function reclaimAbandonedMutationLockSync(
       return reclaimObservedMutationLockUnderIntentSync(options, currentOwner);
     }
 
-    let currentLockStat: ReturnType<typeof statSync>;
+    let currentLockStat: Stats;
 
     try {
-      currentLockStat = statSync(options.lockPath);
+      currentLockStat = statPathNumericSync(options.lockPath);
     } catch (error: unknown) {
       return isNodeErrorWithCode(error, 'ENOENT');
     }
@@ -912,16 +917,16 @@ function withMutationLockReclamationIntentSync(
   let created = false;
 
   try {
-    mkdirSync(intentPath);
+    makeDirectorySync(intentPath);
     created = true;
-    writeFileSync(ownerPath(intentPath), `${JSON.stringify(intentOwner)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600,
-    });
+    writeTextFileSync(
+      ownerPath(intentPath),
+      `${JSON.stringify(intentOwner)}\n`,
+      {flag: 'wx', mode: 0o600},
+    );
   } catch (error: unknown) {
     if (created) {
-      rmSync(intentPath, {force: true, recursive: true});
+      removePathSync(intentPath, {force: true, recursive: true});
     }
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -933,7 +938,7 @@ function withMutationLockReclamationIntentSync(
   try {
     return operation();
   } finally {
-    rmSync(intentPath, {force: true, recursive: true});
+    removePathSync(intentPath, {force: true, recursive: true});
   }
 }
 
@@ -944,7 +949,7 @@ function hasActiveMutationLockReclamationIntentSync(
   let entries: readonly string[];
 
   try {
-    entries = readdirSync(options.locksRoot);
+    entries = listDirectoryNamesSync(options.locksRoot);
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;
@@ -967,17 +972,17 @@ function hasActiveMutationLockReclamationIntentSync(
 
     if (owner !== undefined) {
       if (owner.hostname === hostname() && !processIsAlive(owner.pid)) {
-        rmSync(intentPath, {force: true, recursive: true});
+        removePathSync(intentPath, {force: true, recursive: true});
         continue;
       }
 
       return true;
     }
 
-    let intentStat: ReturnType<typeof statSync>;
+    let intentStat: Stats;
 
     try {
-      intentStat = statSync(intentPath);
+      intentStat = statPathNumericSync(intentPath);
     } catch (error: unknown) {
       if (isNodeErrorWithCode(error, 'ENOENT')) {
         continue;
@@ -993,7 +998,7 @@ function hasActiveMutationLockReclamationIntentSync(
       return true;
     }
 
-    rmSync(intentPath, {force: true, recursive: true});
+    removePathSync(intentPath, {force: true, recursive: true});
   }
 
   return false;
@@ -1005,7 +1010,7 @@ function readMutationLockReclamationIntentOwnerSync(
   let raw: string;
 
   try {
-    raw = readFileSync(ownerPath(intentPath), 'utf8');
+    raw = readTextFileSync(ownerPath(intentPath));
   } catch {
     return undefined;
   }
@@ -1024,12 +1029,12 @@ function quarantineMutationLockSync(
   const quarantinePath = `${options.lockPath}.stale-${randomUUID()}`;
 
   try {
-    renameSync(options.lockPath, quarantinePath);
+    renamePathSync(options.lockPath, quarantinePath);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT');
   }
 
-  rmSync(quarantinePath, {force: true, recursive: true});
+  removePathSync(quarantinePath, {force: true, recursive: true});
   return true;
 }
 
@@ -1039,7 +1044,7 @@ async function readMutationLockOwner(
   let raw: string;
 
   try {
-    raw = await readFile(ownerPath(lockPath), 'utf8');
+    raw = await readTextFile(ownerPath(lockPath));
   } catch {
     return undefined;
   }
@@ -1059,7 +1064,7 @@ function readMutationLockOwnerSync(
   let raw: string;
 
   try {
-    raw = readFileSync(ownerPath(lockPath), 'utf8');
+    raw = readTextFileSync(ownerPath(lockPath));
   } catch {
     return undefined;
   }
@@ -1111,6 +1116,78 @@ function isMutationLockReclamationIntentOwner(
 
 function ownerPath(lockPath: string): string {
   return join(lockPath, 'owner.json');
+}
+
+type MutationLockWait = {
+  /**
+   * Returns how long to sleep before the next acquisition attempt, throwing the
+   * busy error once the resource has stopped making progress.
+   */
+  remainingRetryDelayMs(): number;
+};
+
+/**
+ * Gives every target in a multi-lock acquisition its own full stall budget.
+ *
+ * `waitTimeoutMs` is per-resource health, so it cannot also be spent as one
+ * pooled allowance across targets: time spent legitimately queueing on a healthy
+ * first target would arrive at the second as a zero budget and reject it on the
+ * first contended attempt. Each target is a distinct resource and answers the
+ * stall question independently.
+ */
+function waitTimeoutMsPerTarget(configuredWaitMs: number | undefined): number {
+  return configuredWaitMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
+}
+
+/**
+ * Tracks a contended acquisition as a *stall* budget rather than a total one.
+ *
+ * `waitTimeoutMs` bounds how long the resource may sit without progress, not how
+ * long this caller may queue. A fair queue of N contenders takes N times the
+ * per-holder work to drain, so a total budget rejects healthy waiters purely
+ * because the queue is long — and it does so first on the slowest machine, which
+ * makes the failure look like flake instead of saturation.
+ *
+ * Progress is observed through the owner nonce: a different nonce means some
+ * other contender both acquired and released while we waited, so the resource is
+ * alive and this caller's budget restarts. A holder that dies without releasing
+ * is still handled by reclamation, and a holder that hangs forever never changes
+ * the nonce, so it still trips the budget.
+ */
+function startMutationLockWait(
+  normalized: NormalizedMutationLockOptions,
+): MutationLockWait {
+  let deadlineStartedAt = Date.now();
+  let observedNonce = readMutationLockOwnerSync(normalized.lockPath)?.nonce;
+
+  return {
+    remainingRetryDelayMs(): number {
+      const currentNonce = readMutationLockOwnerSync(
+        normalized.lockPath,
+      )?.nonce;
+
+      if (currentNonce !== undefined && currentNonce !== observedNonce) {
+        // Hand-off observed: the queue is draining, so stop counting against
+        // this caller.
+        observedNonce = currentNonce;
+        deadlineStartedAt = Date.now();
+      }
+
+      const stalledMs = Date.now() - deadlineStartedAt;
+
+      if (stalledMs >= normalized.waitTimeoutMs) {
+        throw new LocalRuntimeMutationLockBusyError(
+          normalized.busyCode,
+          `Local runtime mutation resource is busy: ${normalized.resourceKey}.`,
+        );
+      }
+
+      return Math.min(
+        randomizedRetryDelayMs(),
+        Math.max(1, normalized.waitTimeoutMs - stalledMs),
+      );
+    },
+  };
 }
 
 function randomizedRetryDelayMs(): number {

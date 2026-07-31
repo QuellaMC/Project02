@@ -7,7 +7,9 @@
 export {
   createRuntimePluginHost,
   runRuntimePluginSessionEndHooks,
+  runRuntimePluginSessionEndHooksForTargets,
   runRuntimePluginShutdownHooks,
+  runRuntimePluginShutdownHooksForTargets,
   runtimePluginId,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
@@ -18,6 +20,10 @@ export {
   type RuntimePluginHost,
   type RuntimePluginSessionEndOptions,
 } from './host.ts';
+export {
+  runtimePluginLifecycleTarget,
+  type RuntimePluginLifecycleTarget,
+} from './instance-lifecycle.ts';
 export {
   type RuntimePluginToolConfirmationHandler,
   type RuntimePluginToolConfirmationRequest,

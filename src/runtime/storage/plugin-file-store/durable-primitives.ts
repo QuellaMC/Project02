@@ -1,13 +1,19 @@
 import {createHash, type Hash} from 'node:crypto';
+import {join, parse, resolve} from 'node:path';
+
 import {
+  listDirectoryEntriesSync,
+  lstatPathSync,
+  readFileBytesSync,
+  readTextFileSync,
+  removePathSync,
   type Dirent,
-  lstatSync,
-  readFileSync,
-  realpathSync,
-  readdirSync,
-  rmSync,
-} from 'node:fs';
-import {basename, dirname, join, parse, resolve, sep} from 'node:path';
+} from '../../../shared/file-system.ts';
+import {
+  canonicalPath,
+  describeRealEntry,
+  firstUnacceptableComponent,
+} from '../../../shared/real-path.ts';
 
 import {
   atomicReplaceFileSync,
@@ -21,6 +27,7 @@ import {
 import {
   acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
+  LocalRuntimeMutationLocksAcquireError,
   type LocalRuntimeMutationLockOwnerToken,
 } from '../mutation-lock.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
@@ -95,19 +102,26 @@ export function withDurablePluginStoreMutations<T>(
   },
   operation: () => T,
 ): T {
-  const lease = acquireLocalRuntimeMutationLocksSync({
-    locksRoot: createLocalRuntimeStorageLayout({
-      storeRoot: options.storeRoot,
-    }).locksRoot,
-    resourceKeys: [
-      ...options.roots.map(durablePluginStoreMutationResourceKey),
-      ...(options.resourceKeys ?? []),
-    ],
-    waitTimeoutMs: 0,
-    ...(options.ownerToken === undefined
-      ? {}
-      : {ownerToken: options.ownerToken}),
-  });
+  const locksRoot = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  }).locksRoot;
+  const resourceKeys = [
+    ...options.roots.map(durablePluginStoreMutationResourceKey),
+    ...(options.resourceKeys ?? []),
+  ];
+  let lease: ReturnType<typeof acquireLocalRuntimeMutationLocksSync>;
+
+  try {
+    lease = acquireLocalRuntimeMutationLocksSync({
+      targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
+      waitTimeoutMs: 0,
+      ...(options.ownerToken === undefined
+        ? {}
+        : {ownerToken: options.ownerToken}),
+    });
+  } catch (error: unknown) {
+    throw singleMutationLockError(error);
+  }
 
   try {
     return operation();
@@ -125,19 +139,26 @@ export async function withDurablePluginStoreMutationsAsync<T>(
   },
   operation: () => T | Promise<T>,
 ): Promise<T> {
-  const lease = await acquireLocalRuntimeMutationLocks({
-    locksRoot: createLocalRuntimeStorageLayout({
-      storeRoot: options.storeRoot,
-    }).locksRoot,
-    resourceKeys: [
-      ...options.roots.map(durablePluginStoreMutationResourceKey),
-      ...(options.resourceKeys ?? []),
-    ],
-    waitTimeoutMs: 0,
-    ...(options.ownerToken === undefined
-      ? {}
-      : {ownerToken: options.ownerToken}),
-  });
+  const locksRoot = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  }).locksRoot;
+  const resourceKeys = [
+    ...options.roots.map(durablePluginStoreMutationResourceKey),
+    ...(options.resourceKeys ?? []),
+  ];
+  let lease: Awaited<ReturnType<typeof acquireLocalRuntimeMutationLocks>>;
+
+  try {
+    lease = await acquireLocalRuntimeMutationLocks({
+      targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
+      waitTimeoutMs: 0,
+      ...(options.ownerToken === undefined
+        ? {}
+        : {ownerToken: options.ownerToken}),
+    });
+  } catch (error: unknown) {
+    throw singleMutationLockError(error);
+  }
 
   try {
     return await operation();
@@ -150,61 +171,33 @@ export function durablePluginStoreMutationResourceKey(root: string): string {
   return `plugin:${canonicalDurablePluginStoreRoot(root)}`;
 }
 
+function singleMutationLockError(error: unknown): unknown {
+  return error instanceof LocalRuntimeMutationLocksAcquireError
+    ? (error.cause ?? error)
+    : error;
+}
+
 export function canonicalDurablePluginStoreRoot(storeRoot: string): string {
-  let current = resolve(storeRoot);
-  const missingParts: string[] = [];
+  const canonical = canonicalPath(storeRoot);
 
-  for (;;) {
-    try {
-      const canonical = join(realpathSync(current), ...missingParts);
-
-      assertSafeDurableDirectoryPath(canonical, 'Plugin fileStore store root');
-      return canonical;
-    } catch (error: unknown) {
-      if (!isMissingFileError(error)) {
-        throw error;
-      }
-
-      const parent = dirname(current);
-
-      if (parent === current) {
-        throw error;
-      }
-
-      missingParts.unshift(basename(current));
-      current = parent;
-    }
-  }
+  assertSafeDurableDirectoryPath(canonical, 'Plugin fileStore store root');
+  return canonical;
 }
 
 function assertSafeDurableDirectoryPath(path: string, label: string): void {
   const absolute = resolve(path);
-  const root = parse(absolute).root;
-  const parts = absolute.slice(root.length).split(sep).filter(Boolean);
-  let current = root;
+  const offending = firstUnacceptableComponent({
+    root: parse(absolute).root,
+    path: absolute,
+    accept: ['directory'],
+  });
 
-  for (const part of parts) {
-    current = join(current, part);
-
-    try {
-      const stat = lstatSync(current);
-
-      if (stat.isSymbolicLink()) {
-        throw new TypeError(
-          `${label} must be a real directory and cannot contain symlinks.`,
-        );
-      }
-
-      if (!stat.isDirectory()) {
-        throw new TypeError(`${label} must be a real directory.`);
-      }
-    } catch (error: unknown) {
-      if (isMissingFileError(error)) {
-        return;
-      }
-
-      throw error;
-    }
+  if (offending !== undefined) {
+    throw new TypeError(
+      offending.kind === 'link'
+        ? `${label} must be a real directory and cannot contain symlinks.`
+        : `${label} must be a real directory.`,
+    );
   }
 }
 
@@ -226,35 +219,30 @@ export function assertSafeDurablePluginPath(
   safePath: string,
 ): void {
   assertSafeDurablePluginRoot(root);
-  let current = root;
+  const offending = firstUnacceptableComponent({
+    root,
+    path: join(root, ...safePath.split('/')),
+    accept: ['directory', 'file'],
+  });
 
-  for (const part of safePath.split('/')) {
-    current = join(current, part);
-
-    try {
-      const stat = lstatSync(current);
-
-      if (stat.isSymbolicLink()) {
-        throw new TypeError('Plugin fileStore paths cannot contain symlinks.');
-      }
-
-      if (!stat.isDirectory() && !stat.isFile()) {
-        throw new TypeError('Plugin fileStore contains an unsupported entry.');
-      }
-    } catch (error: unknown) {
-      if (isMissingFileError(error)) {
-        return;
-      }
-
-      throw error;
-    }
+  if (offending !== undefined) {
+    throw new TypeError(
+      offending.kind === 'link'
+        ? 'Plugin fileStore paths cannot contain symlinks.'
+        : 'Plugin fileStore contains an unsupported entry.',
+    );
   }
 }
 
 export function assertRegularFile(path: string, label: string): void {
-  const stat = lstatSync(path);
+  const entry = describeRealEntry(path);
 
-  if (stat.isSymbolicLink() || !stat.isFile()) {
+  if (entry.kind === 'absent' || entry.kind === 'unreadable') {
+    // `readOptionalRegularFile` reads "not there yet" off the error code, so
+    // the original has to reach it rather than a message written over it.
+    throw entry.error;
+  }
+  if (entry.kind !== 'file') {
     throw new TypeError(`${label} must be a regular file.`);
   }
 }
@@ -262,7 +250,7 @@ export function assertRegularFile(path: string, label: string): void {
 export function readOptionalRegularFile(path: string): string | undefined {
   try {
     assertRegularFile(path, 'Plugin fileStore path');
-    return readFileSync(path, 'utf8');
+    return readTextFileSync(path);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return undefined;
@@ -277,7 +265,7 @@ export function readOptionalRegularFileBuffer(
 ): Buffer | undefined {
   try {
     assertRegularFile(path, 'Plugin fileStore path');
-    return readFileSync(path);
+    return readFileBytesSync(path);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return undefined;
@@ -351,7 +339,7 @@ export function readPersistedDurableRevision(root: string): number | undefined {
   const revisionPath = join(root, durableRevisionFileName);
 
   try {
-    const parsed = Number(readFileSync(revisionPath, 'utf8').trim());
+    const parsed = Number(readTextFileSync(revisionPath).trim());
 
     if (Number.isSafeInteger(parsed) && parsed >= 0) {
       return parsed;
@@ -413,7 +401,7 @@ function readDurablePathModesFile(
   const modesPath = join(root, durablePathModesFileName);
 
   try {
-    const parsed = JSON.parse(readFileSync(modesPath, 'utf8')) as unknown;
+    const parsed = JSON.parse(readTextFileSync(modesPath)) as unknown;
 
     if (!isPlainObject(parsed)) {
       throw new TypeError('Plugin file store path modes are malformed.');
@@ -462,9 +450,7 @@ export function writeDurablePathModes(
 
 function durablePathModesFileStamp(root: string): string {
   try {
-    const stat = lstatSync(join(root, durablePathModesFileName), {
-      bigint: true,
-    });
+    const stat = lstatPathSync(join(root, durablePathModesFileName));
 
     return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(
       ':',
@@ -531,7 +517,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
   let entries: Dirent[];
 
   try {
-    entries = readdirSync(directory, {withFileTypes: true});
+    entries = listDirectoryEntriesSync(directory);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;
@@ -549,7 +535,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
     }
 
     if (entry.isFile() && isAbandonedAtomicReplacementFile(entry.name)) {
-      rmSync(entryPath, {force: true});
+      removePathSync(entryPath, {force: true});
     }
   }
 }
@@ -557,7 +543,7 @@ export function cleanupDurablePluginStoreAtomicTempFiles(
 function countDurableStoreEntries(directory: string): number {
   let count = 0;
 
-  for (const entry of readdirSync(directory, {withFileTypes: true})) {
+  for (const entry of listDirectoryEntriesSync(directory)) {
     if (
       entry.name === durableRevisionFileName ||
       entry.name === durablePathModesFileName ||
@@ -582,7 +568,7 @@ function countDurableStoreEntries(directory: string): number {
     }
 
     if (entry.name.endsWith('.jsonl')) {
-      count += readFileSync(entryPath, 'utf8').match(/\n/gu)?.length ?? 0;
+      count += readTextFileSync(entryPath).match(/\n/gu)?.length ?? 0;
       continue;
     }
 
@@ -638,7 +624,7 @@ function assertDurableJsonlPathMode(options: {
   if (options.path.endsWith('.jsonl')) {
     try {
       const records = parseRuntimePluginJsonlContent(
-        readFileSync(options.filePath, 'utf8'),
+        readTextFileSync(options.filePath),
       );
 
       if (records.length !== 1 || !Array.isArray(records[0])) {
@@ -656,7 +642,7 @@ function assertDurableJsonlPathMode(options: {
   }
 
   try {
-    JSON.parse(readFileSync(options.filePath, 'utf8'));
+    JSON.parse(readTextFileSync(options.filePath));
   } catch (error: unknown) {
     if (isMissingFileError(error) || error instanceof SyntaxError) {
       return;
@@ -680,7 +666,7 @@ function assertDurableJsonPathMode(options: {
   }
 
   try {
-    lstatSync(options.filePath);
+    lstatPathSync(options.filePath);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;

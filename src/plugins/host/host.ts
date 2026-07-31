@@ -28,11 +28,13 @@ import type {
   RuntimePluginRegistrySnapshot,
   RuntimePluginAfterTurnCommittedContext,
   RuntimePluginContext,
+  RuntimePluginManifest,
 } from '../api/types.ts';
 import {
   assertRuntimePluginFileStoreProviderPresent,
   resolveRuntimePluginAccessForPlugins,
   runtimePluginAccessForPlugin,
+  runtimePluginAccessForPluginId,
   type RuntimePluginAccessMapByPluginId,
 } from '../policy/access-control.ts';
 import {
@@ -101,9 +103,18 @@ import {
   type RuntimePluginReloader,
 } from './reload.ts';
 import {
-  createRetiredRuntimePluginLifecycle,
-  type RetiredRuntimePluginLifecycle,
+  createRuntimePluginInstanceOwnership,
+  runtimePluginLifecycleTargets,
+  type RuntimePluginInstanceOwnership,
+  type RuntimePluginLifecycleTarget,
 } from './instance-lifecycle.ts';
+import {
+  createPluginHookExecutionScope,
+  PluginHookTimeoutError,
+  snapshotPluginHookResult,
+  withPluginHookTimeout,
+  type PluginHookExecutionScope,
+} from './hook-execution.ts';
 import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 
 export {runtimePluginId} from '../api/contract.ts';
@@ -117,6 +128,8 @@ type CreateRuntimePluginFileStore =
 
 export type CreateRuntimePluginHostOptions = {
   readonly plugins?: readonly RuntimePlugin[];
+  /** Catalog-authoritative ownership records for configured plugin instances. */
+  readonly lifecycleTargets?: readonly RuntimePluginLifecycleTarget[];
   readonly enabledPluginIds?: readonly string[];
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
@@ -177,26 +190,20 @@ export type RunRuntimePluginShutdownHooksOptions = {
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 };
 
-type RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions = {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly context: RuntimePluginContext;
+type RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions = Omit<
+  RunRuntimePluginShutdownHooksOptions,
+  'plugins'
+> & {
+  readonly targets: readonly RuntimePluginLifecycleTarget[];
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
-  readonly storeRoot?: string | undefined;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-  readonly hookOptions?: RuntimePluginSessionEndOptions | undefined;
 };
 
-type RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions = {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly context: RuntimePluginContext;
-  readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
-  readonly storeRoot?: string | undefined;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-};
+type RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions =
+  RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions &
+    Pick<RunRuntimePluginSessionEndHooksOptions, 'hookOptions'>;
+
+type RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions =
+  RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions;
 
 export type RuntimePluginHealthHostResult = {
   readonly snapshots: readonly RuntimePluginHealthSnapshot[];
@@ -292,25 +299,6 @@ type RuntimePluginHostState = {
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
 };
 
-function createSwapWithRetirement(
-  swapEnabledPlugin: (next: RuntimePlugin) => RuntimePlugin | undefined,
-  retiredLifecycle: RetiredRuntimePluginLifecycle,
-): (next: RuntimePlugin) => RuntimePlugin | undefined {
-  return next => {
-    const previous = swapEnabledPlugin(next);
-
-    if (previous === undefined) {
-      return undefined;
-    }
-
-    // Live and retired stay disjoint: a resurrected instance gives up its
-    // retired slot, and the replaced one takes a slot at most once.
-    retiredLifecycle.unretire(next);
-    retiredLifecycle.retire(previous);
-    return previous;
-  };
-}
-
 export function createRuntimePluginHost(
   options: CreateRuntimePluginHostOptions = {},
 ): RuntimePluginHost {
@@ -335,13 +323,18 @@ export function createRuntimePluginHost(
   });
   let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
-  const retiredLifecycle = createRetiredRuntimePluginLifecycle({
-    isLive: plugin => livePlugins().includes(plugin),
-  });
-  const swapAndRetirePlugin = createSwapWithRetirement(
-    swapEnabledPlugin,
-    retiredLifecycle,
+  let terminalStarted = false;
+  const catalogManifestForPluginId = lifecycleCatalogManifestResolver(
+    lifecycleCatalogManifestByPluginId({
+      enabledPlugins,
+      configuredTargets: options.lifecycleTargets ?? [],
+    }),
   );
+  const instanceOwnership = createRuntimePluginInstanceOwnership({
+    isLive: plugin => livePlugins().includes(plugin),
+    swapEnabledPlugin,
+    catalogManifestForPluginId,
+  });
 
   return Object.freeze({
     registrySnapshot() {
@@ -395,7 +388,6 @@ export function createRuntimePluginHost(
       return reconcilePreparedRuntimePluginConfigEffect({
         effect,
         state: pluginConfigControl,
-        storeRoot: options.storeRoot,
       });
     },
     pluginConfigCurrentFor(pluginId, configFingerprint) {
@@ -408,18 +400,30 @@ export function createRuntimePluginHost(
       );
     },
     async reloadPluginForCommittedConfig(effects, reloadOptions) {
-      return await reloadRuntimePluginForCommittedConfig({
-        effects,
-        reloader: options.pluginReloader,
-        pluginConfigControl,
-        livePlugins,
-        swapEnabledPlugin: swapAndRetirePlugin,
-        retirePlugin: retiredLifecycle.retire,
-        recordLiveAppliedFingerprint,
-        ...(reloadOptions?.turnResultFingerprint === undefined
-          ? {}
-          : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
-      });
+      if (terminalStarted) {
+        return Object.freeze({outcome: 'deferred'});
+      }
+
+      return await instanceOwnership.track(
+        reloadRuntimePluginForCommittedConfig({
+          effects,
+          reloader: options.pluginReloader,
+          pluginConfigControl,
+          livePlugins,
+          swapEnabledPlugin: instanceOwnership.replaceLive,
+          retirePlugin: (plugin, catalogPluginId) => {
+            instanceOwnership.retire(
+              plugin,
+              catalogManifestForPluginId(catalogPluginId),
+            );
+          },
+          trackReloadWork: instanceOwnership.track,
+          recordLiveAppliedFingerprint,
+          ...(reloadOptions?.turnResultFingerprint === undefined
+            ? {}
+            : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
+        }),
+      );
     },
     beginFileStoreTransaction() {
       if (activeFileStoreTransaction !== undefined) {
@@ -445,7 +449,10 @@ export function createRuntimePluginHost(
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
-        plugins: livePlugins(),
+        targets: runtimePluginLifecycleTargets(
+          livePlugins(),
+          catalogManifestForPluginId,
+        ),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -463,11 +470,11 @@ export function createRuntimePluginHost(
       } satisfies RuntimePluginHookHostResult);
     },
     async onSessionEnd(context, hookOptions) {
-      return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-        // Retired instances run BEFORE live ones: both sides of a swap share
-        // one plugin id and store, so the live instance's terminal writes
-        // must land last and win.
-        plugins: [...retiredLifecycle.retiredPlugins(), ...livePlugins()],
+      terminalStarted = true;
+      await instanceOwnership.quiesce();
+
+      return await runRuntimePluginSessionEndHooksForTargets({
+        targets: instanceOwnership.terminalTargets(livePlugins()),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -478,8 +485,10 @@ export function createRuntimePluginHost(
       });
     },
     shutdown(context) {
-      shutdownResult ??= runRuntimePluginShutdownHooksWithResolvedPermissions({
-        plugins: [...retiredLifecycle.retiredPlugins(), ...livePlugins()],
+      terminalStarted = true;
+      shutdownResult ??= runFinalShutdownPhase({
+        instanceOwnership,
+        livePlugins,
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,
@@ -579,7 +588,6 @@ function createRuntimePluginHostState(
           }),
     }),
     ...(pluginConfigControl === undefined ? {} : {pluginConfigControl}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const plugins = Object.freeze([...hostScopedPlugins, ...configuredPlugins]);
   allPlugins = plugins;
@@ -642,14 +650,59 @@ function createRuntimePluginHostState(
   } satisfies RuntimePluginHostState);
 }
 
+function lifecycleCatalogManifestByPluginId(options: {
+  readonly enabledPlugins: readonly RuntimePlugin[];
+  readonly configuredTargets: readonly RuntimePluginLifecycleTarget[];
+}): ReadonlyMap<string, RuntimePluginManifest> {
+  const manifests = new Map(
+    options.enabledPlugins.map(
+      plugin => [plugin.manifest.id, plugin.manifest] as const,
+    ),
+  );
+
+  for (const target of options.configuredTargets) {
+    if (!options.enabledPlugins.includes(target.plugin)) {
+      throw new TypeError(
+        `Plugin "${target.catalogManifest.id}" lifecycle target is not enabled in this host.`,
+      );
+    }
+
+    if (target.catalogManifest.id !== target.plugin.manifest.id) {
+      throw new TypeError(
+        `Plugin "${target.plugin.manifest.id}" lifecycle target must match catalog "${target.catalogManifest.id}".`,
+      );
+    }
+
+    manifests.set(target.catalogManifest.id, target.catalogManifest);
+  }
+
+  return manifests;
+}
+
+function lifecycleCatalogManifestResolver(
+  manifests: ReadonlyMap<string, RuntimePluginManifest>,
+): (pluginId: string) => RuntimePluginManifest {
+  return pluginId => {
+    const manifest = manifests.get(pluginId);
+
+    if (manifest === undefined) {
+      throw new TypeError(
+        `Plugin "${pluginId}" is missing its catalog lifecycle manifest.`,
+      );
+    }
+
+    return manifest;
+  };
+}
+
 export async function runRuntimePluginSessionEndHooks(
   options: RunRuntimePluginSessionEndHooksOptions,
 ): Promise<RuntimePluginHookHostResult> {
   // This standalone helper treats the supplied plugins as already selected and
   // enabled. Callers that need activation filtering should pass only activated
   // plugins, or use the configured host path.
-  return await runRuntimePluginSessionEndHooksWithResolvedPermissions({
-    plugins: options.plugins,
+  return await runRuntimePluginSessionEndHooksForTargets({
+    targets: runtimePluginLifecycleTargets(options.plugins),
     context: options.context,
     accessByPluginId: resolveRuntimePluginAccessForPlugins({
       plugins: options.plugins,
@@ -668,8 +721,8 @@ export async function runRuntimePluginShutdownHooks(
 ): Promise<RuntimePluginHookHostResult> {
   // As with standalone session-end cleanup, callers supply the already-selected
   // plugin set. This path deliberately does not rebuild or revalidate a host.
-  return await runRuntimePluginShutdownHooksWithResolvedPermissions({
-    plugins: options.plugins,
+  return await runRuntimePluginShutdownHooksForTargets({
+    targets: runtimePluginLifecycleTargets(options.plugins),
     context: options.context,
     accessByPluginId: resolveRuntimePluginAccessForPlugins({
       plugins: options.plugins,
@@ -682,11 +735,11 @@ export async function runRuntimePluginShutdownHooks(
   });
 }
 
-async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
+export async function runRuntimePluginSessionEndHooksForTargets(
   options: RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions,
 ): Promise<RuntimePluginHookHostResult> {
   return await runHookPhase({
-    plugins: options.plugins,
+    targets: options.targets,
     context: options.context,
     accessByPluginId: options.accessByPluginId,
     storeRoot: options.storeRoot,
@@ -700,11 +753,44 @@ async function runRuntimePluginSessionEndHooksWithResolvedPermissions(
   });
 }
 
-async function runRuntimePluginShutdownHooksWithResolvedPermissions(
+/**
+ * Runs shutdown, the last phase, and closes instance ownership around it.
+ *
+ * Quiescing is bounded, so a reload factory that outlived its own deadline can
+ * still produce a candidate after this point. Nothing reads the retired list
+ * again, so late arrivals are torn down as they appear rather than filed where
+ * no dispatch will reach them, holding whatever their factory opened.
+ */
+async function runFinalShutdownPhase(
+  options: Omit<
+    RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions,
+    'targets'
+  > & {
+    readonly instanceOwnership: RuntimePluginInstanceOwnership;
+    readonly livePlugins: () => readonly RuntimePlugin[];
+  },
+): Promise<RuntimePluginHookHostResult> {
+  await options.instanceOwnership.quiesce();
+
+  const dispatch = async (
+    targets: readonly RuntimePluginLifecycleTarget[],
+  ): Promise<RuntimePluginHookHostResult> =>
+    await runRuntimePluginShutdownHooksForTargets({...options, targets});
+
+  options.instanceOwnership.close(target => {
+    void dispatch([target]);
+  });
+
+  return await dispatch(
+    options.instanceOwnership.terminalTargets(options.livePlugins()),
+  );
+}
+
+export async function runRuntimePluginShutdownHooksForTargets(
   options: RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions,
 ): Promise<RuntimePluginHookHostResult> {
   return await runHookPhase({
-    plugins: options.plugins,
+    targets: options.targets,
     context: options.context,
     accessByPluginId: options.accessByPluginId,
     storeRoot: options.storeRoot,
@@ -802,7 +888,7 @@ async function runBeforeRoleModelCallPlugin(
     plugin,
     accessByPluginId: options.accessByPluginId,
   });
-  const executionScope = createPluginHookExecutionScope(plugin);
+  const executionScope = createPluginHookExecutionScope(plugin.manifest);
   const hookContext = createPluginHookContext({
     context: options.context,
     plugin,
@@ -962,7 +1048,7 @@ async function runHandleToolCall(
     failureDegrades,
     approvalGatedTool,
   } = resolution;
-  const executionScope = createPluginHookExecutionScope(plugin);
+  const executionScope = createPluginHookExecutionScope(plugin.manifest);
   const hookContext = createPluginHookContext({
     context: options.context,
     plugin,
@@ -979,7 +1065,8 @@ async function runHandleToolCall(
 
   try {
     const result = await withPluginHookTimeout({
-      plugin,
+      pluginId: plugin.manifest.id,
+      policyManifest: plugin.manifest,
       hookName: 'handleToolCall',
       executionScope,
       revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
@@ -1257,7 +1344,7 @@ function rejectedRuntimePluginToolExecution(
 }
 
 async function runHookPhase<TContext extends RuntimePluginContext>(options: {
-  readonly plugins: readonly RuntimePlugin[];
+  readonly targets: readonly RuntimePluginLifecycleTarget[];
   readonly context: TContext;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly storeRoot?: string | undefined;
@@ -1281,21 +1368,24 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
   let failed = false;
 
-  for (const plugin of options.plugins) {
+  for (const {plugin, catalogManifest} of options.targets) {
+    const catalogPluginId = catalogManifest.id;
     const hook = options.hookForPlugin(plugin);
 
     if (hook === undefined) {
       continue;
     }
 
-    const executionScope = createPluginHookExecutionScope(plugin);
+    const executionScope = createPluginHookExecutionScope(catalogManifest);
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
+      policyManifest: catalogManifest,
+      pluginId: catalogPluginId,
       deadlineAt: executionScope.deadlineAt,
       signal: executionScope.abortController.signal,
-      access: runtimePluginAccessForPlugin({
-        plugin,
+      access: runtimePluginAccessForPluginId({
+        pluginId: catalogPluginId,
         accessByPluginId: options.accessByPluginId,
       }),
       storeRoot: options.storeRoot,
@@ -1306,6 +1396,8 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
     });
     const result = await invokeHook({
       plugin,
+      pluginId: catalogPluginId,
+      policyManifest: catalogManifest,
       context: hookContext.context,
       executionScope,
       revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
@@ -1318,6 +1410,8 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
       evidence.push(
         createHookFailureEvidence({
           plugin,
+          policyManifest: catalogManifest,
+          pluginId: catalogPluginId,
           context: options.context,
           evidenceKind: options.evidenceKind,
           status: 'failed',
@@ -1345,6 +1439,8 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
         evidence.push(
           createHookFailureEvidence({
             plugin,
+            policyManifest: catalogManifest,
+            pluginId: catalogPluginId,
             context: options.context,
             evidenceKind: options.evidenceKind,
             status: 'failed',
@@ -1419,7 +1515,8 @@ function normalizeToolCallResult(options: {
   readonly deadlineAt: number;
 }): RuntimePluginToolCallExecutionResult {
   const value = snapshotPluginHookResult({
-    plugin: options.plugin,
+    pluginId: options.plugin.manifest.id,
+    policyManifest: options.plugin.manifest,
     hookName: 'handleToolCall',
     value: options.value,
     deadlineAt: options.deadlineAt,
@@ -1587,43 +1684,6 @@ function normalizeJsonValue(
   }
 }
 
-function snapshotPluginHookResult(options: {
-  readonly plugin: RuntimePlugin;
-  readonly hookName:
-    | 'afterTurnCommitted'
-    | 'beforeRoleModelCall'
-    | 'handleToolCall'
-    | 'health'
-    | 'onSessionEnd'
-    | 'onShutdown';
-  readonly value: unknown;
-  readonly deadlineAt: number;
-}): unknown {
-  try {
-    return createJsonBoundarySnapshot(options.value, {
-      field: `Plugin ${options.hookName} result`,
-      redact: true,
-      deadlineAt: options.deadlineAt,
-    });
-  } catch (error: unknown) {
-    if (
-      error instanceof TypeError &&
-      error.message.endsWith('JSON normalization timed out.')
-    ) {
-      throw new PluginHookTimeoutError(
-        {
-          pluginId: options.plugin.manifest.id,
-          hookName: options.hookName,
-          timeoutMs: options.plugin.manifest.runtimePolicy.timeoutMs,
-        },
-        {cause: error},
-      );
-    }
-
-    throw error;
-  }
-}
-
 async function runHealth(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly context: RuntimePluginContext;
@@ -1644,7 +1704,7 @@ async function runHealth(options: {
       continue;
     }
 
-    const executionScope = createPluginHookExecutionScope(plugin);
+    const executionScope = createPluginHookExecutionScope(plugin.manifest);
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
@@ -1663,14 +1723,16 @@ async function runHealth(options: {
 
     try {
       const snapshot = await withPluginHookTimeout({
-        plugin,
+        pluginId: plugin.manifest.id,
+        policyManifest: plugin.manifest,
         hookName: 'health',
         executionScope,
         revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
         operation: async deadlineAt =>
           createRuntimePluginHealthSnapshot(
             snapshotPluginHookResult({
-              plugin,
+              pluginId: plugin.manifest.id,
+              policyManifest: plugin.manifest,
               hookName: 'health',
               value: await hook(hookContext.context),
               deadlineAt,
@@ -1779,7 +1841,8 @@ async function invokeBeforeRoleModelCallHook(options: {
     return Object.freeze({
       status: 'accepted',
       value: await withPluginHookTimeout({
-        plugin: options.plugin,
+        pluginId: options.plugin.manifest.id,
+        policyManifest: options.plugin.manifest,
         hookName: 'beforeRoleModelCall',
         executionScope: options.executionScope,
         revokeFileStoreWrites: options.revokeFileStoreWrites,
@@ -1804,6 +1867,8 @@ async function invokeBeforeRoleModelCallHook(options: {
 
 async function invokeHook<TContext extends RuntimePluginContext>(options: {
   readonly plugin: RuntimePlugin;
+  readonly pluginId: string;
+  readonly policyManifest: RuntimePluginManifest;
   readonly context: TContext;
   readonly executionScope: PluginHookExecutionScope;
   readonly revokeFileStoreWrites: () => void;
@@ -1816,13 +1881,16 @@ async function invokeHook<TContext extends RuntimePluginContext>(options: {
     return Object.freeze({
       status: 'accepted',
       value: await withPluginHookTimeout({
-        plugin: options.plugin,
+        policyManifest: options.policyManifest,
+        pluginId: options.pluginId,
         hookName: options.hookName,
         executionScope: options.executionScope,
         revokeFileStoreWrites: options.revokeFileStoreWrites,
         operation: async deadlineAt =>
           normalizeHookResult({
             plugin: options.plugin,
+            pluginId: options.pluginId,
+            policyManifest: options.policyManifest,
             context: options.context,
             value: await options.hook(options.context),
             deadlineAt,
@@ -1847,7 +1915,8 @@ function normalizeBeforeRoleModelCallResult(options: {
   readonly deadlineAt: number;
 }): RuntimePluginBeforeRoleModelCallResult {
   const value = snapshotPluginHookResult({
-    plugin: options.plugin,
+    pluginId: options.plugin.manifest.id,
+    policyManifest: options.plugin.manifest,
     hookName: 'beforeRoleModelCall',
     value: options.value,
     deadlineAt: options.deadlineAt,
@@ -1880,13 +1949,16 @@ function normalizeBeforeRoleModelCallResult(options: {
 
 function normalizeHookResult(options: {
   readonly plugin: RuntimePlugin;
+  readonly pluginId: string;
+  readonly policyManifest: RuntimePluginManifest;
   readonly context: RuntimePluginContext;
   readonly value: unknown;
   readonly deadlineAt: number;
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd' | 'onShutdown';
 }): RuntimePluginHookResult {
   const value = snapshotPluginHookResult({
-    plugin: options.plugin,
+    pluginId: options.pluginId,
+    policyManifest: options.policyManifest,
     hookName: options.hookName,
     value: options.value,
     deadlineAt: options.deadlineAt,
@@ -1906,6 +1978,7 @@ function normalizeHookResult(options: {
     status,
     evidence: normalizeEvidenceSnapshots({
       plugin: options.plugin,
+      pluginId: options.pluginId,
       context: options.context,
       value: value['evidence'],
     }),
@@ -1998,91 +2071,6 @@ function handleToolCallFailureDegrades(options: {
     options.plugin.manifest.runtimePolicy.failureBehavior.handleToolCall ===
       'degrade'
   );
-}
-
-class PluginHookTimeoutError extends Error {
-  constructor(
-    options: {
-      readonly pluginId: string;
-      readonly hookName: string;
-      readonly timeoutMs: number;
-    },
-    errorOptions?: ErrorOptions,
-  ) {
-    super(
-      `Plugin "${options.pluginId}" ${options.hookName} timed out after ${String(
-        options.timeoutMs,
-      )}ms.`,
-      errorOptions,
-    );
-    this.name = 'PluginHookTimeoutError';
-  }
-}
-
-type PluginHookExecutionScope = {
-  readonly abortController: AbortController;
-  readonly deadlineAt: number;
-};
-
-function createPluginHookExecutionScope(
-  plugin: RuntimePlugin,
-): PluginHookExecutionScope {
-  return Object.freeze({
-    abortController: new AbortController(),
-    deadlineAt: Date.now() + plugin.manifest.runtimePolicy.timeoutMs,
-  });
-}
-
-async function withPluginHookTimeout<T>(options: {
-  readonly plugin: RuntimePlugin;
-  readonly hookName: string;
-  readonly executionScope: PluginHookExecutionScope;
-  readonly revokeFileStoreWrites: () => void;
-  readonly operation: (deadlineAt: number) => T | Promise<T>;
-}): Promise<T> {
-  let timeoutId: ReturnType<typeof setTimeout> | undefined;
-  const timeoutMs = options.plugin.manifest.runtimePolicy.timeoutMs;
-  const deadlineAt = options.executionScope.deadlineAt;
-  const remainingMs = Math.max(0, deadlineAt - Date.now());
-
-  try {
-    return await Promise.race([
-      Promise.resolve()
-        .then(() => options.operation(deadlineAt))
-        .then(value => {
-          if (Date.now() >= deadlineAt) {
-            const error = new PluginHookTimeoutError({
-              pluginId: options.plugin.manifest.id,
-              hookName: options.hookName,
-              timeoutMs,
-            });
-
-            options.executionScope.abortController.abort(error);
-            throw error;
-          }
-
-          return value;
-        }),
-      new Promise<T>((_resolve, reject) => {
-        timeoutId = setTimeout(() => {
-          const error = new PluginHookTimeoutError({
-            pluginId: options.plugin.manifest.id,
-            hookName: options.hookName,
-            timeoutMs,
-          });
-
-          options.executionScope.abortController.abort(error);
-          options.revokeFileStoreWrites();
-          reject(error);
-        }, remainingMs);
-      }),
-    ]);
-  } finally {
-    if (timeoutId !== undefined) {
-      clearTimeout(timeoutId);
-    }
-    options.revokeFileStoreWrites();
-  }
 }
 
 function errorMessage(error: unknown): string {

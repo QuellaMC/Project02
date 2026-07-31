@@ -10,9 +10,9 @@ import type {
 } from '../../plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
   inspectRuntimePluginConfig,
   redactRuntimeConfigValue,
+  resolveRuntimeConfigScopeTarget,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,
   type RuntimePluginConfigFieldInspectShape,
@@ -23,9 +23,10 @@ import {
   askForFieldValue,
   askForNumber,
   cancelled,
+  ensureConsoleCommitTarget,
   formatInspectedFieldValue,
   previewAndCommitChange,
-  runtimeConfigLocation,
+  shellQuoteConsoleCommandArgument,
   writeDiagnostics,
   writeLine,
   type RuntimeConfigConsoleContext,
@@ -81,10 +82,11 @@ export async function runPluginConfigSection(
   );
 
   const inspected = inspectRuntimePluginConfig({
-    ...runtimeConfigLocation(context),
+    runtimeLocation: snapshot.runtimeLocation,
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
+    targetScope: snapshot.scope,
     manifest,
     pluginManifests: manifests,
     ...(activation === undefined ? {} : {activation}),
@@ -118,6 +120,7 @@ export async function runPluginConfigSection(
       manifest,
       inspected.enabled,
       inspected.fingerprint,
+      snapshot,
     );
 
     if (change !== undefined) {
@@ -144,6 +147,7 @@ export async function runPluginConfigSection(
     field,
     inspectedField,
     inspected.fingerprint,
+    snapshot,
   );
 
   if (change !== undefined) {
@@ -156,6 +160,7 @@ async function stagePluginActivationChange(
   manifest: RuntimePluginManifest,
   enabled: boolean,
   fingerprint: string,
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Enable');
   writeLine(context.stdout, '2) Disable');
@@ -183,14 +188,25 @@ async function stagePluginActivationChange(
     oldValue: enabled,
     newValue: nextEnabled,
     reloadRequired: true,
-    commit() {
-      applyRuntimeConfigControlOperation({
-        ...runtimeConfigLocation(context),
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
         ...(context.env === undefined ? {} : {env: context.env}),
+      });
+      const target = resolveRuntimeConfigScopeTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        ...(context.env === undefined ? {} : {env: context.env}),
+        scope: snapshot.scope,
+      });
+
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fingerprint,
-        operation: {
-          kind: nextEnabled ? 'plugin_enable' : 'plugin_disable',
-          pluginId: manifest.id,
+        request: {
+          kind: 'plugin_activation',
+          manifest,
+          enabled: nextEnabled,
         },
       });
     },
@@ -203,6 +219,7 @@ async function stagePluginFieldChange(
   field: RuntimePluginConfigField,
   inspectedField: RuntimePluginConfigFieldInspectShape,
   fingerprint: string,
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<StagedRuntimeConfigChange | undefined> {
   writeLine(context.stdout, '1) Set');
   if (!field.required) {
@@ -260,16 +277,28 @@ async function stagePluginFieldChange(
     oldValue,
     newValue,
     reloadRequired: field.reloadRequired !== false,
-    commit() {
-      applyRuntimePluginConfigControlOperation({
-        ...runtimeConfigLocation(context),
-        ...(context.runtimeEnv === undefined && context.env === undefined
-          ? {}
-          : {env: context.runtimeEnv ?? context.env}),
-        manifest,
-        actor: 'operator',
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
+        ...(context.env === undefined ? {} : {env: context.env}),
+      });
+      const runtimeEnv = context.runtimeEnv ?? context.env;
+      const target = resolveRuntimeConfigScopeTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        ...(runtimeEnv === undefined ? {} : {env: runtimeEnv}),
+        scope: snapshot.scope,
+      });
+
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: fingerprint,
-        operation,
+        request: {
+          kind: 'plugin_config',
+          manifest,
+          actor: 'operator',
+          fieldOperation: operation,
+        },
       });
     },
   };
@@ -281,7 +310,15 @@ function pluginCatalog(
 ): RuntimeConfigConsolePluginCatalog {
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: snapshot.loadedConfig,
-    ...(context.storeRoot === undefined ? {} : {storeRoot: context.storeRoot}),
+    runtimeLocation: snapshot.runtimeLocation,
+    // A scoped console judges activation for the selected character —
+    // the snapshot's scope may be a flag override the loaded config
+    // does not name.
+    ...(snapshot.scope === 'global'
+      ? {}
+      : {
+          overlayConfig: snapshot.overlay,
+        }),
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
@@ -359,21 +396,13 @@ function writeSecretConfigInstructions(
   manifest: RuntimePluginManifest,
   field: RuntimePluginConfigField,
 ): void {
-  const locationArgs = [
-    ...(context.storeRoot === undefined
-      ? []
-      : ['--store', shellQuote(context.storeRoot)]),
-    ...(context.configPath === undefined
-      ? []
-      : ['--config', shellQuote(context.configPath)]),
-  ];
   const envVar = field.envVar ?? suggestedSecretEnvVar(manifest.id, field.name);
   const commandArgs = [
     'secret',
     'set',
-    shellQuote(manifest.id),
-    shellQuote(field.name),
-    shellQuote(envVar),
+    shellQuoteConsoleCommandArgument(manifest.id),
+    shellQuoteConsoleCommandArgument(field.name),
+    shellQuoteConsoleCommandArgument(envVar),
   ];
 
   writeLine(
@@ -383,7 +412,7 @@ function writeSecretConfigInstructions(
   writeLine(context.stdout, `Set ${envVar} in the environment, then run:`);
   writeLine(
     context.stdout,
-    `pnpm runtime-config${locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`} -- ${commandArgs.join(' ')}`,
+    `${context.secretSetCommandPrefix} -- ${commandArgs.join(' ')}`,
   );
 }
 
@@ -391,8 +420,4 @@ function suggestedSecretEnvVar(pluginId: string, fieldName: string): string {
   return `${pluginId}_${fieldName}`
     .replaceAll(/[^A-Za-z0-9]+/g, '_')
     .toUpperCase();
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", `'"'"'`)}'`;
 }

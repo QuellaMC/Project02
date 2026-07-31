@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {
   createConversationSession,
@@ -34,7 +35,9 @@ import {
 
 describe('plugin-driven Character State tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {
-    const session = createConversationSession();
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
     const logStore = createRuntimeLogStore();
     const adapter = createSequencedAdapter([
       {
@@ -157,6 +160,8 @@ describe('plugin-driven Character State tool loop', () => {
     expect(result.status).toBe('completed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -255,6 +260,8 @@ describe('plugin-driven Character State tool loop', () => {
     }
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -374,6 +381,8 @@ describe('plugin-driven Character State tool loop', () => {
     expect(result.status).toBe('completed');
 
     const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -489,13 +498,21 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-health-rejected';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({id: sessionId});
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     const logStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     });
@@ -559,7 +576,10 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-idempotent';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -584,10 +604,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     const call = Object.freeze({
       eventId: context.eventId,
@@ -632,7 +649,10 @@ describe('plugin-driven Character State tool loop', () => {
     const sessionId = 'session-plugin-patch-idempotent-replay';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
@@ -657,10 +677,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     const originalCall = Object.freeze({
       eventId: context.eventId,
@@ -682,10 +699,7 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     const interveningCall = Object.freeze({
       eventId: interveningContext.eventId,
@@ -839,7 +853,9 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('isolates default in-memory Character State by session object', async () => {
-    const firstSession = createConversationSession();
+    const firstSession = createConversationSession({
+      character: testCharacterProfile,
+    });
     const firstLogStore = createRuntimeLogStore();
     const firstAdapter = createSequencedAdapter([
       {
@@ -871,7 +887,9 @@ describe('plugin-driven Character State tool loop', () => {
       roleModelAdapter: firstAdapter,
     });
 
-    const secondSession = createConversationSession();
+    const secondSession = createConversationSession({
+      character: testCharacterProfile,
+    });
     const secondLogStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
     const secondAdapter: RoleModelAdapter = Object.freeze({

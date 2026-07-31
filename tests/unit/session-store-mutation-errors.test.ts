@@ -42,7 +42,10 @@ describe('local runtime session catalog mutation failures', () => {
       await import('../../src/runtime/storage/session-store.ts');
 
     await expect(
-      createLocalRuntimeSessionStore({storeRoot}).createSession({
+      createLocalRuntimeSessionStore({
+        storeRoot,
+        characterId: 'mira',
+      }).createSession({
         sessionId: 'rolled-back-session',
         createdAt: '2026-07-11T00:00:00.000Z',
       }),
@@ -55,7 +58,10 @@ describe('local runtime session catalog mutation failures', () => {
     const storeRoot = await createTempStoreRoot();
     const {createLocalRuntimeSessionStore} =
       await import('../../src/runtime/storage/session-store.ts');
-    const store = createLocalRuntimeSessionStore({storeRoot});
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    });
     await store.createSession({
       sessionId: 'existing-session',
       createdAt: '2026-07-11T00:00:00.000Z',

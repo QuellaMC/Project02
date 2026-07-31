@@ -4,9 +4,10 @@
  * (runtime, plugins, role-model, core, shared) may import it.
  */
 export {
-  createConfiguredProject02PluginHost,
+  classifyRuntimePluginCatalogDiscovery,
   createConfiguredProject02PluginHostFromPlan,
   createRuntimePluginCatalogSnapshot,
+  discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
   resolveRuntimePluginActivation,
   type PreparedProject02PluginActivationPlan,
@@ -15,7 +16,22 @@ export {
   type RuntimePluginActivationResult,
   type RuntimePluginActivationSnapshot,
   type RuntimePluginActivationStatus,
+  type RuntimePluginCatalogDiscovery,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition,
 } from './activation.ts';
-export {resolveRuntimeCliStartup} from './startup.ts';
+export {
+  initializeProject02CharacterRuntime,
+  resolveRuntimeCliStartup,
+  type RuntimeCliStartupResult,
+} from './startup.ts';
+export {
+  defaultProject02CharacterId,
+  prepareProject02CharacterActivation,
+  type Project02CharacterActivation,
+} from './character.ts';
+export {
+  enforceCharacterPluginExpectations,
+  planCharacterPackagePluginMaterialization,
+  type CharacterPackagePluginMaterializationPlan,
+} from './character-plugins.ts';

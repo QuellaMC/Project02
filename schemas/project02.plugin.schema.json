@@ -110,8 +110,15 @@
         "config": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["fields"],
+          "required": ["scope", "fields"],
           "properties": {
+            "scope": {
+              "enum": [
+                "global_with_character_overrides",
+                "character_only"
+              ],
+              "description": "Whether enablement and non-secret settings may be authored globally with character overrides, or only in character/package config. Secrets always remain global."
+            },
             "fields": {
               "type": "array",
               "items": {"$ref": "#/definitions/configField"}
@@ -187,6 +194,27 @@
             "file_store": {"$ref": "#/definitions/accessLevel"},
             "turn_context": {"$ref": "#/definitions/accessLevel"},
             "model_input": {"$ref": "#/definitions/accessLevel"}
+          }
+        }
+      },
+      "if": {
+        "type": "object",
+        "required": ["config"],
+        "properties": {
+          "config": {
+            "type": "object",
+            "required": ["scope"],
+            "properties": {"scope": {"const": "character_only"}}
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "description": "Character-only plugins cannot be enabled by the manifest default; enable them in a character package or character config.",
+        "properties": {
+          "activation": {
+            "type": "object",
+            "properties": {"defaultEnabled": {"const": false}}
           }
         }
       }

@@ -9,6 +9,7 @@ import type {
   RuntimePluginAfterTurnCommittedContext,
   RuntimePluginContext,
   RuntimePluginFileStore,
+  RuntimePluginManifest,
 } from '../api/types.ts';
 import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
@@ -27,6 +28,8 @@ export function createPluginHookContext<
 >(options: {
   readonly context: TContext;
   readonly plugin: RuntimePlugin;
+  readonly policyManifest?: RuntimePluginManifest | undefined;
+  readonly pluginId?: string | undefined;
   readonly access: RuntimePluginAccessSnapshot;
   readonly deadlineAt: number;
   readonly signal: AbortSignal;
@@ -38,6 +41,8 @@ export function createPluginHookContext<
   readonly createFileStore?:
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
 }): PluginHookContextScope<TContext> {
+  const pluginId = options.pluginId ?? options.plugin.manifest.id;
+  const policyManifest = options.policyManifest ?? options.plugin.manifest;
   const grantsFileStore = runtimePluginGrantsAccess({
     access: options.access,
     accessName: 'file_store',
@@ -52,7 +57,7 @@ export function createPluginHookContext<
     }) &&
     (options.allowFileStoreWrites ??
       sideEffectLevelAllowsFileStoreWrites(
-        options.plugin.manifest.runtimePolicy.sideEffectLevel,
+        policyManifest.runtimePolicy.sideEffectLevel,
       ));
   const baseFileStore = grantsFileStore
     ? (options.fileStoreTransaction?.fileStoreFor({
@@ -63,7 +68,7 @@ export function createPluginHookContext<
         ...(options.sessionIdentity === undefined
           ? {}
           : {sessionIdentity: options.sessionIdentity}),
-        pluginId: options.plugin.manifest.id,
+        pluginId,
       }) ??
       options.createFileStore?.({
         ...(options.storeRoot === undefined
@@ -73,13 +78,13 @@ export function createPluginHookContext<
         ...(options.sessionIdentity === undefined
           ? {}
           : {sessionIdentity: options.sessionIdentity}),
-        pluginId: options.plugin.manifest.id,
+        pluginId,
       }))
     : undefined;
 
   if (grantsFileStore && baseFileStore === undefined) {
     throw new Error(
-      `Plugin "${options.plugin.manifest.id}" has file_store access, but the ` +
+      `Plugin "${pluginId}" has file_store access, but the ` +
         'host was created without a file-store provider.',
     );
   }
@@ -101,7 +106,7 @@ export function createPluginHookContext<
   // Preserve the hook context subtype while making fileStore injection entirely host-controlled.
   const context = Object.freeze({
     ...contextWithScrubbedTurn,
-    pluginId: options.plugin.manifest.id,
+    pluginId,
     deadlineAt: options.deadlineAt,
     signal: options.signal,
     ...(fileStore === undefined ? {} : {fileStore: fileStore.fileStore}),

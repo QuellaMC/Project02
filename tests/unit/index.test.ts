@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {readFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
@@ -95,6 +96,7 @@ describe('role-model module smoke', () => {
 
   it('keeps root runtime compatibility exports usable together', async () => {
     const session = createConversationSession({
+      character: testCharacterProfile,
       id: 'root-compat-session',
     });
     const logStore = createRuntimeLogStore();

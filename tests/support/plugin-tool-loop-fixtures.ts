@@ -1,3 +1,4 @@
+import {testCharacterProfile} from './character-fixtures.ts';
 import {
   createConversationSession,
   createRuntimeEventIdentity,
@@ -193,7 +194,9 @@ export function createSequencedAdapter(
 }
 
 export function createConversationAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
+  logStore: RuntimeLogStore = createRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
+  }),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -265,7 +268,9 @@ export function createCharacterAppendFailingLogStore(
 }
 
 export function createRuntimeTurnCompletedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
+  logStore: RuntimeLogStore = createRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
+  }),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -279,8 +284,8 @@ export function createRuntimeTurnCompletedAppendFailingLogStore(
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -319,8 +324,8 @@ export function createRuntimeTurnCompletedAppendThenThrowLogStore(
 
       return stored;
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -358,8 +363,8 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
     appendRawEvent(record) {
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -380,7 +385,9 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
 }
 
 export function createAfterTurnCommittedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
+  logStore: RuntimeLogStore = createRuntimeLogStore({
+    boundCharacter: testCharacterProfile,
+  }),
 ): RuntimeLogStore {
   return Object.freeze({
     ...delegateRuntimeLogStoreLifecycle(logStore),
@@ -394,8 +401,8 @@ export function createAfterTurnCommittedAppendFailingLogStore(
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -466,8 +473,8 @@ export function createToolCallFinishedAppendFailingLogStore(
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -546,6 +553,7 @@ export function createHealthRejectingPlugin() {
       },
       declaredPlugins: ['health'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -608,6 +616,7 @@ export function createHandleFileStoreWritePlugin(
           ? ['tool_provider', 'handle_tool_call']
           : ['tool_provider', 'handle_tool_call', 'health'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -758,6 +767,7 @@ export function createAfterTurnCommittedProbeHost(
           },
           declaredPlugins: ['after_turn_committed'],
           config: {
+            scope: 'global_with_character_overrides',
             fields: [],
           },
           localTrustLevel: 'test_fixture',
@@ -837,6 +847,7 @@ export function createPluginStoreRevisionFixtureHost() {
           },
           declaredPlugins: ['tool_provider', 'handle_tool_call'],
           config: {
+            scope: 'global_with_character_overrides',
             fields: [],
           },
           localTrustLevel: 'test_fixture',
@@ -928,15 +939,23 @@ export function transactionIdentityFromContext(context: {
 export async function createDurableCharacterStateHarness(sessionId: string) {
   const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
-  await createLocalRuntimeSessionStore({storeRoot}).createSession({
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: testCharacterProfile.id,
+  }).createSession({
     sessionId,
     createdAt: '2026-06-15T00:00:00.000Z',
   });
 
   return {
     storeRoot,
-    session: createConversationSession({id: sessionId}),
+    session: createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    }),
     logStore: createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
       storeRoot,
       sessionId,
     }),

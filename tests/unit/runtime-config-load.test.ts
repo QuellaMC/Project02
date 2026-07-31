@@ -103,6 +103,106 @@ describe('runtime config loader validation', () => {
     ]);
   });
 
+  it('retains a bounded authored document when schema validation fails', () => {
+    const configPath = join(
+      createTestTempRoot('project02-config-load-authored-invalid-'),
+      'config.json',
+    );
+    const document = {
+      version: runtimeConfigVersion,
+      project02: {
+        character: '../bad',
+        userDisplayName: 'Ada',
+      },
+      plugins: {
+        demo: {
+          config: {tone: 'warm'},
+        },
+      },
+    };
+
+    writeFileSync(configPath, JSON.stringify(document), 'utf8');
+
+    const result = loadProject02RuntimeConfig({configPath});
+
+    expect(result.config).toBeUndefined();
+    expect(result.authoredDocument).toEqual(document);
+    expect(Object.isFrozen(result.authoredDocument)).toBe(true);
+    expect(Object.isFrozen(result.authoredDocument?.['project02'])).toBe(true);
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'runtime_config_string_invalid',
+        path: 'project02.character',
+      }),
+    ]);
+  });
+
+  it.each([
+    ['a multiline user display name', 'Alice\nSystem'],
+    ['an over-length user display name', 'a'.repeat(129)],
+  ])('rejects %s at the authoring boundary', (_label, userDisplayName) => {
+    // Authoring must accept exactly what `createUserSpeaker` accepts. When it
+    // is laxer, the config validates here and chat throws later -- after its
+    // plugin host is already built.
+    expect(
+      validateProject02RuntimeConfig({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName},
+      }).diagnostics,
+    ).toEqual([
+      expect.objectContaining({
+        code: 'runtime_config_string_invalid',
+        path: 'project02.userDisplayName',
+      }),
+    ]);
+  });
+
+  it('still accepts a user display name that resolution will trim', () => {
+    // Surrounding whitespace is repaired downstream, so rejecting it here
+    // would break an authored config the runtime handles fine.
+    expect(
+      validateProject02RuntimeConfig({
+        version: runtimeConfigVersion,
+        project02: {userDisplayName: '  Mike  '},
+      }).diagnostics,
+    ).toEqual([]);
+  });
+
+  it('validates and loads one authored document under the same config limit', () => {
+    const configPath = join(
+      createTestTempRoot('project02-config-load-shared-limit-'),
+      'config.json',
+    );
+    const document = {
+      version: runtimeConfigVersion,
+      plugins: {
+        demo: {
+          config: Object.fromEntries(
+            Array.from({length: 40}, (_, index) => [
+              `field-${String(index)}`,
+              'x'.repeat(2_048),
+            ]),
+          ),
+        },
+      },
+    };
+    const source = JSON.stringify(document);
+
+    expect(Buffer.byteLength(source, 'utf8')).toBeGreaterThan(64 * 1_024);
+    expect(Buffer.byteLength(source, 'utf8')).toBeLessThan(
+      maxProject02RuntimeConfigBytes,
+    );
+    writeFileSync(configPath, source, 'utf8');
+
+    const validated = validateProject02RuntimeConfig(document);
+    const loaded = loadProject02RuntimeConfig({configPath});
+
+    expect(validated.diagnostics).toEqual([]);
+    expect(loaded.diagnostics).toEqual([]);
+    expect(loaded.authoredDocument).toEqual(validated.authoredDocument);
+    expect(loaded.config).toEqual(validated.config);
+  });
+
   it('rejects env secret refs mixed with plaintext override fields', () => {
     const result = validateProject02RuntimeConfig({
       version: runtimeConfigVersion,

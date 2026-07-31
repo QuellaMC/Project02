@@ -28,6 +28,7 @@ export function requiredSecretPlugin(
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'apiKey',
@@ -72,6 +73,7 @@ export function requiredSecretAndEndpointPlugin(
     manifest: {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           ...plugin.manifest.config.fields,
           {
@@ -132,6 +134,7 @@ export function firstPartyPlugin(
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'first_party',

@@ -38,6 +38,7 @@ import {
   type RoleModelDecisionRejectionReason,
   type RoleModelDecisionResult,
   type RoleModelInputEnvelope,
+  type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
   type RoleModelProviderExchangeSnapshot,
@@ -563,9 +564,34 @@ function optionalRoleModelIOSnapshot(
       'rawOutputText',
       'malformed_record',
     ),
+    ...optionalRoleModelCharacterRefOption(value['characterRef']),
     ...optionalRoleModelProviderMetadataOption(value['providerMetadata']),
     ...optionalRoleModelProviderExchangeOption(value['providerExchange']),
   });
+}
+
+function optionalRoleModelCharacterRefOption(value: unknown): {
+  readonly characterRef?: RoleModelCharacterRef;
+} {
+  if (value === undefined) {
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    throwMalformedRecord('characterRef');
+  }
+
+  return {
+    characterRef: Object.freeze({
+      id: requiredRecordString(value, 'id', 'malformed_record'),
+      version: requiredRecordString(value, 'version', 'malformed_record'),
+      personaFingerprint: requiredRecordString(
+        value,
+        'personaFingerprint',
+        'malformed_record',
+      ),
+    } satisfies RoleModelCharacterRef),
+  };
 }
 
 function optionalParsedRoleModelDecisionSnapshot(

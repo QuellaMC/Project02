@@ -72,12 +72,7 @@
 inspect request
   -&gt; config load and activation projection
   -&gt; session and durable evidence reads
-  -&gt; JSON output
-
-relay input
-  -&gt; in-memory session and log store
-  -&gt; the same runLocalUserMessageEvent runtime
-  -&gt; one visible reply</code></pre>
+  -&gt; JSON output</code></pre>
     <p>
       The user-turn runtime is the useful convergence point. Divergence appears before it in config
       and plugin composition, inside direct host dispatch, and after it in inspection and durable
@@ -205,19 +200,27 @@ relay input
       <li><strong>PR scope:</strong> deferred as a mechanical, behavior-neutral follow-up.</li>
     </ul>
 
-    <h3>Medium, uncertain: relay retains a parallel composition path</h3>
+    <h3>Resolved: relay's parallel composition path is removed</h3>
     <p>
       <strong>Responsibility:</strong> CLI dependency composition. <code>src/cli/relay.ts</code>
-      lines 23-50 creates an in-memory session and log store directly, while
-      <code>src/cli/chat.ts</code> lines 206-294 loads config, resolves activation, constructs a
-      configured host, and prepares durable runtime dependencies. Both converge on
-      <code>runLocalUserMessageEvent</code>, so core runtime behavior is shared, but relay does not
-      exercise configured plugins, provider selection, or durable storage.
+      created an in-memory session and log store directly, while chat loaded config, resolved
+      activation, constructed a configured host, and prepared durable runtime dependencies. Both
+      converged on <code>runLocalUserMessageEvent</code>, so core runtime behavior was shared, but
+      relay did not exercise configured plugins, provider selection, or durable storage.
     </p>
     <p>
-      This may be architectural drift, but repository instructions explicitly retain relay as the
-      narrow MVP smoke and compatibility path. Do not fold it into chat until the product no longer
-      needs that deterministic, dependency-light entry point.
+      This audit deferred to repository policy, which retained relay as the narrow MVP smoke and
+      compatibility path. That reading no longer holds. The audit's own question was what relay
+      stayed compatible <em>with</em>, and the answer had become only itself: nothing outside the
+      repository ran it, and a smoke path that skips configured plugins, provider selection, and
+      durable storage stops being evidence about the composition operators actually run.
+    </p>
+    <p>
+      <strong>Resolution:</strong> <code>relay</code> is deleted and <code>chat</code> is the one
+      user-turn entry point. What relay was reached for &mdash; a small, deterministic composition
+      to test through &mdash; is served by the runtime seams chat itself composes, so that coverage
+      survives without a second command to keep in step. <code>AGENTS.repo.md</code> sections 3, 4,
+      and 7 were amended so the policy this finding deferred to no longer reads as requiring it.
     </p>
 
     <h2>Duplicate-route and ownership summary</h2>
@@ -262,8 +265,8 @@ relay input
         </tr>
         <tr>
           <td>CLI composition</td>
-          <td>Full chat composition and minimal relay composition</td>
-          <td>The shared local runtime; retain relay as an explicit compatibility wrapper</td>
+          <td>Resolved &mdash; was full chat composition and minimal relay composition</td>
+          <td><code>chat</code> over the shared local runtime; relay removed, not wrapped</td>
         </tr>
       </tbody>
     </table>
@@ -306,8 +309,8 @@ relay input
         contract, and persisted record codec ownership without changing formats or validators.
       </li>
       <li>
-        Reassess relay only after repository policy removes its smoke/compatibility role. Until
-        then, keep its shared runtime call and small dependency surface.
+        <s>Reassess relay only after repository policy removes its smoke/compatibility role.</s>
+        Done: the policy was amended and relay was removed rather than reassessed in place.
       </li>
     </ol>
 
@@ -318,7 +321,6 @@ relay input
       <li>Cross-file trace, raw-event, and conversation validators remain necessary under the current three-file storage layout. Do not delete them as a shortcut.</li>
       <li>Schema-1 storage reads remain an explicitly tested persistence contract. The unreleased runtime-config <code>enabledPlugins</code> route is not retained; all configuration and tests use <code>plugins.&lt;id&gt;.enabled</code>, while <code>defaultMemoryProvider</code> only chooses among active providers.</li>
       <li><code>src/plugins/adapter-proofs/</code> contains test and compatibility proof mapping, not a second production plugin runtime.</li>
-      <li>The relay composition difference is intentional for now because the repository retains it as a narrow smoke path.</li>
       <li>Splitting the large user-turn runtime orchestration is deferred. No independent duplicate runtime route was proven, and a broad runtime framework would exceed the evidence in this audit.</li>
     </ul>
   </main>

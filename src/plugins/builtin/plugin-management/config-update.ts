@@ -94,7 +94,6 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
 export function reconcilePreparedRuntimePluginConfigEffect(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string | undefined;
 }) {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
@@ -124,17 +123,9 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     actor: 'agent',
     operation,
   });
-  const targetConfigPath = requiredRuntimePluginConfigControl(
-    options.state,
-  ).resolveTargetPath({
-    ...(options.state.configPath === undefined
-      ? {}
-      : {configPath: options.state.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.state.env === undefined ? {} : {env: options.state.env}),
-  });
+  const target = options.state.configControl.target;
 
-  if (targetConfigPath !== options.effect.targetConfigPath) {
+  if (target.canonicalConfigPath !== options.effect.targetConfigPath) {
     throw requiredRuntimePluginConfigControl(options.state).createConflictError(
       `Prepared config effect "${options.effect.effectId}" targets another runtime config path.`,
     );
@@ -143,7 +134,6 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   let reconciliation: 'already_applied' | 'applied';
 
@@ -161,17 +151,14 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     const prepared = requiredRuntimePluginConfigControl(
       options.state,
     ).prepareOperation({
-      manifest,
-      actor: 'agent',
+      target,
       expectedFingerprint: options.effect.expectedFingerprint,
-      operation,
-      ...(options.state.configPath === undefined
-        ? {}
-        : {configPath: options.state.configPath}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.state.env === undefined ? {} : {env: options.state.env}),
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: operation,
+      },
     });
 
     if (
@@ -186,17 +173,14 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
     const result = requiredRuntimePluginConfigControl(
       options.state,
     ).applyOperation({
-      manifest,
-      actor: 'agent',
+      target,
       expectedFingerprint: options.effect.expectedFingerprint,
-      operation,
-      ...(options.state.configPath === undefined
-        ? {}
-        : {configPath: options.state.configPath}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.state.env === undefined ? {} : {env: options.state.env}),
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: operation,
+      },
     });
 
     if (result.fingerprint !== options.effect.resultFingerprint) {
@@ -260,7 +244,6 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
 export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): boolean {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
@@ -270,23 +253,14 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
     return false;
   }
 
-  const targetConfigPath = requiredRuntimePluginConfigControl(
-    options.state,
-  ).resolveTargetPath({
-    ...(options.state.configPath === undefined
-      ? {}
-      : {configPath: options.state.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.state.env === undefined ? {} : {env: options.state.env}),
-  });
+  const target = options.state.configControl.target;
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return !(
-    targetConfigPath !== options.effect.targetConfigPath ||
+    target.canonicalConfigPath !== options.effect.targetConfigPath ||
     inspection.fingerprint !== options.effect.expectedFingerprint
   );
 }
@@ -294,7 +268,6 @@ export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
 export function createPreparedRuntimePluginConfigEffectConfirmationPreview(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): RuntimePluginJsonObject {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
@@ -330,7 +303,6 @@ export function createPreparedRuntimePluginConfigEffectConfirmationPreview(optio
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const inspectedField = inspection.fields.find(
     candidate => candidate.name === field.name,
@@ -368,7 +340,6 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
    * update must stop promising appliesTo: next_turn in that case.
    */
   readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
-  readonly storeRoot?: string;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
 
@@ -418,7 +389,6 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
   const blockingDiagnostic = inspection.diagnostics.find(
     diagnostic => diagnostic.severity === 'error',
@@ -442,20 +412,18 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   let targetConfigPath: string;
 
   try {
+    const target = options.state.configControl.target;
     const prepared = requiredRuntimePluginConfigControl(
       options.state,
     ).prepareOperation({
-      manifest,
-      actor: 'agent',
+      target,
       expectedFingerprint,
-      operation,
-      ...(options.state.configPath === undefined
-        ? {}
-        : {configPath: options.state.configPath}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
-      ...(options.state.env === undefined ? {} : {env: options.state.env}),
+      request: {
+        kind: 'plugin_config',
+        manifest,
+        actor: 'agent',
+        fieldOperation: operation,
+      },
     });
 
     resultFingerprint = prepared.resultFingerprint;

@@ -1,11 +1,22 @@
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {
+  testCharacterProfile,
+  writeTestCharacterPackage,
+} from '../support/character-fixtures.ts';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {PassThrough, Readable} from 'node:stream';
 
 import {describe, expect, it, vi} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeLocationForTest,
+} from '../support/runtime-config.ts';
+import {
+  createInitializedTestStoreRoot,
+  withScopedProcessEnv,
+} from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
 import {createConversationSession} from '../../src/core/index.ts';
@@ -25,16 +36,22 @@ import {
 import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
-  inspectRuntimePluginConfig,
   runtimeConfigEnvVarName,
+  inspectRuntimePluginConfig,
 } from '../../src/runtime/config/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
-import {createLocalRuntimeStorageLayout} from '../../src/runtime/storage/layout-contract.ts';
+import {
+  characterDataDirPath,
+  createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
+  decodeStorageSchemaMarker,
+} from '../../src/runtime/storage/layout-contract.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {nvidiaApiKeyEnvName} from '../../src/role-model/providers/nvidia.ts';
 import {runChatCli, runChatCliFromArgs} from '../../src/cli/chat/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
+import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 const realSetTimeout = globalThis.setTimeout;
@@ -43,6 +60,7 @@ describe('chat CLI folded top-level model text', () => {
   it('hides top-level model text by default', async () => {
     let stdout = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['hello\n/exit\n']),
       stdout: collect(chunk => {
@@ -55,12 +73,26 @@ describe('chat CLI folded top-level model text', () => {
     expect(exitCode).toBe(0);
     expect(stdout).not.toContain('folded model note');
   });
+
+  it('rejects a direct invocation without a session or character profile', async () => {
+    await expect(
+      runChatCli({
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+      }),
+    ).rejects.toThrow(
+      'Chat startup requires a session or a character profile.',
+    );
+  });
 });
 
 describe('chat CLI trace summary', () => {
   it('keeps provider and terminal tool evidence when terminal persistence fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['hello\n']),
       stdout: collect(() => {}),
@@ -116,6 +148,7 @@ describe('chat CLI trace summary', () => {
     let adapterRound = 0;
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -174,6 +207,7 @@ describe('chat CLI trace summary', () => {
   it('recovers requested calls from interim evidence when tool-start tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -216,6 +250,7 @@ describe('chat CLI trace summary', () => {
   it('keeps tool-only requested evidence when tool-start tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -252,6 +287,7 @@ describe('chat CLI trace summary', () => {
   it('keeps host-executed evidence when tool-finish tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -288,6 +324,7 @@ describe('chat CLI trace summary', () => {
   it('keeps interim requested evidence when interim tracing fails', async () => {
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['inspect plugins\n']),
       stdout: collect(() => {}),
@@ -332,15 +369,24 @@ describe('chat CLI trace summary', () => {
       'project02-chat-visible-trace-failure-',
     );
     const sessionId = 'visible-trace-failure';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-10T00:00:00.000Z',
     });
-    const backingLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const backingLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+    });
     let stderr = '';
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost({
-        storeRoot,
+        storeRoot: characterDataDirPath(storeRoot, 'mira'),
         sessionId,
       }),
       stdin: Readable.from(['hello\n']),
@@ -349,7 +395,10 @@ describe('chat CLI trace summary', () => {
         stderr += chunk;
       }),
       traceMode: true,
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore: createToolTraceFailingLogStore(
         'visible_reply_committed',
         backingLogStore,
@@ -380,7 +429,12 @@ describe('chat CLI trace summary', () => {
       terminalToolCalls: ['visible_reply'],
     });
 
-    const reopenedLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const reopenedLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+    });
 
     expect(
       reopenedLogStore.conversationMessages().map(message => message.text),
@@ -439,6 +493,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['check plugins\n/exit\n']),
       stdout: collect(() => {}),
@@ -501,6 +556,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try an unavailable tool\n/exit\n']),
       stdout: collect(() => {}),
@@ -580,6 +636,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try invalid plugin arguments\n/exit\n']),
       stdout: collect(() => {}),
@@ -629,6 +686,7 @@ describe('chat CLI trace summary', () => {
     };
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['try an invalid state patch\n/exit\n']),
       stdout: collect(() => {}),
@@ -646,6 +704,122 @@ describe('chat CLI trace summary', () => {
       executedToolCalls: ['character_state.patch'],
       terminalToolCalls: ['visible_reply'],
     });
+  });
+});
+
+describe('chat CLI character selection', () => {
+  // Storage staying clean is startup-seam behavior, asserted once in
+  // tests/unit/runtime-config-overlay.test.ts. This covers only the chat
+  // CLI's own job: routing character_invalid to an exit code and message.
+  it('maps an invalid explicit character to a usage error', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-invalid-character-');
+    let stderr = '';
+
+    const exitCode = await runChatCliFromArgs(
+      [
+        '--store',
+        storeRoot,
+        '--character',
+        '../bad',
+        '--new-session',
+        'invalid-character',
+      ],
+      {
+        stdin: Readable.from([]),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('--character must start with a letter');
+  });
+
+  it('speaks as an operator-installed character selected by config', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-character-swap-');
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {character: 'zeta'},
+    });
+    writeTestCharacterPackage(storeRoot, {
+      id: 'zeta',
+      displayName: 'Zeta',
+      personaSections: ['You are Zeta, a fixture character.'],
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'zeta-session'],
+      {
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Zeta is ready.');
+    expect(stdout).toContain('Zeta:');
+  });
+
+  it('rejects an invalid session id before materializing any character state', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-bad-session-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'bad/session'],
+      {
+        stdin: Readable.from([]),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain(
+      'Local runtime session ID must use only letters, numbers, dots, ' +
+        'underscores, or hyphens.',
+    );
+    // Session args were validated before startup: no home marker and
+    // no character data directory were created.
+    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
+  });
+
+  it('rejects an unknown configured character naming the discovered ids', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-character-missing-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {character: 'ghost'},
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'ghost-session'],
+      {
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Character "ghost" was not found');
+    expect(stderr).toContain('mira');
   });
 });
 
@@ -712,7 +886,7 @@ describe('chat CLI provider selection', () => {
   });
 
   it('reports an invalid provider environment value as a CLI error', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-chat-provider-invalid-env-',
     );
     let stderr = '';
@@ -730,6 +904,35 @@ describe('chat CLI provider selection', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('must be either "local" or "nvidia"');
+    // The env is judged in the startup planning phase, so the value that
+    // makes this command unusable is reported before the run sets up the
+    // character. The store itself is arrangement — the operator already
+    // has one — so what a rejected run must not leave behind is the
+    // character data directory this command would have created.
+    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
+  });
+
+  it('reports an invalid provider value from the home env file before materializing character state', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-provider-env-file-');
+    let stderr = '';
+    writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=bogus\n`);
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'invalid-provider-env-file'],
+      {
+        stdin: Readable.from(['hello\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('must be either "local" or "nvidia"');
+    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
   });
 
   it('releases the durable writer lease when the provider turn fails', async () => {
@@ -775,10 +978,6 @@ describe('chat CLI provider selection', () => {
   it('lets the selected store env override the cwd dotenv defaults', async () => {
     const cwdRoot = createTestTempRoot('project02-chat-cwd-env-');
     const storeRoot = createTestTempRoot('project02-chat-store-env-');
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stderr = '';
 
     writeFileSync(
@@ -791,33 +990,33 @@ describe('chat CLI provider selection', () => {
       `${roleModelProviderEnvName}=nvidia\n${nvidiaApiKeyEnvName}=\n`,
     );
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
-      process.chdir(cwdRoot);
-
-      const exitCode = await runChatCliFromArgs(
-        ['--store', storeRoot, '--new-session', 'selected-store-env'],
-        {
-          stdin: Readable.from(['hello\n']),
-          stdout: collect(() => {}),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: undefined,
         },
-      );
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--store', storeRoot, '--new-session', 'selected-store-env'],
+          {
+            stdin: Readable.from(['hello\n']),
+            stdout: collect(() => {}),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toContain(
-        `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`,
-      );
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stderr).toContain(
+          `NVIDIA provider requires ${nvidiaApiKeyEnvName}.`,
+        );
+      },
+    );
   });
 
   it('ignores process and cwd dotenv runtime config selectors when --store is explicit', async () => {
@@ -825,14 +1024,10 @@ describe('chat CLI provider selection', () => {
     const defaultStoreRoot = createTestTempRoot(
       'project02-chat-default-config-store-',
     );
-    const selectedStoreRoot = createTestTempRoot(
+    const selectedStoreRoot = await createInitializedTestStoreRoot(
       'project02-chat-selected-config-store-',
     );
     const sessionId = 'selected-store-config';
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     const defaultConfigPath = writeRuntimeConfig(
       join(defaultStoreRoot, 'config.json'),
       {
@@ -847,99 +1042,100 @@ describe('chat CLI provider selection', () => {
       'utf8',
     );
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      process.env[runtimeConfigEnvVarName] = defaultConfigPath;
-      process.chdir(cwdRoot);
-
-      const exitCode = await runChatCliFromArgs(
-        ['--store', selectedStoreRoot, '--new-session', sessionId],
-        {
-          stdin: Readable.from(['/exit\n']),
-          stdout: collect(() => {}),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: defaultConfigPath,
         },
-      );
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--store', selectedStoreRoot, '--new-session', sessionId],
+          {
+            stdin: Readable.from(['/exit\n']),
+            stdout: collect(() => {}),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      expect(exitCode).toBe(0);
-      expect(stderr).toBe('');
-      await expect(
-        createLocalRuntimeSessionStore({
-          storeRoot: selectedStoreRoot,
-        }).readSession(sessionId),
-      ).resolves.toMatchObject({
-        sessionId,
-      });
-      expect(
-        existsSync(
-          createLocalRuntimeStorageLayout({storeRoot: defaultStoreRoot})
-            .sessionCatalogPath,
-        ),
-      ).toBe(false);
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stderr).toBe('');
+        await expect(
+          createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+            characterId: 'mira',
+          }).readSession(sessionId),
+        ).resolves.toMatchObject({
+          sessionId,
+        });
+        expect(
+          existsSync(
+            createLocalRuntimeStorageLayout({
+              storeRoot: characterDataDirPath(defaultStoreRoot, 'mira'),
+            }).sessionCatalogPath,
+          ),
+        ).toBe(false);
+      },
+    );
   });
 
   it('uses an explicit store before reading an unrelated cwd dotenv', async () => {
     const cwdRoot = createTestTempRoot('project02-chat-cwd-dotenv-error-');
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-chat-selected-dotenv-error-',
     );
     const sessionId = 'selected-store-before-cwd-dotenv';
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
-      process.chdir(cwdRoot);
-
-      const exitCode = await runChatCliFromArgs(
-        ['--store', storeRoot, '--new-session', sessionId],
-        {
-          stdin: Readable.from(['/exit\n']),
-          stdout: collect(chunk => {
-            stdout += chunk;
-          }),
-          stderr: collect(chunk => {
-            stderr += chunk;
-          }),
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: undefined,
         },
-      );
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--store', storeRoot, '--new-session', sessionId],
+          {
+            stdin: Readable.from(['/exit\n']),
+            stdout: collect(chunk => {
+              stdout += chunk;
+            }),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      expect(exitCode).toBe(0);
-      expect(stdout).toContain('Mira is ready.');
-      expect(stderr).toBe('');
-      await expect(
-        createLocalRuntimeSessionStore({storeRoot}).readSession(sessionId),
-      ).resolves.toMatchObject({
-        sessionId,
-      });
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain('Mira is ready.');
+        expect(stderr).toBe('');
+        await expect(
+          createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(storeRoot, 'mira'),
+            characterId: 'mira',
+          }).readSession(sessionId),
+        ).resolves.toMatchObject({
+          sessionId,
+        });
+      },
+    );
   });
 
   it('uses a process-env selected runtime config before reading an unrelated cwd dotenv', async () => {
     const cwdRoot = createTestTempRoot('project02-chat-env-cwd-dotenv-error-');
-    const selectedStoreRoot = createTestTempRoot(
+    const selectedStoreRoot = await createInitializedTestStoreRoot(
       'project02-chat-env-selected-store-',
     );
     const configRoot = createTestTempRoot(
@@ -952,47 +1148,47 @@ describe('chat CLI provider selection', () => {
       },
     );
     const sessionId = 'env-selected-store-before-cwd-dotenv';
-    const previousCwd = process.cwd();
-    const previousProvider = process.env[roleModelProviderEnvName];
-    const previousApiKey = process.env[nvidiaApiKeyEnvName];
-    const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
 
-    try {
-      Reflect.deleteProperty(process.env, roleModelProviderEnvName);
-      Reflect.deleteProperty(process.env, nvidiaApiKeyEnvName);
-      process.env[runtimeConfigEnvVarName] = configPath;
-      process.chdir(cwdRoot);
+    await withScopedProcessEnv(
+      {
+        cwd: cwdRoot,
+        env: {
+          [roleModelProviderEnvName]: undefined,
+          [nvidiaApiKeyEnvName]: undefined,
+          [runtimeConfigEnvVarName]: configPath,
+        },
+      },
+      async () => {
+        const exitCode = await runChatCliFromArgs(
+          ['--new-session', sessionId],
+          {
+            stdin: Readable.from(['/exit\n']),
+            stdout: collect(chunk => {
+              stdout += chunk;
+            }),
+            stderr: collect(chunk => {
+              stderr += chunk;
+            }),
+          },
+        );
 
-      const exitCode = await runChatCliFromArgs(['--new-session', sessionId], {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-      });
-
-      expect(exitCode).toBe(0);
-      expect(stdout).toContain('Mira is ready.');
-      expect(stderr).toBe('');
-      await expect(
-        createLocalRuntimeSessionStore({
-          storeRoot: selectedStoreRoot,
-        }).readSession(sessionId),
-      ).resolves.toMatchObject({
-        sessionId,
-      });
-    } finally {
-      process.chdir(previousCwd);
-      restoreProcessEnvValue(roleModelProviderEnvName, previousProvider);
-      restoreProcessEnvValue(nvidiaApiKeyEnvName, previousApiKey);
-      restoreProcessEnvValue(runtimeConfigEnvVarName, previousRuntimeConfig);
-    }
+        expect(exitCode).toBe(0);
+        expect(stdout).toContain('Mira is ready.');
+        expect(stderr).toBe('');
+        await expect(
+          createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
+            characterId: 'mira',
+          }).readSession(sessionId),
+        ).resolves.toMatchObject({
+          sessionId,
+        });
+      },
+    );
   });
 
   it('loads the runtime store env before selecting the default chat provider', async () => {
@@ -1125,7 +1321,10 @@ describe('chat CLI provider selection', () => {
       'project02-chat-activation-before-env-',
     );
     const plugin = createRequiredConfigPlugin('chat.required-config');
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
+    const homeLayout = createProject02HomeLayout({homeRoot: storeRoot});
+    const layout = createLocalRuntimeStorageLayout({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    });
     let stdout = '';
     let stderr = '';
 
@@ -1136,7 +1335,7 @@ describe('chat CLI provider selection', () => {
         },
       },
     });
-    mkdirSync(layout.envPath);
+    mkdirSync(homeLayout.envPath);
 
     const exitCode = await runChatCliFromArgs(
       ['--store', storeRoot, '--new-session', 'activation-before-env'],
@@ -1176,7 +1375,7 @@ describe('chat CLI provider selection', () => {
       'project02-chat-mixed-activation-env-',
     );
     const plugin = createRequiredSecretAndConfigPlugin('chat.mixed-config');
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
+    const homeLayout = createProject02HomeLayout({homeRoot: storeRoot});
     const envVar = 'PROJECT02_CHAT_MIXED_SECRET_3452532128';
     let stdout = '';
     let stderr = '';
@@ -1192,7 +1391,7 @@ describe('chat CLI provider selection', () => {
         },
       },
     });
-    writeFileSync(layout.envPath, `${envVar}=chat-secret\n`, 'utf8');
+    writeFileSync(homeLayout.envPath, `${envVar}=chat-secret\n`, 'utf8');
 
     const exitCode = await runChatCliFromArgs(
       ['--store', storeRoot, '--new-session', 'mixed-activation-env'],
@@ -1236,11 +1435,19 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'plugin-config-approval-session';
     const configurablePlugin = createChatConfigurablePlugin();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await materializeChatCharacterConfig({
+      storeRoot,
+      configPath,
+      plugin: configurablePlugin,
+    });
     const fingerprint = inspectRuntimePluginConfig({
+      targetScope: 'character',
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     }).fingerprint;
     let adapterRound = 0;
     let stdout = '';
@@ -1304,10 +1511,13 @@ describe('chat CLI plugin lifecycle', () => {
       },
     );
     const committed = inspectRuntimePluginConfig({
+      targetScope: 'character',
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(exitCode).toBe(0);
@@ -1334,11 +1544,19 @@ describe('chat CLI plugin lifecycle', () => {
       const sessionId = 'plugin-config-slow-approval-session';
       const configurablePlugin = createChatConfigurablePlugin();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      await materializeChatCharacterConfig({
+        storeRoot,
+        configPath,
+        plugin: configurablePlugin,
+      });
       const before = inspectRuntimePluginConfig({
+        targetScope: 'character',
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
-        configPath,
-        storeRoot,
       });
       let adapterRound = 0;
       let stdout = '';
@@ -1413,10 +1631,13 @@ describe('chat CLI plugin lifecycle', () => {
       expect(stderr).toBe('');
       expect(stdout).toContain('Mira: Plugin config request finished.');
       const after = inspectRuntimePluginConfig({
+        targetScope: 'character',
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
-        configPath,
-        storeRoot,
       });
 
       expect({
@@ -1440,11 +1661,19 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'plugin-config-injected-session';
     const configurablePlugin = createChatConfigurablePlugin();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    await materializeChatCharacterConfig({
+      storeRoot,
+      configPath,
+      plugin: configurablePlugin,
+    });
     const before = inspectRuntimePluginConfig({
+      targetScope: 'character',
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     });
     let adapterRound = 0;
     let confirmationCalls = 0;
@@ -1515,10 +1744,13 @@ describe('chat CLI plugin lifecycle', () => {
       },
     );
     const after = inspectRuntimePluginConfig({
+      targetScope: 'character',
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: storeRoot,
+      }),
       manifest: configurablePlugin.manifest,
       pluginManifests: [configurablePlugin.manifest],
-      configPath,
-      storeRoot,
     });
 
     expect(exitCode).toBe(0);
@@ -1541,11 +1773,19 @@ describe('chat CLI plugin lifecycle', () => {
       const sessionId = 'plugin-config-timeout-session';
       const configurablePlugin = createChatConfigurablePlugin();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+      await materializeChatCharacterConfig({
+        storeRoot,
+        configPath,
+        plugin: configurablePlugin,
+      });
       const before = inspectRuntimePluginConfig({
+        targetScope: 'character',
+        runtimeLocation: runtimeLocationForTest({
+          configPath: configPath,
+          storeRoot: storeRoot,
+        }),
         manifest: configurablePlugin.manifest,
         pluginManifests: [configurablePlugin.manifest],
-        configPath,
-        storeRoot,
       });
       const approvalTimeoutMs = 5 * 60_000;
 
@@ -1627,10 +1867,13 @@ describe('chat CLI plugin lifecycle', () => {
       expect(stdout).toContain('Plugin tone was not changed.');
       expect(
         inspectRuntimePluginConfig({
+          targetScope: 'character',
+          runtimeLocation: runtimeLocationForTest({
+            configPath: configPath,
+            storeRoot: storeRoot,
+          }),
           manifest: configurablePlugin.manifest,
           pluginManifests: [configurablePlugin.manifest],
-          configPath,
-          storeRoot,
         }).fingerprint,
       ).toBe(before.fingerprint);
     } finally {
@@ -1651,6 +1894,7 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       stdin: Readable.from(['/exit\n']),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
@@ -1663,10 +1907,7 @@ describe('chat CLI plugin lifecycle', () => {
     expect(sessionEndContexts[0]).toMatchObject({
       sessionId: 'local-session',
       currentUserMessage: '/exit',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
@@ -1694,12 +1935,13 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('preserves an injected plugin host when configured plugin activation would fail', async () => {
     const storeRoot = createTestTempRoot('project02-chat-injected-host-');
+    const configuredPlugin = createRequiredConfigPlugin(
+      'chat.injected-required-config',
+    );
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
-        'character-state': {
-          config: {
-            typoo: true,
-          },
+        [configuredPlugin.manifest.id]: {
+          enabled: true,
         },
       },
     });
@@ -1713,6 +1955,7 @@ describe('chat CLI plugin lifecycle', () => {
       enabledPluginIds: [runtimePluginId, sessionEndPlugin.manifest.id],
     });
     let stderr = '';
+    let configuredFactoryCalls = 0;
 
     const exitCode = await runChatCliFromArgs(
       [
@@ -1730,15 +1973,29 @@ describe('chat CLI plugin lifecycle', () => {
           stderr += chunk;
         }),
         pluginHost,
+        factories: {
+          [configuredPlugin.manifest.id]: {
+            manifest: configuredPlugin.manifest,
+            create() {
+              configuredFactoryCalls += 1;
+              throw new Error(
+                'injected plugin host must bypass configured factories',
+              );
+            },
+          },
+        },
       },
     );
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
+    expect(configuredFactoryCalls).toBe(0);
     expect(sessionEndContexts).toHaveLength(1);
 
     const storedRawEvents = createFileRuntimeLogStore({
-      storeRoot,
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     }).rawEvents();
 
@@ -1828,10 +2085,7 @@ describe('chat CLI plugin lifecycle', () => {
     expect(shutdownContexts).toHaveLength(1);
     expect(shutdownContexts[0]).toMatchObject({
       sessionId,
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     });
     expect(shutdownContexts[0]?.deadlineAt).toBeGreaterThan(Date.now());
     expect(shutdownContexts[0]?.signal.aborted).toBe(false);
@@ -1896,7 +2150,9 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const storedRawEvents = createFileRuntimeLogStore({
-      storeRoot,
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     }).rawEvents();
 
@@ -1938,7 +2194,10 @@ describe('chat CLI plugin lifecycle', () => {
     let stdout = '';
     let stderr = '';
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-22T00:00:00.000Z',
     });
@@ -2061,7 +2320,9 @@ describe('chat CLI plugin lifecycle', () => {
   it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
     const storeRoot = createTestTempRoot('project02-chat-factory-failure-');
     const sessionId = 'manifest-factory-failure';
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
+    const layout = createLocalRuntimeStorageLayout({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+    });
     const configuredPlugin = createSessionEndPlugin(() => {});
     let factoryCalls = 0;
     let cleanupCalls = 0;
@@ -2110,13 +2371,22 @@ describe('chat CLI plugin lifecycle', () => {
     expect(stderr).toContain(
       'Configured plugin construction failed before creating a durable session.',
     );
-    expect(existsSync(layout.schemaPath)).toBe(false);
+    // The unified schema marker owns the character-data directory before
+    // plugin factories may touch it; it is not evidence that a durable
+    // session was created.
+    expect(
+      decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
+    ).toMatchObject({
+      scope: 'character-data',
+      characterId: 'mira',
+    });
     expect(existsSync(layout.sessionCatalogPath)).toBe(false);
     expect(existsSync(layout.sessionsRoot)).toBe(false);
   });
 
-  it('aborts startup when configured plugin activation reports errors', async () => {
+  it('rejects invalid configured plugin fields before materializing startup', async () => {
     const storeRoot = createTestTempRoot('project02-chat-activation-error-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         'character-state': {
@@ -2151,23 +2421,30 @@ describe('chat CLI plugin lifecycle', () => {
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
-    expect(stderr).toContain('Runtime config activation failed');
+    expect(stderr).toContain('Runtime config is invalid');
     expect(stderr).toContain('runtime_config_unknown_plugin_config_field');
     expect(stderr).toContain('plugins.character-state.config.typoo');
     expect(stderr).toContain(
       'Unknown config field "typoo" for plugin "character-state".',
     );
+    expect(existsSync(dataRoot)).toBe(false);
+    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
   });
 
   it('persists session-end hook failures when stdin closes normally', async () => {
     const storeRoot = createTestTempRoot('project02-chat-session-end-');
     const sessionId = 'session-end-failure';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-06-16T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
-      storeRoot,
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     });
     const pluginHost = createRuntimePluginHost({
@@ -2176,10 +2453,14 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       stdin: Readable.from([]),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
-      session: createConversationSession({id: sessionId}),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
       logStore,
       pluginHost,
     });
@@ -2187,7 +2468,9 @@ describe('chat CLI plugin lifecycle', () => {
     expect(exitCode).toBe(0);
 
     const storedRawEvents = createFileRuntimeLogStore({
-      storeRoot,
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId,
     }).rawEvents();
 
@@ -2259,6 +2542,7 @@ describe('chat CLI rejected-turn recovery', () => {
     let stderr = '';
     let invocations = 0;
     const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
       stdin: Readable.from(['first\nsecond\n/exit\n']),
       stdout: collect(chunk => {
@@ -2309,6 +2593,31 @@ function createTextOnlyAdapter(): RoleModelAdapter {
   };
 }
 
+async function materializeChatCharacterConfig(options: {
+  readonly storeRoot: string;
+  readonly configPath: string;
+  readonly plugin: RuntimePlugin;
+}): Promise<void> {
+  const startup = await resolveRuntimeCliStartup({
+    location: {
+      storeRoot: options.storeRoot,
+      configPath: options.configPath,
+    },
+    env: {},
+    factories: {
+      [options.plugin.manifest.id]: {
+        manifest: options.plugin.manifest,
+        create: () => options.plugin,
+      },
+    },
+    continueAfterActivationErrors: true,
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new Error('Expected character config materialization to succeed.');
+  }
+}
+
 function createChatConfigurablePlugin(): RuntimePlugin {
   return createRuntimePlugin({
     manifest: {
@@ -2325,6 +2634,7 @@ function createChatConfigurablePlugin(): RuntimePlugin {
       },
       declaredPlugins: ['tool_provider'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'tone',
@@ -2403,6 +2713,7 @@ function createSessionEndPlugin(
       },
       declaredPlugins,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -2476,6 +2787,7 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
       },
       declaredPlugins: ['on_session_end'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -2538,6 +2850,7 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
       },
       declaredPlugins: ['on_session_end'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'endpoint',
@@ -2589,6 +2902,7 @@ function createRequiredSecretAndConfigPlugin(pluginId: string): RuntimePlugin {
     manifest: {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           ...plugin.manifest.config.fields,
           {
@@ -2609,19 +2923,10 @@ function createRequiredSecretAndConfigPlugin(pluginId: string): RuntimePlugin {
 
 function writeRuntimeEnv(storeRoot: string, content: string): void {
   writeFileSync(
-    createLocalRuntimeStorageLayout({storeRoot}).envPath,
+    createProject02HomeLayout({homeRoot: storeRoot}).envPath,
     content,
     'utf8',
   );
-}
-
-function restoreProcessEnvValue(name: string, value: string | undefined): void {
-  if (value === undefined) {
-    Reflect.deleteProperty(process.env, name);
-    return;
-  }
-
-  process.env[name] = value;
 }
 
 async function waitForMicrotasks(predicate: () => boolean): Promise<void> {
@@ -2654,8 +2959,8 @@ function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
 
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);
@@ -2703,8 +3008,8 @@ function createToolTraceFailingLogStore(
     appendRawEvent(record) {
       return logStore.appendRawEvent(record);
     },
-    appendConversationMessage(record) {
-      return logStore.appendConversationMessage(record);
+    appendConversationMessage(record, expectedCharacter) {
+      return logStore.appendConversationMessage(record, expectedCharacter);
     },
     removeConversationMessages(messageIds) {
       logStore.removeConversationMessages(messageIds);

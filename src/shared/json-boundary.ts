@@ -331,7 +331,7 @@ export function redactJsonTextPreservingStructure(
   }
 }
 
-function isJsonBoundaryObject(
+export function isJsonBoundaryObject(
   value: JsonBoundaryValue,
 ): value is JsonBoundaryObject {
   return typeof value === 'object' && value !== null && !Array.isArray(value);

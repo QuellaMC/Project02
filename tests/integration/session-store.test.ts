@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
   mkdir,
   mkdtemp,
@@ -39,24 +40,6 @@ import type {LocalRuntimeSessionConversationLogReader} from '../../src/runtime/s
 import {assertLocalRuntimeSessionReadable} from '../../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
-type RuntimeControlLayoutPath = 'configPath' | 'envPath';
-const symlinkedRuntimeControlFileCases = Object.freeze([
-  {
-    description: 'config.json',
-    layoutPaths: ['configPath'],
-  },
-  {
-    description: '.env',
-    layoutPaths: ['envPath'],
-  },
-  {
-    description: 'config.json and .env',
-    layoutPaths: ['configPath', 'envPath'],
-  },
-] as const satisfies readonly {
-  readonly description: string;
-  readonly layoutPaths: readonly RuntimeControlLayoutPath[];
-}[]);
 
 describe('local runtime session store', () => {
   afterEach(async () => {
@@ -72,6 +55,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
@@ -91,6 +75,7 @@ describe('local runtime session store', () => {
 
     const reopened = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:05:00.000Z']),
     });
     const selected = await reopened.selectSession('mira-local');
@@ -104,10 +89,27 @@ describe('local runtime session store', () => {
     expect(await reopened.listSessions()).toEqual([selected, second]);
   });
 
+  it('creates sessions for a padded character ID instead of mismatching its own marker', async () => {
+    const storeRoot = await createTempStoreRoot();
+    // An embedded caller can hand this seam an unnormalized ID. The marker
+    // it writes is canonical, so a raw comparison failed the store against
+    // the identity it had just stamped, after durable state existed.
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: ' mira ',
+      now: fixedClock(['2026-07-26T00:00:00.000Z']),
+    });
+
+    const created = await store.createSession({sessionId: 'padded-id'});
+
+    await expect(store.readSession('padded-id')).resolves.toEqual(created);
+  });
+
   it('rejects a non-canonical creation clock without bricking the store', async () => {
     const storeRoot = await createTempStoreRoot();
     const invalid = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['not-a-time']),
     });
 
@@ -117,6 +119,7 @@ describe('local runtime session store', () => {
 
     const valid = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-07-11T00:00:00.000Z']),
     });
     const created = await valid.createSession({sessionId: 'good-time'});
@@ -128,6 +131,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
     const created = await store.createSession({
@@ -150,6 +154,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
@@ -175,6 +180,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
@@ -196,10 +202,30 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('requires readConversationEvidence from readers at the type level', () => {
+    // The home/character-data split made evidence mandatory: a reader
+    // without it is a compile-time migration, not a rehydrate call that
+    // fails at runtime. This fails to compile if the method becomes
+    // optional again.
+    type MessagesOnlyReader = {
+      readConversationMessages: () => readonly [];
+    };
+    type MessagesOnlyReaderIsAccepted =
+      MessagesOnlyReader extends LocalRuntimeSessionConversationLogReader
+        ? true
+        : false;
+    const messagesOnlyReaderIsAccepted: MessagesOnlyReaderIsAccepted = false;
+
+    expect(messagesOnlyReaderIsAccepted).toBe(false);
+  });
+
   it('rehydrates persisted visible conversation messages in order through the CT-02 reader seam', async () => {
     const storeRoot = await createTempStoreRoot();
-    const logStore = createRuntimeLogStore();
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
     const originalSession = createConversationSession({
+      character: testCharacterProfile,
       id: 'mira-local',
     });
 
@@ -219,6 +245,7 @@ describe('local runtime session store', () => {
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       conversationLogReader: reader,
       now: fixedClock(['2026-06-04T00:02:00.000Z']),
     });
@@ -269,6 +296,7 @@ describe('local runtime session store', () => {
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       conversationLogReader: reader,
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
@@ -329,6 +357,7 @@ describe('local runtime session store', () => {
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       conversationLogReader: reader,
       now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
@@ -374,6 +403,7 @@ describe('local runtime session store', () => {
     });
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       conversationLogReader: reader,
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
@@ -391,6 +421,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
@@ -407,6 +438,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
@@ -433,6 +465,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
@@ -453,6 +486,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z']),
     });
 
@@ -489,18 +523,13 @@ describe('local runtime session store', () => {
     );
   });
 
-  it('keeps MVP-006 schema 1 session catalogs readable through the current layout', async () => {
+  it('rejects pre-split schema 1 markers after the clean cut', async () => {
     const storeRoot = await createTempStoreRoot();
     const layout = createLocalRuntimeStorageLayout({storeRoot});
     const paths = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'mira-local',
     });
-    const metadata = {
-      sessionId: 'mira-local',
-      createdAt: '2026-06-04T00:00:00.000Z',
-      updatedAt: '2026-06-04T00:00:00.000Z',
-    };
 
     await mkdir(paths.sessionRoot, {recursive: true});
     await writeFile(
@@ -511,36 +540,34 @@ describe('local runtime session store', () => {
       })}\n`,
       'utf8',
     );
-    await writeFile(
-      layout.sessionCatalogPath,
-      `${JSON.stringify(metadata)}\n`,
-      'utf8',
-    );
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:05:00.000Z']),
     });
 
-    await expect(store.listSessions()).resolves.toEqual([metadata]);
-    await expect(store.readSession('mira-local')).resolves.toEqual(metadata);
-    expect(
-      assertLocalRuntimeSessionReadable({
-        storeRoot,
-        sessionId: 'mira-local',
-      }),
-    ).toEqual(metadata);
-
-    await expect(store.selectSession('mira-local')).resolves.toEqual({
-      ...metadata,
-      updatedAt: '2026-06-04T00:05:00.000Z',
+    await expect(store.listSessions()).rejects.toMatchObject({
+      code: 'unsupported_schema_version',
     });
-    await expect(readFile(layout.schemaPath, 'utf8')).resolves.toBe(
-      `${JSON.stringify({
-        schemaVersion: 1,
-        createdAt: '2026-06-04T00:00:00.000Z',
-      })}\n`,
-    );
+  });
+
+  it('does not report an empty store when its root is nested below a file', async () => {
+    const parentRoot = await createTempStoreRoot();
+    const blockingPath = join(parentRoot, 'not-a-directory');
+    const storeRoot = join(blockingPath, 'mira');
+
+    await writeFile(blockingPath, 'not a directory\n', 'utf8');
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    });
+
+    await expect(store.listSessions()).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'read_failed',
+    });
   });
 
   it('tolerates empty orphan session directories when the catalog was never created', async () => {
@@ -556,6 +583,8 @@ describe('local runtime session store', () => {
       layout.schemaPath,
       `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
+          characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       )}\n`,
@@ -564,6 +593,7 @@ describe('local runtime session store', () => {
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:01:00.000Z']),
     });
 
@@ -596,6 +626,8 @@ describe('local runtime session store', () => {
       layout.schemaPath,
       `${encodeStorageSchemaMarker(
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
+          characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       )}\n`,
@@ -606,6 +638,7 @@ describe('local runtime session store', () => {
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:01:00.000Z']),
     });
 
@@ -637,6 +670,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
@@ -666,6 +700,7 @@ describe('local runtime session store', () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
 
@@ -693,6 +728,7 @@ describe('local runtime session store', () => {
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
+      characterId: 'mira',
       now: fixedClock(['2026-06-04T00:02:00.000Z']),
     });
     const created = await store.createSession({
@@ -709,39 +745,46 @@ describe('local runtime session store', () => {
     );
   });
 
-  for (const testCase of symlinkedRuntimeControlFileCases) {
-    it(`initializes a fresh store containing only symlinked ${testCase.description}`, async () => {
-      const storeRoot = await createTempStoreRoot();
-      const controlTargetRoot = await createTempRoot(
-        'project02-session-store-control-target-',
-      );
-      const layout = createLocalRuntimeStorageLayout({storeRoot});
+  it('rejects a symlinked character overlay before initializing storage', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const controlTargetRoot = await createTempRoot(
+      'project02-session-store-control-target-',
+    );
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
+    const targetPath = join(controlTargetRoot, 'config.target');
 
-      for (const layoutPath of testCase.layoutPaths) {
-        const targetPath = join(controlTargetRoot, `${layoutPath}.target`);
+    await writeFile(targetPath, '{}\n', 'utf8');
+    await symlink(targetPath, layout.configPath);
 
-        await writeFile(targetPath, '{}\n', 'utf8');
-        await symlink(targetPath, layout[layoutPath]);
-      }
-
-      const store = createLocalRuntimeSessionStore({
-        storeRoot,
-        now: fixedClock(['2026-06-04T00:02:00.000Z']),
-      });
-      const created = await store.createSession({
-        sessionId: 'fresh',
-      });
-
-      expect(created).toEqual({
-        sessionId: 'fresh',
-        createdAt: '2026-06-04T00:02:00.000Z',
-        updatedAt: '2026-06-04T00:02:00.000Z',
-      });
-      await expect(readFile(layout.sessionCatalogPath, 'utf8')).resolves.toBe(
-        `${JSON.stringify(created)}\n`,
-      );
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:02:00.000Z']),
     });
-  }
+
+    await expect(
+      store.createSession({sessionId: 'fresh'}),
+    ).rejects.toMatchObject({code: 'missing_file'});
+  });
+
+  it('refuses to initialize a character data directory containing a stray .env', async () => {
+    const storeRoot = await createTempStoreRoot();
+
+    await writeFile(join(storeRoot, '.env'), 'API_KEY=nope\n', 'utf8');
+
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:02:00.000Z']),
+    });
+
+    await expect(
+      store.createSession({sessionId: 'fresh'}),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'missing_file',
+    });
+  });
 });
 
 async function createTempStoreRoot(): Promise<string> {
@@ -778,6 +821,12 @@ function createConversationLogReader(
   return {
     readConversationMessages(sessionId) {
       return recordsBySessionId[sessionId] ?? [];
+    },
+    readConversationEvidence(sessionId) {
+      return {
+        character: testCharacterProfile,
+        messages: recordsBySessionId[sessionId] ?? [],
+      };
     },
   };
 }

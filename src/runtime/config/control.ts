@@ -1,68 +1,59 @@
+import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
 import {
-  applyRuntimeConfigMutation,
-  canonicalRuntimeConfigMutationPath,
-  createRuntimeConfigMutationBase,
-  prepareRuntimeConfigMutationCandidate,
-  type RuntimeConfigMutationResult,
-} from './mutate.ts';
-import {createRuntimeConfigFingerprint} from './fingerprint.ts';
+  layeredRuntimeConfigFingerprintForScope,
+  readCharacterOverlayForScope,
+} from './overlay.ts';
+import {
+  assertResolvedProject02HomeAdoptable,
+  loadProject02RuntimeConfigForLocation,
+  type ResolvedProject02RuntimeLocation,
+} from './location.ts';
+import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
-import {defaultRuntimeConfigPath, loadProject02RuntimeConfig} from './load.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
 import {
   runtimeConfigFieldValueMismatchMessage,
   runtimeConfigValueMatchesField,
 } from './schema.ts';
-import {
-  redactRuntimeConfigValue,
-  runtimeConfigValueIsSecretMarker,
-} from './redact.ts';
+import {runtimePluginScopeViolation} from './plugin-scope.ts';
+import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
+import {redactRuntimeConfigValue} from './redact.ts';
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest,
 } from '../../plugins/api/index.ts';
 import type {
   Project02RuntimeConfig,
+  LoadedProject02RuntimeConfig,
+  RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
   RuntimePluginConfigActivationInspectShape,
   RuntimePluginConfigInspectShape,
 } from './types.ts';
+import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export type RuntimeConfigControlOperation = Extract<
   RuntimeConfigMutationOperation,
   {
-    readonly kind:
-      | 'set'
-      | 'unset'
-      | 'plugin_enable'
-      | 'plugin_disable'
-      | 'default_memory_provider';
+    readonly kind: 'set' | 'unset' | 'default_memory_provider';
   }
 >;
 
-export function applyRuntimeConfigControlOperation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly expectedFingerprint?: string;
-  readonly storeRoot?: string;
-  readonly operation: RuntimeConfigControlOperation;
-}): RuntimeConfigMutationResult {
-  assertRuntimeConfigControlOperation(options.operation);
-  return applyRuntimeConfigMutation(options);
-}
-
-function assertRuntimeConfigControlOperation(
+export function assertRuntimeConfigControlOperation(
   operation: RuntimeConfigMutationOperation,
 ): asserts operation is RuntimeConfigControlOperation {
   switch (operation.kind) {
     case 'set':
     case 'unset':
-    case 'plugin_enable':
-    case 'plugin_disable':
     case 'default_memory_provider':
       return;
+    case 'plugin_enable':
+    case 'plugin_disable':
+      throw new TypeError(
+        'Plugin activation must be changed through manifest-aware control.',
+      );
     case 'plugin_config_set':
     case 'plugin_config_unset':
     case 'secret_set':
@@ -92,42 +83,43 @@ export type RuntimePluginConfigFieldControlOperation =
     };
 
 export function inspectRuntimePluginConfig(options: {
-  readonly configPath?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
+  /** The one document this inspection's control operation can mutate. */
+  readonly targetScope: 'global' | 'character';
   readonly manifest: RuntimePluginManifest;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly activation?: RuntimePluginConfigActivationInspectShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+  const loadedConfig = loadProject02RuntimeConfigForLocation(
+    options.runtimeLocation,
+  );
+  const characterScope = options.runtimeLocation.characterScope;
+  // The guarded overlay loader enforces the identity and adoptability
+  // rules for control reads too: a data directory rebound to another
+  // character must not feed its overlay into model-visible config.
+  const overlayConfig = readCharacterOverlayForScope(characterScope).overlay;
   const manifests = manifestsIncludingTarget(
     options.manifest,
     options.pluginManifests,
   );
-  const resolvedConfig = resolveProject02RuntimeConfig({
-    loadedConfig,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    pluginManifests: manifests,
-    validateInactivePluginConfigs: true,
-    ...(options.env === undefined ? {} : {env: options.env}),
-  });
-  const mutationBase = createRuntimeConfigMutationBase({
-    loadedConfig,
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
+  const {layeredConfig, resolvedConfig} =
+    resolveLayeredProject02RuntimeConfigWithSnapshot({
+      loadedConfig,
+      runtimeLocation: options.runtimeLocation,
+      overlayConfig,
+      pluginManifests: manifests,
+      validateInactivePluginConfigs: true,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    });
+  const mutationBase =
+    createRuntimeConfigAuthoredSnapshot(loadedConfig).document;
 
   return createRuntimePluginConfigInspectShape({
-    loadedConfig,
+    layeredConfig,
+    targetScope: options.targetScope,
     resolvedConfig,
     manifest: options.manifest,
     ...(options.activation === undefined
@@ -136,125 +128,48 @@ export function inspectRuntimePluginConfig(options: {
     ...(options.defaultEnabled === undefined
       ? {}
       : {defaultEnabled: options.defaultEnabled}),
-    fingerprint: createRuntimeConfigFingerprint(mutationBase),
-  });
-}
-
-export function applyRuntimePluginConfigControlOperation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-  readonly manifest: RuntimePluginManifest;
-  readonly actor: RuntimePluginConfigControlActor;
-  readonly expectedFingerprint: string;
-  readonly operation: RuntimePluginConfigFieldControlOperation;
-}): RuntimeConfigMutationResult {
-  const mutation = runtimePluginConfigControlMutation(options);
-
-  return applyRuntimeConfigMutation({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    expectedFingerprint: options.expectedFingerprint,
-    validateCandidate: mutation.validateCandidate,
-    operation: mutation.operation,
-  });
-}
-
-export function prepareRuntimePluginConfigControlOperation(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
-  readonly manifest: RuntimePluginManifest;
-  readonly actor: RuntimePluginConfigControlActor;
-  readonly expectedFingerprint: string;
-  readonly operation: RuntimePluginConfigFieldControlOperation;
-}): {
-  readonly resultFingerprint: string;
-  readonly targetConfigPath: string;
-} {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-  const mutation = runtimePluginConfigControlMutation(options);
-  const prepared = prepareRuntimeConfigMutationCandidate({
-    loadedConfig,
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    expectedFingerprint: options.expectedFingerprint,
-    validateCandidate: mutation.validateCandidate,
-    operation: mutation.operation,
-  });
-
-  return Object.freeze({
-    resultFingerprint: prepared.fingerprint,
-    targetConfigPath: runtimeConfigControlTargetPathFromLoaded({
-      ...(loadedConfig.path === undefined
-        ? {}
-        : {loadedPath: loadedConfig.path}),
-      ...(options.configPath === undefined
-        ? {}
-        : {configPath: options.configPath}),
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
+    fingerprint: layeredControlFingerprint({
+      globalConfig: mutationBase,
+      characterScope,
+      overlayConfig,
     }),
   });
 }
 
-export function resolveRuntimeConfigControlTargetPath(options: {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
+function layeredControlFingerprint(options: {
+  readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
+  readonly characterScope: RuntimeConfigCharacterScope | undefined;
+  readonly overlayConfig:
+    ReturnType<typeof readCharacterOverlayForScope>['overlay'] | undefined;
 }): string {
-  const loadedConfig = loadProject02RuntimeConfig({
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-
-  return runtimeConfigControlTargetPathFromLoaded({
-    ...(loadedConfig.path === undefined ? {} : {loadedPath: loadedConfig.path}),
-    ...(options.configPath === undefined
-      ? {}
-      : {configPath: options.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
+  return layeredRuntimeConfigFingerprintForScope({
+    globalConfig: options.globalConfig,
+    characterScope: options.characterScope,
+    overlay: options.overlayConfig,
   });
 }
 
-function runtimeConfigControlTargetPathFromLoaded(options: {
-  readonly loadedPath?: string;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-}): string {
-  return canonicalRuntimeConfigMutationPath(
-    options.loadedPath ??
-      options.configPath ??
-      defaultRuntimeConfigPath(options.storeRoot),
-  );
-}
-
-function runtimePluginConfigControlMutation(options: {
+export function runtimePluginConfigControlMutation(options: {
   readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
+  readonly authoredScope?: 'global' | 'character';
 }): {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
   const field = validateRuntimePluginConfigControlOperation(options);
+  const scopeViolation = runtimePluginScopeViolation({
+    manifest: options.manifest,
+    authoredScope: options.authoredScope ?? 'global',
+    operation: {kind: 'field', fieldName: field.name},
+  });
+
+  if (scopeViolation !== undefined) {
+    throw new TypeError(scopeViolation.message);
+  }
 
   return {
     operation: runtimePluginConfigMutationOperation(options.operation, {
@@ -265,10 +180,8 @@ function runtimePluginConfigControlMutation(options: {
       assertRuntimePluginConfigCandidateValid({
         config,
         manifest: options.manifest,
+        runtimeLocation: options.runtimeLocation,
         ...(options.env === undefined ? {} : {env: options.env}),
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
       });
     },
   };
@@ -306,18 +219,21 @@ function runtimePluginConfigMutationOperation(
 function assertRuntimePluginConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
-  readonly storeRoot?: string;
 }): void {
+  const loadedConfig: LoadedProject02RuntimeConfig = Object.freeze({
+    source: options.runtimeLocation.selectedConfig.source,
+    path: options.runtimeLocation.selectedConfig.path,
+    config: options.config,
+    diagnostics: Object.freeze([]),
+  });
   const resolved = resolveProject02RuntimeConfig({
-    loadedConfig: {
-      source: 'path',
-      config: options.config,
-      diagnostics: Object.freeze([]),
-    },
+    loadedConfig,
+    runtimeLocation: options.runtimeLocation,
     pluginManifests: [options.manifest],
+    skipPluginScopeValidation: true,
     ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
     validateInactivePluginConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(
@@ -439,17 +355,5 @@ function manifestsIncludingTarget(
 function runtimeConfigControlValueContainsSecret(
   value: RuntimeConfigValue,
 ): boolean {
-  if (Array.isArray(value)) {
-    return value.some(runtimeConfigControlValueContainsSecret);
-  }
-
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  if (runtimeConfigValueIsSecretMarker(value)) {
-    return true;
-  }
-
-  return Object.values(value).some(runtimeConfigControlValueContainsSecret);
+  return nestedSecretMarkerPath(value, 'value') !== undefined;
 }

@@ -76,9 +76,25 @@ export default tseslint.config(
   {
     files: ['src/cli/chat/main.ts'],
     rules: {
+      // Re-pinned +33 for character activation wiring (startup character
+      // resolution, profile threading, required-profile guard), +2 for
+      // selecting the configured character id from resolved config, then
+      // +13 for the configurable user display name (per-session prompt
+      // label, threading into the durable runtime and fallback session),
+      // then +31 for persona/characterRef threading into the turn calls,
+      // then +8 for the home/character-data split: explicit durable-session
+      // selection (home root, character, user display name) replacing the
+      // runtime-args spread, and home-layout --store validation, then +4
+      // for character-origin attribution on config diagnostics, then +5
+      // for consuming startup's shared character activation and its
+      // character_invalid status, then +3 for the --character flag, then
+      // +1 to validate session args before startup materializes state,
+      // then +19 for the store-consent gate: the --init-carrying store
+      // state replacing the bare location state, and the gate call that
+      // asks before any startup creates a home.
       'max-lines': [
         'error',
-        {max: 1079, skipBlankLines: true, skipComments: true},
+        {max: 1198, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -94,9 +110,12 @@ export default tseslint.config(
   {
     files: ['src/role-model/loop/loop.ts'],
     rules: {
+      // Re-pinned +7 for persona render options and characterRef stamping
+      // at ioSnapshot creation, then +8 for the characterRef-vs-decision-
+      // context identity guard at loop entry.
       'max-lines': [
         'error',
-        {max: 1485, skipBlankLines: true, skipComments: true},
+        {max: 1500, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -111,50 +130,62 @@ export default tseslint.config(
     },
   },
   {
-    // Re-pinned +2 to inject the plugin reloader capability into the host,
-    // then +13 to stamp the plan with its authored-config fingerprint and
-    // hand it to the host as the construction-currency signal recovery uses.
+    // Ratcheted down after deleting the direct configured-host constructor.
+    // Remaining bulk owns catalog composition, layered activation planning,
+    // package instantiation, construction cleanup, and host state assembly.
     files: ['src/app/activation.ts'],
     rules: {
       'max-lines': [
         'error',
-        {max: 1147, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
-    files: ['src/runtime/config/mutate.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1216, skipBlankLines: true, skipComments: true},
+        {max: 1182, skipBlankLines: true, skipComments: true},
       ],
     },
   },
   {
     files: ['src/runtime/storage/raw-event-codec.ts'],
     rules: {
+      // Re-pinned +23 for the additive characterRef decode on the
+      // role-model IO snapshot.
       'max-lines': [
         'error',
-        {max: 1672, skipBlankLines: true, skipComments: true},
+        {max: 1695, skipBlankLines: true, skipComments: true},
       ],
     },
   },
   {
     files: ['src/runtime/evidence/validation.ts'],
     rules: {
+      // Re-pinned +1 for the shared localUserSpeaker import (mechanical
+      // growth; replaces inline 'local-user'/'You' literals), +19 for
+      // bound-character injection (expected-character chain guard,
+      // unanchored-guard parameterization, character-less placeholder),
+      // then +45 for the session user speaker: recorded/bound user-speaker
+      // state, the one-user-speaker-per-session derivation, and restored
+      // transcripts validating against the recorded user display name,
+      // then +1 to extend the bound-character check to anchored evidence,
+      // then +8 to anchor a custom first user speaker when the store
+      // binds none (direct-runtime stores with custom display names).
       'max-lines': [
         'error',
-        {max: 2119, skipBlankLines: true, skipComments: true},
+        {max: 2193, skipBlankLines: true, skipComments: true},
       ],
     },
   },
   {
     files: ['src/runtime/storage/session-store.ts'],
     rules: {
+      // Re-pinned +3 for the evidence-required rehydration error (the
+      // session character is evidence-derived and has no default), +2 for
+      // allowlisting the character binding and packages entries in the
+      // store-initialization content check, then +5 for threading the
+      // evidence-derived user speaker through rehydration, then +11 for
+      // scoped schema markers (scope assertion on read, character-data
+      // scope on init) after the home/data guard split, then +13 to let
+      // the foreign-content guard skip a concurrent initializer's live
+      // atomic-replacement temp files.
       'max-lines': [
         'error',
-        {max: 1004, skipBlankLines: true, skipComments: true},
+        {max: 1038, skipBlankLines: true, skipComments: true},
       ],
     },
   },

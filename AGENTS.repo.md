@@ -83,6 +83,15 @@ when the current slice explicitly chooses it. Do not begin with a full runtime
 kernel, component registry, memory system, Live2D layer, plugin architecture, or
 background scheduler.
 
+**Status: that first slice is built, and `chat` is what it grew into.** The
+`relay` command is gone. It survived for a while as a second, dependency-light
+composition kept for smoke coverage, which meant two entry points assembled the
+runtime differently and only one of them exercised what operators actually run.
+A smoke path that skips configured plugins, provider selection, and durable
+storage stops being evidence about the product the moment those exist. Test the
+composition directly instead. Nothing below authorizes reintroducing a parallel
+entry point to keep a simpler one around.
+
 Features should arrive from pressure in roughly this order:
 
 1. Basic relay CLI: accept input, run through a minimal agent seam, print/send output.
@@ -110,6 +119,10 @@ Keep each slice minimal:
 - One output path.
 - One fake or local agent seam by default.
 - Focused tests around input parsing, reply production, errors, and boundary behavior.
+
+"One entry point" is a rule about the slice, not a licence to add a second
+command that does the same job more simply. Where a slice needs a smaller
+composition, build it as a seam the existing command can be tested through.
 
 Do not put current slice status in this file. Current slice details belong in
 the active slice document, PR description, issue, or journal.
@@ -217,6 +230,20 @@ contracts:
 
 Use the OpenClaw-style config migration lesson as the model: old config paths or
 names can keep working while new paths are introduced.
+
+**"Users" means released users.** This project has not shipped, so nothing
+outside the repository depends on any name here. Compatibility is owed to
+operators who already have data or scripts, not to a shape simply because it
+was written first. Tests are not users either: a test that only exists to
+exercise an old shape is removed with the shape, not preserved as a reason to
+keep it.
+
+A second implementation is not a compatibility adapter. An adapter translates an
+old input into the current path; a parallel command re-implements the path, and
+then the two drift. `relay` was the example — retained as a compatibility and
+smoke entry point until the only thing it was compatible with was itself, and
+removed rather than migrated. When something looks like it needs keeping for
+compatibility, name the caller that would break. If there isn't one, delete it.
 
 ---
 

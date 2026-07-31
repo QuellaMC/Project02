@@ -1,3 +1,4 @@
+import {testCharacterProfile} from './character-fixtures.ts';
 import {
   createDecisionContext,
   createDefaultRoleModelPluginToolDefinitions,
@@ -90,6 +91,7 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
       },
       declaredPlugins: ['tool_provider', 'handle_tool_call'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [],
       },
       localTrustLevel: 'test_fixture',
@@ -286,10 +288,7 @@ export function createRejectedToolCallResultWithEvidence(options: {
 export function createTestDecisionContext() {
   return createDecisionContext({
     sessionId: 'session-loop',
-    characterSnapshot: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    characterSnapshot: testCharacterProfile,
   });
 }
 
@@ -306,10 +305,7 @@ export function createTestPluginContext(
     sessionId: 'session-loop',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'search memory',
-    character: {
-      id: 'mira',
-      displayName: 'Mira',
-    },
+    character: testCharacterProfile,
   });
 }
 

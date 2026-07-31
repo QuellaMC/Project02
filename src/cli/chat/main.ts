@@ -3,6 +3,7 @@ import {createInterface} from 'node:readline';
 
 import {
   type CharacterAgent,
+  type CharacterProfile,
   type ConversationSession,
   createConversationSession,
   createRuntimeEventIdentity,
@@ -38,7 +39,7 @@ import {
   acquireLocalRuntimeSessionWriterLease,
   createDurableChatRuntime,
   createLocalRuntimeMutationLockOwnerToken,
-  createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
   type DurableChatRuntime,
   normalizeLocalRuntimeSessionId,
   runtimeLogStoreWithWriterOwner,
@@ -58,20 +59,30 @@ import {
 } from '../../app/index.ts';
 import {
   diagnosticsHaveErrors,
+  runtimeConfigDiagnosticAttribution,
+  runtimeConfigDiagnosticLocation,
   RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
-import type {RoleModelAdapter} from '../../role-model/index.ts';
+import type {
+  RoleModelAdapter,
+  RoleModelCharacterRef,
+} from '../../role-model/index.ts';
 import {
   isLocalRuntimeTerminalError,
   type LocalRuntimeTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
-  parseRuntimeLocationFlag,
+  emptyRuntimeStoreCliState,
+  parseRuntimeStoreFlag,
   RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState,
+  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
+import {
+  assertProject02StoreConsent,
+  Project02StoreConsentError,
+} from '../shared/store-consent.ts';
 import {
   createSelectedRoleModelAdapter,
   parseProviderName,
@@ -96,6 +107,10 @@ type ChatCliOptions = {
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
+  readonly characterProfile?: CharacterProfile;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
+  readonly userDisplayName?: string;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
@@ -108,9 +123,11 @@ type RunChatCliOptions = Omit<ChatCliOptions, 'pluginHost'> & {
 
 type ChatCliArgs = {
   readonly traceMode: boolean;
+  readonly init: boolean;
   readonly provider?: ChatProviderName;
   readonly storeRoot?: string;
   readonly configPath?: string;
+  readonly character?: string;
   readonly sessionId?: string;
   readonly newSessionId?: string;
 };
@@ -146,8 +163,11 @@ const exitCommand = '/exit';
 const modelTextToggleCommand = '/model-text';
 const showModelTextCommand = '/show-model-text';
 const hideModelTextCommand = '/hide-model-text';
-const promptText = 'You: ';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
+
+function promptTextFor(session: ConversationSession): string {
+  return `${session.userSpeaker.displayName}: `;
+}
 const startupFailurePluginCleanupMessage =
   'chat startup failed before opening a durable session';
 const fatalFailurePluginCleanupMessage =
@@ -167,6 +187,18 @@ class ChatCliStartupError extends Error {
     super(message);
     this.name = 'ChatCliStartupError';
   }
+}
+
+function requiredChatCharacterProfile(
+  characterProfile: CharacterProfile | undefined,
+): CharacterProfile {
+  if (characterProfile === undefined) {
+    throw new ChatCliStartupError(
+      'Chat startup requires a session or a character profile.',
+    );
+  }
+
+  return characterProfile;
 }
 
 function createChatToolConfirmationBridge(
@@ -292,18 +324,55 @@ export async function runChatCliFromArgs(
 ): Promise<number> {
   try {
     const parsedArgs = parseChatCliArgs(args);
-    const startup = resolveRuntimeCliStartup({
+
+    // Invalid session ids (and a malformed --store) fail here, before
+    // startup materializes any durable character state.
+    validateDurableSessionArgs(parsedArgs);
+
+    // And before that state is created at all, if the operator never
+    // asked for a store here.
+    await assertProject02StoreConsent({
+      location: parsedArgs,
+      init: parsedArgs.init,
+      stdout: options.stdout,
+      stdin: options.stdin,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    });
+
+    const startup = await resolveRuntimeCliStartup({
       location: parsedArgs,
       ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
       continueAfterActivationErrors: options.pluginHost !== undefined,
+      // The same selection run below, run early: an unusable
+      // PROJECT02_ROLE_MODEL_PROVIDER is this command's error, and it
+      // has to be reported before startup writes the home and
+      // character-data markers. The configured file value is left out
+      // deliberately — it is a fallback, and cannot rescue an env value
+      // that does not name a provider.
+      validateRuntimeEnv: env => {
+        selectChatProvider(parsedArgs.provider, env);
+      },
     });
 
+    if (startup.status === 'character_invalid') {
+      throw new ChatCliUsageError(
+        `Character activation failed: ${
+          startup.characterActivation.status === 'failed'
+            ? (startup.characterActivation.messages[0] ??
+              'no character resolved.')
+            : 'no character resolved.'
+        }`,
+      );
+    }
+
     if (startup.status === 'config_invalid') {
+      // Resolved-config diagnostics carry both layers, so a character
+      // overlay error surfaces here with its attribution.
       assertNoRuntimeConfigErrors(
-        startup.loadedConfig.diagnostics,
+        startup.activationPlan.resolvedConfig.diagnostics,
         'Runtime config is invalid',
       );
       throw new ChatCliUsageError('Runtime config is invalid.');
@@ -324,7 +393,7 @@ export async function runChatCliFromArgs(
         selectChatProvider(
           parsedArgs.provider,
           runtimeEnv,
-          startup.loadedConfig.config?.project02?.roleModelProvider,
+          startup.activationPlan.resolvedConfig.project02.roleModelProvider,
         ),
       ),
     } satisfies ChatCliArgs;
@@ -343,6 +412,19 @@ export async function runChatCliFromArgs(
     } satisfies ChatCliArgs;
 
     validateDurableSessionArgs(runtimeArgs);
+
+    // Character activation already ran inside startup, before any
+    // plugin resources were constructed.
+    const characterActivation = startup.characterActivation;
+
+    if (characterActivation.status !== 'resolved') {
+      throw new ChatCliUsageError(
+        'Character activation failed: no character resolved.',
+      );
+    }
+    for (const warning of characterActivation.warnings) {
+      options.stderr.write(`Warning: ${warning}\n`);
+    }
     const toolConfirmationBridge =
       options.pluginHost === undefined
         ? createChatToolConfirmationBridge(options.toolConfirmationHandler)
@@ -370,6 +452,11 @@ export async function runChatCliFromArgs(
       parsedTraceMode: parsedArgs.traceMode,
       configuredHost,
       toolConfirmationBridge,
+      characterProfile: characterActivation.profile,
+      characterPersonaSections: characterActivation.personaSections,
+      characterRef: characterActivation.characterRef,
+      userDisplayName:
+        startup.activationPlan.resolvedConfig.project02.userDisplayName,
     });
   } catch (error: unknown) {
     if (isFormattedTerminalError(error)) {
@@ -388,13 +475,31 @@ async function runChatCliAfterConfiguredHost(options: {
   readonly parsedTraceMode: boolean;
   readonly configuredHost: ConfiguredChatPluginHost | undefined;
   readonly toolConfirmationBridge: ChatToolConfirmationBridge | undefined;
+  readonly characterProfile: CharacterProfile;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
+  readonly userDisplayName?: string;
 }): Promise<number> {
   let durableRuntime: DurableChatRuntime;
   let pluginHost: RuntimePluginHost;
   let roleModelAdapter: RoleModelAdapter | undefined;
 
   try {
-    durableRuntime = await createDurableChatRuntime(options.runtimeArgs);
+    durableRuntime = await createDurableChatRuntime({
+      ...(options.runtimeArgs.storeRoot === undefined
+        ? {}
+        : {homeRoot: options.runtimeArgs.storeRoot}),
+      ...(options.runtimeArgs.sessionId === undefined
+        ? {}
+        : {sessionId: options.runtimeArgs.sessionId}),
+      ...(options.runtimeArgs.newSessionId === undefined
+        ? {}
+        : {newSessionId: options.runtimeArgs.newSessionId}),
+      character: options.characterProfile,
+      ...(options.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: options.userDisplayName}),
+    });
     const startupPluginHost =
       options.options.pluginHost ?? options.configuredHost?.host;
 
@@ -418,6 +523,7 @@ async function runChatCliAfterConfiguredHost(options: {
       await cleanupConfiguredChatPluginHostAfterStartupFailure({
         configuredHost: options.configuredHost,
         args: options.runtimeArgs,
+        character: options.characterProfile,
       });
     }
 
@@ -430,6 +536,12 @@ async function runChatCliAfterConfiguredHost(options: {
       session: durableRuntime.session,
       logStore: durableRuntime.logStore,
       ...(roleModelAdapter === undefined ? {} : {roleModelAdapter}),
+      ...(options.characterPersonaSections === undefined
+        ? {}
+        : {characterPersonaSections: options.characterPersonaSections}),
+      ...(options.characterRef === undefined
+        ? {}
+        : {characterRef: options.characterRef}),
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
@@ -481,6 +593,7 @@ async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
 async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
   readonly args: ChatCliArgs;
+  readonly character: CharacterProfile;
 }): Promise<void> {
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
@@ -488,7 +601,7 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
       options.args.newSessionId ?? options.args.sessionId,
     ),
     currentUserMessage: startupFailurePluginCleanupMessage,
-    character: createConversationSession().character,
+    character: options.character,
     hookOptions: {allowFileStoreWrites: false},
   });
   await runBestEffortPluginShutdown({
@@ -497,7 +610,7 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
       options.args.newSessionId ?? options.args.sessionId,
     ),
     currentUserMessage: configuredPluginShutdownMessage,
-    character: createConversationSession().character,
+    character: options.character,
   });
 }
 
@@ -534,12 +647,10 @@ function formatRuntimeConfigDiagnosticError(
   messagePrefix: string,
   diagnostic: RuntimeConfigDiagnostic,
 ): string {
-  const diagnosticLocation =
-    diagnostic.path === undefined
-      ? diagnostic.code
-      : `${diagnostic.code} at ${diagnostic.path}`;
-
-  return `${messagePrefix}: ${diagnostic.message} (${diagnosticLocation})`;
+  return (
+    `${messagePrefix}: ${runtimeConfigDiagnosticAttribution(diagnostic)}` +
+    `${diagnostic.message} (${runtimeConfigDiagnosticLocation(diagnostic)})`
+  );
 }
 
 export async function runChatCli(options: RunChatCliOptions): Promise<number> {
@@ -577,9 +688,21 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
 async function runChatCliWithActiveWriter(
   options: RunChatCliOptions,
 ): Promise<number> {
-  const session = options.session ?? createConversationSession();
+  const session =
+    options.session ??
+    createConversationSession({
+      character: requiredChatCharacterProfile(options.characterProfile),
+      ...(options.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: options.userDisplayName}),
+    });
   const logStore =
-    options.logStore ?? createRuntimeLogStore({sessionId: session.id});
+    options.logStore ??
+    createRuntimeLogStore({
+      sessionId: session.id,
+      boundCharacter: session.character,
+      boundUserSpeaker: session.userSpeaker,
+    });
   const pluginHost = options.pluginHost;
   const lines = createInterface({
     input: options.stdin,
@@ -598,7 +721,7 @@ async function runChatCliWithActiveWriter(
   let showNonCommittedTopLevelText = false;
 
   options.stdout.write(`${session.character.displayName} is ready.\n`);
-  options.stdout.write(promptText);
+  options.stdout.write(promptTextFor(session));
 
   try {
     for (;;) {
@@ -668,7 +791,7 @@ async function handleChatInputLine(options: {
     options.options.stdout.write(
       `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`,
     );
-    options.options.stdout.write(promptText);
+    options.options.stdout.write(promptTextFor(options.session));
     return {
       status: 'continue',
       showNonCommittedTopLevelText: nextModelTextVisibility,
@@ -686,6 +809,14 @@ async function handleChatInputLine(options: {
       ...(options.options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.options.roleModelAdapter}),
+      ...(options.options.characterPersonaSections === undefined
+        ? {}
+        : {
+            characterPersonaSections: options.options.characterPersonaSections,
+          }),
+      ...(options.options.characterRef === undefined
+        ? {}
+        : {characterRef: options.options.characterRef}),
       pluginHost: options.pluginHost,
       onProgress(progressEvent) {
         writeRuntimeProgress(
@@ -711,7 +842,7 @@ async function handleChatInputLine(options: {
     return {status: 'exit', exitCode: 1};
   }
 
-  options.options.stdout.write(promptText);
+  options.options.stdout.write(promptTextFor(options.session));
   return {
     status: 'continue',
     showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,
@@ -847,6 +978,8 @@ type HandleUserMessageThroughRuntimeOptions = {
   readonly line: string;
   readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
   readonly pluginHost: RuntimePluginHost;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
@@ -871,6 +1004,12 @@ async function handleUserMessageThroughRuntime(
         ...(options.roleModelAdapter === undefined
           ? {}
           : {roleModelAdapter: options.roleModelAdapter}),
+        ...(options.characterPersonaSections === undefined
+          ? {}
+          : {characterPersonaSections: options.characterPersonaSections}),
+        ...(options.characterRef === undefined
+          ? {}
+          : {characterRef: options.characterRef}),
         pluginHost: options.pluginHost,
         ...(options.onProgress === undefined
           ? {}
@@ -1070,7 +1209,7 @@ function writeTraceSummary(
 function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let traceMode = false;
   let provider: ChatProviderName | undefined;
-  let location: RuntimeLocationCliState = {};
+  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
   let sessionId: string | undefined;
   let newSessionId: string | undefined;
 
@@ -1107,15 +1246,15 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
       continue;
     }
 
-    const locationResult = parseRuntimeLocationFlag({
+    const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: location,
+      state: store,
     });
 
-    if (locationResult.status === 'matched') {
-      location = locationResult.state;
-      index = locationResult.nextIndex;
+    if (storeResult.status === 'matched') {
+      store = storeResult.state;
+      index = storeResult.nextIndex;
       continue;
     }
 
@@ -1158,9 +1297,15 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
     );
   }
 
+  const {location} = store;
+
   return {
     traceMode,
+    init: store.init,
     ...providerOption(provider),
+    ...(location.character === undefined
+      ? {}
+      : {character: location.character}),
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
@@ -1174,7 +1319,7 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
 function validateDurableSessionArgs(args: ChatCliArgs): void {
   if (args.storeRoot !== undefined) {
-    createLocalRuntimeStorageLayout({storeRoot: args.storeRoot});
+    createProject02HomeLayout({homeRoot: args.storeRoot});
   }
 
   if (args.sessionId !== undefined) {
@@ -1191,6 +1336,7 @@ function isFormattedTerminalError(
 ): error is
   | ChatCliUsageError
   | ChatCliStartupError
+  | Project02StoreConsentError
   | RoleModelProviderSelectionError
   | RuntimeLocationCliUsageError
   | RuntimeEnvFileError
@@ -1198,6 +1344,7 @@ function isFormattedTerminalError(
   return (
     error instanceof ChatCliUsageError ||
     error instanceof ChatCliStartupError ||
+    error instanceof Project02StoreConsentError ||
     error instanceof RoleModelProviderSelectionError ||
     error instanceof RuntimeLocationCliUsageError ||
     error instanceof RuntimeEnvFileError ||

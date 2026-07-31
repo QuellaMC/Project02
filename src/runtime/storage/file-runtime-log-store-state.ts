@@ -1,3 +1,4 @@
+import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
@@ -5,7 +6,10 @@ import {
   type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions,
 } from './layout-contract.ts';
-import {assertLocalRuntimeSessionReadable} from './session-store.ts';
+import {
+  assertLocalRuntimeSessionDirectoryIsReal,
+  assertLocalRuntimeSessionReadable,
+} from './session-store.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   localRuntimeMutationLockOwnerOwnsResource,
@@ -35,7 +39,10 @@ import {recoverAbandonedRuntimeWriterEvidence} from '../evidence/recovery.ts';
 
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
+    readonly characterId: string;
     readonly writerLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly boundCharacter?: CharacterProfile;
+    readonly boundUserSpeaker?: SpeakerIdentity;
     readonly onEvidenceValidation?: (
       mode: 'cold_snapshot' | 'incremental_append',
     ) => void;
@@ -58,6 +65,16 @@ export class FileRuntimeLogStoreState {
   private temporaryFilesScavenged = false;
 
   constructor(options: FileRuntimeLogStoreStateOptions) {
+    if (
+      options.boundCharacter !== undefined &&
+      options.boundCharacter.id !== options.characterId
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'character_identity_mismatch',
+        `File runtime log store character "${options.characterId}" does not match bound character "${options.boundCharacter.id}".`,
+      );
+    }
+
     this.options = options;
     this.paths = createLocalRuntimeSessionPaths(options);
     this.locksRoot = createLocalRuntimeStorageLayout({
@@ -70,16 +87,21 @@ export class FileRuntimeLogStoreState {
   }
 
   assertSessionReadable(): void {
+    const sessionOptions = {
+      storeRoot: this.options.storeRoot,
+      sessionId: this.paths.sessionId,
+      characterId: this.options.characterId,
+    };
+
     if (this.sessionReadabilityChecked) {
+      // Session identity is settled, but the directory being a real directory is
+      // a live filesystem property: a swap to a symlink after the first read
+      // would otherwise let later appends write through the link.
+      assertLocalRuntimeSessionDirectoryIsReal(sessionOptions);
       return;
     }
 
-    assertLocalRuntimeSessionReadable({
-      ...(this.options.storeRoot === undefined
-        ? {}
-        : {storeRoot: this.options.storeRoot}),
-      sessionId: this.paths.sessionId,
-    });
+    assertLocalRuntimeSessionReadable(sessionOptions);
     this.sessionReadabilityChecked = true;
   }
 
@@ -95,6 +117,8 @@ export class FileRuntimeLogStoreState {
   }
 
   readStoredEvidence(): MutableDurableRuntimeSessionEvidence {
+    this.assertSessionReadable();
+
     if (this.writerIsActive() && !this.temporaryFilesScavenged) {
       scavengeAbandonedRuntimeEvidenceTemporaryFiles(this.paths);
       this.temporaryFilesScavenged = true;
@@ -132,10 +156,22 @@ export class FileRuntimeLogStoreState {
         paths: this.paths,
         evidence: reconcileTerminalRawTraceEvidence(evidence),
         mode: 'public',
+        ...(this.options.boundCharacter === undefined
+          ? {}
+          : {boundCharacter: this.options.boundCharacter}),
+        ...(this.options.boundUserSpeaker === undefined
+          ? {}
+          : {boundUserSpeaker: this.options.boundUserSpeaker}),
       });
       this.transitionMachine = createRuntimeEvidenceTransitionMachine({
         evidence,
         sessionId: this.paths.sessionId,
+        ...(this.options.boundCharacter === undefined
+          ? {}
+          : {boundCharacter: this.options.boundCharacter}),
+        ...(this.options.boundUserSpeaker === undefined
+          ? {}
+          : {boundUserSpeaker: this.options.boundUserSpeaker}),
       });
     }
 
@@ -225,6 +261,12 @@ export class FileRuntimeLogStoreState {
       const recovered = recoverAbandonedRuntimeWriterEvidence({
         paths: this.paths,
         evidence,
+        ...(this.options.boundCharacter === undefined
+          ? {}
+          : {boundCharacter: this.options.boundCharacter}),
+        ...(this.options.boundUserSpeaker === undefined
+          ? {}
+          : {boundUserSpeaker: this.options.boundUserSpeaker}),
       });
 
       if (recovered === undefined) {

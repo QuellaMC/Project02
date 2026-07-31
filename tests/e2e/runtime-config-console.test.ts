@@ -1,20 +1,32 @@
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {Readable} from 'node:stream';
 
 import {describe, expect, it} from 'vitest';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
+import {ensureConsoleCommitTarget} from '../../src/cli/config/console-shared.ts';
+import {
+  characterDataDirPath,
+  ensureCharacterDataMarker,
+} from '../../src/runtime/storage/index.ts';
 import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
-import type {RuntimePlugin} from '../../src/plugins/api/types.ts';
+import {
+  createRuntimePlugin,
+  type RuntimePlugin,
+} from '../../src/plugins/api/index.ts';
 import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../src/app/index.ts';
 import {
+  createInitializedTestStoreRoot,
   requiredDottedConfigPlugin,
   requiredSecretPlugin,
   requiredSecretPluginWithManifestEnvVar,
 } from '../support/runtime-config-fixtures.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  runtimeLocationForTest,
+  writeRuntimeConfig,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -26,8 +38,80 @@ type ScriptedPromptStep =
     };
 
 describe('runtime config console UI', () => {
+  it('revalidates scoped layers before a console save materializes state', async () => {
+    const homeRoot = createTestTempRoot('project02-console-bad-overlay-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    // The overlay went bad after the console opened: the save must
+    // fail before ensure writes either storage marker.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(join(dataRoot, 'config.json'), '{not json\n');
+
+    await expect(
+      ensureConsoleCommitTarget({
+        runtimeLocation: runtimeLocationForTest({
+          storeRoot: homeRoot,
+          characterScope: {characterId: 'mira', dataRoot},
+          env: {},
+        }),
+        scope: 'character',
+        env: {},
+      }),
+    ).rejects.toThrow();
+    expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
+    expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
+  });
+
+  it('saves a scoped edit with an explicit global config', async () => {
+    const homeRoot = createTestTempRoot('project02-console-alias-');
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const overlayPath = join(dataRoot, 'config.json');
+    const globalConfigPath = join(homeRoot, 'config.json');
+    let stdout = '';
+
+    writeRuntimeConfig(globalConfigPath, {
+      project02: {roleModelProvider: 'local'},
+    });
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {});
+
+    // The snapshot fingerprints the selected global document plus the
+    // overlay — the same pair the commit verifies.
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      [
+        '--store',
+        homeRoot,
+        '--character',
+        'mira',
+        '--config',
+        globalConfigPath,
+        'ui',
+      ],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        env: {},
+        prompt: scriptedPrompt(['1', '3', '1', 'Aliased Name', '1']),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('Saved project02.userDisplayName.');
+    expect(JSON.parse(readFileSync(overlayPath, 'utf8'))).toMatchObject({
+      project02: {userDisplayName: 'Aliased Name'},
+    });
+  });
+
   it('exits cleanly when the default prompt reaches stdin EOF', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-eof-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-console-eof-',
+    );
     let stdout = '';
     let stderr = '';
 
@@ -44,13 +128,13 @@ describe('runtime config console UI', () => {
       },
     );
 
-    expect(exitCode).toBe(0);
     expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
     expect(stdout).toContain('Project02 Runtime Config');
   });
 
   it('accepts a quit command through the default terminal prompt', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-default-prompt-',
     );
     let stdout = '';
@@ -75,7 +159,9 @@ describe('runtime config console UI', () => {
   });
 
   it('groups default catalog plugins and system services in one selectable list', async () => {
-    const storeRoot = createTestTempRoot('project02-config-console-groups-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-console-groups-',
+    );
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
@@ -196,7 +282,7 @@ describe('runtime config console UI', () => {
   });
 
   it('selects a system service through the continuous plugin index', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-system-selection-',
     );
     let stdout = '';
@@ -270,7 +356,7 @@ describe('runtime config console UI', () => {
   });
 
   it('lists package factories separately from canonical bootstrap services', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-plugin-group-',
     );
     const plugin = requiredDottedConfigPlugin('sample.plugin', 'endpoint');
@@ -295,7 +381,7 @@ describe('runtime config console UI', () => {
   });
 
   it('reports a default terminal prompt input failure without hanging', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-console-input-failure-',
     );
     const input = new Readable({
@@ -340,7 +426,7 @@ describe('runtime config console UI', () => {
         stderr: collect(chunk => {
           stderr += chunk;
         }),
-        prompt: scriptedPrompt(['1', '3', '1', 'unsupported', 'nvidia', '1']),
+        prompt: scriptedPrompt(['1', '4', '1', 'unsupported', 'nvidia', '1']),
       },
     );
 
@@ -412,6 +498,157 @@ describe('runtime config console UI', () => {
         },
       },
     });
+  });
+
+  it('does not save when Unset targets a globally inherited character field', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-inherited-field-',
+    );
+    const plugin = optionalDottedConfigPlugin('sample.inherited', 'tone');
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {tone: 'warm'},
+        },
+      },
+    });
+    const before = readFileSync(configPath, 'utf8');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    const overlayPath = join(dataRoot, 'config.json');
+    let stdout = '';
+    let stderr = '';
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {});
+    const bootstrapExitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, '--character', 'mira', 'ui'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        factories: factoriesFor(plugin),
+        prompt: scriptedPrompt(['q']),
+      },
+    );
+
+    expect(bootstrapExitCode).toBe(0);
+    const overlayBefore = readFileSync(overlayPath, 'utf8');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, '--character', 'mira', 'ui'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        factories: factoriesFor(plugin),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, plugin.manifest.id),
+          '2',
+          '2',
+        ]),
+      },
+    );
+
+    expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('tone: "warm" [global]');
+    expect(stdout).toContain('Field tone is already unset.');
+    expect(stdout).not.toContain('Saved plugins.sample.inherited.config.tone.');
+    expect(readFileSync(configPath, 'utf8')).toBe(before);
+    expect(readFileSync(overlayPath, 'utf8')).toBe(overlayBefore);
+  });
+
+  it('unsets only the authored overlay value and reveals the inherited global value', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-overlay-unset-',
+    );
+    const plugin = optionalDottedConfigPlugin('sample.overlay-unset', 'tone');
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {
+        [plugin.manifest.id]: {
+          enabled: true,
+          config: {tone: 'warm'},
+        },
+      },
+    });
+    const globalBefore = readFileSync(configPath, 'utf8');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+    const overlayPath = join(dataRoot, 'config.json');
+    let stdout = '';
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(overlayPath, {
+      plugins: {
+        [plugin.manifest.id]: {
+          config: {tone: 'cool'},
+        },
+      },
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, '--character', 'mira', 'ui'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: factoriesFor(plugin),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, plugin.manifest.id),
+          '2',
+          '2',
+          '1',
+        ]),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain('tone: "cool" [authored]');
+    expect(stdout).toContain('Saved plugins.sample.overlay-unset.config.tone.');
+    expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
+    const storedOverlay = JSON.parse(readFileSync(overlayPath, 'utf8')) as {
+      readonly plugins?: Readonly<
+        Record<string, {readonly config?: Readonly<Record<string, unknown>>}>
+      >;
+    };
+
+    expect(
+      Object.hasOwn(
+        storedOverlay.plugins?.[plugin.manifest.id]?.config ?? {},
+        'tone',
+      ),
+    ).toBe(false);
+
+    let reopenedStdout = '';
+    const reopenExitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, '--character', 'mira', 'ui'],
+      {
+        stdout: collect(chunk => {
+          reopenedStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: factoriesFor(plugin),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => reopenedStdout, plugin.manifest.id),
+          'q',
+        ]),
+      },
+    );
+
+    expect(reopenExitCode).toBe(0);
+    expect(reopenedStdout).toContain('tone: "warm" [global]');
   });
 
   it.each([
@@ -500,7 +737,7 @@ describe('runtime config console UI', () => {
     let stdout = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'ui'],
+      ['--store', storeRoot, '--config', configPath, 'ui'],
       {
         stdout: collect(chunk => {
           stdout += chunk;
@@ -525,6 +762,8 @@ describe('runtime config console UI', () => {
     expect(stdout).toContain(
       "pnpm runtime-config --store '" +
         storeRoot +
+        "' --config '" +
+        configPath +
         "' -- secret set 'memory.secret' 'apiKey' 'MEMORY_SECRET_API_KEY'",
     );
     expect(stdout).not.toContain('must-never-appear');
@@ -644,7 +883,7 @@ describe('runtime config console UI', () => {
         }),
         prompt: scriptedPrompt([
           '1',
-          '3',
+          '4',
           '1',
           'nvidia',
           {
@@ -687,6 +926,26 @@ function factoriesFor(
       manifest: plugin.manifest,
       create: () => plugin,
     } satisfies RuntimePluginFactoryDefinition),
+  });
+}
+
+function optionalDottedConfigPlugin(
+  id: string,
+  fieldName: string,
+): RuntimePlugin {
+  const plugin = requiredDottedConfigPlugin(id, fieldName);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      config: {
+        ...plugin.manifest.config,
+        fields: plugin.manifest.config.fields.map(field => ({
+          ...field,
+          required: false,
+        })),
+      },
+    },
   });
 }
 

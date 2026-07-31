@@ -52,7 +52,6 @@ export function handleRuntimePluginConfigReadToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): RuntimePluginToolCallResult {
   let pluginId: string;
 
@@ -79,7 +78,6 @@ export function handleRuntimePluginConfigReadToolCall(options: {
   const inspection = inspectRuntimePluginConfigForControl({
     manifest,
     state: options.state,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
   });
 
   return {
@@ -108,8 +106,19 @@ export function handleRuntimePluginConfigReadToolCall(options: {
 export function inspectRuntimePluginConfigForControl(options: {
   readonly manifest: RuntimePluginManifest;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 }): RuntimePluginConfigInspection {
+  const target = options.state.configControl.target;
+  const runtimeLocation =
+    target.scope === 'character'
+      ? target.runtimeLocation
+      : target.characterRuntimeLocation;
+
+  if (runtimeLocation === undefined) {
+    throw new TypeError(
+      'Plugin config control requires an activated character runtime.',
+    );
+  }
+
   const activation = ownJsonRecordValue(
     options.state.activationByPluginId,
     options.manifest.id,
@@ -126,11 +135,9 @@ export function inspectRuntimePluginConfigForControl(options: {
             options.manifest.id,
           ),
         }),
-    ...(options.state.configPath === undefined
-      ? {}
-      : {configPath: options.state.configPath}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    ...(options.state.env === undefined ? {} : {env: options.state.env}),
+    runtimeLocation,
+    targetScope: target.scope,
+    env: target.env,
   });
 }
 
@@ -180,6 +187,7 @@ function modelVisiblePluginConfigInspection(
       agentMutable: field.agentMutable && !field.secret,
       reloadRequired: field.reloadRequired,
       authored: field.authored,
+      effectiveSource: field.effectiveSource,
       effective: {
         name: field.effective.name,
         sensitive: field.effective.secret,

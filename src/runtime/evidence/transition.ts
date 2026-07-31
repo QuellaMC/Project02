@@ -1,4 +1,4 @@
-import type {CharacterProfile} from '../../core/index.ts';
+import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 import type {
   ConversationLogRecord,
   ConversationLogRecordInput,
@@ -53,8 +53,14 @@ export type RuntimeEvidenceTransitionMachine = {
 export function createRuntimeEvidenceTransitionMachine(options: {
   readonly evidence: MutableDurableRuntimeSessionEvidence;
   readonly sessionId?: string;
+  readonly boundCharacter?: CharacterProfile;
+  readonly boundUserSpeaker?: SpeakerIdentity;
 }): RuntimeEvidenceTransitionMachine {
-  const state = createRuntimeEvidenceIncrementalState(options.evidence);
+  const state = createRuntimeEvidenceIncrementalState(
+    options.evidence,
+    options.boundCharacter,
+    options.boundUserSpeaker,
+  );
 
   return Object.freeze({
     state,

@@ -2,6 +2,7 @@ import {
   isJsonBoundaryCredentialKey,
   redactJsonBoundaryText,
 } from '../../shared/redaction.ts';
+import {valueIsSecretMarker} from '../../shared/secret-marker.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
@@ -77,17 +78,11 @@ export function redactResolvedRuntimeConfigField(
   } satisfies RedactedRuntimeConfigField);
 }
 
-// The single owner of secret-marker detection: a config value is a secret
-// marker when it is a `$env` or `$plaintextSecret` object.
+// Config-typed view over the one shared secret-marker owner.
 export function runtimeConfigValueIsSecretMarker(
   value: RuntimeConfigValue,
 ): boolean {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    ('$env' in value || '$plaintextSecret' in value)
-  );
+  return valueIsSecretMarker(value);
 }
 
 function runtimeConfigRedactionPath(

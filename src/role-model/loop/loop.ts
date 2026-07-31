@@ -20,6 +20,7 @@ import {
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
   type RejectedRoleModelDecisionResult,
+  type RoleModelCharacterRef,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
@@ -30,6 +31,7 @@ import {
   type RoleModelToolObservation,
 } from '../api/contracts.ts';
 import {
+  assertRoleModelCharacterRefMatchesCharacter,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
@@ -104,6 +106,8 @@ export type RunRoleModelLoopOptions = {
     event: RoleModelInterimVisibleReplyEvent,
   ) => Promise<void> | void;
   readonly runtimePluginContext?: RuntimePluginContext;
+  readonly personaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
 };
 
 export type RoleModelPluginToolHost = {
@@ -174,6 +178,15 @@ export const defaultRoleModelMaxToolRounds = 99;
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions,
 ): Promise<RoleModelLoopExecutionResult> {
+  // The snapshot constructor enforces this too, but rejecting up front
+  // keeps a contradictory ref from reaching the provider at all.
+  if (options.characterRef !== undefined) {
+    assertRoleModelCharacterRefMatchesCharacter(
+      options.characterRef,
+      options.decisionContext.characterSnapshot,
+    );
+  }
+
   const adapter = options.adapter ?? createDeterministicLocalRoleModelAdapter();
   const maxToolRounds = normalizeMaxToolRounds(options.maxToolRounds);
   const identity = createSnapshotIdentity(options.event);
@@ -284,6 +297,9 @@ async function invokeRoleModelLoopRound(options: {
   });
   const turnContext = renderRoleModelTurnContext(inputEnvelope, {
     additionalMessages: options.state.nativeAdditionalMessages,
+    ...(options.options.personaSections === undefined
+      ? {}
+      : {personaSections: options.options.personaSections}),
   });
   const rawOutput: unknown = await options.adapter.invoke(inputEnvelope, {
     turnContext,
@@ -299,6 +315,9 @@ async function invokeRoleModelLoopRound(options: {
     sessionId: options.sessionId,
     inputEnvelope,
     rawOutputText: rawOutputValidation.rawOutputText,
+    ...(options.options.characterRef === undefined
+      ? {}
+      : {characterRef: options.options.characterRef}),
     ...providerMetadataOption(rawOutputValidation.providerMetadata),
     ...providerExchangeOption(rawOutputValidation.providerExchange),
   });
