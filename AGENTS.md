@@ -241,6 +241,10 @@ explanation that does not belong in a module README. `docs/plan/` and
 `docs/develop-journal/` are gitignored local scratch space — nothing there is
 a shared source of truth. PR descriptions carry the record for normal changes.
 
+`.gitignore` does not apply to files already tracked, so an ignored path can
+still sit in the index and produce committable diffs. If you find one, untrack
+it (`git rm --cached`) rather than editing it in place.
+
 ---
 
 ## 12. Final Rule
