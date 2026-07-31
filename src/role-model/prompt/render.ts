@@ -64,6 +64,7 @@ export type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
   readonly outputMode?: 'native_tools' | 'json_fallback';
   readonly capabilities?: RoleModelProviderCapabilities;
+  readonly personaSections?: readonly string[];
 };
 
 export type RoleModelPreparedRequest = RoleModelTurnContext & {
@@ -136,6 +137,9 @@ export function prepareRoleModelRequest(
     capabilities,
     outputMode,
     promptFragments,
+    ...(options.personaSections === undefined
+      ? {}
+      : {personaSections: options.personaSections}),
   });
   const messages = frames.flatMap(frame =>
     frame.message === undefined ? [] : [frame.message],
@@ -159,10 +163,18 @@ export function prepareRoleModelRequest(
 
 function createSystemMessage(
   inputEnvelope: RoleModelInputEnvelope,
+  personaSections: readonly string[] | undefined,
 ): RoleModelSystemChatMessage {
+  // Persona sections join as paragraphs; the runtime-owned protocol text
+  // always follows and is not overridable by character packages.
+  const personaText =
+    personaSections === undefined || personaSections.length === 0
+      ? `You are ${inputEnvelope.decisionContext.characterSnapshot.displayName}.`
+      : personaSections.join('\n\n');
+
   return Object.freeze({
     role: 'system',
-    content: `You are ${inputEnvelope.decisionContext.characterSnapshot.displayName}. ${roleModelStableSystemPromptText}`,
+    content: `${personaText} ${roleModelStableSystemPromptText}`,
   } satisfies RoleModelSystemChatMessage);
 }
 
@@ -173,6 +185,7 @@ function createRoleModelPromptFrames(
     readonly capabilities: RoleModelProviderCapabilities;
     readonly outputMode: 'native_tools' | 'json_fallback';
     readonly promptFragments: readonly RoleModelPromptFragment[];
+    readonly personaSections?: readonly string[];
   },
 ): readonly RoleModelPromptFrame[] {
   const frames: RoleModelPromptFrame[] = [];
@@ -187,7 +200,7 @@ function createRoleModelPromptFrames(
   frames.push(
     createPromptFrame(
       'system_protocol',
-      createSystemMessage(inputEnvelope),
+      createSystemMessage(inputEnvelope, options.personaSections),
       true,
     ),
   );

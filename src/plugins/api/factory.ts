@@ -16,6 +16,20 @@ export type RuntimePluginFactoryFunction = (
   input: RuntimePluginFactoryInput,
 ) => Promise<RuntimePlugin> | RuntimePlugin;
 
+export type RuntimePluginPackageLoadOptions = {
+  /**
+   * Receives a fully constructed candidate when package acceptance rejects it.
+   * The caller can then route the candidate through its ordinary lifecycle
+   * cleanup without weakening the package loader's manifest boundary.
+   */
+  readonly retainRejectedCandidate?: (plugin: RuntimePlugin) => void;
+};
+
+export type RuntimePluginPackageLoadFunction = (
+  input: RuntimePluginFactoryInput,
+  options?: RuntimePluginPackageLoadOptions,
+) => Promise<RuntimePlugin>;
+
 export type RuntimePluginFactoryCreate = (
   ...args: never[]
 ) => Promise<RuntimePlugin> | RuntimePlugin;
@@ -30,5 +44,5 @@ export type RuntimePluginFactoryDefinition<
 export type RuntimePluginPackageCatalogEntry = {
   readonly catalogKind: 'package';
   readonly manifest: RuntimePluginManifest;
-  readonly load: RuntimePluginFactoryFunction;
+  readonly load: RuntimePluginPackageLoadFunction;
 };

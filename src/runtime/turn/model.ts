@@ -224,6 +224,12 @@ async function runRuntimeModel(
       preparedConfigEffectsByToolCallId:
         state.preparedConfigEffectsByToolCallId,
       runtimePluginContext: prepared.runtimePluginContext,
+      ...(state.options.characterPersonaSections === undefined
+        ? {}
+        : {personaSections: state.options.characterPersonaSections}),
+      ...(state.options.characterRef === undefined
+        ? {}
+        : {characterRef: state.options.characterRef}),
       onPluginToolCallStarted(event) {
         recordPluginToolCallStarted(state, event);
       },

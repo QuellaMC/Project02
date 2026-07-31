@@ -1,5 +1,6 @@
-import {readFileSync} from 'node:fs';
 import {join} from 'node:path';
+
+import {readTextFileSync} from '../../../shared/file-system.ts';
 
 import {createLocalRuntimeMutationLockOwnerToken} from '../mutation-lock.ts';
 import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
@@ -102,7 +103,7 @@ export function createDurableRuntimePluginFileStore(
 
           try {
             return freezeRuntimePluginFileStoreJsonValue(
-              JSON.parse(readFileSync(filePath, 'utf8')) as unknown,
+              JSON.parse(readTextFileSync(filePath)) as unknown,
             );
           } catch (error: unknown) {
             if (isMissingFileError(error)) {
@@ -137,9 +138,7 @@ export function createDurableRuntimePluginFileStore(
           });
 
           try {
-            return parseRuntimePluginJsonlContent(
-              readFileSync(filePath, 'utf8'),
-            );
+            return parseRuntimePluginJsonlContent(readTextFileSync(filePath));
           } catch (error: unknown) {
             if (isMissingFileError(error)) {
               return Object.freeze([]);

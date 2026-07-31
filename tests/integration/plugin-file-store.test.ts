@@ -1935,7 +1935,10 @@ async function registerRuntimeSession(
   storeRoot: string,
   sessionId: string,
 ): Promise<void> {
-  await createLocalRuntimeSessionStore({storeRoot}).createSession({
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: 'mira',
+  }).createSession({
     sessionId,
     createdAt: testTransactionIdentity().createdAt,
   });

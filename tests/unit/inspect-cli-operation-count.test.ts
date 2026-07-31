@@ -1,3 +1,4 @@
+import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {describe, expect, it, vi} from 'vitest';
 
 import type {
@@ -53,7 +54,10 @@ describe('inspect CLI evidence indexing', () => {
     ] satisfies readonly RawEventLogRecord[];
     const countedRawEvents = countClassificationVisits(rawEvents);
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: identity.createdAt,
     });

@@ -5,13 +5,16 @@
  */
 export {
   freezeCharacterProfile,
-  localCharacterProfile,
   visibleMessageRoleValues,
   type CharacterProfile,
+  type SpeakerIdentity,
   type VisibleMessage,
   type VisibleMessageRole,
 } from './message/message.ts';
 export {
+  characterLength,
+  isValidSpeakerDisplayName,
+  maxSpeakerDisplayNameLength,
   normalizeOneLineMessage,
   normalizeVisibleMessageText,
   oneLineMessageMissingErrorMessage,
@@ -40,12 +43,15 @@ export {
   CharacterReplyValidationError,
   ConversationRehydrationError,
   createConversationSession,
+  createUserSpeaker,
   defaultRecentVisibleMessageLimit,
+  localUserSpeaker,
   normalizeCharacterAgentReply,
   rollbackLastCharacterTurn,
   runCharacterTurn,
   selectRecentVisibleMessages,
   validateCharacterAgentReply,
+  validateConversationParticipants,
   validateRestoredVisibleTranscript,
   type CharacterAgent,
   type CharacterAgentInput,

@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
-import {lstatSync, readFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
+
+import {lstatPathSync, readTextFileSync} from '../../../shared/file-system.ts';
 
 import type {RuntimeEventIdentity} from '../../../core/index.ts';
 import {createLocalRuntimeSessionPaths} from '../layout-contract.ts';
@@ -74,7 +75,7 @@ export function assertDurableTransactionJournalDoesNotExist(
   journalPath: string,
 ): void {
   try {
-    lstatSync(journalPath);
+    lstatPathSync(journalPath);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;
@@ -102,7 +103,7 @@ export function readDurablePluginFileStoreJournal(
   let value: unknown;
 
   try {
-    value = JSON.parse(readFileSync(journalPath, 'utf8')) as unknown;
+    value = JSON.parse(readTextFileSync(journalPath)) as unknown;
   } catch (error: unknown) {
     throw new TypeError('Plugin fileStore transaction journal is malformed.', {
       cause: error,

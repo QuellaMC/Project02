@@ -142,6 +142,11 @@ export const runtimePluginConfigValueTypeValues = [
   'enum',
 ] as const;
 
+export const runtimePluginConfigScopeValues = [
+  'global_with_character_overrides',
+  'character_only',
+] as const;
+
 export type RuntimePluginKind = (typeof runtimePluginKindValues)[number];
 export type RuntimePluginDeclaration =
   (typeof runtimePluginDeclarationValues)[number];
@@ -186,6 +191,8 @@ export type RuntimePluginHealthStatus =
   (typeof runtimePluginHealthStatusValues)[number];
 export type RuntimePluginConfigValueType =
   (typeof runtimePluginConfigValueTypeValues)[number];
+export type RuntimePluginConfigScope =
+  (typeof runtimePluginConfigScopeValues)[number];
 
 // Reason code recorded in raw-event evidence when a plugin's
 // before-role-model hook rejects the turn. Contract vocabulary: the

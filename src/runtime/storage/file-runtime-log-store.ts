@@ -1,4 +1,4 @@
-import {appendFileSync} from 'node:fs';
+import {appendTextFileSync} from '../../shared/file-system.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {encodeConversationLogRecord} from './conversation-codec.ts';
 import {encodeRawEventLogRecord} from './raw-event-codec.ts';
@@ -21,7 +21,7 @@ export {
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 
 export function createFileRuntimeLogStore(
-  options: CreateFileRuntimeLogStoreOptions = {},
+  options: CreateFileRuntimeLogStoreOptions,
 ): RuntimeLogStore {
   const state = new FileRuntimeLogStoreState(options);
   const {paths, writerLockOwnerToken} = state;
@@ -149,7 +149,7 @@ export function createFileRuntimeLogStore(
 
 function appendJsonLine(filePath: string, line: string): void {
   try {
-    appendFileSync(filePath, `${line}\n`, {encoding: 'utf8', mode: 0o600});
+    appendTextFileSync(filePath, `${line}\n`, 0o600);
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',

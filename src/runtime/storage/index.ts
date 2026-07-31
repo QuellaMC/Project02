@@ -9,11 +9,13 @@ export {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionMetadata,
   createLocalRuntimeSessionPaths,
+  characterDataDirPath,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
+  createProject02HomeLayout,
   decodeStorageSchemaMarker,
   defaultLocalRuntimeSessionId,
-  defaultLocalRuntimeStoreRoot,
+  defaultProject02HomeRoot,
   encodeStorageSchemaMarker,
   LocalRuntimeStorageContractError,
   localRuntimeReadableStorageSchemaVersions,
@@ -29,10 +31,14 @@ export {
   type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions,
   type LocalRuntimeStorageContractErrorCode,
+  type LocalRuntimeCharacterDataStorageSchemaMarker,
+  type LocalRuntimeHomeStorageSchemaMarker,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
+  homeRootForCharacterDataDir,
   type LocalRuntimeStorageSchemaMarker,
 } from './layout-contract.ts';
+export {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 export {
   createRuntimePluginFileStore,
   createRuntimePluginFileStoreTransaction,
@@ -44,6 +50,23 @@ export {
   type DurableChatRuntime,
   type DurableSessionSelection,
 } from './durable-session-bootstrap.ts';
+export {
+  assertCharacterDataDirAdoptable,
+  assertCharacterDataDirReadable,
+  ensureCharacterDataDir,
+  ensureCharacterDataMarker,
+  isProject02CharacterDataOwnedPath,
+  recordMaterializedCharacterPackageVersion,
+  requireCharacterDataMarker,
+  type EnsureCharacterDataMarkerResult,
+} from './character-data.ts';
+export {
+  assertProject02HomeAdoptable,
+  assertRealHomeEnvFile,
+  ensureInitializedProject02Home,
+  project02HomeCreationIsNew,
+  type EnsureInitializedProject02HomeOptions,
+} from './home.ts';
 export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
 export {
   acquireLocalRuntimeSessionWriterLease,

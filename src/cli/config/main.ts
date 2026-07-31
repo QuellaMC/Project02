@@ -1,36 +1,47 @@
 import {
   applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
+  assertGlobalConfigLoadableForCharacterScope,
+  assertResolvedProject02HomeAdoptable,
+  assertSelectedProject02HomeAdoptable,
   createRuntimeConfigInspectShape,
-  defaultRuntimeConfigPath,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
-  inspectRuntimePluginConfig,
+  readCharacterOverlayForScope,
+  resolveRuntimeConfigScopeTarget,
+  runtimeConfigDiagnosticAttribution,
+  runtimeConfigDiagnosticIsReadinessFailure,
   RuntimeConfigMutationError,
   runtimeConfigEnvPathForLocation,
+  runtimeConfigLocationUsesDefaultConfigPath,
   RuntimeEnvFileError,
-  storeRootForLoadedDefaultConfigPath,
   type LoadedProject02RuntimeConfig,
+  type ResolvedProject02ConfigLocation,
+  type ResolvedProject02RuntimeLocation,
+  type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
 import {
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
-import type {RuntimePluginCatalogEntry} from '../../plugins/index.ts';
-import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {
+  installedRuntimePluginCatalogEntry,
+  type RuntimePluginCatalogEntry,
+} from '../../plugins/index.ts';
 import {
   isLocalRuntimeTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
+import {RuntimeLocationCliUsageError} from '../shared/runtime-location-flags.ts';
 import {
-  RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState,
-} from '../shared/runtime-location-flags.ts';
+  assertProject02StoreConsent,
+  Project02StoreConsentError,
+} from '../shared/store-consent.ts';
 import {
   runRuntimeConfigConsole,
   type RuntimeConfigConsolePromptAdapter,
 } from './console.ts';
+import {runtimeConfigSecretSetCommandPrefix} from './console-shared.ts';
 import {
   assertNoExtraArgs,
   parseRuntimeConfigCliArgs,
@@ -51,20 +62,38 @@ type RuntimeConfigCliOptions = {
   readonly prompt?: RuntimeConfigConsolePromptAdapter;
 };
 
+type RuntimeConfigCliMutationOperation = Extract<
+  RuntimeConfigCliArgs['command'],
+  {readonly kind: 'mutate'}
+>['operation'];
+
+type CharacterScopedRuntimeCliStartup = Exclude<
+  Awaited<ReturnType<typeof resolveRuntimeCliStartup>>,
+  {readonly status: 'character_invalid'}
+>;
+
 export function runRuntimeConfigCliFromArgs(
   args: readonly string[],
   options: RuntimeConfigCliOptions,
 ): Promise<number> {
   return Promise.resolve()
-    .then(() => {
+    .then(async () => {
       const parsedArgs = parseRuntimeConfigCliArgs(args);
+
+      if (
+        parsedArgs.location.character !== undefined &&
+        parsedArgs.commandArgs[0] !== 'ui'
+      ) {
+        return runCharacterScopedRuntimeConfigCommand(parsedArgs, options);
+      }
 
       if (parsedArgs.commandArgs[0] !== 'ui') {
         return runRuntimeConfigCliFromArgsSync(args, options);
       }
 
       assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
-      const startup = resolveRuntimeCliStartup({
+      await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+      const startup = await resolveRuntimeCliStartup({
         location: parsedArgs.location,
         ...(options.env === undefined ? {} : {env: options.env}),
         ...(options.factories === undefined
@@ -73,15 +102,29 @@ export function runRuntimeConfigCliFromArgs(
         continueAfterActivationErrors: true,
       });
 
-      return runRuntimeConfigConsole({
+      if (startup.status === 'character_invalid') {
+        throw new RuntimeConfigCliUsageError(
+          (startup.characterActivation.status === 'failed'
+            ? startup.characterActivation.messages[0]
+            : undefined) ?? 'Character activation failed.',
+        );
+      }
+
+      return await runRuntimeConfigConsole({
         stdout: options.stdout,
+        loadedConfig: startup.loadedConfig,
+        runtimeLocation: startup.runtimeLocation,
         ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
         env: startup.configEnv,
         runtimeEnv:
           startup.status === 'resolved'
             ? startup.runtimeEnv
             : startup.configEnv,
-        ...parsedArgs.location,
+        scope:
+          parsedArgs.location.character === undefined ? 'global' : 'character',
+        secretSetCommandPrefix: runtimeConfigSecretSetCommandPrefix(
+          parsedArgs.location,
+        ),
         ...(options.factories === undefined
           ? {}
           : {factories: options.factories}),
@@ -91,15 +134,51 @@ export function runRuntimeConfigCliFromArgs(
     .catch((error: unknown) => handleRuntimeConfigCliError(error, options));
 }
 
-function runRuntimeConfigCliFromArgsSync(
+/**
+ * Asks before a route that would create one. Every caller runs this
+ * after its command has parsed: a malformed command line is a usage
+ * error whatever store it names, and asking first would answer the
+ * wrong question — offering to create a store for a command that was
+ * never going to run.
+ *
+ * Read verbs (`path`, `env-path`, `get` at global scope) never call
+ * it. They create nothing today, and `path` in particular is how an
+ * operator asks where a store *would* live.
+ *
+ * `creates` says which of the two things a route brings into being, so
+ * the gate can tell a run that stands up a home from one that only
+ * writes the config document it was pointed at.
+ */
+function assertRuntimeConfigCliStoreConsent(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  options: RuntimeConfigCliOptions,
+  creates: 'home' | 'selected-config' = 'home',
+): Promise<void> {
+  return assertProject02StoreConsent({
+    location: parsedArgs.location,
+    init: parsedArgs.init,
+    stdout: options.stdout,
+    creates,
+    // The same env staging the command itself will use, so the gate
+    // judges the home the command would actually resolve.
+    cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
+      parsedArgs,
+      options.env ?? process.env,
+    ),
+    ...(options.stdin === undefined ? {} : {stdin: options.stdin}),
+    ...(options.env === undefined ? {} : {env: options.env}),
+  });
+}
+
+async function runRuntimeConfigCliFromArgsSync(
   args: readonly string[],
   options: RuntimeConfigCliOptions,
-): number {
+): Promise<number> {
   try {
     const parsedArgs = parseRuntimeConfigCliArgs(args);
 
     if (parsedArgs.commandArgs[0] === 'check') {
-      return runRuntimeConfigCheckCommand(parsedArgs, options);
+      return await runRuntimeConfigCheckCommand(parsedArgs, options);
     }
 
     const secretSetCommand =
@@ -111,31 +190,49 @@ function runRuntimeConfigCliFromArgsSync(
     );
 
     if (secretSetCommand) {
-      return runRuntimePluginSecretSetCommand(parsedArgs, options, cwdDotEnv);
+      return await runRuntimePluginSecretSetCommand(
+        parsedArgs,
+        options,
+        cwdDotEnv,
+      );
     }
 
-    return runRuntimeConfigDocumentCommand(parsedArgs, options, cwdDotEnv);
+    return await runRuntimeConfigDocumentCommand(
+      parsedArgs,
+      options,
+      cwdDotEnv,
+    );
   } catch (error: unknown) {
     return handleRuntimeConfigCliError(error, options);
   }
 }
 
-function runRuntimeConfigCheckCommand(
+async function runRuntimeConfigCheckCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
-): number {
-  const startup = resolveRuntimeCliStartup({
+): Promise<number> {
+  // Check parses without env — only `secret set` reads one, and this
+  // route is reached only for `check` — so a malformed command line is
+  // rejected before anything is asked for or created.
+  const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
+
+  if (command.kind !== 'check') {
+    throw new TypeError('Runtime config check command parsing drifted.');
+  }
+
+  await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+  const startup = await resolveRuntimeCliStartup({
     location: parsedArgs.location,
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.factories === undefined ? {} : {factories: options.factories}),
   });
-  const command = parseRuntimeConfigCommand(
-    parsedArgs.commandArgs,
-    startup.configEnv,
-  );
 
-  if (command.kind !== 'check') {
-    throw new TypeError('Runtime config check command parsing drifted.');
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
   }
 
   writeJson(options.stdout, {
@@ -151,27 +248,47 @@ function runRuntimeConfigCheckCommand(
     : 0;
 }
 
-function runRuntimePluginSecretSetCommand(
+async function runRuntimePluginSecretSetCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
-): number {
-  const startup = resolveRuntimeConfigCliActivationStartup({
-    parsedArgs,
-    options,
-    cwdDotEnv,
-  });
+): Promise<number> {
+  // Secret set is the one verb that reads env while parsing, so it
+  // stages env through the config-stage startup — which creates
+  // nothing — rather than the activation startup that does. The
+  // command is then rejected, and the store offered, in that order:
+  // both before anything is written.
   const command = parseRuntimeConfigCommand(
     parsedArgs.commandArgs,
-    startup.configEnv,
+    resolveRuntimeCliStartup({
+      stage: 'config',
+      location: parsedArgs.location,
+      cwdDotEnv,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    }).configEnv,
   );
 
   if (command.kind !== 'secret_set') {
     throw new TypeError('Runtime config secret-set command parsing drifted.');
   }
 
+  await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+  const startup = await resolveRuntimeConfigCliActivationStartup({
+    parsedArgs,
+    options,
+    cwdDotEnv,
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
+  }
+
   const result = applyRuntimePluginSecretSetCommand({
-    location: parsedArgs.location,
+    runtimeLocation: startup.runtimeLocation,
     runtimeEnv:
       startup.status === 'resolved' ? startup.runtimeEnv : startup.configEnv,
     catalogEntries: startup.activationPlan.catalogEntries,
@@ -182,12 +299,12 @@ function runRuntimePluginSecretSetCommand(
   return 0;
 }
 
-function runRuntimeConfigDocumentCommand(
+async function runRuntimeConfigDocumentCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
-): number {
-  const startup = resolveRuntimeCliStartup({
+): Promise<number> {
+  const configStartup = resolveRuntimeCliStartup({
     stage: 'config',
     location: parsedArgs.location,
     cwdDotEnv,
@@ -197,37 +314,38 @@ function runRuntimeConfigDocumentCommand(
     location: parsedArgs.location,
     command: parseRuntimeConfigCommand(
       parsedArgs.commandArgs,
-      startup.configEnv,
+      configStartup.configEnv,
     ),
   };
 
   if (parsed.command.kind === 'path') {
+    assertReadableSelectedHome(configStartup.runtimeLocation);
     options.stdout.write(
-      `${
-        startup.loadedConfig.path ??
-        defaultRuntimeConfigPath(parsed.location.storeRoot)
-      }\n`,
+      `${configStartup.runtimeLocation.selectedConfig.path}\n`,
     );
     return 0;
   }
 
   if (parsed.command.kind === 'env_path') {
-    assertRuntimeConfigLoadedForEnvPath(startup.loadedConfig);
+    assertReadableSelectedHome(configStartup.runtimeLocation);
+    assertResolvedProject02HomeAdoptable(configStartup.runtimeLocation, {
+      requireRealEnvFile: true,
+    });
+    assertRuntimeConfigLoadedForEnvPath(
+      configStartup.loadedConfig,
+      configStartup.runtimeLocation,
+    );
     options.stdout.write(
-      `${runtimeConfigEnvPathForLocation({
-        loadedConfig: startup.loadedConfig,
-        ...(parsed.location.storeRoot === undefined
-          ? {}
-          : {storeRoot: parsed.location.storeRoot}),
-      })}\n`,
+      `${runtimeConfigEnvPathForLocation(configStartup.runtimeLocation)}\n`,
     );
     return 0;
   }
 
   if (parsed.command.kind === 'get') {
-    assertRuntimeConfigLoaded(startup.loadedConfig);
+    assertReadableSelectedHome(configStartup.runtimeLocation);
+    assertRuntimeConfigLoaded(configStartup.loadedConfig);
     const value = getRedactedRuntimeConfigValueAtPath(
-      startup.loadedConfig.config,
+      configStartup.loadedConfig.config,
       parsed.command.path,
     );
 
@@ -239,23 +357,370 @@ function runRuntimeConfigDocumentCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
+  // Every read verb returned above, so what is left writes. Plugin
+  // activation resolves its manifest through the activation startup,
+  // which stands up the home; the plain document write touches only
+  // the selected config, which standalone is just the file the
+  // operator named.
+  if (isPluginActivationOperation(parsed.command.operation)) {
+    await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+
+    return runManifestAwarePluginActivation({
+      parsedArgs,
+      options,
+      cwdDotEnv,
+      operation: parsed.command.operation,
+    });
+  }
+
+  await assertRuntimeConfigCliStoreConsent(
+    parsedArgs,
+    options,
+    'selected-config',
+  );
+  const target = resolveRuntimeConfigScopeTarget({
+    runtimeLocation: configStartup.runtimeLocation,
+    env: configStartup.configEnv,
+    scope: 'global',
+  });
   const result = applyRuntimeConfigControlOperation({
-    ...parsed.location,
-    env: startup.configEnv,
-    operation: parsed.command.operation,
+    target,
+    request: {
+      kind: 'document',
+      operation: parsed.command.operation,
+    },
   });
 
   writeRuntimeConfigMutationResult(options.stdout, result);
   return 0;
 }
 
-function resolveRuntimeConfigCliActivationStartup(options: {
+function isPluginActivationOperation(
+  operation: RuntimeConfigCliMutationOperation,
+): operation is Extract<
+  typeof operation,
+  {readonly kind: 'plugin_enable' | 'plugin_disable'}
+> {
+  return (
+    operation.kind === 'plugin_enable' || operation.kind === 'plugin_disable'
+  );
+}
+
+async function runManifestAwarePluginActivation(options: {
   readonly parsedArgs: RuntimeConfigCliParsedArgs;
   readonly options: RuntimeConfigCliOptions;
   readonly cwdDotEnv: 'always' | 'auto';
-}): ReturnType<typeof resolveRuntimeCliStartup> {
+  readonly operation: Extract<
+    Extract<
+      RuntimeConfigCliArgs['command'],
+      {readonly kind: 'mutate'}
+    >['operation'],
+    {readonly kind: 'plugin_enable' | 'plugin_disable'}
+  >;
+}): Promise<number> {
+  const startup = await resolveRuntimeConfigCliActivationStartup({
+    parsedArgs: options.parsedArgs,
+    options: options.options,
+    cwdDotEnv: options.cwdDotEnv,
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
+  }
+
+  const definition = installedRuntimePluginCatalogEntry(
+    startup.activationPlan.catalogEntries,
+    options.operation.pluginId,
+  );
+
+  if (definition === undefined) {
+    throw new RuntimeConfigCliUsageError(
+      `Plugin "${options.operation.pluginId}" is not installed.`,
+    );
+  }
+
+  const target = resolveRuntimeConfigScopeTarget({
+    runtimeLocation: startup.runtimeLocation,
+    env: startup.configEnv,
+    scope: 'global',
+  });
+  const result = applyRuntimeConfigControlOperation({
+    target,
+    request: {
+      kind: 'plugin_activation',
+      manifest: definition.manifest,
+      enabled: options.operation.kind === 'plugin_enable',
+    },
+  });
+
+  writeRuntimeConfigMutationResult(options.options.stdout, result);
+  return 0;
+}
+
+/**
+ * Verb routing under --character: path/get/set/unset target the named
+ * character's overlay; check stays layered-global; secret and env-file
+ * verbs are rejected because secrets are shared across characters.
+ */
+async function runCharacterScopedRuntimeConfigCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs,
+  options: RuntimeConfigCliOptions,
+): Promise<number> {
+  const characterId = parsedArgs.location.character;
+
+  if (characterId === undefined) {
+    throw new TypeError('Character-scoped command routing drifted.');
+  }
+
+  assertCharacterScopedRawCommandAllowed(parsedArgs.commandArgs);
+
+  // Secret commands were rejected above and no remaining verb consults
+  // the environment while parsing, so the command parses before the one
+  // activation startup — the config-stage pre-startup this route used
+  // to run existed only to stage env for parsing.
+  const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
+
+  assertCharacterScopedParsedCommandAllowed(command);
+  // Every scoped verb runs the activation startup, which materializes
+  // the character's data directory — so unlike global scope, the read
+  // verbs create too and none of them are exempt.
+  await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
+  const characterConfigRequest =
+    characterConfigStartupRequestForCommand(command);
+  const startup = await resolveRuntimeCliStartup({
+    location: parsedArgs.location,
+    cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
+      parsedArgs,
+      options.env ?? process.env,
+    ),
+    ...(options.env === undefined ? {} : {env: options.env}),
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
+    continueAfterActivationErrors: true,
+    ...(characterConfigRequest === undefined ? {} : {characterConfigRequest}),
+  });
+
+  if (startup.status === 'character_invalid') {
+    throw new RuntimeConfigCliUsageError(
+      (startup.characterActivation.status === 'failed'
+        ? startup.characterActivation.messages[0]
+        : undefined) ?? 'Character activation failed.',
+    );
+  }
+
+  if (command.kind !== 'check') {
+    assertScopedStartupConfigReadable(startup);
+  }
+
+  const target = resolveRuntimeConfigScopeTarget({
+    runtimeLocation: startup.runtimeLocation,
+    env: startup.configEnv,
+    scope: 'character',
+  });
+
+  return writeCharacterScopedRuntimeConfigResult({
+    stdout: options.stdout,
+    command,
+    startup,
+    target,
+  });
+}
+
+function assertCharacterScopedRawCommandAllowed(
+  commandArgs: readonly string[],
+): void {
+  // Secret set reads its env var during parsing, so scope rejection
+  // intentionally comes first.
+  if (commandArgs[0] === 'secret' && commandArgs[1] === 'set') {
+    throw new RuntimeConfigCliUsageError(
+      'Secrets are shared across characters; run the secret command ' +
+        'without --character.',
+    );
+  }
+}
+
+function assertCharacterScopedParsedCommandAllowed(
+  command: RuntimeConfigCliArgs['command'],
+): void {
+  if (command.kind === 'env_path') {
+    throw new RuntimeConfigCliUsageError(
+      'The secrets env file is shared across characters; run env-path ' +
+        'without --character.',
+    );
+  }
+}
+
+function characterConfigStartupRequestForCommand(
+  command: RuntimeConfigCliArgs['command'],
+) {
+  if (command.kind !== 'mutate') {
+    return undefined;
+  }
+
+  return isPluginActivationOperation(command.operation)
+    ? {
+        kind: 'plugin_activation' as const,
+        pluginId: command.operation.pluginId,
+        enabled: command.operation.kind === 'plugin_enable',
+      }
+    : {
+        kind: 'document' as const,
+        operation: command.operation,
+      };
+}
+
+function writeCharacterScopedRuntimeConfigResult(options: {
+  readonly stdout: NodeJS.WritableStream;
+  readonly command: RuntimeConfigCliArgs['command'];
+  readonly startup: CharacterScopedRuntimeCliStartup;
+  readonly target: Extract<
+    ResolvedRuntimeConfigScopeTarget,
+    {readonly scope: 'character'}
+  >;
+}): number {
+  const {command, startup, target} = options;
+
+  if (command.kind === 'check') {
+    writeJson(options.stdout, {
+      runtimeConfig: createRuntimeConfigInspectShape(
+        startup.activationPlan.resolvedConfig,
+      ),
+      activationDiagnostics: startup.activationPlan.activation.diagnostics,
+      plugins: startup.activationPlan.activation.plugins,
+    });
+    return diagnosticsHaveErrors(startup.activationPlan.activation.diagnostics)
+      ? 1
+      : 0;
+  }
+
+  if (command.kind === 'path') {
+    options.stdout.write(`${target.configPath}\n`);
+    return 0;
+  }
+
+  if (command.kind === 'get') {
+    return writeCharacterScopedValue({
+      stdout: options.stdout,
+      target,
+      loadedConfig: startup.loadedConfig,
+      path: command.path,
+    });
+  }
+
+  if (command.kind !== 'mutate') {
+    throw new TypeError('Runtime config command routing drifted.');
+  }
+
+  const result = startup.characterConfigMutation;
+
+  if (result === undefined) {
+    throw new TypeError('Character config mutation did not commit.');
+  }
+
+  writeRuntimeConfigMutationResult(options.stdout, result);
+  return 0;
+}
+
+/**
+ * Blocks a scoped verb on an invalid authored document, not on an
+ * incomplete environment.
+ *
+ * The distinction is the shared classifier's, not this command's: a
+ * missing required value or secret says activation is not ready yet,
+ * which is precisely the state an operator runs `path` and `get` to
+ * inspect and `set` to repair. Materialization already draws the line
+ * here, so deferring to the same predicate keeps one answer for
+ * "does this diagnostic stop config work" instead of a per-verb
+ * allowlist that a new resolver error code could fall through.
+ */
+function assertScopedStartupConfigReadable(
+  startup: CharacterScopedRuntimeCliStartup,
+): void {
+  assertGlobalConfigLoadableForCharacterScope(startup.loadedConfig);
+  const blocking = startup.activationPlan.resolvedConfig.diagnostics.find(
+    diagnostic =>
+      diagnostic.severity === 'error' &&
+      !runtimeConfigDiagnosticIsReadinessFailure(diagnostic),
+  );
+
+  if (blocking !== undefined) {
+    throw new RuntimeConfigCliUsageError(
+      `${runtimeConfigDiagnosticAttribution(blocking)}${blocking.message}`,
+    );
+  }
+}
+
+/**
+ * Read-only commands that treat the selected store as a home refuse a
+ * directory the runtime would not adopt. Mutations are admitted by the
+ * immutable transaction target itself. Explicit --config and env-selected
+ * paths remain standalone files with no home semantics.
+ */
+function assertReadableSelectedHome(
+  runtimeLocation: ResolvedProject02ConfigLocation,
+): void {
+  assertSelectedProject02HomeAdoptable(runtimeLocation, {
+    requireRealEnvFile: true,
+  });
+}
+
+function writeCharacterScopedValue(options: {
+  readonly stdout: NodeJS.WritableStream;
+  readonly target: Extract<
+    ResolvedRuntimeConfigScopeTarget,
+    {readonly scope: 'character'}
+  >;
+  readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly path: string;
+}): number {
+  // The guarded loader holds the identity and adoptability rules for
+  // reads too: a directory marked for another character, or one the
+  // writers would refuse, must not report its overlay as this
+  // character's config.
+  const overlay = readCharacterOverlayForScope(
+    options.target.runtimeLocation.characterScope,
+  ).overlay;
+  const overlayError = overlay.diagnostics.find(
+    diagnostic => diagnostic.severity === 'error',
+  );
+
+  if (overlayError !== undefined) {
+    throw new RuntimeConfigCliUsageError(
+      `${runtimeConfigDiagnosticAttribution(overlayError)}${overlayError.message}`,
+    );
+  }
+
+  const overlayValue = getRedactedRuntimeConfigValueAtPath(
+    overlay.config,
+    options.path,
+  );
+  const globalValue = getRedactedRuntimeConfigValueAtPath(
+    options.loadedConfig.config,
+    options.path,
+  );
+
+  writeJson(options.stdout, {
+    value: overlayValue ?? globalValue ?? null,
+    origin:
+      overlayValue !== undefined
+        ? 'character'
+        : globalValue !== undefined
+          ? 'global'
+          : 'none',
+  });
+  return 0;
+}
+
+async function resolveRuntimeConfigCliActivationStartup(options: {
+  readonly parsedArgs: RuntimeConfigCliParsedArgs;
+  readonly options: RuntimeConfigCliOptions;
+  readonly cwdDotEnv: 'always' | 'auto';
+}): Promise<Awaited<ReturnType<typeof resolveRuntimeCliStartup>>> {
   try {
-    return resolveRuntimeCliStartup({
+    return await resolveRuntimeCliStartup({
       location: options.parsedArgs.location,
       cwdDotEnv: options.cwdDotEnv,
       ...(options.options.factories === undefined
@@ -276,7 +741,7 @@ function resolveRuntimeConfigCliActivationStartup(options: {
 }
 
 function applyRuntimePluginSecretSetCommand(options: {
-  readonly location: RuntimeLocationCliState;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly runtimeEnv: NodeJS.ProcessEnv;
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
   readonly operation: Extract<
@@ -284,15 +749,12 @@ function applyRuntimePluginSecretSetCommand(options: {
     {readonly kind: 'secret_set'}
   >['operation'];
 }) {
-  const definition = ownJsonRecordValue(
+  const definition = installedRuntimePluginCatalogEntry(
     options.catalogEntries,
     options.operation.pluginId,
   );
 
-  if (
-    definition === undefined ||
-    definition.manifest.id !== options.operation.pluginId
-  ) {
+  if (definition === undefined) {
     throw new RuntimeConfigCliUsageError(
       `Plugin "${options.operation.pluginId}" is not installed.`,
     );
@@ -302,23 +764,24 @@ function applyRuntimePluginSecretSetCommand(options: {
     ...options.runtimeEnv,
     [options.operation.envVar]: options.operation.secretValue,
   };
-  const inspected = inspectRuntimePluginConfig({
-    ...options.location,
+  const target = resolveRuntimeConfigScopeTarget({
+    runtimeLocation: options.runtimeLocation,
     env: runtimeEnv,
-    manifest: definition.manifest,
+    scope: 'global',
   });
 
-  return applyRuntimePluginConfigControlOperation({
-    ...options.location,
-    env: runtimeEnv,
-    manifest: definition.manifest,
-    actor: 'operator',
-    expectedFingerprint: inspected.fingerprint,
-    operation: {
-      kind: 'secret_set',
-      fieldName: options.operation.fieldName,
-      envVar: options.operation.envVar,
-      secretValue: options.operation.secretValue,
+  return applyRuntimeConfigControlOperation({
+    target,
+    request: {
+      kind: 'plugin_config',
+      manifest: definition.manifest,
+      actor: 'operator',
+      fieldOperation: {
+        kind: 'secret_set',
+        fieldName: options.operation.fieldName,
+        envVar: options.operation.envVar,
+        secretValue: options.operation.secretValue,
+      },
     },
   });
 }
@@ -347,6 +810,7 @@ function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
 
 function assertRuntimeConfigLoadedForEnvPath(
   loaded: LoadedProject02RuntimeConfig,
+  runtimeLocation: ResolvedProject02ConfigLocation,
 ): void {
   if (!diagnosticsHaveErrors(loaded.diagnostics)) {
     return;
@@ -358,7 +822,7 @@ function assertRuntimeConfigLoadedForEnvPath(
 
   if (
     errorDiagnostic?.code === 'runtime_config_missing' &&
-    storeRootForLoadedDefaultConfigPath(loaded) !== undefined
+    runtimeConfigLocationUsesDefaultConfigPath(runtimeLocation)
   ) {
     return;
   }
@@ -379,6 +843,7 @@ function handleRuntimeConfigCliError(
   if (
     error instanceof RuntimeConfigCliUsageError ||
     error instanceof RuntimeLocationCliUsageError ||
+    error instanceof Project02StoreConsentError ||
     error instanceof RuntimeEnvFileError ||
     error instanceof RuntimeConfigMutationError ||
     error instanceof AggregateError ||
@@ -394,6 +859,7 @@ function handleRuntimeConfigCliError(
 
 if (isMainModule(import.meta.url)) {
   const exitCode = await runRuntimeConfigCliFromArgs(process.argv.slice(2), {
+    stdin: process.stdin,
     stdout: process.stdout,
     stderr: process.stderr,
   });

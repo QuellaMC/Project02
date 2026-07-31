@@ -1,8 +1,10 @@
 export {reconcilePreparedRuntimePluginConfigEffect} from './builtin/plugin-management/config-update.ts';
 export {
+  createRuntimePluginConfigControlBinding,
   createRuntimePluginManagementPlugin,
   createRuntimePluginManagementPluginManifest,
   isRuntimePluginManagementPlugin,
+  type RuntimePluginConfigControlBinding,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
 } from './builtin/plugin-management/index.ts';
@@ -10,6 +12,7 @@ export {
   defaultRuntimePluginHostServiceCatalogEntries,
   hostFirstPartyRuntimePluginIds,
   hostScopedFirstPartyRuntimePluginIds,
+  installedRuntimePluginCatalogEntry,
   isHostOwnedFirstPartyRuntimePluginId,
   isHostScopedFirstPartyRuntimePluginId,
   type RuntimePluginCatalogEntry,
@@ -20,12 +23,15 @@ export type {
   RuntimePluginFactoryFunction,
   RuntimePluginFactoryInput,
   RuntimePluginPackageCatalogEntry,
+  RuntimePluginPackageLoadFunction,
+  RuntimePluginPackageLoadOptions,
 } from './api/factory.ts';
 export {
   createRuntimePlugin,
   createRuntimePluginContext,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
 } from './api/constructors.ts';
+export {validateRuntimePluginManifest} from './api/manifest-validation.ts';
 export {
   firstPartyModelToolsPluginId,
   runtimePluginConfigReadToolName,
@@ -34,6 +40,7 @@ export {
   runtimePluginId,
   runtimePluginListToolName,
   type RuntimePluginAccessMap,
+  type RuntimePluginAccessSnapshot,
 } from './api/contract.ts';
 export type {
   CreateRuntimePluginFileStoreOptions,
@@ -51,7 +58,9 @@ export {
 export {
   createRuntimePluginHost,
   runRuntimePluginSessionEndHooks,
+  runRuntimePluginSessionEndHooksForTargets,
   runRuntimePluginShutdownHooks,
+  runRuntimePluginShutdownHooksForTargets,
   type RuntimePluginSessionEndOptions,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
@@ -61,6 +70,10 @@ export {
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,
 } from './host/host.ts';
+export {
+  runtimePluginLifecycleTarget,
+  type RuntimePluginLifecycleTarget,
+} from './host/instance-lifecycle.ts';
 export {createMemoryProviderRuntimePlugin} from './builtin/memory-provider/provider-plugin.ts';
 export {memorySearchTool} from './builtin/memory-provider/tools.ts';
 export type {

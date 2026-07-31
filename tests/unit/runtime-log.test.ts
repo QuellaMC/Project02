@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -21,7 +22,7 @@ const identity = {
 
 describe('runtime log store', () => {
   it('appends trace entries in order and returns immutable snapshots', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const received: RuntimeTraceEntryInput = {
       ...identity,
       step: 'runtime_event_received',
@@ -60,7 +61,7 @@ describe('runtime log store', () => {
   });
 
   it('copies raw event records with source event and trace identity', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const received: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_event_received',
@@ -151,7 +152,7 @@ describe('runtime log store', () => {
   });
 
   it('deeply snapshots tool input and result evidence before storing it', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const nestedInput = {query: 'before'};
     const nestedOutput = {answer: 'before'};
     const started: RawEventLogRecordInput = {
@@ -207,7 +208,7 @@ describe('runtime log store', () => {
   });
 
   it('appends visible conversation records only through explicit committed-message inputs', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const userMessage: ConversationLogRecordInput = {
       ...identity,
       id: 'local-session:message-1',
@@ -252,7 +253,7 @@ describe('runtime log store', () => {
   });
 
   it('records failed raw rejections without adding visible conversation records', () => {
-    const store = createRuntimeLogStore();
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const rejection: RawEventLogRecordInput = {
       ...identity,
       kind: 'runtime_turn_rejected',
@@ -271,6 +272,309 @@ describe('runtime log store', () => {
 
     expect(store.rawEvents()).toEqual([received, rejection]);
     expect(store.conversationMessages()).toEqual([]);
+  });
+
+  it('rejects a conversation append when no character is expected, recorded, or bound', () => {
+    const store = createRuntimeLogStore();
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow(
+      'Conversation append requires a session character: none was expected, recorded, or store-bound.',
+    );
+  });
+
+  it('accepts an unanchored custom-character transcript only while the store is unbound', () => {
+    const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
+    const appendNovaTurn = (
+      store: ReturnType<typeof createRuntimeLogStore>,
+    ) => {
+      store.appendTrace({...identity, step: 'runtime_event_received'});
+      store.appendRawEvent({
+        ...identity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
+      });
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        },
+        novaProfile,
+      );
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-2',
+          role: 'character',
+          speakerId: 'nova',
+          speakerName: 'Nova',
+          text: 'hello back',
+          committedAt: '2026-06-04T00:00:02.000Z',
+        },
+        novaProfile,
+      );
+
+      return () =>
+        store.appendRawEvent({
+          ...identity,
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE',
+          status: 'completed',
+          visibleMessageIds: [
+            'local-session:message-1',
+            'local-session:message-2',
+          ],
+        });
+    };
+
+    const unboundStore = createRuntimeLogStore();
+    appendNovaTurn(unboundStore)();
+    expect(unboundStore.conversationMessages()).toHaveLength(2);
+
+    const boundStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+    expect(() => appendNovaTurn(boundStore)()).toThrow(
+      'Durable character evidence must match the store-bound character.',
+    );
+  });
+
+  it('anchors a custom first user speaker when the store binds none', () => {
+    // A direct-runtime store may omit boundUserSpeaker while the
+    // session carries a custom display name: the first user record
+    // anchors the speaker (the id is never negotiable), and later
+    // records must match the anchor.
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'someone-else',
+        speakerName: 'Custom Name',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'Custom Name',
+      text: 'hello',
+      committedAt: '2026-06-04T00:00:01.000Z',
+    });
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
+      committedAt: '2026-06-04T00:00:02.000Z',
+    });
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-3',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Different Name',
+        text: 'again',
+        committedAt: '2026-06-04T00:00:03.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+  });
+
+  it('refuses an anchoring user name a later read would reject', () => {
+    // The anchoring name is judged by the rule every speaker name is
+    // judged by, not merely "non-empty". A multiline or overlong name
+    // used to append, and the next read of the session ran it through
+    // createUserSpeaker and threw — leaving durable evidence that could
+    // never be opened again. Refusing the write is the only outcome
+    // that does not strand the session.
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+
+    for (const speakerName of ['Bad\nName', ' Padded ', 'x'.repeat(129)]) {
+      expect(() =>
+        store.appendConversationMessage({
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName,
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        }),
+      ).toThrow('speaker metadata is malformed');
+    }
+
+    // Nothing landed: message 1 is still the slot a user record may
+    // take. Had a refused record been appended, the store would now
+    // require message 2 and the character role.
+    expect(
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Custom Name',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }).speakerName,
+    ).toBe('Custom Name');
+  });
+
+  it('refuses a supplied character the store binding disagrees with', () => {
+    // The binding is a fact about the store, not a default the caller
+    // outranks. A supplied character used to win outright, and with no
+    // recorded evidence yet to compare against, `nova` messages landed
+    // in a `mira`-bound store; the refusal arrived on the terminal raw
+    // event, after the appends were durable.
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+    const nova = {id: 'nova', displayName: 'Nova'} as const;
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    expect(() =>
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        },
+        nova,
+      ),
+    ).toThrow(
+      'Durable character evidence must match the store-bound character',
+    );
+
+    // Nothing landed, and only the timing changed: message 1 is still
+    // free, the bound character still appends, and a renamed character
+    // stays appendable because the binding is compared by id.
+    expect(
+      store.appendConversationMessage(
+        {
+          ...identity,
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+          committedAt: '2026-06-04T00:00:01.000Z',
+        },
+        {id: testCharacterProfile.id, displayName: 'Renamed Mira'},
+      ).id,
+    ).toBe('local-session:message-1');
+  });
+
+  it('stamps user messages against the bound user speaker and rejects drift', () => {
+    const store = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      boundUserSpeaker: {id: 'local-user', displayName: 'Mike'},
+    });
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'hello',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
+
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'Mike',
+      text: 'hello',
+      committedAt: '2026-06-04T00:00:01.000Z',
+    });
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
+      committedAt: '2026-06-04T00:00:02.000Z',
+    });
+
+    // Once recorded, the session's user speaker wins over later intent:
+    // one user speaker per session, mirroring the character rule.
+    expect(() =>
+      store.appendConversationMessage({
+        ...identity,
+        id: 'local-session:message-3',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Michael',
+        text: 'renamed mid-session',
+        committedAt: '2026-06-04T00:00:03.000Z',
+      }),
+    ).toThrow('speaker metadata is malformed');
   });
 });
 

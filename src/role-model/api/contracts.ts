@@ -250,11 +250,21 @@ export type RejectedRoleModelDecisionResult = {
 export type RoleModelDecisionResult =
   AcceptedRoleModelDecisionResult | RejectedRoleModelDecisionResult;
 
+// Provider-independent per-turn character identification: which character
+// definition (content revision included) produced this turn. Additive and
+// optional so records written before it decode unchanged.
+export type RoleModelCharacterRef = {
+  readonly id: string;
+  readonly version: string;
+  readonly personaFingerprint: string;
+};
+
 export type RoleModelIOSnapshot = RuntimeEventIdentity & {
   readonly kind: 'role_model_io_snapshot';
   readonly sessionId: string;
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly rawOutputText: string;
+  readonly characterRef?: RoleModelCharacterRef;
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 };
@@ -263,6 +273,7 @@ export type CreateRoleModelIOSnapshotOptions = RuntimeEventIdentity & {
   readonly sessionId: string;
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly rawOutputText: string;
+  readonly characterRef?: RoleModelCharacterRef;
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 };

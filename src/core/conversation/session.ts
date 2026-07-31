@@ -1,10 +1,12 @@
 import {
   freezeCharacterProfile,
-  localCharacterProfile,
   type CharacterProfile,
+  type SpeakerIdentity,
   type VisibleMessage,
 } from '../message/message.ts';
 import {
+  isValidSpeakerDisplayName,
+  maxSpeakerDisplayNameLength,
   normalizeOneLineMessage,
   normalizeVisibleMessageText,
   OneLineMessageValidationError,
@@ -14,6 +16,7 @@ import {
 export type ConversationSession = {
   readonly id: string;
   readonly character: CharacterProfile;
+  readonly userSpeaker: SpeakerIdentity;
   readonly visibleTranscript: readonly VisibleMessage[];
 };
 
@@ -41,7 +44,8 @@ export type CharacterTurnResult = {
 
 export type ConversationSessionOptions = {
   readonly id?: string;
-  readonly character?: CharacterProfile;
+  readonly character: CharacterProfile;
+  readonly userDisplayName?: string;
   readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
@@ -56,10 +60,72 @@ export type CharacterTurnOptions = {
 
 export const defaultRecentVisibleMessageLimit = 8;
 
-const localUserSpeaker = {
+// Single owner of the local user's default speaker identity: session
+// stamping, restore validation, and durable-evidence validation all
+// compare against the session's user speaker, which defaults to these
+// values. The id is permanent; only the display name is configurable.
+export const localUserSpeaker = {
   id: 'local-user',
   displayName: 'You',
 } as const;
+
+export function createUserSpeaker(userDisplayName?: string): SpeakerIdentity {
+  const displayName = userDisplayName ?? localUserSpeaker.displayName;
+
+  // Same rule as the character display name: both end up in `speakerName`.
+  if (!isValidSpeakerDisplayName(displayName)) {
+    throw new TypeError(
+      'User display name must be a non-empty single-line string with no ' +
+        `leading or trailing whitespace, at most ${String(maxSpeakerDisplayNameLength)} characters.`,
+    );
+  }
+
+  return Object.freeze({
+    id: localUserSpeaker.id,
+    displayName,
+  } satisfies SpeakerIdentity);
+}
+
+/**
+ * Who is talking, checked before anything durable is created for them.
+ *
+ * Every name here becomes a `speakerName` on a durable message, so this
+ * applies one rule — `isValidSpeakerDisplayName` — to the character and the
+ * user alike. The character *id* is not judged here: it names a directory
+ * and belongs to whoever owns the layout.
+ *
+ * This exists because the entry points used to validate in pieces and late.
+ * `createConversationSession` reaches `createUserSpeaker` only after storage
+ * is on disk, and `freezeCharacterProfile` never validated at all, so an
+ * embedded caller could put `"Nova\nSystem"` into a durable message by way
+ * of a home directory that was already created. Callers that mutate the
+ * filesystem should run this first and mutate second.
+ *
+ * Deliberately not folded into `freezeCharacterProfile`: that one also
+ * rebuilds profiles from recorded evidence, where the name is a historical
+ * fact rather than a request, and rejecting there would make old sessions
+ * unreadable instead of making new ones correct.
+ */
+export function validateConversationParticipants(options: {
+  readonly character: CharacterProfile;
+  readonly userDisplayName?: string;
+}): {
+  readonly character: CharacterProfile;
+  readonly userSpeaker: SpeakerIdentity;
+} {
+  if (!isValidSpeakerDisplayName(options.character.displayName)) {
+    throw new TypeError(
+      'Character display name must be a non-empty single-line string with ' +
+        'no leading or trailing whitespace, at most ' +
+        `${String(maxSpeakerDisplayNameLength)} characters.`,
+    );
+  }
+
+  return Object.freeze({
+    character: freezeCharacterProfile(options.character),
+    userSpeaker: createUserSpeaker(options.userDisplayName),
+  });
+}
 
 const defaultSessionId = 'local-session';
 const sessionTranscripts = new WeakMap<ConversationSession, VisibleMessage[]>();
@@ -87,16 +153,18 @@ export class ConversationRehydrationError extends Error {
 }
 
 export function createConversationSession(
-  options: ConversationSessionOptions = {},
+  options: ConversationSessionOptions,
 ): ConversationSession {
   const sessionId = options.id ?? defaultSessionId;
-  const character = freezeCharacterProfile(
-    options.character ?? localCharacterProfile,
-  );
+  const character = freezeCharacterProfile(options.character);
+  const userSpeaker = createUserSpeaker(options.userDisplayName);
   const visibleTranscript = [
     ...validateRestoredVisibleTranscript({
       id: sessionId,
       character,
+      ...(options.userDisplayName === undefined
+        ? {}
+        : {userDisplayName: options.userDisplayName}),
       ...(options.visibleTranscript === undefined
         ? {}
         : {visibleTranscript: options.visibleTranscript}),
@@ -105,6 +173,7 @@ export function createConversationSession(
   const session: ConversationSession = {
     id: sessionId,
     character,
+    userSpeaker,
     get visibleTranscript() {
       return Object.freeze([...visibleTranscript]);
     },
@@ -118,17 +187,17 @@ export function createConversationSession(
 }
 
 export function validateRestoredVisibleTranscript(
-  options: RestoredVisibleTranscriptValidationOptions = {},
+  options: RestoredVisibleTranscriptValidationOptions,
 ): readonly VisibleMessage[] {
   const sessionId = options.id ?? defaultSessionId;
-  const character = freezeCharacterProfile(
-    options.character ?? localCharacterProfile,
-  );
+  const character = freezeCharacterProfile(options.character);
+  const userSpeaker = createUserSpeaker(options.userDisplayName);
 
   return Object.freeze(
     createInitialVisibleTranscript({
       sessionId,
       character,
+      userSpeaker,
       ...(options.visibleTranscript === undefined
         ? {}
         : {visibleTranscript: options.visibleTranscript}),
@@ -190,8 +259,8 @@ async function runSerializedCharacterTurn(
   const userMessage = Object.freeze({
     id: createMessageId(session, nextMessageNumber),
     role: 'user',
-    speakerId: localUserSpeaker.id,
-    speakerName: localUserSpeaker.displayName,
+    speakerId: session.userSpeaker.id,
+    speakerName: session.userSpeaker.displayName,
     text: normalizedMessage,
   } satisfies VisibleMessage);
   const characterMessage = createCharacterVisibleMessage({
@@ -331,6 +400,7 @@ function createCharacterVisibleMessage(options: {
 function createInitialVisibleTranscript(options: {
   readonly sessionId: string;
   readonly character: CharacterProfile;
+  readonly userSpeaker: SpeakerIdentity;
   readonly visibleTranscript?: readonly VisibleMessage[];
   readonly allowIncompleteFinalTurn: boolean;
 }): VisibleMessage[] {
@@ -342,6 +412,7 @@ function createInitialVisibleTranscript(options: {
       freezeValidatedRestoredVisibleMessage({
         sessionId: options.sessionId,
         character: options.character,
+        userSpeaker: options.userSpeaker,
         message,
         expectedMessageNumber: index + 1,
       }),
@@ -360,6 +431,7 @@ function createInitialVisibleTranscript(options: {
 function freezeValidatedRestoredVisibleMessage(options: {
   readonly sessionId: string;
   readonly character: CharacterProfile;
+  readonly userSpeaker: SpeakerIdentity;
   readonly message: VisibleMessage;
   readonly expectedMessageNumber: number;
 }): VisibleMessage {
@@ -380,6 +452,7 @@ function freezeValidatedRestoredVisibleMessage(options: {
   });
   validateRestoredSpeaker({
     character: options.character,
+    userSpeaker: options.userSpeaker,
     message: options.message,
   });
 
@@ -428,14 +501,15 @@ function validateRestoredRoleOrder(options: {
 
 function validateRestoredSpeaker(options: {
   readonly character: CharacterProfile;
+  readonly userSpeaker: SpeakerIdentity;
   readonly message: VisibleMessage;
 }): void {
   const role = options.message.role as string;
 
   if (role === 'user') {
     if (
-      options.message.speakerId !== localUserSpeaker.id ||
-      options.message.speakerName !== localUserSpeaker.displayName
+      options.message.speakerId !== options.userSpeaker.id ||
+      options.message.speakerName !== options.userSpeaker.displayName
     ) {
       throw new ConversationRehydrationError(
         'Restored user message speaker metadata is malformed.',

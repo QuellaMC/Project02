@@ -16,6 +16,7 @@ import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
+  initializeTestStore,
   requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
@@ -27,6 +28,10 @@ const installedSecretFactories = Object.freeze({
     create: () => installedSecretPlugin,
   }),
 });
+
+function physicalEnvPath(storeRoot: string): string {
+  return join(realpathSync.native(storeRoot), '.env');
+}
 
 describe('runtime config CLI location selection', () => {
   it('prints the env-selected config path from PROJECT02_RUNTIME_CONFIG', async () => {
@@ -79,7 +84,7 @@ describe('runtime config CLI location selection', () => {
         },
         {
           args: ['env-path'] as const,
-          expected: join(storeRoot, '.env'),
+          expected: physicalEnvPath(storeRoot),
         },
       ]) {
         let stdout = '';
@@ -130,6 +135,7 @@ describe('runtime config CLI location selection', () => {
     let setStderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(storeRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -169,7 +175,7 @@ describe('runtime config CLI location selection', () => {
         JSON.parse(setStdout) as {readonly configPath: string},
       ).toMatchObject({
         configPath,
-        envPath: join(storeRoot, '.env'),
+        envPath: physicalEnvPath(storeRoot),
       });
       expect(setStderr).toBe('');
       expect(
@@ -207,6 +213,7 @@ describe('runtime config CLI location selection', () => {
     let stderr = '';
 
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(storeRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -232,7 +239,7 @@ describe('runtime config CLI location selection', () => {
       expect(JSON.parse(stdout) as {readonly configPath: string}).toMatchObject(
         {
           configPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
       );
       expect(
@@ -279,6 +286,7 @@ describe('runtime config CLI location selection', () => {
       `${envVar}="${secretValue}"\n`,
       'utf8',
     );
+    await initializeTestStore(storeRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -304,7 +312,7 @@ describe('runtime config CLI location selection', () => {
       expect(JSON.parse(stdout) as {readonly configPath: string}).toMatchObject(
         {
           configPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
       );
       expect(readFileSync(join(storeRoot, '.env'), 'utf8')).toBe(
@@ -347,6 +355,8 @@ describe('runtime config CLI location selection', () => {
     const secretValue = 'from-process-env';
 
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(storeRoot);
+    await initializeTestStore(configStoreRoot);
 
     try {
       process.env[envVar] = secretValue;
@@ -356,12 +366,12 @@ describe('runtime config CLI location selection', () => {
         {
           args: ['--store', storeRoot] as const,
           configPath: storeConfigPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
         {
           args: ['--config', configPath] as const,
           configPath,
-          envPath: join(configStoreRoot, '.env'),
+          envPath: physicalEnvPath(configStoreRoot),
         },
       ]) {
         let stdout = '';
@@ -443,6 +453,8 @@ describe('runtime config CLI location selection', () => {
       `${envVar}="${secretValue}"\n`,
       'utf8',
     );
+    await initializeTestStore(storeRoot);
+    await initializeTestStore(configStoreRoot);
 
     try {
       Reflect.deleteProperty(process.env, envVar);
@@ -452,12 +464,12 @@ describe('runtime config CLI location selection', () => {
         {
           args: ['--store', storeRoot] as const,
           configPath: storeConfigPath,
-          envPath: join(storeRoot, '.env'),
+          envPath: physicalEnvPath(storeRoot),
         },
         {
           args: ['--config', configPath] as const,
           configPath,
-          envPath: join(configStoreRoot, '.env'),
+          envPath: physicalEnvPath(configStoreRoot),
         },
       ]) {
         let stdout = '';
@@ -518,6 +530,7 @@ describe('runtime config CLI location selection', () => {
       `${runtimeConfigEnvVarName}=${configPath}\n`,
       'utf8',
     );
+    await initializeTestStore(storeRoot);
 
     try {
       Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
@@ -541,7 +554,7 @@ describe('runtime config CLI location selection', () => {
           stderr: collect(() => {}),
         }),
       ).toBe(0);
-      expect(envPathStdout).toBe(`${join(storeRoot, '.env')}\n`);
+      expect(envPathStdout).toBe(`${physicalEnvPath(storeRoot)}\n`);
 
       expect(
         await runRuntimeConfigCliFromArgs(
@@ -576,7 +589,7 @@ describe('runtime config CLI location selection', () => {
 
       expect(setOutput).toMatchObject({
         configPath,
-        envPath: join(storeRoot, '.env'),
+        envPath: physicalEnvPath(storeRoot),
       });
       expect(afterSet).toMatchObject({
         project02: {
@@ -637,6 +650,11 @@ describe('runtime config CLI location selection', () => {
       `${runtimeConfigEnvVarName}=${dotenvConfigPath}\n`,
       'utf8',
     );
+    // Only the two homes the mutations write into: the dotenv- and
+    // process-selected stores stay uninitialized, which is part of what
+    // "the explicit location won" means here.
+    await initializeTestStore(explicitStoreRoot);
+    await initializeTestStore(selectedStoreRoot);
 
     try {
       process.env[runtimeConfigEnvVarName] = processConfigPath;
@@ -788,7 +806,7 @@ describe('runtime config CLI location selection', () => {
     },
     {
       args: ['--store', '   ', 'path'] as const,
-      message: 'Local runtime store root must be non-empty.',
+      message: 'Project02 home root must be a non-empty path.',
     },
   ])(
     'reports invalid runtime location for %j without throwing',
@@ -945,13 +963,12 @@ describe('runtime config CLI location selection', () => {
       }),
     ).toBe(0);
 
-    expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+    expect(stdout).toBe(`${physicalEnvPath(storeRoot)}\n`);
     expect(stderr).toBe('');
   });
 
-  it('prints env-path from an inferred store-default config root', async () => {
+  it('uses the default runtime home for a standalone config filename', async () => {
     const storeRoot = createTestTempRoot('project02-config-env-path-inferred-');
-    const seededStoreRoot = realpathSync.native(storeRoot);
     const configPath = writeRuntimeConfig(
       defaultRuntimeConfigPath(storeRoot),
       {},
@@ -970,7 +987,7 @@ describe('runtime config CLI location selection', () => {
       }),
     ).toBe(0);
 
-    expect(stdout).toBe(`${join(seededStoreRoot, '.env')}\n`);
+    expect(stdout).toBe(`${join(process.cwd(), '.project02', '.env')}\n`);
     expect(stderr).toBe('');
   });
 
@@ -987,6 +1004,6 @@ describe('runtime config CLI location selection', () => {
       }),
     ).toBe(0);
 
-    expect(stdout).toBe(`${join(storeRoot, '.env')}\n`);
+    expect(stdout).toBe(`${physicalEnvPath(storeRoot)}\n`);
   });
 });

@@ -5,13 +5,27 @@
  * IO and no runtime access beyond reading the supplied env.
  */
 import {
-  parseRuntimeLocationFlag,
+  emptyRuntimeStoreCliState,
+  parseRuntimeStoreFlag,
   type RuntimeLocationCliState,
+  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
 import type {
-  RuntimeConfigControlOperation,
+  RuntimeConfigMutationOperation,
   RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
+
+type RuntimeConfigCliMutationOperation = Extract<
+  RuntimeConfigMutationOperation,
+  {
+    readonly kind:
+      | 'set'
+      | 'unset'
+      | 'plugin_enable'
+      | 'plugin_disable'
+      | 'default_memory_provider';
+  }
+>;
 
 export class RuntimeConfigCliUsageError extends Error {
   constructor(message: string) {
@@ -29,7 +43,7 @@ export type RuntimeConfigCliArgs = {
     | {readonly kind: 'get'; readonly path: string}
     | {
         readonly kind: 'mutate';
-        readonly operation: RuntimeConfigControlOperation;
+        readonly operation: RuntimeConfigCliMutationOperation;
       }
     | {
         readonly kind: 'secret_set';
@@ -45,13 +59,15 @@ export type RuntimeConfigCliArgs = {
 
 export type RuntimeConfigCliParsedArgs = {
   readonly location: RuntimeLocationCliState;
+  /** The operator agreed on the command line to create a missing store. */
+  readonly init: boolean;
   readonly commandArgs: readonly string[];
 };
 
 export function parseRuntimeConfigCliArgs(
   args: readonly string[],
 ): RuntimeConfigCliParsedArgs {
-  let location: RuntimeLocationCliState = {};
+  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
   const commandArgs: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -66,15 +82,15 @@ export function parseRuntimeConfigCliArgs(
       break;
     }
 
-    const locationResult = parseRuntimeLocationFlag({
+    const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: location,
+      state: store,
     });
 
-    if (locationResult.status === 'matched') {
-      location = locationResult.state;
-      index = locationResult.nextIndex;
+    if (storeResult.status === 'matched') {
+      store = storeResult.state;
+      index = storeResult.nextIndex;
       continue;
     }
 
@@ -83,7 +99,8 @@ export function parseRuntimeConfigCliArgs(
   }
 
   return {
-    location,
+    location: store.location,
+    init: store.init,
     commandArgs,
   };
 }
@@ -146,9 +163,15 @@ function envHasNonEmptyValue(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name]?.length ?? 0) > 0;
 }
 
+/**
+ * Env is consulted only by `secret set`, which reads the secret value
+ * from the named variable; every other command parses without it, so
+ * surfaces that reject secret commands up front can parse before any
+ * environment staging.
+ */
 export function parseRuntimeConfigCommand(
   args: readonly string[],
-  env: NodeJS.ProcessEnv,
+  env?: NodeJS.ProcessEnv,
 ): RuntimeConfigCliArgs['command'] {
   const command = args[0];
 
@@ -240,6 +263,12 @@ export function parseRuntimeConfigCommand(
   }
 
   if (command === 'secret' && args[1] === 'set') {
+    if (env === undefined) {
+      throw new RuntimeConfigCliUsageError(
+        'secret set requires the runtime environment to read the secret from.',
+      );
+    }
+
     const envVar = requiredArg(args, 4, 'secret set requires an env var.');
     const secretValue = env[envVar];
 

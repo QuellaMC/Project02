@@ -12,6 +12,8 @@ node_modules/
 .vite/
 .vitest/
 .turbo/
+.project02/
+# Pre-split dev store; superseded by .project02/ but may still hold history.
 .project02-runtime/
 dist/
 build/

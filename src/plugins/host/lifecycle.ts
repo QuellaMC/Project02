@@ -7,8 +7,8 @@ import type {
 } from './host.ts';
 
 /**
- * Best-effort session-end / shutdown hooks shared by the chat and relay
- * CLIs (one owner for the synthesized-context cleanup pattern). Failures
+ * Best-effort session-end / shutdown hooks for CLIs that own a plugin
+ * host (one owner for the synthesized-context cleanup pattern). Failures
  * are swallowed: cleanup must never mask the error that triggered it.
  */
 export async function runBestEffortPluginSessionEnd(options: {

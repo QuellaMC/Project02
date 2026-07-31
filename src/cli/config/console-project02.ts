@@ -8,17 +8,18 @@ import {
   getRedactedRuntimeConfigValueAtPath,
   project02RuntimeConfigFieldDefinitions,
   redactRuntimeConfigValue,
+  resolveRuntimeConfigScopeTarget,
   type Project02ConfigFieldDefinition,
-  type RuntimeConfigMutationOperation,
+  type RuntimeConfigControlOperation,
   type RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
 import {
   askForFieldValue,
   askForNumber,
   cancelled,
+  ensureConsoleCommitTarget,
   formatCurrentValue,
   previewAndCommitChange,
-  runtimeConfigLocation,
   writeLine,
   type RuntimeConfigConsoleContext,
   type RuntimeConfigConsoleSnapshot,
@@ -29,13 +30,21 @@ export async function runProject02ConfigSection(
   context: RuntimeConfigConsoleContext,
   snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<void> {
-  const fields = project02RuntimeConfigFieldDefinitions();
+  // Character scope edits the overlay: only character-scoped fields
+  // appear, and current values come from the overlay document.
+  const fields =
+    snapshot.scope === 'global'
+      ? project02RuntimeConfigFieldDefinitions()
+      : project02RuntimeConfigFieldDefinitions().filter(field =>
+          field.scopes.includes('character'),
+        );
+  const displayConfig = snapshot.scopedConfig ?? snapshot.config;
 
   writeLine(context.stdout, '');
   writeLine(context.stdout, 'Project02');
   fields.forEach((field, index) => {
     const currentValue = getRedactedRuntimeConfigValueAtPath(
-      snapshot.config,
+      displayConfig,
       field.path,
     );
 
@@ -80,10 +89,10 @@ async function stageProject02FieldChange(
   }
 
   const oldValue = getRedactedRuntimeConfigValueAtPath(
-    snapshot.config,
+    snapshot.scopedConfig ?? snapshot.config,
     field.path,
   );
-  let operation: RuntimeConfigMutationOperation;
+  let operation: RuntimeConfigControlOperation;
   let newValue: RuntimeConfigValue | undefined;
 
   if (action === 2) {
@@ -105,12 +114,22 @@ async function stageProject02FieldChange(
     oldValue,
     newValue,
     reloadRequired: field.reloadRequired,
-    commit() {
-      applyRuntimeConfigControlOperation({
-        ...runtimeConfigLocation(context),
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
         ...(context.env === undefined ? {} : {env: context.env}),
+      });
+      const target = resolveRuntimeConfigScopeTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        ...(context.env === undefined ? {} : {env: context.env}),
+        scope: snapshot.scope,
+      });
+
+      applyRuntimeConfigControlOperation({
+        target,
         expectedFingerprint: snapshot.fingerprint,
-        operation,
+        request: {kind: 'document', operation},
       });
     },
   };

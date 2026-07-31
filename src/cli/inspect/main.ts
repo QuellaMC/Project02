@@ -1,8 +1,9 @@
 import {readFlagValue} from '../shared/flags.ts';
+import type {CharacterProfile} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
   createLocalRuntimeSessionStore,
-  createLocalRuntimeStorageLayout,
+  createProject02HomeLayout,
   type LocalRuntimeSessionMetadata,
   normalizeLocalRuntimeSessionId,
 } from '../../runtime/storage/index.ts';
@@ -11,8 +12,13 @@ import {
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
+  formatRejectedRuntimeCliStartup,
+  interpretRuntimeCliStartup,
+} from '../shared/startup-outcome.ts';
+import {
   createRuntimeConfigInspectShape,
   RuntimeEnvFileError,
+  type ResolvedProject02RuntimeLocation,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
 } from '../../runtime/config/index.ts';
@@ -22,9 +28,10 @@ import {
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
 import {
-  parseRuntimeLocationFlag,
+  emptyRuntimeStoreCliState,
+  parseRuntimeStoreFlag,
   RuntimeLocationCliUsageError,
-  type RuntimeLocationCliState,
+  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
 import {
   createTurnEvidence,
@@ -55,11 +62,13 @@ type InspectCliArgs =
       readonly mode: 'sessions';
       readonly storeRoot?: string;
       readonly configPath?: string;
+      readonly character?: string;
     }
   | {
       readonly mode: 'session';
       readonly storeRoot?: string;
       readonly configPath?: string;
+      readonly character?: string;
       readonly sessionId: string;
     };
 
@@ -101,30 +110,52 @@ export async function runInspectCliFromArgs(
         : options.env;
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
+    // Inspect reports on a store; it has no business making one. The
+    // report stage runs every decision an activation runs and describes
+    // what it would produce, so there is nothing to ask consent for and
+    // nothing to refuse: reading a store the operator has not set up
+    // yet tells them exactly that, and leaves the path empty.
     const startup = resolveRuntimeCliStartup({
+      stage: 'report',
       location: parsedArgs,
       ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
     });
+    const interpreted = interpretRuntimeCliStartup(startup);
 
-    if (startup.status === 'config_invalid') {
+    if (interpreted.outcome === 'rejected') {
       throw new InspectCliUsageError(
-        startup.loadedConfig.diagnostics[0]?.message ??
-          'Runtime config is invalid.',
+        formatRejectedRuntimeCliStartup(interpreted),
       );
     }
 
+    // A broken unrelated character package leaves the selected one
+    // usable. Reporting healthy state without saying so would give the
+    // operator no indication the installed package needs fixing, so the
+    // warnings go to stderr and leave the stdout JSON contract intact.
+    for (const warning of interpreted.warnings) {
+      options.stderr.write(`Warning: ${warning}\n`);
+    }
+
+    const usable = interpreted.startup;
+
     if (parsedArgs.mode === 'sessions') {
-      await writeSessionList(options.stdout, startup.activationPlan);
+      await writeSessionList(
+        options.stdout,
+        usable.activationPlan,
+        usable.runtimeLocation,
+      );
       return 0;
     }
 
     await writeSessionEvidence(
       parsedArgs,
       options.stdout,
-      startup.activationPlan,
+      usable.activationPlan,
+      usable.characterActivation.profile,
+      usable.runtimeLocation,
     );
     return 0;
   } catch (error: unknown) {
@@ -143,7 +174,7 @@ export async function runInspectCliFromArgs(
 }
 
 function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
-  let location: RuntimeLocationCliState = {};
+  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
   let sessionsMode = false;
   let sessionId: string | undefined;
 
@@ -158,15 +189,25 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       continue;
     }
 
-    const locationResult = parseRuntimeLocationFlag({
+    // Rejected rather than ignored: inspect creates nothing, so a flag
+    // asking it to would be accepted and do nothing, which is worse
+    // than being told it does not apply here.
+    if (arg === '--init') {
+      throw new InspectCliUsageError(
+        'inspect never creates a store, so --init does not apply. ' +
+          'Run chat or runtime-config with --init to create one.',
+      );
+    }
+
+    const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: location,
+      state: store,
     });
 
-    if (locationResult.status === 'matched') {
-      location = locationResult.state;
-      index = locationResult.nextIndex;
+    if (storeResult.status === 'matched') {
+      store = storeResult.state;
+      index = storeResult.nextIndex;
       continue;
     }
 
@@ -203,6 +244,8 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     );
   }
 
+  const {location} = store;
+
   if (sessionsMode) {
     return {
       mode: 'sessions',
@@ -212,6 +255,9 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       ...(location.configPath === undefined
         ? {}
         : {configPath: location.configPath}),
+      ...(location.character === undefined
+        ? {}
+        : {character: location.character}),
     } satisfies InspectCliArgs;
   }
 
@@ -228,12 +274,15 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     ...(location.configPath === undefined
       ? {}
       : {configPath: location.configPath}),
+    ...(location.character === undefined
+      ? {}
+      : {character: location.character}),
   } satisfies InspectCliArgs;
 }
 
 function validateInspectCliArgs(args: InspectCliArgs): void {
   if (args.storeRoot !== undefined) {
-    createLocalRuntimeStorageLayout({storeRoot: args.storeRoot});
+    createProject02HomeLayout({homeRoot: args.storeRoot});
   }
 
   if (args.mode === 'session') {
@@ -244,9 +293,11 @@ function validateInspectCliArgs(args: InspectCliArgs): void {
 async function writeSessionList(
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): Promise<void> {
   const sessionStore = createLocalRuntimeSessionStore({
-    storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+    storeRoot: runtimeLocation.characterScope.dataRoot,
+    characterId: runtimeLocation.characterScope.characterId,
   });
   const sessions = await sessionStore.listSessions();
 
@@ -266,15 +317,33 @@ async function writeSessionEvidence(
   args: InspectCliArgs & {readonly mode: 'session'},
   stdout: NodeJS.WritableStream,
   runtimeConfig: Project02ConfiguredPluginActivation,
+  boundCharacter: CharacterProfile,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
 ): Promise<void> {
   const storage = {
-    storeRoot: runtimeConfig.resolvedConfig.project02.storeRoot,
+    storeRoot: runtimeLocation.characterScope.dataRoot,
   };
-  const sessionStore = createLocalRuntimeSessionStore(storage);
+  const sessionStore = createLocalRuntimeSessionStore({
+    ...storage,
+    characterId: runtimeLocation.characterScope.characterId,
+  });
   const session = await sessionStore.readSession(args.sessionId);
+  // boundCharacter is passed for a wrong-answer check, not a security
+  // one: there is no attacker in a local app. It catches a session whose
+  // evidence names a different character than the directory it sits in —
+  // reachable by a bug in our own write path, an interrupted migration,
+  // or a home folder synced between machines. Unchecked, inspect would
+  // print another character's transcript as if it were this one, and the
+  // operator would have no way to tell.
+  //
+  // No boundUserSpeaker, though: the user speaker id is the same constant
+  // for every record in a single-user app, so binding it would compare
+  // that constant to itself.
   const logStore = createFileRuntimeLogStore({
     ...storage,
     sessionId: session.sessionId,
+    characterId: runtimeLocation.characterScope.characterId,
+    boundCharacter,
   });
   const evidence = logStore.readSessionEvidence();
   const {traceEntries, rawEvents, conversationMessages} = evidence.stored;

@@ -31,7 +31,6 @@ import {
   type RuntimePluginListHostState,
 } from './list.ts';
 import {
-  assertRuntimePluginConfigControlCapabilityPresent,
   createRuntimePluginConfigControlHostStateSnapshot,
   type RuntimePluginConfigControlHostState,
 } from './state.ts';
@@ -39,7 +38,6 @@ import {
 export type CreateRuntimePluginManagementPluginOptions = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
 };
 
 const runtimePluginManagementPluginInstances = new WeakSet<RuntimePlugin>();
@@ -47,12 +45,6 @@ const runtimePluginManagementPluginInstances = new WeakSet<RuntimePlugin>();
 export function createRuntimePluginManagementPlugin(
   options: CreateRuntimePluginManagementPluginOptions,
 ): RuntimePlugin {
-  if (options.pluginConfigControl !== undefined) {
-    assertRuntimePluginConfigControlCapabilityPresent(
-      options.pluginConfigControl,
-    );
-  }
-
   const pluginConfigControl =
     options.pluginConfigControl === undefined
       ? undefined
@@ -89,9 +81,6 @@ export function createRuntimePluginManagementPlugin(
             call,
             context,
             state: pluginConfigControl,
-            ...(options.storeRoot === undefined
-              ? {}
-              : {storeRoot: options.storeRoot}),
           });
         }
 
@@ -122,9 +111,6 @@ export function createRuntimePluginManagementPlugin(
                 },
                 pluginId,
               ) === true,
-            ...(options.storeRoot === undefined
-              ? {}
-              : {storeRoot: options.storeRoot}),
           });
         }
 
@@ -153,6 +139,7 @@ export function createRuntimePluginManagementPluginManifest() {
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [],
     },
     localTrustLevel: 'first_party',
@@ -203,11 +190,13 @@ export {
   type RuntimePluginListHostState,
 } from './list.ts';
 export {
+  createRuntimePluginConfigControlBinding,
   createRuntimePluginConfigControlHostStateSnapshot,
   createRuntimePluginInventoryHostStateSnapshot,
   isRuntimeConfigConflictError,
   requiredRuntimePluginConfigControl,
   runtimeConfigConflictErrorCode,
+  type RuntimePluginConfigControlBinding,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
 } from './state.ts';

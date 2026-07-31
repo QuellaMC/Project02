@@ -1,4 +1,4 @@
-import {mkdirSync, writeFileSync} from 'node:fs';
+import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -6,16 +6,207 @@ import {
   defaultRuntimeConfigPath,
   runtimeConfigEnvVarName,
 } from '../../src/runtime/config/index.ts';
+import {defaultProject02HomeRoot} from '../../src/runtime/storage/index.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
+  initializeTestStore,
   requiredDottedConfigPlugin,
   requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
+  it('rejects check when the character-data root is a symlink', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-root-link-');
+    const outside = createTestTempRoot('project02-config-check-root-target-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(join(outside, 'mira'), {recursive: true});
+    writeRuntimeConfig(join(outside, 'mira', 'config.json'), {
+      project02: {userDisplayName: 'Outside Name'},
+    });
+    symlinkSync(outside, join(storeRoot, 'character-data'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
+  it('rejects check for a marker-less home holding foreign content', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-check-foreign-home-',
+    );
+    let stderr = '';
+
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
+  it('rejects check when the data marker is a directory', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-marker-dir-');
+    const dataRoot = join(storeRoot, 'character-data', 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(join(dataRoot, 'schema.json'), {recursive: true});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    // A formatted storage refusal, never a raw EISDIR stack trace.
+    expect(stderr).toMatch(/^Error: /);
+  });
+
+  it('rejects check when the character-data root is a regular file', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-root-file-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeFileSync(join(storeRoot, 'character-data'), 'not a directory\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    // A formatted storage refusal, never a raw ENOTDIR stack trace.
+    expect(stderr).toMatch(/^Error: /);
+  });
+
+  it('rejects check for an absent character dir under a symlinked root', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-link-empty-');
+    const outside = createTestTempRoot('project02-config-check-link-tgt-');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // No mira/ exists yet anywhere: the symlinked root alone must
+    // fail read-only startup, exactly like the writers.
+    symlinkSync(outside, join(storeRoot, 'character-data'));
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
+  it('rejects check when a marker-less data directory holds foreign content', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-foreign-');
+    const dataRoot = join(storeRoot, 'character-data', 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A marker-less directory with an overlay AND foreign content: the
+    // first durable run would refuse it, so check must not report its
+    // overlay as the effective config.
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
+  });
+
+  it('rejects check when the data directory is marked for another character', async () => {
+    const storeRoot = createTestTempRoot('project02-config-check-marker-');
+    const dataRoot = join(storeRoot, 'character-data', 'mira');
+    let stderr = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // A copied directory: mira's path claims nova but carries an
+    // overlay a naive read-only check would report as mira's config.
+    mkdirSync(dataRoot, {recursive: true});
+    writeFileSync(
+      join(dataRoot, 'schema.json'),
+      `${JSON.stringify({
+        schemaVersion: 4,
+        scope: 'character-data',
+        characterId: 'nova',
+        createdAt: '2026-07-23T00:00:00.000Z',
+      })}\n`,
+    );
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'check'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('holds history for character "nova"');
+  });
+
   it('reports activation warnings from runtime config check', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-');
     let stdout = '';
@@ -169,6 +360,10 @@ describe('runtime config CLI reads and checks', () => {
       storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
+    // The authored storeRoot is the invalid value under test, so both
+    // runs fall back to the default home beside the cwd.
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
+    await initializeTestStore(storeRoot);
 
     try {
       process.chdir(cwdRoot);
@@ -238,6 +433,7 @@ describe('runtime config CLI reads and checks', () => {
       storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {
       process.env[runtimeConfigEnvVarName] = configPath;
@@ -426,6 +622,9 @@ describe('runtime config CLI reads and checks', () => {
       `${runtimeConfigEnvVarName}=${join(storeRoot, 'config.json')}\n${envVar}="${secretValue}"\n`,
       'utf8',
     );
+    // The selected config authors no storeRoot, so the home stays the
+    // default one beside the working directory.
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {
       Reflect.deleteProperty(process.env, runtimeConfigEnvVarName);
@@ -509,6 +708,7 @@ describe('runtime config CLI reads and checks', () => {
       `${envVar}="from-cwd-dotenv"\n`,
       'utf8',
     );
+    await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {
       process.chdir(cwdRoot);

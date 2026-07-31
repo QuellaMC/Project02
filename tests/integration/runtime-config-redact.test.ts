@@ -3,7 +3,10 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
@@ -42,7 +45,10 @@ describe('runtime config redaction', () => {
     );
 
     const resolved = resolveProject02RuntimeConfig({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+      }),
+
       pluginManifests: [dottedConfigManifest()],
     });
     const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
@@ -101,7 +107,10 @@ describe('runtime config redaction', () => {
     );
 
     const resolved = resolveProject02RuntimeConfig({
-      loadedConfig: loadProject02RuntimeConfig({configPath}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({configPath}),
+      }),
+
       pluginManifests: [dottedConfigManifest()],
     });
     const redacted = resolved.redactedPluginConfigs['memory.dotted-redaction'];
@@ -187,6 +196,7 @@ function authSecretConfigManifest(): RuntimePluginManifest {
     description: 'Test manifest for a secret field outside name heuristics.',
     declaredPlugins: ['plugin_discovery'],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'auth',
@@ -215,6 +225,7 @@ function dottedConfigManifest(): RuntimePluginManifest {
     },
     declaredPlugins: [],
     config: {
+      scope: 'global_with_character_overrides',
       fields: [
         {
           name: 'api.key',

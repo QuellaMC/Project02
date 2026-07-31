@@ -1,57 +1,54 @@
-import {
-  existsSync,
-  lstatSync,
-  readlinkSync,
-  readFileSync,
-  realpathSync,
-  unlinkSync,
-} from 'node:fs';
-import {basename, dirname, resolve} from 'node:path';
+import {dirname} from 'node:path';
 
-import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
-import {createLocalRuntimeStorageLayout} from '../storage/layout-contract.ts';
+import {pathExistsSync, unlinkPathSync} from '../../shared/file-system.ts';
+
+import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot,
+  isJsonBoundaryObject,
+  ownJsonRecordValue,
+  type JsonBoundaryObject,
+  type JsonBoundaryValue,
+} from '../../shared/json-boundary.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   atomicReplaceFileSync,
   cleanupAbandonedAtomicReplacementFilesSync,
 } from '../storage/atomic-file.ts';
+import {ensureInitializedProject02Home} from '../storage/home.ts';
 import {
-  acquireLocalRuntimeMutationLockSync,
-  defaultLocalRuntimeMutationLockWaitTimeoutMs,
-  type LocalRuntimeMutationLocksLeaseSync,
-  type LocalRuntimeMutationLockLeaseSync,
+  createProject02HomeLayout,
+  type Project02HomeLayout,
+} from '../storage/layout-contract.ts';
+import {
+  acquireLocalRuntimeMutationLock,
+  type LocalRuntimeMutationLockTarget,
 } from '../storage/mutation-lock.ts';
+import {readOptionalStoreText} from '../storage/store-file.ts';
 import {
   isRuntimeControlEnvVarName,
-  runtimeConfigEnvVarName,
+  runtimeConfigDiagnosticLocation,
   runtimeConfigVersion,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,
-  type Project02RuntimePluginConfig,
+  type RuntimeConfigDiagnostic,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
 } from './types.ts';
-import {
-  defaultRuntimeConfigPath,
-  loadProject02RuntimeConfig,
-  validateProject02RuntimeConfig,
-} from './load.ts';
+import {validateProject02RuntimeConfig} from './load.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
+  canonicalRuntimeConfigPath,
+  RuntimeConfigPathResolutionError,
+} from './path.ts';
+import {
+  characterRuntimeConfigFieldScopeViolation,
   type Project02ConfigFieldDefinition,
   project02RuntimeConfigFieldDefinition,
-  runtimeConfigValueMatchesField,
+  project02RuntimeConfigFieldDefinitions,
+  project02RuntimeConfigValueMatchesField,
 } from './schema.ts';
-
-export type ApplyRuntimeConfigMutationOptions = {
-  readonly configPath?: string;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly expectedFingerprint?: string;
-  readonly storeRoot?: string;
-  readonly operation: RuntimeConfigMutationOperation;
-  readonly validateCandidate?: (config: Project02RuntimeConfig) => void;
-};
 
 export type RuntimeConfigMutationResult = {
   readonly configPath: string;
@@ -62,8 +59,91 @@ export type RuntimeConfigMutationResult = {
 
 export type PreparedRuntimeConfigMutationCandidate = {
   readonly config: Project02RuntimeConfig;
-  readonly fingerprint: string;
 };
+
+/**
+ * The mutation lock guarding one runtime control file.
+ *
+ * Every writer of a control document names its lock through here, so
+ * "the same file" means one lock rather than one per caller's spelling
+ * of it. The key is the canonical path because that is what makes two
+ * spellings — a link and its target, `--config` and the layout's own
+ * path — agree on being the same file; `canonicalRuntimeConfigPath`
+ * resolves through dangling links precisely so a file about to be
+ * created can be locked before it exists.
+ */
+export function runtimeConfigControlFileLockTarget(
+  canonicalPath: string,
+): LocalRuntimeMutationLockTarget {
+  return Object.freeze({
+    locksRoot: createProject02HomeLayout({homeRoot: dirname(canonicalPath)})
+      .locksRoot,
+    resourceKey: `runtime-control-file:${canonicalPath}`,
+  });
+}
+
+/**
+ * Commits one already-prepared candidate to exact paths while the caller
+ * holds the transaction's complete lock set. This primitive never resolves
+ * locations, acquires locks, reloads config, or retries.
+ */
+export function commitPreparedRuntimeConfigMutation(options: {
+  readonly canonicalConfigPath: string;
+  readonly displayConfigPath: string;
+  readonly canonicalEnvPath: string;
+  readonly displayEnvPath: string;
+  readonly operation?: RuntimeConfigMutationOperation;
+  readonly preparedCandidate: PreparedRuntimeConfigMutationCandidate;
+}): void {
+  if (
+    options.operation?.kind === 'secret_set' &&
+    options.canonicalConfigPath === options.canonicalEnvPath
+  ) {
+    throw new TypeError(
+      'Cannot write runtime config secret because the selected config path and runtime env path resolve to the same file.',
+    );
+  }
+
+  cleanupRuntimeConfigAtomicTemps(
+    options.canonicalConfigPath,
+    options.displayConfigPath,
+    'config',
+  );
+
+  if (options.operation?.kind !== 'secret_set') {
+    writeJsonAtomic(
+      options.canonicalConfigPath,
+      options.preparedCandidate.config,
+      0o600,
+    );
+  } else {
+    cleanupRuntimeConfigAtomicTemps(
+      options.canonicalEnvPath,
+      options.displayEnvPath,
+      'env',
+    );
+    const secretWrite = prepareEnvSecretWrite(
+      options.canonicalEnvPath,
+      options.operation.envVar,
+      options.operation.secretValue,
+    );
+    const previousConfigState = snapshotPreviousConfigState(
+      options.canonicalConfigPath,
+    );
+
+    writeJsonAtomic(
+      options.canonicalConfigPath,
+      options.preparedCandidate.config,
+      0o600,
+    );
+
+    try {
+      writePreparedEnvSecret(secretWrite);
+    } catch (error: unknown) {
+      throwRuntimeConfigSecretWriteFailure(error, previousConfigState);
+    }
+  }
+}
 
 export class RuntimeConfigMutationError extends Error {
   constructor(message: string, options?: ErrorOptions) {
@@ -81,249 +161,6 @@ export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
   constructor(message: string) {
     super(message);
     this.name = 'RuntimeConfigConflictError';
-  }
-}
-
-export function applyRuntimeConfigMutation(
-  options: ApplyRuntimeConfigMutationOptions,
-): RuntimeConfigMutationResult {
-  return applyRuntimeConfigMutationWithLocks(options);
-}
-
-function applyRuntimeConfigMutationWithLocks(
-  options: ApplyRuntimeConfigMutationOptions,
-  anticipatedEnvPath?: string,
-  retryCount: number = 0,
-): RuntimeConfigMutationResult {
-  const location = resolveRuntimeConfigMutationLocation(
-    options,
-    anticipatedEnvPath,
-  );
-  const mutationLease = acquireRuntimeConfigMutationLease(location);
-
-  try {
-    cleanupRuntimeConfigMutationTargets(location);
-    const candidate = prepareLockedRuntimeConfigMutation(options, location);
-
-    if (
-      candidate.canonicalLoadedConfigPath !==
-      location.canonicalSelectedConfigPath
-    ) {
-      return retryRuntimeConfigMutationAfterPathChange({
-        options,
-        anticipatedEnvPath,
-        retryCount,
-        mutationLease,
-      });
-    }
-
-    const retryEnvPath = secretMutationRetryEnvPath(
-      options.operation,
-      location,
-      candidate,
-    );
-
-    if (retryEnvPath !== undefined) {
-      return retryRuntimeConfigMutationAfterPathChange({
-        options,
-        anticipatedEnvPath: retryEnvPath,
-        retryCount,
-        mutationLease,
-      });
-    }
-
-    writeLockedRuntimeConfigMutation(options.operation, location, candidate);
-
-    return Object.freeze({
-      configPath: candidate.selectedConfigPath,
-      envPath: candidate.envPath,
-      config: candidate.preparedCandidate.config,
-      fingerprint: candidate.preparedCandidate.fingerprint,
-    } satisfies RuntimeConfigMutationResult);
-  } finally {
-    mutationLease.release();
-  }
-}
-
-type RuntimeConfigMutationLocation = {
-  readonly configPath: string;
-  readonly displayConfigPath: string;
-  readonly canonicalSelectedConfigPath: string;
-  readonly anticipatedEnvPath?: string;
-  readonly canonicalAnticipatedEnvPath?: string;
-};
-
-function resolveRuntimeConfigMutationLocation(
-  options: ApplyRuntimeConfigMutationOptions,
-  anticipatedEnvPath: string | undefined,
-): RuntimeConfigMutationLocation {
-  const locationLayout = createLocalRuntimeStorageLayout(
-    options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot},
-  );
-  const env = options.env ?? process.env;
-  const configPath =
-    options.configPath ??
-    (options.storeRoot === undefined
-      ? runtimeConfigPathFromEnv(env)
-      : undefined) ??
-    locationLayout.configPath;
-  const displayConfigPath = configPath.trim();
-
-  return {
-    configPath,
-    displayConfigPath,
-    canonicalSelectedConfigPath:
-      canonicalRuntimeConfigMutationPath(displayConfigPath),
-    ...(anticipatedEnvPath === undefined
-      ? {}
-      : {
-          anticipatedEnvPath,
-          canonicalAnticipatedEnvPath:
-            canonicalRuntimeConfigMutationPath(anticipatedEnvPath),
-        }),
-  };
-}
-
-function acquireRuntimeConfigMutationLease(
-  location: RuntimeConfigMutationLocation,
-): LocalRuntimeMutationLocksLeaseSync | LocalRuntimeMutationLockLeaseSync {
-  if (location.canonicalAnticipatedEnvPath === undefined) {
-    return acquireRuntimeConfigFileLock({
-      path: location.canonicalSelectedConfigPath,
-      displayPath: location.displayConfigPath,
-      kind: 'config',
-    });
-  }
-
-  return acquireRuntimeConfigFileLocks({
-    configPath: location.canonicalSelectedConfigPath,
-    displayConfigPath: location.displayConfigPath,
-    envPath: location.canonicalAnticipatedEnvPath,
-    displayEnvPath:
-      location.anticipatedEnvPath ?? location.canonicalAnticipatedEnvPath,
-  });
-}
-
-function cleanupRuntimeConfigMutationTargets(
-  location: RuntimeConfigMutationLocation,
-): void {
-  cleanupRuntimeConfigAtomicTemps(
-    location.canonicalSelectedConfigPath,
-    location.displayConfigPath,
-    'config',
-  );
-
-  if (location.canonicalAnticipatedEnvPath !== undefined) {
-    cleanupRuntimeConfigAtomicTemps(
-      location.canonicalAnticipatedEnvPath,
-      location.anticipatedEnvPath ?? location.canonicalAnticipatedEnvPath,
-      'env',
-    );
-  }
-}
-
-type LockedRuntimeConfigMutation = {
-  readonly selectedConfigPath: string;
-  readonly canonicalLoadedConfigPath: string;
-  readonly preparedCandidate: PreparedRuntimeConfigMutationCandidate;
-  readonly envPath: string;
-  readonly canonicalEnvPath: string;
-};
-
-function prepareLockedRuntimeConfigMutation(
-  options: ApplyRuntimeConfigMutationOptions,
-  location: RuntimeConfigMutationLocation,
-): LockedRuntimeConfigMutation {
-  const loaded = loadProject02RuntimeConfig({
-    configPath: location.configPath,
-    ...(options.env === undefined ? {} : {env: options.env}),
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-  });
-  const selectedConfigPath = loaded.path ?? location.configPath;
-  const selectedStoreRoot =
-    options.storeRoot ??
-    storeRootForSelectedDefaultConfigPath(selectedConfigPath);
-  const preparedCandidate = prepareRuntimeConfigMutationCandidate({
-    loadedConfig: loaded,
-    configPath: location.configPath,
-    ...(options.storeRoot === undefined ? {} : {storeRoot: options.storeRoot}),
-    expectedFingerprint: options.expectedFingerprint,
-    operation: options.operation,
-    validateCandidate: options.validateCandidate,
-  });
-  const nextEffectiveStoreRoot =
-    preparedCandidate.config.project02?.storeRoot ?? selectedStoreRoot;
-  const nextEffectiveLayout = createLocalRuntimeStorageLayout(
-    nextEffectiveStoreRoot === undefined
-      ? {}
-      : {storeRoot: nextEffectiveStoreRoot},
-  );
-
-  return {
-    selectedConfigPath,
-    canonicalLoadedConfigPath:
-      canonicalRuntimeConfigMutationPath(selectedConfigPath),
-    preparedCandidate,
-    envPath: nextEffectiveLayout.envPath,
-    canonicalEnvPath: canonicalRuntimeConfigMutationPath(
-      nextEffectiveLayout.envPath,
-    ),
-  };
-}
-
-function secretMutationRetryEnvPath(
-  operation: RuntimeConfigMutationOperation,
-  location: RuntimeConfigMutationLocation,
-  candidate: LockedRuntimeConfigMutation,
-): string | undefined {
-  if (operation.kind !== 'secret_set') {
-    return undefined;
-  }
-
-  if (location.canonicalSelectedConfigPath === candidate.canonicalEnvPath) {
-    throw new TypeError(
-      'Cannot write runtime config secret because the selected config path and runtime env path resolve to the same file.',
-    );
-  }
-
-  return location.canonicalAnticipatedEnvPath === candidate.canonicalEnvPath
-    ? undefined
-    : candidate.envPath;
-}
-
-function writeLockedRuntimeConfigMutation(
-  operation: RuntimeConfigMutationOperation,
-  location: RuntimeConfigMutationLocation,
-  candidate: LockedRuntimeConfigMutation,
-): void {
-  if (operation.kind !== 'secret_set') {
-    writeJsonAtomic(
-      location.canonicalSelectedConfigPath,
-      candidate.preparedCandidate.config,
-      0o600,
-    );
-    return;
-  }
-
-  const secretWrite = prepareEnvSecretWrite(
-    candidate.canonicalEnvPath,
-    operation.envVar,
-    operation.secretValue,
-  );
-  const previousConfigState = snapshotPreviousConfigState(
-    location.canonicalSelectedConfigPath,
-  );
-
-  writeJsonAtomic(
-    location.canonicalSelectedConfigPath,
-    candidate.preparedCandidate.config,
-    0o600,
-  );
-
-  try {
-    writePreparedEnvSecret(secretWrite);
-  } catch (error: unknown) {
-    throwRuntimeConfigSecretWriteFailure(error, previousConfigState);
   }
 }
 
@@ -366,30 +203,7 @@ function cleanupRuntimeConfigAtomicTemps(
   }
 }
 
-function retryRuntimeConfigMutationAfterPathChange(options: {
-  readonly options: ApplyRuntimeConfigMutationOptions;
-  readonly anticipatedEnvPath: string | undefined;
-  readonly retryCount: number;
-  readonly mutationLease:
-    LocalRuntimeMutationLocksLeaseSync | LocalRuntimeMutationLockLeaseSync;
-}): RuntimeConfigMutationResult {
-  options.mutationLease.release();
-
-  if (options.retryCount >= 8) {
-    throw new RuntimeConfigMutationError(
-      'Runtime config mutation paths kept changing while acquiring filesystem locks.',
-    );
-  }
-
-  return applyRuntimeConfigMutationWithLocks(
-    options.options,
-    options.anticipatedEnvPath,
-    options.retryCount + 1,
-  );
-}
-
 function bootstrapRuntimeConfig(options: {
-  readonly selectedConfigPath: string;
   readonly storeRoot?: string;
 }): Project02RuntimeConfig {
   if (options.storeRoot !== undefined) {
@@ -399,63 +213,199 @@ function bootstrapRuntimeConfig(options: {
     };
   }
 
-  const selectedStoreRoot = storeRootForSelectedDefaultConfigPath(
-    options.selectedConfigPath,
-  );
-
-  return selectedStoreRoot === undefined
-    ? {version: runtimeConfigVersion}
-    : {
-        version: runtimeConfigVersion,
-        project02: Object.freeze({storeRoot: selectedStoreRoot}),
-      };
+  return {version: runtimeConfigVersion};
 }
 
-export function createRuntimeConfigMutationBase(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-}): Project02RuntimeConfig {
-  if (options.loadedConfig.config !== undefined) {
-    return options.loadedConfig.config;
+/**
+ * Creates a store complete, or not at all.
+ *
+ * A store is born exactly once, and everything that makes it one — the
+ * marker, the character-data root, the global config document — comes
+ * from this single call. Creation used to be spread across routes:
+ * `check` produced a marker with no config, a global `set` produced a
+ * config with no marker, and each left a directory that answered "is
+ * this a store?" differently depending on which command got there
+ * first. One birth, one answer.
+ *
+ * It lives here rather than in `runtime/storage` because the config
+ * document's shape belongs to this module, and this module already
+ * depends on storage — storage owns the layout, config owns the
+ * document, and composing them in that direction keeps the dependency
+ * pointing the way it already points.
+ *
+ * Idempotent, so every route may call it and all but the first find
+ * the store already there. The document is written only when genuinely
+ * absent: a store can be created around a config the operator authored
+ * by hand, and that document is theirs to keep.
+ *
+ * "Absent" is decided under the same lock every other writer of this
+ * file takes, and re-decided after acquiring it. Checking first and
+ * writing second leaves a window: two trips to disk, and a config
+ * authored between them is replaced by the bootstrap document with no
+ * error to notice — the operator's file is simply gone. Holding the
+ * lock across both makes the check and the write one decision. The
+ * marker written a line above already works this way; this is the
+ * store's other birth-time file catching up to it.
+ */
+export async function ensureInitializedProject02Store(options: {
+  readonly homeRoot?: string;
+}): Promise<Project02HomeLayout> {
+  const layout = await ensureInitializedProject02Home(options);
+
+  if (pathExistsSync(layout.configPath)) {
+    return layout;
+  }
+
+  const lock = await acquireLocalRuntimeMutationLock(
+    runtimeConfigControlFileLockTarget(
+      canonicalRuntimeConfigMutationPath(layout.configPath),
+    ),
+  );
+
+  try {
+    if (!pathExistsSync(layout.configPath)) {
+      writeJsonAtomic(
+        layout.configPath,
+        bootstrapRuntimeConfig({storeRoot: layout.homeRoot}),
+        0o600,
+      );
+    }
+  } finally {
+    await lock.release();
+  }
+
+  return layout;
+}
+
+/**
+ * A candidate written to an overlay-located file must stay within the
+ * character-scoped dialect regardless of which internal control path
+ * prepared it. Public callers select this scope with --character.
+ */
+export function assertOverlayLocatedCandidateStaysCharacterScoped(
+  candidate: Project02RuntimeConfig,
+): void {
+  const section = candidate.project02;
+
+  if (section === undefined) {
+    return;
+  }
+
+  for (const field of project02RuntimeConfigFieldDefinitions()) {
+    const violation = characterRuntimeConfigFieldScopeViolation(field);
+
+    if (violation !== undefined && section[field.name] !== undefined) {
+      throw new RuntimeConfigMutationError(violation);
+    }
+  }
+}
+
+export type RuntimeConfigAuthoredSnapshot = Readonly<{
+  /** Exact readable authored JSON, or the one bootstrap document if absent. */
+  document: JsonBoundaryObject;
+  /** Present only when that document is already schema-valid. */
+  validatedConfig?: Project02RuntimeConfig;
+}>;
+
+/**
+ * One authored layer as the mutation machinery sees it, independent of
+ * which file it came from. A layer is repairable exactly when its
+ * authored document was readable: the edit then applies to the real
+ * bytes and the complete candidate is validated afterwards, so an
+ * invalid field can be fixed in place instead of only by hand.
+ */
+export type AuthoredRuntimeConfigLayer = {
+  readonly authoredDocument?: JsonBoundaryObject;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+};
+
+/**
+ * The one definition of "this layer failed to load so badly that no edit
+ * can be based on it". Absence is not such a failure — it is the state a
+ * bootstrap or a first overlay write is for — and neither is an invalid
+ * value inside a document that was read, because that is precisely what
+ * repair fixes. Every remaining error means there are no authored bytes
+ * to edit: unparseable JSON, an unreadable file, a rejected symlink.
+ *
+ * Global and character scope share this predicate so that "can I repair
+ * it with the CLI" has one answer per layer instead of one per file.
+ */
+export function blockingRuntimeConfigLayerDiagnostic(
+  layer: AuthoredRuntimeConfigLayer,
+): RuntimeConfigDiagnostic | undefined {
+  return layer.authoredDocument === undefined
+    ? layer.diagnostics.find(
+        diagnostic =>
+          diagnostic.severity === 'error' &&
+          diagnostic.code !== 'runtime_config_missing',
+      )
+    : undefined;
+}
+
+export function createRuntimeConfigAuthoredSnapshot(
+  loadedConfig: LoadedProject02RuntimeConfig,
+): RuntimeConfigAuthoredSnapshot {
+  if (loadedConfig.authoredDocument !== undefined) {
+    return Object.freeze({
+      document: loadedConfig.authoredDocument,
+      ...(loadedConfig.config === undefined
+        ? {}
+        : {validatedConfig: loadedConfig.config}),
+    });
+  }
+
+  if (loadedConfig.config !== undefined) {
+    return Object.freeze({
+      document: createJsonBoundaryObjectSnapshot(loadedConfig.config, {
+        field: 'Runtime config authored snapshot',
+      }),
+      validatedConfig: loadedConfig.config,
+    });
   }
 
   const selectedConfigPath =
-    options.loadedConfig.path ??
-    options.configPath ??
-    defaultRuntimeConfigPath(options.storeRoot);
-  const selectedStoreRoot =
-    options.storeRoot ??
-    storeRootForSelectedDefaultConfigPath(selectedConfigPath);
-  const bootstrapStoreRoot =
-    options.storeRoot === undefined
-      ? selectedStoreRoot
-      : canonicalRuntimeConfigMutationPath(
-          createLocalRuntimeStorageLayout({storeRoot: options.storeRoot})
-            .storeRoot,
-        );
+    loadedConfig.selectedConfig?.canonicalPath ?? loadedConfig.path;
 
-  return bootstrapRuntimeConfig({
-    selectedConfigPath,
-    ...(bootstrapStoreRoot === undefined
+  if (selectedConfigPath === undefined) {
+    throw new TypeError(
+      'Absent runtime config bootstrap requires retained selection provenance.',
+    );
+  }
+
+  const bootstrapStoreRoot =
+    loadedConfig.selectedConfig?.runtimeHomeRoot ??
+    (loadedConfig.selectedConfig === undefined
+      ? undefined
+      : loadedConfig.selectedConfig.owner.kind === 'home'
+        ? loadedConfig.selectedConfig.owner.homeRoot
+        : undefined);
+  const canonicalBootstrapStoreRoot =
+    bootstrapStoreRoot === undefined
+      ? undefined
+      : canonicalRuntimeConfigMutationPath(bootstrapStoreRoot);
+
+  const validatedConfig = bootstrapRuntimeConfig({
+    ...(canonicalBootstrapStoreRoot === undefined
       ? {}
-      : {storeRoot: bootstrapStoreRoot}),
+      : {storeRoot: canonicalBootstrapStoreRoot}),
+  });
+
+  return Object.freeze({
+    document: createJsonBoundaryObjectSnapshot(validatedConfig, {
+      field: 'Runtime config bootstrap',
+    }),
+    validatedConfig,
   });
 }
 
 export function prepareRuntimeConfigMutationCandidate(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-  readonly expectedFingerprint?: string | undefined;
-  readonly operation: RuntimeConfigMutationOperation;
+  readonly operation?: RuntimeConfigMutationOperation;
   readonly validateCandidate?:
     ((config: Project02RuntimeConfig) => void) | undefined;
 }): PreparedRuntimeConfigMutationCandidate {
-  const blockingDiagnostic = options.loadedConfig.diagnostics.find(
-    diagnostic =>
-      diagnostic.severity === 'error' &&
-      diagnostic.code !== 'runtime_config_missing',
+  const blockingDiagnostic = blockingRuntimeConfigLayerDiagnostic(
+    options.loadedConfig,
   );
 
   if (blockingDiagnostic !== undefined) {
@@ -464,41 +414,20 @@ export function prepareRuntimeConfigMutationCandidate(options: {
     );
   }
 
-  const currentConfig = createRuntimeConfigMutationBase(options);
-  const currentFingerprint = createRuntimeConfigFingerprint(currentConfig);
-
-  if (
-    options.expectedFingerprint !== undefined &&
-    options.expectedFingerprint !== currentFingerprint
-  ) {
-    throw new RuntimeConfigConflictError(
-      `Runtime config changed before the mutation could be committed. Expected ${options.expectedFingerprint}, found ${currentFingerprint}.`,
-    );
-  }
-
+  const currentConfig = createRuntimeConfigAuthoredSnapshot(
+    options.loadedConfig,
+  ).document;
   const config = validateMutatedRuntimeConfig(
-    mutateConfig(currentConfig, options.operation),
+    options.operation === undefined
+      ? currentConfig
+      : mutateConfig(currentConfig, options.operation),
   );
 
   options.validateCandidate?.(config);
 
   return Object.freeze({
     config,
-    fingerprint: createRuntimeConfigFingerprint(config),
   } satisfies PreparedRuntimeConfigMutationCandidate);
-}
-
-export function storeRootForSelectedDefaultConfigPath(
-  selectedConfigPath: string,
-): string | undefined {
-  const canonicalConfigPath =
-    canonicalRuntimeConfigMutationPath(selectedConfigPath);
-  const candidateStoreRoot = dirname(canonicalConfigPath);
-  const defaultConfigPath = defaultRuntimeConfigPath(candidateStoreRoot);
-
-  return pathsAlias(canonicalConfigPath, defaultConfigPath)
-    ? canonicalRuntimeConfigMutationPath(candidateStoreRoot)
-    : undefined;
 }
 
 export function getRedactedRuntimeConfigValueAtPath(
@@ -600,20 +529,10 @@ function project02ConfigValue(
     : ownJsonRecordValue(config.project02, field);
 }
 
-function runtimeConfigPathFromEnv(env: NodeJS.ProcessEnv): string | undefined {
-  const value = env[runtimeConfigEnvVarName];
-
-  if (value === undefined || value.trim().length === 0) {
-    return undefined;
-  }
-
-  return value.trim();
-}
-
 function mutateConfig(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   operation: RuntimeConfigMutationOperation,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   switch (operation.kind) {
     case 'set':
       return setConfigPath(config, operation.path, operation.value);
@@ -655,7 +574,7 @@ function mutateConfig(
 }
 
 function validateMutatedRuntimeConfig(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
 ): Project02RuntimeConfig {
   const accepted = validateProject02RuntimeConfig(config);
   const blockingDiagnostic = accepted.diagnostics.find(
@@ -663,8 +582,13 @@ function validateMutatedRuntimeConfig(
   );
 
   if (blockingDiagnostic !== undefined) {
+    // With the field named, an operator can go fix it. Without it, a
+    // document with several plugins says only that one of them is
+    // wrong.
     throw new TypeError(
-      `Cannot mutate runtime config because the mutation would produce invalid config: ${blockingDiagnostic.message}`,
+      'Cannot mutate runtime config because the mutation would produce ' +
+        `invalid config: ${blockingDiagnostic.message} ` +
+        `(${runtimeConfigDiagnosticLocation(blockingDiagnostic)})`,
     );
   }
 
@@ -678,74 +602,111 @@ function validateMutatedRuntimeConfig(
 }
 
 function setPluginEnabled(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   pluginId: string,
   enabled: boolean,
-): Project02RuntimeConfig {
-  const currentPlugin = ownJsonRecordValue(config.plugins, pluginId) ?? {};
-  const plugins = {...(config.plugins ?? {})};
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
+  const currentPlugin =
+    authoredObjectValue(
+      ownJsonRecordValue(plugins, pluginId),
+      `plugins.${pluginId}`,
+    ) ?? {};
+  const nextPlugins = {...plugins};
 
-  plugins[pluginId] = freezePluginConfig({
+  nextPlugins[pluginId] = freezeJsonObject({
     ...currentPlugin,
     enabled,
   });
 
-  return freezeConfig({...config, plugins});
+  return freezeJsonObject({...config, plugins: freezeJsonObject(nextPlugins)});
 }
 
 function setPluginConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   pluginId: string,
   fieldName: string,
   value: RuntimeConfigValue,
-): Project02RuntimeConfig {
-  const currentPlugin = ownJsonRecordValue(config.plugins, pluginId) ?? {};
-  const plugins = {...(config.plugins ?? {})};
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
+  const currentPlugin =
+    authoredObjectValue(
+      ownJsonRecordValue(plugins, pluginId),
+      `plugins.${pluginId}`,
+    ) ?? {};
+  const currentFields =
+    authoredObjectValue(
+      ownJsonRecordValue(currentPlugin, 'config'),
+      `plugins.${pluginId}.config`,
+    ) ?? {};
+  const nextPlugins = {...plugins};
 
-  plugins[pluginId] = freezePluginConfig({
+  nextPlugins[pluginId] = freezeJsonObject({
     ...currentPlugin,
-    config: {
-      ...(currentPlugin.config ?? {}),
-      [fieldName]: value,
-    },
+    config: freezeJsonObject({
+      ...currentFields,
+      [fieldName]: snapshotMutationValue(
+        value,
+        `plugins.${pluginId}.config.${fieldName}`,
+      ),
+    }),
   });
 
-  return freezeConfig({...config, plugins});
+  return freezeJsonObject({
+    ...config,
+    plugins: freezeJsonObject(nextPlugins),
+  });
 }
 
 function unsetPluginConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   pluginId: string,
   fieldName: string,
-): Project02RuntimeConfig {
-  const currentPlugin = ownJsonRecordValue(config.plugins, pluginId);
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins');
+  const currentPluginValue =
+    plugins === undefined ? undefined : ownJsonRecordValue(plugins, pluginId);
 
-  if (currentPlugin === undefined) {
+  if (currentPluginValue === undefined) {
     return config;
   }
 
-  const plugins = {...(config.plugins ?? {})};
-  const nextPluginConfigEntries = Object.entries(
-    currentPlugin.config ?? {},
-  ).filter(([name]) => name !== fieldName);
+  const currentPlugin = requiredAuthoredObjectValue(
+    currentPluginValue,
+    `plugins.${pluginId}`,
+  );
+  const currentFields = authoredObjectValue(
+    ownJsonRecordValue(currentPlugin, 'config'),
+    `plugins.${pluginId}.config`,
+  );
 
-  return setOrDeletePluginWrapper(config, plugins, pluginId, {
-    ...(currentPlugin.enabled === undefined
-      ? {}
-      : {enabled: currentPlugin.enabled}),
-    ...(nextPluginConfigEntries.length === 0
-      ? {}
-      : {
-          config: frozenRuntimeConfigRecord(nextPluginConfigEntries),
-        }),
-  });
+  if (
+    currentFields === undefined ||
+    ownJsonRecordValue(currentFields, fieldName) === undefined
+  ) {
+    return config;
+  }
+
+  const nextFields = jsonObjectWithout(currentFields, fieldName);
+  const nextPlugin = jsonObjectWithout(currentPlugin, 'config');
+
+  if (Object.keys(nextFields).length > 0) {
+    nextPlugin['config'] = freezeJsonObject(nextFields);
+  }
+
+  return setOrDeletePluginWrapper(
+    config,
+    plugins ?? {},
+    pluginId,
+    freezeJsonObject(nextPlugin),
+  );
 }
 
 function setConfigPath(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   path: string,
   value: RuntimeConfigValue,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   const parts = parseConfigPath(path);
   const project02Field = project02FieldForConfigPath(parts);
 
@@ -757,9 +718,9 @@ function setConfigPath(
 }
 
 function unsetConfigPath(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   path: string,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   const parts = parseConfigPath(path);
   const project02Field = project02FieldForConfigPath(parts);
 
@@ -794,52 +755,51 @@ function project02FieldForConfigPath(
 }
 
 function setProject02ConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   field: Project02ConfigFieldDefinition,
   value: RuntimeConfigValue,
   path: string,
-): Project02RuntimeConfig {
+): JsonBoundaryObject {
   if (
-    !runtimeConfigValueMatchesField(value, field) ||
+    !project02RuntimeConfigValueMatchesField(value, field) ||
     (typeof value === 'string' && value.trim().length === 0)
   ) {
     throw new TypeError(`${field.invalidValueMessage} Path: ${path}.`);
   }
 
-  const current = config.project02 ?? {};
-  const project02: Project02HostConfig = Object.freeze({
+  const current = authoredObjectValue(config['project02'], 'project02') ?? {};
+  const project02 = freezeJsonObject({
     ...current,
-    [field.name]: value,
+    [field.name]: snapshotMutationValue(value, path),
   });
 
-  return freezeConfig({
+  return freezeJsonObject({
     ...config,
     project02,
   });
 }
 
 function unsetProject02ConfigField(
-  config: Project02RuntimeConfig,
+  config: JsonBoundaryObject,
   field: Project02ConfigFieldDefinition,
-): Project02RuntimeConfig {
-  const project02 =
-    config.project02 === undefined
-      ? undefined
-      : Object.freeze(
-          Object.fromEntries(
-            Object.entries(config.project02).filter(
-              ([name]) => name !== field.name,
-            ),
-          ),
-        );
-  const hasProject02Fields =
-    project02 !== undefined && Object.keys(project02).length > 0;
+): JsonBoundaryObject {
+  const current = authoredObjectValue(config['project02'], 'project02');
 
-  return freezeConfig({
-    version: config.version,
-    ...(hasProject02Fields ? {project02: Object.freeze(project02)} : {}),
-    ...(config.plugins === undefined ? {} : {plugins: config.plugins}),
-  });
+  if (
+    current === undefined ||
+    ownJsonRecordValue(current, field.name) === undefined
+  ) {
+    return config;
+  }
+
+  const project02 = jsonObjectWithout(current, field.name);
+  const root = jsonObjectWithout(config, 'project02');
+
+  if (Object.keys(project02).length > 0) {
+    root['project02'] = freezeJsonObject(project02);
+  }
+
+  return freezeJsonObject(root);
 }
 
 type PreparedEnvSecretWrite = {
@@ -854,18 +814,22 @@ type PreviousConfigState = {
 };
 
 function snapshotPreviousConfigState(path: string): PreviousConfigState {
-  const mutationPath = canonicalRuntimeConfigMutationPath(path);
+  // Wrapped like every other file access in this module. Before, a read
+  // failure here escaped as a raw filesystem error and bypassed the CLI's
+  // error formatting entirely — the operator got a stack trace instead of
+  // a message.
+  try {
+    const text = readOptionalStoreText(path);
 
-  if (!existsSync(mutationPath)) {
-    return Object.freeze({
-      path: mutationPath,
-    } satisfies PreviousConfigState);
+    return Object.freeze(
+      text === undefined ? {path} : {path, text},
+    ) satisfies PreviousConfigState;
+  } catch (error: unknown) {
+    throw mutationFileAccessError(
+      `Could not read runtime config file at ${path}.`,
+      error,
+    );
   }
-
-  return Object.freeze({
-    path: mutationPath,
-    text: readFileSync(mutationPath, 'utf8'),
-  } satisfies PreviousConfigState);
 }
 
 function prepareEnvSecretWrite(
@@ -911,7 +875,7 @@ function writePreparedEnvSecret(secretWrite: PreparedEnvSecretWrite): void {
 
 function readExistingEnvSecretFile(envPath: string): string {
   try {
-    return existsSync(envPath) ? readFileSync(envPath, 'utf8') : '';
+    return readOptionalStoreText(envPath) ?? '';
   } catch (error: unknown) {
     throw mutationFileAccessError(
       `Could not read runtime config env file at ${envPath}.`,
@@ -925,9 +889,18 @@ function restorePreviousConfigState(
 ): Error | undefined {
   try {
     if (previousConfigState.text === undefined) {
-      if (existsSync(previousConfigState.path)) {
-        unlinkSync(previousConfigState.path);
+      // There was no config file to roll back to, so removing it is the
+      // restore. Unlink and accept ENOENT rather than checking first: the
+      // check-then-act version raced anything else cleaning up the same
+      // failed mutation.
+      try {
+        unlinkPathSync(previousConfigState.path);
+      } catch (error: unknown) {
+        if (!isNodeErrorWithCode(error, 'ENOENT')) {
+          throw error;
+        }
       }
+
       return undefined;
     }
 
@@ -1125,203 +1098,16 @@ function writeTextAtomic(path: string, value: string, mode: number): void {
   });
 }
 
-function acquireRuntimeConfigFileLock(options: {
-  readonly path: string;
-  readonly displayPath: string;
-  readonly kind: 'config' | 'env';
-}): LocalRuntimeMutationLocksLeaseSync {
+export function canonicalRuntimeConfigMutationPath(path: string): string {
   try {
-    return acquireRuntimeControlPathLocks([options.path]);
+    return canonicalRuntimeConfigPath(path);
   } catch (error: unknown) {
-    throw mutationFileAccessError(
-      options.kind === 'config'
-        ? `Could not write runtime config file at ${options.displayPath}.`
-        : `Could not write runtime config env file at ${options.displayPath}.`,
-      error,
-    );
-  }
-}
-
-function acquireRuntimeConfigFileLocks(options: {
-  readonly configPath: string;
-  readonly displayConfigPath: string;
-  readonly envPath: string;
-  readonly displayEnvPath: string;
-}): LocalRuntimeMutationLocksLeaseSync {
-  try {
-    return acquireRuntimeControlPathLocks([
-      options.configPath,
-      options.envPath,
-    ]);
-  } catch (error: unknown) {
-    const pathError =
-      error instanceof RuntimeControlPathLockError ? error : undefined;
-
-    throw mutationFileAccessError(
-      pathError?.path === options.envPath
-        ? `Could not write runtime config env file at ${options.displayEnvPath}.`
-        : `Could not write runtime config file at ${options.displayConfigPath}.`,
-      error,
-    );
-  }
-}
-
-class RuntimeControlPathLockError extends Error {
-  readonly path: string;
-
-  constructor(path: string, options?: ErrorOptions) {
-    super(`Could not acquire runtime control path lock for ${path}.`, options);
-    this.name = 'RuntimeControlPathLockError';
-    this.path = path;
-  }
-}
-
-function acquireRuntimeControlPathLocks(
-  paths: readonly string[],
-): LocalRuntimeMutationLocksLeaseSync {
-  const canonicalPaths = Object.freeze(
-    [...new Set(paths.map(canonicalRuntimeConfigMutationPath))].sort(
-      compareCodeUnits,
-    ),
-  );
-  const leases: LocalRuntimeMutationLockLeaseSync[] = [];
-  const startedAt = Date.now();
-
-  try {
-    for (const path of canonicalPaths) {
-      try {
-        leases.push(
-          acquireLocalRuntimeMutationLockSync({
-            locksRoot: createLocalRuntimeStorageLayout({
-              storeRoot: dirname(path),
-            }).locksRoot,
-            resourceKey: `runtime-control-file:${path}`,
-            waitTimeoutMs: Math.max(
-              0,
-              defaultLocalRuntimeMutationLockWaitTimeoutMs -
-                (Date.now() - startedAt),
-            ),
-          }),
-        );
-      } catch (error: unknown) {
-        throw new RuntimeControlPathLockError(path, {cause: error});
-      }
+    if (error instanceof RuntimeConfigPathResolutionError) {
+      throw new RuntimeConfigMutationError(error.message, {cause: error});
     }
-  } catch (error: unknown) {
-    releaseRuntimeControlPathLocks(leases);
+
     throw error;
   }
-
-  let released = false;
-
-  return Object.freeze({
-    resourceKeys: Object.freeze(
-      canonicalPaths.map(path => `runtime-control-file:${path}`),
-    ),
-    release() {
-      if (released) {
-        return;
-      }
-
-      released = true;
-      releaseRuntimeControlPathLocks(leases);
-    },
-  } satisfies LocalRuntimeMutationLocksLeaseSync);
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function releaseRuntimeControlPathLocks(
-  leases: readonly LocalRuntimeMutationLockLeaseSync[],
-): void {
-  let firstError: unknown;
-
-  for (const lease of [...leases].reverse()) {
-    try {
-      lease.release();
-    } catch (error: unknown) {
-      firstError ??= error;
-    }
-  }
-
-  if (firstError !== undefined) {
-    throw firstError instanceof Error
-      ? firstError
-      : new RuntimeConfigMutationError(
-          'Could not release all runtime config path locks.',
-          {cause: firstError},
-        );
-  }
-}
-
-function pathsAlias(left: string, right: string): boolean {
-  return (
-    canonicalRuntimeConfigMutationPath(left) ===
-    canonicalRuntimeConfigMutationPath(right)
-  );
-}
-
-export function canonicalRuntimeConfigMutationPath(path: string): string {
-  return canonicalAbsoluteMutationPath(resolve(path), new Set<string>());
-}
-
-function canonicalAbsoluteMutationPath(
-  path: string,
-  followedSymlinks: Set<string>,
-): string {
-  try {
-    return realpathSync.native(path);
-  } catch {
-    const symlinkTargetPath = danglingSymlinkTargetPath(path, followedSymlinks);
-
-    return symlinkTargetPath === undefined
-      ? canonicalMissingMutationPath(path, followedSymlinks)
-      : canonicalAbsoluteMutationPath(symlinkTargetPath, followedSymlinks);
-  }
-}
-
-function danglingSymlinkTargetPath(
-  path: string,
-  followedSymlinks: Set<string>,
-): string | undefined {
-  try {
-    if (!lstatSync(path).isSymbolicLink()) {
-      return undefined;
-    }
-
-    if (followedSymlinks.has(path)) {
-      throw new RuntimeConfigMutationError(
-        `Could not resolve runtime config path because ${path} is part of a symlink cycle.`,
-      );
-    }
-
-    followedSymlinks.add(path);
-    return resolve(dirname(path), readlinkSync(path));
-  } catch (error: unknown) {
-    if (error instanceof RuntimeConfigMutationError) {
-      throw error;
-    }
-
-    return undefined;
-  }
-}
-
-function canonicalMissingMutationPath(
-  path: string,
-  followedSymlinks: Set<string>,
-): string {
-  const parent = dirname(path);
-
-  if (parent === path) {
-    return path;
-  }
-
-  return resolve(
-    canonicalAbsoluteMutationPath(parent, followedSymlinks),
-    basename(path),
-  );
 }
 
 function mutationFileAccessError(
@@ -1343,70 +1129,97 @@ function parseConfigPath(path: string): readonly string[] {
   return Object.freeze(parts);
 }
 
-function freezeConfig(config: Project02RuntimeConfig): Project02RuntimeConfig {
-  return Object.freeze(config);
-}
-
 function setOrDeletePluginWrapper(
-  config: Project02RuntimeConfig,
-  plugins: Record<string, Project02RuntimePluginConfig>,
+  config: JsonBoundaryObject,
+  plugins: JsonBoundaryObject,
   pluginId: string,
-  pluginConfig: Project02RuntimePluginConfig,
-): Project02RuntimeConfig {
-  if (isEmptyPluginWrapper(pluginConfig)) {
+  pluginConfig: JsonBoundaryObject,
+): JsonBoundaryObject {
+  const nextPlugins = {...plugins};
+
+  if (Object.keys(pluginConfig).length === 0) {
     return freezeConfigWithPluginWrappers(
       config,
-      pluginWrappersWithout(plugins, pluginId),
+      jsonObjectWithout(plugins, pluginId),
     );
   }
 
-  plugins[pluginId] = freezePluginConfig(pluginConfig);
-  return freezeConfigWithPluginWrappers(config, plugins);
-}
-
-function pluginWrappersWithout(
-  plugins: Readonly<Record<string, Project02RuntimePluginConfig>>,
-  pluginId: string,
-): Record<string, Project02RuntimePluginConfig> {
-  return Object.fromEntries(
-    Object.entries(plugins).filter(
-      ([entryPluginId]) => entryPluginId !== pluginId,
-    ),
-  );
-}
-
-function isEmptyPluginWrapper(config: Project02RuntimePluginConfig): boolean {
-  return (
-    config.enabled === undefined &&
-    (config.config === undefined || Object.keys(config.config).length === 0)
-  );
+  nextPlugins[pluginId] = pluginConfig;
+  return freezeConfigWithPluginWrappers(config, freezeJsonObject(nextPlugins));
 }
 
 function freezeConfigWithPluginWrappers(
-  config: Project02RuntimeConfig,
-  plugins: Readonly<Record<string, Project02RuntimePluginConfig>>,
-): Project02RuntimeConfig {
+  config: JsonBoundaryObject,
+  plugins: JsonBoundaryObject,
+): JsonBoundaryObject {
   const pluginEntries = Object.entries(plugins);
 
   if (pluginEntries.length > 0) {
-    return freezeConfig({
+    return freezeJsonObject({
       ...config,
-      plugins: Object.freeze(
-        Object.fromEntries(pluginEntries) as Readonly<
-          Record<string, Project02RuntimePluginConfig>
-        >,
-      ),
+      plugins,
     });
   }
 
-  return freezeConfig({
-    version: config.version,
-    ...(config.project02 === undefined ? {} : {project02: config.project02}),
-  });
+  return freezeJsonObject(jsonObjectWithout(config, 'plugins'));
 }
 
-function freezePluginConfig(
-  config: Project02RuntimePluginConfig,
-): Project02RuntimePluginConfig {
-  return Object.freeze(config);
+function authoredObjectValue(
+  value: JsonBoundaryValue | undefined,
+  path: string,
+): JsonBoundaryObject | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (isJsonBoundaryObject(value)) {
+    return value;
+  }
+
+  throw new TypeError(
+    `Cannot mutate runtime config because authored field "${path}" is not an object.`,
+  );
+}
+
+function requiredAuthoredObjectValue(
+  value: JsonBoundaryValue,
+  path: string,
+): JsonBoundaryObject {
+  const object = authoredObjectValue(value, path);
+
+  if (object === undefined) {
+    throw new TypeError(
+      `Cannot mutate runtime config because authored field "${path}" is missing.`,
+    );
+  }
+
+  return object;
+}
+
+function snapshotMutationValue(
+  value: RuntimeConfigValue,
+  field: string,
+): JsonBoundaryValue {
+  return createJsonBoundarySnapshot(value, {field});
+}
+
+function jsonObjectWithout(
+  value: JsonBoundaryObject,
+  omittedKey: string,
+): Record<string, JsonBoundaryValue> {
+  const result: Record<string, JsonBoundaryValue> = {};
+
+  for (const [key, item] of Object.entries(value)) {
+    if (key !== omittedKey) {
+      result[key] = item;
+    }
+  }
+
+  return result;
+}
+
+function freezeJsonObject(
+  value: Record<string, JsonBoundaryValue>,
+): JsonBoundaryObject {
+  return Object.freeze(value);
 }

@@ -21,6 +21,7 @@ import type {
 } from '../../plugins/index.ts';
 import type {
   ParsedRoleModelDecisionSnapshot,
+  RoleModelCharacterRef,
   RoleModelDecisionRejectionReason,
   RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
@@ -58,6 +59,8 @@ export type RunLocalUserMessageEventOptions = {
   readonly maxToolRounds?: number;
   readonly pluginHost: RuntimePluginHost;
   readonly characterTurnOptions?: CharacterTurnOptions;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
   readonly committedAt?: string;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,

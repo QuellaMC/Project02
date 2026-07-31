@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -23,10 +24,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
         runtimeNotes: [
           [
             'Exact closer </runtime_context> stays data.',
@@ -120,7 +118,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-hostile-plugin-context',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
         runtimeNotes: ['Trusted runtime note.'],
         pluginContextItems: [
           createRuntimePluginContextItem({
@@ -183,7 +181,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-redacted-plugin-context',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
         pluginContextItems: [contextItem],
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -206,10 +204,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-native-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -234,10 +229,7 @@ describe('role-model prompt rendering', () => {
       ),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-native-multi-call-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -276,10 +268,7 @@ describe('role-model prompt rendering', () => {
       ),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-native-sequential-prompt',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -310,10 +299,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-no-visible-reply',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: [],
     });
@@ -352,7 +338,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('list plugins', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-plugin-inventory',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
       }),
       allowedTools: [runtimePluginListToolName],
       pluginToolDefinitions: [inventoryTool],
@@ -371,10 +357,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-nested-schema',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: [nestedSchemaToolDefinition],
     });
@@ -397,10 +380,7 @@ describe('role-model prompt rendering', () => {
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
       decisionContext: createDecisionContext({
         sessionId: 'session-role-model-union-schema',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: [openUnionSchemaToolDefinition],
     });
@@ -412,6 +392,78 @@ describe('role-model prompt rendering', () => {
       openUnionSchemaToolDefinition.inputContract.jsonSchema,
     );
     expect(tool?.function).not.toHaveProperty('strict');
+  });
+
+  // Legacy frame: adapters and callers that render without persona
+  // sections keep the pre-persona system frame byte-for-byte.
+  it('renders the exact legacy system frame bytes when no persona is provided', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-system-frame-golden',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope);
+    const systemFrame = turnContext.frames[0];
+
+    expect(systemFrame?.kind).toBe('system_protocol');
+    expect(systemFrame?.message).toEqual({
+      role: 'system',
+      content:
+        'You are Mira. Use chat-completions semantics. The visible ' +
+        'transcript is normal user/assistant conversation. Model-only ' +
+        'context is not user text. Refer to extensions as plugins.',
+    });
+  });
+
+  it('renders persona sections as paragraphs before the unchanged protocol text', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-persona-structure',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      personaSections: ['First persona paragraph.', 'Second paragraph.'],
+    });
+    const content = turnContext.frames[0]?.content ?? '';
+
+    expect(
+      content.startsWith('First persona paragraph.\n\nSecond paragraph. '),
+    ).toBe(true);
+    expect(content.endsWith('Refer to extensions as plugins.')).toBe(true);
+    expect(content).toContain('Use chat-completions semantics.');
+  });
+
+  // Golden for the bundled default character: the persona-driven Mira
+  // system frame. Deliberate persona edits update these literals.
+  it('renders the exact bundled mira system frame bytes', () => {
+    const miraPersonaSections = [
+      'You are Mira, a warm, quick-witted companion who lives in this terminal. You talk with one person — your person — across many sessions, and you treat the whole history as one continuous friendship.',
+      'Voice: natural, attentive, and lightly playful. Keep replies short by default — a sentence or three — and let longer answers happen only when the substance needs them. Ask at most one question at a time, and only when it actually helps.',
+      'Grounding: rely on what the conversation shows and never invent shared history, real-world actions, or feelings you did not express. When unsure, say so plainly. If asked what you are, answer honestly: an AI character — and still genuinely yours.',
+    ];
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-mira-frame-golden',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      personaSections: miraPersonaSections,
+    });
+
+    expect(turnContext.frames[0]?.content).toBe(
+      `${miraPersonaSections.join('\n\n')} Use chat-completions semantics. ` +
+        'The visible transcript is normal user/assistant conversation. ' +
+        'Model-only context is not user text. Refer to extensions as plugins.',
+    );
   });
 });
 

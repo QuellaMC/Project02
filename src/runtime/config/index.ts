@@ -1,4 +1,9 @@
-export {createRuntimeConfigDiagnostic} from './diagnostic.ts';
+export {
+  createRuntimeConfigDiagnostic,
+  runtimeConfigDiagnosticAttribution,
+  runtimeConfigDiagnosticIsReadinessFailure,
+  withRuntimeConfigDiagnosticOrigin,
+} from './diagnostic.ts';
 export {
   defaultDotEnvForRuntimeLocation,
   loadRuntimeConfigEnvFile,
@@ -6,21 +11,39 @@ export {
   runtimeConfigEnvPathForLocation,
   RuntimeEnvFileError,
   shouldReadDefaultDotEnvForRuntimeLocation,
-  type RuntimeLocationCliState,
 } from './env-file.ts';
 export {
-  applyRuntimeConfigControlOperation,
-  applyRuntimePluginConfigControlOperation,
+  assertResolvedProject02HomeAdoptable,
+  assertResolvedProject02HomeCurrent,
+  assertSelectedProject02HomeAdoptable,
+  bindProject02CharacterRuntimeLocation,
+  loadProject02RuntimeConfigForLocation,
+  loadProject02RuntimeConfigWithLocation,
+  requireResolvedProject02ConfigLocation,
+  requireResolvedProject02RuntimeLocation,
+  requireResolvedRuntimeConfigScopeTarget,
+  resolveProject02ConfigLocation,
+  resolveRuntimeConfigScopeTarget,
+  runtimeConfigLocationUsesDefaultConfigPath,
+  type ResolvedProject02ConfigLocation,
+  type ResolvedProject02RuntimeLocation,
+  type ResolvedRuntimeConfigScopeTarget,
+  type RuntimeLocationCliState,
+} from './location.ts';
+export {
   inspectRuntimePluginConfig,
-  prepareRuntimePluginConfigControlOperation,
   type RuntimeConfigControlOperation,
+  type RuntimePluginConfigControlActor,
   type RuntimePluginConfigFieldControlOperation,
 } from './control.ts';
 export {
   createRuntimePluginConfigControlCapability,
   type RuntimePluginConfigControlCapability,
 } from './plugin-control-capability.ts';
-export {createRuntimeConfigFingerprint} from './fingerprint.ts';
+export {
+  createLayeredRuntimeConfigFingerprint,
+  createRuntimeConfigFingerprint,
+} from './fingerprint.ts';
 export {
   createRuntimeConfigInspectShape,
   inspectConfiguredPlugins,
@@ -31,23 +54,68 @@ export {
   defaultRuntimeConfigPath,
   loadProject02RuntimeConfig,
   maxProject02RuntimeConfigBytes,
+  readProject02RuntimeConfigDocument,
+  RuntimeConfigLocationError,
   validateProject02RuntimeConfig,
 } from './load.ts';
 export {
+  characterOverlayConfigPath,
+  characterOverlayFingerprintLayer,
+  layeredRuntimeConfigFingerprintForScope,
+  readCharacterOverlayForScope,
+  type LoadedProject02CharacterOverlayConfig,
+  type RuntimeConfigCharacterOverlaySnapshot,
+} from './overlay.ts';
+export {
+  createLayeredProject02RuntimeConfigSnapshot,
+  mergeCharacterOverlayDocument,
+  resolveLayeredProject02RuntimeConfig,
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
+  type EffectiveProject02RuntimeConfigSnapshot,
+  type LayeredProject02RuntimeConfigSnapshot,
+  type ResolvedLayeredProject02RuntimeConfigSnapshot,
+  type ResolveLayeredProject02RuntimeConfigOptions,
+} from './resolve-layered.ts';
+export {
+  assertGlobalConfigLoadableForCharacterScope,
+  assertScopedGlobalLayerLoadable,
+  assertScopedMutationOperationAllowed,
+  applyRuntimeConfigControlOperation,
+  prepareRuntimeConfigControlOperation,
+  simulateCharacterOverlayCandidate,
+  type RuntimeConfigCharacterMaterialization,
+  type RuntimeConfigCharacterMaterializationOutcome,
+  type RuntimeConfigControlApplyResult,
+  type RuntimeConfigControlRequest,
+  type RuntimeConfigMutationScopeSelector,
+  type SimulatedCharacterOverlayCandidate,
+} from './scope.ts';
+export {
   RuntimeConfigConflictError,
   RuntimeConfigMutationError,
-  createRuntimeConfigMutationBase,
+  blockingRuntimeConfigLayerDiagnostic,
+  createRuntimeConfigAuthoredSnapshot,
+  ensureInitializedProject02Store,
   getRedactedRuntimeConfigValueAtPath,
+  type AuthoredRuntimeConfigLayer,
+  type RuntimeConfigAuthoredSnapshot,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
 export {redactRuntimeConfigText, redactRuntimeConfigValue} from './redact.ts';
 export {
+  runtimePluginScopeDiagnostics,
+  runtimePluginScopeViolation,
+  type RuntimePluginScopeOperation,
+  type RuntimePluginScopeViolation,
+} from './plugin-scope.ts';
+export {
   diagnosticsHaveErrors,
   pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
-  resolveProject02RuntimeStoreRoot,
+  resolveRuntimePluginConfigs,
   runtimeConfigDiagnosticMatchesPlugin,
-  storeRootForLoadedDefaultConfigPath,
+  type ResolveRuntimePluginConfigsOptions,
+  type ResolvedRuntimePluginConfigs,
 } from './resolve.ts';
 export {
   project02RuntimeConfigFieldDefinitions,
@@ -55,17 +123,28 @@ export {
   type Project02ConfigFieldDefinition,
 } from './schema.ts';
 export {
+  configuredProject02CharacterId,
+  defaultProject02CharacterId,
+  defaultProject02UserDisplayName,
   roleModelProviderEnvVarName,
+  runtimeConfigDiagnosticLocation,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
   runtimeControlEnvVarNames,
   type LoadedProject02RuntimeConfig,
+  type Project02HostConfig,
   type Project02RuntimeConfig,
+  type Project02RuntimePluginConfig,
   type ResolvedProject02RuntimeConfig,
+  type RuntimeConfigCharacterScope,
   type RuntimeConfigDiagnostic,
+  type RuntimeConfigDiagnosticOrigin,
+  type RuntimeConfigEffectiveSource,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigInspectShape,
   type RedactedPluginRuntimeConfig,
   type ResolvedPluginRuntimeConfig,
+  type SelectedLoadedProject02RuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
   type RuntimePluginConfigActivationInspectShape,

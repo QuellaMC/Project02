@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {mkdtemp, readFile, readdir, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
@@ -13,7 +14,10 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
-import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
+import {
+  characterDataDirPath,
+  LocalRuntimeStorageContractError,
+} from '../../src/runtime/storage/layout-contract.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 
 const tempRoots: string[] = [];
@@ -30,19 +34,38 @@ describe('durable runtime session writer ownership', () => {
   it('rejects a second active writer before it appends evidence', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'shared-writer-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
-    const secondLogStore = createFileRuntimeLogStore({storeRoot, sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
+    const secondLogStore = createFileRuntimeLogStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
     const rawEventsPath = logStore.localRuntimeSessionPaths?.rawEventsPath;
 
     if (rawEventsPath === undefined) {
       throw new Error('Expected durable runtime session paths.');
     }
-    const firstSession = createConversationSession({id: sessionId});
-    const secondSession = createConversationSession({id: sessionId});
+    const firstSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const secondSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
     let releaseReply: (() => void) | undefined;
     const replyStarted = new Promise<void>(resolveStarted => {
       releaseReply = resolveStarted;
@@ -102,13 +125,27 @@ describe('durable runtime session writer ownership', () => {
   it('rejects a stale in-memory transcript before starting a new turn', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'stale-writer-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const logStore = createFileRuntimeLogStore({storeRoot, sessionId});
-    const currentSession = createConversationSession({id: sessionId});
-    const staleSession = createConversationSession({id: sessionId});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId,
+      characterId: 'mira',
+      boundCharacter: testCharacterProfile,
+    });
+    const currentSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const staleSession = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -140,7 +177,10 @@ describe('durable runtime session writer ownership', () => {
   it('holds the writer lease for the full interactive chat process', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'interactive-writer-session';
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
@@ -177,7 +217,10 @@ describe('durable runtime session writer ownership', () => {
       'parallel-writer-alpha',
       'parallel-writer-beta',
     ] as const;
-    const sessionStore = createLocalRuntimeSessionStore({storeRoot});
+    const sessionStore = createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    });
 
     for (const sessionId of sessionIds) {
       await sessionStore.createSession({
@@ -243,12 +286,20 @@ async function waitForOutput(
 ): Promise<void> {
   await new Promise<void>((resolveOutput, rejectOutput) => {
     let stdout = '';
-    // Generous on purpose: loaded CI runners have taken >5s just to
-    // cold-start the child Node process before any output appears.
-    const timeout = setTimeout(() => {
-      rejectOutput(new Error(`Timed out waiting for chat output: ${stdout}`));
-    }, 15_000);
+    // Idle deadline rather than a total one: these cases spawn several real
+    // Node processes that each cold-start, so total time tracks runner load
+    // and any fixed budget eventually goes flaky (this test reached 6.0s, then
+    // 8.0s, then timed out at 15s on progressively busier runners). Waiting on
+    // silence instead measures the thing that actually indicates a hang, and
+    // `exit` still fails fast when the child dies before it is ready.
+    let timeout: NodeJS.Timeout;
+    const failIfIdle = (): void => {
+      timeout = setTimeout(() => {
+        rejectOutput(new Error(`Timed out waiting for chat output: ${stdout}`));
+      }, 20_000);
+    };
 
+    failIfIdle();
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', (chunk: string) => {
       stdout += chunk;
@@ -256,7 +307,11 @@ async function waitForOutput(
       if (stdout.includes(expected)) {
         clearTimeout(timeout);
         resolveOutput();
+        return;
       }
+      // Progress, not readiness: give the child a fresh idle window.
+      clearTimeout(timeout);
+      failIfIdle();
     });
     child.once('error', error => {
       clearTimeout(timeout);

@@ -1,6 +1,13 @@
-import {existsSync, mkdtempSync, readFileSync, readdirSync} from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {pathToFileURL} from 'node:url';
 
 import {Ajv} from 'ajv';
 import {describe, expect, it} from 'vitest';
@@ -11,7 +18,10 @@ import {
   parseRuntimePluginPackageDescriptor,
   readRuntimePluginPackageDescriptor,
 } from '../../src/plugins/api/package-descriptor.ts';
-import {bundledRuntimePluginPackageRoot} from '../../src/plugins/package-loader/index.ts';
+import {
+  bundledRuntimePluginPackageRoot,
+  maxRuntimePluginPackageMetadataBytes,
+} from '../../src/plugins/package-loader/index.ts';
 
 const schemaPath = join(
   process.cwd(),
@@ -101,6 +111,64 @@ describe('plugin package descriptor schema parity', () => {
       }),
     ],
     [
+      'a missing config scope',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+        const config = {...(manifest['config'] as Record<string, unknown>)};
+
+        delete config['scope'];
+        return {...descriptor, manifest: {...manifest, config}};
+      },
+    ],
+    [
+      'an unsupported config scope',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+
+        return {
+          ...descriptor,
+          manifest: {
+            ...manifest,
+            config: {
+              ...(manifest['config'] as Record<string, unknown>),
+              scope: 'sometimes_global',
+            },
+          },
+        };
+      },
+    ],
+    [
+      'a non-string $schema reference',
+      (descriptor: Record<string, unknown>) => ({
+        ...descriptor,
+        // The key is allowed and ignored, so nothing else validates it;
+        // without its own guard the code accepted a shape this schema
+        // rejects, and the mistake surfaced only in the other tool.
+        $schema: 42,
+      }),
+    ],
+    [
+      'a character-only plugin enabled by manifest default',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+
+        return {
+          ...descriptor,
+          manifest: {
+            ...manifest,
+            config: {
+              ...(manifest['config'] as Record<string, unknown>),
+              scope: 'character_only',
+            },
+            activation: {
+              ...(manifest['activation'] as Record<string, unknown>),
+              defaultEnabled: true,
+            },
+          },
+        };
+      },
+    ],
+    [
       'a secret agent-mutable config field',
       (descriptor: Record<string, unknown>) => {
         const manifest = descriptor['manifest'] as Record<string, unknown>;
@@ -111,6 +179,7 @@ describe('plugin package descriptor schema parity', () => {
           manifest: {
             ...manifest,
             config: {
+              scope: 'global_with_character_overrides',
               fields: [
                 ...config.fields,
                 {
@@ -140,13 +209,45 @@ describe('plugin package descriptor schema parity', () => {
     },
   );
 
-  it('allows and ignores the $schema key in both validators', () => {
+  it('accepts a string $schema key, and its absence, in both validators', () => {
     const descriptor = validDescriptor();
 
     expect(typeof descriptor['$schema']).toBe('string');
-    const parsed = parseRuntimePluginPackageDescriptor(descriptor);
+    expect(parseRuntimePluginPackageDescriptor(descriptor).status).toBe(
+      'accepted',
+    );
 
-    expect(parsed.status).toBe('accepted');
+    // Referencing the editor schema is optional, so an absent key stays
+    // acceptable to both validators.
+    const withoutSchemaRef = {...descriptor};
+
+    delete withoutSchemaRef['$schema'];
+    expect(
+      validateAgainstSchema(withoutSchemaRef),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseRuntimePluginPackageDescriptor(withoutSchemaRef).status).toBe(
+      'accepted',
+    );
+  });
+
+  it('bounds descriptor self-reads before parsing', () => {
+    const root = mkdtempSync(join(tmpdir(), 'project02-plugin-self-read-'));
+    const descriptorPath = join(root, 'project02.plugin.json');
+
+    writeFileSync(
+      descriptorPath,
+      JSON.stringify({
+        padding: 'x'.repeat(maxRuntimePluginPackageMetadataBytes),
+      }),
+      'utf8',
+    );
+
+    expect(() =>
+      readRuntimePluginPackageDescriptor({
+        descriptorUrl: pathToFileURL(descriptorPath),
+      }),
+    ).toThrow('Runtime plugin package descriptor could not be read.');
   });
 
   it('stamps a scaffold whose descriptor passes both validators', () => {

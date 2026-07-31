@@ -34,6 +34,7 @@ export {
   roleModelDuplicateToolCallRejectionReason,
   type RoleModelInputEnvelope,
   roleModelInvalidVisibleReplyRejectionReason,
+  type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
   type RoleModelMalformedAdapterRawOutputDetails,
   roleModelMalformedAdapterRawOutputDetails,
@@ -55,6 +56,7 @@ export {
   roleModelUnsupportedEffectRejectionReason,
 } from './api/contracts.ts';
 export {
+  assertRoleModelCharacterRefMatchesCharacter,
   createAcceptedRoleModelDecisionResult,
   createCharacterDecision,
   createDecisionContext,

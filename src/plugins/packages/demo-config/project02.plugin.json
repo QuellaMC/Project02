@@ -20,6 +20,7 @@
       "before_role_model_call"
     ],
     "config": {
+      "scope": "global_with_character_overrides",
       "fields": [
         {
           "name": "tone",

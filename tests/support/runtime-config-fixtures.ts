@@ -1,10 +1,57 @@
-import type {createConfiguredProject02PluginHost} from '../../src/app/index.ts';
+import type {createConfiguredProject02PluginHostFromPlan} from '../../src/app/index.ts';
 import {
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
   hostScopedFirstPartyRuntimePluginIds,
   runtimePluginContractVersion,
 } from '../../src/plugins/index.ts';
+import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
+import {ensureCharacterDataDir} from '../../src/runtime/storage/index.ts';
+import {createTestTempRoot} from './temp-root.ts';
+
+/**
+ * Marks the character's data directory initialized so a host can be
+ * constructed directly: host construction asserts the initializer ran
+ * and never creates durable character state itself.
+ */
+export async function initializeCharacterDataForHost(
+  storeRoot: string,
+  characterId = 'mira',
+): Promise<void> {
+  await ensureCharacterDataDir({homeRoot: storeRoot, characterId});
+}
+
+/**
+ * Creates a Project02 store at the given path and returns it.
+ *
+ * The CLIs refuse to create a store the operator never asked for, so a
+ * test exercising anything past that gate has to arrange one — the same
+ * way a test needing a config file writes one. Use this wherever the
+ * store's existence is setup rather than the subject; a test about the
+ * gate itself wants a bare `createTestTempRoot`.
+ *
+ * It runs the same initializer the CLIs run, so the arranged store is
+ * the store the product makes — marker, character-data root, and global
+ * config together. A test that arranged less would be exercising a
+ * state no command can produce. What a rejected run must still not
+ * leave is `character-data/<id>/`, an `.env`, or an edited document.
+ *
+ * Takes a path rather than making one because the home a run selects is
+ * not always a root a test named: `--config` points at a file, and the
+ * home it resolves is `<cwd>/.project02` unless the document says
+ * otherwise. Those tests arrange that path directly.
+ */
+export async function initializeTestStore(homeRoot: string): Promise<string> {
+  await ensureInitializedProject02Store({homeRoot});
+  return homeRoot;
+}
+
+/** A fresh temp root that is already a Project02 store. */
+export async function createInitializedTestStoreRoot(
+  prefix = 'project02-test-',
+): Promise<string> {
+  return initializeTestStore(createTestTempRoot(prefix));
+}
 
 export function requiredSecretPlugin(id = 'memory.required') {
   return createRuntimePlugin({
@@ -21,6 +68,7 @@ export function requiredSecretPlugin(id = 'memory.required') {
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'apiKey',
@@ -66,6 +114,7 @@ export function requiredSecretPluginWithManifestEnvVar(
     manifest: {
       ...plugin.manifest,
       config: {
+        scope: 'global_with_character_overrides',
         fields: plugin.manifest.config.fields.map(field =>
           field.name === 'apiKey' ? {...field, envVar} : field,
         ),
@@ -85,6 +134,7 @@ export function requiredDottedConfigPlugin(
       ...plugin.manifest,
       description: 'Test plugin with required dotted config.',
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: fieldName,
@@ -112,6 +162,7 @@ export function structuredConfigPlugin(id: string) {
       ...plugin.manifest,
       description: 'Test plugin with structured non-secret config.',
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'settings',
@@ -139,6 +190,43 @@ export function structuredConfigPlugin(id: string) {
   });
 }
 
+export function characterOnlyConfigPlugin(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: 'Test character-only plugin with shared secret support.',
+      config: {
+        scope: 'character_only',
+        fields: [
+          {
+            name: 'setting',
+            description: 'Character-owned setting.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+            agentMutable: true,
+          },
+          {
+            name: 'apiKey',
+            description: 'Shared API key.',
+            required: false,
+            secret: true,
+            valueType: 'secret',
+            redactionLabels: ['secret'],
+          },
+        ],
+      },
+      activation: {
+        defaultEnabled: false,
+        reasons: ['test_character_only'],
+      },
+    },
+  });
+}
+
 export function memoryProviderPlugin(id: string) {
   return createMemoryProviderRuntimePlugin({
     id,
@@ -161,8 +249,46 @@ export function restoreProcessEnvValue(
   process.env[name] = value;
 }
 
+/**
+ * Runs body with process.env entries and (optionally) the working directory
+ * overridden, restoring both afterwards even when body throws. An undefined
+ * env value unsets that variable for the duration.
+ */
+export async function withScopedProcessEnv<T>(
+  options: {
+    readonly env: Readonly<Record<string, string | undefined>>;
+    readonly cwd?: string;
+  },
+  body: () => Promise<T>,
+): Promise<T> {
+  const previousCwd = process.cwd();
+  const previousEnv = Object.keys(options.env).map(
+    name => [name, process.env[name]] as const,
+  );
+
+  try {
+    for (const [name, value] of Object.entries(options.env)) {
+      restoreProcessEnvValue(name, value);
+    }
+
+    if (options.cwd !== undefined) {
+      process.chdir(options.cwd);
+    }
+
+    return await body();
+  } finally {
+    if (options.cwd !== undefined) {
+      process.chdir(previousCwd);
+    }
+
+    for (const [name, value] of previousEnv) {
+      restoreProcessEnvValue(name, value);
+    }
+  }
+}
+
 export type ActivationPluginSnapshot = Awaited<
-  ReturnType<typeof createConfiguredProject02PluginHost>
+  ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
 >['activation']['plugins'][number];
 
 export function activationPluginById(

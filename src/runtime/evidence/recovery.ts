@@ -15,9 +15,14 @@ import {
   isTerminalRawEventLogRecord,
   type RuntimeSessionEvidenceSnapshot,
 } from './records.ts';
-import {runtimeEventIdentityKey} from '../../core/index.ts';
+import {
+  type CharacterProfile,
+  runtimeEventIdentityKey,
+  type SpeakerIdentity,
+} from '../../core/index.ts';
 import {atomicReplaceFileSync} from '../storage/atomic-file.ts';
 import type {DurableRuntimeSessionEvidence} from './contract.ts';
+import {assertDurableRuntimeSessionIdentity} from './identity.ts';
 import {
   assertDurableRuntimeSessionEvidence,
   deriveTerminalRawTraceEvidence,
@@ -45,7 +50,28 @@ export function createRuntimeSessionEvidenceSnapshot(
 export function recoverAbandonedRuntimeWriterEvidence(options: {
   readonly paths: LocalRuntimeSessionPaths;
   readonly evidence: DurableRuntimeSessionEvidence;
+  readonly boundCharacter?: CharacterProfile;
+  readonly boundUserSpeaker?: SpeakerIdentity;
 }): DurableRuntimeSessionEvidence | undefined {
+  try {
+    assertDurableRuntimeSessionIdentity({
+      paths: options.paths,
+      evidence: options.evidence,
+      ...(options.boundCharacter === undefined
+        ? {}
+        : {boundCharacter: options.boundCharacter}),
+      ...(options.boundUserSpeaker === undefined
+        ? {}
+        : {boundUserSpeaker: options.boundUserSpeaker}),
+    });
+  } catch (error: unknown) {
+    throw new LocalRuntimeStorageContractError(
+      'partial_write',
+      `Local runtime evidence cannot safely recover the abandoned writer for session "${options.paths.sessionId}".`,
+      {cause: error},
+    );
+  }
+
   const openIdentities = startedRawEventIdentitiesWithoutTerminal(
     options.evidence.rawEvents,
   );
@@ -73,6 +99,12 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
       paths: options.paths,
       evidence: evidenceWithDerivedTrace,
       mode: 'appendConversation',
+      ...(options.boundCharacter === undefined
+        ? {}
+        : {boundCharacter: options.boundCharacter}),
+      ...(options.boundUserSpeaker === undefined
+        ? {}
+        : {boundUserSpeaker: options.boundUserSpeaker}),
     });
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
@@ -146,6 +178,12 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
     paths: options.paths,
     evidence: evidenceWithDerivedTerminalTrace(recovered),
     mode: 'public',
+    ...(options.boundCharacter === undefined
+      ? {}
+      : {boundCharacter: options.boundCharacter}),
+    ...(options.boundUserSpeaker === undefined
+      ? {}
+      : {boundUserSpeaker: options.boundUserSpeaker}),
   });
 
   writeJsonLines({
@@ -167,6 +205,8 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
 function recoverLatestTerminalRawTraceEvidence(options: {
   readonly paths: LocalRuntimeSessionPaths;
   readonly evidence: DurableRuntimeSessionEvidence;
+  readonly boundCharacter?: CharacterProfile;
+  readonly boundUserSpeaker?: SpeakerIdentity;
 }): DurableRuntimeSessionEvidence | undefined {
   const missingTraceEntries = deriveTerminalRawTraceEvidence(options.evidence);
 
@@ -197,6 +237,12 @@ function recoverLatestTerminalRawTraceEvidence(options: {
       paths: options.paths,
       evidence: recovered,
       mode: 'public',
+      ...(options.boundCharacter === undefined
+        ? {}
+        : {boundCharacter: options.boundCharacter}),
+      ...(options.boundUserSpeaker === undefined
+        ? {}
+        : {boundUserSpeaker: options.boundUserSpeaker}),
     });
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(

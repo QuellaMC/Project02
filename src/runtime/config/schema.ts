@@ -1,7 +1,13 @@
+import {
+  isValidSpeakerDisplayName,
+  maxSpeakerDisplayNameLength,
+} from '../../core/index.ts';
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
+import {isProject02Identifier} from '../../shared/identifier.ts';
 
 import {
   project02RoleModelProviderValues,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
 } from './types.ts';
 
@@ -12,7 +18,25 @@ export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly invalidValueMessage: string;
   readonly agentMutable: false;
   readonly reloadRequired: boolean;
+  readonly scopes: readonly RuntimeConfigFieldScope[];
+  /**
+   * Narrows `valueType` where the field's real rule is stricter.
+   *
+   * Declared with the field so every authoring path -- load, mutate, scoped
+   * control -- accepts exactly what the consuming boundary accepts. A field
+   * whose value must satisfy a downstream contract states that here rather
+   * than letting each caller re-derive it.
+   */
+  readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
+
+const globalOnlyFieldScopes = Object.freeze([
+  'global',
+] satisfies RuntimeConfigFieldScope[]);
+const characterScopedFieldScopes = Object.freeze([
+  'global',
+  'character',
+] satisfies RuntimeConfigFieldScope[]);
 
 const project02ConfigFieldDefinitions = Object.freeze([
   Object.freeze({
@@ -20,14 +44,16 @@ const project02ConfigFieldDefinitions = Object.freeze([
     name: 'storeRoot',
     label: 'Runtime store root',
     description:
-      'Directory that owns sessions, logs, plugin data, config, and secrets.',
+      'The Project02 home: global config, secrets, installed packages, and ' +
+      'the per-character data directories.',
     invalidValueCode: 'runtime_config_string_invalid',
     invalidValueMessage: 'Runtime config field must be a non-empty string.',
     required: false,
     secret: false,
     valueType: 'path',
-    defaultValueSummary: '.project02-runtime',
+    defaultValueSummary: '.project02',
     redactionLabels: Object.freeze([]),
+    scopes: globalOnlyFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -42,6 +68,27 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'string',
     redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.character',
+    name: 'character',
+    label: 'Character',
+    description:
+      'Selects the default active character package for this Project02 home.',
+    invalidValueCode: 'runtime_config_string_invalid',
+    invalidValueMessage:
+      'Project02 character must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
+    required: false,
+    secret: false,
+    valueType: 'string',
+    defaultValueSummary: 'mira',
+    acceptsValue: value =>
+      typeof value === 'string' && isProject02Identifier(value.trim()),
+    redactionLabels: Object.freeze([]),
+    scopes: globalOnlyFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -59,6 +106,35 @@ const project02ConfigFieldDefinitions = Object.freeze([
     defaultValueSummary: 'local',
     allowedValues: Object.freeze([...project02RoleModelProviderValues]),
     redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.userDisplayName',
+    name: 'userDisplayName',
+    label: 'User display name',
+    description:
+      "Speaker name stamped on the local user's messages. Applies to new " +
+      'sessions; existing sessions keep their historical name.',
+    invalidValueCode: 'runtime_config_string_invalid',
+    invalidValueMessage:
+      'Project02 userDisplayName must be a non-empty single-line string of ' +
+      `at most ${String(maxSpeakerDisplayNameLength)} characters.`,
+    required: false,
+    secret: false,
+    valueType: 'string',
+    defaultValueSummary: 'You',
+    // The session stamps this onto every user message, so authoring must
+    // accept exactly what `createUserSpeaker` accepts. Otherwise the config
+    // validates here and chat throws later, after the plugin host
+    // is already built. Checked against the trimmed value because resolution
+    // trims before constructing the speaker; a newline or an over-length name
+    // is what trimming cannot repair.
+    acceptsValue: value =>
+      typeof value === 'string' && isValidSpeakerDisplayName(value.trim()),
+    redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
@@ -78,6 +154,15 @@ export function project02RuntimeConfigFieldNames(): readonly string[] {
   return Object.freeze(
     project02ConfigFieldDefinitions.map(field => field.name),
   );
+}
+
+export function characterRuntimeConfigFieldScopeViolation(
+  field: Project02ConfigFieldDefinition,
+): string | undefined {
+  return field.scopes.includes('character')
+    ? undefined
+    : `Config field "${field.path}" is global-only; set it in the home ` +
+        'config.json, not the character overlay.';
 }
 
 export function runtimeConfigValueMatchesField(
@@ -113,6 +198,16 @@ export function runtimeConfigValueMatchesField(
   }
 
   return true;
+}
+
+export function project02RuntimeConfigValueMatchesField(
+  value: RuntimeConfigValue,
+  field: Project02ConfigFieldDefinition,
+): boolean {
+  return (
+    runtimeConfigValueMatchesField(value, field) &&
+    (field.acceptsValue?.(value) ?? true)
+  );
 }
 
 /**

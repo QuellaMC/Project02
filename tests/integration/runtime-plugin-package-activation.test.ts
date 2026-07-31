@@ -1,4 +1,12 @@
-import {mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -16,13 +24,18 @@ import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.
 import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
+  initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
 import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {collect} from '../support/streams.ts';
-import {writeRuntimeConfig} from '../support/runtime-config.ts';
+import {
+  writeRuntimeConfig,
+  runtimeConfigSnapshotForTest,
+} from '../support/runtime-config.ts';
+import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 
 describe('configured runtime plugin package activation', () => {
   it('builds the default catalog from bundled packages and bootstrap services', () => {
@@ -31,7 +44,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(
@@ -49,10 +64,10 @@ describe('configured runtime plugin package activation', () => {
     );
 
     expect(characterState).toMatchObject({
-      enabled: true,
-      activationStatus: 'active',
+      enabled: false,
+      activationStatus: 'disabled',
     });
-    expect(characterState?.activationReasons).toContain('enabled_by_default');
+    expect(characterState?.activationReasons).toContain('not_enabled');
     expect(configured.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
@@ -94,8 +109,12 @@ describe('configured runtime plugin package activation', () => {
     });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan,
@@ -111,9 +130,7 @@ describe('configured runtime plugin package activation', () => {
       activationStatus: 'disabled',
     });
     expect(operatorPackage?.activationReasons).toContain('not_enabled');
-    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
-      characterStatePluginId,
-    ]);
+    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([]);
   });
 
   it('does not let an operator default claim trigger required-config validation', () => {
@@ -142,7 +159,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.resolvedConfig.diagnostics).not.toContainEqual(
@@ -164,8 +183,8 @@ describe('configured runtime plugin package activation', () => {
         plugin => plugin.pluginId === characterStatePluginId,
       ),
     ).toMatchObject({
-      enabled: true,
-      activationStatus: 'active',
+      enabled: false,
+      activationStatus: 'disabled',
     });
   });
 
@@ -177,7 +196,10 @@ describe('configured runtime plugin package activation', () => {
     let inspectStdout = '';
     let inspectStderr = '';
 
-    await createLocalRuntimeSessionStore({storeRoot}).createSession({
+    await createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    }).createSession({
       sessionId: 'cold-package-inspect',
       createdAt: '2026-07-15T00:00:00.000Z',
     });
@@ -236,7 +258,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -250,7 +274,7 @@ describe('configured runtime plugin package activation', () => {
       configured.activation.plugins.find(
         plugin => plugin.pluginId === characterStatePluginId,
       )?.enabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('fails closed when config explicitly enables a quarantined operator package', () => {
@@ -272,7 +296,9 @@ describe('configured runtime plugin package activation', () => {
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -294,6 +320,94 @@ describe('configured runtime plugin package activation', () => {
     ).toBe('blocked');
   });
 
+  it('refuses to plan against an overlay in an unadoptable data directory', () => {
+    const storeRoot = createTestTempRoot('project02-package-foreign-overlay-');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    // Marker-less, with an overlay AND foreign content: durable startup
+    // refuses this directory, so the direct plan must not trust its
+    // overlay values either.
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      project02: {userDisplayName: 'Foreign Name'},
+    });
+    writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
+
+    expect(() =>
+      prepareConfiguredProject02PluginActivation({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          storeRoot: storeRoot,
+        }),
+      }),
+    ).toThrow('without a data marker');
+  });
+
+  it('refuses activation planning on a home the runtime would not adopt', async () => {
+    const storeRoot = createTestTempRoot('project02-package-foreign-home-');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
+
+    // The resolved-home owner rejects before package discovery or host
+    // construction can consume paths beneath an unadopted directory.
+    expect(() =>
+      prepareConfiguredProject02PluginActivation({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          storeRoot: storeRoot,
+        }),
+      }),
+    ).toThrow('foreign entries');
+    expect(existsSync(join(storeRoot, 'character-data'))).toBe(false);
+
+    // Direct initialization applies the same ownership rule.
+    await expect(
+      initializeProject02CharacterRuntime({location: {storeRoot}, env: {}}),
+    ).rejects.toThrow('foreign entries');
+  });
+
+  it('fails closed when only the overlay enables a quarantined package on the direct activation path', () => {
+    const storeRoot = createTestTempRoot('project02-package-overlay-enabled-');
+    const manifest = testPackageManifest('operator.broken-overlay');
+    const dataRoot = characterDataDirPath(storeRoot, 'mira');
+
+    writeOperatorPackage({
+      storeRoot,
+      manifest,
+      entrySource: validOperatorEntrySource(),
+    });
+    writeFileSync(
+      join(storeRoot, 'plugins', manifest.id, 'project02.plugin.json'),
+      '{ malformed',
+      'utf8',
+    );
+    // The global config never mentions the plugin; only the overlay
+    // enables it. The direct path (no startup, no overlay argument)
+    // must still classify against the merged view.
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    mkdirSync(dataRoot, {recursive: true});
+    writeRuntimeConfig(join(dataRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    const configured = prepareConfiguredProject02PluginActivation({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        storeRoot: storeRoot,
+      }),
+    });
+
+    expect(configured.activation.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'error',
+        code: 'runtime_plugin_package_invalid_descriptor',
+        pluginId: manifest.id,
+      }),
+    );
+  });
+
   it('fails closed when config enables the claimed id of a mismatched package', () => {
     const storeRoot = createTestTempRoot(
       'project02-package-mismatched-enabled-',
@@ -311,7 +425,9 @@ describe('configured runtime plugin package activation', () => {
     });
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.activation.diagnostics).toContainEqual(
@@ -345,7 +461,9 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
     const configured = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
 
     expect(configured.packageProvenanceByPluginId[characterStatePluginId]).toBe(
@@ -362,7 +480,7 @@ describe('configured runtime plugin package activation', () => {
       configured.activation.plugins.find(
         plugin => plugin.pluginId === characterStatePluginId,
       )?.enabled,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('imports an enabled operator package once with resolved and redacted config', async () => {
@@ -404,8 +522,12 @@ describe('configured runtime plugin package activation', () => {
       },
     });
 
+    await initializeCharacterDataForHost(storeRoot);
+
     const activationPlan = prepareConfiguredProject02PluginActivation({
-      loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
       activationPlan,
@@ -426,7 +548,10 @@ describe('configured runtime plugin package activation', () => {
       input: {
         pluginId: manifest.id,
         manifest: {id: manifest.id},
-        storeRoot: configured.resolvedConfig.project02.storeRoot,
+        storeRoot: characterDataDirPath(
+          configured.resolvedConfig.project02.storeRoot,
+          'mira',
+        ),
         resolvedConfig: {
           label: {
             name: 'label',
@@ -448,13 +573,88 @@ describe('configured runtime plugin package activation', () => {
       },
     });
     expect(configured.plugins.map(plugin => plugin.manifest.id).sort()).toEqual(
-      [characterStatePluginId, manifest.id].sort(),
+      [manifest.id],
     );
     expect(activationPlan.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
       [manifest.id]: 'operator',
     });
+  });
+
+  it('resolves an entry link target’s own relative imports beside the target', async () => {
+    const storeRoot = createTestTempRoot('project02-package-entry-link-');
+    const manifest = testPackageManifest('operator.entry-link');
+    const packageRoot = join(storeRoot, 'plugins', manifest.id);
+    const capturePath = join(storeRoot, 'entry-link-helper.txt');
+
+    writeOperatorPackage({
+      storeRoot,
+      manifest,
+      entrySource: 'unused: replaced by a link below',
+    });
+    // index.mjs -> sub/target.mjs, and the target imports its own
+    // sibling. A relative specifier is resolved against the importer's
+    // directory, and the importer is the file the bytes came from, not
+    // the name that led to it — reading the link's own path as the
+    // parent would look for sub/helper.mjs beside index.mjs, where
+    // nothing is, and reject a package that is entirely self-contained.
+    mkdirSync(join(packageRoot, 'sub'), {recursive: true});
+    writeFileSync(
+      join(packageRoot, 'sub', 'helper.mjs'),
+      'export const label = "from-sub-helper";\n',
+      'utf8',
+    );
+    writeFileSync(
+      join(packageRoot, 'sub', 'target.mjs'),
+      [
+        "import { writeFileSync } from 'node:fs';",
+        "import { label } from './helper.mjs';",
+        'export function createProject02Plugin(input) {',
+        `  writeFileSync(${JSON.stringify(capturePath)}, label, 'utf8');`,
+        '  return {',
+        '    manifest: input.manifest,',
+        '    providedTools: [],',
+        '    lifecycleHooks: {},',
+        '  };',
+        '}',
+        '',
+      ].join('\n'),
+      'utf8',
+    );
+    unlinkSync(join(packageRoot, 'index.mjs'));
+    symlinkSync(
+      join(packageRoot, 'sub', 'target.mjs'),
+      join(packageRoot, 'index.mjs'),
+      'file',
+    );
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    await initializeCharacterDataForHost(storeRoot);
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+      }),
+    });
+    const configured = await createConfiguredProject02PluginHostFromPlan({
+      activationPlan,
+    });
+
+    // The factory only runs if the target's own import resolved, and
+    // the captured value is the one the sibling module exports.
+    expect(
+      configured.activation.plugins.find(
+        plugin => plugin.pluginId === manifest.id,
+      ),
+    ).toMatchObject({enabled: true, activationStatus: 'active'});
+    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
+      manifest.id,
+    ]);
+    expect(readFileSync(capturePath, 'utf8')).toBe('from-sub-helper');
   });
 });
 
@@ -516,7 +716,10 @@ function testPackageManifest(
       hostContractVersions: [runtimePluginContractVersion],
     },
     declaredPlugins: ['plugin_discovery'],
-    config: {fields: options.configFields ?? []},
+    config: {
+      scope: 'global_with_character_overrides',
+      fields: options.configFields ?? [],
+    },
     localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,

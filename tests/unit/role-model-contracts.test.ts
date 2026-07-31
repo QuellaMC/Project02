@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -164,10 +165,7 @@ describe('role-model contracts', () => {
       event: createUserMessageRuntimeEvent('hello', identity),
       decisionContext: createDecisionContext({
         sessionId: 'session-default-allowed-tools',
-        characterSnapshot: {
-          id: 'mira',
-          displayName: 'Mira',
-        },
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: pluginHost.pluginToolDefinitions(),
     });
@@ -197,7 +195,7 @@ describe('role-model contracts', () => {
       event: createUserMessageRuntimeEvent('hello', identity),
       decisionContext: createDecisionContext({
         sessionId: 'session-provider-exchange-redaction',
-        characterSnapshot: {id: 'mira', displayName: 'Mira'},
+        characterSnapshot: testCharacterProfile,
       }),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
     });
@@ -304,10 +302,7 @@ describe('role-model contracts', () => {
         event: createUserMessageRuntimeEvent('hello', identity),
         decisionContext: createDecisionContext({
           sessionId: 'session-duplicate-allowed-tools',
-          characterSnapshot: {
-            id: 'mira',
-            displayName: 'Mira',
-          },
+          characterSnapshot: testCharacterProfile,
         }),
         allowedTools: [visibleReplyModelToolName, visibleReplyModelToolName],
         pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),

@@ -6,7 +6,10 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
-import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
+import {
+  createInitializedTestStoreRoot,
+  requiredSecretPlugin,
+} from '../support/runtime-config-fixtures.ts';
 
 const installedSecretPlugin = requiredSecretPlugin('mem0-local');
 const installedSecretFactories = Object.freeze({
@@ -134,7 +137,11 @@ describe('runtime config CLI plugin paths', () => {
   });
 
   it('rejects mutations for the removed enabledPlugins field', async () => {
-    const storeRoot = createTestTempRoot('project02-config-removed-set-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-removed-set-',
+    );
+    const configPath = join(storeRoot, 'config.json');
+    const originalConfig = readFileSync(configPath, 'utf8');
     let stderr = '';
 
     expect(
@@ -149,11 +156,15 @@ describe('runtime config CLI plugin paths', () => {
       ),
     ).toBe(1);
     expect(stderr).toContain('Unsupported runtime config path: enabledPlugins');
-    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+    // The store was arranged, so "wrote nothing" is the document
+    // sitting exactly as the initializer left it.
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
   it('writes dotenv secrets so quotes and backslashes round-trip through env loading', async () => {
-    const storeRoot = createTestTempRoot('project02-config-secret-escaping-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-secret-escaping-',
+    );
     const envVar = 'PROJECT02_SECRET_ROUNDTRIP_QUOTES';
     const secretValue = String.raw`single' double" slash\ value`;
 
@@ -185,7 +196,9 @@ describe('runtime config CLI plugin paths', () => {
   });
 
   it('writes backslash-only dotenv secrets with a non-escaping delimiter', async () => {
-    const storeRoot = createTestTempRoot('project02-config-secret-slashes-');
+    const storeRoot = await createInitializedTestStoreRoot(
+      'project02-config-secret-slashes-',
+    );
     const envVar = 'PROJECT02_SECRET_ROUNDTRIP_SLASHES';
     const secretValue = String.raw`token\npart C:\Users\mira\AppData\Local\project02`;
 
@@ -264,9 +277,11 @@ describe('runtime config CLI plugin paths', () => {
   });
 
   it('rejects unquoted dotenv fallback secrets that start with a quote delimiter', async () => {
-    const storeRoot = createTestTempRoot(
+    const storeRoot = await createInitializedTestStoreRoot(
       'project02-config-secret-quote-start-',
     );
+    const configPath = join(storeRoot, 'config.json');
+    const originalConfig = readFileSync(configPath, 'utf8');
     const envVar = 'PROJECT02_SECRET_QUOTE_START';
     const secretValue = `"starts-and-ends"with'single-and\`backtick`;
     let stdout = '';
@@ -294,7 +309,9 @@ describe('runtime config CLI plugin paths', () => {
       'no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value',
     );
     expect(existsSync(join(storeRoot, '.env'))).toBe(false);
-    expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
+    // The store was arranged, so "wrote nothing" is the document
+    // sitting exactly as the initializer left it.
+    expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
   it('rotates multi-line dotenv secrets without leaving stale continuation lines', async () => {

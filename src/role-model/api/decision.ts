@@ -53,6 +53,7 @@ import {
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
+  type RoleModelCharacterRef,
   type RoleModelDecisionResult,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
@@ -204,16 +205,25 @@ export function createRoleModelIOSnapshot(
   options: CreateRoleModelIOSnapshotOptions,
 ): RoleModelIOSnapshot {
   const identity = freezeRuntimeEventIdentitySnapshot(options);
+  const inputEnvelope = createRoleModelInputEnvelope(options.inputEnvelope);
 
   return Object.freeze({
     ...identity,
     kind: 'role_model_io_snapshot',
     sessionId: options.sessionId,
-    inputEnvelope: createRoleModelInputEnvelope(options.inputEnvelope),
+    inputEnvelope,
     rawOutputText: redactJsonTextPreservingStructure(
       options.rawOutputText,
       'Role-model adapter raw output',
     ),
+    ...(options.characterRef === undefined
+      ? {}
+      : {
+          characterRef: freezeRoleModelCharacterRef(
+            options.characterRef,
+            inputEnvelope.decisionContext.characterSnapshot,
+          ),
+        }),
     ...(options.providerMetadata === undefined
       ? {}
       : {providerMetadata: freezeProviderMetadata(options.providerMetadata)}),
@@ -238,6 +248,54 @@ export function createParsedRoleModelDecisionSnapshot(
     sessionId: options.sessionId,
     result: freezeRoleModelDecisionResult(options.result),
   } satisfies ParsedRoleModelDecisionSnapshot);
+}
+
+/**
+ * A snapshot names one character, so its package provenance and the
+ * character the turn was decided as have to agree.
+ *
+ * The check belongs to the snapshot rather than to the live loop: the
+ * codec rebuilds durable evidence through this same constructor, so a
+ * record that was copied, hand-edited, or written by a direct writer is
+ * held to the rule the loop already enforced when it was first
+ * produced. Durable identity validation reads only the character
+ * snapshot, and would otherwise report a contradictory ref as healthy.
+ */
+export function assertRoleModelCharacterRefMatchesCharacter(
+  characterRef: RoleModelCharacterRef,
+  characterSnapshot: CharacterProfile,
+): void {
+  if (characterRef.id !== characterSnapshot.id) {
+    throw new TypeError(
+      'Role-model characterRef id must match the decision-context character.',
+    );
+  }
+}
+
+function freezeRoleModelCharacterRef(
+  characterRef: RoleModelCharacterRef,
+  characterSnapshot: CharacterProfile,
+): RoleModelCharacterRef {
+  assertRoleModelCharacterRefMatchesCharacter(characterRef, characterSnapshot);
+
+  return Object.freeze({
+    id: requiredCharacterRefText(characterRef.id, 'id'),
+    version: requiredCharacterRefText(characterRef.version, 'version'),
+    personaFingerprint: requiredCharacterRefText(
+      characterRef.personaFingerprint,
+      'personaFingerprint',
+    ),
+  } satisfies RoleModelCharacterRef);
+}
+
+function requiredCharacterRefText(value: string, field: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new TypeError(
+      `Role-model characterRef ${field} must be a non-empty string.`,
+    );
+  }
+
+  return value;
 }
 
 function freezeRuntimeEventIdentitySnapshot(

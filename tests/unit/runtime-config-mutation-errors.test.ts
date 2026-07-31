@@ -50,20 +50,44 @@ describe('runtime config mutation error handling', () => {
       };
     });
 
-    const {applyRuntimeConfigMutation, RuntimeConfigMutationError} =
-      await import('../../src/runtime/config/mutate.ts');
+    const {
+      applyRuntimeConfigControlOperation,
+      bindProject02CharacterRuntimeLocation,
+      loadProject02RuntimeConfig,
+      resolveProject02ConfigLocation,
+      resolveRuntimeConfigScopeTarget,
+      RuntimeConfigMutationError,
+    } = await import('../../src/runtime/config/index.ts');
+    const {requiredSecretPlugin} =
+      await import('../support/runtime-config-fixtures.ts');
+    const plugin = requiredSecretPlugin('memory');
 
     let thrown: unknown;
 
     try {
-      applyRuntimeConfigMutation({
-        storeRoot,
-        operation: {
-          kind: 'secret_set',
-          pluginId: 'memory',
-          fieldName: 'apiKey',
-          envVar: 'PROJECT02_MEMORY_API_KEY',
-          secretValue: 'secret-value',
+      const loadedConfig = loadProject02RuntimeConfig({storeRoot, env: {}});
+      const configLocation = resolveProject02ConfigLocation({loadedConfig});
+      const runtimeLocation = bindProject02CharacterRuntimeLocation({
+        configLocation,
+        characterId: 'mira',
+      });
+
+      applyRuntimeConfigControlOperation({
+        target: resolveRuntimeConfigScopeTarget({
+          runtimeLocation,
+          env: {PROJECT02_MEMORY_API_KEY: 'secret-value'},
+          scope: 'global',
+        }),
+        request: {
+          kind: 'plugin_config',
+          manifest: plugin.manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'secret_set',
+            fieldName: 'apiKey',
+            envVar: 'PROJECT02_MEMORY_API_KEY',
+            secretValue: 'secret-value',
+          },
         },
       });
     } catch (error: unknown) {

@@ -1,9 +1,10 @@
-import {existsSync, readFileSync} from 'node:fs';
 import {
   type CharacterProfile,
   ConversationRehydrationError,
-  localCharacterProfile,
+  isValidSpeakerDisplayName,
+  localUserSpeaker,
   type RuntimeEventIdentity,
+  type SpeakerIdentity,
   runtimeEventIdentityKey,
   selectRecentVisibleMessages,
   validateRestoredVisibleTranscript,
@@ -32,6 +33,7 @@ import {
   splitCompleteJsonLines,
 } from '../storage/json-lines.ts';
 import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
+import {readOptionalStoreText} from '../storage/store-file.ts';
 import {preparedRuntimePluginConfigEffectHasApprovalEvidence} from '../../plugins/api/index.ts';
 import type {
   DurableRuntimeSessionEvidence,
@@ -40,6 +42,18 @@ import type {
   RuntimeLogValidationMode,
   RuntimeTurnEvidenceState,
 } from './contract.ts';
+import {
+  assertRoleModelEvidenceMatchesSessionId,
+  durableCharacterProfile,
+  recordedConversationCharacterProfile,
+  recordedRoleModelCharacterProfile,
+  recordedUserSpeakerIdentity,
+  roleModelCharacterSnapshot,
+  sameCharacterProfiles,
+  speakerMatchesCharacter,
+  validateDurableCharacterProfiles,
+  validateDurableRuntimeSessionIdentity,
+} from './identity.ts';
 
 export function deriveTerminalRawTraceEvidence(
   evidence: DurableRuntimeSessionEvidence,
@@ -104,6 +118,8 @@ export function deriveTerminalRawTraceEvidence(
 
 export function createRuntimeEvidenceIncrementalState(
   evidence: DurableRuntimeSessionEvidence,
+  boundCharacter?: CharacterProfile,
+  boundUserSpeaker?: SpeakerIdentity,
 ): RuntimeEvidenceIncrementalState {
   const derivedTraceEntries = deriveTerminalRawTraceEvidence(evidence);
   const evidenceForValidation = reconcileTerminalRawTraceEvidence(evidence);
@@ -127,6 +143,9 @@ export function createRuntimeEvidenceIncrementalState(
     conversationCharacter: recordedConversationCharacterProfile(
       evidence.conversationMessages,
     ),
+    boundCharacter,
+    userSpeaker: recordedUserSpeakerIdentity(evidence.conversationMessages),
+    boundUserSpeaker,
     openRawIdentity: undefined,
     openTurnConversationStart: evidence.conversationMessages.length,
   };
@@ -608,7 +627,14 @@ export function assertIncrementalConversationAppend(options: {
     options.expectedCharacter ??
     options.state.roleModelCharacter ??
     options.state.conversationCharacter ??
-    localCharacterProfile;
+    options.state.boundCharacter;
+
+  if (expectedCharacter === undefined) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Conversation append requires a session character: none was expected, recorded, or store-bound.',
+    );
+  }
 
   for (const recordedCharacter of [
     options.state.roleModelCharacter,
@@ -625,10 +651,31 @@ export function assertIncrementalConversationAppend(options: {
     }
   }
 
+  // The store's binding is a fact about the store, not a default the
+  // caller outranks. The precedence above reads the other way — a
+  // supplied character wins, and the loop only compares against evidence
+  // already recorded — so on a session with none, a caller could append
+  // `nova` into a store bound to `mira`. That append succeeded and
+  // mutated durable state; the refusal arrived one call later, on the
+  // terminal raw event, by which point the messages were on disk.
+  //
+  // Same rule, same function, same message as that later refusal and as
+  // every cold read: id only, so a renamed character's sessions stay
+  // appendable. Only the timing changes — the check now runs before the
+  // record is accepted rather than after.
+  validateDurableCharacterProfiles({
+    roleModelCharacter: expectedCharacter,
+    conversationCharacter: options.state.conversationCharacter,
+    boundCharacter: options.state.boundCharacter,
+    allowUnanchoredCustomCharacter: false,
+  });
+
   const speakerIsValid =
     options.record.role === 'user'
-      ? options.record.speakerId === 'local-user' &&
-        options.record.speakerName === 'You'
+      ? userRecordSpeakerIsValid(
+          options.record,
+          options.state.userSpeaker ?? options.state.boundUserSpeaker,
+        )
       : speakerMatchesCharacter(options.record, expectedCharacter);
 
   if (!speakerIsValid) {
@@ -637,6 +684,28 @@ export function assertIncrementalConversationAppend(options: {
       `Restored ${options.record.role} message speaker metadata is malformed.`,
     );
   }
+}
+
+// With no recorded and no store-bound user speaker, the first user
+// record anchors the session's speaker (a direct-runtime store may
+// carry a custom display name); the id is never negotiable.
+//
+// The anchoring name is judged by the same rule every other speaker
+// name is. A looser check here only decided *which* write produced an
+// unreadable session: a non-empty but multiline or overlong name was
+// accepted and appended, and the next read of that session ran it
+// through `createUserSpeaker`, which rejects it — so the store held
+// durable evidence that could never be opened again. Two boundaries
+// judging one field by two rules, with the lenient one writing first.
+function userRecordSpeakerIsValid(
+  record: {readonly speakerId: string; readonly speakerName: string},
+  expectedUserSpeaker: SpeakerIdentity | undefined,
+): boolean {
+  return expectedUserSpeaker === undefined
+    ? record.speakerId === localUserSpeaker.id &&
+        isValidSpeakerDisplayName(record.speakerName)
+    : record.speakerId === expectedUserSpeaker.id &&
+        record.speakerName === expectedUserSpeaker.displayName;
 }
 
 export function applyIncrementalConversationAppend(
@@ -659,6 +728,12 @@ export function applyIncrementalConversationAppend(
       id: record.speakerId,
       displayName: record.speakerName,
     } satisfies CharacterProfile);
+  }
+  if (record.role === 'user' && state.userSpeaker === undefined) {
+    state.userSpeaker = Object.freeze({
+      id: record.speakerId,
+      displayName: record.speakerName,
+    } satisfies SpeakerIdentity);
   }
 }
 
@@ -788,6 +863,7 @@ export function assertIncrementalStatePublicReadable(
   validateDurableCharacterProfiles({
     roleModelCharacter: state.roleModelCharacter,
     conversationCharacter: state.conversationCharacter,
+    boundCharacter: state.boundCharacter,
     allowUnanchoredCustomCharacter: false,
   });
 }
@@ -978,6 +1054,8 @@ export function assertDurableRuntimeSessionEvidence(options: {
   readonly paths: LocalRuntimeSessionPaths;
   readonly evidence: DurableRuntimeSessionEvidence;
   readonly mode: RuntimeLogValidationMode;
+  readonly boundCharacter?: CharacterProfile;
+  readonly boundUserSpeaker?: SpeakerIdentity;
   readonly nextConversationMessage?: ConversationLogRecord;
   readonly nextRawEvent?: RawEventLogRecord;
   readonly nextTraceEntry?: RuntimeTraceEntry;
@@ -1045,18 +1123,25 @@ export function assertDurableRuntimeSessionEvidence(options: {
     messages: conversationMessages,
     rawEvents,
   });
-  assertRoleModelEvidenceMatchesSessionId({
-    sessionId: options.paths.sessionId,
-    rawEvents,
-  });
-  const character = durableCharacterProfile({
-    messages: conversationMessages,
-    rawEvents,
+  const identity = validateDurableRuntimeSessionIdentity({
+    paths: options.paths,
+    evidence: {
+      traceEntries,
+      rawEvents,
+      conversationMessages,
+    },
+    boundCharacter: options.boundCharacter,
+    boundUserSpeaker: options.boundUserSpeaker,
     allowUnanchoredCustomCharacter: options.mode === 'appendConversation',
   });
 
   assertRestoredConversationInvariants(options.paths, conversationMessages, {
-    ...(character === undefined ? {} : {character}),
+    ...(identity.character === undefined
+      ? {}
+      : {character: identity.character}),
+    ...(identity.userSpeaker === undefined
+      ? {}
+      : {userDisplayName: identity.userSpeaker.displayName}),
     allowIncompleteFinalTurn: appendModeAllowsIncompleteConversationTurn({
       mode: options.mode,
       messages: conversationMessages,
@@ -1391,14 +1476,19 @@ function assertRestoredConversationInvariants(
   options: {
     readonly allowIncompleteFinalTurn?: boolean;
     readonly character?: CharacterProfile;
+    readonly userDisplayName?: string;
   } = {},
 ): void {
   try {
     validateRestoredVisibleTranscript({
       id: paths.sessionId,
-      ...(options.character === undefined
+      ...(options.userDisplayName === undefined
         ? {}
-        : {character: options.character}),
+        : {userDisplayName: options.userDisplayName}),
+      // The character is undefined only for transcripts with zero
+      // character-role messages (it is derived from them), so the
+      // placeholder below can never be consulted by a speaker check.
+      character: options.character ?? unboundSessionCharacterPlaceholder,
       visibleTranscript: messages,
       allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false,
     });
@@ -1414,115 +1504,10 @@ function assertRestoredConversationInvariants(
   }
 }
 
-function durableCharacterProfile(options: {
-  readonly messages: readonly ConversationLogRecord[];
-  readonly rawEvents: readonly RawEventLogRecord[];
-  readonly allowUnanchoredCustomCharacter: boolean;
-}): CharacterProfile | undefined {
-  return validateDurableCharacterProfiles({
-    roleModelCharacter: recordedRoleModelCharacterProfile(options.rawEvents),
-    conversationCharacter: recordedConversationCharacterProfile(
-      options.messages,
-    ),
-    allowUnanchoredCustomCharacter: options.allowUnanchoredCustomCharacter,
-  });
-}
-
-function recordedRoleModelCharacterProfile(
-  rawEvents: readonly RawEventLogRecord[],
-): CharacterProfile | undefined {
-  let recordedCharacter: CharacterProfile | undefined;
-
-  for (const rawEvent of rawEvents) {
-    const candidate = roleModelCharacterSnapshot(rawEvent);
-
-    if (candidate === undefined) {
-      continue;
-    }
-
-    if (
-      recordedCharacter !== undefined &&
-      !sameCharacterProfiles(recordedCharacter, candidate)
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Role-model character evidence must identify one durable session character.',
-      );
-    }
-
-    recordedCharacter = candidate;
-  }
-
-  return recordedCharacter;
-}
-
-function recordedConversationCharacterProfile(
-  messages: readonly ConversationLogRecord[],
-): CharacterProfile | undefined {
-  let messageCharacter: CharacterProfile | undefined;
-
-  for (const message of messages) {
-    if (message.role !== 'character') {
-      continue;
-    }
-
-    const candidate = Object.freeze({
-      id: message.speakerId,
-      displayName: message.speakerName,
-    } satisfies CharacterProfile);
-
-    if (
-      messageCharacter !== undefined &&
-      !sameCharacterProfiles(messageCharacter, candidate)
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Durable character messages must identify one session character.',
-      );
-    }
-
-    messageCharacter = candidate;
-  }
-
-  return messageCharacter;
-}
-
-function validateDurableCharacterProfiles(options: {
-  readonly roleModelCharacter: CharacterProfile | undefined;
-  readonly conversationCharacter: CharacterProfile | undefined;
-  readonly allowUnanchoredCustomCharacter: boolean;
-}): CharacterProfile | undefined {
-  if (
-    options.roleModelCharacter !== undefined &&
-    options.conversationCharacter !== undefined &&
-    !sameCharacterProfiles(
-      options.roleModelCharacter,
-      options.conversationCharacter,
-    )
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'Durable character speaker metadata must match recorded role-model character evidence.',
-    );
-  }
-
-  if (
-    options.conversationCharacter !== undefined &&
-    options.roleModelCharacter === undefined &&
-    !sameCharacterProfiles(
-      options.conversationCharacter,
-      localCharacterProfile,
-    ) &&
-    !options.allowUnanchoredCustomCharacter
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'A custom durable character speaker requires matching role-model character evidence.',
-    );
-  }
-
-  return options.roleModelCharacter ?? options.conversationCharacter;
-}
+const unboundSessionCharacterPlaceholder: CharacterProfile = Object.freeze({
+  id: 'runtime.unbound-character',
+  displayName: 'Runtime Unbound Character',
+});
 
 function assertIncrementalCharacterEvidence(
   state: RuntimeEvidenceIncrementalState,
@@ -1547,44 +1532,23 @@ function assertIncrementalCharacterEvidence(
     validateDurableCharacterProfiles({
       roleModelCharacter: state.roleModelCharacter ?? candidate,
       conversationCharacter: state.conversationCharacter,
+      boundCharacter: state.boundCharacter,
       allowUnanchoredCustomCharacter: false,
     });
   }
 }
 
-function roleModelCharacterSnapshot(
-  rawEvent: RawEventLogRecord,
-): CharacterProfile | undefined {
-  return rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
-    .characterSnapshot;
-}
-
 export function durableRuntimeSessionCharacterProfile(
   evidence: DurableRuntimeSessionEvidence,
+  boundCharacter: CharacterProfile,
 ): CharacterProfile {
   return (
     durableCharacterProfile({
       messages: evidence.conversationMessages,
       rawEvents: evidence.rawEvents,
+      boundCharacter,
       allowUnanchoredCustomCharacter: false,
-    }) ?? localCharacterProfile
-  );
-}
-
-function sameCharacterProfiles(
-  left: CharacterProfile,
-  right: CharacterProfile,
-): boolean {
-  return left.id === right.id && left.displayName === right.displayName;
-}
-
-function speakerMatchesCharacter(
-  message: ConversationLogRecord,
-  character: CharacterProfile,
-): boolean {
-  return (
-    message.speakerId === character.id &&
-    message.speakerName === character.displayName
+    }) ?? boundCharacter
   );
 }
 
@@ -2184,31 +2148,6 @@ function visibleConversationMessagesForRawEvent(options: {
     });
 }
 
-function assertRoleModelEvidenceMatchesSessionId(options: {
-  readonly sessionId: string;
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  for (const rawEvent of options.rawEvents) {
-    const sessionIds = [
-      rawEvent.roleModelIOSnapshot?.sessionId,
-      rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext.sessionId,
-      rawEvent.parsedRoleModelDecisionSnapshot?.sessionId,
-      rawEvent.commitValidation?.sessionId,
-    ];
-
-    for (const sessionId of sessionIds) {
-      if (sessionId === undefined || sessionId === options.sessionId) {
-        continue;
-      }
-
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Runtime evidence session identity must match the durable session path.',
-      );
-    }
-  }
-}
-
 function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
   readonly messages: readonly ConversationLogRecord[];
   readonly rawEvents: readonly RawEventLogRecord[];
@@ -2380,7 +2319,7 @@ function readJsonLines<T>(options: {
   readonly missingFileIsAllowed: () => boolean;
   readonly emptyFileIsAllowed: () => boolean;
 }): T[] {
-  const content = readLogFile(options.filePath);
+  const content = readOptionalStoreText(options.filePath);
 
   if (content === undefined) {
     if (!options.missingFileIsAllowed()) {
@@ -2435,22 +2374,7 @@ function rawEventsRequireConversationLog(
 }
 
 function logFileHasContent(filePath: string): boolean {
-  const content = readLogFile(filePath);
+  const content = readOptionalStoreText(filePath);
 
   return content !== undefined && content.length > 0;
-}
-
-function readLogFile(filePath: string): string | undefined {
-  try {
-    if (!existsSync(filePath)) {
-      return undefined;
-    }
-
-    return readFileSync(filePath, 'utf8');
-  } catch {
-    throw new LocalRuntimeStorageContractError(
-      'read_failed',
-      `Could not read local runtime log file: ${filePath}.`,
-    );
-  }
 }

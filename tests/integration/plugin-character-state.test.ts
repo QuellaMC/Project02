@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {mkdirSync, unlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {performance} from 'node:perf_hooks';
@@ -40,7 +41,7 @@ describe('Character State plugin', () => {
     const plugin = createProject02Plugin({
       pluginId: characterStatePluginId,
       manifest,
-      storeRoot: '.project02-runtime',
+      storeRoot: '.project02/character-data/mira',
       resolvedConfig: Object.freeze({}),
       redactedConfig: Object.freeze({}),
     });
@@ -629,10 +630,7 @@ function createCharacterStateContext(options: {
       sessionId: options.sessionId,
       eventType: 'USER_MESSAGE',
       currentUserMessage: 'hello',
-      character: {
-        id: 'mira',
-        displayName: 'Mira',
-      },
+      character: testCharacterProfile,
     }),
     pluginId: characterStatePluginId,
     fileStore: options.fileStore,

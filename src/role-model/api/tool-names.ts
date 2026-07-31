@@ -1,4 +1,5 @@
 import {userTurnBuiltInModelToolNames} from './model-tools.ts';
+import {isProject02Identifier} from '../../shared/identifier.ts';
 
 export type RoleModelAllowedToolName = string;
 
@@ -17,7 +18,7 @@ export function hasDuplicateRoleModelAllowedTools(
 }
 
 export function isRoleModelToolNameSyntax(value: string): boolean {
-  return /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u.test(value);
+  return isProject02Identifier(value);
 }
 
 export function requiredRoleModelIdentifier(

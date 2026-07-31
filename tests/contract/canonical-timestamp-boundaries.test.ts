@@ -1,3 +1,4 @@
+import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
@@ -53,7 +54,7 @@ describe('canonical timestamp boundaries', () => {
           sessionId: 'session-canonical-time',
           eventType: 'USER_MESSAGE',
           currentUserMessage: 'hello',
-          character: {id: 'mira', displayName: 'Mira'},
+          character: testCharacterProfile,
         }),
     ],
     [
@@ -64,7 +65,7 @@ describe('canonical timestamp boundaries', () => {
           sessionId: 'session-canonical-time',
           eventType: 'USER_MESSAGE',
           currentUserMessage: 'hello',
-          character: {id: 'mira', displayName: 'Mira'},
+          character: testCharacterProfile,
           committedAt: nonCanonicalTimestamp,
           visibleMessages: [],
         }),
@@ -151,6 +152,8 @@ describe('canonical timestamp boundaries', () => {
       'storage schema marker',
       () =>
         createLocalRuntimeStorageSchemaMarker({
+          scope: 'character-data',
+          characterId: 'mira',
           createdAt: nonCanonicalTimestamp,
         }),
     ],
@@ -176,7 +179,7 @@ function canonicalInputEnvelope() {
     event: createUserMessageRuntimeEvent('hello', runtimeIdentity),
     decisionContext: createDecisionContext({
       sessionId: 'session-canonical-time',
-      characterSnapshot: {id: 'mira', displayName: 'Mira'},
+      characterSnapshot: testCharacterProfile,
     }),
     pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
   });

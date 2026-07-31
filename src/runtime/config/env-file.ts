@@ -1,23 +1,23 @@
-import {existsSync, readFileSync} from 'node:fs';
 import {parseEnv} from 'node:util';
 
+import {readTextFileSync} from '../../shared/file-system.ts';
+import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+
 import {defaultRuntimeConfigEnvPath} from './load.ts';
-import {storeRootForLoadedDefaultConfigPath} from './resolve.ts';
 import {
-  runtimeConfigEnvVarName,
-  type LoadedProject02RuntimeConfig,
-} from './types.ts';
+  assertResolvedProject02HomeAdoptable,
+  type ResolvedProject02RuntimeLocation,
+} from './location.ts';
+import {runtimeConfigEnvVarName} from './types.ts';
 
 /**
- * A runtime location selected by the operator (store root and/or config
- * path). CLI flag parsing produces this shape (src/cli/runtime-location.ts);
- * startup and env-file resolution consume it.
+ * A runtime location selected by the operator (store root, config
+ * path, and/or character). CLI flag parsing produces this shape
+ * (src/cli/shared/runtime-location-flags.ts); startup, env-file
+ * resolution, and scope-aware config verbs consume it. The character
+ * selects a config scope or an active character; env-file resolution
+ * ignores it (secrets are shared).
  */
-export type RuntimeLocationCliState = {
-  readonly storeRoot?: string;
-  readonly configPath?: string;
-};
-
 export class RuntimeEnvFileError extends Error {
   readonly path: string | undefined;
 
@@ -28,36 +28,31 @@ export class RuntimeEnvFileError extends Error {
   }
 }
 
-export function runtimeConfigEnvPathForLocation(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
-}): string {
-  return defaultRuntimeConfigEnvPath(
-    options.loadedConfig.config?.project02?.storeRoot ??
-      options.storeRoot ??
-      storeRootForLoadedDefaultConfigPath(options.loadedConfig),
-  );
+export function runtimeConfigEnvPathForLocation(
+  runtimeLocation: Pick<ResolvedProject02RuntimeLocation, 'homeRoot'>,
+): string {
+  return defaultRuntimeConfigEnvPath(runtimeLocation.homeRoot);
 }
 
 export function loadRuntimeConfigEnvFile(options: {
-  readonly loadedConfig: LoadedProject02RuntimeConfig;
-  readonly storeRoot?: string;
+  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env?: NodeJS.ProcessEnv;
   readonly envDefaults?: NodeJS.ProcessEnv;
 }): NodeJS.ProcessEnv {
-  const envPath = runtimeConfigEnvPathForLocation(options);
+  assertResolvedProject02HomeAdoptable(options.runtimeLocation);
+  const envPath = runtimeConfigEnvPathForLocation(options.runtimeLocation);
   const env = options.env ?? process.env;
 
-  if (!existsSync(envPath)) {
-    return {...(options.envDefaults ?? {}), ...env};
-  }
-
   try {
-    return {
-      ...(options.envDefaults ?? {}),
-      ...parseEnv(readFileSync(envPath, 'utf8')),
-      ...env,
-    };
+    const source = readOptionalEnvFile(envPath);
+
+    return source === undefined
+      ? {...(options.envDefaults ?? {}), ...env}
+      : {
+          ...(options.envDefaults ?? {}),
+          ...parseEnv(source),
+          ...env,
+        };
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load runtime config env file "${envPath}": ${
@@ -71,12 +66,10 @@ export function loadRuntimeConfigEnvFile(options: {
 export function readDefaultDotEnvFile(): NodeJS.ProcessEnv {
   const envPath = '.env';
 
-  if (!existsSync(envPath)) {
-    return {};
-  }
-
   try {
-    return parseEnv(readFileSync(envPath, 'utf8'));
+    const source = readOptionalEnvFile(envPath);
+
+    return source === undefined ? {} : parseEnv(source);
   } catch (error: unknown) {
     throw new RuntimeEnvFileError(
       `Could not load .env file: ${
@@ -120,4 +113,28 @@ export function defaultDotEnvForRuntimeLocation(
 
 function runtimeConfigEnvSelectsConfig(env: NodeJS.ProcessEnv): boolean {
   return (env[runtimeConfigEnvVarName]?.trim().length ?? 0) > 0;
+}
+
+/**
+ * Read an env file that may not exist, without asking first. The
+ * `existsSync`-then-read version this replaces reported a file created
+ * between the two calls as absent, and a file deleted between them as a
+ * crash.
+ *
+ * This does not borrow the store's read primitive: `.env` is resolved
+ * against the working directory, not the store, and env failures reach
+ * the operator as `RuntimeEnvFileError` — which all three CLIs print
+ * verbatim and one branches on. A store `read_failed` would replace a
+ * message naming the operator's own file with a generic one.
+ */
+function readOptionalEnvFile(path: string): string | undefined {
+  try {
+    return readTextFileSync(path);
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return undefined;
+    }
+
+    throw error;
+  }
 }

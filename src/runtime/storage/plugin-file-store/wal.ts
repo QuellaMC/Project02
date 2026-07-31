@@ -1,19 +1,19 @@
 import {randomUUID, type Hash} from 'node:crypto';
-import {
-  appendFileSync,
-  closeSync,
-  type Dirent,
-  fsyncSync,
-  mkdirSync,
-  openSync,
-  readFileSync,
-  readdirSync,
-  rmSync,
-  writeSync,
-} from 'node:fs';
 import {dirname, join} from 'node:path';
 import {hostname} from 'node:os';
 
+import {
+  appendBytesFileSync,
+  closeFileSync,
+  flushFileSync,
+  listDirectoryEntriesSync,
+  makeDirectorySync,
+  openFileSync,
+  readTextFileSync,
+  removePathSync,
+  writeTextToFileSync,
+  type Dirent,
+} from '../../../shared/file-system.ts';
 import {canonicalJsonStringify} from '../../../shared/canonical-json.ts';
 import {processIsAlive} from '../process-liveness.ts';
 import type {RuntimeEventIdentity} from '../../../core/index.ts';
@@ -175,7 +175,7 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
           ? {}
           : {faultInjector: options.faultInjector}),
       });
-      rmSync(journalPath, {force: true});
+      removePathSync(journalPath, {force: true});
     },
   );
 }
@@ -292,10 +292,10 @@ export async function prepareDurablePluginFileStoreTransaction(options: {
           }
 
           activeDurableTransactionJournalPaths.delete(journalPath);
-          rmSync(durablePluginFileStoreProgressPath(journalPath), {
+          removePathSync(durablePluginFileStoreProgressPath(journalPath), {
             force: true,
           });
-          rmSync(journalPath, {force: true});
+          removePathSync(journalPath, {force: true});
         },
       ).then(
         () => {
@@ -511,7 +511,7 @@ function finalizeLegacyDurablePluginFileStoreJournal(options: {
     );
 
     if (operation === undefined) {
-      rmSync(options.journalPath, {force: true});
+      removePathSync(options.journalPath, {force: true});
       return;
     }
 
@@ -630,8 +630,8 @@ function finalizeBatchedDurablePluginFileStoreJournal(options: {
     journal: options.journal,
     progress,
   });
-  rmSync(options.journalPath, {force: true});
-  rmSync(durablePluginFileStoreProgressPath(options.journalPath), {
+  removePathSync(options.journalPath, {force: true});
+  removePathSync(durablePluginFileStoreProgressPath(options.journalPath), {
     force: true,
   });
 }
@@ -802,10 +802,7 @@ function readDurablePluginFileStoreTransactionProgress(
       durablePluginFileStoreProgressPath(journalPath),
       'Plugin fileStore transaction progress',
     );
-    content = readFileSync(
-      durablePluginFileStoreProgressPath(journalPath),
-      'utf8',
-    );
+    content = readTextFileSync(durablePluginFileStoreProgressPath(journalPath));
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return undefined;
@@ -822,13 +819,13 @@ function appendDurablePluginFileStoreTransactionProgress(
   appliedCount: number,
 ): void {
   const path = durablePluginFileStoreProgressPath(journalPath);
-  const descriptor = openSync(path, 'a', 0o600);
+  const descriptor = openFileSync(path, 'a', 0o600);
 
   try {
-    writeSync(descriptor, `${String(appliedCount)}\n`);
-    fsyncSync(descriptor);
+    writeTextToFileSync(descriptor, `${String(appliedCount)}\n`);
+    flushFileSync(descriptor);
   } finally {
-    closeSync(descriptor);
+    closeFileSync(descriptor);
   }
 }
 
@@ -903,8 +900,8 @@ function applyPlannedDurablePluginFileStoreJournalContent(options: {
           )
         : contentState.remaining;
 
-    mkdirSync(dirname(filePath), {recursive: true});
-    appendFileSync(filePath, remaining);
+    makeDirectorySync(dirname(filePath), {recursive: true});
+    appendBytesFileSync(filePath, remaining);
   }
 
   const sameContentWrite =
@@ -1195,8 +1192,8 @@ function applyPlannedDurablePluginFileStoreJournalOperation(options: {
               ? Buffer.from(appendedLine, 'utf8')
               : contentState.remaining;
 
-          mkdirSync(dirname(filePath), {recursive: true});
-          appendFileSync(filePath, remaining);
+          makeDirectorySync(dirname(filePath), {recursive: true});
+          appendBytesFileSync(filePath, remaining);
         }
 
         const sameContentWrite =
@@ -1465,7 +1462,7 @@ function recoverDirectDurablePluginFileStoreMutationLocked(options: {
     operation,
     ownerToken: options.ownerToken,
   });
-  rmSync(journalPath, {force: true});
+  removePathSync(journalPath, {force: true});
 }
 
 function createDurablePluginFileStoreJournalOwner(): Pick<
@@ -1575,7 +1572,7 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
 
   try {
     assertSafeDurableTransactionJournalDirectory(journalsRoot);
-    entries = readdirSync(journalsRoot, {withFileTypes: true});
+    entries = listDirectoryEntriesSync(journalsRoot);
   } catch (error: unknown) {
     if (isMissingFileError(error)) {
       return;
@@ -1723,10 +1720,10 @@ export function recoverPreparedDurablePluginFileStoreTransactions(
           );
         }
 
-        rmSync(durablePluginFileStoreProgressPath(journalPath), {
+        removePathSync(durablePluginFileStoreProgressPath(journalPath), {
           force: true,
         });
-        rmSync(journalPath, {force: true});
+        removePathSync(journalPath, {force: true});
       },
     );
   }

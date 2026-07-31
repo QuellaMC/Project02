@@ -9,11 +9,13 @@
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
-
-const pluginIdPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+import {
+  displayNameFromProject02Identifier,
+  isProject02Identifier,
+} from '../src/shared/identifier.ts';
 
 export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
-  if (!pluginIdPattern.test(id)) {
+  if (!isProject02Identifier(id)) {
     throw new Error(
       `Plugin id "${id}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`,
     );
@@ -25,11 +27,7 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
     throw new Error(`Plugin package directory already exists: ${packageRoot}`);
   }
 
-  const displayName = id
-    .split(/[._-]/u)
-    .filter(part => part.length > 0)
-    .map(part => part[0].toUpperCase() + part.slice(1))
-    .join(' ');
+  const displayName = displayNameFromProject02Identifier(id);
 
   mkdirSync(packageRoot, {recursive: true});
   writeFileSync(
@@ -47,7 +45,11 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
     "export {createProject02Plugin} from './plugin.ts';\n",
     'utf8',
   );
-  writeFileSync(join(packageRoot, 'plugin.ts'), pluginModuleTemplate(id), 'utf8');
+  writeFileSync(
+    join(packageRoot, 'plugin.ts'),
+    pluginModuleTemplate(id),
+    'utf8',
+  );
 
   return {packageRoot};
 }
@@ -70,6 +72,7 @@ function descriptorTemplate({id, displayName}) {
       },
       declaredPlugins: ['before_role_model_call'],
       config: {
+        scope: 'global_with_character_overrides',
         fields: [
           {
             name: 'greeting',
