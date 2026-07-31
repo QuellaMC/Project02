@@ -1,207 +1,173 @@
 # AGENTS.md
 
-Reusable agent operating guide. This file is intentionally project-agnostic.
-
-Repository-specific instructions live in [`AGENTS.repo.md`](./AGENTS.repo.md).
-Read this file first, then read the repository addendum before changing this
-repo.
+Operating guide for this repository — a TypeScript **Live Character Framework**:
+a character-driven agent runtime with persona continuity, plugins, tools, and
+durable local state.
 
 Core rule:
 
 ```text
-The agent proposes. The runtime, tests, policy, and repository process commit.
+The model proposes. The runtime, tests, and policy commit.
 ```
 
 ---
 
-## 1. Operating Order
+## 1. Orientation
 
-For every meaningful change:
+Top-level modules under `src/` carry a `README.md` stating what that module
+owns; read it before changing the module, and write one when adding a module
+that lacks it. Those READMEs, the code, and the tests are the source of truth
+for what exists. This file is process, not architecture.
 
-1. Read this file and the repository addendum.
-2. Identify the current task, slice, issue, or user request that authorizes the work.
-3. Make the smallest useful change that satisfies it.
-4. Run the relevant checks.
-5. Record what changed, how it was tested, and what should happen next.
-
-Do not widen scope because a larger refactor feels convenient.
-
----
-
-## 2. Build Style
-
-Build from working vertical slices.
-
-Prefer this order:
-
-1. Start with the smallest end-to-end behavior that can actually run.
-2. Add features when real usage or tests expose pressure.
-3. Improve logs, errors, configuration, and ergonomics when they become needed.
-4. Refactor only when the current structure is blocking real work.
-5. Preserve compatibility when migrating names, config, storage, or user-facing contracts.
-
-Avoid speculative frameworks, empty modules, placeholder APIs, and broad rewrites.
+Precedence when sources disagree: the current user request controls the task,
+tests and code control already-built behavior, and this file controls how you
+work. Call out a mismatch rather than silently resolving it.
 
 ---
 
-## 3. Source of Truth
+## 2. Operating Order
 
-Follow the project-specific addendum for product direction, source links,
-repository structure, and local paths.
+1. Identify the request or issue that authorizes the work.
+2. Make the smallest useful change that satisfies it.
+3. Add or update tests for behavior changes.
+4. Run `pnpm check`.
+5. Say what changed, how it was tested, and what is still open.
 
-General precedence:
-
-- Current user request controls the immediate task.
-- External product or design sources control product direction when the addendum identifies them.
-- Local specs and tests control already-built behavior.
-- Source code controls what actually exists.
-
-If sources disagree, call out the mismatch before changing behavior.
-
-Do not duplicate large external documents in the repository. Link to them and
-quote only the small parts needed for local decisions.
+Do not widen scope because a larger refactor feels convenient. Park good
+out-of-scope ideas in the PR description instead of building them.
 
 ---
 
-## 4. Scope Discipline
+## 3. Build Style
 
-For non-trivial feature work, define the active slice before production code.
-The definition can be lightweight, but it should make these points clear:
+Grow from working behavior, not from anticipated structure:
 
-- Goal.
-- Current scope.
-- Explicit non-goals.
-- Acceptance criteria.
-- Test plan.
-- Implementation boundaries.
-- Future ideas discovered during planning.
+- Start with the smallest end-to-end path that actually runs.
+- Add features when real usage or tests expose pressure.
+- Refactor when the current structure blocks real work, not before.
+- Avoid speculative frameworks, empty modules, placeholder APIs, and schema
+  fields added for a someday caller.
 
-Only implement behavior inside the current slice. Park useful outside-scope
-ideas in the repository's backlog, future-ideas document, issue, or PR notes.
+One job, one implementation. A second command or module that re-does an
+existing path is not a simpler alternative — it is a fork that drifts. Where
+something needs a smaller composition, expose a seam in the existing path and
+test through it.
 
----
-
-## 5. Parallel and Delegated Work
-
-When work is split across threads or agents, keep one coordinator-facing active
-slice. The main thread owns the user conversation, intended outcome, active
-slice, task decomposition, final integration review, and user-facing progress
-report.
-
-Child threads should receive task packets derived from the active slice. A task
-packet should define goal, scope, non-goals, acceptance criteria, likely files,
-dependencies, required checks, and handoff expectations. Child threads may keep
-local notes or child task documents when the repository addendum allows it, but
-they must not create competing active slices or override the parent slice.
-
-Agents inside a child thread may implement, test, review, audit docs, or
-research. The child thread remains responsible for merging that work into one
-coherent handoff.
-
-Before handoff or PR review, a child thread should run the required checks,
-assign review agents when useful, fix all actionable findings, and clearly mark
-anything unresolved. The main thread reviews child work against the user intent,
-active slice, repository policy, tests, and sibling-thread conflicts.
-
-Resolve mechanical conflicts locally when the safe answer is clear. Escalate
-semantic conflicts to the parent thread. Escalate to the user only when the
-decision requires a product, priority, scope, or architecture call that is not
-already authorized.
+Compatibility is owed to real callers. This project has not shipped, so
+nothing outside the repository depends on a name here; keep a shape when an
+operator's data or scripts would break, not because it was written first. A
+test that only exists to exercise an old shape is removed with the shape.
 
 ---
 
-## 6. Implementation Standards
+## 4. Implementation Standards
 
-Write the minimum code that satisfies the current slice and tests.
-
-Rules:
-
-- Follow existing project patterns.
-- Reuse existing logic.
-- Before adding a new function, constant, hard-coded value, interface, contract,
-  codec, validator, or helper, first search for similar behavior already in the
-  repo. If one exists, reuse it or merge the behavior into the appropriate
-  shared seam instead of creating a parallel implementation.
-- Create shared helpers only for a real shared boundary or a concrete next caller.
-- Keep persistence, model calls, side effects, logging, rendering, and external tools behind explicit boundaries.
-- Prefer explicit data shapes over implicit prompt behavior.
+- Follow existing project patterns and reuse existing logic.
+- Before adding a function, constant, hard-coded value, interface, contract,
+  codec, validator, or helper, search for the behavior first. If it exists,
+  reuse it or merge into the shared seam instead of building a parallel one.
+- Create shared helpers only for a real shared boundary with a concrete caller.
+- Keep persistence, model calls, side effects, logging, rendering, and external
+  tools behind explicit boundaries.
+- Prefer explicit data shapes over implicit prompt behavior, and deterministic
+  code wherever model judgment is not actually needed.
 - Keep identifiers and persisted record meanings stable once they exist.
-- Do not add schema fields because they might be useful someday.
 
-Prefer deterministic behavior where model judgment is not needed. Model calls
-should happen only when the slice requires judgment, language, interpretation,
-or meaning.
+Architecture gates enforced by `pnpm arch:check`:
+
+- `src/core` is pure domain — it may import `core` and `shared` only.
+- `src/shared` is a leaf, and additions need a reviewed `consumers.json` entry
+  naming at least two consumer modules.
+- Cross-module imports land on barrels (`src/<module>/index.ts`), not deep paths.
+- Pre-existing violations live in `.dependency-cruiser-known-violations.json`,
+  which may only shrink. Regenerate with `pnpm arch:baseline` in the same PR
+  that removes violations; a baseline diff that adds entries is a rejection.
+
+The same ratchet applies to the `max-lines` overrides in `eslint.config.mjs`.
 
 ---
 
-## 7. Testing
+## 5. Testing
 
 Use TDD for runtime or behavior changes when practical.
 
-Prefer focused unit tests for pure validation, parsing, routing, deterministic
-state behavior, schema normalization, ID assignment, model-output parsing, and
-commit validation.
+Unit-test pure logic: validation, parsing, routing, deterministic state, schema
+normalization, ID assignment, model-output parsing, commit validation.
+Integration-test real boundaries: input to output, provider to core, model loop
+to commit, tool request to tool result.
 
-Use integration tests for actual boundaries: input to output, provider to core,
-model loop to commit, tool request to tool result, or scheduled event to
-committed output.
-
-Do not call live model providers or external services from tests unless the
-current slice explicitly requires it. Use fakes, mocks, stubs, or test adapters.
+Never call live model providers or external services from tests — use fakes,
+stubs, or test adapters. Keep test temp roots canonical (`realpath`); macOS
+symlinks a temp dir that CI does not, and the difference silently splits local
+and CI results.
 
 ---
 
-## 8. Model, Persistence, Security, and Errors
+## 6. Model, Persistence, Security, and Errors
 
-Model output may propose actions, but runtime policy decides what is allowed.
-Raw model output must never directly mutate durable state.
+Model output may propose actions; runtime policy decides what is allowed. Raw
+model output must never directly mutate durable state.
 
 Any action affecting user data, external systems, money, private information,
-messages, documents, files, calendars, tasks, accounts, or settings must go
-through explicit validation and, when needed, user confirmation.
+messages, documents, files, accounts, or settings goes through explicit
+validation and, when needed, user confirmation.
 
-Every implemented boundary should define what happens when validation, logging,
-parsing, model output, side-effect validation, deduplication, or duplicate
-processing fails. Do not hide runtime errors behind friendly language only.
+Every boundary defines what happens when validation, parsing, logging,
+model output, or duplicate processing fails. Do not hide runtime errors behind
+friendly language.
 
 ---
 
-## 9. TypeScript Policy
+## 7. TypeScript and Checks
 
-Default behavior:
+Node 24.12+, pnpm, TypeScript, ESLint, Vitest. Code follows Google TypeScript
+style, enforced by Prettier plus the gts core rules in `eslint.config.mjs`.
 
-- Prefer simple, readable TypeScript over clever type-level programming.
-- Do not add `any`, `as any`, `@ts-ignore`, `@ts-expect-error`, broad casts, or non-null assertions unless explicitly justified.
-- Do not introduce branded types, complex conditional types, or framework-wide abstractions unless required by the task.
+- Prefer simple, readable TypeScript over type-level cleverness.
+- No `any`, `as any`, `@ts-ignore`, `@ts-expect-error`, broad casts, or non-null
+  assertions without explicit justification.
+- No branded types, complex conditional types, or framework-wide abstractions
+  unless the task requires them.
 - Do not change public APIs unless the task requires it.
 
-Required checks before done:
+`pnpm check` is the gate — format, lint, typecheck, arch, and coverage. CI runs
+the same command. For TypeScript-heavy changes also run:
 
-- Run the repo's typecheck command.
-- Run lint.
-- Run relevant tests.
-- For behavior changes, add or update tests.
+```text
+pnpm exec tsc -p tsconfig.json --noEmit --noUnusedLocals --noUnusedParameters
+```
 
----
-
-## 10. Git Hygiene
-
-Follow the repository-specific branch, PR, merge, and CI policy.
-
-General rules:
-
-- Keep commits coherent and reviewable.
-- Do not mix unrelated work.
-- Sign commits when the repository requires it.
-- Use PR descriptions with real multi-line Markdown.
-- Do not include agent or platform branding in PR titles or PR bodies, and do
-  not add that branding to code files or generated artifacts unless explicitly
-  requested.
-- Run required checks before considering work done.
+Do not commit dependency folders, caches, coverage, build output, or temp
+files. Before commits touching package or tooling files, check `git status
+--short` and `git ls-files -ci --exclude-standard`.
 
 ---
 
-## 11. Final Rule
+## 8. Branch, Commit, and PR Policy
+
+One branch, one PR, merged before the next starts. All changes to `main` go
+through a PR unless the user directs otherwise.
+
+Branch names: `feature/`, `fix/`, `docs/`, `chore/` plus a short name.
+
+- Sign commits (`git commit -S`).
+- Keep commits coherent; do not mix unrelated work.
+- PR descriptions are real multi-line Markdown with `## Summary` and `## Tests`.
+- No agent or platform branding in commits, PR titles, PR bodies, code, or
+  generated artifacts.
+
+---
+
+## 9. Documentation
+
+`docs/wiki/` holds durable HTML reference pages; add one when a subsystem needs
+explanation that does not belong in a module README. `docs/plan/` and
+`docs/develop-journal/` are gitignored local scratch space — nothing there is
+a shared source of truth. PR descriptions carry the record for normal changes.
+
+---
+
+## 10. Final Rule
 
 Design the architecture globally. Implement behavior locally. Let schemas,
-modules, docs, and process grow only when working behavior needs them.
+modules, and docs grow only when working behavior needs them.
