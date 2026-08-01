@@ -172,6 +172,10 @@ async function prepareRuntimeTurn(
         reason: beforeRoleModelCallResult.reason,
         runtimePluginContext,
         traceStep: runtimePluginBeforeRoleModelCallRejectionReason,
+        // The user message committed before this gate; the terminal
+        // event must reference it or later full-evidence reads rebuild
+        // a prior conversation that is missing a durable message.
+        ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
       }),
     };
   }

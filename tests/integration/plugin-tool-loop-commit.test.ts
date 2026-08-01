@@ -502,6 +502,61 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ]);
   });
 
+  it('completes a text-only terminal round after a committed interim reply', async () => {
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {text: 'let me check'},
+          },
+          {
+            name: 'character_state.patch',
+            input: {mood: 'curious'},
+          },
+        ],
+      },
+      {
+        text: 'internal wrap-up note',
+        toolCalls: [],
+      },
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('quiet finish', 'evt_interim_then_text_only'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+    });
+
+    // The terminal decision has no visible_reply, so commit validation
+    // carries no accepted reply text even though an earlier round
+    // committed an interim message; the turn stays a valid completion.
+    expect(result.status).toBe('completed');
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['quiet finish', 'let me check']);
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      status: 'completed',
+      parsedRoleModelDecisionSnapshot: {
+        result: {
+          status: 'accepted',
+          nonCommittedText: 'internal wrap-up note',
+        },
+      },
+    });
+    expect(
+      logStore.rawEvents().at(-1)?.commitValidation?.result,
+    ).not.toHaveProperty('acceptedVisibleReplyText');
+  });
+
   it('commits multi-line final visible replies', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,

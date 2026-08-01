@@ -42,7 +42,10 @@ import type {
   ParsedRoleModelDecisionSnapshot,
   RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
-import type {RoleModelLoopResult} from '../../role-model/index.ts';
+import {
+  executionVisibleReplyText,
+  type RoleModelLoopResult,
+} from '../../role-model/index.ts';
 import {findValidatedTerminalRawEventForSession} from '../storage/file-runtime-log-store.ts';
 import type {
   AppendVisibleReplyOptions,
@@ -439,9 +442,14 @@ function createTerminalRawEventInput(
   },
 ): RawEventLogRecordInput {
   const {state} = options;
-  const lastCharacterMessageText = state.committedVisibleMessages
-    .filter(message => message.role === 'character')
-    .at(-1)?.text;
+  // Commit validation describes the terminal decision, not the turn's
+  // message history: a terminal round carrying only non-committed text
+  // has no accepted reply even when earlier rounds committed interim
+  // messages, and the codec cross-checks this field against that same
+  // decision snapshot.
+  const terminalVisibleReplyText = executionVisibleReplyText(
+    options.roleModelResult.decision,
+  );
 
   return {
     ...state.identity,
@@ -462,9 +470,13 @@ function createTerminalRawEventInput(
       sessionId: options.decisionContext.sessionId,
       result: {
         status: 'accepted',
-        ...(lastCharacterMessageText === undefined
+        ...(terminalVisibleReplyText === undefined
           ? {}
-          : {acceptedVisibleReplyText: lastCharacterMessageText}),
+          : {
+              acceptedVisibleReplyText: normalizeCharacterAgentReply({
+                text: terminalVisibleReplyText,
+              }).text,
+            }),
       },
     }),
     ...runtimePluginEvidenceOption(options.terminalPluginEvidence),

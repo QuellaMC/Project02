@@ -1261,6 +1261,83 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
   });
 
+  it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-before-call-rejected';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+
+    const rejectedResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'blocked question',
+        identity('evt_before_call_rejected'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createBeforeCallRejectingPluginHost(),
+    });
+
+    expect(rejectedResult.status).toBe('rejected');
+    // The user message committed before the gate ran, so the terminal
+    // rejection must reference it — otherwise later full-evidence reads
+    // rebuild a prior conversation missing a durable message.
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      visibleMessageIds: [`${sessionId}:message-1`],
+    });
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const followupSession = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+      visibleTranscript: reopened.conversationMessages(),
+    });
+    const followupResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'try again',
+        identity('evt_after_before_call_rejected'),
+      ),
+      session: followupSession,
+      logStore: reopened,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(followupResult.status).toBe('completed');
+    // The completed turn's recent-context snapshot includes the kept user
+    // message; a full validated reload must accept that agreement.
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).not.toThrow();
+  });
+
   it('persists decodable commit validation for plugin health rejections', async () => {
     const storeRoot = createStoreRoot();
     await createLocalRuntimeSessionStore({
@@ -1931,6 +2008,62 @@ function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
       };
     },
   };
+}
+
+function createBeforeCallRejectingPluginHost() {
+  return createRuntimePluginHost({
+    plugins: [
+      createRuntimePlugin({
+        manifest: {
+          id: 'before-call.reject.fixture',
+          displayName: 'Before Call Reject Fixture',
+          version: '1.0.0',
+          kind: 'first_party',
+          description: 'Test plugin that rejects turns before the model call.',
+          contractVersion: runtimePluginContractVersion,
+          compatibility: {
+            hostContractVersions: [runtimePluginContractVersion],
+            sourceSystem: 'test',
+          },
+          declaredPlugins: ['before_role_model_call'],
+          config: {
+            scope: 'global_with_character_overrides',
+            fields: [],
+          },
+          localTrustLevel: 'test_fixture',
+          runtimePolicy: {
+            requiredForTurn: true,
+            sideEffectLevel: 'runtime_read',
+            confirmation: 'not_required',
+            timeoutMs: 1000,
+            sourceReferencesRequired: false,
+            redactionLabels: [],
+            failureBehavior: {
+              beforeRoleModelCall: 'reject_turn',
+              handleToolCall: 'reject_tool_call',
+              afterTurnCommitted: 'log_failure',
+              health: 'degrade',
+            },
+          },
+          activation: {
+            defaultEnabled: true,
+            reasons: ['test'],
+          },
+          requestedAccess: {},
+        },
+        providedTools: [],
+        lifecycleHooks: {
+          beforeRoleModelCall() {
+            throw new Error('before-call fixture rejects the turn');
+          },
+        },
+      }),
+    ],
+    enabledPluginIds: [
+      firstPartyModelToolsPluginId,
+      'before-call.reject.fixture',
+    ],
+  });
 }
 
 function createHealthRejectingPluginHost(options?: {

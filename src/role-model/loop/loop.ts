@@ -91,9 +91,12 @@ export type RunRoleModelLoopOptions = {
     event: RoleModelPluginToolCallsRequestedEvent,
   ) => Promise<void> | void;
   /**
-   * Delivery channel for every visible reply the model produces, interim or
-   * terminal alike. Required: a visible reply the loop cannot deliver is
-   * user-facing text lost, so a caller must always consume it.
+   * Delivery channel for every visible reply of a round the loop accepts,
+   * interim or terminal alike. Required: an accepted reply the loop cannot
+   * deliver is user-facing text lost, so a caller must always consume it.
+   * A round the loop rejects delivers nothing — including a valid reply
+   * beside a tool call that exhausts the round budget: a rejected proposal
+   * commits no part of itself.
    */
   readonly onVisibleReply: (
     event: RoleModelVisibleReplyEvent,

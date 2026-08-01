@@ -101,6 +101,7 @@ export {
 export {
   type AcceptedRoleModelLoopResult,
   defaultRoleModelMaxToolRounds,
+  executionVisibleReplyText,
   type RejectedRoleModelLoopResult,
   type RoleModelLoopResult,
   type RoleModelVisibleReplyEvent,
