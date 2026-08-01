@@ -24,7 +24,7 @@ describe('character data marker', () => {
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',
@@ -50,7 +50,7 @@ describe('character data marker', () => {
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',
@@ -105,7 +105,7 @@ describe('character data marker', () => {
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',

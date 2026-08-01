@@ -119,13 +119,31 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
   );
   const finalOpenRawEvent = openRawEvents.at(-1);
 
-  if (
-    finalOpenRawEvent === undefined ||
-    openRawEvents.some(record => (record.visibleMessageIds?.length ?? 0) > 0)
-  ) {
+  if (finalOpenRawEvent === undefined) {
     throwPriorWriterPartialWrite(options.paths);
   }
 
+  // A message is committed exactly when its visible_message_committed
+  // event is durable. Fully committed messages of the open turn were shown
+  // to the user and stay — the rejected terminal closes the turn around
+  // them. A row whose commit event never landed is a partial write and is
+  // removed with the recovery rewrite below.
+  const committedMessageIds = new Set(
+    options.evidence.rawEvents
+      .filter(
+        record =>
+          record.kind === 'visible_message_committed' &&
+          runtimeEventIdentityKey(record) === identityKey,
+      )
+      .flatMap(record => record.visibleMessageIds ?? []),
+  );
+  const openTurnMessageIds = options.evidence.conversationMessages
+    .filter(
+      message =>
+        runtimeEventIdentityKey(message) === identityKey &&
+        committedMessageIds.has(message.id),
+    )
+    .map(message => message.id);
   const rejectedTerminal = decodeRawEventLogRecord(
     encodeRawEventLogRecord({
       eventId: finalOpenRawEvent.eventId,
@@ -135,6 +153,9 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
       eventType: finalOpenRawEvent.eventType,
       status: 'rejected',
       reason: 'writer_process_terminated',
+      ...(openTurnMessageIds.length === 0
+        ? {}
+        : {visibleMessageIds: openTurnMessageIds}),
     }),
   );
   const storedTraceSteps = new Set(
@@ -169,7 +190,9 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
     rawEvents: Object.freeze([...options.evidence.rawEvents, rejectedTerminal]),
     conversationMessages: Object.freeze(
       options.evidence.conversationMessages.filter(
-        message => runtimeEventIdentityKey(message) !== identityKey,
+        message =>
+          runtimeEventIdentityKey(message) !== identityKey ||
+          committedMessageIds.has(message.id),
       ),
     ),
   } satisfies DurableRuntimeSessionEvidence);

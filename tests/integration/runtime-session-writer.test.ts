@@ -1,3 +1,4 @@
+import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {spawn, type ChildProcessWithoutNullStreams} from 'node:child_process';
 import {mkdtemp, readFile, readdir, rm} from 'node:fs/promises';
@@ -82,13 +83,13 @@ describe('durable runtime session writer ownership', () => {
       session: firstSession,
       logStore,
       pluginHost: createRuntimePluginHost(),
-      agent: {
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
         async reply() {
           markReplyStarted?.();
           await replyStarted;
           return {text: 'first reply'};
         },
-      },
+      }),
     });
 
     await providerEntered;
@@ -104,7 +105,9 @@ describe('durable runtime session writer ownership', () => {
         session: secondSession,
         logStore: secondLogStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'second reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'second reply'}),
+        }),
       });
     } catch (error: unknown) {
       secondError = error;
@@ -155,7 +158,9 @@ describe('durable runtime session writer ownership', () => {
       session: currentSession,
       logStore,
       pluginHost: createRuntimePluginHost(),
-      agent: {reply: () => ({text: 'first reply'})},
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: 'first reply'}),
+      }),
     });
     const rawEventCountBeforeStaleWriter = logStore.rawEvents().length;
 
@@ -168,7 +173,9 @@ describe('durable runtime session writer ownership', () => {
         session: staleSession,
         logStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'stale reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'stale reply'}),
+        }),
       }),
     ).rejects.toMatchObject({code: 'stale_session'});
     expect(logStore.rawEvents()).toHaveLength(rawEventCountBeforeStaleWriter);

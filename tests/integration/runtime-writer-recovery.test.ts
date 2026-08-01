@@ -1,3 +1,4 @@
+import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
@@ -46,7 +47,9 @@ describe('abandoned durable runtime writer recovery', () => {
       session,
       logStore: initialLogStore,
       pluginHost: createRuntimePluginHost(),
-      agent: {reply: () => ({text: 'first reply'})},
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: 'first reply'}),
+      }),
     });
 
     const paths = initialLogStore.localRuntimeSessionPaths;
@@ -90,7 +93,9 @@ describe('abandoned durable runtime writer recovery', () => {
       session,
       logStore: reopenedLogStore,
       pluginHost: createRuntimePluginHost(),
-      agent: {reply: () => ({text: 'second reply'})},
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: 'second reply'}),
+      }),
     });
 
     expect(
@@ -104,7 +109,9 @@ describe('abandoned durable runtime writer recovery', () => {
       'runtime_event_received',
       'runtime_event_normalized',
       'runtime_turn_started',
-      'visible_reply_committed',
+      // One commit step per visible message: the user message and the reply.
+      'visible_message_committed',
+      'visible_message_committed',
       'raw_event_log_appended',
       'runtime_turn_completed',
     ]);
@@ -179,7 +186,9 @@ describe('abandoned durable runtime writer recovery', () => {
       session,
       logStore,
       pluginHost: createRuntimePluginHost(),
-      agent: {reply: () => ({text: 'next reply'})},
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: 'next reply'}),
+      }),
     });
 
     const evidence = logStore.readSessionEvidence().stored;
@@ -258,7 +267,9 @@ describe('abandoned durable runtime writer recovery', () => {
       }),
       logStore: foreignLogStore,
       pluginHost: createRuntimePluginHost(),
-      agent: {reply: () => ({text: 'foreign reply'})},
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+        reply: () => ({text: 'foreign reply'}),
+      }),
     });
 
     const foreignPaths = foreignLogStore.localRuntimeSessionPaths;
@@ -321,7 +332,9 @@ describe('abandoned durable runtime writer recovery', () => {
         }),
         logStore: boundedLogStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'next reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'next reply'}),
+        }),
       }),
     ).rejects.toBeDefined();
 
@@ -376,7 +389,9 @@ describe('abandoned durable runtime writer recovery', () => {
         }),
         logStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'next reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'next reply'}),
+        }),
       }),
     ).rejects.toMatchObject({code: 'partial_write'});
   });

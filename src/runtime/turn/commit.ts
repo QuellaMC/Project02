@@ -1,11 +1,9 @@
 import {
-  CharacterReplyValidationError,
+  appendCharacterMessage,
+  appendUserMessage,
   normalizeCharacterAgentReply,
-  rollbackLastCharacterTurn,
-  runCharacterTurn,
-  type CharacterAgent,
-  type CharacterAgentReply,
-  type CharacterTurnResult,
+  rollbackLastMessage,
+  type VisibleMessage,
 } from '../../core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
@@ -79,7 +77,6 @@ export type CompleteRuntimeTurnOptions = {
   readonly roleModelPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly roleModelPluginToolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
   readonly preCommitHealthResult: RuntimePluginHealthHostResult;
-  readonly visibleReplyText: string | undefined;
 };
 
 export function initializeRuntimeTurnEvidence(state: RuntimeTurnState): void {
@@ -178,65 +175,24 @@ async function finalizePluginFileStoreTransaction(
   await prepared?.finalize();
 }
 
+export function commitUserMessage(
+  state: RuntimeTurnState,
+): ConversationLogRecord {
+  const message = appendUserMessage(
+    state.options.session,
+    state.event.payload.currentUserMessage,
+  );
+
+  return commitVisibleMessage(state, message, {});
+}
+
 export async function appendVisibleReplyForDecision(
   state: RuntimeTurnState,
   optionsForReply: AppendVisibleReplyOptions,
-): Promise<CharacterTurnResult | undefined> {
+): Promise<ConversationLogRecord> {
   const normalizedReply = normalizeCharacterAgentReply({
     text: optionsForReply.text,
   });
-
-  if (!optionsForReply.final) {
-    appendInterimVisibleReply(state, optionsForReply);
-    await emitProgress(state, {
-      kind: 'visible_reply',
-      final: false,
-      text: normalizedReply.text,
-    });
-    return undefined;
-  }
-
-  if (state.userConversationMessage !== undefined) {
-    throw new CharacterReplyValidationError(
-      'Runtime cannot commit more than one final visible reply per turn.',
-    );
-  }
-
-  const turn = await commitFinalVisibleReply(
-    state,
-    optionsForReply,
-    normalizedReply.text,
-  );
-  await emitProgress(state, {
-    kind: 'visible_reply',
-    final: true,
-    text: turn.reply.text,
-  });
-  return turn;
-}
-
-function appendInterimVisibleReply(
-  state: RuntimeTurnState,
-  optionsForReply: AppendVisibleReplyOptions,
-): void {
-  appendRawEvent(state, {
-    ...state.identity,
-    kind: 'interim_visible_reply_emitted',
-    eventType: state.event.type,
-    payloadSummary: state.payloadSummary,
-    roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      optionsForReply.parsedRoleModelDecisionSnapshot,
-    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
-  });
-  appendTrace(state, 'interim_visible_reply_emitted');
-}
-
-async function commitFinalVisibleReply(
-  state: RuntimeTurnState,
-  optionsForReply: AppendVisibleReplyOptions,
-  replyText: string,
-): Promise<CharacterTurnResult> {
   const commitValidation = createRoleModelCommitValidationSnapshot({
     ...state.identity,
     sessionId: roleModelIOSnapshotSessionId(
@@ -244,93 +200,95 @@ async function commitFinalVisibleReply(
     ),
     result: {
       status: 'accepted',
-      acceptedVisibleReplyText: replyText,
+      acceptedVisibleReplyText: normalizedReply.text,
     },
   });
-  const turn = await runCharacterTurn(
+  const message = appendCharacterMessage(
     state.options.session,
-    state.event.payload.currentUserMessage,
-    createFixedReplyAgent(replyText),
-    state.options.characterTurnOptions,
+    normalizedReply,
   );
-  const visibleMessages = appendConversationTurn(state, turn);
+  const record = commitVisibleMessage(state, message, {
+    roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
+    parsedRoleModelDecisionSnapshot:
+      optionsForReply.parsedRoleModelDecisionSnapshot,
+    commitValidation,
+    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
+  });
+
+  await emitProgress(state, {
+    kind: 'visible_reply',
+    text: message.text,
+  });
+  return record;
+}
+
+/**
+ * The one durable step for any visible message, either role: append the
+ * session message to the conversation log, then anchor it with its own
+ * visible_message_committed raw event. Failure of either write rolls back
+ * exactly this message; earlier committed messages already reached the user
+ * and stay.
+ */
+function commitVisibleMessage(
+  state: RuntimeTurnState,
+  message: VisibleMessage,
+  evidence: Partial<RawEventLogRecordInput>,
+): ConversationLogRecord {
+  const committedAt =
+    state.options.committedAt ?? state.options.event.createdAt;
+  let record: ConversationLogRecord;
+
+  try {
+    record = state.options.logStore.appendConversationMessage(
+      {
+        ...message,
+        ...state.identity,
+        committedAt,
+      },
+      state.options.session.character,
+    );
+  } catch (error: unknown) {
+    rollbackFailedMessageCommit(state, message, error);
+    throw error;
+  }
 
   try {
     appendRawEvent(state, {
       ...state.identity,
-      kind: 'visible_reply_committed',
+      kind: 'visible_message_committed',
       eventType: state.event.type,
-      visibleMessageIds: visibleMessages.map(message => message.id),
+      visibleMessageIds: [record.id],
       payloadSummary: state.payloadSummary,
-      roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-      parsedRoleModelDecisionSnapshot:
-        optionsForReply.parsedRoleModelDecisionSnapshot,
-      commitValidation,
-      ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
+      ...evidence,
     });
   } catch (error: unknown) {
-    rollbackFailedConversationCommit(state, turn, error);
+    rollbackFailedMessageCommit(state, message, error);
     throw error;
   }
 
-  state.userConversationMessage = visibleMessages[0];
-  state.committedVisibleMessages.push(...visibleMessages);
-  appendTrace(state, 'visible_reply_committed');
-  return turn;
+  state.committedVisibleMessages.push(record);
+  appendTrace(state, 'visible_message_committed');
+  return record;
 }
 
-function appendConversationTurn(
+function rollbackFailedMessageCommit(
   state: RuntimeTurnState,
-  turn: CharacterTurnResult,
-): readonly [ConversationLogRecord, ConversationLogRecord] {
-  const committedAt =
-    state.options.committedAt ?? state.options.event.createdAt;
-  let userRecord: ConversationLogRecord | undefined;
-  let characterRecord: ConversationLogRecord;
-
-  try {
-    userRecord = state.options.logStore.appendConversationMessage(
-      {
-        ...turn.userMessage,
-        ...state.identity,
-        committedAt,
-      },
-      state.options.session.character,
-    );
-    characterRecord = state.options.logStore.appendConversationMessage(
-      {
-        ...turn.characterMessage,
-        ...state.identity,
-        committedAt,
-      },
-      state.options.session.character,
-    );
-  } catch (error: unknown) {
-    rollbackFailedConversationCommit(state, turn, error);
-    throw error;
-  }
-
-  return Object.freeze([userRecord, characterRecord]);
-}
-
-function rollbackFailedConversationCommit(
-  state: RuntimeTurnState,
-  turn: CharacterTurnResult,
+  message: VisibleMessage,
   originalError: unknown,
 ): void {
   const cleanupErrors: unknown[] = [];
 
+  // Attempt durable removal even when the append itself threw: a crash
+  // mid-write can persist the row despite the error, and the message ID
+  // is deterministic, so removal targets exactly this message.
   try {
-    state.options.logStore.removeConversationMessages([
-      turn.userMessage.id,
-      turn.characterMessage.id,
-    ]);
+    state.options.logStore.removeConversationMessages([message.id]);
   } catch (error: unknown) {
     cleanupErrors.push(error);
   }
 
   try {
-    rollbackLastCharacterTurn(state.options.session, turn);
+    rollbackLastMessage(state.options.session, message);
   } catch (error: unknown) {
     cleanupErrors.push(error);
   }
@@ -408,7 +366,6 @@ export async function completeRuntimeTurn(
   });
 
   await preparePluginFileStoreTransaction(state);
-  const turn = await commitTerminalVisibleReply(options);
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
     ...options.preCommitHealthResult.evidence,
@@ -417,7 +374,6 @@ export async function completeRuntimeTurn(
     ...options,
     terminalPluginEvidence,
     runtimeConfigEffects,
-    turn,
   });
   const durability = await finalizeCompletedDurability(
     state,
@@ -439,7 +395,6 @@ export async function completeRuntimeTurn(
   return Object.freeze({
     status: 'completed',
     event: state.event,
-    ...(turn === undefined ? {} : {turn}),
     conversationMessages: Object.freeze([...state.committedVisibleMessages]),
     rawEvent: terminalAppend.rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
@@ -455,28 +410,10 @@ export async function completeRuntimeTurn(
   } satisfies LocalRuntimeUserMessageCompletedResult);
 }
 
-async function commitTerminalVisibleReply(
-  options: CompleteRuntimeTurnOptions,
-): Promise<CharacterTurnResult | undefined> {
-  if (options.visibleReplyText === undefined) {
-    return undefined;
-  }
-
-  return await appendVisibleReplyForDecision(options.state, {
-    runtimePluginEvidence: options.roleModelPluginEvidence,
-    final: true,
-    roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      options.roleModelResult.parsedDecisionSnapshot,
-    text: options.visibleReplyText,
-  });
-}
-
 function appendCompletedTerminalRawEvent(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
     readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
-    readonly turn: CharacterTurnResult | undefined;
   },
 ): {
   readonly rawEvent: RawEventLogRecord;
@@ -499,10 +436,12 @@ function createTerminalRawEventInput(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
     readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
-    readonly turn: CharacterTurnResult | undefined;
   },
 ): RawEventLogRecordInput {
   const {state} = options;
+  const lastCharacterMessageText = state.committedVisibleMessages
+    .filter(message => message.role === 'character')
+    .at(-1)?.text;
 
   return {
     ...state.identity,
@@ -523,9 +462,9 @@ function createTerminalRawEventInput(
       sessionId: options.decisionContext.sessionId,
       result: {
         status: 'accepted',
-        ...(options.turn === undefined
+        ...(lastCharacterMessageText === undefined
           ? {}
-          : {acceptedVisibleReplyText: options.turn.reply.text}),
+          : {acceptedVisibleReplyText: lastCharacterMessageText}),
       },
     }),
     ...runtimePluginEvidenceOption(options.terminalPluginEvidence),
@@ -805,12 +744,4 @@ function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
     afterCommitResult.status === 'completed_with_failures' ||
     afterCommitResult.evidence.length > 0
   );
-}
-
-function createFixedReplyAgent(replyText: string): CharacterAgent {
-  return Object.freeze({
-    reply(): CharacterAgentReply {
-      return {text: replyText};
-    },
-  } satisfies CharacterAgent);
 }

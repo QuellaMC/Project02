@@ -24,8 +24,8 @@ describe('local storage plugin schema', () => {
     expect(requiresCharacter).toBe(true);
   });
 
-  it('uses scoped schema version 4 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(4);
+  it('uses scoped schema version 5 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(5);
     expect(
       createLocalRuntimeSessionPaths({storeRoot: 'store'}),
     ).not.toHaveProperty('characterStatePath');
@@ -35,14 +35,14 @@ describe('local storage plugin schema', () => {
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 4,
+          schemaVersion: 5,
           scope: 'character-data',
           characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       ),
     ).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 5,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-06-04T00:00:00.000Z',
@@ -50,7 +50,7 @@ describe('local storage plugin schema', () => {
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 4,
+          schemaVersion: 5,
           scope: 'character-data',
           characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
@@ -58,13 +58,13 @@ describe('local storage plugin schema', () => {
         }),
       ),
     ).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       materializedCharacterPackageVersion: '2.3.4',
     });
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 4,
+          schemaVersion: 5,
           scope: 'home',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
@@ -82,7 +82,7 @@ describe('local storage plugin schema', () => {
     expect(() =>
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 4,
+          schemaVersion: 5,
           scope: 'other',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
@@ -94,7 +94,7 @@ describe('local storage plugin schema', () => {
     expect(() =>
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 4,
+          schemaVersion: 5,
           scope: 'character-data',
           characterId: '../mira',
           createdAt: '2026-06-04T00:00:00.000Z',

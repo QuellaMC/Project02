@@ -966,10 +966,7 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   });
 
   if (commitValidation === undefined) {
-    if (
-      options.kind !== 'tool_call_started' &&
-      options.kind !== 'interim_visible_reply_emitted'
-    ) {
+    if (options.kind !== 'tool_call_started') {
       throwMalformedRecord('commitValidation');
     }
 
@@ -1134,7 +1131,7 @@ function assertRoleModelCommitStatusMatchesRawEvent(options: {
     });
 
     if (
-      options.kind !== 'visible_reply_committed' &&
+      options.kind !== 'visible_message_committed' &&
       options.kind !== 'runtime_turn_completed'
     ) {
       throwMalformedRecord('commitValidation');

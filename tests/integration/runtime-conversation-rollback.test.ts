@@ -1,3 +1,4 @@
+import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
@@ -84,7 +85,9 @@ describe('runtime conversation rollback failures', () => {
         session: failedSession,
         logStore: failingStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'failed reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'failed reply'}),
+        }),
       });
     } catch (error: unknown) {
       thrown = error;
@@ -116,7 +119,9 @@ describe('runtime conversation rollback failures', () => {
         session: recoveredSession,
         logStore: reopened,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'next reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'next reply'}),
+        }),
       }),
     ).resolves.toMatchObject({status: 'completed'});
 
@@ -206,7 +211,9 @@ describe('runtime conversation rollback failures', () => {
         session: failedSession,
         logStore: failingStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'failed reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'failed reply'}),
+        }),
       });
     } catch (error: unknown) {
       thrown = error;
@@ -215,7 +222,11 @@ describe('runtime conversation rollback failures', () => {
     expect(thrown).toBeInstanceOf(AggregateError);
     expect((thrown as AggregateError).cause).toBe(appendFailure);
     expect((thrown as AggregateError).errors).toEqual([cleanupFailure]);
-    expect(failedSession.visibleTranscript).toEqual([]);
+    // The user message committed fully before the character append failed,
+    // so it stays; only the uncommitted character row rolls back.
+    expect(
+      failedSession.visibleTranscript.map(message => message.role),
+    ).toEqual(['user']);
 
     const reopened = createFileRuntimeLogStore({
       storeRoot,
@@ -223,9 +234,20 @@ describe('runtime conversation rollback failures', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
+    // Recovery keeps the committed user row, so the next writer's session
+    // restores it before continuing.
     const recoveredSession = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
+      visibleTranscript: [
+        {
+          id: `${sessionId}:message-1`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'failed input',
+        },
+      ],
     });
 
     await expect(
@@ -238,7 +260,9 @@ describe('runtime conversation rollback failures', () => {
         session: recoveredSession,
         logStore: reopened,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'next reply'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'next reply'}),
+        }),
       }),
     ).resolves.toMatchObject({status: 'completed'});
 
@@ -254,7 +278,7 @@ describe('runtime conversation rollback failures', () => {
     );
     expect(
       recoveredEvidence.conversationMessages.map(message => message.text),
-    ).toEqual(['next input', 'next reply']);
+    ).toEqual(['failed input', 'next input', 'next reply']);
   });
 
   it('closes durable raw evidence when the first conversation append persists before throwing', async () => {
@@ -319,7 +343,9 @@ describe('runtime conversation rollback failures', () => {
         }),
         logStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'hello back'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'hello back'}),
+        }),
       }),
     ).rejects.toThrow('user append persisted then failed');
 
@@ -375,12 +401,20 @@ describe('runtime conversation rollback failures', () => {
         session,
         logStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'hello back'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'hello back'}),
+        }),
       }),
     ).rejects.toThrow('character append persisted then failed');
 
-    expect(underlying.conversationMessages()).toEqual([]);
-    expect(session.visibleTranscript).toEqual([]);
+    // The committed user message stays; the persisted-then-failed character
+    // row is removed durably and in memory.
+    expect(
+      underlying.conversationMessages().map(message => message.role),
+    ).toEqual(['user']);
+    expect(session.visibleTranscript.map(message => message.role)).toEqual([
+      'user',
+    ]);
   });
 
   it('attempts durable and in-memory cleanup without masking the append failure', async () => {
@@ -434,7 +468,9 @@ describe('runtime conversation rollback failures', () => {
         session,
         logStore,
         pluginHost: createRuntimePluginHost(),
-        agent: {reply: () => ({text: 'hello back'})},
+        roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+          reply: () => ({text: 'hello back'}),
+        }),
       });
     } catch (error: unknown) {
       thrown = error;
@@ -447,6 +483,8 @@ describe('runtime conversation rollback failures', () => {
     expect((thrown as AggregateError).errors).toEqual([
       expect.objectContaining({message: 'durable rollback failed'}),
     ]);
-    expect(session.visibleTranscript).toEqual([]);
+    expect(session.visibleTranscript.map(message => message.role)).toEqual([
+      'user',
+    ]);
   });
 });

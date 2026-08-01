@@ -195,7 +195,7 @@ describe('first-selection materialization through startup', () => {
         ),
       ),
     ).toMatchObject({
-      schemaVersion: 4,
+      schemaVersion: 5,
       materializedCharacterPackageVersion: '1.0.0',
     });
   });

@@ -110,7 +110,6 @@ export function createRuntimeTurnState(
     finishedToolCallIds: [],
     finishedPluginToolResults: [],
     preparedConfigEffectsByToolCallId: new Map(),
-    userConversationMessage: undefined,
   } satisfies RuntimeTurnState;
 }
 

@@ -164,7 +164,7 @@ describe('inspect CLI plugin evidence', () => {
     expect(output.turns[0].modelRounds).toHaveLength(2);
     expect(
       output.turns[0].modelRounds.map(round => round.rawEventKind),
-    ).toEqual(['tool_call_started', 'visible_reply_committed']);
+    ).toEqual(['tool_call_started', 'visible_message_committed']);
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText,
     ).toContain('character_state.patch');
@@ -760,7 +760,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 5,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -797,7 +797,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 5,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -832,7 +832,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 5,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

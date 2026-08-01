@@ -6,14 +6,6 @@ import {
   type UserMessageRuntimeEvent,
 } from '../../core/index.ts';
 import {
-  roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-  roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
-  roleModelAdapterProviderResponseStatusNonFiniteDetails,
-  roleModelAdapterRejectionNotReplayableDetails,
-  roleModelAdapterProviderExchangeMalformedDetails,
-  roleModelAdapterRawOutputMissingTextRejectionDetails,
-  roleModelDecisionRejectionReasons,
-  roleModelMalformedOutputRejectionReason,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type DecisionContext,
@@ -21,32 +13,29 @@ import {
   type RoleModelPluginToolDefinition,
   type RejectedRoleModelDecisionResult,
   type RoleModelCharacterRef,
-  type RoleModelDecisionRejection,
-  type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
-  type RoleModelMalformedAdapterRawOutputDetails,
-  type RoleModelProviderExchangeSnapshot,
-  type RoleModelProviderMetadata,
   type RoleModelToolObservation,
 } from '../api/contracts.ts';
 import {
   assertRoleModelCharacterRefMatchesCharacter,
   createParsedRoleModelDecisionSnapshot,
-  createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
 } from '../api/decision.ts';
 import {parseRoleModelExecutionDecision} from './decision-parser.ts';
-import {normalizeReplayableRejectedRoleModelDecisionResult} from './replay-evidence.ts';
+import {
+  providerExchangeOption,
+  providerMetadataOption,
+  validateRoleModelAdapterRawOutput,
+} from './adapter-raw-output.ts';
 import {
   createRejectedToolRoutingEvidence,
   missingRoutingTargetRejection,
   type RoleModelPluginToolRoutingEvidence,
   userTurnCallLimitRoutingRejection,
 } from './routing-rejections.ts';
-import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
 import type {
   RoleModelAdapter,
   RoleModelNativeToolCallArgumentError,
@@ -69,7 +58,6 @@ import {runtimeToolNameForProviderToolName} from '../prompt/tool-wire.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginToolCallResultSnapshot,
-  redactRuntimePluginText,
   type PreparedRuntimePluginConfigEffect,
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
@@ -102,8 +90,13 @@ export type RunRoleModelLoopOptions = {
   readonly onPluginToolCallsRequested?: (
     event: RoleModelPluginToolCallsRequestedEvent,
   ) => Promise<void> | void;
-  readonly onInterimVisibleReply?: (
-    event: RoleModelInterimVisibleReplyEvent,
+  /**
+   * Delivery channel for every visible reply the model produces, interim or
+   * terminal alike. Required: a visible reply the loop cannot deliver is
+   * user-facing text lost, so a caller must always consume it.
+   */
+  readonly onVisibleReply: (
+    event: RoleModelVisibleReplyEvent,
   ) => Promise<void> | void;
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly personaSections?: readonly string[];
@@ -121,7 +114,7 @@ export type RoleModelPluginToolHost = {
 
 export {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
 
-export type RoleModelInterimVisibleReplyEvent = {
+export type RoleModelVisibleReplyEvent = {
   readonly round: number;
   readonly text: string;
   readonly inputEnvelope: RoleModelInputEnvelope;
@@ -159,7 +152,6 @@ export {
   terminalRoleModelLoopResult,
   type AcceptedRoleModelLoopResult,
   type RejectedRoleModelLoopResult,
-  type RoleModelLoopExecutionResult,
   type RoleModelLoopResult,
   type RoleModelLoopRound,
   type RoleModelLoopState,
@@ -169,7 +161,7 @@ import {
   executionVisibleReplyText,
   handleRejectedRoleModelLoopRound,
   terminalRoleModelLoopResult,
-  type RoleModelLoopExecutionResult,
+  type RoleModelLoopResult,
   type RoleModelLoopState,
 } from './round-outcome.ts';
 
@@ -177,7 +169,7 @@ export const defaultRoleModelMaxToolRounds = 99;
 
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions,
-): Promise<RoleModelLoopExecutionResult> {
+): Promise<RoleModelLoopResult> {
   // The snapshot constructor enforces this too, but rejecting up front
   // keeps a contradictory ref from reaching the provider at all.
   if (options.characterRef !== undefined) {
@@ -238,6 +230,20 @@ export async function runRoleModelLoop(
     }
 
     if (terminalResult !== undefined) {
+      if (terminalResult.status === 'accepted') {
+        // Deliver from the execution decision, not the public evidence:
+        // the reply the user sees is the model's actual text, while the
+        // evidence snapshot may hold its redacted projection.
+        await deliverVisibleReply({
+          options,
+          round,
+          decision: invokedRound.decisionResult.decision,
+          inputEnvelope: terminalResult.inputEnvelope,
+          ioSnapshot: terminalResult.ioSnapshot,
+          parsedDecisionSnapshot: terminalResult.parsedDecisionSnapshot,
+        });
+      }
+
       return terminalResult;
     }
 
@@ -256,6 +262,29 @@ export async function runRoleModelLoop(
       round,
     });
   }
+}
+
+async function deliverVisibleReply(delivery: {
+  readonly options: RunRoleModelLoopOptions;
+  readonly round: number;
+  readonly decision: CharacterDecision;
+  readonly inputEnvelope: RoleModelInputEnvelope;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+}): Promise<void> {
+  const text = executionVisibleReplyText(delivery.decision);
+
+  if (text === undefined) {
+    return;
+  }
+
+  await delivery.options.onVisibleReply({
+    round: delivery.round,
+    text,
+    inputEnvelope: delivery.inputEnvelope,
+    ioSnapshot: delivery.ioSnapshot,
+    parsedDecisionSnapshot: delivery.parsedDecisionSnapshot,
+  });
 }
 
 type InvokedRoleModelLoopRoundBase = {
@@ -390,19 +419,14 @@ async function routeRoleModelLoopToolCalls(options: {
   readonly round: number;
   readonly toolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
-  const interimVisibleReplyText = executionVisibleReplyText(
-    options.invokedRound.decisionResult.decision,
-  );
-
-  if (interimVisibleReplyText !== undefined) {
-    await options.options.onInterimVisibleReply?.({
-      round: options.round,
-      text: interimVisibleReplyText,
-      inputEnvelope: options.invokedRound.inputEnvelope,
-      ioSnapshot: options.invokedRound.ioSnapshot,
-      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
-    });
-  }
+  await deliverVisibleReply({
+    options: options.options,
+    round: options.round,
+    decision: options.invokedRound.decisionResult.decision,
+    inputEnvelope: options.invokedRound.inputEnvelope,
+    ioSnapshot: options.invokedRound.ioSnapshot,
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+  });
 
   await options.options.onPluginToolCallsRequested?.({
     round: options.round,
@@ -827,7 +851,7 @@ function createNativeVisibleReplyToolResultContent(): Readonly<
     status: 'accepted',
     toolName: visibleReplyModelToolName,
     output: Object.freeze({
-      kind: 'interim_visible_reply',
+      kind: 'visible_reply_delivered',
     }),
   });
 }
@@ -1212,471 +1236,6 @@ function freezeRuntimePluginJsonObject(
   });
 }
 
-type RoleModelAdapterRawOutputValidationResult =
-  | {
-      readonly status: 'accepted';
-      readonly rawOutputText: string;
-      readonly providerMetadata?: RoleModelProviderMetadata;
-      readonly providerExchange?: RoleModelProviderExchangeSnapshot;
-      readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
-      readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-    }
-  | {
-      readonly status: 'rejected';
-      readonly rawOutputText: string;
-      readonly providerMetadata?: RoleModelProviderMetadata;
-      readonly providerExchange?: RoleModelProviderExchangeSnapshot;
-      readonly decisionResult: RejectedRoleModelDecisionResult;
-    };
-
-function validateRoleModelAdapterRawOutput(
-  rawOutput: unknown,
-  allowedTools: readonly RoleModelAllowedToolName[],
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
-): RoleModelAdapterRawOutputValidationResult {
-  if (!isJsonRecord(rawOutput)) {
-    return createMalformedAdapterRawOutputResult();
-  }
-
-  const rawOutputTextValue = rawOutput['rawOutputText'];
-
-  if (typeof rawOutputTextValue !== 'string') {
-    return createMalformedAdapterRawOutputResult();
-  }
-  const rawOutputText = rawOutputTextValue;
-
-  const providerMetadataResult = optionalProviderMetadata(
-    rawOutput['providerMetadata'],
-  );
-  const providerExchange = optionalProviderExchange(
-    rawOutput['providerExchange'],
-  );
-
-  if (providerMetadataResult.status === 'rejected') {
-    return createMalformedAdapterRawOutputResult(
-      providerMetadataResult.details,
-    );
-  }
-
-  if (
-    rawOutput['providerExchange'] !== undefined &&
-    providerExchange === undefined
-  ) {
-    return createMalformedAdapterRawOutputResult(
-      roleModelAdapterProviderExchangeMalformedDetails,
-    );
-  }
-
-  const providerMetadata = providerMetadataResult.providerMetadata;
-  const rejection = optionalRoleModelDecisionRejection(rawOutput['rejection']);
-  const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
-    rawOutput['nativeAssistantMessage'],
-  );
-  const nativeToolCallArgumentErrors =
-    optionalRoleModelNativeToolCallArgumentErrors(
-      rawOutput['nativeToolCallArgumentErrors'],
-    );
-
-  if (
-    rawOutput['nativeToolCallArgumentErrors'] !== undefined &&
-    nativeToolCallArgumentErrors === undefined
-  ) {
-    return createMalformedAdapterRawOutputResult(
-      roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-    );
-  }
-
-  if (rejection !== undefined) {
-    const decisionResult = normalizeReplayableRejectedRoleModelDecisionResult({
-      rawOutputText,
-      providerMetadata,
-      decisionResult: createRejectedRoleModelDecisionResult(
-        rejection.reason,
-        rejection.details,
-      ),
-      allowedTools,
-      pluginToolDefinitions,
-      toolObservations,
-    });
-
-    if (decisionResult === undefined) {
-      return createMalformedAdapterRawOutputResult(
-        roleModelAdapterRejectionNotReplayableDetails,
-      );
-    }
-
-    return Object.freeze({
-      status: 'rejected',
-      rawOutputText,
-      ...providerMetadataOption(providerMetadata),
-      ...providerExchangeOption(providerExchange),
-      decisionResult,
-    } satisfies RoleModelAdapterRawOutputValidationResult);
-  }
-
-  return Object.freeze({
-    status: 'accepted',
-    rawOutputText,
-    ...providerMetadataOption(providerMetadata),
-    ...providerExchangeOption(providerExchange),
-    ...nativeAssistantMessageOption(nativeAssistantMessage),
-    ...nativeToolCallArgumentErrorsOption(nativeToolCallArgumentErrors),
-  } satisfies RoleModelAdapterRawOutputValidationResult);
-}
-
-function createMalformedAdapterRawOutputResult(
-  details: RoleModelMalformedAdapterRawOutputDetails = roleModelAdapterRawOutputMissingTextRejectionDetails,
-): RoleModelAdapterRawOutputValidationResult {
-  return Object.freeze({
-    status: 'rejected',
-    rawOutputText: '',
-    decisionResult: createRejectedRoleModelDecisionResult(
-      roleModelMalformedOutputRejectionReason,
-      details,
-    ),
-  } satisfies RoleModelAdapterRawOutputValidationResult);
-}
-
-function providerMetadataOption(
-  providerMetadata: RoleModelProviderMetadata | undefined,
-): {readonly providerMetadata?: RoleModelProviderMetadata} {
-  return providerMetadata === undefined ? {} : {providerMetadata};
-}
-
-function providerExchangeOption(
-  providerExchange: RoleModelProviderExchangeSnapshot | undefined,
-): {readonly providerExchange?: RoleModelProviderExchangeSnapshot} {
-  return providerExchange === undefined ? {} : {providerExchange};
-}
-
-function nativeAssistantMessageOption(
-  nativeAssistantMessage: RoleModelAssistantChatMessage | undefined,
-): {readonly nativeAssistantMessage?: RoleModelAssistantChatMessage} {
-  return nativeAssistantMessage === undefined ? {} : {nativeAssistantMessage};
-}
-
-function nativeToolCallArgumentErrorsOption(
-  nativeToolCallArgumentErrors:
-    readonly RoleModelNativeToolCallArgumentError[] | undefined,
-): {
-  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-} {
-  return nativeToolCallArgumentErrors === undefined
-    ? {}
-    : {nativeToolCallArgumentErrors};
-}
-
-function optionalRoleModelNativeToolCallArgumentErrors(
-  value: unknown,
-): readonly RoleModelNativeToolCallArgumentError[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const errors: RoleModelNativeToolCallArgumentError[] = [];
-
-  for (const item of value) {
-    if (!isJsonRecord(item)) {
-      return undefined;
-    }
-
-    const executableIndex = item['executableIndex'];
-    const toolName = item['toolName'];
-    const reason = item['reason'];
-    const message = item['message'];
-
-    if (
-      typeof executableIndex !== 'number' ||
-      !Number.isInteger(executableIndex) ||
-      executableIndex < 0 ||
-      typeof toolName !== 'string' ||
-      toolName.length === 0 ||
-      typeof reason !== 'string' ||
-      reason.length === 0 ||
-      typeof message !== 'string' ||
-      message.length === 0
-    ) {
-      return undefined;
-    }
-
-    errors.push(
-      Object.freeze({
-        executableIndex,
-        toolName,
-        reason: redactRuntimePluginText(reason),
-        message: redactRuntimePluginText(message),
-      } satisfies RoleModelNativeToolCallArgumentError),
-    );
-  }
-
-  return Object.freeze(errors);
-}
-
-function optionalRoleModelAssistantChatMessage(
-  value: unknown,
-): RoleModelAssistantChatMessage | undefined {
-  if (!isJsonRecord(value) || value['role'] !== 'assistant') {
-    return undefined;
-  }
-
-  const content = value['content'];
-  const toolCalls = optionalRoleModelChatToolCalls(value['tool_calls']);
-
-  if (content !== null && typeof content !== 'string') {
-    return undefined;
-  }
-
-  return Object.freeze({
-    role: 'assistant',
-    content: typeof content === 'string' ? content : null,
-    ...(toolCalls === undefined ? {} : {tool_calls: toolCalls}),
-  } satisfies RoleModelAssistantChatMessage);
-}
-
-function optionalRoleModelChatToolCalls(
-  value: unknown,
-): readonly RoleModelChatToolCall[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const calls: RoleModelChatToolCall[] = [];
-
-  for (const item of value) {
-    const call = optionalRoleModelChatToolCall(item);
-
-    if (call === undefined) {
-      return undefined;
-    }
-
-    calls.push(call);
-  }
-
-  return Object.freeze(calls);
-}
-
-function optionalRoleModelChatToolCall(
-  value: unknown,
-): RoleModelChatToolCall | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  const id = value['id'];
-  const type = value['type'];
-  const fn = value['function'];
-
-  if (typeof id !== 'string' || type !== 'function' || !isJsonRecord(fn)) {
-    return undefined;
-  }
-
-  const name = fn['name'];
-  const args = fn['arguments'];
-
-  if (typeof name !== 'string' || typeof args !== 'string') {
-    return undefined;
-  }
-
-  return Object.freeze({
-    id,
-    type: 'function',
-    function: Object.freeze({
-      name,
-      arguments: args,
-    }),
-  } satisfies RoleModelChatToolCall);
-}
-
-function optionalProviderMetadata(value: unknown):
-  | {
-      readonly status: 'accepted';
-      readonly providerMetadata?: RoleModelProviderMetadata;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly details: RoleModelMalformedAdapterRawOutputDetails;
-    } {
-  if (value === undefined) {
-    return Object.freeze({status: 'accepted'});
-  }
-
-  if (!isJsonRecord(value)) {
-    return Object.freeze({status: 'accepted'});
-  }
-
-  const provider = value['provider'];
-
-  if (provider !== 'local' && provider !== 'nvidia') {
-    return Object.freeze({status: 'accepted'});
-  }
-
-  const model = value['model'];
-  const request = optionalProviderRequestMetadata(value['request']);
-  const response = optionalProviderResponseMetadata(value['response']);
-  const error = optionalProviderErrorMetadata(value['error']);
-
-  if (request?.status === 'rejected') {
-    return request;
-  }
-
-  if (response?.status === 'rejected') {
-    return response;
-  }
-
-  return Object.freeze({
-    status: 'accepted',
-    providerMetadata: Object.freeze({
-      provider,
-      ...(typeof model === 'string' ? {model} : {}),
-      ...(request === undefined ? {} : {request: request.request}),
-      ...(response === undefined ? {} : {response: response.response}),
-      ...(error === undefined ? {} : {error}),
-    } satisfies RoleModelProviderMetadata),
-  });
-}
-
-function optionalProviderExchange(
-  value: unknown,
-): RoleModelProviderExchangeSnapshot | undefined {
-  return parseRoleModelProviderExchangeSnapshot(value);
-}
-
-type ProviderRequestMetadata = NonNullable<
-  RoleModelProviderMetadata['request']
->;
-type ProviderResponseMetadata = NonNullable<
-  RoleModelProviderMetadata['response']
->;
-
-function optionalProviderRequestMetadata(value: unknown):
-  | {
-      readonly status: 'accepted';
-      readonly request: ProviderRequestMetadata;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly details: typeof roleModelAdapterProviderRequestMessageCountNonFiniteDetails;
-    }
-  | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  const endpoint = value['endpoint'];
-  const messageCount = value['messageCount'];
-
-  if (typeof messageCount === 'number' && !Number.isFinite(messageCount)) {
-    return Object.freeze({
-      status: 'rejected',
-      details: roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
-    });
-  }
-
-  return Object.freeze({
-    status: 'accepted',
-    request: Object.freeze({
-      ...(typeof endpoint === 'string'
-        ? {endpoint: redactRuntimePluginText(endpoint)}
-        : {}),
-      ...(typeof messageCount === 'number' ? {messageCount} : {}),
-      stream: false,
-    }),
-  });
-}
-
-function optionalProviderResponseMetadata(value: unknown):
-  | {
-      readonly status: 'accepted';
-      readonly response: ProviderResponseMetadata;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly details: typeof roleModelAdapterProviderResponseStatusNonFiniteDetails;
-    }
-  | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  const status = value['status'];
-
-  if (typeof status === 'number' && !Number.isFinite(status)) {
-    return Object.freeze({
-      status: 'rejected',
-      details: roleModelAdapterProviderResponseStatusNonFiniteDetails,
-    });
-  }
-
-  return Object.freeze({
-    status: 'accepted',
-    response: Object.freeze({
-      ...(typeof status === 'number' ? {status} : {}),
-    }),
-  });
-}
-
-function optionalProviderErrorMetadata(
-  value: unknown,
-): RoleModelProviderMetadata['error'] | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  const code = value['code'];
-  const message = value['message'];
-
-  if (typeof code !== 'string' || typeof message !== 'string') {
-    return undefined;
-  }
-
-  return Object.freeze({
-    code: redactRuntimePluginText(code),
-    message: redactRuntimePluginText(message),
-  });
-}
-
-function optionalRoleModelDecisionRejection(
-  value: unknown,
-): RoleModelDecisionRejection | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  const reason = value['reason'];
-  const details = value['details'];
-
-  if (!isRoleModelDecisionRejectionReason(reason)) {
-    return undefined;
-  }
-
-  return Object.freeze({
-    reason,
-    ...(typeof details === 'string'
-      ? {details: redactRuntimePluginText(details)}
-      : {}),
-  } satisfies RoleModelDecisionRejection);
-}
-
-function isRoleModelDecisionRejectionReason(
-  value: unknown,
-): value is RoleModelDecisionRejectionReason {
-  return (
-    typeof value === 'string' &&
-    roleModelDecisionRejectionReasons.includes(
-      value as RoleModelDecisionRejectionReason,
-    )
-  );
-}
-
 function createSnapshotIdentity(
   event: UserMessageRuntimeEvent,
 ): RuntimeEventIdentity {
@@ -1685,10 +1244,4 @@ function createSnapshotIdentity(
     traceId: event.traceId,
     createdAt: event.createdAt,
   } satisfies RuntimeEventIdentity);
-}
-
-function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

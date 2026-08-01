@@ -12,13 +12,12 @@ import {join} from 'node:path';
 
 import {afterEach, describe, expect, it} from 'vitest';
 
-import {createDeterministicCharacterAgent} from '../../src/role-model/providers/deterministic.ts';
-
 import {
+  appendCharacterMessage,
+  appendUserMessage,
   ConversationRehydrationError,
   createConversationSession,
   createUserMessageRuntimeEvent,
-  runCharacterTurn,
 } from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
@@ -306,17 +305,19 @@ describe('local runtime session store', () => {
     });
 
     const rehydrated = await store.rehydrateConversationSession('mira-local');
-    const result = await runCharacterTurn(
-      rehydrated,
-      'second',
-      createDeterministicCharacterAgent(),
-    );
 
-    expect(result.reply.text).toBe(
-      'I remember you said "first" Stay with me for a minute.',
-    );
-    expect(result.userMessage.id).toBe('mira-local:message-3');
-    expect(result.characterMessage.id).toBe('mira-local:message-4');
+    expect(rehydrated.visibleTranscript.map(message => message.text)).toEqual([
+      'first',
+      "I'm here. Tell me what you need.",
+    ]);
+
+    const userMessage = appendUserMessage(rehydrated, 'second');
+    const characterMessage = appendCharacterMessage(rehydrated, {
+      text: 'reply after rehydration',
+    });
+
+    expect(userMessage.id).toBe('mira-local:message-3');
+    expect(characterMessage.id).toBe('mira-local:message-4');
   });
 
   it('keeps separate session transcripts isolated during rehydration', async () => {
@@ -372,20 +373,25 @@ describe('local runtime session store', () => {
     const alpha = await store.rehydrateConversationSession('alpha');
     const beta = await store.rehydrateConversationSession('beta');
 
-    await expect(
-      runCharacterTurn(alpha, 'second', createDeterministicCharacterAgent()),
-    ).resolves.toMatchObject({
-      reply: {
-        text: 'I remember you said "alpha first" Stay with me for a minute.',
-      },
-    });
-    await expect(
-      runCharacterTurn(beta, 'second', createDeterministicCharacterAgent()),
-    ).resolves.toMatchObject({
-      reply: {
-        text: 'I remember you said "beta first" Stay with me for a minute.',
-      },
-    });
+    appendUserMessage(alpha, 'second');
+    const alphaReply = appendCharacterMessage(alpha, {text: 'alpha again'});
+    appendUserMessage(beta, 'second');
+    const betaReply = appendCharacterMessage(beta, {text: 'beta again'});
+
+    expect(alphaReply.id).toBe('alpha:message-4');
+    expect(betaReply.id).toBe('beta:message-4');
+    expect(alpha.visibleTranscript.map(message => message.text)).toEqual([
+      'alpha first',
+      'alpha reply',
+      'second',
+      'alpha again',
+    ]);
+    expect(beta.visibleTranscript.map(message => message.text)).toEqual([
+      'beta first',
+      'beta reply',
+      'second',
+      'beta again',
+    ]);
   });
 
   it('fails loudly when persisted visible messages are malformed', async () => {

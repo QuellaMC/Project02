@@ -366,13 +366,6 @@ function assertIncrementalTerminalRawEvent(
   const unfinished = state.unfinishedToolCallIdsByIdentity.get(identityKey);
   const turnMessageIds = state.messageIdsByIdentity.get(identityKey) ?? [];
 
-  if (turnMessageIds.length !== 0 && turnMessageIds.length !== 2) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'A terminal runtime turn must commit exactly one user/character message pair.',
-    );
-  }
-
   if (record.kind === 'runtime_turn_completed' && (unfinished?.size ?? 0) > 0) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
@@ -607,19 +600,17 @@ export function assertIncrementalConversationAppend(options: {
     messageNumber,
   });
   const expectedIdSuffix = `:message-${String(messageNumber)}`;
-  const expectedRole = messageNumber % 2 === 1 ? 'user' : 'character';
 
   if (
-    (expectedId === undefined
+    expectedId === undefined
       ? !options.record.id.endsWith(expectedIdSuffix)
-      : options.record.id !== expectedId) ||
-    options.record.role !== expectedRole
+      : options.record.id !== expectedId
   ) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
       expectedId === undefined
-        ? 'Restored visible message must have a sequential session message ID and preserve user/character commit order.'
-        : `Restored visible message must have sequential ID "${expectedId}" and preserve user/character commit order.`,
+        ? 'Restored visible message must have a sequential session message ID.'
+        : `Restored visible message must have sequential ID "${expectedId}".`,
     );
   }
 
@@ -1116,7 +1107,6 @@ export function assertDurableRuntimeSessionEvidence(options: {
 
   if (options.mode === 'public') {
     assertRawEventTurnTerminalCompleteness(rawEvents);
-    assertCompleteConversationLog(conversationMessages);
   }
 
   assertRawEventVisibleReferencesMatchConversationMessages({
@@ -1142,24 +1132,12 @@ export function assertDurableRuntimeSessionEvidence(options: {
     ...(identity.userSpeaker === undefined
       ? {}
       : {userDisplayName: identity.userSpeaker.displayName}),
-    allowIncompleteFinalTurn: appendModeAllowsIncompleteConversationTurn({
-      mode: options.mode,
-      messages: conversationMessages,
-      rawEvents,
-    }),
   });
   assertConversationMessagesHaveTerminalRawEvidence({
-    messages: conversationMessages.filter((message, index) =>
+    messages: conversationMessages.filter(message =>
       messageRequiresTerminalRawEvidence({
         mode: options.mode,
         message,
-        isFinalIncompleteAppendMessage:
-          index === conversationMessages.length - 1 &&
-          appendModeAllowsIncompleteConversationTurn({
-            mode: options.mode,
-            messages: conversationMessages,
-            rawEvents,
-          }),
         rawEvents,
       }),
     ),
@@ -1474,7 +1452,6 @@ function assertRestoredConversationInvariants(
   paths: LocalRuntimeSessionPaths,
   messages: readonly ConversationLogRecord[],
   options: {
-    readonly allowIncompleteFinalTurn?: boolean;
     readonly character?: CharacterProfile;
     readonly userDisplayName?: string;
   } = {},
@@ -1490,7 +1467,6 @@ function assertRestoredConversationInvariants(
       // placeholder below can never be consulted by a speaker check.
       character: options.character ?? unboundSessionCharacterPlaceholder,
       visibleTranscript: messages,
-      allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false,
     });
   } catch (error: unknown) {
     if (error instanceof ConversationRehydrationError) {
@@ -1549,23 +1525,6 @@ export function durableRuntimeSessionCharacterProfile(
       boundCharacter,
       allowUnanchoredCustomCharacter: false,
     }) ?? boundCharacter
-  );
-}
-
-function assertCompleteConversationLog(
-  messages: readonly ConversationLogRecord[],
-): void {
-  if (messages.length % 2 === 0) {
-    return;
-  }
-
-  throwIncompleteConversationLog();
-}
-
-function throwIncompleteConversationLog(): never {
-  throw new LocalRuntimeStorageContractError(
-    'malformed_record',
-    'Local runtime conversation log ended before a complete user/character turn.',
   );
 }
 
@@ -1760,43 +1719,18 @@ function assertOpenRawTurnAllowsNextIdentity(options: {
   });
 }
 
-function appendModeAllowsIncompleteConversationTurn(options: {
-  readonly messages: readonly ConversationLogRecord[];
-  readonly mode: RuntimeLogValidationMode;
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): boolean {
-  if (options.mode !== 'appendConversation') {
-    return false;
-  }
-
-  if (options.messages.length % 2 === 0) {
-    return false;
-  }
-
-  const finalMessage = options.messages.at(-1);
-
-  if (finalMessage?.role !== 'user') {
-    return false;
-  }
-
-  return startedRawEventIdentitiesWithoutTerminal(options.rawEvents).has(
-    runtimeEventIdentityKey(finalMessage),
-  );
-}
-
+/**
+ * A committed message needs its turn's terminal raw event, except while
+ * that turn is still open: with commit-as-emitted, any number of already
+ * committed messages of either role may precede the terminal record, and
+ * a crash simply leaves them as truthful history. Public reads still
+ * demand a closed log; append modes tolerate exactly the open turn.
+ */
 function messageRequiresTerminalRawEvidence(options: {
-  readonly isFinalIncompleteAppendMessage: boolean;
   readonly message: ConversationLogRecord;
   readonly mode: RuntimeLogValidationMode;
   readonly rawEvents: readonly RawEventLogRecord[];
 }): boolean {
-  if (
-    options.mode === 'appendConversation' &&
-    options.isFinalIncompleteAppendMessage
-  ) {
-    return false;
-  }
-
   if (options.mode === 'public') {
     return true;
   }
@@ -2090,18 +2024,18 @@ function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
     return;
   }
 
+  // Per-message commits mean an event may reference only character
+  // messages; a turn still commits at most one user message, and where an
+  // event does reference it, the text must be the model's input.
   const userMessages = options.rawEvent.visibleMessageIds
     .map(messageId => options.messagesById.get(messageId))
     .filter((message): message is ConversationLogRecord => {
       return message?.role === 'user';
     });
 
-  const userMessage = userMessages[0];
-
   if (
-    userMessages.length !== 1 ||
-    userMessage === undefined ||
-    userMessage.text !== inputText
+    userMessages.length > 1 ||
+    userMessages.some(message => message.text !== inputText)
   ) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
@@ -2175,13 +2109,6 @@ function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
     ).map(message => message.id);
     const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
 
-    if (expectedMessageIds.length !== 0 && expectedMessageIds.length !== 2) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'A completed runtime turn must commit exactly one user/character message pair.',
-      );
-    }
-
     if (!sameOrderedValues(visibleMessageIds, expectedMessageIds)) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
@@ -2199,9 +2126,9 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
     return;
   }
 
-  const completedTurnEvidence = new Set(
+  const messageCommitEvidence = new Set(
     options.rawEvents
-      .filter(isVisibleMessageTerminalRawEventLogRecord)
+      .filter(record => record.kind === 'visible_message_committed')
       .flatMap(record =>
         (record.visibleMessageIds ?? []).map(messageId =>
           visibleMessageEvidenceKey(record, messageId),
@@ -2211,11 +2138,11 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
 
   for (const message of options.messages) {
     if (
-      !completedTurnEvidence.has(visibleMessageEvidenceKey(message, message.id))
+      !messageCommitEvidence.has(visibleMessageEvidenceKey(message, message.id))
     ) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
-        `Conversation message lacks terminal raw-event evidence: ${message.id}.`,
+        `Conversation message lacks its visible_message_committed raw event: ${message.id}.`,
       );
     }
   }

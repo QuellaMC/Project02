@@ -477,11 +477,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       throw new Error('Expected text-only turn to complete.');
     }
 
-    const optionalTurn: typeof result.turn = undefined;
-
-    expect(optionalTurn).toBeUndefined();
-    expect(result).not.toHaveProperty('turn');
-    expect(logStore.conversationMessages()).toEqual([]);
+    // The user's message is history the moment it is accepted, even when
+    // the model folds its answer into non-committed text: nothing the
+    // user said disappears because the turn produced no visible reply.
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user']);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
       parsedRoleModelDecisionSnapshot: {
@@ -496,7 +497,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
         },
       },
     });
-    expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toBeUndefined();
+    expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toEqual([
+      'local-session:message-1',
+    ]);
   });
 
   it('commits multi-line final visible replies', async () => {
@@ -702,7 +705,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
   });
 
-  it('removes a durable user row when paired character append fails', async () => {
+  it('keeps the accepted user row and rejects the turn when a character append fails', async () => {
     const storeRoot = createTestTempRoot('project02-log-store-');
     const sessionId = 'session-character-append-fails';
     await createLocalRuntimeSessionStore({
@@ -752,8 +755,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId,
     });
 
-    expect(session.visibleTranscript).toEqual([]);
-    expect(reopenedLogStore.conversationMessages()).toEqual([]);
+    // Commit-as-emitted: the user's accepted message is already history,
+    // so only the failed character append rolls back. The rejected turn
+    // closes around the kept user row.
+    expect(session.visibleTranscript.map(message => message.role)).toEqual([
+      'user',
+    ]);
+    expect(
+      reopenedLogStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user']);
     expect(reopenedLogStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
       status: 'rejected',
@@ -1020,13 +1030,13 @@ describe('plugin-driven tool loop commit and rollback', () => {
       characterId: testCharacterProfile.id,
     });
 
-    expect(result).toMatchObject({
-      status: 'completed',
-      turn: {
-        reply: {
-          text: 'the completed reply survives trace reconciliation',
-        },
-      },
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected a completed runtime turn.');
+    }
+    expect(result.conversationMessages.at(-1)).toMatchObject({
+      role: 'character',
+      text: 'the completed reply survives trace reconciliation',
     });
     expect(result).not.toHaveProperty('postCommitFailures');
     expect(
@@ -1295,8 +1305,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
         .map(event => event.kind),
     ).toEqual(['runtime_turn_rejected']);
     expect(
-      rawEvents.find(event => event.kind === 'visible_reply_committed')
-        ?.visibleMessageIds,
+      rawEvents
+        .filter(event => event.kind === 'visible_message_committed')
+        .flatMap(event => event.visibleMessageIds ?? []),
     ).toEqual(visibleMessageIds);
     expect(rawEvents.at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',

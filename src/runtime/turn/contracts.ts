@@ -1,7 +1,4 @@
 import {
-  type CharacterAgent,
-  type CharacterTurnOptions,
-  type CharacterTurnResult,
   type ConversationSession,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
@@ -54,11 +51,10 @@ export type RunLocalUserMessageEventOptions = {
   readonly session: ConversationSession;
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
-  readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly maxToolRounds?: number;
+  readonly recentMessageLimit?: number;
   readonly pluginHost: RuntimePluginHost;
-  readonly characterTurnOptions?: CharacterTurnOptions;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
   readonly committedAt?: string;
@@ -70,7 +66,6 @@ export type RunLocalUserMessageEventOptions = {
 export type LocalRuntimeTurnProgressEvent =
   | {
       readonly kind: 'visible_reply';
-      readonly final: boolean;
       readonly text: string;
     }
   | {
@@ -88,7 +83,6 @@ export type LocalRuntimeTurnProgressEvent =
 export type LocalRuntimeUserMessageCompletedResult = {
   readonly status: 'completed';
   readonly event: UserMessageRuntimeEvent;
-  readonly turn?: CharacterTurnResult;
   readonly conversationMessages: readonly ConversationLogRecord[];
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
@@ -172,12 +166,10 @@ export type RuntimeTurnState = {
     string,
     PreparedRuntimePluginConfigEffect
   >;
-  userConversationMessage: ConversationLogRecord | undefined;
 };
 
 export type AppendVisibleReplyOptions = {
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
-  readonly final: boolean;
   readonly roleModelIOSnapshot: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly text: string;

@@ -483,13 +483,20 @@ describe('plugin-driven Character State tool loop', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
+      // No feedback budget left after the tool round: the empty reply
+      // must reject the turn rather than earn a correction round.
+      maxToolRounds: 1,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
       reason: 'invalid_visible_reply',
     });
-    expect(logStore.conversationMessages()).toEqual([]);
+    // The accepted user message stays history; only the staged plugin
+    // effects of the rejected turn are discarded.
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user']);
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
     expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
   });

@@ -332,7 +332,7 @@ describe('chat CLI trace summary', () => {
         stderr += chunk;
       }),
       traceMode: true,
-      logStore: createToolTraceFailingLogStore('interim_visible_reply_emitted'),
+      logStore: createToolTraceFailingLogStore('visible_message_committed'),
       roleModelAdapter: {
         invoke() {
           return {
@@ -400,7 +400,7 @@ describe('chat CLI trace summary', () => {
         character: testCharacterProfile,
       }),
       logStore: createToolTraceFailingLogStore(
-        'visible_reply_committed',
+        'visible_message_committed',
         backingLogStore,
       ),
       roleModelAdapter: {
@@ -441,7 +441,7 @@ describe('chat CLI trace summary', () => {
     ).toEqual(['hello', 'Final reply before trace failure.']);
     expect(reopenedLogStore.rawEvents().map(event => event.kind)).toEqual(
       expect.arrayContaining([
-        'visible_reply_committed',
+        'visible_message_committed',
         'runtime_turn_rejected',
       ]),
     );
@@ -2982,12 +2982,13 @@ function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
 
 function createToolTraceFailingLogStore(
   failingStep:
-    | 'interim_visible_reply_emitted'
-    | 'tool_call_started'
-    | 'tool_call_finished'
-    | 'visible_reply_committed',
+    'visible_message_committed' | 'tool_call_started' | 'tool_call_finished',
   logStore: RuntimeLogStore = createRuntimeLogStore(),
 ): RuntimeLogStore {
+  // The user-message commit also traces visible_message_committed; these
+  // scenarios target a model-reply commit, so the first occurrence passes.
+  let visibleCommitTraces = 0;
+
   return Object.freeze({
     ...(logStore.localRuntimeSessionPaths === undefined
       ? {}
@@ -3000,7 +3001,14 @@ function createToolTraceFailingLogStore(
         }),
     appendTrace(entry) {
       if (entry.step === failingStep) {
-        throw new Error(`${failingStep} trace append failed`);
+        if (
+          failingStep !== 'visible_message_committed' ||
+          visibleCommitTraces > 0
+        ) {
+          throw new Error(`${failingStep} trace append failed`);
+        }
+
+        visibleCommitTraces += 1;
       }
 
       return logStore.appendTrace(entry);

@@ -67,17 +67,6 @@ export type RejectedRoleModelLoopResult = {
 export type RoleModelLoopResult =
   AcceptedRoleModelLoopResult | RejectedRoleModelLoopResult;
 
-export type RoleModelLoopExecutionResult =
-  | {
-      readonly status: 'accepted';
-      readonly publicResult: AcceptedRoleModelLoopResult;
-      readonly visibleReplyText?: string;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly publicResult: RejectedRoleModelLoopResult;
-    };
-
 export type RoleModelLoopState = {
   readonly rounds: RoleModelLoopRound[];
   readonly allPluginToolResults: RoleModelPluginToolRoutingEvidence[];
@@ -159,7 +148,7 @@ export function appendRejectedRoleModelLoopRound(options: {
   readonly state: RoleModelLoopState;
   readonly invokedRound: RejectedRoundView;
   readonly round: number;
-}): RoleModelLoopExecutionResult {
+}): RejectedRoleModelLoopResult {
   const loopRound = createRoleModelLoopRound({
     pluginToolResults: [],
     inputEnvelope: options.invokedRound.inputEnvelope,
@@ -170,15 +159,12 @@ export function appendRejectedRoleModelLoopRound(options: {
 
   options.state.rounds.push(loopRound);
 
-  return Object.freeze({
-    status: 'rejected',
-    publicResult: createRejectedRoleModelLoopResult({
-      pluginToolResults: options.state.allPluginToolResults,
-      inputEnvelope: options.invokedRound.inputEnvelope,
-      ioSnapshot: options.invokedRound.ioSnapshot,
-      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
-      rounds: options.state.rounds,
-    }),
+  return createRejectedRoleModelLoopResult({
+    pluginToolResults: options.state.allPluginToolResults,
+    inputEnvelope: options.invokedRound.inputEnvelope,
+    ioSnapshot: options.invokedRound.ioSnapshot,
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    rounds: options.state.rounds,
   });
 }
 
@@ -204,7 +190,7 @@ export function handleRejectedRoleModelLoopRound(options: {
   readonly invokedRound: RejectedRoundView;
   readonly round: number;
   readonly maxToolRounds: number;
-}): RoleModelLoopExecutionResult | undefined {
+}): RejectedRoleModelLoopResult | undefined {
   const rejection = options.invokedRound.decisionResult.rejection;
 
   if (
@@ -257,8 +243,18 @@ export function terminalRoleModelLoopResult(options: {
   readonly sessionId: string;
   readonly round: number;
   readonly maxToolRounds: number;
-}): RoleModelLoopExecutionResult | 'continue' | undefined {
-  if (options.invokedRound.executableToolCalls.length === 0) {
+}): RoleModelLoopResult | 'continue' | undefined {
+  const isTerminalRound = options.invokedRound.executableToolCalls.length === 0;
+  const gate = visibleReplyGateRejection(
+    options.invokedRound.decisionResult,
+    isTerminalRound,
+  );
+
+  if (gate !== undefined) {
+    return rejectOrFeedbackRound(options, gate);
+  }
+
+  if (isTerminalRound) {
     return terminalAcceptedRoleModelLoopResult(options);
   }
 
@@ -266,9 +262,58 @@ export function terminalRoleModelLoopResult(options: {
     return undefined;
   }
 
+  return rejectWithReason(options, {
+    reason: roleModelPluginToolRejectedRejectionReason,
+    details: `Role model exceeded maximum executable tool rounds (${String(options.maxToolRounds)}).`,
+  });
+}
+
+function rejectOrFeedbackRound(
+  options: {
+    readonly state: RoleModelLoopState;
+    readonly invokedRound: AcceptedRoundView;
+    readonly identity: RuntimeEventIdentity;
+    readonly sessionId: string;
+    readonly round: number;
+    readonly maxToolRounds: number;
+  },
+  gate: {
+    readonly reason: RoleModelDecisionRejectionReason;
+    readonly details: string;
+  },
+): RoleModelLoopResult | 'continue' {
+  if (options.state.toolRounds < options.maxToolRounds) {
+    recordDecisionErrorFeedbackRound({
+      state: options.state,
+      round: options.round,
+      inputEnvelope: options.invokedRound.inputEnvelope,
+      ioSnapshot: options.invokedRound.ioSnapshot,
+      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+      note: `Your previous response was rejected: ${gate.details} Respond again following the tool protocol.`,
+    });
+
+    return 'continue';
+  }
+
+  return rejectWithReason(options, gate);
+}
+
+function rejectWithReason(
+  options: {
+    readonly state: RoleModelLoopState;
+    readonly invokedRound: AcceptedRoundView;
+    readonly identity: RuntimeEventIdentity;
+    readonly sessionId: string;
+    readonly round: number;
+  },
+  gate: {
+    readonly reason: RoleModelDecisionRejectionReason;
+    readonly details: string;
+  },
+): RejectedRoleModelLoopResult {
   const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
-    roleModelPluginToolRejectedRejectionReason,
-    `Role model exceeded maximum executable tool rounds (${String(options.maxToolRounds)}).`,
+    gate.reason,
+    gate.details,
   );
   const rejectedParsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
     ...options.identity,
@@ -291,52 +336,8 @@ export function terminalRoleModelLoopResult(options: {
 function terminalAcceptedRoleModelLoopResult(options: {
   readonly state: RoleModelLoopState;
   readonly invokedRound: AcceptedRoundView;
-  readonly identity: RuntimeEventIdentity;
-  readonly sessionId: string;
   readonly round: number;
-  readonly maxToolRounds: number;
-}): RoleModelLoopExecutionResult | 'continue' {
-  const commitGate = terminalCommitGateRejection(
-    options.invokedRound.decisionResult,
-  );
-
-  if (commitGate !== undefined) {
-    if (options.state.toolRounds < options.maxToolRounds) {
-      recordDecisionErrorFeedbackRound({
-        state: options.state,
-        round: options.round,
-        inputEnvelope: options.invokedRound.inputEnvelope,
-        ioSnapshot: options.invokedRound.ioSnapshot,
-        parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
-        note: `Your previous response was rejected: ${commitGate.details} Respond again following the tool protocol.`,
-      });
-
-      return 'continue';
-    }
-
-    const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
-      commitGate.reason,
-      commitGate.details,
-    );
-    const rejectedParsedDecisionSnapshot =
-      createParsedRoleModelDecisionSnapshot({
-        ...options.identity,
-        sessionId: options.sessionId,
-        result: rejectedDecisionResult,
-      });
-
-    return appendRejectedRoleModelLoopRound({
-      state: options.state,
-      invokedRound: {
-        decisionResult: rejectedDecisionResult,
-        inputEnvelope: options.invokedRound.inputEnvelope,
-        ioSnapshot: options.invokedRound.ioSnapshot,
-        parsedDecisionSnapshot: rejectedParsedDecisionSnapshot,
-      },
-      round: options.round,
-    });
-  }
-
+}): AcceptedRoleModelLoopResult {
   const loopRound = createRoleModelLoopRound({
     pluginToolResults: [],
     inputEnvelope: options.invokedRound.inputEnvelope,
@@ -356,10 +357,7 @@ function terminalAcceptedRoleModelLoopResult(options: {
     );
   }
 
-  const visibleReplyText = executionVisibleReplyText(
-    options.invokedRound.decisionResult.decision,
-  );
-  const publicResult = Object.freeze({
+  return Object.freeze({
     status: 'accepted',
     inputEnvelope: options.invokedRound.inputEnvelope,
     ioSnapshot: options.invokedRound.ioSnapshot,
@@ -369,22 +367,18 @@ function terminalAcceptedRoleModelLoopResult(options: {
     pluginToolResults: Object.freeze([...options.state.allPluginToolResults]),
     rounds: Object.freeze([...options.state.rounds]),
   } satisfies AcceptedRoleModelLoopResult);
-
-  return Object.freeze({
-    status: 'accepted',
-    publicResult,
-    ...(visibleReplyText === undefined ? {} : {visibleReplyText}),
-  });
 }
 
 /**
- * Pre-validates the commit semantics of a terminal decision: it must carry
- * either a visible reply that survives text normalization or non-committed
- * text. Failures here would otherwise surface only at turn commit, past the
- * point where the model could react.
+ * One gate for every accepted round: a decision that speaks must speak
+ * validly (visible_reply text survives normalization), and a terminal
+ * decision must produce something (a visible reply or non-committed text).
+ * Failures here reach the model as a feedback round while budget remains,
+ * so invalid text is corrected before anything is shown or committed.
  */
-function terminalCommitGateRejection(
+function visibleReplyGateRejection(
   decisionResult: AcceptedRoleModelDecisionResult,
+  isTerminalRound: boolean,
 ):
   | {
       readonly reason: RoleModelDecisionRejectionReason;
@@ -394,7 +388,7 @@ function terminalCommitGateRejection(
   const visibleReply = getVisibleReplyToolCall(decisionResult.decision);
 
   if (visibleReply === undefined) {
-    return decisionResult.nonCommittedText === undefined
+    return isTerminalRound && decisionResult.nonCommittedText === undefined
       ? {
           reason: roleModelMalformedOutputRejectionReason,
           details: roleModelTerminalEmptyOutputRejectionDetails,

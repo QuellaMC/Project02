@@ -39,6 +39,8 @@ export {
   type UserMessageRuntimeEventPayload,
 } from './message/event.ts';
 export {
+  appendCharacterMessage,
+  appendUserMessage,
   CharacterInputError,
   CharacterReplyValidationError,
   ConversationRehydrationError,
@@ -47,8 +49,7 @@ export {
   defaultRecentVisibleMessageLimit,
   localUserSpeaker,
   normalizeCharacterAgentReply,
-  rollbackLastCharacterTurn,
-  runCharacterTurn,
+  rollbackLastMessage,
   selectRecentVisibleMessages,
   validateCharacterAgentReply,
   validateConversationParticipants,
@@ -56,8 +57,6 @@ export {
   type CharacterAgent,
   type CharacterAgentInput,
   type CharacterAgentReply,
-  type CharacterTurnOptions,
-  type CharacterTurnResult,
   type ConversationSession,
   type ConversationSessionOptions,
   type RestoredVisibleTranscriptValidationOptions,

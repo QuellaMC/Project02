@@ -862,7 +862,7 @@ describe('file runtime log store plugin tool event validation', () => {
     writeFileSync(
       createLocalRuntimeStorageLayout({storeRoot}).schemaPath,
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 5,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-06-15T00:00:00.000Z',
@@ -1181,7 +1181,7 @@ describe('file runtime log store plugin tool event validation', () => {
       appendRawEvent(record) {
         if (
           !failedVisibleReplyAppend &&
-          record.kind === 'visible_reply_committed'
+          record.kind === 'visible_message_committed'
         ) {
           failedVisibleReplyAppend = true;
           throw appendFailure;
@@ -1297,7 +1297,11 @@ describe('file runtime log store plugin tool event validation', () => {
       reason: 'plugin_health_rejected',
       message: 'Plugin health unavailable: health fixture offline',
     });
-    expect(logStore.conversationMessages()).toEqual([]);
+    // Health gates run after delivery: they reject the turn and stop
+    // future messages, but never un-say text the user already saw.
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user', 'character']);
 
     const rawEvents = logStore.rawEvents();
     const commitRejection = rawEvents.find(
@@ -1382,7 +1386,11 @@ describe('file runtime log store plugin tool event validation', () => {
       reason: 'plugin_health_rejected',
       message: 'Plugin health degraded: health fixture backpressure',
     });
-    expect(logStore.conversationMessages()).toEqual([]);
+    // Health gates run after delivery: they reject the turn and stop
+    // future messages, but never un-say text the user already saw.
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user', 'character']);
 
     const rawEvents = logStore.rawEvents();
     const commitRejection = rawEvents.find(

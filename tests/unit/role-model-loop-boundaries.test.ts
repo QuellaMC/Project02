@@ -84,7 +84,8 @@ describe('role-model loop evidence and boundary validation', () => {
         };
       },
     });
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('update config', eventId),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -180,7 +181,8 @@ describe('role-model loop evidence and boundary validation', () => {
         };
       },
     });
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_native_argument_secret'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -206,7 +208,8 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('preserves credential-bearing tool input for host dispatch while redacting loop evidence', async () => {
     let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_secret_tool_input'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -260,7 +263,11 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('keeps execution reply text explicit and constructs public evidence independently', async () => {
+    const deliveredReplyTexts: string[] = [];
     const executionResult = await runRoleModelLoop({
+      onVisibleReply: event => {
+        deliveredReplyTexts.push(event.text);
+      },
       event: createTestEvent('reply safely', 'evt_execution_reply_boundary'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -284,12 +291,10 @@ describe('role-model loop evidence and boundary validation', () => {
       throw new Error('Expected an accepted role-model loop result.');
     }
 
-    const publicResult = executionResult.publicResult;
+    const publicResult = executionResult;
     const clonedPublicResult = structuredClone(publicResult);
 
-    expect(executionResult.visibleReplyText).toBe(
-      'api_key=execution-reply-secret',
-    );
+    expect(deliveredReplyTexts).toEqual(['api_key=execution-reply-secret']);
     expect(clonedPublicResult).toEqual(publicResult);
     expect(JSON.stringify(publicResult)).not.toContain(
       'execution-reply-secret',
@@ -343,7 +348,8 @@ describe('role-model loop evidence and boundary validation', () => {
         },
       });
 
-      const {publicResult: result} = await runRoleModelLoop({
+      const result = await runRoleModelLoop({
+        onVisibleReply: () => {},
         event: createTestEvent(
           'search memory',
           `evt_accepted_${evidenceStatus}_evidence_plugin_tool`,
@@ -415,7 +421,8 @@ describe('role-model loop evidence and boundary validation', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -465,7 +472,8 @@ describe('role-model loop evidence and boundary validation', () => {
       enabledPluginIds: [plugin.manifest.id],
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -545,7 +553,8 @@ describe('role-model loop evidence and boundary validation', () => {
         },
       });
 
-      const {publicResult: result} = await runRoleModelLoop({
+      const result = await runRoleModelLoop({
+        onVisibleReply: () => {},
         event: createTestEvent('search memory', eventId),
         decisionContext: createTestDecisionContext(),
         adapter,
@@ -669,7 +678,8 @@ describe('role-model loop evidence and boundary validation', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_custom_host_secret_output'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -780,7 +790,8 @@ describe('role-model loop evidence and boundary validation', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_custom_host_secret_reject'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -826,7 +837,8 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('rejects custom-host evidence that does not match the routed call identity', async () => {
     const eventId = 'evt_custom_host_evidence_identity';
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -892,7 +904,8 @@ describe('role-model loop evidence and boundary validation', () => {
       redactionLabels: [],
     } satisfies RuntimePluginEvidenceSnapshot;
     Reflect.deleteProperty(malformedEvidence, 'kind');
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -968,7 +981,8 @@ describe('role-model loop evidence and boundary validation', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -1022,7 +1036,8 @@ describe('role-model loop evidence and boundary validation', () => {
       ],
       () => undefined,
     );
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_sequential_required_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -1079,7 +1094,8 @@ describe('role-model loop evidence and boundary validation', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_repeated_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -1124,7 +1140,8 @@ describe('role-model loop evidence and boundary validation', () => {
       ],
       () => undefined,
     );
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_rejected_attempt_limit'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -1147,7 +1164,8 @@ describe('role-model loop evidence and boundary validation', () => {
     'counts %s host attempts before rejecting a retry',
     async failureMode => {
       let hostCalls = 0;
-      const {publicResult: result} = await runRoleModelLoop({
+      const result = await runRoleModelLoop({
+        onVisibleReply: () => {},
         event: createTestEvent(
           'search memory',
           `evt_${failureMode}_attempt_limit`,
@@ -1210,7 +1228,8 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('dispatches an over-capacity batch up to its limit and rejects the overflow members', async () => {
     let hostCalls = 0;
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_batch_attempt_limit'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1254,7 +1273,8 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('returns an undeclared executable call to the model as a rejected observation', async () => {
     let handledCalls = 0;
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_undeclared_feedback'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1292,7 +1312,8 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('rejects a declared tool outside allowedTools as not declared for the turn', async () => {
     let handledCalls = 0;
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_narrowed_allowlist'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1358,7 +1379,8 @@ describe('role-model loop evidence and boundary validation', () => {
       },
     } satisfies RoleModelAdapter);
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_missing_required_feedback'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -1385,7 +1407,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('sends a correction note for duplicate visible_reply calls', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('reply twice', 'evt_duplicate_reply_feedback'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1416,7 +1439,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('sends a correction note when visible_reply text normalizes to empty', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('reply blank', 'evt_blank_reply_feedback'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1446,7 +1470,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('keeps the terminal rejection when no round budget remains for feedback', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_feedback_budget_exhausted'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1479,7 +1504,8 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('rejects the turn when the model persists past its call limits for maxToolRounds', async () => {
     let hostCalls = 0;
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_persistent_attempt_limit'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -1521,6 +1547,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {
     const executionResult = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_empty_tool_calls'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1534,10 +1561,9 @@ describe('role-model loop evidence and boundary validation', () => {
       ),
       maxToolRounds: 0,
     });
-    const result = executionResult.publicResult;
+    const result = executionResult;
 
     expect(executionResult.status).toBe('rejected');
-    expect(executionResult).not.toHaveProperty('visibleReplyText');
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
@@ -1577,7 +1603,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('redacts adapter-supplied provider endpoints before IO snapshots expose them', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_provider_endpoint_redaction'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1614,7 +1641,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_request'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1641,7 +1669,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('rejects non-finite provider response metadata before snapshots can serialize it', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_response'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1667,7 +1696,8 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1724,7 +1754,8 @@ describe('role-model loop evidence and boundary validation', () => {
   ])(
     'rejects provider exchange tool schemas with %s',
     async (_case, required) => {
-      const {publicResult: result} = await runRoleModelLoop({
+      const result = await runRoleModelLoop({
+        onVisibleReply: () => {},
         event: createTestEvent('hello', `evt_bad_schema_${required.join('_')}`),
         decisionContext: createTestDecisionContext(),
         pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1778,7 +1809,8 @@ describe('role-model loop evidence and boundary validation', () => {
   );
 
   it('accepts a nested provider schema with an empty required array', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_valid_nested_empty_required'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
@@ -1833,7 +1865,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
 function executionResultVisibleReply(
   result: Extract<
-    Awaited<ReturnType<typeof runRoleModelLoop>>['publicResult'],
+    Awaited<ReturnType<typeof runRoleModelLoop>>,
     {status: 'accepted'}
   >,
 ): string | undefined {

@@ -1,3 +1,4 @@
+import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import * as fs from 'node:fs';
 
@@ -378,7 +379,9 @@ async function runTurn(
     session,
     logStore,
     pluginHost: createRuntimePluginHost({plugins: []}),
-    agent: {reply: () => ({text: `reply ${String(turn)}`})},
+    roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+      reply: () => ({text: `reply ${String(turn)}`}),
+    }),
   });
 }
 

@@ -6,7 +6,11 @@ export const defaultProject02HomeRoot = '.project02';
 
 export const defaultLocalRuntimeSessionId = 'local-session';
 
-export const localRuntimeStorageSchemaVersion = 4;
+// v5: the conversation log became per-message (commit-as-emitted) — role is
+// a recorded fact, turns may hold any number of visible messages, and each
+// message anchors to its own visible_message_committed raw event. v4 stores
+// were written under the strict user/character pair rule and fail closed.
+export const localRuntimeStorageSchemaVersion = 5;
 
 export type LocalRuntimeReadableStorageSchemaVersion =
   typeof localRuntimeStorageSchemaVersion;
@@ -429,7 +433,11 @@ export function decodeStorageSchemaMarker(
   if (!isLocalRuntimeReadableStorageSchemaVersion(schemaVersion)) {
     throw new LocalRuntimeStorageContractError(
       'unsupported_schema_version',
-      `Unsupported local runtime storage schema version: ${String(schemaVersion)}.`,
+      `This store uses storage schema version ${String(schemaVersion)}, but this ` +
+        `version of Project02 reads only version ${String(localRuntimeStorageSchemaVersion)}. ` +
+        'To keep this store, run the Project02 version that created it; to ' +
+        'continue here, choose a different store directory or delete this one ' +
+        'and start fresh.',
     );
   }
 

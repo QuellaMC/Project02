@@ -466,7 +466,8 @@ describe('NVIDIA role-model provider', () => {
       requiresConfirmation: false,
       sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition);
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent(
         'use the supplied credential',
         'evt_nvidia_authoritative_arguments',
@@ -637,7 +638,8 @@ describe('NVIDIA role-model provider', () => {
     expect(serializedOutput).not.toContain('user:pass');
     expect(serializedOutput).not.toContain('endpoint-secret');
 
-    const {publicResult: loopResult} = await runRoleModelLoop({
+    const loopResult = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: inputEnvelope.event,
       decisionContext: inputEnvelope.decisionContext,
       pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,

@@ -84,7 +84,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     );
   });
 
-  it('shows interim visible_reply before executable tools without committing it', async () => {
+  it('commits interim visible_reply durably before executable tools run', async () => {
     const sessionId = 'session-interim-visible-reload';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
     await createLocalRuntimeSessionStore({
@@ -151,13 +151,18 @@ describe('plugin-driven tool loop progress and evidence', () => {
       storeRoot,
       sessionId,
     });
+    // Every visible reply is history the moment the user sees it: the
+    // interim text commits durably before the tool round runs, in order.
     expect(
       reloadedLogStore.conversationMessages().map(message => message.text),
-    ).toEqual(['needs tool', 'finished']);
+    ).toEqual([
+      'needs tool',
+      'Authorization: Bearer interim-secret',
+      'finished',
+    ]);
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
-        final: false,
         text: 'Authorization: Bearer interim-secret',
       },
       {
@@ -173,35 +178,24 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
       {
         kind: 'visible_reply',
-        final: true,
         text: 'finished',
       },
     ]);
     const reloadedRawEvents = reloadedLogStore.rawEvents();
-    const serializedEvidence = JSON.stringify({
-      rawEvents: reloadedRawEvents,
-      traceEntries: reloadedLogStore.traceEntries(),
-    });
 
-    expect(serializedEvidence).toContain('Authorization: [redacted]');
-    expect(serializedEvidence).not.toContain('interim-secret');
-    const interimEvent = reloadedRawEvents.find(
-      event => event.kind === 'interim_visible_reply_emitted',
-    );
-    expect(interimEvent).toMatchObject({
-      kind: 'interim_visible_reply_emitted',
-    });
-    expect(interimEvent).not.toHaveProperty('visibleMessageIds');
-    expect(interimEvent).not.toHaveProperty('commitValidation');
     expect(
       reloadedRawEvents
-        .filter(event => event.kind === 'visible_reply_committed')
+        .filter(event => event.kind === 'visible_message_committed')
         .map(event => event.visibleMessageIds),
-    ).toEqual([[`${sessionId}:message-1`, `${sessionId}:message-2`]]);
+    ).toEqual([
+      [`${sessionId}:message-1`],
+      [`${sessionId}:message-2`],
+      [`${sessionId}:message-3`],
+    ]);
     expect(
       reloadedLogStore
         .traceEntries()
-        .some(entry => entry.step === 'interim_visible_reply_emitted'),
+        .some(entry => entry.step === 'visible_message_committed'),
     ).toBe(true);
   });
 
@@ -248,7 +242,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
       onProgress(event) {
         progress.push(event);
 
-        if (event.kind === 'visible_reply' && !event.final) {
+        if (event.kind === 'visible_reply' && event.text === 'checking') {
           throw new Error('interim progress observer failed');
         }
       },
@@ -257,11 +251,10 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(result.status).toBe('completed');
     expect(
       logStore.conversationMessages().map(message => message.text),
-    ).toEqual(['needs tool', 'finished']);
+    ).toEqual(['needs tool', 'checking', 'finished']);
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
-        final: false,
         text: 'checking',
       },
       {
@@ -277,7 +270,6 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
       {
         kind: 'visible_reply',
-        final: true,
         text: 'finished',
       },
     ]);
@@ -286,6 +278,73 @@ describe('plugin-driven tool loop progress and evidence', () => {
         .rawEvents()
         .some(event => event.kind === 'runtime_turn_rejected'),
     ).toBe(false);
+  });
+
+  it('feeds prior interim replies back through the next turn model context', async () => {
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRuntimeLogStore();
+    const firstTurn = await runLocalUserMessageEvent({
+      event: createTestEvent('needs tool', 'evt_interim_context_first'),
+      session,
+      logStore,
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {text: 'checking'},
+            },
+            {
+              name: 'character_state.patch',
+              input: {energy: 'high'},
+            },
+          ],
+        },
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {text: 'finished'},
+            },
+          ],
+        },
+      ]),
+    });
+
+    expect(firstTurn.status).toBe('completed');
+
+    let observedRecentTexts: readonly string[] = [];
+    const secondTurn = await runLocalUserMessageEvent({
+      event: createTestEvent('and now?', 'evt_interim_context_second'),
+      session,
+      logStore,
+      roleModelAdapter: Object.freeze({
+        invoke(inputEnvelope) {
+          observedRecentTexts =
+            inputEnvelope.decisionContext.recentVisibleMessages.map(
+              message => message.text,
+            );
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {
+                  name: 'visible_reply',
+                  input: {text: 'context noted'},
+                },
+              ],
+            }),
+          };
+        },
+      }),
+    });
+
+    expect(secondTurn.status).toBe('completed');
+    // The model's memory equals what the user saw: interim replies are
+    // part of the prior conversation it reads back, not lost progress
+    // text. The current user message rides the event payload instead.
+    expect(observedRecentTexts).toEqual(['needs tool', 'checking', 'finished']);
   });
 
   it('keeps durable final visible_reply committed when progress callback fails', async () => {
@@ -311,7 +370,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
       logStore,
       roleModelAdapter: adapter,
       onProgress(event) {
-        if (event.kind === 'visible_reply' && event.final) {
+        if (event.kind === 'visible_reply') {
           throw new Error('final progress observer failed');
         }
       },
@@ -388,7 +447,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toEqual(['runtime_turn_completed', 'runtime_turn_completed']);
   });
 
-  it('preserves role-model evidence when interim visible_reply is invalid', async () => {
+  it('gives the model a feedback round when an interim visible_reply is invalid', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
@@ -432,78 +491,22 @@ describe('plugin-driven tool loop progress and evidence', () => {
       roleModelAdapter: adapter,
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: roleModelInvalidVisibleReplyRejectionReason,
-    });
-    expect(logStore.conversationMessages()).toEqual([]);
+    // One gate for every round: an empty visible_reply is a correctable
+    // model error, so the loop burns a feedback round instead of rejecting
+    // the turn. Nothing invalid is shown or committed, the round's tools
+    // do not run, and the corrected second decision completes the turn.
+    expect(result.status).toBe('completed');
     expect(
-      logStore
-        .rawEvents()
-        .some(event => event.kind === 'visible_reply_committed'),
-    ).toBe(false);
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['needs invalid interim', 'finished']);
     expect(
       logStore.rawEvents().some(event => event.kind === 'tool_call_started'),
     ).toBe(false);
-
-    const rejectionEvents = logStore
-      .rawEvents()
-      .filter(
-        event =>
-          event.kind === 'commit_validation_rejected' ||
-          event.kind === 'runtime_turn_rejected',
-      );
-
-    expect(rejectionEvents).toHaveLength(2);
-
-    for (const event of rejectionEvents) {
-      expect(event).toMatchObject({
-        reason: roleModelInvalidVisibleReplyRejectionReason,
-        roleModelIOSnapshot: {
-          inputEnvelope: {
-            event: {
-              payload: {
-                currentUserMessage: 'needs invalid interim',
-              },
-            },
-          },
-        },
-        parsedRoleModelDecisionSnapshot: {
-          result: {
-            status: 'accepted',
-            decision: {
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {
-                    text: '   ',
-                  },
-                },
-                {
-                  name: 'character_state.patch',
-                  input: {
-                    mood: 'curious',
-                  },
-                },
-              ],
-            },
-          },
-        },
-        commitValidation: {
-          sessionId: 'local-session',
-          result: {
-            status: 'rejected',
-            rejection: {
-              reason: roleModelInvalidVisibleReplyRejectionReason,
-              details: 'Character agent returned an empty reply.',
-            },
-          },
-        },
-      });
-      expect(event.roleModelIOSnapshot?.rawOutputText).toContain(
-        '"visible_reply"',
-      );
-    }
+    expect(
+      logStore
+        .rawEvents()
+        .some(event => event.kind === 'runtime_turn_rejected'),
+    ).toBe(false);
   });
 
   it('preserves prior tool evidence when a later interim visible_reply is invalid', async () => {
