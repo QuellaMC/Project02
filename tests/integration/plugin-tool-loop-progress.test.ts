@@ -199,7 +199,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toBe(true);
   });
 
-  it('continues after interim visible_reply progress callback failures', async () => {
+  it('ends the turn loudly when interim visible_reply delivery fails', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
@@ -248,36 +248,31 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
     });
 
-    expect(result.status).toBe('completed');
+    // The visible_reply progress event is the only delivery path, so its
+    // failure is failed delivery: no further model rounds run into a
+    // broken display, the turn ends rejected, and the message names both
+    // the failure and the fact that the reply is saved.
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'visible_reply_delivery_failed',
+      message:
+        'Displaying the reply failed: interim progress observer failed ' +
+        'The reply was saved to the conversation history.',
+    });
     expect(
       logStore.conversationMessages().map(message => message.text),
-    ).toEqual(['needs tool', 'checking', 'finished']);
+    ).toEqual(['needs tool', 'checking']);
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
         text: 'checking',
       },
-      {
-        kind: 'tool_calls_requested',
-        round: 1,
-        toolNames: ['character_state.patch'],
-      },
-      {
-        kind: 'tool_call_completed',
-        round: 1,
-        status: 'accepted',
-        toolName: 'character_state.patch',
-      },
-      {
-        kind: 'visible_reply',
-        text: 'finished',
-      },
     ]);
-    expect(
-      logStore
-        .rawEvents()
-        .some(event => event.kind === 'runtime_turn_rejected'),
-    ).toBe(false);
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      visibleMessageIds: ['local-session:message-1', 'local-session:message-2'],
+    });
   });
 
   it('feeds prior interim replies back through the next turn model context', async () => {
@@ -347,7 +342,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(observedRecentTexts).toEqual(['needs tool', 'checking', 'finished']);
   });
 
-  it('keeps durable final visible_reply committed when progress callback fails', async () => {
+  it('keeps the durable reply and rejects the turn when final delivery fails', async () => {
     const sessionId = 'session-final-progress-fails';
     const {session, logStore, storeRoot} =
       await createDurableCharacterStateHarness(sessionId);
@@ -376,16 +371,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
     });
 
-    expect(result.status).toBe('completed');
-    expect(result.rawEvent).toMatchObject({
-      kind: 'runtime_turn_completed',
-      status: 'completed',
+    // Failed delivery of the final reply rejects the turn: the reply is
+    // durable history the user can recover, but the runtime does not
+    // claim a completion the user never saw.
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'visible_reply_delivery_failed',
     });
-    expect(
-      logStore
-        .rawEvents()
-        .some(event => event.kind === 'runtime_turn_rejected'),
-    ).toBe(false);
 
     const reopenedLogStore = createFileRuntimeLogStore({
       boundCharacter: testCharacterProfile,
@@ -406,7 +398,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
             event.kind === 'runtime_turn_rejected',
         )
         .map(event => event.kind),
-    ).toEqual(['runtime_turn_completed']);
+    ).toEqual(['runtime_turn_rejected']);
 
     const restoredSession = createConversationSession({
       character: testCharacterProfile,
@@ -444,7 +436,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
             event.kind === 'runtime_turn_rejected',
         )
         .map(event => event.kind),
-    ).toEqual(['runtime_turn_completed', 'runtime_turn_completed']);
+    ).toEqual(['runtime_turn_rejected', 'runtime_turn_completed']);
   });
 
   it('gives the model a feedback round when an interim visible_reply is invalid', async () => {

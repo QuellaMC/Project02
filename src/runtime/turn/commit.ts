@@ -71,6 +71,18 @@ export class IncompleteConversationRollbackError extends AggregateError {
   }
 }
 
+export class VisibleReplyDeliveryError extends Error {
+  constructor(cause: unknown) {
+    super(
+      `Displaying the reply failed: ${
+        cause instanceof Error ? cause.message : String(cause)
+      } The reply was saved to the conversation history.`,
+      {cause},
+    );
+    this.name = 'VisibleReplyDeliveryError';
+  }
+}
+
 export type CompleteRuntimeTurnOptions = {
   readonly state: RuntimeTurnState;
   readonly decisionContext: DecisionContext;
@@ -130,7 +142,28 @@ export async function emitProgress(
   try {
     await state.options.onProgress?.(progressEvent);
   } catch {
-    // Progress callbacks are observers; they must not change runtime commit semantics.
+    // Tool progress callbacks are observers; they must not change runtime
+    // commit semantics. Visible replies do not pass through here — their
+    // delivery is load-bearing and uses deliverVisibleReplyProgress.
+  }
+}
+
+/**
+ * The visible_reply progress event is the only path a reply reaches the
+ * user, so a callback failure here is failed delivery, not a failed
+ * observation: the runtime must not report a completed turn claiming the
+ * user saw text they never received. The message is already durable when
+ * this runs — the raised error ends the turn as rejected around the kept
+ * history and names both facts for the user.
+ */
+async function deliverVisibleReplyProgress(
+  state: RuntimeTurnState,
+  text: string,
+): Promise<void> {
+  try {
+    await state.options.onProgress?.({kind: 'visible_reply', text});
+  } catch (error: unknown) {
+    throw new VisibleReplyDeliveryError(error);
   }
 }
 
@@ -218,10 +251,7 @@ export async function appendVisibleReplyForDecision(
     ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
   });
 
-  await emitProgress(state, {
-    kind: 'visible_reply',
-    text: message.text,
-  });
+  await deliverVisibleReplyProgress(state, message.text);
   return record;
 }
 
