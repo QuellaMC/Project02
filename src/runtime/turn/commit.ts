@@ -46,7 +46,10 @@ import {
   executionVisibleReplyText,
   type RoleModelLoopResult,
 } from '../../role-model/index.ts';
-import {findValidatedTerminalRawEventForSession} from '../storage/file-runtime-log-store.ts';
+import {
+  durableVisibleMessageCommitExists,
+  findValidatedTerminalRawEventForSession,
+} from '../storage/file-runtime-log-store.ts';
 import type {
   AppendVisibleReplyOptions,
   LocalRuntimeTurnProgressEvent,
@@ -265,6 +268,15 @@ function commitVisibleMessage(
       ...evidence,
     });
   } catch (error: unknown) {
+    // The anchor decides: an append that throws can still have reached
+    // the log, and removing a row its durable anchor references would
+    // leave evidence pointing at a missing message that recovery cannot
+    // repair. Keep the message when the anchor landed.
+    if (durableCommitAnchorExists(state, record.id)) {
+      state.committedVisibleMessages.push(record);
+      throw error;
+    }
+
     rollbackFailedMessageCommit(state, message, error);
     throw error;
   }
@@ -272,6 +284,25 @@ function commitVisibleMessage(
   state.committedVisibleMessages.push(record);
   appendTrace(state, 'visible_message_committed');
   return record;
+}
+
+function durableCommitAnchorExists(
+  state: RuntimeTurnState,
+  messageId: string,
+): boolean {
+  const sessionPaths = state.options.logStore.localRuntimeSessionPaths;
+
+  if (sessionPaths === undefined) {
+    return false;
+  }
+
+  try {
+    return durableVisibleMessageCommitExists(sessionPaths, messageId);
+  } catch {
+    // An unreadable log cannot prove the anchor landed; fall back to the
+    // rollback path, which reports its own cleanup failures.
+    return false;
+  }
 }
 
 function rollbackFailedMessageCommit(

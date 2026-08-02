@@ -54,6 +54,7 @@ import {
 import {LocalRuntimeMutationLockBusyError} from '../../src/runtime/storage/mutation-lock.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
+import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
 import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
@@ -499,6 +500,107 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
     expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toEqual([
       'local-session:message-1',
+    ]);
+  });
+
+  it('keeps a message whose commit anchor persisted before the append threw', async () => {
+    const storeRoot = createTestTempRoot('project02-plugin-loop-');
+    const sessionId = 'session-anchor-persisted-then-failed';
+
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+
+    const fileLogStore = createFileRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+      storeRoot,
+      sessionId,
+    });
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const logStore = Object.freeze({
+      ...(fileLogStore.localRuntimeSessionPaths === undefined
+        ? {}
+        : {localRuntimeSessionPaths: fileLogStore.localRuntimeSessionPaths}),
+      ...(fileLogStore.localRuntimeWriterLockOwnerToken === undefined
+        ? {}
+        : {
+            localRuntimeWriterLockOwnerToken:
+              fileLogStore.localRuntimeWriterLockOwnerToken,
+          }),
+      appendTrace: entry => fileLogStore.appendTrace(entry),
+      appendRawEvent(record) {
+        const stored = fileLogStore.appendRawEvent(record);
+
+        if (
+          record.kind === 'visible_message_committed' &&
+          stored.visibleMessageIds?.includes(`${sessionId}:message-2`) === true
+        ) {
+          throw new Error('anchor persisted then failed');
+        }
+
+        return stored;
+      },
+      appendConversationMessage: (record, expectedCharacter) =>
+        fileLogStore.appendConversationMessage(record, expectedCharacter),
+      removeConversationMessages(messageIds) {
+        fileLogStore.removeConversationMessages(messageIds);
+      },
+      recoverAbandonedWriterEvidence: () =>
+        fileLogStore.recoverAbandonedWriterEvidence?.() ?? false,
+      checkpointWriterEvidence: () => fileLogStore.checkpointWriterEvidence?.(),
+      readSessionEvidence: () => fileLogStore.readSessionEvidence(),
+      traceEntries: () => fileLogStore.traceEntries(),
+      rawEvents: () => fileLogStore.rawEvents(),
+      conversationMessages: () => fileLogStore.conversationMessages(),
+    } satisfies RuntimeLogStore);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('hi', 'evt_anchor_persisted_then_failed'),
+        session,
+        logStore,
+        roleModelAdapter: createSequencedAdapter([
+          {
+            toolCalls: [{name: 'visible_reply', input: {text: 'hello back'}}],
+          },
+        ]),
+      }),
+    ).rejects.toThrow('anchor persisted then failed');
+
+    // The durable anchor references this message, so deleting the row
+    // would leave evidence pointing at a message that no longer exists —
+    // a shape writer recovery cannot repair. The message stays.
+    const paths = fileLogStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    const durableMessageTexts = readFileSync(paths.conversationPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0)
+      .map(line => (JSON.parse(line) as {text: string}).text);
+    const durableAnchoredIds = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.includes('"visible_message_committed"'))
+      .flatMap(
+        line =>
+          (JSON.parse(line) as {visibleMessageIds?: string[]})
+            .visibleMessageIds ?? [],
+      );
+
+    expect(durableMessageTexts).toEqual(['hi', 'hello back']);
+    expect(durableAnchoredIds).toEqual([
+      `${sessionId}:message-1`,
+      `${sessionId}:message-2`,
     ]);
   });
 

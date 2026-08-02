@@ -32,6 +32,7 @@ import {
   CompleteJsonLinesError,
   splitCompleteJsonLines,
 } from '../storage/json-lines.ts';
+import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
 import {readOptionalStoreText} from '../storage/store-file.ts';
 import {preparedRuntimePluginConfigEffectHasApprovalEvidence} from '../../plugins/api/index.ts';
@@ -382,13 +383,10 @@ function assertIncrementalTerminalRawEvent(
     }
   }
 
-  if (
-    record.kind === 'runtime_turn_completed' &&
-    !sameOrderedValues(record.visibleMessageIds ?? [], turnMessageIds)
-  ) {
+  if (!sameOrderedValues(record.visibleMessageIds ?? [], turnMessageIds)) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      'Completed terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
+      'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
     );
   }
 }
@@ -840,6 +838,7 @@ function runtimeEventBaseIdentityKey(identity: {
 
 export function assertIncrementalStatePublicReadable(
   state: RuntimeEvidenceIncrementalState,
+  evidence: DurableRuntimeSessionEvidence,
 ): void {
   if (
     state.traceStartedWithoutRaw.size > 0 ||
@@ -856,6 +855,18 @@ export function assertIncrementalStatePublicReadable(
     conversationCharacter: state.conversationCharacter,
     boundCharacter: state.boundCharacter,
     allowUnanchoredCustomCharacter: false,
+  });
+  // The same gate the file read applies: an already-open store must not
+  // be a second, weaker seam where a direct writer's malformed turn
+  // reads publicly until the session is reopened.
+  assertConversationTurnShape({
+    messages: evidence.conversationMessages,
+    rawEvents: evidence.rawEvents,
+    mode: 'public',
+  });
+  assertCompletedTerminalRawEventsMatchConversationMessages({
+    messages: evidence.conversationMessages,
+    rawEvents: evidence.rawEvents,
   });
 }
 
@@ -1404,6 +1415,23 @@ function readRuntimeTraceEntries(
   assertRuntimeTraceTerminalOrder(records);
 
   return Object.freeze(records);
+}
+
+/**
+ * Whether a message's commit anchor is durable, read straight from the
+ * raw-event file. The writer needs this mid-turn, where a validated read
+ * would reject its own open turn, to tell "the anchor landed and the
+ * append reported failure afterwards" from "nothing was written".
+ */
+export function durableVisibleMessageCommitExists(
+  paths: LocalRuntimeSessionPaths,
+  messageId: string,
+): boolean {
+  return readRawEventLogRecords(paths, 'publicDecode').some(
+    rawEvent =>
+      rawEvent.kind === 'visible_message_committed' &&
+      (rawEvent.visibleMessageIds ?? []).includes(messageId),
+  );
 }
 
 function readRawEventLogRecords(
@@ -2092,8 +2120,12 @@ function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
     );
   }
 
+  // Both terminal kinds enumerate their turn's committed messages: a
+  // rejected turn keeps whatever it committed before rejecting, and
+  // transcript reconstruction reads prior messages from these
+  // references, so an omitted id would desync a later turn's context.
   for (const rawEvent of options.rawEvents.filter(
-    isCompletedTerminalRawEventLogRecord,
+    isVisibleMessageTerminalRawEventLogRecord,
   )) {
     const expectedMessageIds = (
       messagesByTurnIdentity.get(runtimeEventIdentityKey(rawEvent)) ?? []
@@ -2103,7 +2135,7 @@ function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
     if (!sameOrderedValues(visibleMessageIds, expectedMessageIds)) {
       throw new LocalRuntimeStorageContractError(
         'malformed_record',
-        'Completed terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
+        'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
       );
     }
   }
@@ -2254,10 +2286,6 @@ function assertCharacterCommitCarriesItsDecision(
   const commitResult = commitEvent.commitValidation?.result;
   const decisionResult = commitEvent.parsedRoleModelDecisionSnapshot?.result;
 
-  // Presence, not text equality: durable evidence holds the redacted
-  // projection of the reply, so the transcript text legitimately differs
-  // where redaction applied. The codec already proves the evidence's
-  // accepted text agrees with its own decision snapshot.
   if (
     commitResult?.status !== 'accepted' ||
     commitResult.acceptedVisibleReplyText === undefined ||
@@ -2268,12 +2296,19 @@ function assertCharacterCommitCarriesItsDecision(
       `Character message commit must carry the accepted decision that produced its text: ${message.id}.`,
     );
   }
-}
 
-function isCompletedTerminalRawEventLogRecord(
-  record: RawEventLogRecord,
-): boolean {
-  return record.kind === 'runtime_turn_completed';
+  // Evidence holds the redacted projection of the reply the transcript
+  // shows, so the rows compare through that same projection: credential
+  // redaction stays legitimate while unrelated edited text is rejected.
+  if (
+    commitResult.acceptedVisibleReplyText !==
+    redactJsonBoundaryText(message.text)
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Character message text must match the accepted reply its commit anchored: ${message.id}.`,
+    );
+  }
 }
 
 function isVisibleMessageTerminalRawEventLogRecord(

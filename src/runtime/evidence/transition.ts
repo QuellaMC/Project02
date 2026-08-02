@@ -137,7 +137,7 @@ export function createRuntimeEvidenceTransitionMachine(options: {
       applyIncrementalConversationRemoval(state, messageIds);
     },
     assertPublicReadable() {
-      assertIncrementalStatePublicReadable(state);
+      assertIncrementalStatePublicReadable(state, options.evidence);
     },
   } satisfies RuntimeEvidenceTransitionMachine);
 }

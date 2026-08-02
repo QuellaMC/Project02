@@ -15,6 +15,7 @@ import {
 
 export {
   durableRuntimeSessionCharacterProfile,
+  durableVisibleMessageCommitExists,
   findValidatedTerminalRawEventForSession,
 } from '../evidence/validation.ts';
 

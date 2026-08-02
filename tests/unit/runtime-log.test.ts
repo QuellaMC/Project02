@@ -6,13 +6,27 @@ import {
   createRuntimePluginTurnEvidenceSnapshot,
 } from '../../src/plugins/api/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
+import {createRoleModelCommitValidationSnapshot} from '../../src/runtime/evidence/records.ts';
 import type {
   ConversationLogRecordInput,
   RawEventLogRecordInput,
   RuntimeTraceEntryInput,
 } from '../../src/runtime/evidence/records.ts';
+import {
+  createDecisionContext,
+  createDefaultRoleModelPluginToolDefinitions,
+  createParsedRoleModelDecisionSnapshot,
+  createRoleModelInputEnvelope,
+  createRoleModelIOSnapshot,
+  parseRoleModelExecutionDecision,
+} from '../../src/role-model/index.ts';
 import type {RuntimePluginTurnEvidenceSnapshot} from '../../src/plugins/api/index.ts';
-import type {RuntimeEventIdentity} from '../../src/core/index.ts';
+import {
+  createRuntimeEventIdentity,
+  createUserMessageRuntimeEvent,
+  type CharacterProfile,
+  type RuntimeEventIdentity,
+} from '../../src/core/index.ts';
 
 const identity = {
   eventId: 'evt_log_001',
@@ -95,7 +109,7 @@ describe('runtime log store', () => {
     store.appendTrace({...identity, step: 'runtime_event_received'});
     const receivedRecord = store.appendRawEvent(received);
     const normalizedRecord = store.appendRawEvent(normalized);
-    store.appendConversationMessage({
+    appendVisibleMessageWithCommitAnchor(store, {
       ...identity,
       id: 'local-session:message-1',
       role: 'user',
@@ -104,7 +118,7 @@ describe('runtime log store', () => {
       text: 'hello',
       committedAt: '2026-06-04T00:00:01.000Z',
     });
-    store.appendConversationMessage({
+    appendVisibleMessageWithCommitAnchor(store, {
       ...identity,
       id: 'local-session:message-2',
       role: 'character',
@@ -144,11 +158,45 @@ describe('runtime log store', () => {
     expect(Object.isFrozen(appended)).toBe(true);
     expect(Object.isFrozen(appended.visibleMessageIds)).toBe(true);
     expect(Object.isFrozen(normalizedRecord.payloadSummary)).toBe(true);
-    expect(store.rawEvents()).toEqual([
-      receivedRecord,
-      normalizedRecord,
-      appended,
-    ]);
+    expect(
+      store
+        .rawEvents()
+        .filter(event => event.kind !== 'visible_message_committed'),
+    ).toEqual([receivedRecord, normalizedRecord, appended]);
+  });
+
+  it('applies the turn-shape gate to an already-open store, not only to file reads', () => {
+    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
+
+    store.appendTrace({...identity, step: 'runtime_event_received'});
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    // A message committed with no anchor is a shape the writer never
+    // produces; the in-memory store must not be a weaker second seam
+    // that reads it publicly until the session is reopened.
+    store.appendConversationMessage({
+      ...identity,
+      id: 'local-session:message-1',
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello',
+      committedAt: '2026-06-04T00:00:01.000Z',
+    });
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_turn_completed',
+      eventType: 'USER_MESSAGE',
+      status: 'completed',
+      visibleMessageIds: ['local-session:message-1'],
+    });
+
+    expect(() => store.conversationMessages()).toThrow(
+      'lacks its visible_message_committed raw event',
+    );
   });
 
   it('deeply snapshots tool input and result evidence before storing it', () => {
@@ -234,8 +282,8 @@ describe('runtime log store', () => {
       kind: 'runtime_event_received',
       eventType: 'USER_MESSAGE',
     });
-    store.appendConversationMessage(userMessage);
-    store.appendConversationMessage(characterMessage);
+    appendVisibleMessageWithCommitAnchor(store, userMessage);
+    appendVisibleMessageWithCommitAnchor(store, characterMessage);
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_turn_completed',
@@ -249,7 +297,11 @@ describe('runtime log store', () => {
       characterMessage,
     ]);
     expect(store.traceEntries()).toHaveLength(1);
-    expect(store.rawEvents()).toHaveLength(2);
+    expect(
+      store
+        .rawEvents()
+        .filter(event => event.kind !== 'visible_message_committed'),
+    ).toHaveLength(2);
   });
 
   it('records failed raw rejections without adding visible conversation records', () => {
@@ -310,7 +362,8 @@ describe('runtime log store', () => {
         kind: 'runtime_event_received',
         eventType: 'USER_MESSAGE',
       });
-      store.appendConversationMessage(
+      appendVisibleMessageWithCommitAnchor(
+        store,
         {
           ...identity,
           id: 'local-session:message-1',
@@ -322,7 +375,8 @@ describe('runtime log store', () => {
         },
         novaProfile,
       );
-      store.appendConversationMessage(
+      appendVisibleMessageWithCommitAnchor(
+        store,
         {
           ...identity,
           id: 'local-session:message-2',
@@ -577,6 +631,78 @@ describe('runtime log store', () => {
     ).toThrow('speaker metadata is malformed');
   });
 });
+
+/**
+ * The commit anchor the runtime writes for every visible message, so a
+ * fixture transcript has the shape validation requires: user rows carry
+ * no model evidence, character rows carry the accepted decision that
+ * produced their text.
+ */
+function appendVisibleMessageWithCommitAnchor(
+  store: ReturnType<typeof createRuntimeLogStore>,
+  message: ConversationLogRecordInput,
+  expectedCharacter?: CharacterProfile,
+): void {
+  const stored =
+    expectedCharacter === undefined
+      ? store.appendConversationMessage(message)
+      : store.appendConversationMessage(message, expectedCharacter);
+  const eventIdentity = {
+    eventId: message.eventId,
+    traceId: message.traceId,
+    createdAt: message.createdAt,
+  };
+
+  store.appendRawEvent({
+    ...eventIdentity,
+    kind: 'visible_message_committed',
+    eventType: 'USER_MESSAGE',
+    visibleMessageIds: [stored.id],
+    ...(message.role === 'user'
+      ? {}
+      : {
+          roleModelIOSnapshot: createRoleModelIOSnapshot({
+            ...eventIdentity,
+            sessionId: 'local-session',
+            inputEnvelope: createRoleModelInputEnvelope({
+              event: createUserMessageRuntimeEvent(
+                'hello',
+                createRuntimeEventIdentity(eventIdentity),
+              ),
+              decisionContext: createDecisionContext({
+                sessionId: 'local-session',
+                characterSnapshot: expectedCharacter ?? testCharacterProfile,
+              }),
+              pluginToolDefinitions:
+                createDefaultRoleModelPluginToolDefinitions(),
+            }),
+            rawOutputText: JSON.stringify({
+              toolCalls: [{name: 'visible_reply', input: {text: message.text}}],
+            }),
+          }),
+          parsedRoleModelDecisionSnapshot:
+            createParsedRoleModelDecisionSnapshot({
+              ...eventIdentity,
+              sessionId: 'local-session',
+              result: parseRoleModelExecutionDecision(
+                JSON.stringify({
+                  toolCalls: [
+                    {name: 'visible_reply', input: {text: message.text}},
+                  ],
+                }),
+              ),
+            }),
+          commitValidation: createRoleModelCommitValidationSnapshot({
+            ...eventIdentity,
+            sessionId: 'local-session',
+            result: {
+              status: 'accepted',
+              acceptedVisibleReplyText: message.text,
+            },
+          }),
+        }),
+  });
+}
 
 function createMinimalPluginTurnEvidence(
   eventIdentity: RuntimeEventIdentity,

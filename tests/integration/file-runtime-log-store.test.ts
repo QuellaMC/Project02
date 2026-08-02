@@ -1261,6 +1261,78 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
   });
 
+  it('rejects a character row edited away from its accepted reply', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-character-text-drift';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_character_text_drift'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // Evidence keeps the redacted projection of the reply, so the rows
+    // compare through that projection: editing the character text to
+    // unrelated content is rejected rather than silently trusted.
+    const conversationLines = readFileSync(paths.conversationPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const editedLines = conversationLines.map(line => {
+      if (!line.includes('"role":"character"')) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as Record<string, unknown>;
+
+      record['text'] = 'text the model never produced';
+      return JSON.stringify(record);
+    });
+
+    writeFileSync(
+      paths.conversationPath,
+      `${editedLines.join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow('must match the accepted reply its commit anchored');
+  });
+
   it('rejects a duplicated visible_message_committed anchor for one message', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-duplicate-commit-anchor';
