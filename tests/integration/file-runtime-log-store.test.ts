@@ -1336,6 +1336,233 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow('more than one visible_message_committed raw event');
   });
 
+  it('rejects a forged character row committed without its accepted decision', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-forged-character-row';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_forged_character_row'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // A direct writer forging a character reply can anchor it with a bare
+    // commit event, but not with the accepted decision that produced the
+    // text — the turn-shape gate rejects the evidence-free character row.
+    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const strippedLines = rawLines.map(line => {
+      if (!line.includes('"visible_message_committed"')) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as Record<string, unknown>;
+
+      if (record['commitValidation'] === undefined) {
+        return line;
+      }
+
+      delete record['commitValidation'];
+      delete record['parsedRoleModelDecisionSnapshot'];
+      delete record['roleModelIOSnapshot'];
+      return JSON.stringify(record);
+    });
+
+    writeFileSync(paths.rawEventsPath, `${strippedLines.join('\n')}\n`, 'utf8');
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow(
+      'Character message commit must carry the accepted decision that produced its text',
+    );
+  });
+
+  it('rejects a user row whose text disagrees with the recorded model input', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-user-text-drift';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_user_text_drift'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // The turn's user row is resolved by event identity, not by which
+    // events reference it: editing the durable user text away from the
+    // recorded model input fails even though the character commit events
+    // never name the user row.
+    const conversationLines = readFileSync(paths.conversationPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const editedLines = conversationLines.map(line => {
+      if (!line.includes('"role":"user"')) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as Record<string, unknown>;
+
+      record['text'] = 'edited after the fact';
+      return JSON.stringify(record);
+    });
+
+    writeFileSync(
+      paths.conversationPath,
+      `${editedLines.join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow(
+      'Role-model input text must match the committed user visible message for the turn.',
+    );
+  });
+
+  it('rejects a second user row appended into one turn', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-second-user-row';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_second_user_row'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // One runtime input, one user row: a direct writer duplicating the
+    // user utterance under the same turn identity is rejected even with
+    // its own commit anchor, so one input cannot appear as two
+    // utterances in future model context.
+    const conversationLines = readFileSync(paths.conversationPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const userLine = conversationLines.find(line =>
+      line.includes('"role":"user"'),
+    );
+
+    if (userLine === undefined) {
+      throw new Error('Expected a user conversation line.');
+    }
+
+    const userRecord = JSON.parse(userLine) as Record<string, unknown>;
+    const forgedUserRecord = {
+      ...userRecord,
+      id: `${sessionId}:message-${String(conversationLines.length + 1)}`,
+    };
+
+    writeFileSync(
+      paths.conversationPath,
+      `${[...conversationLines, JSON.stringify(forgedUserRecord)].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow();
+  });
+
   it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-before-call-rejected';

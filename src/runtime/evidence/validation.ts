@@ -1133,15 +1133,10 @@ export function assertDurableRuntimeSessionEvidence(options: {
       ? {}
       : {userDisplayName: identity.userSpeaker.displayName}),
   });
-  assertConversationMessagesHaveTerminalRawEvidence({
-    messages: conversationMessages.filter(message =>
-      messageRequiresTerminalRawEvidence({
-        mode: options.mode,
-        message,
-        rawEvents,
-      }),
-    ),
+  assertConversationTurnShape({
+    messages: conversationMessages,
     rawEvents,
+    mode: options.mode,
   });
 }
 
@@ -2017,30 +2012,26 @@ function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
     options.rawEvent.roleModelIOSnapshot?.inputEnvelope.event.payload
       .currentUserMessage;
 
-  if (
-    inputText === undefined ||
-    options.rawEvent.visibleMessageIds === undefined
-  ) {
+  if (inputText === undefined) {
     return;
   }
 
-  // Per-message commits mean an event may reference only character
-  // messages; a turn still commits at most one user message, and where an
-  // event does reference it, the text must be the model's input.
-  const userMessages = options.rawEvent.visibleMessageIds
-    .map(messageId => options.messagesById.get(messageId))
-    .filter((message): message is ConversationLogRecord => {
-      return message?.role === 'user';
-    });
+  // Resolve the turn's user message by event identity, not by which rows
+  // this event happens to reference: the recorded model input must be the
+  // turn's committed user text wherever that row already exists.
+  const identityKey = runtimeEventIdentityKey(options.rawEvent);
 
-  if (
-    userMessages.length > 1 ||
-    userMessages.some(message => message.text !== inputText)
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'Role-model input text must match the committed user visible message for the turn.',
-    );
+  for (const message of options.messagesById.values()) {
+    if (
+      message.role === 'user' &&
+      runtimeEventIdentityKey(message) === identityKey &&
+      message.text !== inputText
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Role-model input text must match the committed user visible message for the turn.',
+      );
+    }
   }
 }
 
@@ -2118,19 +2109,89 @@ function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
   }
 }
 
-function assertConversationMessagesHaveTerminalRawEvidence(options: {
+/**
+ * The one statement of what a valid conversation turn looks like — the
+ * exact shape the runtime writer produces and nothing wider:
+ *
+ *   1. Every message pairs 1:1 with a visible_message_committed raw
+ *      event of its own turn identity, and each such event anchors
+ *      exactly one message.
+ *   2. A turn with messages holds exactly one user message, committed
+ *      first; any number of character replies follow it.
+ *   3. A character reply's commit event carries the accepted decision
+ *      that produced it, and the committed text is that decision's
+ *      visible reply. The user message's commit event carries no
+ *      decision — its text is the turn's model input, checked wherever
+ *      the turn recorded one.
+ *
+ * Fragmented per-event checks are deliberately folded in here: a store
+ * shape the writer cannot produce fails this one gate at first read
+ * instead of slipping between scattered assertions.
+ */
+function assertConversationTurnShape(options: {
   readonly messages: readonly ConversationLogRecord[];
   readonly rawEvents: readonly RawEventLogRecord[];
+  readonly mode: RuntimeLogValidationMode;
 }): void {
-  const commitEvents = options.rawEvents.filter(
-    record => record.kind === 'visible_message_committed',
-  );
-  // One message, one commit event: each anchor names exactly one message,
-  // and no message is anchored twice — duplicate processing or a direct
-  // writer cannot inflate the commit record of what the user saw.
-  const messageCommitEvidence = new Set<string>();
+  const commitEventByMessageKey = collectMessageCommitEvents(options.rawEvents);
 
-  for (const record of commitEvents) {
+  for (const message of options.messages) {
+    if (
+      !commitEventByMessageKey.has(
+        visibleMessageEvidenceKey(message, message.id),
+      ) &&
+      messageRequiresTerminalRawEvidence({
+        mode: options.mode,
+        message,
+        rawEvents: options.rawEvents,
+      })
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Conversation message lacks its visible_message_committed raw event: ${message.id}.`,
+      );
+    }
+  }
+
+  for (const [identityKey, turnMessages] of groupByTurnIdentity(
+    options.messages,
+  )) {
+    assertSingleLeadingUserMessage(identityKey, turnMessages);
+
+    for (const message of turnMessages) {
+      const commitEvent = commitEventByMessageKey.get(
+        visibleMessageEvidenceKey(message, message.id),
+      );
+
+      if (commitEvent === undefined) {
+        continue;
+      }
+
+      if (message.role === 'character') {
+        assertCharacterCommitCarriesItsDecision(message, commitEvent);
+      } else if (commitEvent.commitValidation !== undefined) {
+        // The writer never stamps model commit validation on the user
+        // row; the recorded model input is checked against the turn's
+        // user text in the raw-event walk.
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `User message commit must not carry model commit validation: ${message.id}.`,
+        );
+      }
+    }
+  }
+}
+
+function collectMessageCommitEvents(
+  rawEvents: readonly RawEventLogRecord[],
+): ReadonlyMap<string, RawEventLogRecord> {
+  const commitEventByMessageKey = new Map<string, RawEventLogRecord>();
+
+  for (const record of rawEvents) {
+    if (record.kind !== 'visible_message_committed') {
+      continue;
+    }
+
     const messageIds = record.visibleMessageIds ?? [];
 
     if (messageIds.length !== 1) {
@@ -2143,26 +2204,70 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
     for (const messageId of messageIds) {
       const key = visibleMessageEvidenceKey(record, messageId);
 
-      if (messageCommitEvidence.has(key)) {
+      if (commitEventByMessageKey.has(key)) {
         throw new LocalRuntimeStorageContractError(
           'malformed_record',
           `Conversation message has more than one visible_message_committed raw event: ${messageId}.`,
         );
       }
 
-      messageCommitEvidence.add(key);
+      commitEventByMessageKey.set(key, record);
     }
   }
 
-  for (const message of options.messages) {
-    if (
-      !messageCommitEvidence.has(visibleMessageEvidenceKey(message, message.id))
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Conversation message lacks its visible_message_committed raw event: ${message.id}.`,
-      );
-    }
+  return commitEventByMessageKey;
+}
+
+function groupByTurnIdentity(
+  messages: readonly ConversationLogRecord[],
+): ReadonlyMap<string, readonly ConversationLogRecord[]> {
+  const messagesByTurn = new Map<string, ConversationLogRecord[]>();
+
+  for (const message of messages) {
+    const key = runtimeEventIdentityKey(message);
+    const turnMessages = messagesByTurn.get(key) ?? [];
+
+    turnMessages.push(message);
+    messagesByTurn.set(key, turnMessages);
+  }
+
+  return messagesByTurn;
+}
+
+function assertSingleLeadingUserMessage(
+  identityKey: string,
+  turnMessages: readonly ConversationLogRecord[],
+): void {
+  const userMessages = turnMessages.filter(message => message.role === 'user');
+
+  if (userMessages.length !== 1 || turnMessages[0]?.role !== 'user') {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `A runtime turn must commit exactly one user message before its replies: ${identityKey.split(' ')[0] ?? identityKey}.`,
+    );
+  }
+}
+
+function assertCharacterCommitCarriesItsDecision(
+  message: ConversationLogRecord,
+  commitEvent: RawEventLogRecord,
+): void {
+  const commitResult = commitEvent.commitValidation?.result;
+  const decisionResult = commitEvent.parsedRoleModelDecisionSnapshot?.result;
+
+  // Presence, not text equality: durable evidence holds the redacted
+  // projection of the reply, so the transcript text legitimately differs
+  // where redaction applied. The codec already proves the evidence's
+  // accepted text agrees with its own decision snapshot.
+  if (
+    commitResult?.status !== 'accepted' ||
+    commitResult.acceptedVisibleReplyText === undefined ||
+    decisionResult?.status !== 'accepted'
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Character message commit must carry the accepted decision that produced its text: ${message.id}.`,
+    );
   }
 }
 
