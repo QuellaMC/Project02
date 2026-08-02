@@ -1505,7 +1505,6 @@ function createInspectFixturePlugin(
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -1602,7 +1601,6 @@ function createInspectSessionEndFixturePlugin(
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,

@@ -48,16 +48,16 @@ import type {
   RuntimePluginFileStoreProvider,
   RuntimePluginFileStoreTransaction,
 } from '../api/file-store-contract.ts';
-import {isApprovalGatedRuntimePluginTool} from '../api/tool-classification.ts';
+import {
+  isApprovalGatedRuntimePluginTool,
+  isModelFacingRuntimePluginTool,
+} from '../api/tool-classification.ts';
 import type {RuntimeEventIdentity} from '../../core/index.ts';
 import {validateModelToolInputAgainstContract} from '../../role-model/index.ts';
 import {
-  isModelFacingPluginTool,
   pluginCanWriteModelInput,
-  pluginToolHasRequiredGrantedAccess,
   pluginToolDefinitionsForEnabledPlugins,
   routableModelFacingPluginTools,
-  toolAllowsFileStoreWrites,
 } from '../policy/tool-policy.ts';
 import {
   assertAcceptedToolEvidenceSourceReferences,
@@ -1060,7 +1060,6 @@ async function runHandleToolCall(
     sessionIdentity: options.sessionIdentity,
     fileStoreTransaction: options.fileStoreTransaction,
     createFileStore: options.createFileStore,
-    allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool),
   });
 
   try {
@@ -1208,8 +1207,7 @@ function rejectedRuntimePluginToolPolicy(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
 }): RejectedRuntimePluginToolExecution | undefined {
-  const modelFacing = isModelFacingPluginTool({
-    plugin: options.plugin,
+  const modelFacing = isModelFacingRuntimePluginTool({
     tool: options.providedTool,
   });
 
@@ -1219,25 +1217,6 @@ function rejectedRuntimePluginToolPolicy(options: {
       context: options.context,
       reason: 'model_input_not_granted',
       message: `Plugin "${options.plugin.manifest.id}" did not declare model_input write access for model-facing tool "${options.providedTool.name}".`,
-      evidenceStatus: options.failureDegrades ? 'degraded' : 'rejected',
-      policyOutcome: options.failureDegrades
-        ? 'optional_degraded'
-        : 'disallowed_tool_call',
-    });
-  }
-
-  if (
-    modelFacing &&
-    !pluginToolHasRequiredGrantedAccess({
-      tool: options.providedTool,
-      access: options.access,
-    })
-  ) {
-    return rejectedRuntimePluginToolExecution({
-      call: options.call,
-      context: options.context,
-      reason: 'file_store_write_not_granted',
-      message: `Plugin "${options.plugin.manifest.id}" did not declare file_store write access for local-memory-write tool "${options.providedTool.name}".`,
       evidenceStatus: options.failureDegrades ? 'degraded' : 'rejected',
       policyOutcome: options.failureDegrades
         ? 'optional_degraded'

@@ -26,6 +26,10 @@ import {
 } from '../api/decision.ts';
 import {parseRoleModelExecutionDecision} from './decision-parser.ts';
 import {
+  createToolBatchLock,
+  type ToolBatchLockMode,
+} from './tool-batch-lock.ts';
+import {
   providerExchangeOption,
   providerMetadataOption,
   validateRoleModelAdapterRawOutput,
@@ -889,9 +893,21 @@ async function routeExecutableToolCalls(options: {
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
   readonly priorToolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
-  const results: RoleModelPluginToolRoutingEvidence[] = [];
+  // Two phases. Admission runs in the model's call order because it is
+  // order-dependent (per-turn call limits count earlier calls in this
+  // same batch) and must stay deterministic. Execution then runs
+  // concurrently under the batch lock, and results are reassembled in
+  // call order so evidence never depends on completion order.
+  const results: (RoleModelPluginToolRoutingEvidence | undefined)[] = [];
+  const admitted: {
+    readonly slot: number;
+    readonly toolName: string;
+    readonly mode: ToolBatchLockMode;
+    readonly run: () => Promise<RoleModelPluginToolRoutingEvidence>;
+  }[] = [];
 
   for (const [index, toolCall] of options.toolCalls.entries()) {
+    const slot = results.push(undefined) - 1;
     const toolAllowed = options.inputEnvelope.allowedTools.some(
       allowed => allowed === toolCall.name,
     );
@@ -937,12 +953,15 @@ async function routeExecutableToolCalls(options: {
       toolCall,
       toolDefinition,
       priorToolObservations: options.priorToolObservations,
-      routedResults: results,
+      // Admission is sequential, so every earlier call in this batch has
+      // either been decided into a slot or admitted for execution; both
+      // count toward a per-turn limit.
+      batchToolNames: batchAttemptsSoFar(results, admitted),
       context: options.runtimePluginContext,
     });
 
     if (callLimitRejection !== undefined) {
-      results.push(callLimitRejection);
+      results[slot] = callLimitRejection;
       continue;
     }
 
@@ -953,20 +972,18 @@ async function routeExecutableToolCalls(options: {
       );
 
     if (nativeToolCallArgumentError !== undefined) {
-      results.push(
-        createRejectedToolRoutingEvidence({
-          callId,
-          call: routedCall,
-          dispatchedToHost: false,
-          ...(options.runtimePluginContext === undefined
-            ? {}
-            : {context: options.runtimePluginContext}),
-          reason: nativeToolCallArgumentError.reason,
-          message: nativeToolCallArgumentError.message,
-          evidenceStatus: 'rejected',
-          policyOutcome: 'handler_rejected',
-        }),
-      );
+      results[slot] = createRejectedToolRoutingEvidence({
+        callId,
+        call: routedCall,
+        dispatchedToHost: false,
+        ...(options.runtimePluginContext === undefined
+          ? {}
+          : {context: options.runtimePluginContext}),
+        reason: nativeToolCallArgumentError.reason,
+        message: nativeToolCallArgumentError.message,
+        evidenceStatus: 'rejected',
+        policyOutcome: 'handler_rejected',
+      });
       continue;
     }
 
@@ -975,89 +992,120 @@ async function routeExecutableToolCalls(options: {
       options.pluginToolHost === undefined ||
       options.runtimePluginContext === undefined
     ) {
-      results.push(
-        missingRoutingTargetRejection({
-          callId,
-          call: routedCall,
-          toolName: toolCall.name,
-          pluginDeclared: pluginId !== undefined,
-          context: options.runtimePluginContext,
-        }),
-      );
-      continue;
-    }
-
-    let hostResult: RuntimePluginToolCallExecutionResult;
-
-    try {
-      hostResult = await options.pluginToolHost.handleToolCall(
-        executionCall,
-        options.runtimePluginContext,
-      );
-    } catch (error: unknown) {
-      const routingEvidence = createRejectedToolRoutingEvidence({
+      results[slot] = missingRoutingTargetRejection({
         callId,
         call: routedCall,
-        dispatchedToHost: true,
-        context: options.runtimePluginContext,
-        reason: 'handler_failed',
-        message:
-          error instanceof Error
-            ? error.message
-            : `Tool "${toolCall.name}" handler failed.`,
-        evidenceStatus: 'failed',
-        policyOutcome: 'handler_rejected',
-      });
-
-      results.push(routingEvidence);
-      continue;
-    }
-
-    let routableHostResult: RuntimePluginToolCallResult;
-
-    try {
-      routableHostResult = normalizeRoutablePluginToolResult({
-        result: freezeRuntimePluginToolCallResult(hostResult, {
-          call: executionCall,
-        }),
         toolName: toolCall.name,
-      });
-      capturePreparedConfigEffect({
-        call: executionCall,
-        result: hostResult,
-        routableResult: routableHostResult,
-        effectsByToolCallId: options.preparedConfigEffectsByToolCallId,
-      });
-    } catch (error: unknown) {
-      const routingEvidence = createRejectedToolRoutingEvidence({
-        callId,
-        call: routedCall,
-        dispatchedToHost: true,
+        pluginDeclared: pluginId !== undefined,
         context: options.runtimePluginContext,
-        reason: 'invalid_tool_output',
-        message:
-          error instanceof Error
-            ? error.message
-            : `Tool "${toolCall.name}" returned invalid output.`,
-        evidenceStatus: 'failed',
-        policyOutcome: 'handler_rejected',
       });
-
-      results.push(routingEvidence);
       continue;
     }
 
-    const routingEvidence = Object.freeze({
-      callId,
-      call: routedCall,
-      dispatchedToHost: true,
-      result: routableHostResult,
-    } satisfies RoleModelPluginToolRoutingEvidence);
+    const executionMode: ToolBatchLockMode =
+      toolDefinition?.concurrency === 'shared' ? 'shared' : 'exclusive';
+    const pluginToolHost = options.pluginToolHost;
+    const runtimePluginContext = options.runtimePluginContext;
 
-    results.push(routingEvidence);
+    admitted.push({
+      slot,
+      toolName: toolCall.name,
+      mode: executionMode,
+      async run() {
+        let hostResult: RuntimePluginToolCallExecutionResult;
+
+        try {
+          hostResult = await pluginToolHost.handleToolCall(
+            executionCall,
+            runtimePluginContext,
+          );
+        } catch (error: unknown) {
+          return createRejectedToolRoutingEvidence({
+            callId,
+            call: routedCall,
+            dispatchedToHost: true,
+            context: runtimePluginContext,
+            reason: 'handler_failed',
+            message:
+              error instanceof Error
+                ? error.message
+                : `Tool "${toolCall.name}" handler failed.`,
+            evidenceStatus: 'failed',
+            policyOutcome: 'handler_rejected',
+          });
+        }
+
+        try {
+          const routableHostResult = normalizeRoutablePluginToolResult({
+            result: freezeRuntimePluginToolCallResult(hostResult, {
+              call: executionCall,
+            }),
+            toolName: toolCall.name,
+          });
+
+          capturePreparedConfigEffect({
+            call: executionCall,
+            result: hostResult,
+            routableResult: routableHostResult,
+            effectsByToolCallId: options.preparedConfigEffectsByToolCallId,
+          });
+
+          return Object.freeze({
+            callId,
+            call: routedCall,
+            dispatchedToHost: true,
+            result: routableHostResult,
+          } satisfies RoleModelPluginToolRoutingEvidence);
+        } catch (error: unknown) {
+          return createRejectedToolRoutingEvidence({
+            callId,
+            call: routedCall,
+            dispatchedToHost: true,
+            context: runtimePluginContext,
+            reason: 'invalid_tool_output',
+            message:
+              error instanceof Error
+                ? error.message
+                : `Tool "${toolCall.name}" returned invalid output.`,
+            evidenceStatus: 'failed',
+            policyOutcome: 'handler_rejected',
+          });
+        }
+      },
+    });
   }
 
-  return createAcceptedPluginToolRoutingResult(results);
+  // One failing call never cancels its siblings: every admitted call
+  // runs and reports its own outcome, so the model receives the complete
+  // result set and decides what to do next.
+  const lock = createToolBatchLock();
+
+  await Promise.all(
+    admitted.map(async entry => {
+      results[entry.slot] = await lock.run(entry.mode, entry.run);
+    }),
+  );
+
+  return createAcceptedPluginToolRoutingResult(
+    results.filter(result => result !== undefined),
+  );
+}
+
+/**
+ * Tool names already attempted in this batch: those decided during
+ * admission plus those admitted for execution. A limit bounds attempts,
+ * so a call still running counts the same as a finished one.
+ */
+function batchAttemptsSoFar(
+  results: readonly (RoleModelPluginToolRoutingEvidence | undefined)[],
+  admitted: readonly {readonly toolName: string}[],
+): readonly string[] {
+  return [
+    ...results
+      .filter(result => result !== undefined)
+      .map(result => result.call.toolName),
+    ...admitted.map(entry => entry.toolName),
+  ];
 }
 
 function capturePreparedConfigEffect(options: {

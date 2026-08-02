@@ -281,32 +281,6 @@ export function createModelFacingToolWithoutModelInputPlugin(
   } satisfies RuntimePlugin);
 }
 
-export function createLocalMemoryWriteToolWithoutFileStorePlugin(
-  onHandle: () => void,
-): RuntimePlugin {
-  const pluginId = 'memory.tool-no-file-store-write.fixture';
-
-  return createRuntimePlugin({
-    manifest: {
-      ...memorySearchPluginManifest(pluginId),
-      requestedAccess: {file_store: 'read', model_input: 'write'},
-    },
-    providedTools: localMemoryWriteSearchProvidedTools(),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        onHandle();
-        const query = call.input['query'];
-
-        return createAcceptedMemorySearchResult({
-          pluginId,
-          query: typeof query === 'string' ? query : '',
-          context,
-        });
-      },
-    },
-  });
-}
-
 export function createDegradableMemorySearchPlugin(
   onHandle: () => void,
 ): RuntimePlugin {
@@ -325,77 +299,6 @@ export function createDegradableMemorySearchPlugin(
       },
     },
     providedTools: memorySearchProvidedTools(),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        onHandle();
-        const query = call.input['query'];
-
-        if (typeof query !== 'string') {
-          throw new Error('Expected query string.');
-        }
-
-        return createAcceptedMemorySearchResult({
-          pluginId: id,
-          query,
-          context,
-        });
-      },
-    },
-  });
-}
-
-export function createConfirmationRequiredMemorySearchPlugin(
-  onHandle: () => void = () => {},
-): RuntimePlugin {
-  const id = 'memory.confirmation-required.fixture';
-  const manifest = memorySearchPluginManifest(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-        confirmation: 'required',
-      },
-    },
-    providedTools: memorySearchProvidedTools(),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        onHandle();
-        const query = call.input['query'];
-
-        if (typeof query !== 'string') {
-          throw new Error('Expected query string.');
-        }
-
-        return createAcceptedMemorySearchResult({
-          pluginId: id,
-          query,
-          context,
-        });
-      },
-    },
-  });
-}
-
-export function createExternalReadMemorySearchPlugin(
-  onHandle: () => void,
-): RuntimePlugin {
-  const id = 'memory.external-read.fixture';
-  const manifest = memorySearchPluginManifest(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-        sideEffectLevel: 'external_read',
-      },
-    },
-    providedTools: memorySearchProvidedTools().map(tool => ({
-      ...tool,
-      sideEffectLevel: 'external_read' as const,
-    })),
     lifecycleHooks: {
       handleToolCall(call, context) {
         onHandle();
@@ -1064,7 +967,6 @@ export function createRetainedBeforeRoleModelFileStorePlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       declaredPlugins: ['before_role_model_call'],
       requestedAccess: {file_store: 'write'},
@@ -1090,10 +992,14 @@ export function createRetainedBeforeRoleModelFileStorePlugin(
 export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   const pluginId = 'memory.read-only-file-store.fixture';
 
+  // Genuinely read-only: the granted access is what withholds writes.
+  // This fixture used to request write access and rely on a declared
+  // effect level to be refused anyway — two systems answering one
+  // question, which is the overlap the annotations model retired.
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: {file_store: 'write', model_input: 'write'},
+      requestedAccess: {file_store: 'read', model_input: 'write'},
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -1150,7 +1056,7 @@ export function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlug
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: {file_store: 'write', model_input: 'write'},
+      requestedAccess: {file_store: 'read', model_input: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1276,7 +1182,6 @@ export function createRetainedHealthFileStorePlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       declaredPlugins: ['health'],
       requestedAccess: {file_store: 'write'},
@@ -1486,7 +1391,6 @@ export function createSessionEndFileStoreProbePlugin(options: {
       declaredPlugins: ['on_session_end'],
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       requestedAccess: options.requestedAccess,
     },
@@ -1524,7 +1428,6 @@ export function memorySearchPluginManifest(id: string) {
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,
@@ -1566,7 +1469,6 @@ export function memorySearchProvidedTools() {
         additionalFields: false,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
       sourceReferencesRequired: false,
     },

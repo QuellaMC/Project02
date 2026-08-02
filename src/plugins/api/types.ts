@@ -21,6 +21,8 @@ import type {
   RuntimePluginConfigScope,
   RuntimePluginConfigValueType,
   RuntimePluginConfirmationRequirement,
+  RuntimePluginToolAnnotations,
+  RuntimePluginToolConcurrency,
   RuntimePluginContextItemKind,
   RuntimePluginDeclaration,
   RuntimePluginEvidenceKind,
@@ -30,7 +32,6 @@ import type {
   RuntimePluginHealthStatus,
   RuntimePluginKind,
   RuntimePluginPolicyOutcome,
-  RuntimePluginSideEffectLevel,
   RuntimePluginSourceKind,
   RuntimePluginToolValidationOwner,
   RuntimePluginTrustLevel,
@@ -79,7 +80,6 @@ export type RuntimePluginConfigMetadata = {
 
 export type RuntimePluginRuntimePolicy = {
   readonly requiredForTurn: boolean;
-  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
   readonly confirmation: RuntimePluginConfirmationRequirement;
   readonly timeoutMs: number;
   readonly sourceReferencesRequired: boolean;
@@ -121,7 +121,10 @@ export type RuntimePluginProvidedTool = {
   readonly callLimit?: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
+  /** Absent hints mean unknown, which the runtime treats conservatively. */
+  readonly annotations?: RuntimePluginToolAnnotations;
+  /** Absent means exclusive: a tool overlaps only when it says so. */
+  readonly concurrency?: RuntimePluginToolConcurrency;
   readonly requiresConfirmation: boolean;
   readonly sourceReferencesRequired: boolean;
 };

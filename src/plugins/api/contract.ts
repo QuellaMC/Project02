@@ -46,13 +46,18 @@ export const runtimePluginAccessLevelValues = [
   'write',
 ] as const;
 
-export const runtimePluginSideEffectLevelValues = [
-  'none',
-  'runtime_read',
-  'runtime_config_write',
-  'local_memory_write',
-  'external_read',
-  'external_write',
+/**
+ * How a tool call may overlap other calls in the same model batch.
+ *
+ * Scheduling only — deliberately separate from the annotation hints,
+ * which describe a tool so a person can judge it. A read-only tool can
+ * still need exclusivity (a rate-limited endpoint), and a writing tool
+ * against isolated state could be shared; one field answering both
+ * questions is what made the retired sideEffectLevel enum confusing.
+ */
+export const runtimePluginToolConcurrencyValues = [
+  'shared',
+  'exclusive',
 ] as const;
 
 export const beforeRoleModelFailureBehaviorValues = [
@@ -163,8 +168,23 @@ export type RuntimePluginAccessSnapshot = {
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly grantedAccess: RuntimePluginAccessMap;
 };
-export type RuntimePluginSideEffectLevel =
-  (typeof runtimePluginSideEffectLevelValues)[number];
+export type RuntimePluginToolConcurrency =
+  (typeof runtimePluginToolConcurrencyValues)[number];
+
+/**
+ * Advisory description of a tool, in the shape MCP clients already use,
+ * so the person enabling a plugin can judge its tools and the runtime
+ * knows when to ask before running one.
+ *
+ * The runtime does not police these: a plugin the user chose to run is
+ * trusted the way a local MCP server is. Absent annotations mean
+ * unknown, and unknown is treated conservatively (ask).
+ */
+export type RuntimePluginToolAnnotations = {
+  readonly readOnlyHint?: boolean;
+  readonly destructiveHint?: boolean;
+  readonly openWorldHint?: boolean;
+};
 export type RuntimePluginBeforeRoleModelFailureBehavior =
   (typeof beforeRoleModelFailureBehaviorValues)[number];
 export type RuntimePluginHandleToolCallFailureBehavior =

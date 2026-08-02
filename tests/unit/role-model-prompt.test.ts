@@ -330,7 +330,6 @@ describe('role-model prompt rendering', () => {
         additionalFields: false,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
       sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition);
@@ -510,7 +509,6 @@ const nestedSchemaToolDefinition = Object.freeze({
     },
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'local_memory_write',
   requiresConfirmation: false,
   sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
@@ -550,7 +548,6 @@ const openUnionSchemaToolDefinition = Object.freeze({
     },
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'runtime_read',
   requiresConfirmation: false,
   sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);

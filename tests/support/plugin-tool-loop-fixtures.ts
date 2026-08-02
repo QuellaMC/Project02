@@ -559,7 +559,6 @@ export function createHealthRejectingPlugin() {
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: true,
-        sideEffectLevel: 'none',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -622,7 +621,6 @@ export function createHandleFileStoreWritePlugin(
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: healthRejectsWhenValue === undefined ? false : true,
-        sideEffectLevel: 'local_memory_write',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -662,7 +660,6 @@ export function createHandleFileStoreWritePlugin(
           additionalFields: false,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'local_memory_write',
         requiresConfirmation: false,
         sourceReferencesRequired: false,
       }),
@@ -773,7 +770,6 @@ export function createAfterTurnCommittedProbeHost(
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
             requiredForTurn: false,
-            sideEffectLevel: 'local_memory_write',
             confirmation: 'not_required',
             timeoutMs: 1000,
             sourceReferencesRequired: false,
@@ -853,7 +849,6 @@ export function createPluginStoreRevisionFixtureHost() {
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
             requiredForTurn: false,
-            sideEffectLevel: 'runtime_read',
             confirmation: 'not_required',
             timeoutMs: 1000,
             sourceReferencesRequired: false,
@@ -907,7 +902,6 @@ export function createRevisionFixtureTool(name: string) {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
   } as const;

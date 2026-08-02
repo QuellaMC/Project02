@@ -2186,7 +2186,6 @@ describe('chat CLI plugin lifecycle', () => {
         }
       },
       {
-        sideEffectLevel: 'local_memory_write',
         requestedAccess: {file_store: 'write', turn_context: 'read'},
       },
     );
@@ -2267,7 +2266,6 @@ describe('chat CLI plugin lifecycle', () => {
         sessionEndContexts.push(context);
       },
       {
-        sideEffectLevel: 'local_memory_write',
         requestedAccess: {file_store: 'write', turn_context: 'read'},
       },
     );
@@ -2651,7 +2649,6 @@ function createChatConfigurablePlugin(): RuntimePlugin {
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -2686,7 +2683,6 @@ function createSessionEndPlugin(
     >;
     readonly requiredForTurn?: boolean;
     readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
-    readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
     readonly defaultEnabled?: boolean;
   } = {},
 ): RuntimePlugin {
@@ -2719,7 +2715,6 @@ function createSessionEndPlugin(
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: options.requiredForTurn === true,
-        sideEffectLevel: options.sideEffectLevel ?? 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -2793,7 +2788,6 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -2865,7 +2859,6 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,

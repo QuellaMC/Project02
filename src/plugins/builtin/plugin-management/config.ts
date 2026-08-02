@@ -42,7 +42,8 @@ export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
+    annotations: {readOnlyHint: true},
+    concurrency: 'shared',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
   };

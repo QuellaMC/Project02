@@ -3,16 +3,12 @@ import type {RoleModelPluginToolDefinition} from '../../role-model/index.ts';
 import {isFirstPartyModelToolsPlugin} from '../builtin/model-tools/index.ts';
 import {isModelFacingRuntimePluginTool} from '../api/tool-classification.ts';
 import {
-  runtimePluginAccessFor,
   runtimePluginAccessForPlugin,
   runtimePluginGrantsAccess,
   type RuntimePluginAccessMapByPluginId,
 } from './access-control.ts';
 import type {RuntimePlugin, RuntimePluginProvidedTool} from '../api/types.ts';
-import type {
-  RuntimePluginAccessSnapshot,
-  RuntimePluginSideEffectLevel,
-} from '../api/contract.ts';
+import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
 export type IsHostOwnedFirstPartyModelToolsPlugin = (
   plugin: RuntimePlugin,
@@ -68,10 +64,7 @@ export function modelVisiblePluginTools(options: {
   return Object.freeze(
     options.plugin.providedTools.filter(
       tool =>
-        pluginToolHasRequiredGrantedAccess({
-          tool,
-          access: options.access,
-        }) &&
+        pluginToolHasRequiredGrantedAccess({access: options.access}) &&
         (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isModelVisiblePluginTool({
           plugin: options.plugin,
@@ -92,14 +85,8 @@ export function routableModelFacingPluginTools(options: {
   return Object.freeze(
     options.plugin.providedTools.filter(
       tool =>
-        pluginToolHasRequiredGrantedAccess({
-          tool,
-          access: options.access,
-        }) &&
-        isModelFacingPluginTool({
-          plugin: options.plugin,
-          tool,
-        }),
+        pluginToolHasRequiredGrantedAccess({access: options.access}) &&
+        isModelFacingRuntimePluginTool({tool}),
     ),
   );
 }
@@ -114,31 +101,16 @@ export function pluginCanWriteModelInput(
   });
 }
 
+/**
+ * A tool reaches the model only if its plugin may write model input.
+ * File-store writes are governed where they happen — the hook context
+ * hands out a write-capable store only under a file_store write grant —
+ * so this no longer second-guesses that from a tool's declared class.
+ */
 export function pluginToolHasRequiredGrantedAccess(options: {
-  readonly tool: RuntimePluginProvidedTool;
   readonly access: RuntimePluginAccessSnapshot;
 }): boolean {
-  if (!pluginCanWriteModelInput(options.access)) {
-    return false;
-  }
-
-  const requestedFileStoreAccess = runtimePluginAccessFor(
-    options.access.requestedAccess,
-    'file_store',
-  );
-
-  // A local-memory tool may own storage behind its provider and request no
-  // host fileStore access. If it opts into the host fileStore, a write-classed
-  // tool must hold the matching write grant instead of a read-only handle.
-  return (
-    !toolAllowsFileStoreWrites(options.tool) ||
-    requestedFileStoreAccess === 'none' ||
-    runtimePluginGrantsAccess({
-      access: options.access,
-      accessName: 'file_store',
-      requiredAccess: 'write',
-    })
-  );
+  return pluginCanWriteModelInput(options.access);
 }
 
 export function discoverableCurrentTurnPluginTools(options: {
@@ -150,10 +122,7 @@ export function discoverableCurrentTurnPluginTools(options: {
   return Object.freeze(
     options.plugin.providedTools.filter(
       tool =>
-        pluginToolHasRequiredGrantedAccess({
-          tool,
-          access: options.access,
-        }) &&
+        pluginToolHasRequiredGrantedAccess({access: options.access}) &&
         (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isDiscoverableCurrentTurnTool({
           plugin: options.plugin,
@@ -174,7 +143,7 @@ export function isDiscoverableCurrentTurnTool(options: {
   readonly tool: RuntimePluginProvidedTool;
   readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): boolean {
-  if (isModelFacingPluginTool(options)) {
+  if (isModelFacingRuntimePluginTool({tool: options.tool})) {
     return options.plugin.lifecycleHooks.handleToolCall !== undefined;
   }
 
@@ -190,19 +159,8 @@ export function isFirstPartyBuiltInModelTool(options: {
     options.isHostOwnedFirstPartyModelToolsPlugin?.(options.plugin) === true &&
     options.tool.validationOwner === 'built_in_model_tools' &&
     isBuiltInModelToolName(options.tool.name) &&
-    !toolRequiresConfirmation(options.tool) &&
-    options.tool.sideEffectLevel === 'none'
+    !toolRequiresConfirmation(options.tool)
   );
-}
-
-export function isModelFacingPluginTool(options: {
-  readonly plugin: RuntimePlugin;
-  readonly tool: RuntimePluginProvidedTool;
-}): boolean {
-  return isModelFacingRuntimePluginTool({
-    manifest: options.plugin.manifest,
-    tool: options.tool,
-  });
 }
 
 export function isModelVisiblePluginTool(options: {
@@ -220,20 +178,8 @@ export function isModelVisiblePluginTool(options: {
 
   return (
     options.plugin.lifecycleHooks.handleToolCall !== undefined &&
-    isModelFacingPluginTool(options)
+    isModelFacingRuntimePluginTool({tool: options.tool})
   );
-}
-
-export function toolAllowsFileStoreWrites(
-  tool: RuntimePluginProvidedTool,
-): boolean {
-  return sideEffectLevelAllowsFileStoreWrites(tool.sideEffectLevel);
-}
-
-export function sideEffectLevelAllowsFileStoreWrites(
-  sideEffectLevel: RuntimePluginSideEffectLevel,
-): boolean {
-  return sideEffectLevel === 'local_memory_write';
 }
 
 export function toolRequiresConfirmation(

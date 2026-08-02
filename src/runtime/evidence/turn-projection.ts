@@ -476,7 +476,6 @@ function pluginListings(
             Object.freeze({
               name: tool.name,
               validationOwner: tool.validationOwner,
-              sideEffectLevel: tool.sideEffectLevel,
               requiresConfirmation: tool.requiresConfirmation,
               sourceReferencesRequired: tool.sourceReferencesRequired,
             } satisfies InspectPluginToolListing),

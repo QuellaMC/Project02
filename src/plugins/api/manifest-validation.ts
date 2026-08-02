@@ -15,7 +15,8 @@ import {
   runtimePluginContractVersion,
   runtimePluginDeclarationValues,
   runtimePluginKindValues,
-  runtimePluginSideEffectLevelValues,
+  runtimePluginToolConcurrencyValues,
+  type RuntimePluginToolAnnotations,
   runtimePluginToolValidationOwnerValues,
   runtimePluginTrustLevelValues,
   type RuntimePluginAccessMap,
@@ -214,7 +215,8 @@ export function validateRuntimePluginProvidedTool(
   const callLimit = optionalModelToolCallLimit(value['callLimit']);
   const inputContract = requiredModelToolInputContract(value['inputContract']);
   const validationOwner = value['validationOwner'];
-  const sideEffectLevel = value['sideEffectLevel'];
+  const annotations = optionalToolAnnotations(value['annotations']);
+  const concurrency = value['concurrency'];
   const requiresConfirmation = requiredBoolean(
     value['requiresConfirmation'],
     'requiresConfirmation',
@@ -251,10 +253,17 @@ export function validateRuntimePluginProvidedTool(
     );
   }
 
-  if (!isOneOf(sideEffectLevel, runtimePluginSideEffectLevelValues)) {
+  if (annotations.status === 'rejected') {
+    return annotations;
+  }
+
+  if (
+    concurrency !== undefined &&
+    !isOneOf(concurrency, runtimePluginToolConcurrencyValues)
+  ) {
     return reject(
       'malformed_tool_definition',
-      'Plugin provided tool sideEffectLevel is not supported.',
+      'Plugin provided tool concurrency is not supported.',
     );
   }
 
@@ -266,7 +275,10 @@ export function validateRuntimePluginProvidedTool(
       ...(callLimit.value === undefined ? {} : {callLimit: callLimit.value}),
       inputContract: inputContract.value,
       validationOwner,
-      sideEffectLevel,
+      ...(annotations.value === undefined
+        ? {}
+        : {annotations: annotations.value}),
+      ...(concurrency === undefined ? {} : {concurrency}),
       requiresConfirmation: requiresConfirmation.value,
       sourceReferencesRequired: sourceReferencesRequired.value,
     } satisfies RuntimePluginProvidedTool),
@@ -732,7 +744,6 @@ function requiredRuntimePolicy(
     value['requiredForTurn'],
     'requiredForTurn',
   );
-  const sideEffectLevel = value['sideEffectLevel'];
   const confirmation = value['confirmation'];
   const timeoutMs = requiredPositiveInteger(value['timeoutMs'], 'timeoutMs');
   const sourceReferencesRequired = requiredBoolean(
@@ -761,13 +772,6 @@ function requiredRuntimePolicy(
     ]);
   }
 
-  if (!isOneOf(sideEffectLevel, runtimePluginSideEffectLevelValues)) {
-    return reject(
-      'malformed_manifest',
-      'Plugin runtimePolicy.sideEffectLevel is not supported.',
-    );
-  }
-
   if (!isOneOf(confirmation, confirmationRequirementValues)) {
     return reject(
       'malformed_manifest',
@@ -778,7 +782,6 @@ function requiredRuntimePolicy(
   return accept(
     Object.freeze({
       requiredForTurn: requiredForTurn.value,
-      sideEffectLevel,
       confirmation,
       timeoutMs: timeoutMs.value,
       sourceReferencesRequired: sourceReferencesRequired.value,
@@ -786,6 +789,53 @@ function requiredRuntimePolicy(
       failureBehavior: failureBehavior.value,
     } satisfies RuntimePluginRuntimePolicy),
   );
+}
+
+/**
+ * Tool annotations are advisory and every field is optional, so an
+ * absent block is valid; a present one must still be well formed, since
+ * a malformed hint would silently read as "unknown" and change whether
+ * the user is asked.
+ */
+function optionalToolAnnotations(
+  value: unknown,
+): RuntimePluginValidationResult<RuntimePluginToolAnnotations | undefined> {
+  if (value === undefined) {
+    return accept(undefined);
+  }
+
+  if (!isRecord(value)) {
+    return reject(
+      'malformed_tool_definition',
+      'Plugin provided tool annotations must be an object.',
+    );
+  }
+
+  const record = value;
+  const hints: Record<string, boolean> = {};
+
+  for (const hint of [
+    'readOnlyHint',
+    'destructiveHint',
+    'openWorldHint',
+  ] as const) {
+    const hintValue = record[hint];
+
+    if (hintValue === undefined) {
+      continue;
+    }
+
+    if (typeof hintValue !== 'boolean') {
+      return reject(
+        'malformed_tool_definition',
+        `Plugin provided tool annotation "${hint}" must be a boolean.`,
+      );
+    }
+
+    hints[hint] = hintValue;
+  }
+
+  return accept(Object.freeze(hints) as RuntimePluginToolAnnotations);
 }
 
 function requiredFailureBehavior(

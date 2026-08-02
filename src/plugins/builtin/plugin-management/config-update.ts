@@ -85,7 +85,8 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_config_write',
+    annotations: {readOnlyHint: false, destructiveHint: true},
+    concurrency: 'exclusive',
     requiresConfirmation: true,
     sourceReferencesRequired: false,
   };

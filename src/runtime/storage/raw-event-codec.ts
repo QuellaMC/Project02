@@ -132,7 +132,7 @@ const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
     additionalFields: true,
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'local_memory_write',
+  concurrency: 'exclusive',
   requiresConfirmation: false,
   sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);

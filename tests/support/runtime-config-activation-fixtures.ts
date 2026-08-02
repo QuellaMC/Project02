@@ -43,7 +43,6 @@ export function requiredSecretPlugin(
       localTrustLevel: 'trusted_adapter',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -140,7 +139,6 @@ export function firstPartyPlugin(
       localTrustLevel: 'first_party',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -199,7 +197,6 @@ export function fileStoreSessionEndPlugin(
       declaredPlugins: ['plugin_discovery', 'on_session_end'],
       runtimePolicy: {
         ...plugin.manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       requestedAccess: {file_store: 'write'},
     },

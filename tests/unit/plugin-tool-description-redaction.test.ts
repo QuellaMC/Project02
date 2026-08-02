@@ -190,7 +190,6 @@ function credentialDescriptionManifest() {
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,
@@ -251,7 +250,6 @@ function credentialDescriptionTool() {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
   };

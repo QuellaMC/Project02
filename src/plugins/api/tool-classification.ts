@@ -5,34 +5,28 @@ import type {
   RuntimePluginProvidedTool,
 } from './types.ts';
 
+/**
+ * A tool reaches the model when its plugin is enabled and the host
+ * validates it. Enabling the plugin is the trust decision — as with a
+ * local MCP server the user chose to run — so the runtime no longer
+ * filters tools by a declared effect level. A tool that wants consent
+ * per call says so with requiresConfirmation and is prompted, rather
+ * than being hidden from the model entirely.
+ */
 export function isModelFacingRuntimePluginTool(options: {
-  readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
-  const manifestAllowsModelFacingTools =
-    options.manifest.runtimePolicy.confirmation !== 'required';
-
   return (
-    manifestAllowsModelFacingTools &&
-    (isApprovalGatedRuntimePluginTool(options.tool) ||
-      (!isBuiltInModelToolName(options.tool.name) &&
-        options.tool.validationOwner === 'plugin_host' &&
-        !options.tool.requiresConfirmation &&
-        (options.tool.sideEffectLevel === 'none' ||
-          options.tool.sideEffectLevel === 'runtime_read' ||
-          options.tool.sideEffectLevel === 'local_memory_write')))
+    !isBuiltInModelToolName(options.tool.name) &&
+    options.tool.validationOwner === 'plugin_host'
   );
 }
 
+/** Prompts the user before the call runs. */
 export function isApprovalGatedRuntimePluginTool(
   tool: RuntimePluginProvidedTool,
 ): boolean {
-  return (
-    !isBuiltInModelToolName(tool.name) &&
-    tool.validationOwner === 'plugin_host' &&
-    tool.requiresConfirmation &&
-    tool.sideEffectLevel === 'runtime_config_write'
-  );
+  return isModelFacingRuntimePluginTool({tool}) && tool.requiresConfirmation;
 }
 
 export function validateRuntimePluginModelFacingToolAccess(options: {
@@ -40,10 +34,7 @@ export function validateRuntimePluginModelFacingToolAccess(options: {
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): void {
   const hasModelFacingTool = options.providedTools.some(tool =>
-    isModelFacingRuntimePluginTool({
-      manifest: options.manifest,
-      tool,
-    }),
+    isModelFacingRuntimePluginTool({tool}),
   );
 
   if (

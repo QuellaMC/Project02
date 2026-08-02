@@ -137,7 +137,6 @@ export type InspectPluginListing = {
 export type InspectPluginToolListing = {
   readonly name: string;
   readonly validationOwner: string;
-  readonly sideEffectLevel: string;
   readonly requiresConfirmation: boolean;
   readonly sourceReferencesRequired: boolean;
 };

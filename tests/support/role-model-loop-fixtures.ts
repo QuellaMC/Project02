@@ -42,7 +42,6 @@ export const memorySearchToolDefinition = Object.freeze({
     additionalFields: false,
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'runtime_read',
   requiresConfirmation: false,
   sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
@@ -65,12 +64,26 @@ export const visibleDotReplyToolDefinition = Object.freeze({
   description: 'Exercise a provider-name collision with visible_reply.',
 } satisfies RoleModelPluginToolDefinition);
 
-export function withVisibleReplyTool(
+/**
+ * A tool definition with no per-turn call limit and an explicit
+ * concurrency mode, for batches that exercise the execution gate.
+ */
+export function unlimitedToolWithConcurrency(
   definition: RoleModelPluginToolDefinition,
+  concurrency: 'shared' | 'exclusive',
+): RoleModelPluginToolDefinition {
+  const {callLimit, ...withoutCallLimit} = definition;
+
+  void callLimit;
+  return Object.freeze({...withoutCallLimit, concurrency});
+}
+
+export function withVisibleReplyTool(
+  ...definitions: readonly RoleModelPluginToolDefinition[]
 ): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze([
     ...createDefaultRoleModelPluginToolDefinitions(),
-    definition,
+    ...definitions,
   ]);
 }
 
@@ -97,7 +110,6 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
       localTrustLevel: 'test_fixture',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,
@@ -136,7 +148,6 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
           additionalFields: false,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
         sourceReferencesRequired: false,
       },

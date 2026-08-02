@@ -256,7 +256,6 @@ function dottedConfigManifest(): RuntimePluginManifest {
     localTrustLevel: 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,

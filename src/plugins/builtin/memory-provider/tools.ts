@@ -22,7 +22,8 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
+    annotations: {readOnlyHint: true},
+    concurrency: 'shared',
     requiresConfirmation: false,
     sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
@@ -50,7 +51,8 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'local_memory_write',
+    annotations: {readOnlyHint: false},
+    concurrency: 'exclusive',
     requiresConfirmation: false,
     sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);

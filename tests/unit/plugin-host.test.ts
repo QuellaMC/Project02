@@ -38,13 +38,10 @@ import {
 } from '../../src/plugins/packages/character-state/plugin.ts';
 import {
   callFileStoreAvailabilityProbe,
-  createConfirmationRequiredMemorySearchPlugin,
   createDeferred,
   createExplicitlyEnabledRuntimePluginHost,
-  createExternalReadMemorySearchPlugin,
   createFileStoreAvailabilityProbePlugin,
   createLateFileStoreWritePlugin,
-  createLocalMemoryWriteToolWithoutFileStorePlugin,
   createMemorySearchPlugin,
   createMemorySearchPluginWithInvocationProbe,
   createMemorySearchToolProviderOnlyPlugin,
@@ -751,93 +748,6 @@ describe('runtime plugin host catalog and routing', () => {
     );
   });
 
-  it('does not expose tools when the plugin manifest requires confirmation', async () => {
-    const plugin = createConfirmationRequiredMemorySearchPlugin();
-    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
-
-    expect(host.pluginToolDefinitions().map(tool => tool.name)).not.toContain(
-      'memory.search',
-    );
-
-    const result = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: runtimePluginId,
-        toolName: runtimePluginListToolName,
-        input: {},
-      },
-      testPluginContext(),
-    );
-
-    expect(result.status).toBe('accepted');
-    if (result.status !== 'accepted') {
-      throw new Error('Expected runtime.plugin.list to be accepted.');
-    }
-
-    expect(JSON.stringify(result.output)).toContain(
-      'memory.confirmation-required.fixture',
-    );
-    expect(JSON.stringify(result.output)).not.toContain('memory.search');
-  });
-
-  it('rejects direct calls to confirmation-required tools without executing them', async () => {
-    let handlerCalls = 0;
-    const plugin = createConfirmationRequiredMemorySearchPlugin(() => {
-      handlerCalls += 1;
-    });
-    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
-
-    const result = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: plugin.manifest.id,
-        toolName: 'memory.search',
-        input: {query: 'private memory'},
-      },
-      testPluginContext(),
-    );
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: 'tool_not_routable',
-    });
-    expect(result.evidence).toContainEqual(
-      expect.objectContaining({
-        policyOutcome: 'disallowed_tool_call',
-      }),
-    );
-    expect(handlerCalls).toBe(0);
-  });
-
-  it('rejects direct calls to external-side-effect tools without executing them', async () => {
-    let handlerCalls = 0;
-    const plugin = createExternalReadMemorySearchPlugin(() => {
-      handlerCalls += 1;
-    });
-    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
-
-    const result = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: plugin.manifest.id,
-        toolName: 'memory.search',
-        input: {query: 'remote memory'},
-      },
-      testPluginContext(),
-    );
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: 'tool_not_routable',
-    });
-    expect(result.evidence).toContainEqual(
-      expect.objectContaining({
-        policyOutcome: 'disallowed_tool_call',
-      }),
-    );
-    expect(handlerCalls).toBe(0);
-  });
-
   it('turns handler failures into redacted rejected tool observations', async () => {
     const plugin = createMemorySearchPlugin(
       'memory.failing',
@@ -1153,48 +1063,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       reason: 'model_input_not_granted',
-    });
-  });
-
-  it('does not expose, advertise, route, or invoke local-memory-write tools without file_store write', async () => {
-    let invoked = false;
-    const plugin = createLocalMemoryWriteToolWithoutFileStorePlugin(() => {
-      invoked = true;
-    });
-    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
-
-    expect(host.pluginToolDefinitions().map(tool => tool.name)).not.toContain(
-      'memory.search',
-    );
-
-    const discovery = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: runtimePluginId,
-        toolName: runtimePluginListToolName,
-        input: {},
-      },
-      testPluginContext(),
-    );
-
-    expect(JSON.stringify(discovery)).not.toContain('memory.search');
-
-    const result = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: plugin.manifest.id,
-        toolName: 'memory.search',
-        input: {
-          query: 'Mira',
-        },
-      },
-      testPluginContext(),
-    );
-
-    expect(invoked).toBe(false);
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: 'file_store_write_not_granted',
     });
   });
 });

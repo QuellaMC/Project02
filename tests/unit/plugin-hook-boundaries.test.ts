@@ -29,7 +29,6 @@ describe('runtime plugin hook result boundaries', () => {
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,
-          sideEffectLevel: 'runtime_read',
           confirmation: 'not_required',
           timeoutMs: 10_000,
           sourceReferencesRequired: false,

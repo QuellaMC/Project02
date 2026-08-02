@@ -28,6 +28,7 @@ import {
   memorySearchToolDefinition,
   parseTestJson,
   requiredMemorySearchToolDefinition,
+  unlimitedToolWithConcurrency,
   visibleDotReplyToolDefinition,
   withVisibleReplyTool,
 } from '../support/role-model-loop-fixtures.ts';
@@ -218,6 +219,117 @@ describe('role-model loop routing and policy', () => {
         },
       },
     });
+  });
+
+  it('overlaps shared tool calls and keeps observations in call order', async () => {
+    const events: string[] = [];
+    const searchTool = unlimitedToolWithConcurrency(
+      memorySearchToolDefinition,
+      'shared',
+    );
+    const recallTool = unlimitedToolWithConcurrency(
+      memoryRecallToolDefinition,
+      'shared',
+    );
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        events.push(`start:${call.toolName}`);
+        await Promise.resolve();
+        await Promise.resolve();
+        events.push(`end:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('search memory', 'evt_shared_tool_overlap'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(searchTool, recallTool),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_shared_tool_overlap'),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'memory.search', input: {query: 'first'}},
+              {name: 'memory.recall', input: {query: 'second'}},
+            ],
+          },
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'done'}},
+            ],
+          },
+        ],
+        () => undefined,
+      ),
+    });
+
+    expect(result.status).toBe('accepted');
+    // Both shared calls are in flight together.
+    expect(events.indexOf('start:memory.recall')).toBeLessThan(
+      events.indexOf('end:memory.search'),
+    );
+    // Observations follow the model's call order regardless of which
+    // call finished first.
+    expect(
+      result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
+    ).toEqual(['memory.search', 'memory.recall']);
+  });
+
+  it('runs an exclusive tool call alone within its batch', async () => {
+    const events: string[] = [];
+    const searchTool = unlimitedToolWithConcurrency(
+      memorySearchToolDefinition,
+      'shared',
+    );
+    const recallTool = unlimitedToolWithConcurrency(
+      memoryRecallToolDefinition,
+      'exclusive',
+    );
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        events.push(`start:${call.toolName}`);
+        await Promise.resolve();
+        await Promise.resolve();
+        events.push(`end:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('mixed batch', 'evt_exclusive_tool_alone'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(searchTool, recallTool),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_exclusive_tool_alone'),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'memory.search', input: {query: 'first'}},
+              {name: 'memory.recall', input: {query: 'second'}},
+            ],
+          },
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'done'}},
+            ],
+          },
+        ],
+        () => undefined,
+      ),
+    });
+
+    // The exclusive call waits for the shared call to finish.
+    expect(events).toEqual([
+      'start:memory.search',
+      'end:memory.search',
+      'start:memory.recall',
+      'end:memory.recall',
+    ]);
   });
 
   it('does not route a defined plugin tool omitted from allowedTools', async () => {

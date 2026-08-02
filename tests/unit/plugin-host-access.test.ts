@@ -342,11 +342,9 @@ describe('runtime plugin host access and lifecycle', () => {
     if (result.status !== 'accepted') {
       throw new Error('Expected read-only fileStore probe to be accepted.');
     }
-
-    expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe('runtime_read');
     expect(registration).toMatchObject({
-      requestedAccess: {file_store: 'write', model_input: 'write'},
-      grantedAccess: {file_store: 'write', model_input: 'write'},
+      requestedAccess: {file_store: 'read', model_input: 'write'},
+      grantedAccess: {file_store: 'read', model_input: 'write'},
     });
     expect(result.output).toEqual({
       seed: {
@@ -439,9 +437,6 @@ describe('runtime plugin host access and lifecycle', () => {
       },
       testPluginContext(),
     );
-
-    expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe('runtime_read');
-    expect(plugin.providedTools[0]?.sideEffectLevel).toBe('local_memory_write');
     expect(registration).toMatchObject({
       requestedAccess: {file_store: 'write', model_input: 'write'},
       grantedAccess: {file_store: 'write', model_input: 'write'},

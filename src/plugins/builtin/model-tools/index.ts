@@ -22,7 +22,8 @@ export const firstPartyModelToolsProvidedTools = Object.freeze(
       callLimit: definition.callLimit,
       inputContract: definition.inputContract,
       validationOwner: 'built_in_model_tools',
-      sideEffectLevel: 'none',
+      annotations: {readOnlyHint: true},
+      concurrency: 'shared',
       requiresConfirmation: false,
       sourceReferencesRequired: false,
     } satisfies RuntimePluginProvidedTool),
@@ -62,7 +63,6 @@ export function createFirstPartyModelToolsPluginManifest(): RuntimePluginManifes
     localTrustLevel: 'first_party',
     runtimePolicy: {
       requiredForTurn: true,
-      sideEffectLevel: 'none',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,

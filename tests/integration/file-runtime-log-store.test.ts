@@ -2352,7 +2352,6 @@ function storedRecordWithPluginToolJsonSchema(
       jsonSchema,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'local_memory_write',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
   });
@@ -2518,7 +2517,6 @@ function createBeforeCallRejectingPluginHost() {
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
             requiredForTurn: true,
-            sideEffectLevel: 'runtime_read',
             confirmation: 'not_required',
             timeoutMs: 1000,
             sourceReferencesRequired: false,
@@ -2580,7 +2578,6 @@ function createHealthRejectingPluginHost(options?: {
           localTrustLevel: 'test_fixture',
           runtimePolicy: {
             requiredForTurn: true,
-            sideEffectLevel: 'runtime_read',
             confirmation: 'not_required',
             timeoutMs: 1000,
             sourceReferencesRequired: false,

@@ -89,7 +89,6 @@ function descriptorTemplate({id, displayName}) {
       localTrustLevel: 'first_party',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: 'none',
         confirmation: 'not_required',
         timeoutMs: 1000,
         sourceReferencesRequired: false,

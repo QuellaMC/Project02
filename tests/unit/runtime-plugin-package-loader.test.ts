@@ -1918,7 +1918,6 @@ function testPluginManifest(
     localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'none',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,

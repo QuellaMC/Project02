@@ -134,7 +134,6 @@
           "additionalProperties": false,
           "required": [
             "requiredForTurn",
-            "sideEffectLevel",
             "confirmation",
             "timeoutMs",
             "sourceReferencesRequired",
@@ -143,16 +142,6 @@
           ],
           "properties": {
             "requiredForTurn": {"type": "boolean"},
-            "sideEffectLevel": {
-              "enum": [
-                "none",
-                "runtime_read",
-                "runtime_config_write",
-                "local_memory_write",
-                "external_read",
-                "external_write"
-              ]
-            },
             "confirmation": {"enum": ["not_required", "required"]},
             "timeoutMs": {"type": "integer", "minimum": 1},
             "sourceReferencesRequired": {"type": "boolean"},

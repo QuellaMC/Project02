@@ -3,7 +3,6 @@ import type {
   RuntimePluginFileStoreProvider,
   RuntimePluginFileStoreTransaction,
 } from '../api/file-store-contract.ts';
-import {sideEffectLevelAllowsFileStoreWrites} from '../policy/tool-policy.ts';
 import type {
   RuntimePlugin,
   RuntimePluginAfterTurnCommittedContext,
@@ -42,23 +41,23 @@ export function createPluginHookContext<
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
 }): PluginHookContextScope<TContext> {
   const pluginId = options.pluginId ?? options.plugin.manifest.id;
-  const policyManifest = options.policyManifest ?? options.plugin.manifest;
   const grantsFileStore = runtimePluginGrantsAccess({
     access: options.access,
     accessName: 'file_store',
     requiredAccess: 'read',
   });
   const sessionId = options.sessionId ?? options.context.sessionId;
+  // The granted access decides. The retired sideEffectLevel enum gated
+  // this too, so a plugin the user had already granted file_store write
+  // could still be refused for declaring the "wrong" effect level —
+  // two permission systems answering one question.
   const allowWrites =
     runtimePluginGrantsAccess({
       access: options.access,
       accessName: 'file_store',
       requiredAccess: 'write',
     }) &&
-    (options.allowFileStoreWrites ??
-      sideEffectLevelAllowsFileStoreWrites(
-        policyManifest.runtimePolicy.sideEffectLevel,
-      ));
+    (options.allowFileStoreWrites ?? true);
   const baseFileStore = grantsFileStore
     ? (options.fileStoreTransaction?.fileStoreFor({
         ...(options.storeRoot === undefined

@@ -76,9 +76,7 @@ describe('host-owned runtime plugin management tools', () => {
       runtimePluginConfigReadToolName,
       runtimePluginConfigUpdateToolName,
     ]);
-    expect(plugin.manifest.runtimePolicy).toMatchObject({
-      sideEffectLevel: 'runtime_config_write',
-    });
+    expect(plugin.manifest.runtimePolicy).toMatchObject({});
   });
 
   it('exposes list always, config read with state, and config update only with confirmation', () => {
@@ -114,7 +112,6 @@ describe('host-owned runtime plugin management tools', () => {
       expect.objectContaining({
         pluginId: runtimePluginId,
         name: runtimePluginConfigReadToolName,
-        sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
       }),
     );
@@ -125,7 +122,6 @@ describe('host-owned runtime plugin management tools', () => {
       expect.objectContaining({
         pluginId: runtimePluginId,
         name: runtimePluginConfigUpdateToolName,
-        sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
       }),
     );
@@ -201,7 +197,6 @@ describe('host-owned runtime plugin management tools', () => {
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,
-          sideEffectLevel: 'runtime_config_write',
           confirmation: 'not_required',
           timeoutMs: 1_000,
           sourceReferencesRequired: false,
@@ -228,7 +223,6 @@ describe('host-owned runtime plugin management tools', () => {
             additionalFields: false,
           },
           validationOwner: 'plugin_host',
-          sideEffectLevel: 'runtime_config_write',
           requiresConfirmation: true,
           sourceReferencesRequired: false,
         },
@@ -2331,7 +2325,6 @@ function configurablePluginManifest(
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,

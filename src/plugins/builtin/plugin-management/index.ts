@@ -145,7 +145,6 @@ export function createRuntimePluginManagementPluginManifest() {
     localTrustLevel: 'first_party',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'runtime_config_write',
       confirmation: 'not_required',
       timeoutMs: runtimePluginConfigUpdateExecutionTimeoutMs,
       sourceReferencesRequired: false,

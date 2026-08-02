@@ -462,7 +462,6 @@ describe('NVIDIA role-model provider', () => {
         additionalFields: true,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
       sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition);
@@ -1777,7 +1776,6 @@ function createAliasCollisionToolDefinition(options: {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
   } satisfies RoleModelPluginToolDefinition);

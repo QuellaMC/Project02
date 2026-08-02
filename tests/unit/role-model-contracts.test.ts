@@ -48,7 +48,6 @@ describe('role-model contracts', () => {
           additionalFields: false,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
         sourceReferencesRequired: false,
       },
@@ -514,7 +513,6 @@ describe('role-model contracts', () => {
           additionalFields: true,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
         sourceReferencesRequired: false,
       },
@@ -608,7 +606,6 @@ describe('role-model contracts', () => {
         additionalFields: true,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
       sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition;

@@ -78,7 +78,8 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
+    annotations: {readOnlyHint: true},
+    concurrency: 'shared',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
   };
@@ -289,7 +290,8 @@ function createRuntimePluginListToolSummary(
   return Object.freeze({
     name: boundedRuntimePluginListText(tool.name),
     description: boundedRuntimePluginListText(tool.description),
-    sideEffectLevel: tool.sideEffectLevel,
+    ...(tool.annotations === undefined ? {} : {annotations: tool.annotations}),
+    ...(tool.concurrency === undefined ? {} : {concurrency: tool.concurrency}),
     requiredForUserTurn: tool.requiredForUserTurn,
     ...(tool.callLimit === undefined ? {} : {callLimit: tool.callLimit}),
     requiresConfirmation: tool.requiresConfirmation,

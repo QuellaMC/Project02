@@ -96,7 +96,11 @@ export function userTurnCallLimitRoutingRejection(options: {
   readonly toolCall: ModelToolCall;
   readonly toolDefinition: RoleModelPluginToolDefinition | undefined;
   readonly priorToolObservations: readonly RoleModelToolObservation[];
-  readonly routedResults: readonly RoleModelPluginToolRoutingEvidence[];
+  /**
+   * Tool names already attempted in this batch. A limit bounds attempts,
+   * so a call still executing counts the same as a finished one.
+   */
+  readonly batchToolNames: readonly string[];
   readonly context: RuntimePluginContext | undefined;
 }): RoleModelPluginToolRoutingEvidence | undefined {
   const callLimit = options.toolDefinition?.callLimit;
@@ -109,9 +113,8 @@ export function userTurnCallLimitRoutingRejection(options: {
     options.priorToolObservations.filter(
       observation => observation.toolName === options.toolCall.name,
     ).length +
-    options.routedResults.filter(
-      result => result.call.toolName === options.toolCall.name,
-    ).length;
+    options.batchToolNames.filter(name => name === options.toolCall.name)
+      .length;
 
   if (attemptCount < callLimit.maxCalls) {
     return undefined;

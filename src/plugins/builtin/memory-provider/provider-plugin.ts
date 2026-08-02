@@ -26,9 +26,6 @@ export function createMemoryProviderRuntimePlugin(
   const toolNamespace = options.toolNamespace ?? 'memory';
   const searchToolName = `${toolNamespace}.search`;
   const addToolName = `${toolNamespace}.add`;
-  const canWriteMemory =
-    provider.add !== undefined || provider.captureTurn !== undefined;
-
   return createRuntimePlugin({
     manifest: {
       id: pluginId,
@@ -50,7 +47,6 @@ export function createMemoryProviderRuntimePlugin(
       localTrustLevel: 'trusted_adapter',
       runtimePolicy: {
         requiredForTurn: false,
-        sideEffectLevel: canWriteMemory ? 'local_memory_write' : 'runtime_read',
         confirmation: 'not_required',
         timeoutMs: 1500,
         sourceReferencesRequired: true,

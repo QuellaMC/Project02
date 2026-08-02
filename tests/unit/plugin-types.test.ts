@@ -143,7 +143,6 @@ describe('runtime plugin source references', () => {
         version: '1.0.0?token=version-secret',
         runtimePolicy: {
           requiredForTurn: false,
-          sideEffectLevel: 'runtime_read',
           confirmation: 'not_required',
           timeoutMs: 1_000,
           sourceReferencesRequired: false,
@@ -799,67 +798,44 @@ describe('runtime plugin model-facing tool policy', () => {
     expect(plugin.providedTools).toHaveLength(1);
   });
 
-  it('classifies approval-gated config writes by policy instead of plugin identity', () => {
-    const manifest = createRuntimePluginManifest(
-      runtimePluginManifestFixture({
-        id: 'settings.arbitrary.fixture',
-        requestedAccess: {model_input: 'write'},
-      }),
-    );
+  it('offers a confirm-gated tool to the model instead of hiding it', () => {
     const tool = createRuntimePluginProvidedTool(
       runtimePluginProvidedToolFixture({
         name: 'settings.arbitrary.update',
-        sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
       }),
     );
 
+    // Enabling the plugin is the trust decision. A tool that wants
+    // consent per call says so and is prompted, rather than being kept
+    // away from the model by its declared class.
     expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
-    expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
-    expect(
-      isModelFacingRuntimePluginTool({
-        manifest: createRuntimePluginManifest(
-          runtimePluginManifestFixture({
-            id: 'settings.arbitrary.fixture',
-            requestedAccess: {model_input: 'write'},
-            runtimePolicy: {
-              ...manifest.runtimePolicy,
-              confirmation: 'required',
-            },
-          }),
-        ),
-        tool,
-      }),
-    ).toBe(false);
+    expect(isModelFacingRuntimePluginTool({tool})).toBe(true);
   });
 
-  it('accepts non-model-facing tools without model_input write', () => {
-    for (const tool of [
-      runtimePluginProvidedToolFixture({sideEffectLevel: 'external_write'}),
-      runtimePluginProvidedToolFixture({
-        sideEffectLevel: 'runtime_config_write',
-        requiresConfirmation: false,
-      }),
-    ]) {
-      expect(() =>
-        createRuntimePlugin({
-          manifest: runtimePluginManifestFixture({
-            declaredPlugins: ['tool_provider', 'handle_tool_call'],
-            requestedAccess: {},
-          }),
-          providedTools: [tool],
-          lifecycleHooks: {
-            handleToolCall() {
-              return {
-                status: 'accepted',
-                output: {},
-                evidence: [],
-              };
-            },
-          },
+  it('requires model_input write for a plugin that provides model tools', () => {
+    // Every host-validated tool reaches the model now, so a plugin that
+    // provides one must declare the access that implies. The old
+    // "non-model-facing tool" carve-out was defined by the retired
+    // effect-level enum and no longer exists.
+    expect(() =>
+      createRuntimePlugin({
+        manifest: runtimePluginManifestFixture({
+          declaredPlugins: ['tool_provider', 'handle_tool_call'],
+          requestedAccess: {},
         }),
-      ).not.toThrow();
-    }
+        providedTools: [runtimePluginProvidedToolFixture({})],
+        lifecycleHooks: {
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: [],
+            };
+          },
+        },
+      }),
+    ).toThrow('model_input');
   });
 
   it('requires shutdown hooks to declare the shutdown lifecycle', () => {
@@ -960,7 +936,6 @@ describe('runtime plugin config metadata', () => {
         localTrustLevel: 'test_fixture',
         runtimePolicy: {
           requiredForTurn: false,
-          sideEffectLevel: 'runtime_read',
           confirmation: 'not_required',
           timeoutMs: 1000,
           sourceReferencesRequired: false,
@@ -1038,7 +1013,6 @@ function runtimePluginManifestFixture(
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,
@@ -1088,7 +1062,6 @@ function runtimePluginProvidedToolFixture(
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
     sourceReferencesRequired: false,
     ...overrides,

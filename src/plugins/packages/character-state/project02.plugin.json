@@ -28,7 +28,6 @@
     "localTrustLevel": "first_party",
     "runtimePolicy": {
       "requiredForTurn": true,
-      "sideEffectLevel": "local_memory_write",
       "confirmation": "not_required",
       "timeoutMs": 1000,
       "sourceReferencesRequired": false,

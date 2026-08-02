@@ -131,7 +131,6 @@ function createCharacterStatePluginFromManifest(
         },
         inputContract: characterStatePatchInputContract,
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'local_memory_write',
         requiresConfirmation: false,
         sourceReferencesRequired: false,
       }),

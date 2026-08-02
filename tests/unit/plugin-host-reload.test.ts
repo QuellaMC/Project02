@@ -66,7 +66,6 @@ function reloadFixtureManifest(): RuntimePluginManifest {
     localTrustLevel: 'test_fixture',
     runtimePolicy: {
       requiredForTurn: false,
-      sideEffectLevel: 'none',
       confirmation: 'not_required',
       timeoutMs: 1000,
       sourceReferencesRequired: false,
@@ -245,7 +244,6 @@ describe('runtime plugin host live config reload', () => {
           requiredForUserTurn: false,
           inputContract: {type: 'object', fields: [], additionalFields: false},
           validationOwner: 'plugin_host',
-          sideEffectLevel: 'none',
           requiresConfirmation: false,
           sourceReferencesRequired: false,
         },
