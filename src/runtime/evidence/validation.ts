@@ -2153,10 +2153,8 @@ function assertConversationTurnShape(options: {
     }
   }
 
-  for (const [identityKey, turnMessages] of groupByTurnIdentity(
-    options.messages,
-  )) {
-    assertSingleLeadingUserMessage(identityKey, turnMessages);
+  for (const turnMessages of groupByTurnIdentity(options.messages).values()) {
+    assertSingleLeadingUserMessage(turnMessages);
 
     for (const message of turnMessages) {
       const commitEvent = commitEventByMessageKey.get(
@@ -2235,15 +2233,16 @@ function groupByTurnIdentity(
 }
 
 function assertSingleLeadingUserMessage(
-  identityKey: string,
   turnMessages: readonly ConversationLogRecord[],
 ): void {
   const userMessages = turnMessages.filter(message => message.role === 'user');
 
   if (userMessages.length !== 1 || turnMessages[0]?.role !== 'user') {
+    // Name the turn by its recorded eventId - identity keys are opaque
+    // map keys, never parsed back into their parts.
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      `A runtime turn must commit exactly one user message before its replies: ${identityKey.split(' ')[0] ?? identityKey}.`,
+      `A runtime turn must commit exactly one user message before its replies: ${turnMessages[0]?.eventId ?? 'unknown event'}.`,
     );
   }
 }
