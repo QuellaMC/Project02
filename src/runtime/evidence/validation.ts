@@ -864,10 +864,6 @@ export function assertIncrementalStatePublicReadable(
     rawEvents: evidence.rawEvents,
     mode: 'public',
   });
-  assertCompletedTerminalRawEventsMatchConversationMessages({
-    messages: evidence.conversationMessages,
-    rawEvents: evidence.rawEvents,
-  });
 }
 
 export function reconcileTerminalRawTraceEvidence(
@@ -2028,8 +2024,6 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
       );
     }
   }
-
-  assertCompletedTerminalRawEventsMatchConversationMessages(options);
 }
 
 function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
@@ -2101,46 +2095,6 @@ function visibleConversationMessagesForRawEvent(options: {
     });
 }
 
-function assertCompletedTerminalRawEventsMatchConversationMessages(options: {
-  readonly messages: readonly ConversationLogRecord[];
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  const messagesByTurnIdentity = new Map<
-    string,
-    readonly ConversationLogRecord[]
-  >();
-
-  for (const message of options.messages) {
-    const identityKey = runtimeEventIdentityKey(message);
-    const messages = messagesByTurnIdentity.get(identityKey) ?? [];
-
-    messagesByTurnIdentity.set(
-      identityKey,
-      Object.freeze([...messages, message]),
-    );
-  }
-
-  // Both terminal kinds enumerate their turn's committed messages: a
-  // rejected turn keeps whatever it committed before rejecting, and
-  // transcript reconstruction reads prior messages from these
-  // references, so an omitted id would desync a later turn's context.
-  for (const rawEvent of options.rawEvents.filter(
-    isVisibleMessageTerminalRawEventLogRecord,
-  )) {
-    const expectedMessageIds = (
-      messagesByTurnIdentity.get(runtimeEventIdentityKey(rawEvent)) ?? []
-    ).map(message => message.id);
-    const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
-
-    if (!sameOrderedValues(visibleMessageIds, expectedMessageIds)) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
-      );
-    }
-  }
-}
-
 /**
  * The one statement of what a valid conversation turn looks like — the
  * exact shape the runtime writer produces and nothing wider:
@@ -2185,7 +2139,30 @@ function assertConversationTurnShape(options: {
     }
   }
 
-  for (const turnMessages of groupByTurnIdentity(options.messages).values()) {
+  const messagesByTurnIdentity = groupByTurnIdentity(options.messages);
+
+  // Both terminal kinds enumerate their turn's committed messages: a
+  // rejected turn keeps whatever it committed before rejecting, and
+  // transcript reconstruction reads prior messages from these
+  // references, so an omitted id would desync a later turn's context.
+  for (const rawEvent of options.rawEvents.filter(
+    isVisibleMessageTerminalRawEventLogRecord,
+  )) {
+    const expectedMessageIds = (
+      messagesByTurnIdentity.get(runtimeEventIdentityKey(rawEvent)) ?? []
+    ).map(message => message.id);
+
+    if (
+      !sameOrderedValues(rawEvent.visibleMessageIds ?? [], expectedMessageIds)
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
+      );
+    }
+  }
+
+  for (const turnMessages of messagesByTurnIdentity.values()) {
     assertSingleLeadingUserMessage(turnMessages);
 
     for (const message of turnMessages) {

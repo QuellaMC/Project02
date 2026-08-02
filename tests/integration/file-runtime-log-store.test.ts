@@ -1261,6 +1261,78 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
   });
 
+  it('rejects a terminal event that omits one of its turn committed messages', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-terminal-omits-message';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_terminal_omits_message'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // Transcript reconstruction reads prior messages from terminal
+    // references, so a terminal that drops one of its turn's committed
+    // ids would desync a later turn's model context.
+    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const trimmedLines = rawLines.map(line => {
+      if (!line.includes('"runtime_turn_completed"')) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as {visibleMessageIds?: string[]};
+
+      return JSON.stringify({
+        ...record,
+        visibleMessageIds: (record.visibleMessageIds ?? []).slice(0, 1),
+      });
+    });
+
+    writeFileSync(paths.rawEventsPath, `${trimmedLines.join('\n')}\n`, 'utf8');
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow(
+      'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
+    );
+  });
+
   it('rejects a character row edited away from its accepted reply', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-character-text-drift';
