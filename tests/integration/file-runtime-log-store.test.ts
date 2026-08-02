@@ -1686,16 +1686,55 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     const userRecord = JSON.parse(userLine) as Record<string, unknown>;
-    const forgedUserRecord = {
-      ...userRecord,
-      id: `${sessionId}:message-${String(conversationLines.length + 1)}`,
-    };
+    const forgedMessageId = `${sessionId}:message-${String(conversationLines.length + 1)}`;
+    const forgedUserRecord = {...userRecord, id: forgedMessageId};
 
     writeFileSync(
       paths.conversationPath,
       `${[...conversationLines, JSON.stringify(forgedUserRecord)].join('\n')}\n`,
       'utf8',
     );
+
+    // Anchor the forged row too, and list it on the terminal event, so
+    // the store fails on the duplicated utterance itself rather than on
+    // a missing anchor or an unreferenced message.
+    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const userAnchorLine = rawLines.find(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes(`${sessionId}:message-1`),
+    );
+
+    if (userAnchorLine === undefined) {
+      throw new Error('Expected a user commit anchor line.');
+    }
+
+    const forgedAnchor = JSON.stringify({
+      ...(JSON.parse(userAnchorLine) as Record<string, unknown>),
+      visibleMessageIds: [forgedMessageId],
+    });
+    const terminalIndex = rawLines.findIndex(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+    const terminalRecord = JSON.parse(rawLines[terminalIndex] ?? '{}') as {
+      visibleMessageIds?: string[];
+    };
+    const forgedLines = [
+      ...rawLines.slice(0, terminalIndex),
+      forgedAnchor,
+      JSON.stringify({
+        ...terminalRecord,
+        visibleMessageIds: [
+          ...(terminalRecord.visibleMessageIds ?? []),
+          forgedMessageId,
+        ],
+      }),
+      ...rawLines.slice(terminalIndex + 1),
+    ];
+
+    writeFileSync(paths.rawEventsPath, `${forgedLines.join('\n')}\n`, 'utf8');
 
     expect(() =>
       createFileRuntimeLogStore({
@@ -1704,7 +1743,7 @@ describe('file runtime log store plugin tool event validation', () => {
         characterId: testCharacterProfile.id,
         boundCharacter: testCharacterProfile,
       }).readSessionEvidence(),
-    ).toThrow();
+    ).toThrow('must commit exactly one user message before its replies');
   });
 
   it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
