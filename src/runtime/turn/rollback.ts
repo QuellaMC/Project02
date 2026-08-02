@@ -29,7 +29,6 @@ import {
 } from './plugin-evidence.ts';
 import {
   IncompleteConversationRollbackError,
-  VisibleReplyDeliveryError,
   appendRawEvent,
   appendTrace,
   rollbackPluginFileStoreTransaction,
@@ -40,7 +39,6 @@ import {
   type RoleModelRawEvidence,
   type RuntimeTurnRejectionOptions,
   type RuntimeTurnState,
-  visibleReplyDeliveryFailedRejectionReason,
 } from './contracts.ts';
 
 const unexpectedRuntimeTurnFailureMessage =
@@ -195,22 +193,6 @@ export async function handleRuntimeTurnFailure(
       reason: rejection.reason,
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
       traceStep: 'character_reply_rejected',
-      ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
-    });
-  }
-
-  if (error instanceof VisibleReplyDeliveryError) {
-    // The reply is durable but the user never saw it: the turn ends
-    // rejected around the kept history instead of claiming completion,
-    // and the message tells the user both facts.
-    return await appendRejectedResult(state, {
-      message: error.message,
-      rawKind: 'visible_reply_delivery_failed',
-      rawReason: visibleReplyDeliveryFailedRejectionReason,
-      reason: visibleReplyDeliveryFailedRejectionReason,
-      ...runtimePluginContextOption(state.runtimePluginContextForTurn),
-      traceStep: 'visible_reply_delivery_failed',
-      toolCallIds: Object.freeze([...state.finishedToolCallIds]),
       ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     });
   }

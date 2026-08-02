@@ -2122,19 +2122,37 @@ function assertConversationMessagesHaveTerminalRawEvidence(options: {
   readonly messages: readonly ConversationLogRecord[];
   readonly rawEvents: readonly RawEventLogRecord[];
 }): void {
-  if (options.messages.length === 0) {
-    return;
-  }
-
-  const messageCommitEvidence = new Set(
-    options.rawEvents
-      .filter(record => record.kind === 'visible_message_committed')
-      .flatMap(record =>
-        (record.visibleMessageIds ?? []).map(messageId =>
-          visibleMessageEvidenceKey(record, messageId),
-        ),
-      ),
+  const commitEvents = options.rawEvents.filter(
+    record => record.kind === 'visible_message_committed',
   );
+  // One message, one commit event: each anchor names exactly one message,
+  // and no message is anchored twice — duplicate processing or a direct
+  // writer cannot inflate the commit record of what the user saw.
+  const messageCommitEvidence = new Set<string>();
+
+  for (const record of commitEvents) {
+    const messageIds = record.visibleMessageIds ?? [];
+
+    if (messageIds.length !== 1) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'A visible_message_committed raw event must anchor exactly one conversation message.',
+      );
+    }
+
+    for (const messageId of messageIds) {
+      const key = visibleMessageEvidenceKey(record, messageId);
+
+      if (messageCommitEvidence.has(key)) {
+        throw new LocalRuntimeStorageContractError(
+          'malformed_record',
+          `Conversation message has more than one visible_message_committed raw event: ${messageId}.`,
+        );
+      }
+
+      messageCommitEvidence.add(key);
+    }
+  }
 
   for (const message of options.messages) {
     if (

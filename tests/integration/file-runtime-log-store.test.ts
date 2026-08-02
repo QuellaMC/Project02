@@ -1261,6 +1261,81 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
   });
 
+  it('rejects a duplicated visible_message_committed anchor for one message', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-duplicate-commit-anchor';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_duplicate_commit_anchor'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // Simulate duplicate processing by a direct writer: re-append the
+    // reply's commit event verbatim. One message, one commit event — the
+    // duplicated anchor must fail closed instead of reading publicly.
+    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const commitIndex = rawLines.findIndex(line =>
+      line.includes('"visible_message_committed"'),
+    );
+
+    if (commitIndex === -1) {
+      throw new Error('Expected a visible_message_committed raw event line.');
+    }
+
+    const duplicatedLines = [
+      ...rawLines.slice(0, commitIndex + 1),
+      rawLines[commitIndex],
+      ...rawLines.slice(commitIndex + 1),
+    ];
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${duplicatedLines.join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow('more than one visible_message_committed raw event');
+  });
+
   it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-before-call-rejected';
