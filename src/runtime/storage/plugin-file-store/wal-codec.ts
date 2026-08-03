@@ -1,10 +1,7 @@
-import {createHash} from 'node:crypto';
-import {dirname, join} from 'node:path';
+import {dirname} from 'node:path';
 
-import {lstatPathSync, readTextFileSync} from '../../../shared/file-system.ts';
+import {readTextFileSync} from '../../../shared/file-system.ts';
 
-import type {RuntimeEventIdentity} from '../../../core/index.ts';
-import {createLocalRuntimeSessionPaths} from '../layout-contract.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import {
   assertRegularFile,
@@ -16,7 +13,6 @@ import {
 } from './durable-primitives.ts';
 import {
   freezeRuntimePluginFileStoreJsonValue,
-  isMissingFileError,
   isPlainObject,
   normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
@@ -24,68 +20,40 @@ import {
 export const durableTransactionJournalVersion =
   'project02.plugin_transaction.v1';
 
+/**
+ * One durable write, described completely enough for a later process to
+ * finish or verify it after a crash.
+ *
+ * A tool call's writes are durable when the call returns, so a journal
+ * describes exactly one operation. There is no batch and nothing to roll
+ * back: recovery either completes this write or confirms it already landed.
+ */
 export type DurablePluginFileStoreJournalOperation = {
-  readonly index: number;
   readonly pluginId: string;
   readonly path: string;
-  readonly kind: 'append_jsonl' | 'write_json';
   readonly value: RuntimePluginJsonValue;
-  readonly status: 'pending' | 'planned' | 'applied';
-  readonly expectedBeforeHash?: string;
-  readonly beforeHash?: string;
-  readonly afterHash?: string;
-  readonly afterContent?: string;
-  readonly beforeLength?: number;
-  readonly appendedLine?: string;
-  readonly afterLength?: number;
-  readonly beforeRevision?: number;
-  readonly afterRevision?: number;
-};
+  readonly beforeHash: string;
+  readonly afterHash: string;
+  readonly beforeRevision: number;
+  readonly afterRevision: number;
+} & (
+  | {readonly kind: 'write_json'; readonly afterContent: string}
+  | {
+      readonly kind: 'append_jsonl';
+      readonly beforeLength: number;
+      readonly appendedLine: string;
+      readonly afterLength: number;
+    }
+);
 
 export type DurablePluginFileStoreJournal = {
   readonly version: typeof durableTransactionJournalVersion;
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly createdAt: string;
   readonly ownerHostname: string;
   readonly ownerNonce: string;
   readonly ownerPid: number;
   readonly sessionId: string;
-  readonly operations: readonly DurablePluginFileStoreJournalOperation[];
+  readonly operation: DurablePluginFileStoreJournalOperation;
 };
-
-export function durablePluginFileStoreTransactionJournalPath(options: {
-  readonly storeRoot: string;
-  readonly sessionId: string;
-  readonly identity: RuntimeEventIdentity;
-}): string {
-  const sessionPaths = createLocalRuntimeSessionPaths(options);
-  const key = createHash('sha256')
-    .update(options.identity.eventId)
-    .update('\u0000')
-    .update(options.identity.traceId)
-    .update('\u0000')
-    .update(options.identity.createdAt)
-    .digest('hex');
-
-  return join(sessionPaths.sessionRoot, '.plugin-transactions', `${key}.json`);
-}
-
-export function assertDurableTransactionJournalDoesNotExist(
-  journalPath: string,
-): void {
-  try {
-    lstatPathSync(journalPath);
-  } catch (error: unknown) {
-    if (isMissingFileError(error)) {
-      return;
-    }
-
-    throw error;
-  }
-
-  throw new Error('Plugin fileStore transaction journal already exists.');
-}
 
 export function writeDurablePluginFileStoreJournal(
   journalPath: string,
@@ -115,56 +83,29 @@ export function readDurablePluginFileStoreJournal(
   }
 
   const version = value['version'];
-  const eventId = value['eventId'];
-  const traceId = value['traceId'];
-  const createdAt = value['createdAt'];
   const ownerHostname = value['ownerHostname'];
   const ownerNonce = value['ownerNonce'];
   const ownerPid = value['ownerPid'];
   const sessionId = value['sessionId'];
-  const rawOperations = value['operations'];
 
   if (
     version !== durableTransactionJournalVersion ||
-    !isNonEmptyString(eventId) ||
-    !isNonEmptyString(traceId) ||
-    !isCanonicalIsoTimestamp(createdAt) ||
     !isNonEmptyString(ownerHostname) ||
     !isOwnerNonce(ownerNonce) ||
     !isPositiveSafeInteger(ownerPid) ||
-    !isNonEmptyString(sessionId) ||
-    !Array.isArray(rawOperations)
+    !isNonEmptyString(sessionId)
   ) {
     throw new TypeError('Plugin fileStore transaction journal is malformed.');
   }
 
-  const operations = rawOperations.map((rawOperation, index) =>
-    decodeDurablePluginFileStoreJournalOperation(rawOperation, index),
-  );
-
   return Object.freeze({
     version,
-    eventId,
-    traceId,
-    createdAt,
     ownerHostname,
     ownerNonce,
     ownerPid,
     sessionId,
-    operations: Object.freeze(operations),
+    operation: decodeDurablePluginFileStoreJournalOperation(value['operation']),
   } satisfies DurablePluginFileStoreJournal);
-}
-
-function isCanonicalIsoTimestamp(value: unknown): value is string {
-  if (typeof value !== 'string') {
-    return false;
-  }
-
-  try {
-    return new Date(value).toISOString() === value;
-  } catch {
-    return false;
-  }
 }
 
 function isOwnerNonce(value: unknown): value is string {
@@ -178,94 +119,23 @@ function isOwnerNonce(value: unknown): value is string {
 
 function decodeDurablePluginFileStoreJournalOperation(
   value: unknown,
-  expectedIndex: number,
 ): DurablePluginFileStoreJournalOperation {
   if (!isPlainObject(value)) {
     throw new TypeError('Plugin fileStore transaction operation is malformed.');
   }
 
-  const index = value['index'];
   const pluginId = value['pluginId'];
   const path = value['path'];
   const kind = value['kind'];
-  const status = value['status'];
-  const expectedBeforeHash = value['expectedBeforeHash'];
+  const beforeHash = value['beforeHash'];
+  const afterHash = value['afterHash'];
+  const beforeRevision = value['beforeRevision'];
+  const afterRevision = value['afterRevision'];
 
   if (
-    index !== expectedIndex ||
     !isNonEmptyString(pluginId) ||
     !isNonEmptyString(path) ||
     (kind !== 'append_jsonl' && kind !== 'write_json') ||
-    (status !== 'pending' && status !== 'planned' && status !== 'applied') ||
-    typeof expectedBeforeHash !== 'string'
-  ) {
-    throw new TypeError('Plugin fileStore transaction operation is malformed.');
-  }
-
-  normalizeRuntimePluginFileStorePath(path);
-  const operation = {
-    index,
-    pluginId,
-    path,
-    kind,
-    value: freezeRuntimePluginFileStoreJsonValue(value['value']),
-    status,
-    expectedBeforeHash,
-    ...decodePlannedJournalOperationFields(value, kind, status),
-  } satisfies DurablePluginFileStoreJournalOperation;
-
-  if (
-    kind === 'append_jsonl' &&
-    status !== 'pending' &&
-    operation.appendedLine !== `${JSON.stringify(operation.value)}\n`
-  ) {
-    throw new TypeError('Plugin fileStore transaction operation is malformed.');
-  }
-
-  return Object.freeze(operation);
-}
-
-function decodePlannedJournalOperationFields(
-  value: Readonly<Record<string, unknown>>,
-  kind: DurablePluginFileStoreJournalOperation['kind'],
-  status: DurablePluginFileStoreJournalOperation['status'],
-): Partial<
-  Pick<
-    DurablePluginFileStoreJournalOperation,
-    | 'afterContent'
-    | 'afterHash'
-    | 'afterLength'
-    | 'afterRevision'
-    | 'appendedLine'
-    | 'beforeHash'
-    | 'beforeLength'
-    | 'beforeRevision'
-  >
-> {
-  const beforeHash = value['beforeHash'];
-  const afterHash = value['afterHash'];
-  const afterContent = value['afterContent'];
-  const beforeLength = value['beforeLength'];
-  const appendedLine = value['appendedLine'];
-  const afterLength = value['afterLength'];
-  const beforeRevision = value['beforeRevision'];
-  const afterRevision = value['afterRevision'];
-  const fields = [
-    beforeHash,
-    afterHash,
-    afterContent,
-    beforeLength,
-    appendedLine,
-    afterLength,
-    beforeRevision,
-    afterRevision,
-  ];
-
-  if (status === 'pending' && fields.every(field => field === undefined)) {
-    return {};
-  }
-
-  if (
     typeof beforeHash !== 'string' ||
     typeof afterHash !== 'string' ||
     !isNonNegativeSafeInteger(beforeRevision) ||
@@ -275,42 +145,63 @@ function decodePlannedJournalOperationFields(
     throw new TypeError('Plugin fileStore transaction operation is malformed.');
   }
 
+  normalizeRuntimePluginFileStorePath(path);
   const common = {
+    pluginId,
+    path,
+    value: freezeRuntimePluginFileStoreJsonValue(value['value']),
     beforeHash,
     afterHash,
     beforeRevision,
     afterRevision,
   };
 
-  if (kind === 'write_json') {
-    if (
-      typeof afterContent !== 'string' ||
-      beforeLength !== undefined ||
-      appendedLine !== undefined ||
-      afterLength !== undefined
-    ) {
-      throw new TypeError(
-        'Plugin fileStore transaction operation is malformed.',
-      );
-    }
+  return Object.freeze(
+    kind === 'write_json'
+      ? {...common, kind, ...decodeWriteJsonFields(value)}
+      : {...common, kind, ...decodeAppendJsonlFields(value, common.value)},
+  );
+}
 
-    return {...common, afterContent};
-  }
+function decodeWriteJsonFields(value: Readonly<Record<string, unknown>>): {
+  readonly afterContent: string;
+} {
+  const afterContent = value['afterContent'];
 
   if (
-    afterContent !== undefined ||
-    !isNonNegativeSafeInteger(beforeLength) ||
-    typeof appendedLine !== 'string' ||
-    !isNonNegativeSafeInteger(afterLength) ||
-    afterLength !== beforeLength + Buffer.byteLength(appendedLine)
+    typeof afterContent !== 'string' ||
+    value['beforeLength'] !== undefined ||
+    value['appendedLine'] !== undefined ||
+    value['afterLength'] !== undefined
   ) {
     throw new TypeError('Plugin fileStore transaction operation is malformed.');
   }
 
-  return {
-    ...common,
-    beforeLength,
-    appendedLine,
-    afterLength,
-  };
+  return {afterContent};
+}
+
+function decodeAppendJsonlFields(
+  value: Readonly<Record<string, unknown>>,
+  appendedValue: RuntimePluginJsonValue,
+): {
+  readonly beforeLength: number;
+  readonly appendedLine: string;
+  readonly afterLength: number;
+} {
+  const beforeLength = value['beforeLength'];
+  const appendedLine = value['appendedLine'];
+  const afterLength = value['afterLength'];
+
+  if (
+    value['afterContent'] !== undefined ||
+    !isNonNegativeSafeInteger(beforeLength) ||
+    typeof appendedLine !== 'string' ||
+    !isNonNegativeSafeInteger(afterLength) ||
+    afterLength !== beforeLength + Buffer.byteLength(appendedLine) ||
+    appendedLine !== `${JSON.stringify(appendedValue)}\n`
+  ) {
+    throw new TypeError('Plugin fileStore transaction operation is malformed.');
+  }
+
+  return {beforeLength, appendedLine, afterLength};
 }

@@ -1,8 +1,5 @@
 import {runtimePluginGrantsAccess} from '../policy/access-control.ts';
-import type {
-  RuntimePluginFileStoreProvider,
-  RuntimePluginFileStoreTransaction,
-} from '../api/file-store-contract.ts';
+import type {RuntimePluginFileStoreProvider} from '../api/file-store-contract.ts';
 import type {
   RuntimePlugin,
   RuntimePluginAfterTurnCommittedContext,
@@ -36,7 +33,6 @@ export function createPluginHookContext<
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly allowFileStoreWrites?: boolean | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
   readonly createFileStore?:
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
 }): PluginHookContextScope<TContext> {
@@ -59,7 +55,7 @@ export function createPluginHookContext<
     }) &&
     (options.allowFileStoreWrites ?? true);
   const baseFileStore = grantsFileStore
-    ? (options.fileStoreTransaction?.fileStoreFor({
+    ? options.createFileStore?.({
         ...(options.storeRoot === undefined
           ? {}
           : {storeRoot: options.storeRoot}),
@@ -68,17 +64,7 @@ export function createPluginHookContext<
           ? {}
           : {sessionIdentity: options.sessionIdentity}),
         pluginId,
-      }) ??
-      options.createFileStore?.({
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
-        sessionId,
-        ...(options.sessionIdentity === undefined
-          ? {}
-          : {sessionIdentity: options.sessionIdentity}),
-        pluginId,
-      }))
+      })
     : undefined;
 
   if (grantsFileStore && baseFileStore === undefined) {

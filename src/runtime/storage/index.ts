@@ -41,7 +41,6 @@ export {
 export {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 export {
   createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
   type RuntimePluginFileStoreProvider,
 } from './plugin-file-store/index.ts';
 export {

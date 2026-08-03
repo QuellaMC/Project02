@@ -137,50 +137,6 @@ export async function emitProgress(
   }
 }
 
-export function beginPluginFileStoreTransaction(
-  state: RuntimeTurnState,
-  pluginHost: RuntimePluginHost,
-): void {
-  pluginHost.beginFileStoreTransaction?.();
-  state.pluginFileStoreTransactionActive =
-    pluginHost.beginFileStoreTransaction !== undefined;
-}
-
-export async function preparePluginFileStoreTransaction(
-  state: RuntimeTurnState,
-): Promise<void> {
-  if (!state.pluginFileStoreTransactionActive) {
-    return;
-  }
-
-  state.preparedPluginFileStoreTransaction =
-    await state.runtimePluginHostForTurn?.prepareFileStoreTransaction?.(
-      state.identity,
-    );
-  state.pluginFileStoreTransactionActive = false;
-}
-
-export async function rollbackPluginFileStoreTransaction(
-  state: RuntimeTurnState,
-): Promise<void> {
-  if (state.pluginFileStoreTransactionActive) {
-    state.runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
-    state.pluginFileStoreTransactionActive = false;
-  }
-
-  await state.preparedPluginFileStoreTransaction?.discard();
-  state.preparedPluginFileStoreTransaction = undefined;
-}
-
-async function finalizePluginFileStoreTransaction(
-  state: RuntimeTurnState,
-): Promise<void> {
-  const prepared = state.preparedPluginFileStoreTransaction;
-
-  state.preparedPluginFileStoreTransaction = undefined;
-  await prepared?.finalize();
-}
-
 export function commitUserMessage(
   state: RuntimeTurnState,
 ): ConversationLogRecord {
@@ -399,7 +355,6 @@ export async function completeRuntimeTurn(
     effects: runtimeConfigEffects,
   });
 
-  await preparePluginFileStoreTransaction(state);
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
     ...options.preCommitHealthResult.evidence,
@@ -409,7 +364,7 @@ export async function completeRuntimeTurn(
     terminalPluginEvidence,
     runtimeConfigEffects,
   });
-  const durability = await finalizeCompletedDurability(
+  const durability = finalizeCompletedDurability(
     state,
     terminalAppend.terminalAppendFailure,
   );
@@ -433,9 +388,6 @@ export async function completeRuntimeTurn(
     rawEvent: terminalAppend.rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
     traceEntries: Object.freeze([...state.traceEntries]),
-    ...(durability.pluginFileStoreRecoveryPending
-      ? {pluginFileStoreRecoveryPending: true}
-      : {}),
     ...(durability.postCommitFailures.length === 0
       ? {}
       : {
@@ -563,23 +515,17 @@ function recoverCompletedTerminalRawEvent(
   };
 }
 
-async function finalizeCompletedDurability(
+/**
+ * Plugin writes are durable when their tool call returns, so completing
+ * a turn no longer finalizes staged effects — only the turn's own
+ * terminal trace remains to close.
+ */
+function finalizeCompletedDurability(
   state: RuntimeTurnState,
   terminalAppendFailure: string | undefined,
-): Promise<{
-  readonly pluginFileStoreRecoveryPending: boolean;
-  readonly postCommitFailures: string[];
-}> {
+): {readonly postCommitFailures: string[]} {
   const postCommitFailures =
     terminalAppendFailure === undefined ? [] : [terminalAppendFailure];
-  let pluginFileStoreRecoveryPending = false;
-
-  try {
-    await finalizePluginFileStoreTransaction(state);
-  } catch (error: unknown) {
-    pluginFileStoreRecoveryPending = true;
-    postCommitFailures.push(runtimePostCommitFailureMessage(error));
-  }
 
   try {
     appendTrace(state, 'raw_event_log_appended');
@@ -588,7 +534,7 @@ async function finalizeCompletedDurability(
     reconcileCompletedTerminalTrace(state, error, postCommitFailures);
   }
 
-  return {pluginFileStoreRecoveryPending, postCommitFailures};
+  return {postCommitFailures};
 }
 
 function reconcileCompletedTerminalTrace(

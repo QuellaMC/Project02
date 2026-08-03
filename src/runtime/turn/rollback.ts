@@ -31,7 +31,6 @@ import {
   IncompleteConversationRollbackError,
   appendRawEvent,
   appendTrace,
-  rollbackPluginFileStoreTransaction,
   visibleMessageIdsForTurnOption,
 } from './commit.ts';
 import {
@@ -62,7 +61,6 @@ export async function appendRejectedResult(
     healthResult.evidence,
   );
 
-  await rollbackPluginFileStoreTransaction(state);
   appendTrace(state, optionsForRejection.traceStep);
   appendRawEvent(state, {
     ...state.identity,
@@ -197,7 +195,6 @@ export async function handleRuntimeTurnFailure(
     });
   }
 
-  await rollbackPluginFileStoreTransaction(state);
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_turn_rejected',

@@ -1,6 +1,5 @@
 import {
   createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
   type RuntimePluginFileStoreProvider,
 } from '../runtime/storage/index.ts';
 import {
@@ -24,7 +23,6 @@ import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 export const configuredRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
   Object.freeze({
     createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
   });
 
 type InstantiatedRuntimePluginPackages = {

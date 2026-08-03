@@ -14,7 +14,7 @@
  * characters that belong in program values are spelled as escapes.
  */
 import {execFileSync} from 'node:child_process';
-import {readFileSync} from 'node:fs';
+import {existsSync, readFileSync} from 'node:fs';
 
 const TEXT_FILE_PATTERN = /\.(?:ts|mts|mjs|js|json|md|html|yml|yaml)$/;
 
@@ -22,7 +22,10 @@ const trackedFiles = execFileSync('git', ['ls-files', '-z'], {
   encoding: 'utf8',
 })
   .split('\0')
-  .filter(path => path !== '' && TEXT_FILE_PATTERN.test(path));
+  .filter(path => path !== '' && TEXT_FILE_PATTERN.test(path))
+  // A file deleted from the working tree but still in the index has no
+  // content to scan; mid-deletion is an ordinary state to run checks in.
+  .filter(path => existsSync(path));
 
 const violations = [];
 

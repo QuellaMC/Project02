@@ -1,4 +1,3 @@
-import type {RuntimeEventIdentity} from '../../core/index.ts';
 import type {RuntimePluginFileStore} from './types.ts';
 
 type RuntimePluginFileStoreIdentity = {
@@ -21,22 +20,6 @@ export type InMemoryRuntimePluginFileStoreOptions =
 export type CreateRuntimePluginFileStoreOptions =
   DurableRuntimePluginFileStoreOptions | InMemoryRuntimePluginFileStoreOptions;
 
-export type RuntimePluginFileStoreTransaction = {
-  fileStoreFor(
-    options: CreateRuntimePluginFileStoreOptions,
-  ): RuntimePluginFileStore;
-  prepare(
-    identity: RuntimeEventIdentity,
-  ): Promise<RuntimePluginFileStorePreparedTransaction>;
-  rollback(): void;
-  hasPendingWrites(): boolean;
-};
-
-export type RuntimePluginFileStorePreparedTransaction = {
-  discard(): Promise<void>;
-  finalize(): Promise<void>;
-};
-
 export type RuntimePluginFileStorePathMode = 'json' | 'jsonl';
 
 /**
@@ -48,5 +31,4 @@ export type RuntimePluginFileStoreProvider = {
   readonly createFileStore: (
     options: CreateRuntimePluginFileStoreOptions,
   ) => RuntimePluginFileStore;
-  readonly createFileStoreTransaction: () => RuntimePluginFileStoreTransaction;
 };

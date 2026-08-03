@@ -99,15 +99,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/runtime/storage/plugin-file-store/wal.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1603, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
     files: ['src/role-model/loop/loop.ts'],
     rules: {
       // Re-pinned +7 for persona render options and characterRef stamping

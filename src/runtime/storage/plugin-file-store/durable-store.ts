@@ -26,13 +26,10 @@ import {
   applyRecoverableDurablePluginFileStoreOperation,
   type DurablePluginFileStoreFaultInjector,
   recoverDirectDurablePluginFileStoreMutation,
-  recoverPreparedDurablePluginFileStoreTransactions,
 } from './wal.ts';
 
 export type DurableRuntimePluginFileStoreDependencies = {
   readonly faultInjector?: DurablePluginFileStoreFaultInjector;
-  readonly skipInitialCleanup?: boolean;
-  readonly skipPreparedTransactionRecovery?: boolean;
 };
 
 export function createDurableRuntimePluginFileStore(
@@ -52,30 +49,32 @@ export function createDurableRuntimePluginFileStore(
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
 
-  if (dependencies.skipPreparedTransactionRecovery !== true) {
-    recoverPreparedDurablePluginFileStoreTransactions(
-      durableOptions,
-      ownerToken,
-    );
-  }
-  if (dependencies.skipInitialCleanup !== true) {
-    withDurablePluginStoreMutation(
-      {storeRoot: durableOptions.storeRoot, root, ownerToken},
-      () => {
-        assertSafeDurablePluginRoot(root);
-        cleanupDurablePluginStoreAtomicTempFiles(root);
-      },
-    );
-  }
+  // A write is durable when its call returns, so the only recovery a store
+  // needs on open is finishing a single interrupted write.
+  recoverDirectDurablePluginFileStoreMutation({
+    storeRoot: durableOptions.storeRoot,
+    sessionId: durableOptions.sessionId,
+    pluginId: durableOptions.pluginId,
+    root,
+    ownerToken,
+  });
 
-  function recoverPreparedTransactions(): void {
-    if (dependencies.skipPreparedTransactionRecovery !== true) {
-      recoverPreparedDurablePluginFileStoreTransactions(
-        durableOptions,
-        ownerToken,
-        {recoverDirectMutation: false},
-      );
-    }
+  withDurablePluginStoreMutation(
+    {storeRoot: durableOptions.storeRoot, root, ownerToken},
+    () => {
+      assertSafeDurablePluginRoot(root);
+      cleanupDurablePluginStoreAtomicTempFiles(root);
+    },
+  );
+
+  function recoverInterruptedWrite(): void {
+    recoverDirectDurablePluginFileStoreMutation({
+      storeRoot: durableOptions.storeRoot,
+      sessionId: durableOptions.sessionId,
+      pluginId: durableOptions.pluginId,
+      root,
+      ownerToken,
+    });
   }
 
   return Object.freeze({
@@ -83,7 +82,7 @@ export function createDurableRuntimePluginFileStore(
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      recoverPreparedTransactions();
+      recoverInterruptedWrite();
       return withDurablePluginStoreMutation(
         {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
@@ -119,7 +118,7 @@ export function createDurableRuntimePluginFileStore(
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      recoverPreparedTransactions();
+      recoverInterruptedWrite();
       return withDurablePluginStoreMutation(
         {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
@@ -152,7 +151,7 @@ export function createDurableRuntimePluginFileStore(
     writeJsonAtomic(path, value) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
 
-      recoverPreparedTransactions();
+      recoverInterruptedWrite();
       applyRecoverableDurablePluginFileStoreOperation({
         storeRoot: durableOptions.storeRoot,
         sessionId: durableOptions.sessionId,
@@ -170,7 +169,7 @@ export function createDurableRuntimePluginFileStore(
     appendJsonl(path, value) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
 
-      recoverPreparedTransactions();
+      recoverInterruptedWrite();
       applyRecoverableDurablePluginFileStoreOperation({
         storeRoot: durableOptions.storeRoot,
         sessionId: durableOptions.sessionId,
@@ -186,7 +185,7 @@ export function createDurableRuntimePluginFileStore(
       });
     },
     revision() {
-      recoverPreparedTransactions();
+      recoverInterruptedWrite();
       return withDurablePluginStoreMutation(
         {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {

@@ -168,7 +168,5 @@ export {
   type DurableRuntimePluginFileStoreOptions,
   type InMemoryRuntimePluginFileStoreOptions,
   type RuntimePluginFileStorePathMode,
-  type RuntimePluginFileStorePreparedTransaction,
   type RuntimePluginFileStoreProvider,
-  type RuntimePluginFileStoreTransaction,
 } from './file-store-contract.ts';

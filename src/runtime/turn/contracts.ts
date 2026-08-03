@@ -13,7 +13,6 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
-  RuntimePluginFileStorePreparedTransaction,
   RuntimePluginHost,
 } from '../../plugins/index.ts';
 import type {
@@ -87,7 +86,6 @@ export type LocalRuntimeUserMessageCompletedResult = {
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
-  readonly pluginFileStoreRecoveryPending?: boolean;
   readonly postCommitFailures?: readonly string[];
 };
 
@@ -154,9 +152,6 @@ export type RuntimeTurnState = {
   readonly payloadSummary: RawEventLogPayloadSummary;
   runtimePluginContextForTurn: RuntimePluginContext | undefined;
   runtimePluginHostForTurn: RuntimePluginHost | undefined;
-  pluginFileStoreTransactionActive: boolean;
-  preparedPluginFileStoreTransaction:
-    RuntimePluginFileStorePreparedTransaction | undefined;
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
   readonly startedPluginToolCalls: Map<string, RuntimePluginToolCall>;

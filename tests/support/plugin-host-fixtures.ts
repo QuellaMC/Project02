@@ -29,7 +29,6 @@ import type {
 } from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
   type RuntimePluginFileStoreProvider,
 } from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {createRuntimePluginConfigControlCapability} from '../../src/runtime/config/index.ts';
@@ -60,7 +59,6 @@ export type TestRuntimePluginHostOptions = Omit<
 export const testRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
   Object.freeze({
     createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
   });
 
 /** Real config-control capability wired the way the composition root does. */

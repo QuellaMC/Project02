@@ -291,32 +291,8 @@ export function hashOptionalFileContent(
     : createPresentFileContentHash(content).digest('hex');
 }
 
-export function createPresentFileContentHash(content: string | Buffer): Hash {
+function createPresentFileContentHash(content: string | Buffer): Hash {
   return createHash('sha256').update('present\u0000').update(content);
-}
-
-export function requiredJournalOperationString(
-  value: string | undefined,
-): string {
-  if (value === undefined) {
-    throw new TypeError(
-      'Plugin fileStore transaction operation is not planned.',
-    );
-  }
-
-  return value;
-}
-
-export function requiredJournalOperationRevision(
-  value: number | undefined,
-): number {
-  if (!isNonNegativeSafeInteger(value)) {
-    throw new TypeError(
-      'Plugin fileStore transaction operation is not planned.',
-    );
-  }
-
-  return value;
 }
 
 export function isNonNegativeSafeInteger(value: unknown): value is number {

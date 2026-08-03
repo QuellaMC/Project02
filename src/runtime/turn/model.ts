@@ -32,7 +32,6 @@ import {
   appendToolCallFinished,
   appendToolCallStarted,
   appendVisibleReplyForDecision,
-  beginPluginFileStoreTransaction,
   commitUserMessage,
   completeRuntimeTurn,
   emitProgress,
@@ -157,7 +156,6 @@ async function prepareRuntimeTurn(
 
   state.runtimePluginContextForTurn = runtimePluginContext;
   state.runtimePluginHostForTurn = pluginHost;
-  beginPluginFileStoreTransaction(state, pluginHost);
   const beforeRoleModelCallResult =
     await pluginHost.beforeRoleModelCall(runtimePluginContext);
 
