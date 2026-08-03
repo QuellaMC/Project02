@@ -799,6 +799,9 @@ describe('runtime plugin model-facing tool policy', () => {
   });
 
   it('offers a confirm-gated tool to the model instead of hiding it', () => {
+    const manifest = createRuntimePluginManifest(
+      runtimePluginManifestFixture({}),
+    );
     const tool = createRuntimePluginProvidedTool(
       runtimePluginProvidedToolFixture({
         name: 'settings.arbitrary.update',
@@ -809,8 +812,26 @@ describe('runtime plugin model-facing tool policy', () => {
     // Enabling the plugin is the trust decision. A tool that prepares an
     // effect for approval says so and is prompted, rather than being kept
     // away from the model by its declared class.
-    expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
-    expect(isModelFacingRuntimePluginTool({tool})).toBe(true);
+    expect(isApprovalGatedRuntimePluginTool({manifest, tool})).toBe(true);
+    expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
+  });
+
+  it('keeps every tool of a confirm-required plugin away from the model', () => {
+    // runtimePolicy.confirmation is the operator's switch, not the
+    // plugin's: it says every call here must be approved. No gate can ask
+    // before a tool acts, so the tools are withheld rather than exposed
+    // and prompted for nothing.
+    const base = createRuntimePluginManifest(runtimePluginManifestFixture({}));
+    const manifest = createRuntimePluginManifest({
+      ...runtimePluginManifestFixture({}),
+      runtimePolicy: {...base.runtimePolicy, confirmation: 'required'},
+    });
+    const tool = createRuntimePluginProvidedTool(
+      runtimePluginProvidedToolFixture({name: 'settings.arbitrary.update'}),
+    );
+
+    expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(false);
+    expect(isApprovalGatedRuntimePluginTool({manifest, tool})).toBe(false);
   });
 
   it('requires model_input write for a plugin that provides model tools', () => {

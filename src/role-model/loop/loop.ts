@@ -451,6 +451,9 @@ async function routeRoleModelLoopToolCalls(options: {
     ...(options.options.onPluginToolCallStarted === undefined
       ? {}
       : {onPluginToolCallStarted: options.options.onPluginToolCallStarted}),
+    ...(options.options.onPluginToolCallCompleted === undefined
+      ? {}
+      : {onPluginToolCallCompleted: options.options.onPluginToolCallCompleted}),
     ...(options.options.pluginToolHost === undefined
       ? {}
       : {pluginToolHost: options.options.pluginToolHost}),
@@ -466,18 +469,6 @@ async function routeRoleModelLoopToolCalls(options: {
     nativeToolCallArgumentErrors:
       options.invokedRound.nativeToolCallArgumentErrors,
   });
-
-  for (const result of pluginToolRouting.results) {
-    await options.options.onPluginToolCallCompleted?.({
-      round: options.round,
-      callId: result.callId,
-      dispatchedToHost: result.dispatchedToHost,
-      pluginId: result.call.pluginId,
-      toolName: result.call.toolName,
-      status: result.result.status,
-      result: result.result,
-    });
-  }
 
   return pluginToolRouting;
 }
@@ -889,6 +880,9 @@ async function routeExecutableToolCalls(options: {
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent,
   ) => Promise<void> | void;
+  readonly onPluginToolCallCompleted?: (
+    event: RoleModelPluginToolCallCompletedEvent,
+  ) => Promise<void> | void;
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
   readonly priorToolObservations: readonly RoleModelToolObservation[];
@@ -965,25 +959,17 @@ async function routeExecutableToolCalls(options: {
       continue;
     }
 
-    const nativeToolCallArgumentError =
-      options.nativeToolCallArgumentErrors?.find(
-        error =>
-          error.executableIndex === index && error.toolName === toolCall.name,
-      );
+    const nativeArgumentRejection = nativeToolCallArgumentRejection({
+      callId,
+      call: routedCall,
+      executableIndex: index,
+      toolName: toolCall.name,
+      errors: options.nativeToolCallArgumentErrors,
+      context: options.runtimePluginContext,
+    });
 
-    if (nativeToolCallArgumentError !== undefined) {
-      results[slot] = createRejectedToolRoutingEvidence({
-        callId,
-        call: routedCall,
-        dispatchedToHost: false,
-        ...(options.runtimePluginContext === undefined
-          ? {}
-          : {context: options.runtimePluginContext}),
-        reason: nativeToolCallArgumentError.reason,
-        message: nativeToolCallArgumentError.message,
-        evidenceStatus: 'rejected',
-        policyOutcome: 'handler_rejected',
-      });
+    if (nativeArgumentRejection !== undefined) {
+      results[slot] = nativeArgumentRejection;
       continue;
     }
 
@@ -1080,15 +1066,102 @@ async function routeExecutableToolCalls(options: {
   // result set and decides what to do next.
   const lock = createToolBatchLock();
 
+  const report = createSettledToolCallReporter({
+    results,
+    round: options.round,
+    ...(options.onPluginToolCallCompleted === undefined
+      ? {}
+      : {onPluginToolCallCompleted: options.onPluginToolCallCompleted}),
+  });
+
   await Promise.all(
     admitted.map(async entry => {
       results[entry.slot] = await lock.run(entry.mode, entry.run);
+      await report(entry.slot);
     }),
   );
+
+  // Calls rejected during admission never reached the lock, so they are
+  // reported here. Every settled call is reported exactly once.
+  for (const slot of results.keys()) {
+    await report(slot);
+  }
 
   return createAcceptedPluginToolRoutingResult(
     results.filter(result => result !== undefined),
   );
+}
+
+/**
+ * The provider rejected this call's arguments before it could run, so it
+ * is answered from the error rather than dispatched.
+ */
+function nativeToolCallArgumentRejection(options: {
+  readonly callId: string;
+  readonly call: RuntimePluginToolCall;
+  readonly executableIndex: number;
+  readonly toolName: string;
+  readonly errors: readonly RoleModelNativeToolCallArgumentError[] | undefined;
+  readonly context: RuntimePluginContext | undefined;
+}): RoleModelPluginToolRoutingEvidence | undefined {
+  const argumentError = options.errors?.find(
+    candidate =>
+      candidate.executableIndex === options.executableIndex &&
+      candidate.toolName === options.toolName,
+  );
+
+  if (argumentError === undefined) {
+    return undefined;
+  }
+
+  return createRejectedToolRoutingEvidence({
+    callId: options.callId,
+    call: options.call,
+    dispatchedToHost: false,
+    ...(options.context === undefined ? {} : {context: options.context}),
+    reason: argumentError.reason,
+    message: argumentError.message,
+    evidenceStatus: 'rejected',
+    policyOutcome: 'handler_rejected',
+  });
+}
+
+/**
+ * Reports each tool call once, as soon as its own result exists.
+ *
+ * A tool's write is durable when its call returns, so a crash between
+ * that and the report would leave recovery a started call and no record
+ * of the effect that landed. Waiting for the whole batch would widen
+ * that window for every call but the slowest. Ordering is not lost:
+ * the observations the model reads next are reassembled by slot.
+ */
+function createSettledToolCallReporter(options: {
+  readonly results: readonly (RoleModelPluginToolRoutingEvidence | undefined)[];
+  readonly round: number;
+  readonly onPluginToolCallCompleted?: (
+    event: RoleModelPluginToolCallCompletedEvent,
+  ) => Promise<void> | void;
+}): (slot: number) => Promise<void> {
+  const reported = new Set<number>();
+
+  return async (slot: number): Promise<void> => {
+    const result = options.results[slot];
+
+    if (result === undefined || reported.has(slot)) {
+      return;
+    }
+
+    reported.add(slot);
+    await options.onPluginToolCallCompleted?.({
+      round: options.round,
+      callId: result.callId,
+      dispatchedToHost: result.dispatchedToHost,
+      pluginId: result.call.pluginId,
+      toolName: result.call.toolName,
+      status: result.result.status,
+      result: result.result,
+    });
+  };
 }
 
 /**

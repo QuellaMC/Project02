@@ -278,6 +278,73 @@ describe('role-model loop routing and policy', () => {
     ).toEqual(['memory.search', 'memory.recall']);
   });
 
+  it('reports a finished tool call before its slower sibling settles', async () => {
+    // A tool's write is durable when its call returns, so a crash between
+    // that and the report would leave recovery a started call and no
+    // record of the effect. Waiting for the batch widens that window for
+    // every call but the slowest.
+    const events: string[] = [];
+    const fastTool = unlimitedToolWithConcurrency(
+      memorySearchToolDefinition,
+      'shared',
+    );
+    const slowTool = unlimitedToolWithConcurrency(
+      memoryRecallToolDefinition,
+      'shared',
+    );
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        if (call.toolName === 'memory.recall') {
+          for (let tick = 0; tick < 8; tick += 1) {
+            await Promise.resolve();
+          }
+        }
+
+        events.push(`settled:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('search memory', 'evt_completion_timing'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(slowTool, fastTool),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_completion_timing'),
+      onPluginToolCallCompleted: event => {
+        events.push(`reported:${event.toolName}`);
+      },
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'memory.recall', input: {query: 'slow'}},
+              {name: 'memory.search', input: {query: 'fast'}},
+            ],
+          },
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'done'}},
+            ],
+          },
+        ],
+        () => undefined,
+      ),
+    });
+
+    expect(result.status).toBe('accepted');
+    // The fast call is reported while the slow one is still running,
+    // even though the model listed the slow one first.
+    expect(events.indexOf('reported:memory.search')).toBeLessThan(
+      events.indexOf('settled:memory.recall'),
+    );
+    // Observations still follow the model's call order.
+    expect(
+      result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
+    ).toEqual(['memory.recall', 'memory.search']);
+  });
+
   it('runs an exclusive tool call alone within its batch', async () => {
     const events: string[] = [];
     const searchTool = unlimitedToolWithConcurrency(

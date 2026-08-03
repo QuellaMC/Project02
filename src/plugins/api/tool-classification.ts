@@ -12,11 +12,19 @@ import type {
  * filters tools by a declared effect level. A tool that wants consent
  * per call says so with requiresConfirmation and is prompted, rather
  * than being hidden from the model entirely.
+ *
+ * `runtimePolicy.confirmation: 'required'` is the exception, and it is
+ * the operator's rather than the plugin's: it says every call to this
+ * plugin must be approved. The runtime has no gate that can ask before
+ * a tool acts, so the honest answer is to keep the plugin's tools away
+ * from the model instead of exposing them and prompting for nothing.
  */
 export function isModelFacingRuntimePluginTool(options: {
+  readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
   return (
+    options.manifest.runtimePolicy.confirmation !== 'required' &&
     !isBuiltInModelToolName(options.tool.name) &&
     options.tool.validationOwner === 'plugin_host'
   );
@@ -32,15 +40,18 @@ export function isModelFacingRuntimePluginTool(options: {
  *
  * So this cannot gate a tool that *acts* when called. Such a tool would
  * finish its work, then be asked about — worse than not gating it, since
- * the user is consulted about something already done. The contract is
- * stated on the tool type and enforced by
- * `assertPreparedConfirmationProtocol`; a tool that acts and wants
- * consent has to ask inside its own hook, where it still can.
+ * the user is consulted about something already done. A tool that acts
+ * and wants consent has to ask inside its own hook, where it still can;
+ * one that declares the flag and prepares nothing is rejected when its
+ * result is normalized.
  */
-export function isApprovalGatedRuntimePluginTool(
-  tool: RuntimePluginProvidedTool,
-): boolean {
-  return isModelFacingRuntimePluginTool({tool}) && tool.requiresConfirmation;
+export function isApprovalGatedRuntimePluginTool(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly tool: RuntimePluginProvidedTool;
+}): boolean {
+  return (
+    isModelFacingRuntimePluginTool(options) && options.tool.requiresConfirmation
+  );
 }
 
 export function validateRuntimePluginModelFacingToolAccess(options: {
@@ -48,7 +59,7 @@ export function validateRuntimePluginModelFacingToolAccess(options: {
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): void {
   const hasModelFacingTool = options.providedTools.some(tool =>
-    isModelFacingRuntimePluginTool({tool}),
+    isModelFacingRuntimePluginTool({manifest: options.manifest, tool}),
   );
 
   if (

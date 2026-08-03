@@ -877,7 +877,7 @@ function adapterRequestedAccess(options: {
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): RuntimePluginAccessMap {
   const hasModelFacingPluginHostTool = options.providedTools.some(tool =>
-    isModelFacingRuntimePluginTool({tool}),
+    isModelFacingRuntimePluginTool({manifest: options.manifest, tool}),
   );
 
   return Object.freeze({

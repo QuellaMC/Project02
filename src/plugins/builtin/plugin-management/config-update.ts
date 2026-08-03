@@ -7,7 +7,6 @@ import {
   runtimePluginId,
 } from '../../api/contract.ts';
 import {runtimeIdentityMatchesContext} from '../../api/identity.ts';
-import {isApprovalGatedRuntimePluginTool} from '../../api/tool-classification.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
   RuntimePluginConfigField,
@@ -218,6 +217,8 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
 
 export function normalizePreparedRuntimePluginConfigEffect(options: {
   readonly providedTool: RuntimePluginProvidedTool;
+  /** Decided by the host, which holds the manifest this depends on. */
+  readonly approvalGatedTool: boolean;
   readonly context: RuntimePluginContext;
   readonly value: unknown;
 }): PreparedRuntimePluginConfigEffect | undefined {
@@ -225,7 +226,7 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
     return undefined;
   }
 
-  if (!isApprovalGatedRuntimePluginTool(options.providedTool)) {
+  if (!options.approvalGatedTool) {
     throw new TypeError(
       'Only an approval-gated runtime config tool can prepare a config effect.',
     );

@@ -1168,6 +1168,7 @@ function rejectedRuntimePluginToolPolicy(options: {
   readonly context: RuntimePluginContext;
 }): RejectedRuntimePluginToolExecution | undefined {
   const modelFacing = isModelFacingRuntimePluginTool({
+    manifest: options.plugin.manifest,
     tool: options.providedTool,
   });
 
@@ -1245,7 +1246,10 @@ function resolveRuntimePluginToolHandler(options: {
     });
   }
 
-  const approvalGatedTool = isApprovalGatedRuntimePluginTool(providedTool);
+  const approvalGatedTool = isApprovalGatedRuntimePluginTool({
+    manifest: plugin.manifest,
+    tool: providedTool,
+  });
 
   if (
     approvalGatedTool &&
@@ -1489,14 +1493,16 @@ function normalizeToolCallResult(options: {
       } satisfies RuntimePluginToolCallResult);
     }
 
+    const approvalGatedTool = isApprovalGatedRuntimePluginTool({
+      manifest: options.plugin.manifest,
+      tool: options.providedTool,
+    });
     const preparedConfigEffect = normalizePreparedRuntimePluginConfigEffect({
       providedTool: options.providedTool,
+      approvalGatedTool,
       context: options.context,
       value: value['preparedConfigEffect'],
     });
-    const approvalGatedTool = isApprovalGatedRuntimePluginTool(
-      options.providedTool,
-    );
 
     if (approvalGatedTool && preparedConfigEffect === undefined) {
       // requiresConfirmation asks the user to approve an effect the call

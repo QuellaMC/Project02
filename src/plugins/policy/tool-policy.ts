@@ -86,7 +86,10 @@ export function routableModelFacingPluginTools(options: {
     options.plugin.providedTools.filter(
       tool =>
         pluginToolHasRequiredGrantedAccess({access: options.access}) &&
-        isModelFacingRuntimePluginTool({tool}),
+        isModelFacingRuntimePluginTool({
+          manifest: options.plugin.manifest,
+          tool,
+        }),
     ),
   );
 }
@@ -143,7 +146,12 @@ export function isDiscoverableCurrentTurnTool(options: {
   readonly tool: RuntimePluginProvidedTool;
   readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): boolean {
-  if (isModelFacingRuntimePluginTool({tool: options.tool})) {
+  if (
+    isModelFacingRuntimePluginTool({
+      manifest: options.plugin.manifest,
+      tool: options.tool,
+    })
+  ) {
     return options.plugin.lifecycleHooks.handleToolCall !== undefined;
   }
 
@@ -178,7 +186,10 @@ export function isModelVisiblePluginTool(options: {
 
   return (
     options.plugin.lifecycleHooks.handleToolCall !== undefined &&
-    isModelFacingRuntimePluginTool({tool: options.tool})
+    isModelFacingRuntimePluginTool({
+      manifest: options.plugin.manifest,
+      tool: options.tool,
+    })
   );
 }
 
