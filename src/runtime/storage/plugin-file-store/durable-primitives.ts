@@ -603,7 +603,15 @@ function assertDurableJsonlPathMode(options: {
         readTextFileSync(options.filePath),
       );
 
-      if (records.length !== 1 || !Array.isArray(records[0])) {
+      // Reading nothing means every line was unparseable, which is what a
+      // JSON document spread over several lines looks like to a JSONL
+      // reader — so let the whole-file check below have the last word. A
+      // lone array is the other ambiguous shape: one JSONL record and a
+      // JSON document at once.
+      if (
+        records.length > 0 &&
+        (records.length !== 1 || !Array.isArray(records[0]))
+      ) {
         return;
       }
     } catch (error: unknown) {

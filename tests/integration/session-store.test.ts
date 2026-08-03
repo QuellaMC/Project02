@@ -440,52 +440,27 @@ describe('local runtime session store', () => {
     );
   });
 
-  it('fails partial session catalog records with CT-01 partial-write errors', async () => {
+  it('keeps listing sessions when a crash cut the catalog short', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
-      now: fixedClock(['2026-06-04T00:00:00.000Z']),
-    });
-
-    await store.createSession({
-      sessionId: 'alpha',
-    });
-    await writeFile(
-      store.layout.sessionCatalogPath,
-      JSON.stringify({
-        sessionId: 'alpha',
-        createdAt: '2026-06-04T00:00:00.000Z',
-        updatedAt: '2026-06-04T00:00:00.000Z',
-      }),
-      'utf8',
-    );
-
-    await expectStorageErrorCode(
-      async () => await store.listSessions(),
-      'partial_write',
-    );
-  });
-
-  it('rejects interior blank session catalog records', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const store = createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-      now: fixedClock(['2026-06-04T00:00:00.000Z']),
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
 
+    await store.createSession({sessionId: 'beta'});
+    // The catalog write died partway through its second entry.
     await writeFile(
       store.layout.sessionCatalogPath,
-      `${JSON.stringify(alpha)}\n\n`,
+      `${JSON.stringify(alpha)}\n{"sessionId":"be`,
       'utf8',
     );
 
-    await expectStorageErrorCode(
-      async () => await store.readSession('alpha'),
-      'malformed_record',
-    );
+    // The session whose entry landed is still listed and still opens; the
+    // one whose entry did not is simply absent.
+    await expect(store.listSessions()).resolves.toEqual([alpha]);
+    await expect(store.readSession('alpha')).resolves.toEqual(alpha);
   });
 
   it('fails non-canonical session IDs in stored catalog records', async () => {

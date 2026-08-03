@@ -9,7 +9,7 @@ import {
   removeDirectory,
   type Dirent,
 } from '../../shared/file-system.ts';
-import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
+import {readCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   describeRealEntry,
@@ -452,11 +452,7 @@ async function readSessionCatalogEntry(
     );
   }
 
-  const metadata = decodeRequestedSessionCatalogEntry(
-    catalog,
-    layout.sessionCatalogPath,
-    sessionId,
-  );
+  const metadata = decodeRequestedSessionCatalogEntry(catalog, sessionId);
 
   if (metadata === undefined) {
     await assertRequestedSessionIsNotMissingFromCatalog(layout, sessionId);
@@ -487,11 +483,7 @@ function readSessionCatalogEntrySync(
     );
   }
 
-  const metadata = decodeRequestedSessionCatalogEntry(
-    catalog,
-    layout.sessionCatalogPath,
-    sessionId,
-  );
+  const metadata = decodeRequestedSessionCatalogEntry(catalog, sessionId);
 
   if (metadata === undefined) {
     assertRequestedSessionIsNotMissingFromCatalogSync(layout, sessionId);
@@ -513,7 +505,7 @@ async function decodeSessionCatalogForLayout(
     throwMissingRequiredSessionCatalog(layout);
   }
 
-  const sessions = decodeSessionCatalog(catalog, layout.sessionCatalogPath);
+  const sessions = decodeSessionCatalog(catalog);
 
   await assertSessionCatalogCoversDurableSessionDirectories(layout, sessions);
   await assertSessionCatalogEntriesHaveReadableDirectories(layout, sessions);
@@ -521,13 +513,18 @@ async function decodeSessionCatalogForLayout(
   return sessions;
 }
 
+/**
+ * The catalog is append-only, so a crash can leave its final entry
+ * unfinished. An entry that does not decode is skipped: it costs that one
+ * session's listing, where failing the read would hide every session the
+ * user has.
+ */
 function decodeSessionCatalog(
   catalog: string,
-  filePath: string,
 ): Map<string, LocalRuntimeSessionMetadata> {
   const sessions = new Map<string, LocalRuntimeSessionMetadata>();
 
-  for (const line of splitJsonLines(catalog, filePath)) {
+  for (const line of readCompleteJsonLines(catalog)) {
     const metadata = decodeSessionMetadata(line);
 
     sessions.set(metadata.sessionId, metadata);
@@ -536,21 +533,19 @@ function decodeSessionCatalog(
   return sessions;
 }
 
+/**
+ * Only the requested entry is decoded, so opening one session does not
+ * depend on every other entry being well-formed. Listing sessions still
+ * decodes them all and reports the damage.
+ */
 function decodeRequestedSessionCatalogEntry(
   catalog: string,
-  filePath: string,
   sessionId: string,
 ): LocalRuntimeSessionMetadata | undefined {
   let metadata: LocalRuntimeSessionMetadata | undefined;
 
-  for (const line of splitJsonLines(catalog, filePath)) {
-    let parsed: unknown;
-
-    try {
-      parsed = JSON.parse(line) as unknown;
-    } catch {
-      continue;
-    }
+  for (const line of readCompleteJsonLines(catalog)) {
+    const parsed: unknown = JSON.parse(line);
 
     if (isRecord(parsed) && parsed['sessionId'] === sessionId) {
       metadata = decodeSessionMetadata(line);
@@ -947,26 +942,6 @@ function throwMalformedStoredSessionId(): never {
     'malformed_record',
     'Stored local runtime session metadata field "sessionId" must be canonical.',
   );
-}
-
-function splitJsonLines(content: string, filePath: string): readonly string[] {
-  try {
-    return splitCompleteJsonLines(content);
-  } catch (error: unknown) {
-    if (error instanceof CompleteJsonLinesError) {
-      throw new LocalRuntimeStorageContractError(
-        error.reason === 'missing_terminal_newline'
-          ? 'partial_write'
-          : 'malformed_record',
-        error.reason === 'missing_terminal_newline'
-          ? `Local runtime JSONL file ended without a complete record: ${filePath}.`
-          : `Local runtime JSONL file contains a blank record: ${filePath}.`,
-        {cause: error},
-      );
-    }
-
-    throw error;
-  }
 }
 
 function readRecordString(

@@ -28,10 +28,7 @@ import type {
   RuntimeTraceEntry,
 } from './records.ts';
 import {isTerminalRawEventLogRecord} from './records.ts';
-import {
-  CompleteJsonLinesError,
-  splitCompleteJsonLines,
-} from '../storage/json-lines.ts';
+import {readCompleteJsonLines} from '../storage/json-lines.ts';
 import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
 import {readOptionalStoreText} from '../storage/store-file.ts';
@@ -2404,23 +2401,7 @@ function readJsonLines<T>(options: {
     return [];
   }
 
-  try {
-    return splitCompleteJsonLines(content).map(options.decodeLine);
-  } catch (error: unknown) {
-    if (error instanceof CompleteJsonLinesError) {
-      throw new LocalRuntimeStorageContractError(
-        error.reason === 'missing_terminal_newline'
-          ? 'partial_write'
-          : 'malformed_record',
-        error.reason === 'missing_terminal_newline'
-          ? `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
-          : `Local runtime log file contains a blank JSONL record: ${options.filePath}.`,
-        {cause: error},
-      );
-    }
-
-    throw error;
-  }
+  return readCompleteJsonLines(content).map(options.decodeLine);
 }
 
 function rawEventsRequireConversationLog(

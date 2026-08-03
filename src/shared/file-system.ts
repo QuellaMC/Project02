@@ -86,6 +86,42 @@ export async function readTextFile(path: string): Promise<string> {
   return readFile(path, 'utf8');
 }
 
+/**
+ * The file's last byte, or `undefined` when it is absent or empty.
+ *
+ * Appenders read this to tell a complete log from one a crash interrupted
+ * mid-record, which is a question about one byte rather than a reason to
+ * read a session's whole history into memory on every append.
+ */
+export function readFinalByteSync(path: string): number | undefined {
+  let handle: number;
+
+  try {
+    handle = openSync(path, 'r');
+  } catch (error: unknown) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+      return undefined;
+    }
+
+    throw error;
+  }
+
+  try {
+    const size = fstatSync(handle).size;
+
+    if (size === 0) {
+      return undefined;
+    }
+
+    const buffer = Buffer.alloc(1);
+
+    readSync(handle, buffer, 0, 1, size - 1);
+    return buffer[0];
+  } finally {
+    closeSync(handle);
+  }
+}
+
 // --- Inspecting ----------------------------------------------------------
 
 /**

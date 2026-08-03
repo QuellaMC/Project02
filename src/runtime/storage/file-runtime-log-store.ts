@@ -1,4 +1,7 @@
-import {appendTextFileSync} from '../../shared/file-system.ts';
+import {
+  appendTextFileSync,
+  readFinalByteSync,
+} from '../../shared/file-system.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {encodeConversationLogRecord} from './conversation-codec.ts';
 import {encodeRawEventLogRecord} from './raw-event-codec.ts';
@@ -150,7 +153,11 @@ export function createFileRuntimeLogStore(
 
 function appendJsonLine(filePath: string, line: string): void {
   try {
-    appendTextFileSync(filePath, `${line}\n`, 0o600);
+    appendTextFileSync(
+      filePath,
+      `${terminatorForTornTail(filePath)}${line}\n`,
+      0o600,
+    );
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -158,4 +165,22 @@ function appendJsonLine(filePath: string, line: string): void {
       {cause: error},
     );
   }
+}
+
+/**
+ * A newline when the log ends mid-record, so the next append starts on its
+ * own line.
+ *
+ * A process killed mid-append leaves a final line with no newline. Writing
+ * straight after it would splice the new record onto that fragment and make
+ * one unreadable line out of two. Terminating the fragment first leaves it
+ * isolated — readers skip it, and everything after it decodes.
+ *
+ * The interrupted record is not reconstructed: it never finished being
+ * written, so it was never committed.
+ */
+function terminatorForTornTail(filePath: string): string {
+  const finalByte = readFinalByteSync(filePath);
+
+  return finalByte !== undefined && finalByte !== 0x0a ? '\n' : '';
 }

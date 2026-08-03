@@ -1746,6 +1746,92 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow('must commit exactly one user message before its replies');
   });
 
+  it('keeps a session readable when a crash left its last record unfinished', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-torn-final-record';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', identity('evt_torn_first')),
+      session: createConversationSession({
+        character: testCharacterProfile,
+        id: sessionId,
+      }),
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost(),
+    });
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected local runtime session paths.');
+    }
+
+    // The writer died partway through appending its next raw event: the
+    // final line is a fragment with no terminating newline.
+    const rawEvents = readFileSync(paths.rawEventsPath, 'utf8');
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawEvents}{"eventId":"evt_torn_second","kind":"runtime_tu`,
+      'utf8',
+    );
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    // The completed turn survives: an unfinished write costs its own
+    // record, not the conversation around it.
+    expect(reopened.conversationMessages()).toHaveLength(2);
+    expect(
+      reopened.rawEvents().some(record => record.eventId === 'evt_torn_second'),
+    ).toBe(false);
+
+    // The next turn appends after the fragment rather than splicing onto
+    // it, so both it and every later record stay decodable.
+    const followupResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'still there?',
+        identity('evt_after_torn'),
+      ),
+      session: createConversationSession({
+        character: testCharacterProfile,
+        id: sessionId,
+        visibleTranscript: reopened.conversationMessages(),
+      }),
+      logStore: reopened,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost(),
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).conversationMessages(),
+    ).toHaveLength(4);
+  });
+
   it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-before-call-rejected';

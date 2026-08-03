@@ -442,9 +442,10 @@ describe('runtime plugin file store', () => {
   });
 
   it.each([
-    ['a missing terminal newline', '{"value":1}'],
-    ['an interior blank record', '{"value":1}\n\n{"value":2}\n'],
-  ])('rejects durable JSONL containing %s', (_description, content) => {
+    ['a record a crash cut short', '{"value":1}\n{"val'],
+    ['a terminated fragment from an earlier crash', '{"value":1}\n{"val\n'],
+    ['a blank record', '{"value":1}\n\n'],
+  ])('skips durable JSONL containing %s', (_description, content) => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-jsonl-framing';
     const pluginId = 'plugin.jsonl-framing';
@@ -458,7 +459,9 @@ describe('runtime plugin file store', () => {
       pluginId,
     });
 
-    expect(() => store.readJsonl('events.jsonl')).toThrow(/JSONL/iu);
+    // The unfinished record never committed, so it is not history — but
+    // the records written before it are, and they survive.
+    expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}]);
   });
 
   it('rejects JSONL reads and appends on paths that already store JSON', () => {

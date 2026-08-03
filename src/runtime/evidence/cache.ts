@@ -1,9 +1,6 @@
 import {statPathSync} from '../../shared/file-system.ts';
 import {basename} from 'node:path';
-import {
-  CompleteJsonLinesError,
-  splitCompleteJsonLines,
-} from '../storage/json-lines.ts';
+import {readCompleteJsonLines} from '../storage/json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   LocalRuntimeStorageContractError,
@@ -57,17 +54,14 @@ export function readCoherentRuntimeSessionEvidence(
 
     const evidence = createMutableDurableRuntimeSessionEvidence({
       traceEntries: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.tracePath,
         content: contents.trace,
         decodeLine: decodeRuntimeTraceEntry,
       }),
       rawEvents: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.rawEventsPath,
         content: contents.rawEvents,
         decodeLine: decodeRawEventLogRecord,
       }),
       conversationMessages: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.conversationPath,
         content: contents.conversation,
         decodeLine: decodeConversationLogRecord,
       }),
@@ -138,8 +132,12 @@ function readStampedRuntimeEvidenceFile(
   return content;
 }
 
+/**
+ * Records that decode. A line a crash left unfinished is skipped rather
+ * than failing the read, so an interrupted write costs its own record and
+ * not the session around it.
+ */
 function decodeRuntimeEvidenceJsonLines<T>(options: {
-  readonly filePath: string;
   readonly content: string | undefined;
   readonly decodeLine: (line: string) => T;
 }): readonly T[] {
@@ -147,25 +145,9 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
     return Object.freeze([]);
   }
 
-  try {
-    return Object.freeze(
-      splitCompleteJsonLines(options.content).map(options.decodeLine),
-    );
-  } catch (error: unknown) {
-    if (error instanceof CompleteJsonLinesError) {
-      throw new LocalRuntimeStorageContractError(
-        error.reason === 'missing_terminal_newline'
-          ? 'partial_write'
-          : 'malformed_record',
-        error.reason === 'missing_terminal_newline'
-          ? `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
-          : `Local runtime log file contains a blank JSONL record: ${options.filePath}.`,
-        {cause: error},
-      );
-    }
-
-    throw error;
-  }
+  return Object.freeze(
+    readCompleteJsonLines(options.content).map(options.decodeLine),
+  );
 }
 
 export function readRuntimeEvidenceFileStamps(
