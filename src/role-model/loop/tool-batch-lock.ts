@@ -11,6 +11,22 @@
  * Admission order is preserved: a waiting exclusive call is not
  * overtaken by later shared calls, so a batch never reorders the effects
  * the model requested.
+ *
+ * The lease is held for the whole dispatch — routing, the plugin's
+ * handleToolCall hook, and capturing its result — so an exclusive call
+ * holds it until the dispatch settles, not merely until the hook is
+ * entered.
+ *
+ * What that does not cover: exclusivity spans the lifetime of the
+ * dispatch, not the lifetime of every real-world side effect. A hook
+ * that hits its timeout has its dispatch settled and its lease released,
+ * while work it started keeps running if it ignored the AbortSignal it
+ * was given — cancellation here is cooperative, and nothing in-process
+ * can force a plugin to stop. Holding the lease until such a hook
+ * finished would instead let one unresponsive plugin stall every later
+ * exclusive call in the turn, which the user would feel. Enforcing the
+ * stronger guarantee needs a boundary that can actually terminate a
+ * hook, such as running plugins out of process.
  */
 export type ToolBatchLockMode = 'shared' | 'exclusive';
 

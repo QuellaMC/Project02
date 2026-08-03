@@ -45,6 +45,7 @@ import {
   renameSync,
   rmSync,
   statSync,
+  truncateSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -209,6 +210,15 @@ export function appendTextFileSync(
   mode: number,
 ): void {
   appendFileSync(path, text, {encoding: 'utf8', mode});
+}
+
+/**
+ * Cut a file back to `length` bytes. Append-only logs use this to drop a
+ * trailing record a crash left unfinished, which is the one edit an
+ * append-only file makes to what is already on disk.
+ */
+export function truncateFileSync(path: string, length: number): void {
+  truncateSync(path, length);
 }
 
 /**

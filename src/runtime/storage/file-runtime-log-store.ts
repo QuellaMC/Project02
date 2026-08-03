@@ -1,6 +1,8 @@
 import {
   appendTextFileSync,
   readFinalByteSync,
+  readTextFileSync,
+  truncateFileSync,
 } from '../../shared/file-system.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {encodeConversationLogRecord} from './conversation-codec.ts';
@@ -153,11 +155,8 @@ export function createFileRuntimeLogStore(
 
 function appendJsonLine(filePath: string, line: string): void {
   try {
-    appendTextFileSync(
-      filePath,
-      `${terminatorForTornTail(filePath)}${line}\n`,
-      0o600,
-    );
+    discardTornTail(filePath);
+    appendTextFileSync(filePath, `${line}\n`, 0o600);
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
       'write_failed',
@@ -168,19 +167,29 @@ function appendJsonLine(filePath: string, line: string): void {
 }
 
 /**
- * A newline when the log ends mid-record, so the next append starts on its
- * own line.
+ * Drops a record a crash left unfinished, before appending after it.
  *
  * A process killed mid-append leaves a final line with no newline. Writing
  * straight after it would splice the new record onto that fragment and make
- * one unreadable line out of two. Terminating the fragment first leaves it
- * isolated — readers skip it, and everything after it decodes.
+ * one unreadable line out of two, so it has to go somewhere.
  *
- * The interrupted record is not reconstructed: it never finished being
- * written, so it was never committed.
+ * It is removed rather than terminated. A terminated fragment survives as a
+ * committed-looking line that does not parse, and once later records land
+ * after it, nothing distinguishes it from corruption — the reader would
+ * have to tolerate unparseable lines anywhere in the file, which is how a
+ * damaged log gets read back as a short one. The fragment never finished
+ * being written, so it was never committed and nothing is lost by
+ * truncating it.
  */
-function terminatorForTornTail(filePath: string): string {
+function discardTornTail(filePath: string): void {
   const finalByte = readFinalByteSync(filePath);
 
-  return finalByte !== undefined && finalByte !== 0x0a ? '\n' : '';
+  if (finalByte === undefined || finalByte === 0x0a) {
+    return;
+  }
+
+  const content = readTextFileSync(filePath);
+  const lastNewline = content.lastIndexOf('\n');
+
+  truncateFileSync(filePath, lastNewline + 1);
 }

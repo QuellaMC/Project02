@@ -443,7 +443,6 @@ describe('runtime plugin file store', () => {
 
   it.each([
     ['a record a crash cut short', '{"value":1}\n{"val'],
-    ['a terminated fragment from an earlier crash', '{"value":1}\n{"val\n'],
     ['a blank record', '{"value":1}\n\n'],
   ])('skips durable JSONL containing %s', (_description, content) => {
     const storeRoot = createTempRoot();
@@ -462,6 +461,31 @@ describe('runtime plugin file store', () => {
     // The unfinished record never committed, so it is not history — but
     // the records written before it are, and they survive.
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}]);
+  });
+
+  it('reports a damaged record instead of returning a short history', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-jsonl-damage';
+    const pluginId = 'plugin.jsonl-damage';
+    const root = pluginRoot(storeRoot, sessionId, pluginId);
+
+    mkdirSync(root, {recursive: true});
+    // Committed records follow the bad line, so it was never an
+    // unfinished append — the writer truncates those before appending.
+    writeFileSync(
+      join(root, 'events.jsonl'),
+      '{"value":1}\n{"corrupt\n{"value":3}\n',
+      'utf8',
+    );
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId,
+    });
+
+    expect(() => store.readJsonl('events.jsonl')).toThrow(
+      /line 2 is not valid JSON/iu,
+    );
   });
 
   it('rejects JSONL reads and appends on paths that already store JSON', () => {

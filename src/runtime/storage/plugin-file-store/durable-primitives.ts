@@ -32,6 +32,7 @@ import {
 } from '../mutation-lock.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import type {RuntimePluginFileStorePathMode} from '../../../plugins/index.ts';
+import {MalformedJsonLineError} from '../json-lines.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
@@ -619,7 +620,14 @@ function assertDurableJsonlPathMode(options: {
         return;
       }
 
-      if (!(error instanceof SyntaxError)) {
+      // Unreadable as JSONL is the answer this check wants, not a
+      // failure: a JSON document spread over several lines is exactly
+      // what it is trying to recognize. The whole-file parse below
+      // decides.
+      if (
+        !(error instanceof SyntaxError) &&
+        !(error instanceof MalformedJsonLineError)
+      ) {
         throw error;
       }
     }
