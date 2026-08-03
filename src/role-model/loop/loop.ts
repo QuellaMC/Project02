@@ -1065,11 +1065,19 @@ async function routeExecutableToolCalls(options: {
   // complete result set and decides what to do next.
   const lock = createToolBatchLock();
 
-  await Promise.all(
+  // Settled, not all: a failing report must not leave siblings running
+  // past the turn that owns them, so every call finishes before the
+  // first failure propagates.
+  const settled = await Promise.allSettled(
     admitted.map(async entry => {
       results[entry.slot] = await report(await lock.run(entry.mode, entry.run));
     }),
   );
+  const failure = settled.find(outcome => outcome.status === 'rejected');
+
+  if (failure !== undefined) {
+    throw failure.reason;
+  }
 
   return createAcceptedPluginToolRoutingResult(
     results.filter(result => result !== undefined),

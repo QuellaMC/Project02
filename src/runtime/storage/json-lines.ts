@@ -20,22 +20,15 @@ export function readCompleteJsonLines(content: string): readonly string[] {
     .map(line => (line.endsWith('\r') ? line.slice(0, -1) : line));
   lines.pop();
 
-  const records: string[] = [];
+  return Object.freeze(
+    lines.map((line, index) => {
+      if (!isParseableJson(line)) {
+        throw new MalformedJsonLineError(index + 1);
+      }
 
-  for (const [index, line] of lines.entries()) {
-    if (line.trim().length === 0) {
-      continue;
-    }
-
-    if (isParseableJson(line)) {
-      records.push(line);
-      continue;
-    }
-
-    throw new MalformedJsonLineError(index + 1);
-  }
-
-  return Object.freeze(records);
+      return line;
+    }),
+  );
 }
 
 /**

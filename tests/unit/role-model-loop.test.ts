@@ -345,6 +345,61 @@ describe('role-model loop routing and policy', () => {
     ).toEqual(['memory.recall', 'memory.search']);
   });
 
+  it('lets every call finish before a failed report propagates', async () => {
+    const events: string[] = [];
+    const fastTool = unlimitedToolWithConcurrency(
+      memorySearchToolDefinition,
+      'shared',
+    );
+    const slowTool = unlimitedToolWithConcurrency(
+      memoryRecallToolDefinition,
+      'shared',
+    );
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        if (call.toolName === 'memory.recall') {
+          await new Promise(resolve => {
+            setTimeout(resolve, 25);
+          });
+        }
+
+        events.push(`settled:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    await expect(
+      runRoleModelLoop({
+        onVisibleReply: () => {},
+        event: createTestEvent('search memory', 'evt_report_failure'),
+        decisionContext: createTestDecisionContext(),
+        pluginToolDefinitions: withVisibleReplyTool(fastTool, slowTool),
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext('evt_report_failure'),
+        onPluginToolCallCompleted: event => {
+          if (event.toolName === 'memory.search') {
+            throw new Error('could not append finish evidence');
+          }
+        },
+        adapter: createSequencedAdapter(
+          [
+            {
+              toolCalls: [
+                {name: 'memory.search', input: {query: 'fast'}},
+                {name: 'memory.recall', input: {query: 'slow'}},
+              ],
+            },
+          ],
+          () => undefined,
+        ),
+      }),
+    ).rejects.toThrow(/could not append finish evidence/iu);
+
+    // The slow sibling completed before the failure surfaced, so no tool
+    // call outlives the turn that owns it.
+    expect(events).toContain('settled:memory.recall');
+  });
+
   it('runs an exclusive tool call alone within its batch', async () => {
     const events: string[] = [];
     const searchTool = unlimitedToolWithConcurrency(

@@ -446,7 +446,7 @@ describe('runtime plugin file store', () => {
 
   it.each([
     ['a record a crash cut short', '{"value":1}\n{"val'],
-    ['a blank record', '{"value":1}\n\n'],
+    ['a tail of blank bytes', '{"value":1}\n   '],
   ])('skips durable JSONL containing %s', (_description, content) => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-jsonl-framing';
