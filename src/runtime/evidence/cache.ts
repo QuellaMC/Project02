@@ -1,6 +1,5 @@
 import {statPathSync} from '../../shared/file-system.ts';
 import {basename} from 'node:path';
-import {readCompleteJsonLines} from '../storage/json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   LocalRuntimeStorageContractError,
@@ -9,6 +8,7 @@ import {
 import {cleanupAbandonedAtomicReplacementsIn} from '../storage/atomic-file.ts';
 import {
   readOptionalStoreText,
+  readStoreJsonLines,
   storeWriteFailed,
 } from '../storage/store-file.ts';
 import {decodeConversationLogRecord} from '../storage/conversation-codec.ts';
@@ -54,14 +54,17 @@ export function readCoherentRuntimeSessionEvidence(
 
     const evidence = createMutableDurableRuntimeSessionEvidence({
       traceEntries: decodeRuntimeEvidenceJsonLines({
+        filePath: paths.tracePath,
         content: contents.trace,
         decodeLine: decodeRuntimeTraceEntry,
       }),
       rawEvents: decodeRuntimeEvidenceJsonLines({
+        filePath: paths.rawEventsPath,
         content: contents.rawEvents,
         decodeLine: decodeRawEventLogRecord,
       }),
       conversationMessages: decodeRuntimeEvidenceJsonLines({
+        filePath: paths.conversationPath,
         content: contents.conversation,
         decodeLine: decodeConversationLogRecord,
       }),
@@ -133,11 +136,13 @@ function readStampedRuntimeEvidenceFile(
 }
 
 /**
- * Records that decode. A line a crash left unfinished is skipped rather
- * than failing the read, so an interrupted write costs its own record and
- * not the session around it.
+ * The file's committed records. A record a crash left unfinished is
+ * skipped, so an interrupted write costs its own record rather than the
+ * session around it; a committed record that is damaged fails the read
+ * as a store contract error naming the file.
  */
 function decodeRuntimeEvidenceJsonLines<T>(options: {
+  readonly filePath: string;
   readonly content: string | undefined;
   readonly decodeLine: (line: string) => T;
 }): readonly T[] {
@@ -146,7 +151,9 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
   }
 
   return Object.freeze(
-    readCompleteJsonLines(options.content).map(options.decodeLine),
+    readStoreJsonLines(options.filePath, options.content).map(
+      options.decodeLine,
+    ),
   );
 }
 

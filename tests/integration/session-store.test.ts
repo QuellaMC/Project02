@@ -201,6 +201,32 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('opens a healthy session even when another catalog row is damaged', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
+    });
+    const alpha = await store.createSession({sessionId: 'alpha'});
+
+    // A syntactically damaged row for a different session, with a valid
+    // row after it so it cannot be read as an unfinished append.
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `{"sessionId":"corr\n${JSON.stringify(alpha)}\n`,
+      'utf8',
+    );
+
+    // Alpha's own entry and directory are intact, so opening it works.
+    await expect(store.readSession('alpha')).resolves.toEqual(alpha);
+    // Listing is where the damage is reported.
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'malformed_record',
+    );
+  });
+
   it('requires readConversationEvidence from readers at the type level', () => {
     // The home/character-data split made evidence mandatory: a reader
     // without it is a compile-time migration, not a rehydrate call that

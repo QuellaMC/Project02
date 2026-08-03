@@ -9,8 +9,8 @@ import {
   removeDirectory,
   type Dirent,
 } from '../../shared/file-system.ts';
-import {readCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {readStoreJsonLines} from './store-file.ts';
 import {
   describeRealEntry,
   describeRealEntryAsync,
@@ -505,7 +505,7 @@ async function decodeSessionCatalogForLayout(
     throwMissingRequiredSessionCatalog(layout);
   }
 
-  const sessions = decodeSessionCatalog(catalog);
+  const sessions = decodeSessionCatalog(catalog, layout.sessionCatalogPath);
 
   await assertSessionCatalogCoversDurableSessionDirectories(layout, sessions);
   await assertSessionCatalogEntriesHaveReadableDirectories(layout, sessions);
@@ -514,17 +514,17 @@ async function decodeSessionCatalogForLayout(
 }
 
 /**
- * The catalog is append-only, so a crash can leave its final entry
- * unfinished. An entry that does not decode is skipped: it costs that one
- * session's listing, where failing the read would hide every session the
- * user has.
+ * Every catalog entry, with a damaged one failing the read: listing
+ * sessions is where an operator is told the catalog is broken. A record
+ * a crash left unfinished is not an entry yet and is skipped.
  */
 function decodeSessionCatalog(
   catalog: string,
+  filePath: string,
 ): Map<string, LocalRuntimeSessionMetadata> {
   const sessions = new Map<string, LocalRuntimeSessionMetadata>();
 
-  for (const line of readCompleteJsonLines(catalog)) {
+  for (const line of readStoreJsonLines(filePath, catalog)) {
     const metadata = decodeSessionMetadata(line);
 
     sessions.set(metadata.sessionId, metadata);
@@ -534,9 +534,11 @@ function decodeSessionCatalog(
 }
 
 /**
- * Only the requested entry is decoded, so opening one session does not
- * depend on every other entry being well-formed. Listing sessions still
- * decodes them all and reports the damage.
+ * The requested entry alone, so opening one session does not depend on
+ * every other entry being intact. A damaged row belonging to another
+ * session is skipped rather than failing this read — the listing path
+ * above still reports it, and refusing to open a healthy session because
+ * an unrelated one is corrupt helps nobody.
  */
 function decodeRequestedSessionCatalogEntry(
   catalog: string,
@@ -544,8 +546,18 @@ function decodeRequestedSessionCatalogEntry(
 ): LocalRuntimeSessionMetadata | undefined {
   let metadata: LocalRuntimeSessionMetadata | undefined;
 
-  for (const line of readCompleteJsonLines(catalog)) {
-    const parsed: unknown = JSON.parse(line);
+  for (const line of catalog.split('\n')) {
+    if (line.trim().length === 0) {
+      continue;
+    }
+
+    let parsed: unknown;
+
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      continue;
+    }
 
     if (isRecord(parsed) && parsed['sessionId'] === sessionId) {
       metadata = decodeSessionMetadata(line);

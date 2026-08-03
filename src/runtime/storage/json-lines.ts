@@ -1,6 +1,6 @@
 import {
+  readFileBytesSync,
   readFinalByteSync,
-  readTextFileSync,
   truncateFileSync,
 } from '../../shared/file-system.ts';
 
@@ -12,18 +12,18 @@ import {
  * cost a user every earlier turn in the session to report the one that did
  * not land, so that record is skipped and the rest is returned.
  *
- * Only the file's last line may be skipped, and only when it does not
- * parse — a record cut off mid-write is cut off mid-token. Appends are
- * ordered, so that is the only place an unfinished record can be, and the
- * writer truncates such a fragment before appending after it rather than
- * leaving it behind. A fragment therefore never acquires records after
- * itself, and the answer does not change depending on who wrote next.
+ * A record counts as committed once its terminating newline is on disk,
+ * so text after the final newline is not returned — whether or not it
+ * happens to parse. The writer draws the line in the same place,
+ * discarding exactly that tail before it appends, so a record cannot be
+ * visible to recovery on one read and deleted by the next append.
  *
- * Anything else that fails to parse fails the read. An unparseable line
- * with committed records after it was never an unfinished append — it is
- * damage, and silently dropping it would hand a caller a short history
- * while reporting success. The codec still decides what a well-formed
- * record must contain; this seam only decides which lines are records.
+ * Everything before that tail finished being written, so a line there
+ * that does not parse is damage rather than an interrupted append, and
+ * fails the read. Silently dropping it would hand a caller a short
+ * history while reporting success. The codec still decides what a
+ * well-formed record must contain; this seam only decides which lines
+ * are records.
  */
 export function readCompleteJsonLines(content: string): readonly string[] {
   if (content.length === 0) {
@@ -33,7 +33,14 @@ export function readCompleteJsonLines(content: string): readonly string[] {
   const lines = content
     .split('\n')
     .map(line => (line.endsWith('\r') ? line.slice(0, -1) : line));
-  const lastIndex = lines.length - 1;
+  // Text after the final newline: empty for a complete file, and the
+  // unfinished record for an interrupted one. A record is committed when
+  // its newline is on disk, so this is dropped either way — and the
+  // writer agrees, discarding exactly this tail before it appends. Were
+  // it read as committed, a complete-but-unterminated record would be
+  // visible to recovery and then deleted by the next append.
+  lines.pop();
+
   const records: string[] = [];
 
   for (const [index, line] of lines.entries()) {
@@ -46,10 +53,9 @@ export function readCompleteJsonLines(content: string): readonly string[] {
       continue;
     }
 
-    if (index === lastIndex) {
-      continue;
-    }
-
+    // A committed record that does not parse is damage, not an
+    // interrupted write: appends are ordered, so anything before the
+    // torn tail finished being written.
     throw new MalformedJsonLineError(index + 1);
   }
 
@@ -78,9 +84,14 @@ export function discardTornJsonLineTail(filePath: string): void {
     return;
   }
 
-  const content = readTextFileSync(filePath);
+  // Searched and measured in bytes, because that is what truncation
+  // counts. A string offset would be short by one for every non-ASCII
+  // character before the newline — cutting the newline off with the
+  // fragment, so the next append would land on the previous record and
+  // destroy one that had committed.
+  const content = readFileBytesSync(filePath);
 
-  truncateFileSync(filePath, content.lastIndexOf('\n') + 1);
+  truncateFileSync(filePath, content.lastIndexOf(0x0a) + 1);
 }
 
 /** A committed record that does not parse: damage, not a torn append. */

@@ -28,10 +28,12 @@ import type {
   RuntimeTraceEntry,
 } from './records.ts';
 import {isTerminalRawEventLogRecord} from './records.ts';
-import {readCompleteJsonLines} from '../storage/json-lines.ts';
 import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
-import {readOptionalStoreText} from '../storage/store-file.ts';
+import {
+  readOptionalStoreText,
+  readStoreJsonLines,
+} from '../storage/store-file.ts';
 import {preparedRuntimePluginConfigEffectHasApprovalEvidence} from '../../plugins/api/index.ts';
 import type {
   DurableRuntimeSessionEvidence,
@@ -2401,7 +2403,7 @@ function readJsonLines<T>(options: {
     return [];
   }
 
-  return readCompleteJsonLines(content).map(options.decodeLine);
+  return readStoreJsonLines(options.filePath, content).map(options.decodeLine);
 }
 
 function rawEventsRequireConversationLog(

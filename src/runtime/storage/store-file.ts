@@ -24,6 +24,7 @@
  *   Those are "the plugin asked for something invalid", not "the store is
  *   damaged", and the plugin host branches on them.
  */
+import {MalformedJsonLineError, readCompleteJsonLines} from './json-lines.ts';
 import {readTextFileSync} from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 
@@ -66,6 +67,34 @@ export function storeReadFailed(
     `Could not read local runtime store file: ${path}.`,
     {cause},
   );
+}
+
+/**
+ * A store file's committed records, with a damaged one named as a store
+ * contract failure.
+ *
+ * `readCompleteJsonLines` answers a framing question and raises a plain
+ * TypeError; the CLI branches on LocalRuntimeStorageContractError to tell
+ * an operator which file is broken. Translating in one place keeps every
+ * store reader giving the same answer.
+ */
+export function readStoreJsonLines(
+  filePath: string,
+  content: string,
+): readonly string[] {
+  try {
+    return readCompleteJsonLines(content);
+  } catch (error: unknown) {
+    if (!(error instanceof MalformedJsonLineError)) {
+      throw error;
+    }
+
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Local runtime log file has a malformed record on line ${String(error.lineNumber)}: ${filePath}.`,
+      {cause: error},
+    );
+  }
 }
 
 export function storeWriteFailed(

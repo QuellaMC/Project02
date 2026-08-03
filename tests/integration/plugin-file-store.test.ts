@@ -496,6 +496,73 @@ describe('runtime plugin file store', () => {
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}, {value: 2}]);
   });
 
+  it('keeps a non-ASCII record intact when dropping a torn tail after it', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-jsonl-utf8-torn';
+    const pluginId = 'plugin.jsonl-utf8-torn';
+    const root = pluginRoot(storeRoot, sessionId, pluginId);
+
+    mkdirSync(root, {recursive: true});
+    // The committed record is longer in bytes than in code units, so a
+    // string offset would cut its terminating newline off with the
+    // fragment and splice the next append onto it.
+    writeFileSync(
+      join(root, 'events.jsonl'),
+      '{"text":"caf\u00e9"}\n{"tor',
+      'utf8',
+    );
+    writeFileSync(
+      join(root, durablePathModesFileName),
+      '{"events.jsonl":"jsonl"}\n',
+      'utf8',
+    );
+    writeFileSync(join(root, durableRevisionFileName), '1\n', 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId,
+    });
+
+    store.appendJsonl('events.jsonl', {value: 2});
+
+    expect(store.readJsonl('events.jsonl')).toEqual([
+      {text: 'caf\u00e9'},
+      {value: 2},
+    ]);
+  });
+
+  it('withholds a record whose terminating newline never landed', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-jsonl-unterminated';
+    const pluginId = 'plugin.jsonl-unterminated';
+    const root = pluginRoot(storeRoot, sessionId, pluginId);
+
+    mkdirSync(root, {recursive: true});
+    // Complete JSON, no newline: the write did not finish, and the next
+    // append discards it. Reading it as committed would show recovery a
+    // record that then vanishes.
+    writeFileSync(
+      join(root, 'events.jsonl'),
+      '{"value":1}\n{"value":2}',
+      'utf8',
+    );
+    writeFileSync(
+      join(root, durablePathModesFileName),
+      '{"events.jsonl":"jsonl"}\n',
+      'utf8',
+    );
+    writeFileSync(join(root, durableRevisionFileName), '1\n', 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId,
+    });
+
+    expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}]);
+  });
+
   it('reports a damaged record instead of returning a short history', () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-jsonl-damage';
