@@ -731,29 +731,6 @@ describe('runtime plugin model-facing tool policy', () => {
     );
   });
 
-  it('accepts absent call limits and rejects malformed ones', () => {
-    const unlimited = createRuntimePluginProvidedTool(
-      runtimePluginProvidedToolFixture({callLimit: undefined}),
-    );
-
-    expect(unlimited.callLimit).toBeUndefined();
-    expect(() =>
-      createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({callLimit: 5}),
-      ),
-    ).toThrow('Plugin provided tool callLimit must be an object.');
-    expect(() =>
-      createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({
-          callLimit: {
-            scope: 'session',
-            maxCalls: 1,
-          },
-        }),
-      ),
-    ).toThrow('Plugin provided tool callLimit.scope is not supported.');
-  });
-
   it('rejects model-facing tools without requestedAccess.model_input write', () => {
     expect(() =>
       createRuntimePlugin({
@@ -886,11 +863,6 @@ describe('runtime plugin model-facing tool policy', () => {
         'Expected first-party model tools plugin to provide a tool.',
       );
     }
-
-    expect(firstPartyTool.callLimit).toEqual({
-      scope: 'model_response',
-      maxCalls: 1,
-    });
 
     expect(
       isFirstPartyBuiltInModelTool({
@@ -1072,11 +1044,6 @@ function runtimePluginProvidedToolFixture(
   return Object.freeze({
     name: 'memory.search',
     description: 'Search memory.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],

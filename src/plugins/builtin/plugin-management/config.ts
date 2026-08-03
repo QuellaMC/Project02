@@ -28,7 +28,6 @@ export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
     name: runtimePluginConfigReadToolName,
     description:
       'Inspect one installed plugin config using manifest metadata and redacted authored and effective values. Secret values are never returned.',
-    requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [

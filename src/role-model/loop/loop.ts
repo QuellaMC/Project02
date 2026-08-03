@@ -38,7 +38,6 @@ import {
   createRejectedToolRoutingEvidence,
   missingRoutingTargetRejection,
   type RoleModelPluginToolRoutingEvidence,
-  userTurnCallLimitRoutingRejection,
 } from './routing-rejections.ts';
 import type {
   RoleModelAdapter,
@@ -942,21 +941,6 @@ async function routeExecutableToolCalls(options: {
       parsedDecisionSnapshot: options.parsedDecisionSnapshot,
     });
 
-    const callLimitRejection = userTurnCallLimitRoutingRejection({
-      callId,
-      call: routedCall,
-      toolCall,
-      toolDefinition,
-      priorToolObservations: options.priorToolObservations,
-      batchToolNames: batchAttemptsSoFar(results, admitted),
-      context: options.runtimePluginContext,
-    });
-
-    if (callLimitRejection !== undefined) {
-      results[slot] = await report(callLimitRejection);
-      continue;
-    }
-
     const nativeArgumentRejection = nativeToolCallArgumentRejection({
       callId,
       call: routedCall,
@@ -1144,22 +1128,6 @@ function createSettledToolCallReporter(options: {
 
     return result;
   };
-}
-
-/**
- * Tool names already attempted in this batch. A limit bounds attempts, so
- * a call still running counts the same as a finished one.
- */
-function batchAttemptsSoFar(
-  results: readonly (RoleModelPluginToolRoutingEvidence | undefined)[],
-  admitted: readonly {readonly toolName: string}[],
-): readonly string[] {
-  return [
-    ...results
-      .filter(result => result !== undefined)
-      .map(result => result.call.toolName),
-    ...admitted.map(entry => entry.toolName),
-  ];
 }
 
 function capturePreparedConfigEffect(options: {

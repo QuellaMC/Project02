@@ -643,11 +643,6 @@ export function createHandleFileStoreWritePlugin(
       Object.freeze({
         name: handleFileStoreWriteToolName,
         description: 'Write a test value through the plugin file store.',
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [
@@ -891,11 +886,6 @@ export function createRevisionFixtureTool(name: string) {
   return {
     name,
     description: 'Return plugin store revision metadata.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],

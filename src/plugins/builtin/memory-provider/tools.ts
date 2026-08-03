@@ -4,11 +4,6 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({
     name,
     description: 'Search configured memory for relevant context.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 2,
-    },
     inputContract: {
       type: 'object',
       fields: [
@@ -33,11 +28,6 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({
     name,
     description: 'Add a bounded memory item.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [

@@ -2016,7 +2016,6 @@ function handleToolCallFailureDegrades(options: {
 }): boolean {
   return (
     !options.plugin.manifest.runtimePolicy.requiredForTurn &&
-    !options.providedTool.requiredForUserTurn &&
     options.plugin.manifest.runtimePolicy.failureBehavior.handleToolCall ===
       'degrade'
   );

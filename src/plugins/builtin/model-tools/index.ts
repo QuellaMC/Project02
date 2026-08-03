@@ -18,8 +18,6 @@ export const firstPartyModelToolsProvidedTools = Object.freeze(
     Object.freeze({
       name: definition.name,
       description: definition.description,
-      requiredForUserTurn: definition.requiredForUserTurn,
-      callLimit: definition.callLimit,
       inputContract: definition.inputContract,
       validationOwner: 'built_in_model_tools',
       annotations: {readOnlyHint: true},

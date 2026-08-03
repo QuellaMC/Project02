@@ -923,11 +923,6 @@ function createProvidedToolFromSchema(options: {
   return {
     name: options.name,
     description: options.description,
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: options.maxCalls ?? 1,
-    },
     inputContract: options.inputContract,
     validationOwner: options.validationOwner,
     requiresConfirmation: false,

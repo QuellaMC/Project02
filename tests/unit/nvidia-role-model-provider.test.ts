@@ -444,11 +444,6 @@ describe('NVIDIA role-model provider', () => {
       pluginId: 'credential.fixture',
       name: 'credential.use',
       description: 'Use an explicitly supplied credential.',
-      requiredForUserTurn: false,
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
       inputContract: {
         type: 'object',
         fields: [
@@ -1765,11 +1760,6 @@ function createAliasCollisionToolDefinition(options: {
     pluginId: options.pluginId,
     name: options.name,
     description: `Alias collision fixture for ${options.name}.`,
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],

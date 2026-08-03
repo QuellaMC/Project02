@@ -26,8 +26,6 @@ export function createDefaultRoleModelPluginToolDefinitions(): readonly RoleMode
         pluginId: firstPartyModelToolsPluginId,
         name: definition.name,
         description: definition.description,
-        requiredForUserTurn: definition.requiredForUserTurn,
-        callLimit: definition.callLimit,
         inputContract: definition.inputContract,
         validationOwner: 'built_in_model_tools',
         annotations: {readOnlyHint: true},
@@ -91,9 +89,7 @@ function assertBuiltInRoleModelToolPolicy(
   if (
     pluginId !== firstPartyModelToolsPluginId ||
     providedTool.validationOwner !== 'built_in_model_tools' ||
-    providedTool.requiresConfirmation ||
-    providedTool.callLimit?.scope !== 'model_response' ||
-    providedTool.callLimit.maxCalls !== 1
+    providedTool.requiresConfirmation
   ) {
     throw new TypeError(
       `Plugin tool "${providedTool.name}" must be provided by ${firstPartyModelToolsPluginId}.`,
@@ -107,15 +103,6 @@ function assertHostRoleModelToolPolicy(
   if (providedTool.validationOwner !== 'plugin_host') {
     throw new TypeError(
       `Plugin tool "${providedTool.name}" must be validated by plugin_host.`,
-    );
-  }
-
-  if (
-    providedTool.callLimit !== undefined &&
-    providedTool.callLimit.scope !== 'user_turn'
-  ) {
-    throw new TypeError(
-      `Plugin tool "${providedTool.name}" may only declare a user_turn call limit.`,
     );
   }
 

@@ -157,9 +157,6 @@ export const roleModelMalformedOutputRejectionReason = 'malformed_output';
 export const roleModelMalformedToolCallRejectionReason = 'malformed_tool_call';
 export const roleModelUnknownToolRejectionReason = 'unknown_tool';
 export const roleModelDisallowedToolRejectionReason = 'disallowed_tool';
-export const roleModelDuplicateToolCallRejectionReason = 'duplicate_tool_call';
-export const roleModelMissingRequiredToolCallRejectionReason =
-  'missing_required_tool_call';
 export const roleModelUnsupportedEffectRejectionReason = 'unsupported_effect';
 export const roleModelInvalidVisibleReplyRejectionReason =
   'invalid_visible_reply';
@@ -208,8 +205,6 @@ export type RoleModelDecisionRejectionReason =
   | typeof roleModelMalformedToolCallRejectionReason
   | typeof roleModelUnknownToolRejectionReason
   | typeof roleModelDisallowedToolRejectionReason
-  | typeof roleModelDuplicateToolCallRejectionReason
-  | typeof roleModelMissingRequiredToolCallRejectionReason
   | typeof roleModelUnsupportedEffectRejectionReason
   | typeof roleModelInvalidVisibleReplyRejectionReason
   | typeof roleModelProviderErrorRejectionReason
@@ -221,8 +216,6 @@ export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelMalformedToolCallRejectionReason,
   roleModelUnknownToolRejectionReason,
   roleModelDisallowedToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
-  roleModelMissingRequiredToolCallRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelProviderErrorRejectionReason,

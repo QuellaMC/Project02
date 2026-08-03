@@ -2,7 +2,6 @@ import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {
   isRoleModelMalformedAdapterRawOutputDetails,
   roleModelDisallowedToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
@@ -165,7 +164,6 @@ const loopSynthesizedRejectionReasons: readonly string[] = Object.freeze([
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelDisallowedToolRejectionReason,
   roleModelUnknownToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
 ]);
 
 function isRoleModelLoopSynthesizedRejectionEvidence(options: {

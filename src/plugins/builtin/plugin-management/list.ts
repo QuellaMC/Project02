@@ -57,7 +57,6 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
     name: runtimePluginListToolName,
     description:
       'List plugins available to you in the current turn or inspect the installed plugin catalog. Call this when you need canonical plugin inventory.',
-    requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [
@@ -292,8 +291,6 @@ function createRuntimePluginListToolSummary(
     description: boundedRuntimePluginListText(tool.description),
     ...(tool.annotations === undefined ? {} : {annotations: tool.annotations}),
     ...(tool.concurrency === undefined ? {} : {concurrency: tool.concurrency}),
-    requiredForUserTurn: tool.requiredForUserTurn,
-    ...(tool.callLimit === undefined ? {} : {callLimit: tool.callLimit}),
     requiresConfirmation: tool.requiresConfirmation,
     validationOwner: tool.validationOwner,
     sourceReferencesRequired: tool.sourceReferencesRequired,

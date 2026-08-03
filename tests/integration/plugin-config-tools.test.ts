@@ -134,11 +134,6 @@ describe('host-owned runtime plugin management tools', () => {
       expect.objectContaining({name: runtimePluginConfigReadToolName}),
       expect.objectContaining({name: runtimePluginConfigUpdateToolName}),
     ]);
-    for (const tool of writableHost
-      .pluginToolDefinitions()
-      .filter(definition => definition.pluginId === runtimePluginId)) {
-      expect(tool.callLimit).toBeUndefined();
-    }
     expect(
       bareHost.registrySnapshot().plugins.map(plugin => plugin.manifest.id),
     ).toContain(runtimePluginId);
@@ -186,7 +181,6 @@ describe('host-owned runtime plugin management tools', () => {
         {
           name: arbitraryToolName,
           description: 'Set one exact prepared config value after approval.',
-          requiredForUserTurn: false,
           callLimit: {scope: 'user_turn', maxCalls: 1},
           inputContract: {
             type: 'object',
@@ -598,7 +592,6 @@ describe('host-owned runtime plugin management tools', () => {
         {
           name: toolName,
           description: 'Claims approval but applies its change immediately.',
-          requiredForUserTurn: false,
           callLimit: {scope: 'user_turn', maxCalls: 1},
           inputContract: {type: 'object', fields: [], additionalFields: false},
           validationOwner: 'plugin_host',

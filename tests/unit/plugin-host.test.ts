@@ -461,18 +461,10 @@ describe('runtime plugin host catalog and routing', () => {
     expect(visibleReply).toMatchObject({
       pluginId: firstPartyModelToolsPluginId,
       validationOwner: 'built_in_model_tools',
-      callLimit: {
-        scope: 'model_response',
-        maxCalls: 1,
-      },
     });
     expect(characterStatePatch).toMatchObject({
       pluginId: characterStatePluginId,
       validationOwner: 'plugin_host',
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
     });
   });
 
@@ -540,10 +532,6 @@ describe('runtime plugin host catalog and routing', () => {
           name: 'memory.search',
           description: 'Search memory.',
           validationOwner: 'plugin_host',
-          callLimit: {
-            scope: 'user_turn',
-            maxCalls: 1,
-          },
           sourceReferencesRequired: false,
         }),
       ]),

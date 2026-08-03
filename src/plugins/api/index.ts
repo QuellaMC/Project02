@@ -137,10 +137,7 @@ export {
   runtimePluginEvidenceBlocksToolInvocation,
   runtimePluginToolResultHasBlockingEvidence,
 } from './evidence-policy.ts';
-export {
-  requiredModelToolCallLimit,
-  requiredModelToolInputContract,
-} from './tool-schema-validation.ts';
+export {requiredModelToolInputContract} from './tool-schema-validation.ts';
 export {
   assertUniqueRuntimePluginIds,
   runtimeIdentityMatchesContext,

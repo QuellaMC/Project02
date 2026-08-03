@@ -34,10 +34,7 @@ import type {
   RuntimePluginRuntimePolicy,
   RuntimePluginValidationResult,
 } from './types.ts';
-import {
-  optionalModelToolCallLimit,
-  requiredModelToolInputContract,
-} from './tool-schema-validation.ts';
+import {requiredModelToolInputContract} from './tool-schema-validation.ts';
 import {
   accept,
   acceptedOrThrow,
@@ -208,11 +205,6 @@ export function validateRuntimePluginProvidedTool(
     value['description'],
     'description',
   );
-  const requiredForUserTurn = requiredBoolean(
-    value['requiredForUserTurn'],
-    'requiredForUserTurn',
-  );
-  const callLimit = optionalModelToolCallLimit(value['callLimit']);
   const inputContract = requiredModelToolInputContract(value['inputContract']);
   const validationOwner = value['validationOwner'];
   const annotations = optionalToolAnnotations(value['annotations']);
@@ -229,8 +221,6 @@ export function validateRuntimePluginProvidedTool(
   if (
     name.status === 'rejected' ||
     description.status === 'rejected' ||
-    requiredForUserTurn.status === 'rejected' ||
-    callLimit.status === 'rejected' ||
     inputContract.status === 'rejected' ||
     requiresConfirmation.status === 'rejected' ||
     sourceReferencesRequired.status === 'rejected'
@@ -238,8 +228,6 @@ export function validateRuntimePluginProvidedTool(
     return firstRejected([
       name,
       description,
-      requiredForUserTurn,
-      callLimit,
       inputContract,
       requiresConfirmation,
       sourceReferencesRequired,
@@ -271,8 +259,6 @@ export function validateRuntimePluginProvidedTool(
     Object.freeze({
       name: name.value,
       description: redactRuntimePluginText(description.value),
-      requiredForUserTurn: requiredForUserTurn.value,
-      ...(callLimit.value === undefined ? {} : {callLimit: callLimit.value}),
       inputContract: inputContract.value,
       validationOwner,
       ...(annotations.value === undefined

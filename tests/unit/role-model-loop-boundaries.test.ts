@@ -5,10 +5,7 @@ import {
   isRoleModelRawOutputReplayableDecisionEvidence,
   type RoleModelAdapter,
   type RoleModelChatMessage,
-  type RoleModelInputEnvelope,
   roleModelMalformedOutputRejectionReason,
-  roleModelMissingRequiredToolCallRejectionReason,
-  roleModelPluginToolRejectedRejectionReason,
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
   type RoleModelProviderExchangeSnapshot,
@@ -34,7 +31,6 @@ import {
   createTestEvent,
   createTestPluginContext,
   memorySearchToolDefinition,
-  requiredMemorySearchToolDefinition,
   withVisibleReplyTool,
 } from '../support/role-model-loop-fixtures.ts';
 
@@ -986,9 +982,7 @@ describe('role-model loop evidence and boundary validation', () => {
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: withVisibleReplyTool(
-        requiredMemorySearchToolDefinition,
-      ),
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_required_observed'),
     });
@@ -1003,7 +997,7 @@ describe('role-model loop evidence and boundary validation', () => {
   it('allows multiple required tools to complete in sequential rounds', async () => {
     const handledTools: string[] = [];
     const secondRequiredTool = Object.freeze({
-      ...requiredMemorySearchToolDefinition,
+      ...memorySearchToolDefinition,
       name: 'memory.recall',
       description: 'Recall memory.',
     } satisfies RoleModelPluginToolDefinition);
@@ -1012,7 +1006,7 @@ describe('role-model loop evidence and boundary validation', () => {
         {
           toolCalls: [
             {
-              name: requiredMemorySearchToolDefinition.name,
+              name: memorySearchToolDefinition.name,
               input: {query: 'Mira'},
             },
           ],
@@ -1043,7 +1037,7 @@ describe('role-model loop evidence and boundary validation', () => {
       adapter,
       pluginToolDefinitions: Object.freeze([
         ...createDefaultRoleModelPluginToolDefinitions(),
-        requiredMemorySearchToolDefinition,
+        memorySearchToolDefinition,
         secondRequiredTool,
       ]),
       pluginToolHost: Object.freeze({
@@ -1060,215 +1054,6 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(result.status).toBe('accepted');
     expect(handledTools).toEqual(['memory.search', 'memory.recall']);
     expect(result.rounds).toHaveLength(3);
-  });
-
-  it('converts a repeated tool call into a rejected observation and completes the turn', async () => {
-    let handledCalls = 0;
-    const capturedEnvelopes: RoleModelInputEnvelope[] = [];
-    const decisions = [
-      {
-        toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
-      },
-      {
-        toolCalls: [{name: 'memory.search', input: {query: 'Mira again'}}],
-      },
-      {
-        toolCalls: [{name: visibleReplyModelToolName, input: {text: 'done'}}],
-      },
-    ];
-    let decisionIndex = 0;
-    const adapter = Object.freeze({
-      invoke(inputEnvelope) {
-        capturedEnvelopes.push(inputEnvelope);
-        const decision = decisions[decisionIndex] ?? decisions.at(-1);
-        decisionIndex += 1;
-
-        return {rawOutputText: JSON.stringify(decision)};
-      },
-    } satisfies RoleModelAdapter);
-    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
-      handleToolCall() {
-        handledCalls += 1;
-
-        return createAcceptedToolCallResult();
-      },
-    });
-
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_repeated_tool'),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-      pluginToolHost,
-      runtimePluginContext: createTestPluginContext('evt_repeated_tool'),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(handledCalls).toBe(1);
-    expect(result.rounds).toHaveLength(3);
-    expect(result.pluginToolResults).toHaveLength(2);
-    expect(result.pluginToolResults[0]).toMatchObject({
-      dispatchedToHost: true,
-      result: {status: 'accepted'},
-    });
-    expect(result.pluginToolResults[1]).toMatchObject({
-      dispatchedToHost: false,
-      result: {status: 'rejected', reason: 'tool_call_limit_reached'},
-    });
-    expect(JSON.stringify(result.pluginToolResults[1])).toContain(
-      'user_turn maxCalls is 1',
-    );
-    expect(capturedEnvelopes).toHaveLength(3);
-    expect(JSON.stringify(capturedEnvelopes[2]?.toolObservations)).toContain(
-      'tool_call_limit_reached',
-    );
-  });
-
-  it('counts rejected and non-dispatched attempts toward user-turn call limits', async () => {
-    const adapter = createSequencedAdapter(
-      [
-        {
-          toolCalls: [{name: 'memory.search', input: {query: 'first'}}],
-        },
-        {
-          toolCalls: [{name: 'memory.search', input: {query: 'retry'}}],
-        },
-        {
-          toolCalls: [{name: visibleReplyModelToolName, input: {text: 'done'}}],
-        },
-      ],
-      () => undefined,
-    );
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_rejected_attempt_limit'),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(result.pluginToolResults).toHaveLength(2);
-    expect(result.pluginToolResults[0]).toMatchObject({
-      dispatchedToHost: false,
-      result: {status: 'rejected', reason: 'tool_host_missing'},
-    });
-    expect(result.pluginToolResults[1]).toMatchObject({
-      dispatchedToHost: false,
-      result: {status: 'rejected', reason: 'tool_call_limit_reached'},
-    });
-  });
-
-  it.each(['rejected', 'thrown', 'invalid_output'] as const)(
-    'counts %s host attempts before rejecting a retry',
-    async failureMode => {
-      let hostCalls = 0;
-      const result = await runRoleModelLoop({
-        onVisibleReply: () => {},
-        event: createTestEvent(
-          'search memory',
-          `evt_${failureMode}_attempt_limit`,
-        ),
-        decisionContext: createTestDecisionContext(),
-        adapter: createSequencedAdapter(
-          [
-            {
-              toolCalls: [{name: 'memory.search', input: {query: 'first'}}],
-            },
-            {
-              toolCalls: [{name: 'memory.search', input: {query: 'retry'}}],
-            },
-            {
-              toolCalls: [
-                {name: visibleReplyModelToolName, input: {text: 'done'}},
-              ],
-            },
-          ],
-          () => undefined,
-        ),
-        pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-        pluginToolHost: Object.freeze({
-          handleToolCall() {
-            hostCalls += 1;
-
-            if (failureMode === 'thrown') {
-              throw new Error('handler failed');
-            }
-            if (failureMode === 'invalid_output') {
-              return Object.freeze({
-                status: 'accepted',
-                output: {score: Number.NaN},
-                evidence: [],
-              } satisfies RuntimePluginToolCallResult);
-            }
-
-            return Object.freeze({
-              status: 'rejected',
-              reason: 'handler_rejected',
-              message: 'not available',
-              evidence: [],
-            } satisfies RuntimePluginToolCallResult);
-          },
-        }),
-        runtimePluginContext: createTestPluginContext(
-          `evt_${failureMode}_attempt_limit`,
-        ),
-      });
-
-      expect(result.status).toBe('accepted');
-      expect(hostCalls).toBe(1);
-      expect(result.pluginToolResults).toHaveLength(2);
-      expect(result.pluginToolResults[1]).toMatchObject({
-        dispatchedToHost: false,
-        result: {status: 'rejected', reason: 'tool_call_limit_reached'},
-      });
-    },
-  );
-
-  it('dispatches an over-capacity batch up to its limit and rejects the overflow members', async () => {
-    let hostCalls = 0;
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_batch_attempt_limit'),
-      decisionContext: createTestDecisionContext(),
-      adapter: createSequencedAdapter(
-        [
-          {
-            toolCalls: [
-              {name: 'memory.search', input: {query: 'first'}},
-              {name: 'memory.search', input: {query: 'second'}},
-            ],
-          },
-          {
-            toolCalls: [
-              {name: visibleReplyModelToolName, input: {text: 'done'}},
-            ],
-          },
-        ],
-        () => undefined,
-      ),
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-      pluginToolHost: Object.freeze({
-        handleToolCall() {
-          hostCalls += 1;
-          return createAcceptedToolCallResult();
-        },
-      }),
-      runtimePluginContext: createTestPluginContext('evt_batch_attempt_limit'),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(hostCalls).toBe(1);
-    expect(result.pluginToolResults).toHaveLength(2);
-    expect(result.pluginToolResults[0]).toMatchObject({
-      dispatchedToHost: true,
-      result: {status: 'accepted'},
-    });
-    expect(result.pluginToolResults[1]).toMatchObject({
-      dispatchedToHost: false,
-      result: {status: 'rejected', reason: 'tool_call_limit_reached'},
-    });
   });
 
   it('returns an undeclared executable call to the model as a rejected observation', async () => {
@@ -1349,95 +1134,6 @@ describe('role-model loop evidence and boundary validation', () => {
     });
   });
 
-  it('sends a correction note when the terminal decision omits a required tool', async () => {
-    let handledCalls = 0;
-    const renderedRequests: string[] = [];
-    const decisions = [
-      {
-        toolCalls: [
-          {name: visibleReplyModelToolName, input: {text: 'skipping search'}},
-        ],
-      },
-      {
-        toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
-      },
-      {
-        toolCalls: [
-          {name: visibleReplyModelToolName, input: {text: 'done properly'}},
-        ],
-      },
-    ];
-    let decisionIndex = 0;
-    const adapter = Object.freeze({
-      invoke(inputEnvelope, invocation) {
-        void inputEnvelope;
-        renderedRequests.push(JSON.stringify(invocation.turnContext.messages));
-        const decision = decisions[decisionIndex] ?? decisions.at(-1);
-        decisionIndex += 1;
-
-        return {rawOutputText: JSON.stringify(decision)};
-      },
-    } satisfies RoleModelAdapter);
-
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_missing_required_feedback'),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: withVisibleReplyTool(
-        requiredMemorySearchToolDefinition,
-      ),
-      pluginToolHost: Object.freeze({
-        handleToolCall() {
-          handledCalls += 1;
-          return createAcceptedToolCallResult();
-        },
-      }),
-      runtimePluginContext: createTestPluginContext(
-        'evt_missing_required_feedback',
-      ),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(handledCalls).toBe(1);
-    expect(result.rounds).toHaveLength(3);
-    expect(renderedRequests).toHaveLength(3);
-    expect(renderedRequests[1]).toContain('was rejected');
-    expect(renderedRequests[1]).toContain('required');
-  });
-
-  it('sends a correction note for duplicate visible_reply calls', async () => {
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('reply twice', 'evt_duplicate_reply_feedback'),
-      decisionContext: createTestDecisionContext(),
-      adapter: createSequencedAdapter(
-        [
-          {
-            toolCalls: [
-              {name: visibleReplyModelToolName, input: {text: 'first'}},
-              {name: visibleReplyModelToolName, input: {text: 'second'}},
-            ],
-          },
-          {
-            toolCalls: [
-              {name: visibleReplyModelToolName, input: {text: 'just one'}},
-            ],
-          },
-        ],
-        () => undefined,
-      ),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(result.rounds).toHaveLength(2);
-    if (result.status !== 'accepted') {
-      throw new Error('Expected duplicate visible_reply to be repaired.');
-    }
-    expect(executionResultVisibleReply(result)).toBe('just one');
-  });
-
   it('sends a correction note when visible_reply text normalizes to empty', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},
@@ -1467,82 +1163,6 @@ describe('role-model loop evidence and boundary validation', () => {
       throw new Error('Expected a blank visible_reply to be repaired.');
     }
     expect(executionResultVisibleReply(result)).toBe('real reply');
-  });
-
-  it('keeps the terminal rejection when no round budget remains for feedback', async () => {
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_feedback_budget_exhausted'),
-      decisionContext: createTestDecisionContext(),
-      adapter: createSequencedAdapter(
-        [
-          {
-            toolCalls: [
-              {
-                name: visibleReplyModelToolName,
-                input: {text: 'skipping search'},
-              },
-            ],
-          },
-        ],
-        () => undefined,
-      ),
-      pluginToolDefinitions: withVisibleReplyTool(
-        requiredMemorySearchToolDefinition,
-      ),
-      maxToolRounds: 0,
-    });
-
-    expect(result.status).toBe('rejected');
-    if (result.status !== 'rejected') {
-      throw new Error('Expected exhaustion to keep the terminal rejection.');
-    }
-    expect(result.rejection.reason).toBe(
-      roleModelMissingRequiredToolCallRejectionReason,
-    );
-  });
-
-  it('rejects the turn when the model persists past its call limits for maxToolRounds', async () => {
-    let hostCalls = 0;
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_persistent_attempt_limit'),
-      decisionContext: createTestDecisionContext(),
-      adapter: createSequencedAdapter(
-        [
-          {
-            toolCalls: [{name: 'memory.search', input: {query: 'first'}}],
-          },
-          {
-            toolCalls: [{name: 'memory.search', input: {query: 'again'}}],
-          },
-        ],
-        () => undefined,
-      ),
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-      pluginToolHost: Object.freeze({
-        handleToolCall() {
-          hostCalls += 1;
-          return createAcceptedToolCallResult();
-        },
-      }),
-      runtimePluginContext: createTestPluginContext(
-        'evt_persistent_attempt_limit',
-      ),
-      maxToolRounds: 2,
-    });
-
-    expect(result.status).toBe('rejected');
-    if (result.status !== 'rejected') {
-      throw new Error('Expected the persistent turn to be rejected.');
-    }
-    expect(result.rejection.reason).toBe(
-      roleModelPluginToolRejectedRejectionReason,
-    );
-    expect(result.rejection.details).toContain(
-      'maximum executable tool rounds',
-    );
-    expect(hostCalls).toBe(1);
   });
 
   it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {

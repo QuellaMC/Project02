@@ -1450,11 +1450,6 @@ export function memorySearchProvidedTools() {
     {
       name: 'memory.search',
       description: 'Search memory.',
-      requiredForUserTurn: false,
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
       inputContract: {
         type: 'object',
         fields: [

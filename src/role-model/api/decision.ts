@@ -13,7 +13,6 @@ import {
 import {
   createVisibleReplyModelToolCall,
   freezeModelToolCalls,
-  visibleReplyModelToolName,
   type ModelToolCall,
 } from './model-tools.ts';
 import {
@@ -123,26 +122,10 @@ export function createRoleModelToolObservation(
 export function createCharacterDecision(
   toolCalls: readonly ModelToolCall[],
 ): CharacterDecision {
-  assertVisibleReplyCardinality(toolCalls);
-
   return freezeCharacterDecision({
     version: roleModelDecisionContractVersion,
     toolCalls,
   });
-}
-
-function assertVisibleReplyCardinality(
-  toolCalls: readonly ModelToolCall[],
-): void {
-  const visibleReplyCount = toolCalls.filter(
-    call => call.name === visibleReplyModelToolName,
-  ).length;
-
-  if (visibleReplyCount > 1) {
-    throw new TypeError(
-      'Decision must not include duplicate visible_reply tool calls.',
-    );
-  }
 }
 
 export function createVisibleReplyCharacterDecision(

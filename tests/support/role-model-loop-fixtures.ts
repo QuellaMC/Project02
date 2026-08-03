@@ -25,11 +25,6 @@ export const memorySearchToolDefinition = Object.freeze({
   pluginId: 'memory.search.fixture',
   name: 'memory.search',
   description: 'Search memory.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [
@@ -46,11 +41,6 @@ export const memorySearchToolDefinition = Object.freeze({
   sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
-export const requiredMemorySearchToolDefinition = Object.freeze({
-  ...memorySearchToolDefinition,
-  requiredForUserTurn: true,
-} satisfies RoleModelPluginToolDefinition);
-
 export const memoryRecallToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   name: 'memory.recall',
@@ -64,18 +54,12 @@ export const visibleDotReplyToolDefinition = Object.freeze({
   description: 'Exercise a provider-name collision with visible_reply.',
 } satisfies RoleModelPluginToolDefinition);
 
-/**
- * A tool definition with no per-turn call limit and an explicit
- * concurrency mode, for batches that exercise the execution gate.
- */
-export function unlimitedToolWithConcurrency(
+/** A tool definition with an explicit concurrency mode. */
+export function toolWithConcurrency(
   definition: RoleModelPluginToolDefinition,
   concurrency: 'shared' | 'exclusive',
 ): RoleModelPluginToolDefinition {
-  const {callLimit, ...withoutCallLimit} = definition;
-
-  void callLimit;
-  return Object.freeze({...withoutCallLimit, concurrency});
+  return Object.freeze({...definition, concurrency});
 }
 
 export function withVisibleReplyTool(
@@ -131,11 +115,6 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
       {
         name: 'memory.search',
         description: 'Search memory.',
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [

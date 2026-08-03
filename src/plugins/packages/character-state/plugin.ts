@@ -124,11 +124,6 @@ function createCharacterStatePluginFromManifest(
         name: characterStatePatchModelToolName,
         description:
           "Optionally patch the character's internal Character State. This assistant-owned model-only state is not the user's mood, energy, attention, activity, or social orientation.",
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: characterStatePatchInputContract,
         validationOwner: 'plugin_host',
         // Writes durable character state and appends to its event log,

@@ -121,11 +121,6 @@ const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
   name: characterStatePatchModelToolName,
   description:
     'Legacy schema 1 compatibility definition for persisted character_state.patch evidence.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [],

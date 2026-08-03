@@ -103,9 +103,6 @@ describe('plugin tool description redaction', () => {
     expect(renderedTool.function.description).toContain(
       toolDefinition.description,
     );
-    expect(renderedTool.function.description).toContain(
-      'Optional for this user turn; at most 1 call per user turn.',
-    );
     expectCredentialBearingTextToHaveNoRawSecrets(JSON.stringify(renderedTool));
   });
 
@@ -232,11 +229,6 @@ function credentialDescriptionTool() {
   return {
     name: 'memory.secret_search',
     description: credentialBearingDescription,
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [

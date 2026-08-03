@@ -4,10 +4,7 @@ import {
   type RuntimeEventType,
   type VisibleMessage,
 } from '../../core/index.ts';
-import type {
-  ModelToolCallLimit,
-  ModelToolInputContract,
-} from '../../role-model/api/index.ts';
+import type {ModelToolInputContract} from '../../role-model/api/index.ts';
 import type {
   JsonBoundaryObject,
   JsonBoundaryValue,
@@ -116,9 +113,6 @@ export type RuntimePluginManifest = {
 export type RuntimePluginProvidedTool = {
   readonly name: string;
   readonly description: string;
-  readonly requiredForUserTurn: boolean;
-  /** Absent means unlimited: tools are only call-limited when they declare one. */
-  readonly callLimit?: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
   /** Absent hints mean unknown, which the runtime treats conservatively. */

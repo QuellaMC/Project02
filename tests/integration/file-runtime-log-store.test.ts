@@ -736,14 +736,6 @@ describe('file runtime log store plugin tool event validation', () => {
         },
       },
     });
-    expect(
-      reloadedTerminalEvent?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
-        definition => definition.name === visibleReplyModelToolName,
-      )?.callLimit,
-    ).toEqual({
-      scope: 'model_response',
-      maxCalls: 1,
-    });
   });
 
   it('keeps provider credential-key values out of durable raw-event evidence', async () => {
@@ -2483,11 +2475,6 @@ function storedRecordWithPluginToolJsonSchema(
     pluginId: 'memory.fixture',
     name: 'memory.capture',
     description: 'Capture a memory.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],

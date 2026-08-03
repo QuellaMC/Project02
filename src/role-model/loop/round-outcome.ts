@@ -3,10 +3,8 @@ import {
   type RuntimeEventIdentity,
 } from '../../core/index.ts';
 import {
-  roleModelDuplicateToolCallRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
-  roleModelMissingRequiredToolCallRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
   type AcceptedRoleModelDecisionResult,
@@ -174,41 +172,14 @@ export function appendRejectedRoleModelLoopRound(options: {
  * tool call exists to anchor the error to, so it rides the message thread as
  * a correction note instead of a failed tool observation.
  */
-const decisionErrorFeedbackReasons: readonly string[] = Object.freeze([
-  roleModelMissingRequiredToolCallRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
-]);
 
-/**
- * Ends a rejected round: with round budget remaining and a feedback-eligible
- * reason, the rejection is recorded as a round, a correction note joins the
- * running message thread, and the loop continues (returns undefined);
- * otherwise the turn terminates exactly as before.
- */
+/** A rejected decision ends the turn: nothing retries a parse failure. */
 export function handleRejectedRoleModelLoopRound(options: {
   readonly state: RoleModelLoopState;
   readonly invokedRound: RejectedRoundView;
   readonly round: number;
   readonly maxToolRounds: number;
 }): RejectedRoleModelLoopResult | undefined {
-  const rejection = options.invokedRound.decisionResult.rejection;
-
-  if (
-    options.state.toolRounds < options.maxToolRounds &&
-    decisionErrorFeedbackReasons.includes(rejection.reason)
-  ) {
-    recordDecisionErrorFeedbackRound({
-      state: options.state,
-      round: options.round,
-      inputEnvelope: options.invokedRound.inputEnvelope,
-      ioSnapshot: options.invokedRound.ioSnapshot,
-      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
-      note: `Your previous response was rejected: ${rejection.details ?? rejection.reason} Respond again following the tool protocol.`,
-    });
-
-    return undefined;
-  }
-
   return appendRejectedRoleModelLoopRound(options);
 }
 

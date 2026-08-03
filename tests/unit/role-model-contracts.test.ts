@@ -15,7 +15,6 @@ import {
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
-  roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   type RoleModelPluginToolDefinition,
   roleModelTerminalEmptyOutputRejectionDetails,
@@ -37,11 +36,6 @@ describe('role-model contracts', () => {
         pluginId: 'settings.arbitrary.fixture',
         name: 'settings.arbitrary.update',
         description: 'Update one arbitrary settings field after approval.',
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [],
@@ -174,14 +168,6 @@ describe('role-model contracts', () => {
       runtimePluginListToolName,
       characterStatePatchModelToolName,
     ]);
-    expect(
-      inputEnvelope.toolDefinitions.find(
-        definition => definition.name === visibleReplyModelToolName,
-      )?.callLimit,
-    ).toEqual({
-      scope: 'model_response',
-      maxCalls: 1,
-    });
   });
 
   it('redacts credentials throughout shared provider exchange snapshots', () => {
@@ -309,30 +295,25 @@ describe('role-model contracts', () => {
     ).toThrow('Role-model allowedTools must not contain duplicates.');
   });
 
-  it('allows one visible reply per model response', () => {
+  it('accepts several visible replies in one model response', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [
-          {
-            name: visibleReplyModelToolName,
-            input: {text: 'first'},
-          },
-          {
-            name: visibleReplyModelToolName,
-            input: {text: 'second'},
-          },
+          {name: visibleReplyModelToolName, input: {text: 'first'}},
+          {name: visibleReplyModelToolName, input: {text: 'second'}},
         ],
       }),
     );
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelDuplicateToolCallRejectionReason,
-        details:
-          'Decision must not include duplicate visible_reply tool calls.',
-      },
-    });
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected several replies to parse.');
+    }
+
+    expect(result.decision.toolCalls.map(call => call.input['text'])).toEqual([
+      'first',
+      'second',
+    ]);
   });
 
   it('stamps accepted versionless model output with the internal decision version', () => {
@@ -502,11 +483,6 @@ describe('role-model contracts', () => {
         pluginId: 'memory',
         name: requiredToolName,
         description: 'Look up relevant memory before answering.',
-        requiredForUserTurn: true,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [],
@@ -595,11 +571,6 @@ describe('role-model contracts', () => {
       pluginId: 'memory',
       name: 'memory.unknown',
       description: 'Exercise a defined but unavailable memory tool.',
-      requiredForUserTurn: false,
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
       inputContract: {
         type: 'object',
         fields: [],

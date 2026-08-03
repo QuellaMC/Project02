@@ -44,7 +44,6 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
     name: runtimePluginConfigUpdateToolName,
     description:
       'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. Committed changes apply by the next turn when the host can live-reload the plugin (reported per update as appliesTo), otherwise at a later host construction.',
-    requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [

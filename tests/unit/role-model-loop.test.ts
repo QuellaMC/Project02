@@ -27,8 +27,7 @@ import {
   memoryRecallToolDefinition,
   memorySearchToolDefinition,
   parseTestJson,
-  requiredMemorySearchToolDefinition,
-  unlimitedToolWithConcurrency,
+  toolWithConcurrency,
   visibleDotReplyToolDefinition,
   withVisibleReplyTool,
 } from '../support/role-model-loop-fixtures.ts';
@@ -223,11 +222,11 @@ describe('role-model loop routing and policy', () => {
 
   it('overlaps shared tool calls and keeps observations in call order', async () => {
     const events: string[] = [];
-    const searchTool = unlimitedToolWithConcurrency(
+    const searchTool = toolWithConcurrency(
       memorySearchToolDefinition,
       'shared',
     );
-    const recallTool = unlimitedToolWithConcurrency(
+    const recallTool = toolWithConcurrency(
       memoryRecallToolDefinition,
       'shared',
     );
@@ -284,14 +283,8 @@ describe('role-model loop routing and policy', () => {
     // record of the effect. Waiting for the batch widens that window for
     // every call but the slowest.
     const events: string[] = [];
-    const fastTool = unlimitedToolWithConcurrency(
-      memorySearchToolDefinition,
-      'shared',
-    );
-    const slowTool = unlimitedToolWithConcurrency(
-      memoryRecallToolDefinition,
-      'shared',
-    );
+    const fastTool = toolWithConcurrency(memorySearchToolDefinition, 'shared');
+    const slowTool = toolWithConcurrency(memoryRecallToolDefinition, 'shared');
     const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
       async handleToolCall(call) {
         if (call.toolName === 'memory.recall') {
@@ -347,14 +340,8 @@ describe('role-model loop routing and policy', () => {
 
   it('lets every call finish before a failed report propagates', async () => {
     const events: string[] = [];
-    const fastTool = unlimitedToolWithConcurrency(
-      memorySearchToolDefinition,
-      'shared',
-    );
-    const slowTool = unlimitedToolWithConcurrency(
-      memoryRecallToolDefinition,
-      'shared',
-    );
+    const fastTool = toolWithConcurrency(memorySearchToolDefinition, 'shared');
+    const slowTool = toolWithConcurrency(memoryRecallToolDefinition, 'shared');
     const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
       async handleToolCall(call) {
         if (call.toolName === 'memory.recall') {
@@ -402,11 +389,11 @@ describe('role-model loop routing and policy', () => {
 
   it('runs an exclusive tool call alone within its batch', async () => {
     const events: string[] = [];
-    const searchTool = unlimitedToolWithConcurrency(
+    const searchTool = toolWithConcurrency(
       memorySearchToolDefinition,
       'shared',
     );
-    const recallTool = unlimitedToolWithConcurrency(
+    const recallTool = toolWithConcurrency(
       memoryRecallToolDefinition,
       'exclusive',
     );
@@ -1258,74 +1245,6 @@ describe('role-model loop routing and policy', () => {
       'evt_replayed_tool_call.trace_retry_second.round-1.1.memory.search',
     );
     expect(firstCallId).not.toBe(secondCallId);
-  });
-
-  it('requires a successful required plugin tool result before final output', async () => {
-    let invocations = 0;
-    const adapter = createSequencedAdapter(
-      [
-        {
-          toolCalls: [
-            {
-              name: 'memory.search',
-              input: {
-                query: 'Mira',
-              },
-            },
-          ],
-        },
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {
-                text: 'continued after required tool failed',
-              },
-            },
-          ],
-        },
-      ],
-      () => {
-        invocations += 1;
-      },
-    );
-    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
-      handleToolCall(call, context) {
-        return createRejectedToolCallResult({
-          call,
-          context,
-          evidenceStatus: 'degraded',
-          policyOutcome: 'optional_degraded',
-        });
-      },
-    });
-
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_required_plugin_tool'),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: withVisibleReplyTool(
-        requiredMemorySearchToolDefinition,
-      ),
-      pluginToolHost,
-      runtimePluginContext: createTestPluginContext('evt_required_plugin_tool'),
-      maxToolRounds: 2,
-    });
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: 'missing_required_tool_call',
-      },
-    });
-    expect(invocations).toBe(3);
-    expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
-      {
-        status: 'degraded',
-        policyOutcome: 'optional_degraded',
-      },
-    ]);
   });
 
   it('continues after handler failures with rejected evidence', async () => {

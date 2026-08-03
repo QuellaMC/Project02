@@ -252,12 +252,6 @@ describe('role-model prompt rendering', () => {
     expect(protocol).toContain(
       'If you sent an interim visible_reply, make a new visible_reply call',
     );
-    expect(
-      rendered.tools.find(tool => tool.function.name === 'visible_reply')
-        ?.function.description,
-    ).toContain(
-      'Optional for this user turn; at most 1 call per model response.',
-    );
   });
 
   it('omits batching guidance when the native provider cannot call tools in parallel', () => {
@@ -322,8 +316,6 @@ describe('role-model prompt rendering', () => {
       pluginId: 'runtime.management.fixture',
       name: runtimePluginListToolName,
       description: 'List installed runtime plugins.',
-      requiredForUserTurn: false,
-      callLimit: {scope: 'user_turn', maxCalls: 1},
       inputContract: {
         type: 'object',
         fields: [],
@@ -470,11 +462,6 @@ const nestedSchemaToolDefinition = Object.freeze({
   pluginId: 'memory.fixture',
   name: 'memory.capture',
   description: 'Capture a nested memory object.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [],
@@ -517,11 +504,6 @@ const openUnionSchemaToolDefinition = Object.freeze({
   pluginId: 'memory.fixture',
   name: 'memory.union',
   description: 'Accept nullable object and array unions.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [],
