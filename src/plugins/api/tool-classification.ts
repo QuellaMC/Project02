@@ -22,7 +22,21 @@ export function isModelFacingRuntimePluginTool(options: {
   );
 }
 
-/** Prompts the user before the call runs. */
+/**
+ * A tool whose call prepares an effect for the user to approve.
+ *
+ * `requiresConfirmation` names one protocol, not a general "ask me
+ * first" flag: the hook runs, stages a `preparedConfigEffect`, and the
+ * runtime shows that effect and applies it only if the user agrees.
+ * Nothing is written before the prompt because the hook wrote nothing.
+ *
+ * So this cannot gate a tool that *acts* when called. Such a tool would
+ * finish its work, then be asked about — worse than not gating it, since
+ * the user is consulted about something already done. The contract is
+ * stated on the tool type and enforced by
+ * `assertPreparedConfirmationProtocol`; a tool that acts and wants
+ * consent has to ask inside its own hook, where it still can.
+ */
 export function isApprovalGatedRuntimePluginTool(
   tool: RuntimePluginProvidedTool,
 ): boolean {

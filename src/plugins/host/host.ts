@@ -1499,8 +1499,14 @@ function normalizeToolCallResult(options: {
     );
 
     if (approvalGatedTool && preparedConfigEffect === undefined) {
+      // requiresConfirmation asks the user to approve an effect the call
+      // only staged, and the prompt is honest because the hook applied
+      // nothing. A tool returning no prepared effect either acted
+      // already — asking now would be too late — or set the flag by
+      // mistake. Rejecting here means the effect is never confirmed and
+      // the model is told which contract the plugin broke.
       throw new TypeError(
-        'Approval-gated runtime config tools must prepare one config effect.',
+        `Tool "${options.providedTool.name}" sets requiresConfirmation but prepared no effect to confirm. A confirmable tool stages its effect as preparedConfigEffect and applies nothing until the user approves.`,
       );
     }
 

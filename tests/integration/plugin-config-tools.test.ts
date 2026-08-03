@@ -181,36 +181,7 @@ describe('host-owned runtime plugin management tools', () => {
     const toolCallId = 'arbitrary-config-call';
     let preparationCalls = 0;
     const plugin = createRuntimePlugin({
-      manifest: {
-        id: arbitraryPluginId,
-        displayName: 'Arbitrary settings fixture',
-        version: '1.0.0',
-        kind: 'tool_provider',
-        description: 'Prepares an arbitrary policy-category config effect.',
-        contractVersion: runtimePluginContractVersion,
-        compatibility: {
-          hostContractVersions: [runtimePluginContractVersion],
-          sourceSystem: 'test',
-        },
-        declaredPlugins: ['tool_provider', 'handle_tool_call'],
-        config: {scope: 'global_with_character_overrides', fields: []},
-        localTrustLevel: 'test_fixture',
-        runtimePolicy: {
-          requiredForTurn: false,
-          confirmation: 'not_required',
-          timeoutMs: 1_000,
-          sourceReferencesRequired: false,
-          redactionLabels: [],
-          failureBehavior: {
-            beforeRoleModelCall: 'degrade',
-            handleToolCall: 'reject_tool_call',
-            afterTurnCommitted: 'log_failure',
-            health: 'degrade',
-          },
-        },
-        activation: {defaultEnabled: false, reasons: ['test']},
-        requestedAccess: {model_input: 'write'},
-      },
+      manifest: arbitraryConfigPluginManifest(arbitraryPluginId),
       providedTools: [
         {
           name: arbitraryToolName,
@@ -611,6 +582,66 @@ describe('host-owned runtime plugin management tools', () => {
       status: 'rejected',
       reason: 'plugin_config_unknown_plugin',
     });
+    expect(confirmationCalls).toBe(0);
+  });
+
+  it('names the broken contract when a confirmable tool prepares nothing', async () => {
+    // requiresConfirmation asks the user to approve an effect the call
+    // only staged — the prompt is honest because the hook wrote nothing.
+    // A tool that returns no prepared effect either acted already, which
+    // makes asking now too late, or set the flag by mistake. Either way
+    // the plugin is broken, and the model needs to be told which contract
+    // it broke rather than the host raising a TypeError at it.
+    const manifest = configurablePluginManifest();
+    let confirmationCalls = 0;
+    const pluginId = 'settings.acts-immediately.fixture';
+    const toolName = 'settings.acts-immediately.update';
+    const plugin = createRuntimePlugin({
+      manifest: arbitraryConfigPluginManifest(pluginId),
+      providedTools: [
+        {
+          name: toolName,
+          description: 'Claims approval but applies its change immediately.',
+          requiredForUserTurn: false,
+          callLimit: {scope: 'user_turn', maxCalls: 1},
+          inputContract: {type: 'object', fields: [], additionalFields: false},
+          validationOwner: 'plugin_host',
+          requiresConfirmation: true,
+          sourceReferencesRequired: false,
+        },
+      ],
+      lifecycleHooks: {
+        handleToolCall() {
+          return {status: 'accepted', output: {applied: true}, evidence: []};
+        },
+      },
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [runtimePluginId, pluginId],
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+      }),
+      toolConfirmationHandler: () => {
+        confirmationCalls += 1;
+        return {status: 'approved'};
+      },
+    });
+
+    const result = await host.handleToolCall(
+      {...testIdentity(), pluginId, toolName, input: {}},
+      testContext(),
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+    });
+    expect((result as {message?: string}).message).toMatch(
+      /prepared no effect to confirm/iu,
+    );
+    // No prompt: there was never an effect to show the user.
     expect(confirmationCalls).toBe(0);
   });
 
@@ -2264,6 +2295,44 @@ describe('host-owned runtime plugin management tools', () => {
     );
   });
 });
+
+/**
+ * A third-party plugin that prepares a config effect for approval, rather
+ * than the host's own config-update tool. Used to prove the confirmation
+ * protocol is a contract any plugin can meet, not a carve-out for one ID.
+ */
+function arbitraryConfigPluginManifest(id: string) {
+  return {
+    id,
+    displayName: 'Arbitrary settings fixture',
+    version: '1.0.0',
+    kind: 'tool_provider',
+    description: 'Prepares an arbitrary policy-category config effect.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+      sourceSystem: 'test',
+    },
+    declaredPlugins: ['tool_provider', 'handle_tool_call'],
+    config: {scope: 'global_with_character_overrides', fields: []},
+    localTrustLevel: 'test_fixture',
+    runtimePolicy: {
+      requiredForTurn: false,
+      confirmation: 'not_required',
+      timeoutMs: 1_000,
+      sourceReferencesRequired: false,
+      redactionLabels: [],
+      failureBehavior: {
+        beforeRoleModelCall: 'degrade',
+        handleToolCall: 'reject_tool_call',
+        afterTurnCommitted: 'log_failure',
+        health: 'degrade',
+      },
+    },
+    activation: {defaultEnabled: false, reasons: ['test']},
+    requestedAccess: {model_input: 'write'},
+  } as const;
+}
 
 function configurablePluginManifest(
   defaultEnabled = false,

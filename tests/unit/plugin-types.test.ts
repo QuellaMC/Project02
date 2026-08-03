@@ -806,8 +806,8 @@ describe('runtime plugin model-facing tool policy', () => {
       }),
     );
 
-    // Enabling the plugin is the trust decision. A tool that wants
-    // consent per call says so and is prompted, rather than being kept
+    // Enabling the plugin is the trust decision. A tool that prepares an
+    // effect for approval says so and is prompted, rather than being kept
     // away from the model by its declared class.
     expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
     expect(isModelFacingRuntimePluginTool({tool})).toBe(true);
