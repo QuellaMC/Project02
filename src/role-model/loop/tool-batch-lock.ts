@@ -1,32 +1,11 @@
 /**
- * Execution gate for the tool calls in one model sampling batch.
+ * Execution gate for one model sampling batch: `shared` calls overlap
+ * each other, `exclusive` calls run alone. Global across the batch, since
+ * two plugins can reach the same external resource.
  *
- * A tool declares how it may overlap: `shared` calls run concurrently
- * with other shared calls, `exclusive` calls run alone. The lock is
- * global across the batch — not per plugin and not per MCP server —
- * because two plugins can reach the same external resource, and the
- * batch is the unit the model reasoned about when it asked for these
- * calls together.
- *
- * Admission order is preserved: a waiting exclusive call is not
- * overtaken by later shared calls, so a batch never reorders the effects
- * the model requested.
- *
- * The lease is held for the whole dispatch — routing, the plugin's
- * handleToolCall hook, and capturing its result — so an exclusive call
- * holds it until the dispatch settles, not merely until the hook is
- * entered.
- *
- * What that does not cover: exclusivity spans the lifetime of the
- * dispatch, not the lifetime of every real-world side effect. A hook
- * that hits its timeout has its dispatch settled and its lease released,
- * while work it started keeps running if it ignored the AbortSignal it
- * was given — cancellation here is cooperative, and nothing in-process
- * can force a plugin to stop. Holding the lease until such a hook
- * finished would instead let one unresponsive plugin stall every later
- * exclusive call in the turn, which the user would feel. Enforcing the
- * stronger guarantee needs a boundary that can actually terminate a
- * hook, such as running plugins out of process.
+ * The lease covers the whole dispatch, but not work that escapes a
+ * timed-out hook — cancellation is cooperative, and holding the lease
+ * until an unresponsive plugin returned would stall the rest of the turn.
  */
 export type ToolBatchLockMode = 'shared' | 'exclusive';
 

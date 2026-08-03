@@ -49,24 +49,6 @@ export function createDurableRuntimePluginFileStore(
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
 
-  // A write is durable when its call returns, so the only recovery a store
-  // needs on open is finishing a single interrupted write.
-  recoverDirectDurablePluginFileStoreMutation({
-    storeRoot: durableOptions.storeRoot,
-    sessionId: durableOptions.sessionId,
-    pluginId: durableOptions.pluginId,
-    root,
-    ownerToken,
-  });
-
-  withDurablePluginStoreMutation(
-    {storeRoot: durableOptions.storeRoot, root, ownerToken},
-    () => {
-      assertSafeDurablePluginRoot(root);
-      cleanupDurablePluginStoreAtomicTempFiles(root);
-    },
-  );
-
   function recoverInterruptedWrite(): void {
     recoverDirectDurablePluginFileStoreMutation({
       storeRoot: durableOptions.storeRoot,
@@ -77,6 +59,17 @@ export function createDurableRuntimePluginFileStore(
     });
   }
 
+  // A write is durable when its call returns, so opening a store only
+  // finishes a single interrupted write.
+  recoverInterruptedWrite();
+  withDurablePluginStoreMutation(
+    {storeRoot: durableOptions.storeRoot, root, ownerToken},
+    () => {
+      assertSafeDurablePluginRoot(root);
+      cleanupDurablePluginStoreAtomicTempFiles(root);
+    },
+  );
+
   return Object.freeze({
     readJson(path) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
@@ -86,13 +79,6 @@ export function createDurableRuntimePluginFileStore(
       return withDurablePluginStoreMutation(
         {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
-          recoverDirectDurablePluginFileStoreMutation({
-            storeRoot: durableOptions.storeRoot,
-            sessionId: durableOptions.sessionId,
-            pluginId: durableOptions.pluginId,
-            root,
-            ownerToken,
-          });
           assertSafeDurablePluginPath(root, safePath);
           assertDurableOperationPathMode({
             filePath,
@@ -122,13 +108,6 @@ export function createDurableRuntimePluginFileStore(
       return withDurablePluginStoreMutation(
         {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
-          recoverDirectDurablePluginFileStoreMutation({
-            storeRoot: durableOptions.storeRoot,
-            sessionId: durableOptions.sessionId,
-            pluginId: durableOptions.pluginId,
-            root,
-            ownerToken,
-          });
           assertSafeDurablePluginPath(root, safePath);
           assertDurableOperationPathMode({
             filePath,
@@ -189,13 +168,6 @@ export function createDurableRuntimePluginFileStore(
       return withDurablePluginStoreMutation(
         {storeRoot: durableOptions.storeRoot, root, ownerToken},
         () => {
-          recoverDirectDurablePluginFileStoreMutation({
-            storeRoot: durableOptions.storeRoot,
-            sessionId: durableOptions.sessionId,
-            pluginId: durableOptions.pluginId,
-            root,
-            ownerToken,
-          });
           assertSafeDurablePluginRoot(root);
           return readDurableRevision(root);
         },

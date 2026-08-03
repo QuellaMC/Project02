@@ -586,12 +586,8 @@ describe('host-owned runtime plugin management tools', () => {
   });
 
   it('names the broken contract when a confirmable tool prepares nothing', async () => {
-    // requiresConfirmation asks the user to approve an effect the call
-    // only staged — the prompt is honest because the hook wrote nothing.
-    // A tool that returns no prepared effect either acted already, which
-    // makes asking now too late, or set the flag by mistake. Either way
-    // the plugin is broken, and the model needs to be told which contract
-    // it broke rather than the host raising a TypeError at it.
+    // A tool returning no prepared effect either acted already or set
+    // the flag by mistake; the model is told which contract it broke.
     const manifest = configurablePluginManifest();
     let confirmationCalls = 0;
     const pluginId = 'settings.acts-immediately.fixture';

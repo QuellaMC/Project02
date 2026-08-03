@@ -21,8 +21,8 @@ export const durableTransactionJournalVersion =
   'project02.plugin_transaction.v1';
 
 /**
- * One durable write, described completely enough for a later process to
- * finish or verify it after a crash.
+ * One durable write, described completely enough to finish or verify it
+ * after a crash.
  *
  * A tool call's writes are durable when the call returns, so a journal
  * describes exactly one operation. There is no batch and nothing to roll

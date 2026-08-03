@@ -46,12 +46,6 @@ export function freezeRuntimePluginFileStoreJsonValue(
   });
 }
 
-/**
- * A crash mid-append can leave a plugin's JSONL file ending in an
- * unfinished record. Opening the store finishes or discards that write
- * from its journal, so a line that still does not decode here is skipped
- * rather than costing the plugin every record before it.
- */
 export function parseRuntimePluginJsonlContent(
   content: string,
 ): readonly RuntimePluginJsonValue[] {

@@ -855,9 +855,8 @@ export function assertIncrementalStatePublicReadable(
     boundCharacter: state.boundCharacter,
     allowUnanchoredCustomCharacter: false,
   });
-  // The same gate the file read applies: an already-open store must not
-  // be a second, weaker seam where a direct writer's malformed turn
-  // reads publicly until the session is reopened.
+  // The same gate the file read applies, so an open store is not a
+  // second, weaker seam.
   assertConversationTurnShape({
     messages: evidence.conversationMessages,
     rawEvents: evidence.rawEvents,
@@ -1413,10 +1412,8 @@ function readRuntimeTraceEntries(
 }
 
 /**
- * Whether a message's commit anchor is durable, read straight from the
- * raw-event file. The writer needs this mid-turn, where a validated read
- * would reject its own open turn, to tell "the anchor landed and the
- * append reported failure afterwards" from "nothing was written".
+ * Read straight from the raw-event file: the writer needs this mid-turn,
+ * where a validated read would reject its own open turn.
  */
 export function durableVisibleMessageCommitExists(
   paths: LocalRuntimeSessionPaths,
@@ -1739,10 +1736,8 @@ function assertOpenRawTurnAllowsNextIdentity(options: {
 
 /**
  * A committed message needs its turn's terminal raw event, except while
- * that turn is still open: with commit-as-emitted, any number of already
- * committed messages of either role may precede the terminal record, and
- * a crash simply leaves them as truthful history. Public reads still
- * demand a closed log; append modes tolerate exactly the open turn.
+ * that turn is still open. Public reads demand a closed log; append modes
+ * tolerate exactly the open turn.
  */
 function messageRequiresTerminalRawEvidence(options: {
   readonly message: ConversationLogRecord;
@@ -2037,9 +2032,8 @@ function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
     return;
   }
 
-  // Resolve the turn's user message by event identity, not by which rows
-  // this event happens to reference: the recorded model input must be the
-  // turn's committed user text wherever that row already exists.
+  // By event identity, not by which rows this event references: the
+  // recorded model input must match the turn's committed user text.
   const identityKey = runtimeEventIdentityKey(options.rawEvent);
 
   for (const message of options.messagesById.values()) {
@@ -2140,10 +2134,8 @@ function assertConversationTurnShape(options: {
 
   const messagesByTurnIdentity = groupByTurnIdentity(options.messages);
 
-  // Both terminal kinds enumerate their turn's committed messages: a
-  // rejected turn keeps whatever it committed before rejecting, and
-  // transcript reconstruction reads prior messages from these
-  // references, so an omitted id would desync a later turn's context.
+  // Both terminal kinds enumerate their turn's committed messages;
+  // transcript reconstruction reads prior messages from these references.
   for (const rawEvent of options.rawEvents.filter(
     isVisibleMessageTerminalRawEventLogRecord,
   )) {

@@ -249,8 +249,8 @@ describe('runtime plugin file store', () => {
       injected.appendJsonl('events.jsonl', {value: 2});
     }).toThrow(/injected path-mode persistence failure/iu);
 
-    // Something outside the runtime rewrote the file while the journal was
-    // still open, so its recorded before- and after-states both stop matching.
+    // Rewritten while the journal was open, so neither recorded state
+    // matches.
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     writeFileSync(
@@ -283,8 +283,7 @@ describe('runtime plugin file store', () => {
       injected.appendJsonl('events.jsonl', {value: 2});
     }).toThrow(/injected path-mode persistence failure/iu);
 
-    // A crash mid-append leaves a fragment of the line on disk: the process
-    // died between the first byte and the newline.
+    // A crash mid-append leaves a fragment of the line on disk.
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     writeFileSync(join(root, 'events.jsonl'), '{"value":1}\n{"val', 'utf8');
@@ -462,8 +461,7 @@ describe('runtime plugin file store', () => {
       pluginId,
     });
 
-    // The unfinished record never committed, so it is not history — but
-    // the records written before it are, and they survive.
+    // The unfinished record never committed; earlier ones survive.
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}]);
   });
 
@@ -491,8 +489,7 @@ describe('runtime plugin file store', () => {
 
     store.appendJsonl('events.jsonl', {value: 2});
 
-    // The new write is a record of its own rather than text spliced onto
-    // the fragment, so the tool's write survives its own call.
+    // A record of its own, not text spliced onto the fragment.
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}, {value: 2}]);
   });
 
@@ -503,9 +500,8 @@ describe('runtime plugin file store', () => {
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, {recursive: true});
-    // The committed record is longer in bytes than in code units, so a
-    // string offset would cut its terminating newline off with the
-    // fragment and splice the next append onto it.
+    // Longer in bytes than code units, so a string offset would cut the
+    // committed record's newline off with the fragment.
     writeFileSync(
       join(root, 'events.jsonl'),
       '{"text":"caf\u00e9"}\n{"tor',

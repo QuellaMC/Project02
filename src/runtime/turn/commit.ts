@@ -185,11 +185,9 @@ export async function appendVisibleReplyForDecision(
 }
 
 /**
- * The one durable step for any visible message, either role: append the
- * session message to the conversation log, then anchor it with its own
- * visible_message_committed raw event. Failure of either write rolls back
- * exactly this message; earlier committed messages already reached the user
- * and stay.
+ * The one durable step for any visible message: append it, then anchor it
+ * with its own visible_message_committed raw event. Failure rolls back
+ * exactly this message; earlier ones already reached the user.
  */
 function commitVisibleMessage(
   state: RuntimeTurnState,
@@ -224,10 +222,9 @@ function commitVisibleMessage(
       ...evidence,
     });
   } catch (error: unknown) {
-    // The anchor decides: an append that throws can still have reached
-    // the log, and removing a row its durable anchor references would
-    // leave evidence pointing at a missing message that recovery cannot
-    // repair. Keep the message when the anchor landed.
+    // An append that throws can still have reached the log. Removing a
+    // row its durable anchor references would leave evidence pointing at
+    // a missing message, so keep the message when the anchor landed.
     if (durableCommitAnchorExists(state, record.id)) {
       state.committedVisibleMessages.push(record);
       throw error;
@@ -255,8 +252,7 @@ function durableCommitAnchorExists(
   try {
     return durableVisibleMessageCommitExists(sessionPaths, messageId);
   } catch {
-    // An unreadable log cannot prove the anchor landed; fall back to the
-    // rollback path, which reports its own cleanup failures.
+    // An unreadable log cannot prove the anchor landed.
     return false;
   }
 }
@@ -268,9 +264,8 @@ function rollbackFailedMessageCommit(
 ): void {
   const cleanupErrors: unknown[] = [];
 
-  // Attempt durable removal even when the append itself threw: a crash
-  // mid-write can persist the row despite the error, and the message ID
-  // is deterministic, so removal targets exactly this message.
+  // Even when the append threw: a crash mid-write can persist the row
+  // despite the error, and the message ID targets exactly this message.
   try {
     state.options.logStore.removeConversationMessages([message.id]);
   } catch (error: unknown) {
@@ -427,9 +422,7 @@ function createTerminalRawEventInput(
   const {state} = options;
   // Commit validation describes the terminal decision, not the turn's
   // message history: a terminal round carrying only non-committed text
-  // has no accepted reply even when earlier rounds committed interim
-  // messages, and the codec cross-checks this field against that same
-  // decision snapshot.
+  // has no accepted reply even when earlier rounds committed one.
   const terminalVisibleReplyText = executionVisibleReplyText(
     options.roleModelResult.decision,
   );
@@ -515,11 +508,7 @@ function recoverCompletedTerminalRawEvent(
   };
 }
 
-/**
- * Plugin writes are durable when their tool call returns, so completing
- * a turn no longer finalizes staged effects — only the turn's own
- * terminal trace remains to close.
- */
+/** Plugin writes are already durable, so only the terminal trace closes. */
 function finalizeCompletedDurability(
   state: RuntimeTurnState,
   terminalAppendFailure: string | undefined,

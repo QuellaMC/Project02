@@ -95,12 +95,9 @@ export type RunRoleModelLoopOptions = {
     event: RoleModelPluginToolCallsRequestedEvent,
   ) => Promise<void> | void;
   /**
-   * Delivery channel for every visible reply of a round the loop accepts,
-   * interim or terminal alike. Required: an accepted reply the loop cannot
-   * deliver is user-facing text lost, so a caller must always consume it.
-   * A round the loop rejects delivers nothing — including a valid reply
-   * beside a tool call that exhausts the round budget: a rejected proposal
-   * commits no part of itself.
+   * Every visible reply of an accepted round, interim or terminal.
+   * Required, because an undelivered reply is user-facing text lost. A
+   * rejected round delivers nothing: it commits no part of itself.
    */
   readonly onVisibleReply: (
     event: RoleModelVisibleReplyEvent,
@@ -238,9 +235,8 @@ export async function runRoleModelLoop(
 
     if (terminalResult !== undefined) {
       if (terminalResult.status === 'accepted') {
-        // Deliver from the execution decision, not the public evidence:
-        // the reply the user sees is the model's actual text, while the
-        // evidence snapshot may hold its redacted projection.
+        // From the execution decision, not the evidence snapshot, which
+        // may hold a redacted projection of the text.
         await deliverVisibleReply({
           options,
           round,
@@ -887,11 +883,9 @@ async function routeExecutableToolCalls(options: {
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
   readonly priorToolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
-  // Two phases. Admission runs in the model's call order because it is
-  // order-dependent (per-turn call limits count earlier calls in this
-  // same batch) and must stay deterministic. Execution then runs
-  // concurrently under the batch lock, and results are reassembled in
-  // call order so evidence never depends on completion order.
+  // Admission runs in call order because per-turn limits count earlier
+  // calls in the same batch. Execution then runs concurrently under the
+  // batch lock, with results reassembled by slot.
   const results: (RoleModelPluginToolRoutingEvidence | undefined)[] = [];
   const admitted: {
     readonly slot: number;
@@ -899,6 +893,13 @@ async function routeExecutableToolCalls(options: {
     readonly mode: ToolBatchLockMode;
     readonly run: () => Promise<RoleModelPluginToolRoutingEvidence>;
   }[] = [];
+
+  const report = createSettledToolCallReporter({
+    round: options.round,
+    ...(options.onPluginToolCallCompleted === undefined
+      ? {}
+      : {onPluginToolCallCompleted: options.onPluginToolCallCompleted}),
+  });
 
   for (const [index, toolCall] of options.toolCalls.entries()) {
     const slot = results.push(undefined) - 1;
@@ -947,15 +948,12 @@ async function routeExecutableToolCalls(options: {
       toolCall,
       toolDefinition,
       priorToolObservations: options.priorToolObservations,
-      // Admission is sequential, so every earlier call in this batch has
-      // either been decided into a slot or admitted for execution; both
-      // count toward a per-turn limit.
       batchToolNames: batchAttemptsSoFar(results, admitted),
       context: options.runtimePluginContext,
     });
 
     if (callLimitRejection !== undefined) {
-      results[slot] = callLimitRejection;
+      results[slot] = await report(callLimitRejection);
       continue;
     }
 
@@ -969,7 +967,7 @@ async function routeExecutableToolCalls(options: {
     });
 
     if (nativeArgumentRejection !== undefined) {
-      results[slot] = nativeArgumentRejection;
+      results[slot] = await report(nativeArgumentRejection);
       continue;
     }
 
@@ -978,13 +976,15 @@ async function routeExecutableToolCalls(options: {
       options.pluginToolHost === undefined ||
       options.runtimePluginContext === undefined
     ) {
-      results[slot] = missingRoutingTargetRejection({
-        callId,
-        call: routedCall,
-        toolName: toolCall.name,
-        pluginDeclared: pluginId !== undefined,
-        context: options.runtimePluginContext,
-      });
+      results[slot] = await report(
+        missingRoutingTargetRejection({
+          callId,
+          call: routedCall,
+          toolName: toolCall.name,
+          pluginDeclared: pluginId !== undefined,
+          context: options.runtimePluginContext,
+        }),
+      );
       continue;
     }
 
@@ -1061,31 +1061,15 @@ async function routeExecutableToolCalls(options: {
     });
   }
 
-  // One failing call never cancels its siblings: every admitted call
-  // runs and reports its own outcome, so the model receives the complete
-  // result set and decides what to do next.
+  // One failing call never cancels its siblings: the model receives the
+  // complete result set and decides what to do next.
   const lock = createToolBatchLock();
-
-  const report = createSettledToolCallReporter({
-    results,
-    round: options.round,
-    ...(options.onPluginToolCallCompleted === undefined
-      ? {}
-      : {onPluginToolCallCompleted: options.onPluginToolCallCompleted}),
-  });
 
   await Promise.all(
     admitted.map(async entry => {
-      results[entry.slot] = await lock.run(entry.mode, entry.run);
-      await report(entry.slot);
+      results[entry.slot] = await report(await lock.run(entry.mode, entry.run));
     }),
   );
-
-  // Calls rejected during admission never reached the lock, so they are
-  // reported here. Every settled call is reported exactly once.
-  for (const slot of results.keys()) {
-    await report(slot);
-  }
 
   return createAcceptedPluginToolRoutingResult(
     results.filter(result => result !== undefined),
@@ -1127,31 +1111,19 @@ function nativeToolCallArgumentRejection(options: {
 }
 
 /**
- * Reports each tool call once, as soon as its own result exists.
- *
- * A tool's write is durable when its call returns, so a crash between
- * that and the report would leave recovery a started call and no record
- * of the effect that landed. Waiting for the whole batch would widen
- * that window for every call but the slowest. Ordering is not lost:
- * the observations the model reads next are reassembled by slot.
+ * Reports a call as soon as it settles rather than when the batch does:
+ * a tool's write is durable when its call returns, so a crash in that
+ * window would leave a started call and no record of the effect.
  */
 function createSettledToolCallReporter(options: {
-  readonly results: readonly (RoleModelPluginToolRoutingEvidence | undefined)[];
   readonly round: number;
   readonly onPluginToolCallCompleted?: (
     event: RoleModelPluginToolCallCompletedEvent,
   ) => Promise<void> | void;
-}): (slot: number) => Promise<void> {
-  const reported = new Set<number>();
-
-  return async (slot: number): Promise<void> => {
-    const result = options.results[slot];
-
-    if (result === undefined || reported.has(slot)) {
-      return;
-    }
-
-    reported.add(slot);
+}): (
+  result: RoleModelPluginToolRoutingEvidence,
+) => Promise<RoleModelPluginToolRoutingEvidence> {
+  return async result => {
     await options.onPluginToolCallCompleted?.({
       round: options.round,
       callId: result.callId,
@@ -1161,13 +1133,14 @@ function createSettledToolCallReporter(options: {
       status: result.result.status,
       result: result.result,
     });
+
+    return result;
   };
 }
 
 /**
- * Tool names already attempted in this batch: those decided during
- * admission plus those admitted for execution. A limit bounds attempts,
- * so a call still running counts the same as a finished one.
+ * Tool names already attempted in this batch. A limit bounds attempts, so
+ * a call still running counts the same as a finished one.
  */
 function batchAttemptsSoFar(
   results: readonly (RoleModelPluginToolRoutingEvidence | undefined)[],

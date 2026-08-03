@@ -1301,8 +1301,7 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     // Transcript reconstruction reads prior messages from terminal
-    // references, so a terminal that drops one of its turn's committed
-    // ids would desync a later turn's model context.
+    // references, so a dropped id desyncs a later turn's context.
     const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1372,9 +1371,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // Evidence keeps the redacted projection of the reply, so the rows
-    // compare through that projection: editing the character text to
-    // unrelated content is rejected rather than silently trusted.
+    // Rows compare through the redacted projection, so unrelated edited
+    // text is rejected while credential redaction stays legitimate.
     const conversationLines = readFileSync(paths.conversationPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1444,9 +1442,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // Simulate duplicate processing by a direct writer: re-append the
-    // reply's commit event verbatim. One message, one commit event — the
-    // duplicated anchor must fail closed instead of reading publicly.
+    // Duplicate processing by a direct writer: one message, one commit
+    // event, so the duplicated anchor must fail closed.
     const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1519,9 +1516,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // A direct writer forging a character reply can anchor it with a bare
-    // commit event, but not with the accepted decision that produced the
-    // text — the turn-shape gate rejects the evidence-free character row.
+    // A forged reply can carry a bare commit event but not the accepted
+    // decision that produced its text.
     const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1595,10 +1591,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // The turn's user row is resolved by event identity, not by which
-    // events reference it: editing the durable user text away from the
-    // recorded model input fails even though the character commit events
-    // never name the user row.
+    // The user row is resolved by event identity, so this fails even
+    // though no character commit event names it.
     const conversationLines = readFileSync(paths.conversationPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1670,10 +1664,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // One runtime input, one user row: a direct writer duplicating the
-    // user utterance under the same turn identity is rejected even with
-    // its own commit anchor, so one input cannot appear as two
-    // utterances in future model context.
+    // One runtime input, one user row: a duplicate under the same turn
+    // identity is rejected even with its own commit anchor.
     const conversationLines = readFileSync(paths.conversationPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1695,9 +1687,8 @@ describe('file runtime log store plugin tool event validation', () => {
       'utf8',
     );
 
-    // Anchor the forged row too, and list it on the terminal event, so
-    // the store fails on the duplicated utterance itself rather than on
-    // a missing anchor or an unreferenced message.
+    // Anchored and listed on the terminal, so the store fails on the
+    // duplicated utterance rather than a missing anchor.
     const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1796,11 +1787,9 @@ describe('file runtime log store plugin tool event validation', () => {
       .split('\n')
       .filter(line => line.length > 0);
 
-    // Interleave the two turns: each turn still holds its own messages in
-    // order and every commit anchor still matches, so grouping rows by
-    // turn identity sees nothing wrong. Only the file-wide sequence is
-    // broken, and message IDs are assigned per session and checked
-    // against row position, which is what pins that global order.
+    // Each turn still holds its own messages in order with matching
+    // anchors, so only the file-wide sequence is broken — which
+    // per-session message IDs checked against row position pin.
     writeFileSync(
       paths.conversationPath,
       `${[rows[0], rows[2], rows[1], rows[3]].join('\n')}\n`,
@@ -1851,8 +1840,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected local runtime session paths.');
     }
 
-    // The writer died partway through appending its next raw event: the
-    // final line is a fragment with no terminating newline.
+    // The writer died partway through its next raw event.
     const rawEvents = readFileSync(paths.rawEventsPath, 'utf8');
 
     writeFileSync(
@@ -1868,15 +1856,13 @@ describe('file runtime log store plugin tool event validation', () => {
       boundCharacter: testCharacterProfile,
     });
 
-    // The completed turn survives: an unfinished write costs its own
-    // record, not the conversation around it.
+    // The unfinished write costs its own record, not the conversation.
     expect(reopened.conversationMessages()).toHaveLength(2);
     expect(
       reopened.rawEvents().some(record => record.eventId === 'evt_torn_second'),
     ).toBe(false);
 
-    // The next turn appends after the fragment rather than splicing onto
-    // it, so both it and every later record stay decodable.
+    // The next turn appends cleanly rather than splicing onto it.
     const followupResult = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'still there?',

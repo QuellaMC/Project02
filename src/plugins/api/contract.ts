@@ -47,13 +47,9 @@ export const runtimePluginAccessLevelValues = [
 ] as const;
 
 /**
- * How a tool call may overlap other calls in the same model batch.
- *
- * Scheduling only — deliberately separate from the annotation hints,
- * which describe a tool so a person can judge it. A read-only tool can
- * still need exclusivity (a rate-limited endpoint), and a writing tool
- * against isolated state could be shared; one field answering both
- * questions is what made the retired sideEffectLevel enum confusing.
+ * How a tool call may overlap others in the same model batch. Scheduling
+ * only, separate from the annotation hints: a read-only tool can still
+ * need exclusivity, and a writing one against isolated state may not.
  */
 export const runtimePluginToolConcurrencyValues = [
   'shared',
@@ -172,13 +168,9 @@ export type RuntimePluginToolConcurrency =
   (typeof runtimePluginToolConcurrencyValues)[number];
 
 /**
- * Advisory description of a tool, in the shape MCP clients already use,
- * so the person enabling a plugin can judge its tools and the runtime
- * knows when to ask before running one.
- *
- * The runtime does not police these: a plugin the user chose to run is
- * trusted the way a local MCP server is. Absent annotations mean
- * unknown, and unknown is treated conservatively (ask).
+ * Advisory description of a tool, in the shape MCP clients use, so the
+ * person enabling a plugin can judge it. Not policed by the runtime;
+ * absent means unknown, which is treated conservatively.
  */
 export type RuntimePluginToolAnnotations = {
   readonly readOnlyHint?: boolean;

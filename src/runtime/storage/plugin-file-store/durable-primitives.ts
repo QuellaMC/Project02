@@ -604,11 +604,8 @@ function assertDurableJsonlPathMode(options: {
         readTextFileSync(options.filePath),
       );
 
-      // Reading nothing means every line was unparseable, which is what a
-      // JSON document spread over several lines looks like to a JSONL
-      // reader — so let the whole-file check below have the last word. A
-      // lone array is the other ambiguous shape: one JSONL record and a
-      // JSON document at once.
+      // Nothing readable, or a lone array, is ambiguous: let the
+      // whole-file parse below decide.
       if (
         records.length > 0 &&
         (records.length !== 1 || !Array.isArray(records[0]))
@@ -621,9 +618,7 @@ function assertDurableJsonlPathMode(options: {
       }
 
       // Unreadable as JSONL is the answer this check wants, not a
-      // failure: a JSON document spread over several lines is exactly
-      // what it is trying to recognize. The whole-file parse below
-      // decides.
+      // failure: that is what a multi-line JSON document looks like.
       if (
         !(error instanceof SyntaxError) &&
         !(error instanceof MalformedJsonLineError)
