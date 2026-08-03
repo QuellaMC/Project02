@@ -51,6 +51,7 @@ import {
   type RuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import {
+  characterStatePatchModelToolName,
   firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
@@ -147,6 +148,14 @@ describe('inspect CLI plugin evidence', () => {
               readonly evidenceKind: string;
               readonly status: string;
             }[];
+            readonly plugins: readonly {
+              readonly pluginId: string;
+              readonly providedTools: readonly {
+                readonly name: string;
+                readonly annotations?: Readonly<Record<string, boolean>>;
+                readonly concurrency?: string;
+              }[];
+            }[];
           };
         },
       ];
@@ -201,6 +210,20 @@ describe('inspect CLI plugin evidence', () => {
         }),
       ]),
     );
+
+    // An audit has to be able to tell a tool that changes durable state
+    // from one that only reads, so the tool's own declaration is carried
+    // into the projection rather than summarized away.
+    const patchTool = output.turns[0].pluginEvidence.plugins
+      .find(plugin => plugin.pluginId === 'character-state')
+      ?.providedTools.find(
+        tool => tool.name === characterStatePatchModelToolName,
+      );
+
+    expect(patchTool).toMatchObject({
+      annotations: {destructiveHint: true},
+      concurrency: 'exclusive',
+    });
   });
 
   it('shows runtime config source and configured plugin activation', async () => {

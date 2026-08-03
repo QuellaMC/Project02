@@ -478,6 +478,14 @@ function pluginListings(
               validationOwner: tool.validationOwner,
               requiresConfirmation: tool.requiresConfirmation,
               sourceReferencesRequired: tool.sourceReferencesRequired,
+              // Carried through rather than summarized: an audit needs
+              // what the tool declared, including having declared nothing.
+              ...(tool.annotations === undefined
+                ? {}
+                : {annotations: tool.annotations}),
+              ...(tool.concurrency === undefined
+                ? {}
+                : {concurrency: tool.concurrency}),
             } satisfies InspectPluginToolListing),
           ),
         ),

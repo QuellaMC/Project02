@@ -131,6 +131,10 @@ function createCharacterStatePluginFromManifest(
         },
         inputContract: characterStatePatchInputContract,
         validationOwner: 'plugin_host',
+        // Writes durable character state and appends to its event log,
+        // and two patches in one batch would race the same files.
+        annotations: {readOnlyHint: false, destructiveHint: true},
+        concurrency: 'exclusive',
         requiresConfirmation: false,
         sourceReferencesRequired: false,
       }),

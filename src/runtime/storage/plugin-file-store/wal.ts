@@ -26,6 +26,7 @@ import {
   writeTextAtomic,
 } from './durable-primitives.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
+import {discardTornJsonLineTail} from '../json-lines.ts';
 import {
   durableDirectMutationJournalFileName,
   isMissingFileError,
@@ -121,6 +122,15 @@ function planDurablePluginFileStoreOperation(options: {
   assertSafeDurablePluginPath(options.root, options.path);
 
   const filePath = join(options.root, options.path);
+
+  if (options.kind === 'append_jsonl') {
+    // Before reading the bytes this journal will be planned against: a
+    // crash can leave the file ending mid-record, and appending onto that
+    // fragment would splice two records into one unreadable line. The
+    // fragment never committed, so it is dropped rather than kept.
+    discardTornJsonLineTail(filePath);
+  }
+
   const beforeContent = readOptionalRegularFile(filePath);
 
   assertDurableOperationPathMode({

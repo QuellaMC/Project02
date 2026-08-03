@@ -4,7 +4,10 @@
  * produces them lives in `turn-projection.ts`.
  */
 import type {ConversationLogRecord, RuntimeTurnStatus} from './records.ts';
-import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginAccessMap,
+  RuntimePluginToolAnnotations,
+} from '../../plugins/api/index.ts';
 
 export type InspectTurnEvidence = {
   readonly eventId: string;
@@ -139,6 +142,14 @@ export type InspectPluginToolListing = {
   readonly validationOwner: string;
   readonly requiresConfirmation: boolean;
   readonly sourceReferencesRequired: boolean;
+  /**
+   * What the tool said about itself, so an audit can tell a read-only
+   * tool from one that deletes or reaches the network. Absent when the
+   * tool declared nothing — which is itself the answer, and different
+   * from declaring the call harmless.
+   */
+  readonly annotations?: RuntimePluginToolAnnotations;
+  readonly concurrency?: string;
 };
 
 export type InspectPluginContextItem = {

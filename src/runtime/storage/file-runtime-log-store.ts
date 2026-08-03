@@ -1,9 +1,5 @@
-import {
-  appendTextFileSync,
-  readFinalByteSync,
-  readTextFileSync,
-  truncateFileSync,
-} from '../../shared/file-system.ts';
+import {appendTextFileSync} from '../../shared/file-system.ts';
+import {discardTornJsonLineTail} from './json-lines.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {encodeConversationLogRecord} from './conversation-codec.ts';
 import {encodeRawEventLogRecord} from './raw-event-codec.ts';
@@ -155,7 +151,7 @@ export function createFileRuntimeLogStore(
 
 function appendJsonLine(filePath: string, line: string): void {
   try {
-    discardTornTail(filePath);
+    discardTornJsonLineTail(filePath);
     appendTextFileSync(filePath, `${line}\n`, 0o600);
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(
@@ -164,32 +160,4 @@ function appendJsonLine(filePath: string, line: string): void {
       {cause: error},
     );
   }
-}
-
-/**
- * Drops a record a crash left unfinished, before appending after it.
- *
- * A process killed mid-append leaves a final line with no newline. Writing
- * straight after it would splice the new record onto that fragment and make
- * one unreadable line out of two, so it has to go somewhere.
- *
- * It is removed rather than terminated. A terminated fragment survives as a
- * committed-looking line that does not parse, and once later records land
- * after it, nothing distinguishes it from corruption — the reader would
- * have to tolerate unparseable lines anywhere in the file, which is how a
- * damaged log gets read back as a short one. The fragment never finished
- * being written, so it was never committed and nothing is lost by
- * truncating it.
- */
-function discardTornTail(filePath: string): void {
-  const finalByte = readFinalByteSync(filePath);
-
-  if (finalByte === undefined || finalByte === 0x0a) {
-    return;
-  }
-
-  const content = readTextFileSync(filePath);
-  const lastNewline = content.lastIndexOf('\n');
-
-  truncateFileSync(filePath, lastNewline + 1);
 }

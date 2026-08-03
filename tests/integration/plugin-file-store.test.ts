@@ -14,6 +14,10 @@ import {afterEach, describe, expect, it} from 'vitest';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {createDurableRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/durable-store.ts';
 import {
+  durablePathModesFileName,
+  durableRevisionFileName,
+} from '../../src/runtime/storage/plugin-file-store/shared.ts';
+import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionPaths,
   LocalRuntimeStorageContractError,
@@ -461,6 +465,35 @@ describe('runtime plugin file store', () => {
     // The unfinished record never committed, so it is not history — but
     // the records written before it are, and they survive.
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}]);
+  });
+
+  it('keeps a new record readable when appending after a crash-torn one', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-jsonl-torn-append';
+    const pluginId = 'plugin.jsonl-torn-append';
+    const root = pluginRoot(storeRoot, sessionId, pluginId);
+
+    mkdirSync(root, {recursive: true});
+    // A prior crash left the file ending mid-record.
+    writeFileSync(join(root, 'events.jsonl'), '{"value":1}\n{"val', 'utf8');
+    writeFileSync(
+      join(root, durablePathModesFileName),
+      '{"events.jsonl":"jsonl"}\n',
+      'utf8',
+    );
+    writeFileSync(join(root, durableRevisionFileName), '1\n', 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId,
+      pluginId,
+    });
+
+    store.appendJsonl('events.jsonl', {value: 2});
+
+    // The new write is a record of its own rather than text spliced onto
+    // the fragment, so the tool's write survives its own call.
+    expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}, {value: 2}]);
   });
 
   it('reports a damaged record instead of returning a short history', () => {

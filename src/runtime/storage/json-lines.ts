@@ -1,3 +1,9 @@
+import {
+  readFinalByteSync,
+  readTextFileSync,
+  truncateFileSync,
+} from '../../shared/file-system.ts';
+
 /**
  * Reading append-only JSONL that a crash may have interrupted.
  *
@@ -48,6 +54,33 @@ export function readCompleteJsonLines(content: string): readonly string[] {
   }
 
   return Object.freeze(records);
+}
+
+/**
+ * Drops a record a crash left unfinished, before appending after it.
+ *
+ * Every append-only JSONL writer here calls this first. Writing straight
+ * after a fragment splices the new record onto it and makes one unreadable
+ * line out of two, so it has to go somewhere.
+ *
+ * It is removed rather than terminated with a newline. A terminated
+ * fragment survives as a committed-looking line that never parses, and
+ * once later records land after it nothing distinguishes it from
+ * corruption — which would force `readCompleteJsonLines` to tolerate bad
+ * lines anywhere, and that is how a damaged log gets read back as a short
+ * one. The fragment never finished being written, so it was never
+ * committed and nothing is lost.
+ */
+export function discardTornJsonLineTail(filePath: string): void {
+  const finalByte = readFinalByteSync(filePath);
+
+  if (finalByte === undefined || finalByte === 0x0a) {
+    return;
+  }
+
+  const content = readTextFileSync(filePath);
+
+  truncateFileSync(filePath, content.lastIndexOf('\n') + 1);
 }
 
 /** A committed record that does not parse: damage, not a torn append. */
