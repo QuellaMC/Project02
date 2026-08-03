@@ -123,11 +123,9 @@ function planDurablePluginFileStoreOperation(options: {
 
   const filePath = join(options.root, options.path);
 
+  // Before the bytes this journal is planned against are read. A write
+  // replaces the file, so only an append can splice onto a torn tail.
   if (options.kind === 'append_jsonl') {
-    // Before reading the bytes this journal will be planned against: a
-    // crash can leave the file ending mid-record, and appending onto that
-    // fragment would splice two records into one unreadable line. The
-    // fragment never committed, so it is dropped rather than kept.
     discardTornJsonLineTail(filePath);
   }
 

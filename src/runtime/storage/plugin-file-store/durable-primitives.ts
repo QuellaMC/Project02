@@ -32,7 +32,6 @@ import {
 } from '../mutation-lock.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import type {RuntimePluginFileStorePathMode} from '../../../plugins/index.ts';
-import {MalformedJsonLineError} from '../json-lines.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
@@ -598,47 +597,49 @@ function assertDurableJsonlPathMode(options: {
     return;
   }
 
-  if (options.path.endsWith('.jsonl')) {
-    try {
-      const records = parseRuntimePluginJsonlContent(
-        readTextFileSync(options.filePath),
-      );
+  const content = readOptionalRegularFile(options.filePath);
 
-      // Nothing readable, or a lone array, is ambiguous: let the
-      // whole-file parse below decide.
-      if (
-        records.length > 0 &&
-        (records.length !== 1 || !Array.isArray(records[0]))
-      ) {
-        return;
-      }
-    } catch (error: unknown) {
-      if (isMissingFileError(error)) {
-        return;
-      }
-
-      // Unreadable as JSONL is the answer this check wants, not a
-      // failure: that is what a multi-line JSON document looks like.
-      if (
-        !(error instanceof SyntaxError) &&
-        !(error instanceof MalformedJsonLineError)
-      ) {
-        throw error;
-      }
-    }
+  if (content === undefined) {
+    return;
   }
 
+  // A lone array reads as one JSONL record and as a JSON document, so it
+  // stays ambiguous and the whole-file parse decides.
+  const records = options.path.endsWith('.jsonl')
+    ? readOptionalJsonlRecords(content)
+    : undefined;
+
+  if (
+    records !== undefined &&
+    (records.length !== 1 || !Array.isArray(records[0]))
+  ) {
+    return;
+  }
+
+  if (parseOptionalJson(content) !== undefined) {
+    throw new TypeError('Plugin JSONL path already stores JSON.');
+  }
+}
+
+/** Records when the content is JSONL, undefined when it is not. */
+function readOptionalJsonlRecords(
+  content: string,
+): readonly RuntimePluginJsonValue[] | undefined {
   try {
-    JSON.parse(readTextFileSync(options.filePath));
-  } catch (error: unknown) {
-    if (isMissingFileError(error) || error instanceof SyntaxError) {
-      return;
-    }
+    const records = parseRuntimePluginJsonlContent(content);
 
-    throw error;
+    return records.length === 0 ? undefined : records;
+  } catch {
+    return undefined;
   }
+}
 
-  throw new TypeError('Plugin JSONL path already stores JSON.');
+function parseOptionalJson(content: string): unknown {
+  try {
+    return (JSON.parse(content) as unknown) ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function assertDurableJsonPathMode(options: {
