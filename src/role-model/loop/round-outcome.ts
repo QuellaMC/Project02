@@ -29,7 +29,7 @@ import {
   freezeRoleModelChatMessage,
   type RoleModelChatMessage,
 } from '../api/chat-wire.ts';
-import {getVisibleReplyToolCall} from './decision-parser.ts';
+import {visibleReplyToolCalls} from './decision-parser.ts';
 import {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
 
 export type RoleModelLoopRound = {
@@ -131,15 +131,16 @@ export function createRejectedRoleModelLoopResult(options: {
   } satisfies RejectedRoleModelLoopResult);
 }
 
-export function executionVisibleReplyText(
+/** Every reply the decision asks to send, in the order it asked. */
+export function executionVisibleReplyTexts(
   decision: CharacterDecision,
-): string | undefined {
-  const visibleReply = decision.toolCalls.find(
-    call => call.name === visibleReplyModelToolName,
+): readonly string[] {
+  return Object.freeze(
+    decision.toolCalls
+      .filter(call => call.name === visibleReplyModelToolName)
+      .map(call => call.input['text'])
+      .filter((text): text is string => typeof text === 'string'),
   );
-  const text = visibleReply?.input['text'];
-
-  return typeof text === 'string' ? text : undefined;
 }
 
 export function appendRejectedRoleModelLoopRound(options: {
@@ -356,9 +357,9 @@ function visibleReplyGateRejection(
       readonly details: string;
     }
   | undefined {
-  const visibleReply = getVisibleReplyToolCall(decisionResult.decision);
+  const visibleReplies = visibleReplyToolCalls(decisionResult.decision);
 
-  if (visibleReply === undefined) {
+  if (visibleReplies.length === 0) {
     return isTerminalRound && decisionResult.nonCommittedText === undefined
       ? {
           reason: roleModelMalformedOutputRejectionReason,
@@ -367,15 +368,17 @@ function visibleReplyGateRejection(
       : undefined;
   }
 
-  const text = visibleReply.input['text'];
+  for (const visibleReply of visibleReplies) {
+    const text = visibleReply.input['text'];
 
-  try {
-    normalizeVisibleMessageText(typeof text === 'string' ? text : undefined);
-  } catch {
-    return {
-      reason: roleModelInvalidVisibleReplyRejectionReason,
-      details: 'visible_reply text must not be empty.',
-    };
+    try {
+      normalizeVisibleMessageText(typeof text === 'string' ? text : undefined);
+    } catch {
+      return {
+        reason: roleModelInvalidVisibleReplyRejectionReason,
+        details: 'visible_reply text must not be empty.',
+      };
+    }
   }
 
   return undefined;

@@ -9,7 +9,6 @@ export {
   builtInModelToolDefinitions,
   builtInModelToolDefinitionsForUserTurn,
   createVisibleReplyModelToolCall,
-  findVisibleReplyModelToolCall,
   freezeBuiltInModelToolCall,
   freezeModelToolCall,
   freezeModelToolCalls,

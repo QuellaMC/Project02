@@ -18,7 +18,7 @@ import {
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
   getRequiredVisibleReplyText,
-  getVisibleReplyToolCall,
+  visibleReplyToolCalls,
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
@@ -1175,26 +1175,24 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
   readonly actual: string | undefined;
   readonly parsedDecision: CharacterDecision;
 }): void {
-  const parsedDecisionText = getVisibleReplyToolCall(options.parsedDecision)
-    ?.input.text;
+  const parsedTexts = visibleReplyToolCalls(options.parsedDecision).map(
+    call => call.input.text,
+  );
 
-  if (parsedDecisionText === undefined) {
-    if (options.actual === undefined) {
+  if (parsedTexts.length === 0 || options.actual === undefined) {
+    if (parsedTexts.length === 0 && options.actual === undefined) {
       return;
     }
 
     throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
   }
 
-  if (options.actual === undefined) {
-    throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
-  }
-
-  let normalizedParsedDecisionText: string;
+  let normalizedTexts: readonly string[];
 
   try {
-    normalizedParsedDecisionText =
-      normalizeVisibleMessageText(parsedDecisionText);
+    normalizedTexts = parsedTexts.map(text =>
+      normalizeVisibleMessageText(text),
+    );
   } catch (error: unknown) {
     if (error instanceof VisibleMessageTextValidationError) {
       throwMalformedRecord(
@@ -1205,7 +1203,7 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
     throw error;
   }
 
-  if (options.actual !== normalizedParsedDecisionText) {
+  if (!normalizedTexts.includes(options.actual)) {
     throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
   }
 }

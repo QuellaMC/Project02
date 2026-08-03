@@ -646,6 +646,35 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).not.toHaveProperty('acceptedVisibleReplyText');
   });
 
+  it('commits every visible reply a round asks for, in order', async () => {
+    const session = createConversationSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRuntimeLogStore({
+      boundCharacter: testCharacterProfile,
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'first thought'}},
+          {name: 'visible_reply', input: {text: 'and a second'}},
+        ],
+      },
+    ]);
+
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('say two things', 'evt_two_replies'),
+      session,
+      logStore,
+      roleModelAdapter: adapter,
+    });
+
+    expect(result.status).toBe('completed');
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['say two things', 'first thought', 'and a second']);
+  });
+
   it('commits multi-line final visible replies', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,

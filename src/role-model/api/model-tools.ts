@@ -148,26 +148,6 @@ export function freezeBuiltInModelToolCall(
   return createVisibleReplyModelToolCall(call.input.text);
 }
 
-export function findVisibleReplyModelToolCall(
-  calls: readonly ModelToolCall[],
-): VisibleReplyModelToolCall | undefined {
-  const call = calls.find(
-    candidate => candidate.name === visibleReplyModelToolName,
-  );
-
-  if (call === undefined) {
-    return undefined;
-  }
-
-  const text = call.input['text'];
-
-  if (typeof text !== 'string') {
-    return undefined;
-  }
-
-  return createVisibleReplyModelToolCall(text);
-}
-
 export function freezeModelToolDefinition(
   definition: ModelToolDefinition,
 ): ModelToolDefinition {

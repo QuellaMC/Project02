@@ -43,7 +43,7 @@ import type {
   RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
 import {
-  executionVisibleReplyText,
+  executionVisibleReplyTexts,
   type RoleModelLoopResult,
 } from '../../role-model/index.ts';
 import {
@@ -423,9 +423,9 @@ function createTerminalRawEventInput(
   // Commit validation describes the terminal decision, not the turn's
   // message history: a terminal round carrying only non-committed text
   // has no accepted reply even when earlier rounds committed one.
-  const terminalVisibleReplyText = executionVisibleReplyText(
+  const terminalVisibleReplyText = executionVisibleReplyTexts(
     options.roleModelResult.decision,
-  );
+  ).at(-1);
 
   return {
     ...state.identity,

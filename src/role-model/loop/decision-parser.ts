@@ -4,7 +4,6 @@ import {
   freezeModelToolCall,
   visibleReplyModelToolName,
   createVisibleReplyModelToolCall,
-  findVisibleReplyModelToolCall,
   type BuiltInModelToolCall,
   type BuiltInModelToolName,
   type ModelToolCall,
@@ -103,7 +102,7 @@ function parseRoleModelDecisionForBoundary(
 export function getRequiredVisibleReplyText(
   decision: CharacterDecision,
 ): string {
-  const visibleReply = getVisibleReplyToolCall(decision);
+  const visibleReply = visibleReplyToolCalls(decision)[0];
 
   if (visibleReply === undefined) {
     throw new TypeError('CharacterDecision must include visible_reply.');
@@ -112,10 +111,16 @@ export function getRequiredVisibleReplyText(
   return visibleReply.input.text;
 }
 
-export function getVisibleReplyToolCall(
+/** Every reply the decision asks to send, in the order it asked. */
+export function visibleReplyToolCalls(
   decision: CharacterDecision,
-): VisibleReplyModelToolCall | undefined {
-  return findVisibleReplyModelToolCall(decision.toolCalls);
+): readonly VisibleReplyModelToolCall[] {
+  return Object.freeze(
+    decision.toolCalls.filter(
+      (call): call is VisibleReplyModelToolCall =>
+        call.name === visibleReplyModelToolName,
+    ),
+  );
 }
 
 function parseRoleModelDecisionObject(

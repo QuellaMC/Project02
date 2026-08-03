@@ -151,7 +151,7 @@ export type RoleModelPluginToolCallCompletedEvent = {
 export {
   appendRejectedRoleModelLoopRound,
   createRoleModelLoopRound,
-  executionVisibleReplyText,
+  executionVisibleReplyTexts,
   terminalRoleModelLoopResult,
   type AcceptedRoleModelLoopResult,
   type RejectedRoleModelLoopResult,
@@ -161,7 +161,7 @@ export {
 } from './round-outcome.ts';
 import {
   createRoleModelLoopRound,
-  executionVisibleReplyText,
+  executionVisibleReplyTexts,
   handleRejectedRoleModelLoopRound,
   terminalRoleModelLoopResult,
   type RoleModelLoopResult,
@@ -274,19 +274,15 @@ async function deliverVisibleReply(delivery: {
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 }): Promise<void> {
-  const text = executionVisibleReplyText(delivery.decision);
-
-  if (text === undefined) {
-    return;
+  for (const text of executionVisibleReplyTexts(delivery.decision)) {
+    await delivery.options.onVisibleReply({
+      round: delivery.round,
+      text,
+      inputEnvelope: delivery.inputEnvelope,
+      ioSnapshot: delivery.ioSnapshot,
+      parsedDecisionSnapshot: delivery.parsedDecisionSnapshot,
+    });
   }
-
-  await delivery.options.onVisibleReply({
-    round: delivery.round,
-    text,
-    inputEnvelope: delivery.inputEnvelope,
-    ioSnapshot: delivery.ioSnapshot,
-    parsedDecisionSnapshot: delivery.parsedDecisionSnapshot,
-  });
 }
 
 type InvokedRoleModelLoopRoundBase = {

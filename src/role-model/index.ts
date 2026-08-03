@@ -99,7 +99,7 @@ export {
 export {
   type AcceptedRoleModelLoopResult,
   defaultRoleModelMaxToolRounds,
-  executionVisibleReplyText,
+  executionVisibleReplyTexts,
   type RejectedRoleModelLoopResult,
   type RoleModelLoopResult,
   type RoleModelVisibleReplyEvent,
@@ -114,7 +114,7 @@ export {
 } from './loop/loop.ts';
 export {
   getRequiredVisibleReplyText,
-  getVisibleReplyToolCall,
+  visibleReplyToolCalls,
   parseRoleModelDecision,
   parseRoleModelExecutionDecision,
 } from './loop/decision-parser.ts';
