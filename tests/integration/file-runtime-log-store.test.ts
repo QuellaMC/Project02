@@ -1746,6 +1746,77 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow('must commit exactly one user message before its replies');
   });
 
+  it('rejects conversation rows reordered out of their session sequence', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-interleaved-turns';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    let logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    for (const turn of ['first', 'second']) {
+      await runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent(
+          `message ${turn}`,
+          identity(`evt_${turn}_turn`),
+        ),
+        session: createConversationSession({
+          character: testCharacterProfile,
+          id: sessionId,
+          visibleTranscript: logStore.conversationMessages(),
+        }),
+        logStore,
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+        pluginHost: createDefaultProject02PluginHost(),
+      });
+      logStore = createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      });
+    }
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected local runtime session paths.');
+    }
+
+    const rows = readFileSync(paths.conversationPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+
+    // Interleave the two turns: each turn still holds its own messages in
+    // order and every commit anchor still matches, so grouping rows by
+    // turn identity sees nothing wrong. Only the file-wide sequence is
+    // broken, and message IDs are assigned per session and checked
+    // against row position, which is what pins that global order.
+    writeFileSync(
+      paths.conversationPath,
+      `${[rows[0], rows[2], rows[1], rows[3]].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).conversationMessages(),
+    ).toThrow(LocalRuntimeStorageContractError);
+  });
+
   it('keeps a session readable when a crash left its last record unfinished', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-torn-final-record';
