@@ -1,5 +1,17 @@
 import {defineConfig} from 'vitest/config';
 
+/**
+ * Suites that spawn real chat processes. They run in their own project,
+ * one file at a time, so they never compete with each other for cores.
+ */
+const processSpawningTests = [
+  'tests/integration/layered-control-locking.test.ts',
+  'tests/integration/runtime-config-concurrency.test.ts',
+  'tests/integration/runtime-session-writer.test.ts',
+  'tests/integration/session-store-concurrency.test.ts',
+  'tests/e2e/two-character-concurrency.test.ts',
+];
+
 export default defineConfig({
   test: {
     environment: 'node',
@@ -31,6 +43,7 @@ export default defineConfig({
         test: {
           name: 'integration',
           include: ['tests/integration/**/*.test.ts'],
+          exclude: processSpawningTests,
           // Headroom only: several suites spawn 2-7 child node processes and
           // contend for the lock/WAL files they exercise.
           testTimeout: 30000,
@@ -41,6 +54,24 @@ export default defineConfig({
         test: {
           name: 'e2e',
           include: ['tests/e2e/**/*.test.ts'],
+          exclude: processSpawningTests,
+        },
+      },
+      {
+        extends: true,
+        test: {
+          name: 'processes',
+          include: processSpawningTests,
+          // These files launch real chat processes — up to seven at once —
+          // and each one cold-starts Node. Run four such files in parallel
+          // on a two-core CI runner and the children are starved of CPU
+          // rather than blocked on anything: a turn that takes 69ms locally
+          // stalls past any deadline, which is how this suite's idle
+          // timeout went 6s, 8s, 15s, 20s without ever being long enough.
+          // One file at a time keeps the process count bounded by what a
+          // single test needs.
+          fileParallelism: false,
+          testTimeout: 60000,
         },
       },
     ],
