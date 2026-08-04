@@ -174,6 +174,16 @@ export type RuntimeLogStore = {
     record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
   ): RawEventLogRecord;
+  /**
+   * Validates a record and returns it in stored form without writing.
+   * Callers that must show a message before it is durable validate here,
+   * then persist with {@link persistPreparedRawEvent}.
+   */
+  prepareRawEvent(
+    record: RawEventLogRecordInput,
+    expectedCharacter?: CharacterProfile,
+  ): RawEventLogRecord;
+  persistPreparedRawEvent(record: RawEventLogRecord): void;
   checkpointWriterEvidence?(): void;
   recoverAbandonedWriterEvidence?(): boolean;
   readSessionEvidence(): RuntimeSessionEvidenceSnapshot;

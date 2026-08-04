@@ -38,7 +38,6 @@ export type LocalRuntimeStorageContractErrorCode =
   | 'partial_write'
   | 'read_failed'
   | 'session_busy'
-  | 'stale_session'
   | 'storage_busy'
   | 'unsupported_schema_version'
   | 'write_failed';

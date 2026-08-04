@@ -51,6 +51,12 @@ export function createRuntimeLogStore(
 
       return storedRecord;
     },
+    prepareRawEvent(record, expectedCharacter) {
+      return transitionMachine.prepareRawEventAppend(record, expectedCharacter);
+    },
+    persistPreparedRawEvent(record) {
+      transitionMachine.commitRawEventAppend(record);
+    },
     readSessionEvidence() {
       transitionMachine.assertPublicReadable();
 

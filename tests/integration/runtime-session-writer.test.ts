@@ -125,7 +125,7 @@ describe('durable runtime session writer ownership', () => {
     await firstTurn;
   });
 
-  it('rejects a stale in-memory transcript before starting a new turn', async () => {
+  it('refuses a second session writing over an existing transcript', async () => {
     const storeRoot = await createTempStoreRoot();
     const sessionId = 'stale-writer-session';
     await createLocalRuntimeSessionStore({
@@ -177,8 +177,18 @@ describe('durable runtime session writer ownership', () => {
           reply: () => ({text: 'stale reply'}),
         }),
       }),
-    ).rejects.toMatchObject({code: 'stale_session'});
-    expect(logStore.rawEvents()).toHaveLength(rawEventCountBeforeStaleWriter);
+    ).rejects.toMatchObject({code: 'malformed_record'});
+    // The turn is recorded as rejected; no second transcript is written.
+    expect(
+      logStore
+        .rawEvents()
+        .slice(rawEventCountBeforeStaleWriter)
+        .map(rawEvent => rawEvent.kind),
+    ).toEqual([
+      'runtime_event_received',
+      'runtime_event_normalized',
+      'runtime_turn_rejected',
+    ]);
   });
 
   it('holds the writer lease for the full interactive chat process', async () => {

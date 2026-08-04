@@ -143,7 +143,7 @@ async function prepareRuntimeTurn(
       : {recentMessageLimit: state.options.recentMessageLimit}),
   });
 
-  commitUserMessage(state);
+  await commitUserMessage(state);
 
   const runtimePluginContext = createRuntimePluginContext({
     ...state.identity,

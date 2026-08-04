@@ -1149,7 +1149,7 @@ describe('file runtime log store plugin tool event validation', () => {
     });
   });
 
-  it('rolls back a custom first turn when visible-reply raw evidence fails before append', async () => {
+  it('keeps a shown reply in the session when its raw append fails', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-custom-character-raw-rollback';
     const character = {id: 'nova', displayName: 'Nova'};
@@ -1180,15 +1180,21 @@ describe('file runtime log store plugin tool event validation', () => {
           }),
       appendTrace: entry => underlying.appendTrace(entry),
       appendRawEvent(record, expectedCharacter) {
+        return underlying.appendRawEvent(record, expectedCharacter);
+      },
+      prepareRawEvent: (record, expectedCharacter) =>
+        underlying.prepareRawEvent(record, expectedCharacter),
+      persistPreparedRawEvent(record) {
         if (
           !failedVisibleReplyAppend &&
-          record.kind === 'visible_message_committed'
+          record.kind === 'visible_message_committed' &&
+          record.visibleMessage?.role === 'character'
         ) {
           failedVisibleReplyAppend = true;
           throw appendFailure;
         }
 
-        return underlying.appendRawEvent(record, expectedCharacter);
+        underlying.persistPreparedRawEvent(record);
       },
       checkpointWriterEvidence: () => underlying.checkpointWriterEvidence?.(),
       recoverAbandonedWriterEvidence: () =>
@@ -1216,20 +1222,21 @@ describe('file runtime log store plugin tool event validation', () => {
       }),
     ).rejects.toBe(appendFailure);
 
-    expect(failedSession.visibleTranscript).toEqual([]);
+    // The reply reached the user before the append, so it stays said.
+    expect(failedSession.visibleTranscript).toMatchObject([
+      {role: 'user', text: 'show me the stars'},
+      {role: 'character', speakerName: 'Nova'},
+    ]);
+
     const reopened = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
       characterId: character.id,
       boundCharacter: character,
     });
-    expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual(
-      [],
-    );
-    expect(reopened.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-    });
+    expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual([
+      expect.objectContaining({role: 'user', text: 'show me the stars'}),
+    ]);
 
     await expect(
       runLocalUserMessageEvent({
@@ -1240,6 +1247,7 @@ describe('file runtime log store plugin tool event validation', () => {
         session: createConversationSession({
           id: sessionId,
           character,
+          visibleTranscript: reopened.conversationMessages(),
         }),
         logStore: reopened,
         pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
@@ -1248,6 +1256,7 @@ describe('file runtime log store plugin tool event validation', () => {
     ).resolves.toMatchObject({status: 'completed'});
 
     expect(reopened.conversationMessages()).toEqual([
+      expect.objectContaining({role: 'user', text: 'show me the stars'}),
       expect.objectContaining({role: 'user', text: 'try again'}),
       expect.objectContaining({
         role: 'character',

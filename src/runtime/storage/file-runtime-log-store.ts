@@ -47,30 +47,31 @@ export function createFileRuntimeLogStore(
       return storedEntry;
     },
     appendRawEvent(record, expectedCharacter) {
+      const storedRecord = this.prepareRawEvent(record, expectedCharacter);
+
+      this.persistPreparedRawEvent(storedRecord);
+      return storedRecord;
+    },
+    prepareRawEvent(record, expectedCharacter) {
       const evidence = state.readStoredEvidence();
       const machine = state.ensureTransitionMachine(evidence);
 
       state.assertSessionReadable();
       state.assertWriterOwnership();
       state.recordIncrementalValidation();
-      const storedRecord = machine.prepareRawEventAppend(
-        record,
-        expectedCharacter,
-      );
+      return machine.prepareRawEventAppend(record, expectedCharacter);
+    },
+    persistPreparedRawEvent(record) {
+      const machine = state.ensureTransitionMachine(state.readStoredEvidence());
 
       try {
-        appendJsonLine(
-          paths.rawEventsPath,
-          encodeRawEventLogRecord(storedRecord),
-        );
-        machine.commitRawEventAppend(storedRecord);
+        appendJsonLine(paths.rawEventsPath, encodeRawEventLogRecord(record));
+        machine.commitRawEventAppend(record);
         state.checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
         state.invalidateCachedEvidence();
         throw error;
       }
-
-      return storedRecord;
     },
     recoverAbandonedWriterEvidence() {
       return state.recoverAbandonedWriterEvidence();

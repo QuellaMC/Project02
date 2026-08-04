@@ -16,6 +16,12 @@ export function runtimeLogStoreWithWriterOwner(
     appendRawEvent(record, expectedCharacter) {
       return logStore.appendRawEvent(record, expectedCharacter);
     },
+    prepareRawEvent(record, expectedCharacter) {
+      return logStore.prepareRawEvent(record, expectedCharacter);
+    },
+    persistPreparedRawEvent(record) {
+      logStore.persistPreparedRawEvent(record);
+    },
     ...(logStore.checkpointWriterEvidence === undefined
       ? {}
       : {

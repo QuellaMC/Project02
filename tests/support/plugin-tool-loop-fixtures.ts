@@ -211,18 +211,19 @@ export function createRawEventAppendFailingLogStore(options: {
     createRuntimeLogStore({boundCharacter: testCharacterProfile});
   let matched = 0;
 
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record, expectedCharacter) {
-      if (!options.matches(record)) {
-        return logStore.appendRawEvent(record, expectedCharacter);
-      }
+  function failsOn(record: RawEventLogRecordInput): boolean {
+    if (!options.matches(record)) {
+      return false;
+    }
 
-      matched += 1;
-      if (matched <= (options.skip ?? 0)) {
+    matched += 1;
+    return matched > (options.skip ?? 0);
+  }
+
+  return Object.freeze({
+    ...delegateRuntimeLogStore(logStore),
+    appendRawEvent(record, expectedCharacter) {
+      if (!failsOn(record)) {
         return logStore.appendRawEvent(record, expectedCharacter);
       }
 
@@ -232,17 +233,17 @@ export function createRawEventAppendFailingLogStore(options: {
 
       throw new Error(options.message);
     },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
+    persistPreparedRawEvent(record) {
+      if (!failsOn(record)) {
+        logStore.persistPreparedRawEvent(record);
+        return;
+      }
+
+      if (options.persist === true) {
+        logStore.persistPreparedRawEvent(record);
+      }
+
+      throw new Error(options.message);
     },
   } satisfies RuntimeLogStore);
 }
@@ -254,7 +255,7 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
   let failed = false;
 
   return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
+    ...delegateRuntimeLogStore(logStore),
     appendTrace(entry) {
       if (!failed && entry.step === 'raw_event_log_appended') {
         failed = true;
@@ -263,35 +264,11 @@ export function createOneShotTerminalTraceAppendFailingLogStore(
 
       return logStore.appendTrace(entry);
     },
-    appendRawEvent(record, expectedCharacter) {
-      return logStore.appendRawEvent(record, expectedCharacter);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
   } satisfies RuntimeLogStore);
 }
 
-type DelegatedRuntimeLogStoreLifecycle = Pick<
-  RuntimeLogStore,
-  | 'localRuntimeSessionPaths'
-  | 'localRuntimeWriterLockOwnerToken'
-  | 'checkpointWriterEvidence'
-  | 'recoverAbandonedWriterEvidence'
->;
-
-function delegateRuntimeLogStoreLifecycle(
-  logStore: RuntimeLogStore,
-): DelegatedRuntimeLogStoreLifecycle {
+/** Every store method forwarded, so a wrapper names only what it overrides. */
+function delegateRuntimeLogStore(logStore: RuntimeLogStore): RuntimeLogStore {
   return Object.freeze({
     ...(logStore.localRuntimeSessionPaths === undefined
       ? {}
@@ -316,7 +293,31 @@ function delegateRuntimeLogStoreLifecycle(
             return logStore.recoverAbandonedWriterEvidence?.() ?? false;
           },
         }),
-  } satisfies DelegatedRuntimeLogStoreLifecycle);
+    appendTrace(entry) {
+      return logStore.appendTrace(entry);
+    },
+    appendRawEvent(record, expectedCharacter) {
+      return logStore.appendRawEvent(record, expectedCharacter);
+    },
+    prepareRawEvent(record, expectedCharacter) {
+      return logStore.prepareRawEvent(record, expectedCharacter);
+    },
+    persistPreparedRawEvent(record) {
+      logStore.persistPreparedRawEvent(record);
+    },
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    },
+  } satisfies RuntimeLogStore);
 }
 
 export const handleFileStoreWritePluginId = 'handle-write.fixture';

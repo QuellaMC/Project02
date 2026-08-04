@@ -135,15 +135,15 @@ export async function emitProgress(
   }
 }
 
-export function commitUserMessage(
+export async function commitUserMessage(
   state: RuntimeTurnState,
-): ConversationLogRecord {
+): Promise<ConversationLogRecord> {
   const message = createUserMessage(
     state.options.session,
     state.event.payload.currentUserMessage,
   );
 
-  return commitVisibleMessage(state, message, {});
+  return await commitVisibleMessage(state, message, {});
 }
 
 export async function appendVisibleReplyForDecision(
@@ -167,32 +167,27 @@ export async function appendVisibleReplyForDecision(
     state.options.session,
     normalizedReply,
   );
-  const record = commitVisibleMessage(state, message, {
+
+  return await commitVisibleMessage(state, message, {
     roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot:
       optionsForReply.parsedRoleModelDecisionSnapshot,
     commitValidation,
     ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
   });
-
-  await emitProgress(state, {
-    kind: 'visible_reply',
-    text: message.text,
-  });
-  return record;
 }
 
 /**
- * The one durable step for any visible message: a single append that
- * carries both the message and the event that made it visible. It lands
- * or it does not, so there is nothing to roll back.
+ * Saying something is what makes it real, so the message enters the
+ * session and reaches the user before it reaches disk. A storage failure
+ * after that point is reported, never un-said: the conversation happened.
  */
-function commitVisibleMessage(
+async function commitVisibleMessage(
   state: RuntimeTurnState,
   message: VisibleMessage,
   evidence: Partial<RawEventLogRecordInput>,
-): ConversationLogRecord {
-  const rawEvent = state.options.logStore.appendRawEvent(
+): Promise<ConversationLogRecord> {
+  const rawEvent = state.options.logStore.prepareRawEvent(
     {
       ...state.identity,
       kind: 'visible_message_committed',
@@ -205,16 +200,22 @@ function commitVisibleMessage(
     },
     state.options.session.character,
   );
-
-  state.rawEventLogRecords.push(rawEvent);
-  appendCommittedMessage(state.options.session, message);
-
   const record = conversationMessageForRawEvent(rawEvent);
 
   if (record === undefined) {
     throw new TypeError('Visible message commit lost its message.');
   }
 
+  appendCommittedMessage(state.options.session, message);
+
+  if (message.role === 'character') {
+    await emitProgress(state, {kind: 'visible_reply', text: message.text});
+  }
+
+  // Evidence bookkeeping describes the log, so it follows the write: a
+  // terminal event must never reference a record that failed to land.
+  state.options.logStore.persistPreparedRawEvent(rawEvent);
+  state.rawEventLogRecords.push(rawEvent);
   state.committedVisibleMessages.push(record);
   appendTrace(state, 'visible_message_committed');
   return record;
