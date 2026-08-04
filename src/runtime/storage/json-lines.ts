@@ -11,17 +11,8 @@ import {
  * append, and fails the read.
  */
 export function readCompleteJsonLines(content: string): readonly string[] {
-  if (content.length === 0) {
-    return Object.freeze([]);
-  }
-
-  const lines = content
-    .split('\n')
-    .map(line => (line.endsWith('\r') ? line.slice(0, -1) : line));
-  lines.pop();
-
   return Object.freeze(
-    lines.map((line, index) => {
+    committedJsonLines(content).map((line, index) => {
       if (!isParseableJson(line)) {
         throw new MalformedJsonLineError(index + 1);
       }
@@ -29,6 +20,23 @@ export function readCompleteJsonLines(content: string): readonly string[] {
       return line;
     }),
   );
+}
+
+/**
+ * The framing alone, for readers that tolerate a damaged record instead of
+ * failing the whole file.
+ */
+export function committedJsonLines(content: string): readonly string[] {
+  if (content.length === 0) {
+    return Object.freeze([]);
+  }
+
+  const lines = content
+    .split('\n')
+    .map(line => (line.endsWith('\r') ? line.slice(0, -1) : line));
+
+  lines.pop();
+  return Object.freeze(lines);
 }
 
 /**
@@ -60,7 +68,8 @@ export class MalformedJsonLineError extends TypeError {
   }
 }
 
-function isParseableJson(line: string): boolean {
+/** Whether the text is a complete JSON document — `null` included. */
+export function isParseableJson(line: string): boolean {
   try {
     JSON.parse(line);
     return true;

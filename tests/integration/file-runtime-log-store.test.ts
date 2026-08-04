@@ -1428,6 +1428,20 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
+  it('accepts repeated replies whose text needed normalizing', async () => {
+    const {paths} = await committedTurnRawLines(
+      'session-repeated-normalized-replies',
+      createSequencedVisibleReplyAdapter(['  checking  ', 'checking\r\n']),
+    );
+
+    expect(
+      reopenStore(paths)
+        .conversationMessages()
+        .filter(message => message.role === 'character')
+        .map(message => message.text),
+    ).toEqual(['checking', 'checking']);
+  });
+
   it('rejects a duplicated visible_message_committed anchor for one message', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-duplicate-commit-anchor',

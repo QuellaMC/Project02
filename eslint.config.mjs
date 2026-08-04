@@ -135,11 +135,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/storage/raw-event-codec.ts'],
     rules: {
-      // Re-pinned +31: the commit event now carries its message, so this
-      // file absorbed the decoding that conversation-codec.ts held.
+      // Ratcheted down after merging two copies of the visible-message
+      // decoder onto one seam in codec-primitives.ts.
       'max-lines': [
         'error',
-        {max: 1726, skipBlankLines: true, skipComments: true},
+        {max: 1699, skipBlankLines: true, skipComments: true},
       ],
     },
   },

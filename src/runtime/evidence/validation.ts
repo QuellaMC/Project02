@@ -8,6 +8,7 @@ import {
   ConversationRehydrationError,
   isValidSpeakerDisplayName,
   localUserSpeaker,
+  normalizeVisibleMessageText,
   type RuntimeEventIdentity,
   type SpeakerIdentity,
   runtimeEventIdentityKey,
@@ -2213,40 +2214,40 @@ function assertCharacterRowsFollowTheirDecision(
   turnMessages: readonly ConversationLogRecord[],
   commitEventByMessageKey: ReadonlyMap<string, RawEventLogRecord>,
 ): void {
+  // Keyed by the round's raw model output: one decision commits each of its
+  // replies as its own event, and two rounds may legitimately say the same
+  // thing, so the key has to name the round rather than what it said.
   const rowsByDecision = new Map<
     string,
     {readonly texts: string[]; readonly replies: readonly string[]}
   >();
 
   for (const message of turnMessages) {
-    if (message.role !== 'character') {
-      continue;
-    }
-
     const commitEvent = commitEventByMessageKey.get(
       visibleMessageEvidenceKey(message, message.id),
     );
+    const decision = commitEvent?.parsedRoleModelDecisionSnapshot?.result;
+    const round = commitEvent?.roleModelIOSnapshot?.rawOutputText;
 
-    if (commitEvent === undefined) {
+    if (
+      message.role !== 'character' ||
+      round === undefined ||
+      decision?.status !== 'accepted'
+    ) {
       continue;
     }
 
-    const decision = commitEvent.parsedRoleModelDecisionSnapshot?.result;
-
-    if (decision?.status !== 'accepted') {
-      continue;
-    }
-
-    const replies = decision.decision.toolCalls
-      .filter(call => call.name === visibleReplyModelToolName)
-      .map(call => String(call.input['text']));
-    // Keyed by the decision, not the event: one decision commits each of
-    // its replies as its own event, and they share the ordering rule.
-    const key = replies.join('\u0000');
-    const seen = rowsByDecision.get(key) ?? {texts: [], replies};
+    const seen = rowsByDecision.get(round) ?? {
+      texts: [],
+      // Compared against stored text, so replies carry the same
+      // normalization the commit path applied before storing them.
+      replies: decision.decision.toolCalls
+        .filter(call => call.name === visibleReplyModelToolName)
+        .map(call => normalizeVisibleMessageText(String(call.input['text']))),
+    };
 
     seen.texts.push(message.text);
-    rowsByDecision.set(key, seen);
+    rowsByDecision.set(round, seen);
   }
 
   for (const {texts, replies} of rowsByDecision.values()) {

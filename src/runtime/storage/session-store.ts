@@ -10,6 +10,7 @@ import {
   type Dirent,
 } from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {committedJsonLines} from './json-lines.ts';
 import {readStoreJsonLines} from './store-file.ts';
 import {
   describeRealEntry,
@@ -538,7 +539,8 @@ function decodeSessionCatalog(
  * every other entry being intact. A damaged row belonging to another
  * session is skipped rather than failing this read — the listing path
  * above still reports it, and refusing to open a healthy session because
- * an unrelated one is corrupt helps nobody.
+ * an unrelated one is corrupt helps nobody. Framing is shared with that
+ * path, so an unfinished tail row is not an entry here either.
  */
 function decodeRequestedSessionCatalogEntry(
   catalog: string,
@@ -546,7 +548,7 @@ function decodeRequestedSessionCatalogEntry(
 ): LocalRuntimeSessionMetadata | undefined {
   let metadata: LocalRuntimeSessionMetadata | undefined;
 
-  for (const line of catalog.split('\n')) {
+  for (const line of committedJsonLines(catalog)) {
     if (line.trim().length === 0) {
       continue;
     }

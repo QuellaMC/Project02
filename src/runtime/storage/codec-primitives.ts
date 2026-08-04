@@ -2,11 +2,13 @@ import {
   createRuntimeEventIdentitySnapshot,
   normalizeVisibleMessageText,
   type RuntimeEventIdentity,
+  type VisibleMessage,
   type VisibleMessageRole,
   visibleMessageRoleValues,
   VisibleMessageTextValidationError,
 } from '../../core/index.ts';
 import {
+  isRecord,
   LocalRuntimeStorageContractError,
   requiredRecordCanonicalTimestamp,
   requiredRecordString,
@@ -60,6 +62,24 @@ export function requiredNormalizedVisibleMessageText(
   }
 
   return value;
+}
+
+/** The one decoder for a stored visible message, wherever it appears. */
+export function requiredVisibleMessage(
+  value: unknown,
+  field: string,
+): VisibleMessage {
+  if (!isRecord(value)) {
+    throwMalformedRecord(field);
+  }
+
+  return Object.freeze({
+    id: requiredRecordString(value, 'id', 'malformed_record'),
+    role: requiredVisibleMessageRole(value['role']),
+    speakerId: requiredRecordString(value, 'speakerId', 'malformed_record'),
+    speakerName: requiredRecordString(value, 'speakerName', 'malformed_record'),
+    text: requiredNormalizedVisibleMessageText(value, 'text'),
+  } satisfies VisibleMessage);
 }
 
 export function requiredVisibleMessageRole(value: unknown): VisibleMessageRole {

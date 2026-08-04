@@ -697,6 +697,31 @@ describe('runtime plugin file store', () => {
     expect(store.revision()).toBe(1);
   });
 
+  it('treats an untracked path holding JSON null as JSON', () => {
+    const storeRoot = createTempRoot();
+    const root = pluginRoot(
+      storeRoot,
+      'session-null-json-legacy',
+      'plugin.null-json-legacy',
+    );
+    const nullJsonPath = join(root, 'mixed.json');
+    mkdirSync(root, {recursive: true});
+    writeFileSync(nullJsonPath, 'null\n', 'utf8');
+
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-null-json-legacy',
+      pluginId: 'plugin.null-json-legacy',
+    });
+
+    // Appending here would turn the document into a JSONL stream and make
+    // every later JSON read fail.
+    expect(() => {
+      store.appendJsonl('mixed.json', {value: 'jsonl'});
+    }).toThrow(/already stores JSON/iu);
+    expect(readFileSync(nullJsonPath, 'utf8')).toBe('null\n');
+  });
+
   it('preserves untracked .jsonl paths that contain one JSONL record', () => {
     const storeRoot = createTempRoot();
     const root = pluginRoot(

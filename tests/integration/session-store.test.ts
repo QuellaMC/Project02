@@ -178,6 +178,34 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('ignores an uncommitted catalog tail on a point read', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
+    });
+    const alpha = await store.createSession({sessionId: 'alpha'});
+
+    // A complete row that a crash left without its committing newline: it
+    // is not an entry yet, so neither read may report it.
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `${JSON.stringify(alpha)}\n${JSON.stringify({
+        ...alpha,
+        sessionId: 'unfinished',
+      })}`,
+      'utf8',
+    );
+
+    await expect(store.readSession('unfinished')).rejects.toMatchObject({
+      code: 'session_not_found',
+    });
+    expect(
+      (await store.listSessions()).map(session => session.sessionId),
+    ).toEqual(['alpha']);
+  });
+
   it('ignores malformed unrelated catalog metadata on a point read', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({

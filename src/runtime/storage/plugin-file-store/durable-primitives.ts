@@ -20,6 +20,7 @@ import {
   isAbandonedAtomicReplacementFile,
   parseAtomicReplacementFileName,
 } from '../atomic-file.ts';
+import {isParseableJson} from '../json-lines.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout,
@@ -616,7 +617,7 @@ function assertDurableJsonlPathMode(options: {
     return;
   }
 
-  if (parseOptionalJson(content) !== undefined) {
+  if (isParseableJson(content)) {
     throw new TypeError('Plugin JSONL path already stores JSON.');
   }
 }
@@ -629,14 +630,6 @@ function readOptionalJsonlRecords(
     const records = parseRuntimePluginJsonlContent(content);
 
     return records.length === 0 ? undefined : records;
-  } catch {
-    return undefined;
-  }
-}
-
-function parseOptionalJson(content: string): unknown {
-  try {
-    return (JSON.parse(content) as unknown) ?? undefined;
   } catch {
     return undefined;
   }

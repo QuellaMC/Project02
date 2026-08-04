@@ -96,7 +96,7 @@ import {
   isOneOf,
   requiredNormalizedVisibleMessageText,
   requiredRuntimeEventIdentity,
-  requiredVisibleMessageRole,
+  requiredVisibleMessage,
   throwMalformedRecord,
 } from './codec-primitives.ts';
 import {assertToolRawEventSemantics} from './raw-event-tool-semantics.ts';
@@ -307,24 +307,8 @@ function optionalCommittedMessage(record: Record<string, unknown>): {
       'committedAt',
       'malformed_record',
     ),
-    visibleMessage: freezeDecodedVisibleMessage(value),
+    visibleMessage: requiredVisibleMessage(value, 'visibleMessage'),
   });
-}
-
-function freezeDecodedVisibleMessage(
-  record: Record<string, unknown>,
-): VisibleMessage {
-  return Object.freeze({
-    id: requiredRecordString(record, 'id', 'malformed_record'),
-    role: requiredVisibleMessageRole(record['role']),
-    speakerId: requiredRecordString(record, 'speakerId', 'malformed_record'),
-    speakerName: requiredRecordString(
-      record,
-      'speakerName',
-      'malformed_record',
-    ),
-    text: requiredNormalizedVisibleMessageText(record, 'text'),
-  } satisfies VisibleMessage);
 }
 
 function optionalRecordString(
@@ -1461,24 +1445,10 @@ function requiredVisibleMessages(
   const messages: VisibleMessage[] = [];
 
   for (const item of requiredArray(value, key)) {
-    messages.push(requiredVisibleMessage(item));
+    messages.push(requiredVisibleMessage(item, 'recentVisibleMessages'));
   }
 
   return Object.freeze(messages);
-}
-
-function requiredVisibleMessage(value: unknown): VisibleMessage {
-  if (!isRecord(value)) {
-    throwMalformedRecord('recentVisibleMessages');
-  }
-
-  return Object.freeze({
-    id: requiredRecordString(value, 'id', 'malformed_record'),
-    role: requiredVisibleMessageRole(value['role']),
-    speakerId: requiredRecordString(value, 'speakerId', 'malformed_record'),
-    speakerName: requiredRecordString(value, 'speakerName', 'malformed_record'),
-    text: requiredNormalizedVisibleMessageText(value, 'text'),
-  } satisfies VisibleMessage);
 }
 
 function requiredStringArray(value: unknown, key: string): readonly string[] {
