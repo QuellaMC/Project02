@@ -147,6 +147,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     record['visibleMessageIds'],
     'visibleMessageIds',
   );
+  const committedMessage = optionalCommittedMessage(record);
   const toolCallIds = optionalStringArray(record['toolCallIds'], 'toolCallIds');
   const toolCallId = optionalRecordString(
     record,
@@ -254,6 +255,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     ...(status === undefined ? {} : {status}),
     ...(reason === undefined ? {} : {reason}),
     ...(visibleMessageIds === undefined ? {} : {visibleMessageIds}),
+    ...committedMessage,
     ...(toolCallIds === undefined ? {} : {toolCallIds}),
     ...(toolCallId === undefined ? {} : {toolCallId}),
     ...(dispatchedToHost === undefined ? {} : {dispatchedToHost}),
@@ -275,6 +277,54 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       : {runtimePluginTurnEvidence}),
     ...(runtimeConfigEffects === undefined ? {} : {runtimeConfigEffects}),
   } satisfies RawEventLogRecord);
+}
+
+/**
+ * A commit event's message and the moment it committed. They are one
+ * fact, so they are decoded together and neither appears without the other.
+ */
+function optionalCommittedMessage(record: Record<string, unknown>): {
+  readonly visibleMessage?: VisibleMessage;
+  readonly committedAt?: string;
+} {
+  const value = record['visibleMessage'];
+
+  if (value === undefined) {
+    if (record['committedAt'] !== undefined) {
+      throwMalformedRecord('visibleMessage');
+    }
+
+    return {};
+  }
+
+  if (!isRecord(value)) {
+    throwMalformedRecord('visibleMessage');
+  }
+
+  return Object.freeze({
+    committedAt: requiredRecordCanonicalTimestamp(
+      record,
+      'committedAt',
+      'malformed_record',
+    ),
+    visibleMessage: freezeDecodedVisibleMessage(value),
+  });
+}
+
+function freezeDecodedVisibleMessage(
+  record: Record<string, unknown>,
+): VisibleMessage {
+  return Object.freeze({
+    id: requiredRecordString(record, 'id', 'malformed_record'),
+    role: requiredVisibleMessageRole(record['role']),
+    speakerId: requiredRecordString(record, 'speakerId', 'malformed_record'),
+    speakerName: requiredRecordString(
+      record,
+      'speakerName',
+      'malformed_record',
+    ),
+    text: requiredNormalizedVisibleMessageText(record, 'text'),
+  } satisfies VisibleMessage);
 }
 
 function optionalRecordString(

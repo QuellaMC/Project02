@@ -1,5 +1,4 @@
 import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
 
@@ -136,9 +135,7 @@ export function createVisibleReplyModelToolCall(
 ): VisibleReplyModelToolCall {
   return Object.freeze({
     name: visibleReplyModelToolName,
-    input: Object.freeze({
-      text: redactJsonBoundaryText(text),
-    } satisfies VisibleReplyToolInput),
+    input: Object.freeze({text} satisfies VisibleReplyToolInput),
   } satisfies VisibleReplyModelToolCall);
 }
 

@@ -1078,16 +1078,21 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    const conversationRecords = readFileSync(paths.conversationPath, 'utf8')
+    const rawRecords = readFileSync(paths.rawEventsPath, 'utf8')
       .trimEnd()
       .split('\n')
       .map(line => JSON.parse(line) as Record<string, unknown>);
-    for (const conversationRecord of conversationRecords) {
-      if (conversationRecord['role'] === 'character') {
-        conversationRecord['speakerName'] = 'Not Nova';
+
+    for (const rawRecord of rawRecords) {
+      const message = rawRecord['visibleMessage'] as
+        Record<string, unknown> | undefined;
+
+      if (message?.['role'] === 'character') {
+        message['speakerName'] = 'Not Nova';
       }
     }
-    writeJsonLines(paths.conversationPath, conversationRecords);
+
+    writeJsonLines(paths.rawEventsPath, rawRecords);
 
     expect(() =>
       createFileRuntimeLogStore({
@@ -1100,12 +1105,16 @@ describe('file runtime log store plugin tool event validation', () => {
       'Durable character speaker metadata must match recorded role-model character evidence.',
     );
 
-    for (const conversationRecord of conversationRecords) {
-      if (conversationRecord['role'] === 'character') {
-        conversationRecord['speakerName'] = 'Nova';
+    for (const rawRecord of rawRecords) {
+      const message = rawRecord['visibleMessage'] as
+        Record<string, unknown> | undefined;
+
+      if (message?.['role'] === 'character') {
+        message['speakerName'] = 'Nova';
       }
     }
-    writeJsonLines(paths.conversationPath, conversationRecords);
+
+    writeJsonLines(paths.rawEventsPath, rawRecords);
 
     const resumedResult = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -1170,7 +1179,7 @@ describe('file runtime log store plugin tool event validation', () => {
               underlying.localRuntimeWriterLockOwnerToken,
           }),
       appendTrace: entry => underlying.appendTrace(entry),
-      appendRawEvent(record) {
+      appendRawEvent(record, expectedCharacter) {
         if (
           !failedVisibleReplyAppend &&
           record.kind === 'visible_message_committed'
@@ -1179,12 +1188,7 @@ describe('file runtime log store plugin tool event validation', () => {
           throw appendFailure;
         }
 
-        return underlying.appendRawEvent(record);
-      },
-      appendConversationMessage: (record, expectedCharacter) =>
-        underlying.appendConversationMessage(record, expectedCharacter),
-      removeConversationMessages: messageIds => {
-        underlying.removeConversationMessages(messageIds);
+        return underlying.appendRawEvent(record, expectedCharacter);
       },
       checkpointWriterEvidence: () => underlying.checkpointWriterEvidence?.(),
       recoverAbandonedWriterEvidence: () =>
@@ -1325,150 +1329,73 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it('rejects a character row edited away from its accepted reply', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-character-text-drift';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const session = createConversationSession({
-      character: testCharacterProfile,
-      id: sessionId,
-    });
-    const result = await runLocalUserMessageEvent({
-      event: createUserMessageRuntimeEvent(
-        'hello',
-        identity('evt_character_text_drift'),
-      ),
-      session,
-      logStore,
-      roleModelAdapter: createMultilineVisibleReplyAdapter(),
-      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
-    });
-
-    expect(result.status).toBe('completed');
-
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    // Rows compare through the redacted projection, so unrelated edited
-    // text is rejected while credential redaction stays legitimate.
-    const conversationLines = readFileSync(paths.conversationPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0);
-    const editedLines = conversationLines.map(line => {
-      if (!line.includes('"role":"character"')) {
-        return line;
-      }
-
-      const record = JSON.parse(line) as Record<string, unknown>;
-
-      record['text'] = 'text the model never produced';
-      return JSON.stringify(record);
-    });
-
-    writeFileSync(
-      paths.conversationPath,
-      `${editedLines.join('\n')}\n`,
-      'utf8',
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-edited-character-text',
     );
-
-    expect(() =>
-      createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        characterId: testCharacterProfile.id,
-        boundCharacter: testCharacterProfile,
-      }).readSessionEvidence(),
-    ).toThrow('must match the accepted reply its commit anchored');
-  });
-
-  it('rejects a duplicated visible_message_committed anchor for one message', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-duplicate-commit-anchor';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const session = createConversationSession({
-      character: testCharacterProfile,
-      id: sessionId,
-    });
-    const result = await runLocalUserMessageEvent({
-      event: createUserMessageRuntimeEvent(
-        'hello',
-        identity('evt_duplicate_commit_anchor'),
-      ),
-      session,
-      logStore,
-      roleModelAdapter: createMultilineVisibleReplyAdapter(),
-      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
-    });
-
-    expect(result.status).toBe('completed');
-
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    // Duplicate processing by a direct writer: one message, one commit
-    // event, so the duplicated anchor must fail closed.
-    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0);
-    const commitIndex = rawLines.findIndex(line =>
-      line.includes('"visible_message_committed"'),
+    const index = rawLines.findIndex(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
     );
-
-    if (commitIndex === -1) {
-      throw new Error('Expected a visible_message_committed raw event line.');
-    }
-
-    const duplicatedLines = [
-      ...rawLines.slice(0, commitIndex + 1),
-      rawLines[commitIndex],
-      ...rawLines.slice(commitIndex + 1),
-    ];
+    const record = JSON.parse(rawLines[index] ?? '{}') as {
+      visibleMessage?: Record<string, unknown>;
+    };
 
     writeFileSync(
       paths.rawEventsPath,
-      `${duplicatedLines.join('\n')}\n`,
+      `${rawLines
+        .map((line, at) =>
+          at === index
+            ? JSON.stringify({
+                ...record,
+                visibleMessage: {
+                  ...record.visibleMessage,
+                  text: 'edited by hand',
+                },
+              })
+            : line,
+        )
+        .join('\n')}\n`,
       'utf8',
     );
 
-    expect(() =>
-      createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        characterId: testCharacterProfile.id,
-        boundCharacter: testCharacterProfile,
-      }).readSessionEvidence(),
-    ).toThrow('more than one visible_message_committed raw event');
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /must match the accepted reply/iu,
+    );
   });
+  it('rejects a duplicated visible_message_committed anchor for one message', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-duplicate-commit-anchor',
+    );
+    const anchor = rawLines.find(line =>
+      line.includes('"visible_message_committed"'),
+    );
 
+    if (anchor === undefined) {
+      throw new Error('Expected a commit anchor line.');
+    }
+
+    // One message, one commit event: a duplicate must fail closed. It is
+    // inserted before the terminal, so the turn-shape gate decides rather
+    // than the records-after-terminal rule.
+    const terminalIndex = rawLines.findIndex(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${[
+        ...rawLines.slice(0, terminalIndex),
+        anchor,
+        ...rawLines.slice(terminalIndex),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
   it('rejects a forged character row committed without its accepted decision', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-forged-character-row';
@@ -1545,259 +1472,98 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it('rejects a user row whose text disagrees with the recorded model input', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-user-text-drift';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const session = createConversationSession({
-      character: testCharacterProfile,
-      id: sessionId,
-    });
-    const result = await runLocalUserMessageEvent({
-      event: createUserMessageRuntimeEvent(
-        'hello',
-        identity('evt_user_text_drift'),
-      ),
-      session,
-      logStore,
-      roleModelAdapter: createMultilineVisibleReplyAdapter(),
-      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
-    });
-
-    expect(result.status).toBe('completed');
-
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    // The user row is resolved by event identity, so this fails even
-    // though no character commit event names it.
-    const conversationLines = readFileSync(paths.conversationPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0);
-    const editedLines = conversationLines.map(line => {
-      if (!line.includes('"role":"user"')) {
-        return line;
-      }
-
-      const record = JSON.parse(line) as Record<string, unknown>;
-
-      record['text'] = 'edited after the fact';
-      return JSON.stringify(record);
-    });
-
-    writeFileSync(
-      paths.conversationPath,
-      `${editedLines.join('\n')}\n`,
-      'utf8',
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-user-text-drift',
     );
-
-    expect(() =>
-      createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        characterId: testCharacterProfile.id,
-        boundCharacter: testCharacterProfile,
-      }).readSessionEvidence(),
-    ).toThrow(
-      'Role-model input text must match the committed user visible message for the turn.',
-    );
-  });
-
-  it('rejects a second user row appended into one turn', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-second-user-row';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const session = createConversationSession({
-      character: testCharacterProfile,
-      id: sessionId,
-    });
-    const result = await runLocalUserMessageEvent({
-      event: createUserMessageRuntimeEvent(
-        'hello',
-        identity('evt_second_user_row'),
-      ),
-      session,
-      logStore,
-      roleModelAdapter: createMultilineVisibleReplyAdapter(),
-      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
-    });
-
-    expect(result.status).toBe('completed');
-
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    // One runtime input, one user row: a duplicate under the same turn
-    // identity is rejected even with its own commit anchor.
-    const conversationLines = readFileSync(paths.conversationPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0);
-    const userLine = conversationLines.find(line =>
-      line.includes('"role":"user"'),
-    );
-
-    if (userLine === undefined) {
-      throw new Error('Expected a user conversation line.');
-    }
-
-    const userRecord = JSON.parse(userLine) as Record<string, unknown>;
-    const forgedMessageId = `${sessionId}:message-${String(conversationLines.length + 1)}`;
-    const forgedUserRecord = {...userRecord, id: forgedMessageId};
-
-    writeFileSync(
-      paths.conversationPath,
-      `${[...conversationLines, JSON.stringify(forgedUserRecord)].join('\n')}\n`,
-      'utf8',
-    );
-
-    // Anchored and listed on the terminal, so the store fails on the
-    // duplicated utterance rather than a missing anchor.
-    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0);
-    const userAnchorLine = rawLines.find(
+    const index = rawLines.findIndex(
       line =>
         line.includes('"visible_message_committed"') &&
-        line.includes(`${sessionId}:message-1`),
+        line.includes('"role":"user"'),
     );
-
-    if (userAnchorLine === undefined) {
-      throw new Error('Expected a user commit anchor line.');
-    }
-
-    const forgedAnchor = JSON.stringify({
-      ...(JSON.parse(userAnchorLine) as Record<string, unknown>),
-      visibleMessageIds: [forgedMessageId],
-    });
-    const terminalIndex = rawLines.findIndex(line =>
-      line.includes('"runtime_turn_completed"'),
-    );
-    const terminalRecord = JSON.parse(rawLines[terminalIndex] ?? '{}') as {
-      visibleMessageIds?: string[];
+    const record = JSON.parse(rawLines[index] ?? '{}') as {
+      visibleMessage?: Record<string, unknown>;
     };
-    const forgedLines = [
-      ...rawLines.slice(0, terminalIndex),
-      forgedAnchor,
-      JSON.stringify({
-        ...terminalRecord,
-        visibleMessageIds: [
-          ...(terminalRecord.visibleMessageIds ?? []),
-          forgedMessageId,
-        ],
-      }),
-      ...rawLines.slice(terminalIndex + 1),
-    ];
 
-    writeFileSync(paths.rawEventsPath, `${forgedLines.join('\n')}\n`, 'utf8');
-
-    expect(() =>
-      createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        characterId: testCharacterProfile.id,
-        boundCharacter: testCharacterProfile,
-      }).readSessionEvidence(),
-    ).toThrow('must commit exactly one user message before its replies');
-  });
-
-  it('rejects conversation rows reordered out of their session sequence', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-interleaved-turns';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    let logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-
-    for (const turn of ['first', 'second']) {
-      await runLocalUserMessageEvent({
-        event: createUserMessageRuntimeEvent(
-          `message ${turn}`,
-          identity(`evt_${turn}_turn`),
-        ),
-        session: createConversationSession({
-          character: testCharacterProfile,
-          id: sessionId,
-          visibleTranscript: logStore.conversationMessages(),
-        }),
-        logStore,
-        roleModelAdapter: createMultilineVisibleReplyAdapter(),
-        pluginHost: createDefaultProject02PluginHost(),
-      });
-      logStore = createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        characterId: testCharacterProfile.id,
-        boundCharacter: testCharacterProfile,
-      });
-    }
-
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected local runtime session paths.');
-    }
-
-    const rows = readFileSync(paths.conversationPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0);
-
-    // Each turn still holds its own messages in order with matching
-    // anchors, so only the file-wide sequence is broken — which
-    // per-session message IDs checked against row position pin.
     writeFileSync(
-      paths.conversationPath,
-      `${[rows[0], rows[2], rows[1], rows[3]].join('\n')}\n`,
+      paths.rawEventsPath,
+      `${rawLines
+        .map((line, at) =>
+          at === index
+            ? JSON.stringify({
+                ...record,
+                visibleMessage: {
+                  ...record.visibleMessage,
+                  text: 'a different question',
+                },
+              })
+            : line,
+        )
+        .join('\n')}\n`,
       'utf8',
     );
 
-    expect(() =>
-      createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        characterId: testCharacterProfile.id,
-        boundCharacter: testCharacterProfile,
-      }).conversationMessages(),
-    ).toThrow(LocalRuntimeStorageContractError);
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
   });
+  it('rejects a second user row appended into one turn', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-second-user-row',
+    );
+    const index = rawLines.findIndex(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"user"'),
+    );
+    const record = JSON.parse(rawLines[index] ?? '{}') as {
+      visibleMessage?: Record<string, unknown>;
+      visibleMessageIds?: string[];
+    };
+    const forgedId = `session-second-user-row:message-9`;
 
+    // One runtime input, one user row — even with its own commit event.
+    writeFileSync(
+      paths.rawEventsPath,
+      `${[
+        ...rawLines,
+        JSON.stringify({
+          ...record,
+          visibleMessageIds: [forgedId],
+          visibleMessage: {...record.visibleMessage, id: forgedId},
+        }),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
+  it('rejects conversation rows reordered out of their session sequence', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-reordered-rows',
+    );
+    const commits = rawLines.filter(line =>
+      line.includes('"visible_message_committed"'),
+    );
+
+    if (commits.length < 2) {
+      throw new Error('Expected two commit events.');
+    }
+
+    // Message IDs are assigned per session and checked against position,
+    // so swapping two commit events breaks the file-wide sequence.
+    const [first, second] = commits;
+    const swapped = rawLines.map(line =>
+      line === first ? second : line === second ? first : line,
+    );
+
+    writeFileSync(paths.rawEventsPath, `${swapped.join('\n')}\n`, 'utf8');
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
   it('keeps a session readable when a crash left its last record unfinished', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-torn-final-record';
@@ -2740,5 +2506,58 @@ function createHealthRejectingPluginHost(options?: {
       }),
     ],
     enabledPluginIds: [firstPartyModelToolsPluginId, 'health.reject.fixture'],
+  });
+}
+
+async function committedTurnRawLines(sessionId: string): Promise<{
+  readonly paths: NonNullable<RuntimeLogStore['localRuntimeSessionPaths']>;
+  readonly rawLines: readonly string[];
+}> {
+  const storeRoot = createStoreRoot();
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: 'mira',
+  }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+
+  const logStore = createFileRuntimeLogStore({
+    storeRoot,
+    sessionId,
+    characterId: testCharacterProfile.id,
+    boundCharacter: testCharacterProfile,
+  });
+
+  await runLocalUserMessageEvent({
+    event: createUserMessageRuntimeEvent('hello', identity(`evt_${sessionId}`)),
+    session: createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    }),
+    logStore,
+    roleModelAdapter: createMultilineVisibleReplyAdapter(),
+    pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+  });
+
+  const paths = logStore.localRuntimeSessionPaths;
+
+  if (paths === undefined) {
+    throw new Error('Expected file runtime log store session paths.');
+  }
+
+  return {
+    paths,
+    rawLines: readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0),
+  };
+}
+
+function reopenStore(
+  paths: NonNullable<RuntimeLogStore['localRuntimeSessionPaths']>,
+): RuntimeLogStore {
+  return createFileRuntimeLogStore({
+    storeRoot: paths.storeRoot,
+    sessionId: paths.sessionId,
+    characterId: testCharacterProfile.id,
+    boundCharacter: testCharacterProfile,
   });
 }

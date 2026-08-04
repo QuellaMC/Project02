@@ -34,6 +34,7 @@ import {
   type RuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   runtimeConfigEnvVarName,
@@ -100,7 +101,10 @@ describe('chat CLI trace summary', () => {
         stderr += chunk;
       }),
       traceMode: true,
-      logStore: createTerminalRawEventAppendFailingLogStore(),
+      logStore: createRawEventAppendFailingLogStore({
+        matches: record => record.kind === 'runtime_turn_completed',
+        message: 'terminal raw event append failed',
+      }),
       roleModelAdapter: {
         invoke() {
           return {
@@ -2938,41 +2942,6 @@ async function waitForMicrotasks(predicate: () => boolean): Promise<void> {
   throw new Error('Expected asynchronous chat state was not reached.');
 }
 
-function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
-  const logStore = createRuntimeLogStore();
-
-  return Object.freeze({
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      if (record.kind === 'runtime_turn_completed') {
-        throw new Error('terminal raw event append failed');
-      }
-
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
 function createToolTraceFailingLogStore(
   failingStep:
     'visible_message_committed' | 'tool_call_started' | 'tool_call_finished',
@@ -3006,14 +2975,8 @@ function createToolTraceFailingLogStore(
 
       return logStore.appendTrace(entry);
     },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
+    appendRawEvent(record, expectedCharacter) {
+      return logStore.appendRawEvent(record, expectedCharacter);
     },
     readSessionEvidence() {
       return logStore.readSessionEvidence();

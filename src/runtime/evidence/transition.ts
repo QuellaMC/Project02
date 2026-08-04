@@ -1,16 +1,11 @@
 import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 import type {
-  ConversationLogRecord,
-  ConversationLogRecordInput,
   RawEventLogRecord,
   RawEventLogRecordInput,
   RuntimeTraceEntry,
   RuntimeTraceEntryInput,
 } from './records.ts';
-import {
-  decodeConversationLogRecord,
-  encodeConversationLogRecord,
-} from '../storage/conversation-codec.ts';
+import {conversationMessageForRawEvent} from './cache.ts';
 import type {
   MutableDurableRuntimeSessionEvidence,
   RuntimeEvidenceIncrementalState,
@@ -21,7 +16,6 @@ import {
 } from '../storage/raw-event-codec.ts';
 import {
   applyIncrementalConversationAppend,
-  applyIncrementalConversationRemoval,
   applyIncrementalRawEventAppend,
   applyIncrementalTraceAppend,
   assertIncrementalConversationAppend,
@@ -39,14 +33,11 @@ export type RuntimeEvidenceTransitionMachine = {
   readonly state: RuntimeEvidenceIncrementalState;
   prepareTraceAppend(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
   commitTraceAppend(entry: RuntimeTraceEntry): void;
-  prepareRawEventAppend(record: RawEventLogRecordInput): RawEventLogRecord;
-  commitRawEventAppend(record: RawEventLogRecord): void;
-  prepareConversationAppend(
-    record: ConversationLogRecordInput,
+  prepareRawEventAppend(
+    record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
-  ): ConversationLogRecord;
-  commitConversationAppend(record: ConversationLogRecord): void;
-  removeConversationMessages(messageIds: readonly string[]): void;
+  ): RawEventLogRecord;
+  commitRawEventAppend(record: RawEventLogRecord): void;
   assertPublicReadable(): void;
 };
 
@@ -76,7 +67,7 @@ export function createRuntimeEvidenceTransitionMachine(options: {
       options.evidence.traceEntries.push(entry);
       applyIncrementalTraceAppend(state, entry);
     },
-    prepareRawEventAppend(record) {
+    prepareRawEventAppend(record, expectedCharacter) {
       const storedRecord = decodeRawEventLogRecord(
         encodeRawEventLogRecord(record),
       );
@@ -89,6 +80,21 @@ export function createRuntimeEvidenceTransitionMachine(options: {
           ? {}
           : {sessionId: options.sessionId}),
       });
+
+      const message = conversationMessageForRawEvent(storedRecord);
+
+      if (message !== undefined) {
+        assertIncrementalConversationAppend({
+          evidence: options.evidence,
+          state,
+          record: message,
+          ...(options.sessionId === undefined
+            ? {}
+            : {sessionId: options.sessionId}),
+          ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
+        });
+      }
+
       return storedRecord;
     },
     commitRawEventAppend(record) {
@@ -98,43 +104,13 @@ export function createRuntimeEvidenceTransitionMachine(options: {
         state,
         record,
       });
-    },
-    prepareConversationAppend(record, expectedCharacter) {
-      const storedRecord = decodeConversationLogRecord(
-        encodeConversationLogRecord(record),
-      );
 
-      assertIncrementalConversationAppend({
-        evidence: options.evidence,
-        state,
-        record: storedRecord,
-        ...(options.sessionId === undefined
-          ? {}
-          : {sessionId: options.sessionId}),
-        ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
-      });
-      return storedRecord;
-    },
-    commitConversationAppend(record) {
-      options.evidence.conversationMessages.push(record);
-      applyIncrementalConversationAppend(state, record);
-    },
-    removeConversationMessages(messageIds) {
-      const ids = new Set(messageIds);
+      const message = conversationMessageForRawEvent(record);
 
-      for (
-        let index = options.evidence.conversationMessages.length - 1;
-        index >= 0;
-        index -= 1
-      ) {
-        const message = options.evidence.conversationMessages[index];
-
-        if (message !== undefined && ids.has(message.id)) {
-          options.evidence.conversationMessages.splice(index, 1);
-        }
+      if (message !== undefined) {
+        options.evidence.conversationMessages.push(message);
+        applyIncrementalConversationAppend(state, message);
       }
-
-      applyIncrementalConversationRemoval(state, messageIds);
     },
     assertPublicReadable() {
       assertIncrementalStatePublicReadable(state, options.evidence);

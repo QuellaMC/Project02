@@ -1,4 +1,8 @@
 import {
+  conversationMessageForRawEvent,
+  conversationMessagesFromRawEvents,
+} from './cache.ts';
+import {
   type CharacterProfile,
   ConversationRehydrationError,
   isValidSpeakerDisplayName,
@@ -15,7 +19,6 @@ import {
   normalizeLocalRuntimeSessionId,
   type LocalRuntimeSessionPaths,
 } from '../storage/layout-contract.ts';
-import {decodeConversationLogRecord} from '../storage/conversation-codec.ts';
 import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
 import {
   decodeRuntimeTraceEntry,
@@ -28,7 +31,6 @@ import type {
   RuntimeTraceEntry,
 } from './records.ts';
 import {isTerminalRawEventLogRecord} from './records.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
 import {
   readOptionalStoreText,
@@ -510,8 +512,15 @@ function assertIncrementalRawVisibleReferences(
   state: RuntimeEvidenceIncrementalState,
   record: RawEventLogRecord,
 ): void {
+  const ownMessage = conversationMessageForRawEvent(record);
+
   for (const messageId of record.visibleMessageIds ?? []) {
-    const message = state.messagesById.get(messageId);
+    // A commit event carries the message it references, so it satisfies
+    // its own reference before the message is registered.
+    const message =
+      ownMessage?.id === messageId
+        ? ownMessage
+        : state.messagesById.get(messageId);
 
     if (message === undefined) {
       throw new LocalRuntimeStorageContractError(
@@ -769,36 +778,6 @@ function incrementalConversationMessageId(options: {
 
     throw error;
   }
-}
-
-export function applyIncrementalConversationRemoval(
-  state: RuntimeEvidenceIncrementalState,
-  messageIds: readonly string[],
-): void {
-  for (const messageId of messageIds) {
-    const message = state.messagesById.get(messageId);
-
-    if (message === undefined) {
-      continue;
-    }
-
-    state.messagesById.delete(messageId);
-    const identityKey = runtimeEventIdentityKey(message);
-    const remainingIds =
-      state.messageIdsByIdentity
-        .get(identityKey)
-        ?.filter(candidate => candidate !== messageId) ?? [];
-
-    if (remainingIds.length === 0) {
-      state.messageIdsByIdentity.delete(identityKey);
-    } else {
-      state.messageIdsByIdentity.set(identityKey, remainingIds);
-    }
-  }
-
-  state.conversationCharacter = recordedConversationCharacterProfile([
-    ...state.messagesById.values(),
-  ]);
 }
 
 function assertIncrementalIdentityTimestamp(
@@ -1411,21 +1390,6 @@ function readRuntimeTraceEntries(
   return Object.freeze(records);
 }
 
-/**
- * Read straight from the raw-event file: the writer needs this mid-turn,
- * where a validated read would reject its own open turn.
- */
-export function durableVisibleMessageCommitExists(
-  paths: LocalRuntimeSessionPaths,
-  messageId: string,
-): boolean {
-  return readRawEventLogRecords(paths, 'publicDecode').some(
-    rawEvent =>
-      rawEvent.kind === 'visible_message_committed' &&
-      (rawEvent.visibleMessageIds ?? []).includes(messageId),
-  );
-}
-
 function readRawEventLogRecords(
   paths: LocalRuntimeSessionPaths,
   mode: RuntimeLogReadMode = 'public',
@@ -1453,14 +1417,7 @@ function readConversationLogRecords(
       .conversationMessages;
   }
 
-  const records = readJsonLines({
-    filePath: paths.conversationPath,
-    decodeLine: line => decodeConversationLogRecord(line),
-    missingFileIsAllowed: () => !rawEventsRequireConversationLog(paths),
-    emptyFileIsAllowed: () => !rawEventsRequireConversationLog(paths),
-  });
-
-  return Object.freeze(records);
+  return conversationMessagesFromRawEvents(readRawEventLogRecords(paths, mode));
 }
 
 function assertRestoredConversationInvariants(
@@ -1945,17 +1902,11 @@ function traceLogIsOptional(
     return true;
   }
 
-  return (
-    !logFileHasContent(paths.rawEventsPath) &&
-    !logFileHasContent(paths.conversationPath)
-  );
+  return !logFileHasContent(paths.rawEventsPath);
 }
 
 function isRawEventLogOptional(paths: LocalRuntimeSessionPaths): boolean {
-  return (
-    !logFileHasContent(paths.tracePath) &&
-    !logFileHasContent(paths.conversationPath)
-  );
+  return !logFileHasContent(paths.tracePath);
 }
 
 function rawEventLogMissingFileIsAllowed(
@@ -2268,10 +2219,7 @@ function assertCharacterCommitCarriesItsDecision(
   // Evidence holds the redacted projection of the reply the transcript
   // shows, so the rows compare through that same projection: credential
   // redaction stays legitimate while unrelated edited text is rejected.
-  if (
-    commitResult.acceptedVisibleReplyText !==
-    redactJsonBoundaryText(message.text)
-  ) {
+  if (commitResult.acceptedVisibleReplyText !== message.text) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
       `Character message text must match the accepted reply its commit anchored: ${message.id}.`,
@@ -2396,17 +2344,6 @@ function readJsonLines<T>(options: {
   }
 
   return readStoreJsonLines(options.filePath, content).map(options.decodeLine);
-}
-
-function rawEventsRequireConversationLog(
-  paths: LocalRuntimeSessionPaths,
-): boolean {
-  return readRawEventLogRecords(paths, 'append').some(record => {
-    return (
-      record.visibleMessageIds !== undefined &&
-      record.visibleMessageIds.length > 0
-    );
-  });
 }
 
 function logFileHasContent(filePath: string): boolean {

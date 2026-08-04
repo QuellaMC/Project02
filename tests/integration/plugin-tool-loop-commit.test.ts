@@ -44,7 +44,6 @@ import {
 } from '../../src/runtime/storage/layout-contract.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
 import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
@@ -53,17 +52,11 @@ import {
 import {runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost} from '../../src/runtime/turn/local.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
-  createAfterTurnCommittedAppendFailingLogStore,
+  createRawEventAppendFailingLogStore,
   createAfterTurnCommittedProbeHost,
-  createCharacterAppendFailingLogStore,
-  createConversationAppendFailingLogStore,
   createOneShotTerminalTraceAppendFailingLogStore,
-  createRuntimeTurnCompletedAppendFailingLogStore,
-  createRuntimeTurnCompletedAppendThenThrowLogStore,
   createSequencedAdapter,
   createTestEvent,
-  createToolCallFinishedAppendFailingLogStore,
-  createTurnCompletedAppendFailingLogStore,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
 
@@ -490,107 +483,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ]);
   });
 
-  it('keeps a message whose commit anchor persisted before the append threw', async () => {
-    const storeRoot = createTestTempRoot('project02-plugin-loop-');
-    const sessionId = 'session-anchor-persisted-then-failed';
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-
-    const fileLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot,
-      sessionId,
-    });
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = Object.freeze({
-      ...(fileLogStore.localRuntimeSessionPaths === undefined
-        ? {}
-        : {localRuntimeSessionPaths: fileLogStore.localRuntimeSessionPaths}),
-      ...(fileLogStore.localRuntimeWriterLockOwnerToken === undefined
-        ? {}
-        : {
-            localRuntimeWriterLockOwnerToken:
-              fileLogStore.localRuntimeWriterLockOwnerToken,
-          }),
-      appendTrace: entry => fileLogStore.appendTrace(entry),
-      appendRawEvent(record) {
-        const stored = fileLogStore.appendRawEvent(record);
-
-        if (
-          record.kind === 'visible_message_committed' &&
-          stored.visibleMessageIds?.includes(`${sessionId}:message-2`) === true
-        ) {
-          throw new Error('anchor persisted then failed');
-        }
-
-        return stored;
-      },
-      appendConversationMessage: (record, expectedCharacter) =>
-        fileLogStore.appendConversationMessage(record, expectedCharacter),
-      removeConversationMessages(messageIds) {
-        fileLogStore.removeConversationMessages(messageIds);
-      },
-      recoverAbandonedWriterEvidence: () =>
-        fileLogStore.recoverAbandonedWriterEvidence?.() ?? false,
-      checkpointWriterEvidence: () => fileLogStore.checkpointWriterEvidence?.(),
-      readSessionEvidence: () => fileLogStore.readSessionEvidence(),
-      traceEntries: () => fileLogStore.traceEntries(),
-      rawEvents: () => fileLogStore.rawEvents(),
-      conversationMessages: () => fileLogStore.conversationMessages(),
-    } satisfies RuntimeLogStore);
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent('hi', 'evt_anchor_persisted_then_failed'),
-        session,
-        logStore,
-        roleModelAdapter: createSequencedAdapter([
-          {
-            toolCalls: [{name: 'visible_reply', input: {text: 'hello back'}}],
-          },
-        ]),
-      }),
-    ).rejects.toThrow('anchor persisted then failed');
-
-    // The durable anchor references this message, so deleting the row
-    // would leave evidence pointing at a message that no longer exists —
-    // a shape writer recovery cannot repair. The message stays.
-    const paths = fileLogStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    const durableMessageTexts = readFileSync(paths.conversationPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0)
-      .map(line => (JSON.parse(line) as {text: string}).text);
-    const durableAnchoredIds = readFileSync(paths.rawEventsPath, 'utf8')
-      .split('\n')
-      .filter(line => line.includes('"visible_message_committed"'))
-      .flatMap(
-        line =>
-          (JSON.parse(line) as {visibleMessageIds?: string[]})
-            .visibleMessageIds ?? [],
-      );
-
-    expect(durableMessageTexts).toEqual(['hi', 'hello back']);
-    expect(durableAnchoredIds).toEqual([
-      `${sessionId}:message-1`,
-      `${sessionId}:message-2`,
-    ]);
-  });
-
   it('completes a text-only terminal round after a committed interim reply', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
@@ -711,238 +603,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ]);
   });
 
-  it('commits authoritative visible reply text while durable evidence stays redacted', async () => {
-    const sessionId = 'session-authoritative-visible';
-    const storeRoot = createTestTempRoot('project02-authoritative-visible-');
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-    const replyText = 'Authorization: Bearer committed-reply-secret';
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {text: replyText},
-          },
-        ],
-      },
-    ]);
-
-    const result = await runLocalUserMessageEvent({
-      event: createTestEvent(
-        'show the exact value',
-        'evt_authoritative_visible',
-      ),
-      session,
-      logStore,
-      roleModelAdapter: adapter,
-    });
-
-    expect(result.status).toBe('completed');
-    expect(
-      logStore.conversationMessages().map(message => message.text),
-    ).toEqual(['show the exact value', replyText]);
-
-    const serializedEvidence = JSON.stringify({
-      rawEvents: logStore.rawEvents(),
-      traces: logStore.traceEntries(),
-    });
-
-    expect(serializedEvidence).toContain('Authorization: [redacted]');
-    expect(serializedEvidence).not.toContain('committed-reply-secret');
-  });
-
-  it('rolls back visible session messages when conversation log append fails', async () => {
-    const session = createConversationSession({
-      character: testCharacterProfile,
-    });
-    const logStore = createConversationAppendFailingLogStore();
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {
-              text: 'this should not remain in memory',
-            },
-          },
-        ],
-      },
-    ]);
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent('hello', 'evt_conversation_append_fails'),
-        session,
-        logStore,
-        roleModelAdapter: adapter,
-      }),
-    ).rejects.toThrow('conversation append failed');
-    expect(session.visibleTranscript).toEqual([]);
-    expect(logStore.conversationMessages()).toEqual([]);
-  });
-
-  it('discards a prepared Character State patch when conversation append fails', async () => {
-    const sessionId = 'session-character-state-conversation-append-fails';
-    const storeRoot = createTestTempRoot('project02-plugin-loop-');
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createConversationAppendFailingLogStore(
-      createFileRuntimeLogStore({
-        boundCharacter: testCharacterProfile,
-        characterId: testCharacterProfile.id,
-        storeRoot,
-        sessionId,
-      }),
-    );
-    const pluginHost = createRuntimePluginHost({
-      fileStore: testRuntimePluginFileStoreProvider,
-      storeRoot,
-      sessionId,
-      plugins: [createCharacterStatePlugin()],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        characterStatePluginId,
-      ],
-    });
-    const pluginStore = createRuntimePluginFileStore({
-      storeRoot,
-      sessionId,
-      pluginId: characterStatePluginId,
-    });
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent(
-          'hello',
-          'evt_character_state_conversation_append_fails',
-        ),
-        session,
-        logStore,
-        pluginHost,
-        roleModelAdapter: createSequencedAdapter([
-          {
-            toolCalls: [
-              {
-                name: 'character_state.patch',
-                input: {
-                  mood: 'curious',
-                },
-              },
-            ],
-          },
-          {
-            toolCalls: [
-              {
-                name: 'visible_reply',
-                input: {
-                  text: 'the conversation append should fail',
-                },
-              },
-            ],
-          },
-        ]),
-      }),
-    ).rejects.toThrow('conversation append failed');
-
-    expect(pluginStore.readJsonl('events.jsonl')).toEqual([]);
-    expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
-  });
-
-  it('keeps the accepted user row and rejects the turn when a character append fails', async () => {
-    const storeRoot = createTestTempRoot('project02-log-store-');
-    const sessionId = 'session-character-append-fails';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    const fileLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot,
-      sessionId,
-    });
-    const logStore = createCharacterAppendFailingLogStore(fileLogStore);
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {
-              text: 'this should not leave an unmatched user row',
-            },
-          },
-        ],
-      },
-    ]);
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent('hello', 'evt_character_append_fails'),
-        session,
-        logStore,
-        roleModelAdapter: adapter,
-      }),
-    ).rejects.toThrow('character append failed');
-
-    const reopenedLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot,
-      sessionId,
-    });
-
-    // Commit-as-emitted: the user's accepted message is already history,
-    // so only the failed character append rolls back. The rejected turn
-    // closes around the kept user row.
-    expect(session.visibleTranscript.map(message => message.role)).toEqual([
-      'user',
-    ]);
-    expect(
-      reopenedLogStore.conversationMessages().map(message => message.role),
-    ).toEqual(['user']);
-    expect(reopenedLogStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-    });
-  });
-
   it('runs afterTurnCommitted after visible messages and terminal evidence commit', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
@@ -1052,7 +712,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createAfterTurnCommittedAppendFailingLogStore();
+    const logStore = createRawEventAppendFailingLogStore({
+      matches: record => record.kind === 'after_turn_committed',
+      message: 'after-turn raw event append failed',
+    });
     const pluginHost = createAfterTurnCommittedProbeHost(() => {}, {
       status: 'failed',
       summary: 'After commit fixture failed after terminal commit.',
@@ -1105,7 +768,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
-    const logStore = createRuntimeTurnCompletedAppendFailingLogStore();
+    const logStore = createRawEventAppendFailingLogStore({
+      matches: record => record.kind === 'runtime_turn_completed',
+      message: 'terminal raw event append failed',
+    });
     let afterTurnCommittedCalls = 0;
     const pluginHost = createAfterTurnCommittedProbeHost(() => {
       afterTurnCommittedCalls += 1;
@@ -1248,8 +914,12 @@ describe('plugin-driven tool loop commit and rollback', () => {
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
     });
-    const logStore =
-      createRuntimeTurnCompletedAppendThenThrowLogStore(fileLogStore);
+    const logStore = createRawEventAppendFailingLogStore({
+      logStore: fileLogStore,
+      matches: record => record.kind === 'runtime_turn_completed',
+      message: 'terminal raw event append failed after persisting',
+      persist: true,
+    });
     const pluginHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
@@ -1303,9 +973,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       rawEvent: {
         kind: 'runtime_turn_completed',
       },
-      postCommitFailures: [
-        'terminal raw event append reported failure after write',
-      ],
+      postCommitFailures: ['terminal raw event append failed after persisting'],
     });
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(pluginStore.readJson('checkpoint.json')).toMatchObject({
@@ -1345,8 +1013,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
     });
-    const logStore =
-      createRuntimeTurnCompletedAppendFailingLogStore(fileLogStore);
+    const logStore = createRawEventAppendFailingLogStore({
+      logStore: fileLogStore,
+      matches: record => record.kind === 'runtime_turn_completed',
+      message: 'terminal raw event append failed',
+    });
     const pluginHost = createRuntimePluginHost({plugins: []});
     const session = createConversationSession({
       id: sessionId,
@@ -1740,8 +1411,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
     });
-    const logStore =
-      createAfterTurnCommittedAppendFailingLogStore(fileLogStore);
+    const logStore = createRawEventAppendFailingLogStore({
+      logStore: fileLogStore,
+      matches: record => record.kind === 'after_turn_committed',
+      message: 'after-turn raw event append failed',
+    });
     const pluginHost = createConfigEffectTestHost({fixture, session});
     const firstResult = await runLocalUserMessageEvent({
       event: createTestEvent('update config', 'evt_config_marker_recovery'),
@@ -1829,9 +1503,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('skips the recovery rebuild when the running host already carries the config', async () => {
     const live = await createLiveReloadLoopFixture('already-applied');
-    const failingStore = createAfterTurnCommittedAppendFailingLogStore(
-      live.logStore,
-    );
+    const failingStore = createRawEventAppendFailingLogStore({
+      matches: record => record.kind === 'after_turn_committed',
+      message: 'after-turn raw event append failed',
+      logStore: live.logStore,
+    });
     const crashResult = await runLocalUserMessageEvent({
       event: createTestEvent('update tone', 'evt_already_applied_update'),
       session: live.session,
@@ -1891,9 +1567,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('skips the recovery rebuild when the tail effect conflicted at commit', async () => {
     const live = await createLiveReloadLoopFixture('accepted-final');
-    const failingStore = createAfterTurnCommittedAppendFailingLogStore(
-      live.logStore,
-    );
+    const failingStore = createRawEventAppendFailingLogStore({
+      matches: record => record.kind === 'after_turn_committed',
+      message: 'after-turn raw event append failed',
+      logStore: live.logStore,
+    });
     // Two same-plugin live updates prepared against the SAME fingerprint:
     // the first applies at commit, the second conflict-closes, so the file
     // (and the live-applied instance) end at the first effect's result.
@@ -1948,9 +1626,11 @@ describe('plugin-driven tool loop commit and rollback', () => {
         reload: () => Promise.reject(new Error('factory exploded')),
       },
     });
-    const failingStore = createAfterTurnCommittedAppendFailingLogStore(
-      live.logStore,
-    );
+    const failingStore = createRawEventAppendFailingLogStore({
+      matches: record => record.kind === 'after_turn_committed',
+      message: 'after-turn raw event append failed',
+      logStore: live.logStore,
+    });
     const crashResult = await runLocalUserMessageEvent({
       event: createTestEvent('update tone', 'evt_undurable_reload'),
       session: live.session,
@@ -2796,14 +2476,16 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createToolCallFinishedAppendFailingLogStore(
-      createFileRuntimeLogStore({
+    const logStore = createRawEventAppendFailingLogStore({
+      logStore: createFileRuntimeLogStore({
         storeRoot,
         sessionId,
         boundCharacter: testCharacterProfile,
         characterId: testCharacterProfile.id,
       }),
-    );
+      matches: record => record.kind === 'tool_call_finished',
+      message: 'tool_call_finished raw event append failed',
+    });
     const pluginHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,
@@ -2934,14 +2616,16 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       character: testCharacterProfile,
     });
-    const logStore = createTurnCompletedAppendFailingLogStore(
-      createFileRuntimeLogStore({
+    const logStore = createRawEventAppendFailingLogStore({
+      logStore: createFileRuntimeLogStore({
         storeRoot,
         sessionId,
         boundCharacter: testCharacterProfile,
         characterId: testCharacterProfile.id,
       }),
-    );
+      matches: record => record.kind === 'runtime_turn_completed',
+      message: 'runtime_turn_completed raw event append failed',
+    });
     const pluginHost = createRuntimePluginHost({
       fileStore: testRuntimePluginFileStoreProvider,
       storeRoot,

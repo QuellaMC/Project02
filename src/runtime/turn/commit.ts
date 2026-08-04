@@ -1,8 +1,9 @@
+import {conversationMessageForRawEvent} from '../evidence/cache.ts';
 import {
-  appendCharacterMessage,
-  appendUserMessage,
+  appendCommittedMessage,
+  createCharacterMessage,
+  createUserMessage,
   normalizeCharacterAgentReply,
-  rollbackLastMessage,
   type VisibleMessage,
 } from '../../core/index.ts';
 import {
@@ -46,10 +47,7 @@ import {
   executionVisibleReplyTexts,
   type RoleModelLoopResult,
 } from '../../role-model/index.ts';
-import {
-  durableVisibleMessageCommitExists,
-  findValidatedTerminalRawEventForSession,
-} from '../storage/file-runtime-log-store.ts';
+import {findValidatedTerminalRawEventForSession} from '../storage/file-runtime-log-store.ts';
 import type {
   AppendVisibleReplyOptions,
   LocalRuntimeTurnProgressEvent,
@@ -140,7 +138,7 @@ export async function emitProgress(
 export function commitUserMessage(
   state: RuntimeTurnState,
 ): ConversationLogRecord {
-  const message = appendUserMessage(
+  const message = createUserMessage(
     state.options.session,
     state.event.payload.currentUserMessage,
   );
@@ -165,7 +163,7 @@ export async function appendVisibleReplyForDecision(
       acceptedVisibleReplyText: normalizedReply.text,
     },
   });
-  const message = appendCharacterMessage(
+  const message = createCharacterMessage(
     state.options.session,
     normalizedReply,
   );
@@ -185,102 +183,41 @@ export async function appendVisibleReplyForDecision(
 }
 
 /**
- * The one durable step for any visible message: append it, then anchor it
- * with its own visible_message_committed raw event. Failure rolls back
- * exactly this message; earlier ones already reached the user.
+ * The one durable step for any visible message: a single append that
+ * carries both the message and the event that made it visible. It lands
+ * or it does not, so there is nothing to roll back.
  */
 function commitVisibleMessage(
   state: RuntimeTurnState,
   message: VisibleMessage,
   evidence: Partial<RawEventLogRecordInput>,
 ): ConversationLogRecord {
-  const committedAt =
-    state.options.committedAt ?? state.options.event.createdAt;
-  let record: ConversationLogRecord;
-
-  try {
-    record = state.options.logStore.appendConversationMessage(
-      {
-        ...message,
-        ...state.identity,
-        committedAt,
-      },
-      state.options.session.character,
-    );
-  } catch (error: unknown) {
-    rollbackFailedMessageCommit(state, message, error);
-    throw error;
-  }
-
-  try {
-    appendRawEvent(state, {
+  const rawEvent = state.options.logStore.appendRawEvent(
+    {
       ...state.identity,
       kind: 'visible_message_committed',
       eventType: state.event.type,
-      visibleMessageIds: [record.id],
+      visibleMessageIds: [message.id],
+      visibleMessage: message,
+      committedAt: state.options.committedAt ?? state.options.event.createdAt,
       payloadSummary: state.payloadSummary,
       ...evidence,
-    });
-  } catch (error: unknown) {
-    // An append that throws can still have reached the log. Removing a
-    // row its durable anchor references would leave evidence pointing at
-    // a missing message, so keep the message when the anchor landed.
-    if (durableCommitAnchorExists(state, record.id)) {
-      state.committedVisibleMessages.push(record);
-      throw error;
-    }
+    },
+    state.options.session.character,
+  );
 
-    rollbackFailedMessageCommit(state, message, error);
-    throw error;
+  state.rawEventLogRecords.push(rawEvent);
+  appendCommittedMessage(state.options.session, message);
+
+  const record = conversationMessageForRawEvent(rawEvent);
+
+  if (record === undefined) {
+    throw new TypeError('Visible message commit lost its message.');
   }
 
   state.committedVisibleMessages.push(record);
   appendTrace(state, 'visible_message_committed');
   return record;
-}
-
-function durableCommitAnchorExists(
-  state: RuntimeTurnState,
-  messageId: string,
-): boolean {
-  const sessionPaths = state.options.logStore.localRuntimeSessionPaths;
-
-  if (sessionPaths === undefined) {
-    return false;
-  }
-
-  try {
-    return durableVisibleMessageCommitExists(sessionPaths, messageId);
-  } catch {
-    // An unreadable log cannot prove the anchor landed.
-    return false;
-  }
-}
-
-function rollbackFailedMessageCommit(
-  state: RuntimeTurnState,
-  message: VisibleMessage,
-  originalError: unknown,
-): void {
-  const cleanupErrors: unknown[] = [];
-
-  // Even when the append threw: a crash mid-write can persist the row
-  // despite the error, and the message ID targets exactly this message.
-  try {
-    state.options.logStore.removeConversationMessages([message.id]);
-  } catch (error: unknown) {
-    cleanupErrors.push(error);
-  }
-
-  try {
-    rollbackLastMessage(state.options.session, message);
-  } catch (error: unknown) {
-    cleanupErrors.push(error);
-  }
-
-  if (cleanupErrors.length > 0) {
-    throw new IncompleteConversationRollbackError(cleanupErrors, originalError);
-  }
 }
 
 export function appendToolCallStarted(

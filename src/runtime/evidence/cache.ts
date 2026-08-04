@@ -11,9 +11,9 @@ import {
   readStoreJsonLines,
   storeWriteFailed,
 } from '../storage/store-file.ts';
-import {decodeConversationLogRecord} from '../storage/conversation-codec.ts';
 import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
 import {decodeRuntimeTraceEntry} from '../storage/trace-codec.ts';
+import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 import type {
   CachedRuntimeSessionEvidence,
   DurableRuntimeSessionEvidence,
@@ -30,6 +30,43 @@ export function createMutableDurableRuntimeSessionEvidence(
     rawEvents: [...evidence.rawEvents],
     conversationMessages: [...evidence.conversationMessages],
   };
+}
+
+/**
+ * The transcript, rebuilt from the events that committed it. Message text
+ * has one home: the commit event that made it visible.
+ */
+export function conversationMessagesFromRawEvents(
+  rawEvents: readonly RawEventLogRecord[],
+): readonly ConversationLogRecord[] {
+  return Object.freeze(
+    rawEvents.flatMap(rawEvent => {
+      const message = conversationMessageForRawEvent(rawEvent);
+
+      return message === undefined ? [] : [message];
+    }),
+  );
+}
+
+/** The message a commit event carries, or undefined for any other event. */
+export function conversationMessageForRawEvent(
+  rawEvent: RawEventLogRecord,
+): ConversationLogRecord | undefined {
+  if (
+    rawEvent.kind !== 'visible_message_committed' ||
+    rawEvent.visibleMessage === undefined ||
+    rawEvent.committedAt === undefined
+  ) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    eventId: rawEvent.eventId,
+    traceId: rawEvent.traceId,
+    createdAt: rawEvent.createdAt,
+    committedAt: rawEvent.committedAt,
+    ...rawEvent.visibleMessage,
+  } satisfies ConversationLogRecord);
 }
 
 export function readCoherentRuntimeSessionEvidence(
@@ -63,12 +100,12 @@ export function readCoherentRuntimeSessionEvidence(
         content: contents.rawEvents,
         decodeLine: decodeRawEventLogRecord,
       }),
-      conversationMessages: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.conversationPath,
-        content: contents.conversation,
-        decodeLine: decodeConversationLogRecord,
-      }),
+      conversationMessages: [],
     });
+
+    evidence.conversationMessages.push(
+      ...conversationMessagesFromRawEvents(evidence.rawEvents),
+    );
 
     return {stamps: after, evidence};
   }
@@ -89,7 +126,6 @@ function readRuntimeEvidenceFileContents(
 ): {
   readonly trace: string | undefined;
   readonly rawEvents: string | undefined;
-  readonly conversation: string | undefined;
 } {
   return Object.freeze({
     trace: readStampedRuntimeEvidenceFile(
@@ -101,12 +137,6 @@ function readRuntimeEvidenceFileContents(
     rawEvents: readStampedRuntimeEvidenceFile(
       paths.rawEventsPath,
       stamps.rawEvents,
-      attempt,
-      onEvidenceFileRead,
-    ),
-    conversation: readStampedRuntimeEvidenceFile(
-      paths.conversationPath,
-      stamps.conversation,
       attempt,
       onEvidenceFileRead,
     ),
@@ -163,7 +193,6 @@ export function readRuntimeEvidenceFileStamps(
   return Object.freeze({
     trace: readRuntimeEvidenceFileStamp(paths.tracePath),
     rawEvents: readRuntimeEvidenceFileStamp(paths.rawEventsPath),
-    conversation: readRuntimeEvidenceFileStamp(paths.conversationPath),
   });
 }
 
@@ -200,8 +229,7 @@ export function sameRuntimeEvidenceFileStamps(
 ): boolean {
   return (
     sameRuntimeEvidenceFileStamp(left.trace, right.trace) &&
-    sameRuntimeEvidenceFileStamp(left.rawEvents, right.rawEvents) &&
-    sameRuntimeEvidenceFileStamp(left.conversation, right.conversation)
+    sameRuntimeEvidenceFileStamp(left.rawEvents, right.rawEvents)
   );
 }
 
@@ -229,7 +257,6 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
     cleanupAbandonedAtomicReplacementsIn(paths.sessionRoot, [
       basename(paths.tracePath),
       basename(paths.rawEventsPath),
-      basename(paths.conversationPath),
     ]);
   } catch (error: unknown) {
     throw storeWriteFailed(paths.sessionRoot, error);

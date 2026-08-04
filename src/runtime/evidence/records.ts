@@ -19,7 +19,6 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {LocalRuntimeSessionPaths} from '../storage/layout-contract.ts';
 import type {LocalRuntimeMutationLockOwnerToken} from '../storage/mutation-lock.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 
 export const runtimeTurnStatusValues = [
   'completed',
@@ -80,6 +79,9 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  /** The message this event commits; present exactly on commit events. */
+  readonly visibleMessage?: VisibleMessage;
+  readonly committedAt?: string;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
   readonly dispatchedToHost?: boolean;
@@ -113,6 +115,9 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  /** The message this event commits; present exactly on commit events. */
+  readonly visibleMessage?: VisibleMessage;
+  readonly committedAt?: string;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
   readonly dispatchedToHost?: boolean;
@@ -165,12 +170,10 @@ export type RuntimeLogStore = {
   readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
   readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
   appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
-  appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
-  appendConversationMessage(
-    record: ConversationLogRecordInput,
+  appendRawEvent(
+    record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
-  ): ConversationLogRecord;
-  removeConversationMessages(messageIds: readonly string[]): void;
+  ): RawEventLogRecord;
   checkpointWriterEvidence?(): void;
   recoverAbandonedWriterEvidence?(): boolean;
   readSessionEvidence(): RuntimeSessionEvidenceSnapshot;
@@ -242,9 +245,7 @@ function freezeRoleModelCommitValidationResult(
       ...(result.acceptedVisibleReplyText === undefined
         ? {}
         : {
-            acceptedVisibleReplyText: redactJsonBoundaryText(
-              result.acceptedVisibleReplyText,
-            ),
+            acceptedVisibleReplyText: result.acceptedVisibleReplyText,
           }),
     } satisfies AcceptedRoleModelCommitValidationResult);
   }

@@ -135,11 +135,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/storage/raw-event-codec.ts'],
     rules: {
-      // Re-pinned +23 for the additive characterRef decode on the
-      // role-model IO snapshot.
+      // Re-pinned +31: the commit event now carries its message, so this
+      // file absorbed the decoding that conversation-codec.ts held.
       'max-lines': [
         'error',
-        {max: 1695, skipBlankLines: true, skipComments: true},
+        {max: 1726, skipBlankLines: true, skipComments: true},
       ],
     },
   },

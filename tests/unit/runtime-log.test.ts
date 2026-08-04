@@ -165,40 +165,6 @@ describe('runtime log store', () => {
     ).toEqual([receivedRecord, normalizedRecord, appended]);
   });
 
-  it('applies the turn-shape gate to an already-open store, not only to file reads', () => {
-    const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
-    store.appendRawEvent({
-      ...identity,
-      kind: 'runtime_event_received',
-      eventType: 'USER_MESSAGE',
-    });
-    // A message committed with no anchor is a shape the writer never
-    // produces; the in-memory store must not be a weaker second seam
-    // that reads it publicly until the session is reopened.
-    store.appendConversationMessage({
-      ...identity,
-      id: 'local-session:message-1',
-      role: 'user',
-      speakerId: 'local-user',
-      speakerName: 'You',
-      text: 'hello',
-      committedAt: '2026-06-04T00:00:01.000Z',
-    });
-    store.appendRawEvent({
-      ...identity,
-      kind: 'runtime_turn_completed',
-      eventType: 'USER_MESSAGE',
-      status: 'completed',
-      visibleMessageIds: ['local-session:message-1'],
-    });
-
-    expect(() => store.conversationMessages()).toThrow(
-      'lacks its visible_message_committed raw event',
-    );
-  });
-
   it('deeply snapshots tool input and result evidence before storing it', () => {
     const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
     const nestedInput = {query: 'before'};
@@ -337,80 +303,22 @@ describe('runtime log store', () => {
     });
 
     expect(() =>
-      store.appendConversationMessage({
-        ...identity,
-        id: 'local-session:message-1',
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'You',
-        text: 'hello',
-        committedAt: '2026-06-04T00:00:01.000Z',
-      }),
-    ).toThrow(
-      'Conversation append requires a session character: none was expected, recorded, or store-bound.',
-    );
-  });
-
-  it('accepts an unanchored custom-character transcript only while the store is unbound', () => {
-    const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
-    const appendNovaTurn = (
-      store: ReturnType<typeof createRuntimeLogStore>,
-    ) => {
-      store.appendTrace({...identity, step: 'runtime_event_received'});
       store.appendRawEvent({
         ...identity,
-        kind: 'runtime_event_received',
+        kind: 'visible_message_committed',
         eventType: 'USER_MESSAGE',
-      });
-      appendVisibleMessageWithCommitAnchor(
-        store,
-        {
-          ...identity,
+        visibleMessageIds: ['local-session:message-1'],
+        visibleMessage: {
           id: 'local-session:message-1',
           role: 'user',
           speakerId: 'local-user',
           speakerName: 'You',
           text: 'hello',
-          committedAt: '2026-06-04T00:00:01.000Z',
         },
-        novaProfile,
-      );
-      appendVisibleMessageWithCommitAnchor(
-        store,
-        {
-          ...identity,
-          id: 'local-session:message-2',
-          role: 'character',
-          speakerId: 'nova',
-          speakerName: 'Nova',
-          text: 'hello back',
-          committedAt: '2026-06-04T00:00:02.000Z',
-        },
-        novaProfile,
-      );
-
-      return () =>
-        store.appendRawEvent({
-          ...identity,
-          kind: 'runtime_turn_completed',
-          eventType: 'USER_MESSAGE',
-          status: 'completed',
-          visibleMessageIds: [
-            'local-session:message-1',
-            'local-session:message-2',
-          ],
-        });
-    };
-
-    const unboundStore = createRuntimeLogStore();
-    appendNovaTurn(unboundStore)();
-    expect(unboundStore.conversationMessages()).toHaveLength(2);
-
-    const boundStore = createRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-    });
-    expect(() => appendNovaTurn(boundStore)()).toThrow(
-      'Durable character evidence must match the store-bound character.',
+        committedAt: '2026-06-04T00:00:01.000Z',
+      }),
+    ).toThrow(
+      'Conversation append requires a session character: none was expected, recorded, or store-bound.',
     );
   });
 
@@ -430,43 +338,63 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
     });
     expect(() =>
-      store.appendConversationMessage({
+      store.appendRawEvent({
         ...identity,
-        id: 'local-session:message-1',
-        role: 'user',
-        speakerId: 'someone-else',
-        speakerName: 'Custom Name',
-        text: 'hello',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['local-session:message-1'],
+        visibleMessage: {
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'someone-else',
+          speakerName: 'Custom Name',
+          text: 'hello',
+        },
         committedAt: '2026-06-04T00:00:01.000Z',
       }),
     ).toThrow('speaker metadata is malformed');
 
-    store.appendConversationMessage({
+    store.appendRawEvent({
       ...identity,
-      id: 'local-session:message-1',
-      role: 'user',
-      speakerId: 'local-user',
-      speakerName: 'Custom Name',
-      text: 'hello',
+      kind: 'visible_message_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: ['local-session:message-1'],
+      visibleMessage: {
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Custom Name',
+        text: 'hello',
+      },
       committedAt: '2026-06-04T00:00:01.000Z',
     });
-    store.appendConversationMessage({
+    store.appendRawEvent({
       ...identity,
-      id: 'local-session:message-2',
-      role: 'character',
-      speakerId: 'mira',
-      speakerName: 'Mira',
-      text: 'hello back',
+      kind: 'visible_message_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: ['local-session:message-2'],
+      visibleMessage: {
+        id: 'local-session:message-2',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'hello back',
+      },
       committedAt: '2026-06-04T00:00:02.000Z',
     });
     expect(() =>
-      store.appendConversationMessage({
+      store.appendRawEvent({
         ...identity,
-        id: 'local-session:message-3',
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'Different Name',
-        text: 'again',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['local-session:message-3'],
+        visibleMessage: {
+          id: 'local-session:message-3',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'Different Name',
+          text: 'again',
+        },
         committedAt: '2026-06-04T00:00:03.000Z',
       }),
     ).toThrow('speaker metadata is malformed');
@@ -492,13 +420,18 @@ describe('runtime log store', () => {
 
     for (const speakerName of ['Bad\nName', ' Padded ', 'x'.repeat(129)]) {
       expect(() =>
-        store.appendConversationMessage({
+        store.appendRawEvent({
           ...identity,
-          id: 'local-session:message-1',
-          role: 'user',
-          speakerId: 'local-user',
-          speakerName,
-          text: 'hello',
+          kind: 'visible_message_committed',
+          eventType: 'USER_MESSAGE',
+          visibleMessageIds: ['local-session:message-1'],
+          visibleMessage: {
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName,
+            text: 'hello',
+          },
           committedAt: '2026-06-04T00:00:01.000Z',
         }),
       ).toThrow('speaker metadata is malformed');
@@ -508,15 +441,20 @@ describe('runtime log store', () => {
     // take. Had a refused record been appended, the store would now
     // require message 2 and the character role.
     expect(
-      store.appendConversationMessage({
+      store.appendRawEvent({
         ...identity,
-        id: 'local-session:message-1',
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'Custom Name',
-        text: 'hello',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['local-session:message-1'],
+        visibleMessage: {
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'Custom Name',
+          text: 'hello',
+        },
         committedAt: '2026-06-04T00:00:01.000Z',
-      }).speakerName,
+      }).visibleMessage?.speakerName,
     ).toBe('Custom Name');
   });
 
@@ -538,14 +476,19 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
     });
     expect(() =>
-      store.appendConversationMessage(
+      store.appendRawEvent(
         {
           ...identity,
-          id: 'local-session:message-1',
-          role: 'user',
-          speakerId: 'local-user',
-          speakerName: 'You',
-          text: 'hello',
+          kind: 'visible_message_committed',
+          eventType: 'USER_MESSAGE',
+          visibleMessageIds: ['local-session:message-1'],
+          visibleMessage: {
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: 'hello',
+          },
           committedAt: '2026-06-04T00:00:01.000Z',
         },
         nova,
@@ -558,18 +501,23 @@ describe('runtime log store', () => {
     // free, the bound character still appends, and a renamed character
     // stays appendable because the binding is compared by id.
     expect(
-      store.appendConversationMessage(
+      store.appendRawEvent(
         {
           ...identity,
-          id: 'local-session:message-1',
-          role: 'user',
-          speakerId: 'local-user',
-          speakerName: 'You',
-          text: 'hello',
+          kind: 'visible_message_committed',
+          eventType: 'USER_MESSAGE',
+          visibleMessageIds: ['local-session:message-1'],
+          visibleMessage: {
+            id: 'local-session:message-1',
+            role: 'user',
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: 'hello',
+          },
           committedAt: '2026-06-04T00:00:01.000Z',
         },
         {id: testCharacterProfile.id, displayName: 'Renamed Mira'},
-      ).id,
+      ).visibleMessage?.id,
     ).toBe('local-session:message-1');
   });
 
@@ -586,46 +534,66 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
     });
     expect(() =>
-      store.appendConversationMessage({
+      store.appendRawEvent({
         ...identity,
-        id: 'local-session:message-1',
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'You',
-        text: 'hello',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['local-session:message-1'],
+        visibleMessage: {
+          id: 'local-session:message-1',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+        },
         committedAt: '2026-06-04T00:00:01.000Z',
       }),
     ).toThrow('speaker metadata is malformed');
 
-    store.appendConversationMessage({
+    store.appendRawEvent({
       ...identity,
-      id: 'local-session:message-1',
-      role: 'user',
-      speakerId: 'local-user',
-      speakerName: 'Mike',
-      text: 'hello',
+      kind: 'visible_message_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: ['local-session:message-1'],
+      visibleMessage: {
+        id: 'local-session:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'Mike',
+        text: 'hello',
+      },
       committedAt: '2026-06-04T00:00:01.000Z',
     });
-    store.appendConversationMessage({
+    store.appendRawEvent({
       ...identity,
-      id: 'local-session:message-2',
-      role: 'character',
-      speakerId: 'mira',
-      speakerName: 'Mira',
-      text: 'hello back',
+      kind: 'visible_message_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: ['local-session:message-2'],
+      visibleMessage: {
+        id: 'local-session:message-2',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'hello back',
+      },
       committedAt: '2026-06-04T00:00:02.000Z',
     });
 
     // Once recorded, the session's user speaker wins over later intent:
     // one user speaker per session, mirroring the character rule.
     expect(() =>
-      store.appendConversationMessage({
+      store.appendRawEvent({
         ...identity,
-        id: 'local-session:message-3',
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'Michael',
-        text: 'renamed mid-session',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: ['local-session:message-3'],
+        visibleMessage: {
+          id: 'local-session:message-3',
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'Michael',
+          text: 'renamed mid-session',
+        },
         committedAt: '2026-06-04T00:00:03.000Z',
       }),
     ).toThrow('speaker metadata is malformed');
@@ -643,10 +611,6 @@ function appendVisibleMessageWithCommitAnchor(
   message: ConversationLogRecordInput,
   expectedCharacter?: CharacterProfile,
 ): void {
-  const stored =
-    expectedCharacter === undefined
-      ? store.appendConversationMessage(message)
-      : store.appendConversationMessage(message, expectedCharacter);
   const eventIdentity = {
     eventId: message.eventId,
     traceId: message.traceId,
@@ -657,7 +621,15 @@ function appendVisibleMessageWithCommitAnchor(
     ...eventIdentity,
     kind: 'visible_message_committed',
     eventType: 'USER_MESSAGE',
-    visibleMessageIds: [stored.id],
+    visibleMessageIds: [message.id],
+    visibleMessage: {
+      id: message.id,
+      role: message.role,
+      speakerId: message.speakerId,
+      speakerName: message.speakerName,
+      text: message.text,
+    },
+    committedAt: message.committedAt,
     ...(message.role === 'user'
       ? {}
       : {

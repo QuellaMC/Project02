@@ -41,25 +41,15 @@ export function createRuntimeLogStore(
 
       return storedEntry;
     },
-    appendRawEvent(record) {
-      const storedRecord = transitionMachine.prepareRawEventAppend(record);
-
-      transitionMachine.commitRawEventAppend(storedRecord);
-
-      return storedRecord;
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      const storedRecord = transitionMachine.prepareConversationAppend(
+    appendRawEvent(record, expectedCharacter) {
+      const storedRecord = transitionMachine.prepareRawEventAppend(
         record,
         expectedCharacter,
       );
 
-      transitionMachine.commitConversationAppend(storedRecord);
+      transitionMachine.commitRawEventAppend(storedRecord);
 
       return storedRecord;
-    },
-    removeConversationMessages(messageIds) {
-      transitionMachine.removeConversationMessages(messageIds);
     },
     readSessionEvidence() {
       transitionMachine.assertPublicReadable();

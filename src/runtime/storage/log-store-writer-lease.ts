@@ -13,14 +13,8 @@ export function runtimeLogStoreWithWriterOwner(
     appendTrace(entry) {
       return logStore.appendTrace(entry);
     },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
+    appendRawEvent(record, expectedCharacter) {
+      return logStore.appendRawEvent(record, expectedCharacter);
     },
     ...(logStore.checkpointWriterEvidence === undefined
       ? {}

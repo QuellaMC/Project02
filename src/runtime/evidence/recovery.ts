@@ -1,8 +1,8 @@
+import {conversationMessagesFromRawEvents} from './cache.ts';
 import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeSessionPaths,
 } from '../storage/layout-contract.ts';
-import {encodeConversationLogRecord} from '../storage/conversation-codec.ts';
 import {
   decodeRawEventLogRecord,
   encodeRawEventLogRecord,
@@ -123,27 +123,17 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
     throwPriorWriterPartialWrite(options.paths);
   }
 
-  // A message is committed exactly when its visible_message_committed
-  // event is durable. Fully committed messages of the open turn were shown
-  // to the user and stay — the rejected terminal closes the turn around
-  // them. A row whose commit event never landed is a partial write and is
-  // removed with the recovery rewrite below.
-  const committedMessageIds = new Set(
-    options.evidence.rawEvents
-      .filter(
-        record =>
-          record.kind === 'visible_message_committed' &&
-          runtimeEventIdentityKey(record) === identityKey,
-      )
-      .flatMap(record => record.visibleMessageIds ?? []),
-  );
-  const openTurnMessageIds = options.evidence.conversationMessages
+  // A message exists exactly when its commit event does, so the open
+  // turn's committed messages are just that turn's commit events. They
+  // were shown to the user and stay; the rejected terminal closes the
+  // turn around them.
+  const openTurnMessageIds = options.evidence.rawEvents
     .filter(
-      message =>
-        runtimeEventIdentityKey(message) === identityKey &&
-        committedMessageIds.has(message.id),
+      record =>
+        record.kind === 'visible_message_committed' &&
+        runtimeEventIdentityKey(record) === identityKey,
     )
-    .map(message => message.id);
+    .flatMap(record => record.visibleMessageIds ?? []);
   const rejectedTerminal = decodeRawEventLogRecord(
     encodeRawEventLogRecord({
       eventId: finalOpenRawEvent.eventId,
@@ -185,16 +175,14 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
     );
   }
 
+  const rawEvents = Object.freeze([
+    ...options.evidence.rawEvents,
+    rejectedTerminal,
+  ]);
   const recovered = Object.freeze({
     traceEntries: Object.freeze(recoveredTraceEntries),
-    rawEvents: Object.freeze([...options.evidence.rawEvents, rejectedTerminal]),
-    conversationMessages: Object.freeze(
-      options.evidence.conversationMessages.filter(
-        message =>
-          runtimeEventIdentityKey(message) !== identityKey ||
-          committedMessageIds.has(message.id),
-      ),
-    ),
+    rawEvents,
+    conversationMessages: conversationMessagesFromRawEvents(rawEvents),
   } satisfies DurableRuntimeSessionEvidence);
 
   assertDurableRuntimeSessionEvidence({
@@ -209,10 +197,6 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
       : {boundUserSpeaker: options.boundUserSpeaker}),
   });
 
-  writeJsonLines({
-    filePath: options.paths.conversationPath,
-    lines: recovered.conversationMessages.map(encodeConversationLogRecord),
-  });
   writeJsonLines({
     filePath: options.paths.rawEventsPath,
     lines: recovered.rawEvents.map(encodeRawEventLogRecord),
@@ -322,45 +306,4 @@ function writeJsonLines(options: {
       {cause: error},
     );
   }
-}
-
-export function removeConversationLogRecords(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly evidence: DurableRuntimeSessionEvidence;
-  readonly messageIds: readonly string[];
-}): DurableRuntimeSessionEvidence | undefined {
-  const ids = new Set(options.messageIds);
-
-  if (ids.size === 0) {
-    return undefined;
-  }
-
-  const conversationMessages = options.evidence.conversationMessages.filter(
-    message => !ids.has(message.id),
-  );
-
-  if (
-    conversationMessages.length === options.evidence.conversationMessages.length
-  ) {
-    return undefined;
-  }
-
-  const updatedEvidence = Object.freeze({
-    traceEntries: options.evidence.traceEntries,
-    rawEvents: options.evidence.rawEvents,
-    conversationMessages: Object.freeze(conversationMessages),
-  } satisfies DurableRuntimeSessionEvidence);
-
-  assertDurableRuntimeSessionEvidence({
-    paths: options.paths,
-    evidence: updatedEvidence,
-    mode: 'appendConversation',
-  });
-
-  writeJsonLines({
-    filePath: options.paths.conversationPath,
-    lines: conversationMessages.map(encodeConversationLogRecord),
-  });
-
-  return updatedEvidence;
 }

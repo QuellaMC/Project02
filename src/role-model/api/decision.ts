@@ -25,8 +25,6 @@ import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,
 } from '../../shared/json-boundary.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
-import {redactJsonTextPreservingStructure} from '../../shared/json-boundary.ts';
 import type {RoleModelAllowedToolName} from './tool-names.ts';
 import {
   freezeProviderMetadata,
@@ -145,7 +143,7 @@ export function createAcceptedRoleModelDecisionResult(
     decision: freezeCharacterDecision(decision),
     ...(options.nonCommittedText === undefined
       ? {}
-      : {nonCommittedText: redactJsonBoundaryText(options.nonCommittedText)}),
+      : {nonCommittedText: options.nonCommittedText}),
   } satisfies AcceptedRoleModelDecisionResult);
 }
 
@@ -195,10 +193,7 @@ export function createRoleModelIOSnapshot(
     kind: 'role_model_io_snapshot',
     sessionId: options.sessionId,
     inputEnvelope,
-    rawOutputText: redactJsonTextPreservingStructure(
-      options.rawOutputText,
-      'Role-model adapter raw output',
-    ),
+    rawOutputText: options.rawOutputText,
     ...(options.characterRef === undefined
       ? {}
       : {

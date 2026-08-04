@@ -159,23 +159,37 @@ describe('abandoned durable runtime writer recovery', () => {
         kind: 'runtime_event_normalized',
         eventType: 'USER_MESSAGE',
       },
-    ]);
-    writeJsonLines(paths.conversationPath, [
       {
         ...abandonedIdentity,
-        id: `${sessionId}:message-1`,
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'You',
-        text: 'abandoned input',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [`${sessionId}:message-1`],
+        visibleMessage: {
+          id: `${sessionId}:message-1`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'abandoned input',
+        },
         committedAt: abandonedIdentity.createdAt,
       },
     ]);
-    const abandonedTempPath = `${paths.sessionRoot}/.conversation.jsonl.2147483647.123e4567-e89b-42d3-a456-426614174000.tmp`;
+    const abandonedTempPath = `${paths.sessionRoot}/.raw-events.jsonl.2147483647.123e4567-e89b-42d3-a456-426614174000.tmp`;
     writeFileSync(abandonedTempPath, 'secret partial content', 'utf8');
     const session = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
+      // The abandoned turn's committed message survives recovery, so the
+      // resumed session starts from it rather than empty.
+      visibleTranscript: [
+        {
+          id: `${sessionId}:message-1`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'abandoned input',
+        },
+      ],
     });
 
     await runLocalUserMessageEvent({
@@ -210,7 +224,10 @@ describe('abandoned durable runtime writer recovery', () => {
       'raw_event_log_appended',
       'runtime_turn_rejected',
     ]);
+    // The abandoned turn committed its message before dying, so it is
+    // history: the rejected terminal closes the turn around it.
     expect(evidence.conversationMessages.map(message => message.text)).toEqual([
+      'abandoned input',
       'next input',
       'next reply',
     ]);
@@ -300,23 +317,24 @@ describe('abandoned durable runtime writer recovery', () => {
         kind: 'runtime_event_normalized',
         eventType: 'USER_MESSAGE',
       },
-    ]);
-    writeJsonLines(paths.conversationPath, [
-      ...readJsonLines(foreignPaths.conversationPath),
       {
         ...abandonedIdentity,
-        id: `${sessionId}:message-3`,
-        role: 'user',
-        speakerId: 'local-user',
-        speakerName: 'You',
-        text: 'abandoned input',
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [`${sessionId}:message-3`],
+        visibleMessage: {
+          id: `${sessionId}:message-3`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'abandoned input',
+        },
         committedAt: abandonedIdentity.createdAt,
       },
     ]);
     const evidenceBeforeRecovery = {
       trace: readFileSync(paths.tracePath, 'utf8'),
       rawEvents: readFileSync(paths.rawEventsPath, 'utf8'),
-      conversation: readFileSync(paths.conversationPath, 'utf8'),
     };
 
     await expect(
@@ -343,9 +361,6 @@ describe('abandoned durable runtime writer recovery', () => {
     );
     expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe(
       evidenceBeforeRecovery.rawEvents,
-    );
-    expect(readFileSync(paths.conversationPath, 'utf8')).toBe(
-      evidenceBeforeRecovery.conversation,
     );
   });
 

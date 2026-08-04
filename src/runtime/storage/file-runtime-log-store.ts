@@ -1,14 +1,10 @@
 import {appendTextFileSync} from '../../shared/file-system.ts';
 import {discardTornJsonLineTail} from './json-lines.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
-import {encodeConversationLogRecord} from './conversation-codec.ts';
 import {encodeRawEventLogRecord} from './raw-event-codec.ts';
 import {encodeRuntimeTraceEntry} from './trace-codec.ts';
 import type {RuntimeLogStore} from '../evidence/records.ts';
-import {
-  createRuntimeSessionEvidenceSnapshot,
-  removeConversationLogRecords,
-} from '../evidence/recovery.ts';
+import {createRuntimeSessionEvidenceSnapshot} from '../evidence/recovery.ts';
 import {
   FileRuntimeLogStoreState,
   type FileRuntimeLogStoreStateOptions,
@@ -16,7 +12,6 @@ import {
 
 export {
   durableRuntimeSessionCharacterProfile,
-  durableVisibleMessageCommitExists,
   findValidatedTerminalRawEventForSession,
 } from '../evidence/validation.ts';
 
@@ -51,14 +46,17 @@ export function createFileRuntimeLogStore(
 
       return storedEntry;
     },
-    appendRawEvent(record) {
+    appendRawEvent(record, expectedCharacter) {
       const evidence = state.readStoredEvidence();
       const machine = state.ensureTransitionMachine(evidence);
 
       state.assertSessionReadable();
       state.assertWriterOwnership();
       state.recordIncrementalValidation();
-      const storedRecord = machine.prepareRawEventAppend(record);
+      const storedRecord = machine.prepareRawEventAppend(
+        record,
+        expectedCharacter,
+      );
 
       try {
         appendJsonLine(
@@ -74,53 +72,11 @@ export function createFileRuntimeLogStore(
 
       return storedRecord;
     },
-    appendConversationMessage(record, expectedCharacter) {
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
-
-      state.assertSessionReadable();
-      state.assertWriterOwnership();
-      state.recordIncrementalValidation();
-      const storedRecord = machine.prepareConversationAppend(
-        record,
-        expectedCharacter,
-      );
-
-      try {
-        appendJsonLine(
-          paths.conversationPath,
-          encodeConversationLogRecord(storedRecord),
-        );
-        machine.commitConversationAppend(storedRecord);
-        state.checkpointCachedEvidenceStamps();
-      } catch (error: unknown) {
-        state.invalidateCachedEvidence();
-        throw error;
-      }
-
-      return storedRecord;
-    },
     recoverAbandonedWriterEvidence() {
       return state.recoverAbandonedWriterEvidence();
     },
     checkpointWriterEvidence() {
       state.checkpointWriterEvidence();
-    },
-    removeConversationMessages(messageIds) {
-      state.assertSessionReadable();
-      state.assertWriterOwnership();
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
-      const updated = removeConversationLogRecords({
-        paths,
-        evidence,
-        messageIds,
-      });
-
-      if (updated !== undefined) {
-        machine.removeConversationMessages(messageIds);
-        state.checkpointCachedEvidenceStamps();
-      }
     },
     readSessionEvidence() {
       state.assertSessionReadable();

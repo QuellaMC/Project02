@@ -2,14 +2,15 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
-  appendCharacterMessage,
-  appendUserMessage,
+  appendCommittedMessage,
+  type ConversationSession,
+  createCharacterMessage,
+  createUserMessage,
   CharacterInputError,
   CharacterReplyValidationError,
   createConversationSession,
   createUserSpeaker,
   maxSpeakerDisplayNameLength,
-  rollbackLastMessage,
   ConversationRehydrationError,
   type VisibleMessage,
 } from '../../src/core/index.ts';
@@ -97,23 +98,6 @@ describe('conversation core', () => {
     expect(() => appendUserMessage(session, 'hello\nthere')).toThrow(
       CharacterInputError,
     );
-  });
-
-  it('rolls back only the latest message and refuses stale rollbacks', () => {
-    const session = createConversationSession({
-      character: testCharacterProfile,
-    });
-
-    const userMessage = appendUserMessage(session, 'hello');
-    const characterMessage = appendCharacterMessage(session, {text: 'hi'});
-
-    expect(() => {
-      rollbackLastMessage(session, userMessage);
-    }).toThrow('Cannot roll back a message that is no longer latest.');
-
-    rollbackLastMessage(session, characterMessage);
-    rollbackLastMessage(session, userMessage);
-    expect(session.visibleTranscript).toEqual([]);
   });
 
   it('exposes the visible transcript as an immutable snapshot of committed messages', () => {
@@ -315,3 +299,23 @@ describe('conversation core', () => {
     );
   });
 });
+
+function appendUserMessage(
+  session: ConversationSession,
+  text: string | undefined,
+): VisibleMessage {
+  const message = createUserMessage(session, text);
+
+  appendCommittedMessage(session, message);
+  return message;
+}
+
+function appendCharacterMessage(
+  session: ConversationSession,
+  reply: unknown,
+): VisibleMessage {
+  const message = createCharacterMessage(session, reply);
+
+  appendCommittedMessage(session, message);
+  return message;
+}

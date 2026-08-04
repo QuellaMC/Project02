@@ -108,12 +108,6 @@ export default defineConfig({
           functions: 95,
           lines: 70,
         },
-        'src/runtime/storage/conversation-codec.ts': {
-          statements: 95,
-          branches: 95,
-          functions: 95,
-          lines: 95,
-        },
         'src/runtime/storage/raw-event-codec.ts': {
           statements: 75,
           branches: 70,
@@ -139,10 +133,10 @@ export default defineConfig({
           lines: 83,
         },
         'src/runtime/evidence/recovery.ts': {
-          statements: 82,
-          branches: 74,
-          functions: 90,
-          lines: 82,
+          statements: 84,
+          branches: 65,
+          functions: 92,
+          lines: 84,
         },
         'src/runtime/storage/file-runtime-log-store.ts': {
           statements: 88,

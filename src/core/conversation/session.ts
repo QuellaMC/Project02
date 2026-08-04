@@ -192,51 +192,44 @@ export function validateRestoredVisibleTranscript(
   );
 }
 
-export function appendUserMessage(
+/**
+ * The next user message for this session, not yet part of the transcript.
+ * A message joins the transcript only once it is durable, so the two
+ * cannot disagree.
+ */
+export function createUserMessage(
   session: ConversationSession,
   message: string | undefined,
 ): VisibleMessage {
   const normalizedMessage = normalizeCharacterInput(message);
-  const transcript = getMutableTranscript(session);
-  const userMessage = Object.freeze({
-    id: createMessageId(session, transcript.length + 1),
+
+  return Object.freeze({
+    id: createMessageId(session, getMutableTranscript(session).length + 1),
     role: 'user',
     speakerId: session.userSpeaker.id,
     speakerName: session.userSpeaker.displayName,
     text: normalizedMessage,
   } satisfies VisibleMessage);
-
-  transcript.push(userMessage);
-  return userMessage;
 }
 
-export function appendCharacterMessage(
-  session: ConversationSession,
-  reply: unknown,
-): VisibleMessage {
-  const normalizedReplyText = normalizeCharacterReply(reply);
-  const transcript = getMutableTranscript(session);
-  const characterMessage = createCharacterVisibleMessage({
-    messageNumber: transcript.length + 1,
-    replyText: normalizedReplyText,
-    session,
-  });
-
-  transcript.push(characterMessage);
-  return characterMessage;
-}
-
-export function rollbackLastMessage(
+/** Adds a durable message to the session the model reads. */
+export function appendCommittedMessage(
   session: ConversationSession,
   message: VisibleMessage,
 ): void {
-  const transcript = getMutableTranscript(session);
+  getMutableTranscript(session).push(message);
+}
 
-  if (transcript.at(-1) !== message) {
-    throw new Error('Cannot roll back a message that is no longer latest.');
-  }
-
-  transcript.pop();
+/** The next character message for this session, not yet in the transcript. */
+export function createCharacterMessage(
+  session: ConversationSession,
+  reply: unknown,
+): VisibleMessage {
+  return createCharacterVisibleMessage({
+    messageNumber: getMutableTranscript(session).length + 1,
+    replyText: normalizeCharacterReply(reply),
+    session,
+  });
 }
 
 function normalizeCharacterInput(message: string | undefined): string {

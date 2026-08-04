@@ -149,11 +149,7 @@ describe('file runtime log store evidence cache', () => {
     vi.mocked(fs.readFileSync).mockClear();
     reopened.readSessionEvidence();
 
-    expect(evidenceFileReads()).toEqual([
-      'trace.jsonl',
-      'raw-events.jsonl',
-      'conversation.jsonl',
-    ]);
+    expect(evidenceFileReads()).toEqual(['trace.jsonl', 'raw-events.jsonl']);
 
     vi.mocked(fs.readFileSync).mockClear();
     reopened.traceEntries();
@@ -213,11 +209,7 @@ describe('file runtime log store evidence cache', () => {
 
     vi.mocked(fs.readFileSync).mockClear();
     reader.readSessionEvidence();
-    expect(evidenceFileReads()).toEqual([
-      'trace.jsonl',
-      'raw-events.jsonl',
-      'conversation.jsonl',
-    ]);
+    expect(evidenceFileReads()).toEqual(['trace.jsonl', 'raw-events.jsonl']);
     expect(coldValidations).toBe(1);
 
     vi.mocked(fs.readFileSync).mockClear();
@@ -227,11 +219,7 @@ describe('file runtime log store evidence cache', () => {
     await runTurn(session, writer, 1);
     vi.mocked(fs.readFileSync).mockClear();
     reader.readSessionEvidence();
-    expect(evidenceFileReads()).toEqual([
-      'trace.jsonl',
-      'raw-events.jsonl',
-      'conversation.jsonl',
-    ]);
+    expect(evidenceFileReads()).toEqual(['trace.jsonl', 'raw-events.jsonl']);
     expect(coldValidations).toBe(2);
 
     vi.mocked(fs.readFileSync).mockClear();
@@ -386,11 +374,7 @@ async function runTurn(
 }
 
 function evidenceFileReads(): readonly string[] {
-  const evidenceFileNames = new Set([
-    'trace.jsonl',
-    'raw-events.jsonl',
-    'conversation.jsonl',
-  ]);
+  const evidenceFileNames = new Set(['trace.jsonl', 'raw-events.jsonl']);
 
   return vi
     .mocked(fs.readFileSync)

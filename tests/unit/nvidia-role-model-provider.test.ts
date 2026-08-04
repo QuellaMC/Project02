@@ -31,11 +31,6 @@ import {createDefaultProject02PluginHost} from '../support/default-plugin-host.t
 import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import {testRuntimePluginConfigControlCapability} from '../support/plugin-host-fixtures.ts';
 import {createRuntimePluginContextItem} from '../../src/plugins/api/index.ts';
-import {
-  createTestDecisionContext,
-  createTestEvent,
-  createTestPluginContext,
-} from '../support/role-model-loop-fixtures.ts';
 
 describe('NVIDIA role-model provider', () => {
   it('preserves successful assistant content for execution while redacting provider evidence', async () => {
@@ -380,124 +375,6 @@ describe('NVIDIA role-model provider', () => {
     });
     expect(serializedEvidence).not.toContain('id-secret');
     expect(serializedEvidence).not.toContain('reply-cookie');
-  });
-
-  it('routes authoritative native tool arguments while public loop surfaces stay redacted', async () => {
-    let responseIndex = 0;
-    let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
-    const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          responseIndex += 1;
-
-          return Promise.resolve(
-            responseIndex === 1
-              ? {
-                  choices: [
-                    {
-                      finish_reason: 'tool_calls',
-                      message: {
-                        role: 'assistant',
-                        content: null,
-                        tool_calls: [
-                          {
-                            id: 'call_credential_use',
-                            type: 'function',
-                            function: {
-                              name: 'credential_use',
-                              arguments: JSON.stringify({
-                                query:
-                                  'Authorization: Bearer native-input-secret',
-                                accessToken: 'native-structured-secret',
-                              }),
-                            },
-                          },
-                        ],
-                      },
-                    },
-                  ],
-                }
-              : {
-                  choices: [
-                    {
-                      finish_reason: 'stop',
-                      message: {
-                        role: 'assistant',
-                        content: 'Finished safely.',
-                      },
-                    },
-                  ],
-                },
-          );
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'provider-secret',
-      fetchClient,
-    });
-    const credentialToolDefinition = Object.freeze({
-      pluginId: 'credential.fixture',
-      name: 'credential.use',
-      description: 'Use an explicitly supplied credential.',
-      inputContract: {
-        type: 'object',
-        fields: [
-          {
-            name: 'query',
-            description: 'Credential use request.',
-            required: true,
-            valueType: 'string',
-          },
-        ],
-        additionalFields: true,
-      },
-      validationOwner: 'plugin_host',
-      requiresConfirmation: false,
-      sourceReferencesRequired: false,
-    } satisfies RoleModelPluginToolDefinition);
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent(
-        'use the supplied credential',
-        'evt_nvidia_authoritative_arguments',
-      ),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: [
-        ...createDefaultRoleModelPluginToolDefinitions(),
-        credentialToolDefinition,
-      ],
-      pluginToolHost: Object.freeze({
-        handleToolCall(call) {
-          dispatchedInput = call.input;
-          return {
-            status: 'accepted',
-            output: {used: true},
-            evidence: [],
-          };
-        },
-      }),
-      runtimePluginContext: createTestPluginContext(
-        'evt_nvidia_authoritative_arguments',
-      ),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(dispatchedInput).toEqual({
-      query: 'Authorization: Bearer native-input-secret',
-      accessToken: 'native-structured-secret',
-    });
-    expect(result.pluginToolResults[0]?.call.input).toEqual({
-      query: 'Authorization: [redacted]',
-      accessToken: '[redacted]',
-    });
-    expect(JSON.stringify(result)).not.toContain('native-input-secret');
-    expect(JSON.stringify(result)).not.toContain('native-structured-secret');
   });
 
   it('redacts configured model credentials from direct provider evidence', async () => {

@@ -6,7 +6,6 @@ import {
   decodeStorageSchemaMarker,
   localRuntimeStorageSchemaVersion,
 } from '../../src/runtime/storage/layout-contract.ts';
-import {decodeConversationLogRecord} from '../../src/runtime/storage/conversation-codec.ts';
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 import {decodeRuntimeTraceEntry} from '../../src/runtime/storage/trace-codec.ts';
 
@@ -222,23 +221,6 @@ describe('local storage plugin schema', () => {
             traceId: 'same-id',
             createdAt: '2026-06-15T00:00:00.000Z',
             step: 'runtime_event_received',
-          }),
-        ),
-    ],
-    [
-      'conversation',
-      () =>
-        decodeConversationLogRecord(
-          JSON.stringify({
-            eventId: 'same-id',
-            traceId: 'same-id',
-            createdAt: '2026-06-15T00:00:00.000Z',
-            id: 'session:message-1',
-            role: 'user',
-            speakerId: 'local-user',
-            speakerName: 'You',
-            text: 'Hello',
-            committedAt: '2026-06-15T00:00:01.000Z',
           }),
         ),
     ],

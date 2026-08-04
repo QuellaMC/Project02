@@ -37,7 +37,6 @@ export type RuntimeEvidenceFileStamp =
 export type RuntimeEvidenceFileStamps = {
   readonly trace: RuntimeEvidenceFileStamp;
   readonly rawEvents: RuntimeEvidenceFileStamp;
-  readonly conversation: RuntimeEvidenceFileStamp;
 };
 
 export type CachedRuntimeSessionEvidence = {

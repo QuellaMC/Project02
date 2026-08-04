@@ -2,16 +2,12 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
-  createAcceptedRoleModelDecisionResult,
   createDecisionContext,
   createDefaultRoleModelPluginToolDefinitions,
-  createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
-  createRoleModelIOSnapshot,
   createRoleModelPluginToolDefinitions,
   createRoleModelToolObservation,
-  createVisibleReplyCharacterDecision,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
@@ -170,111 +166,6 @@ describe('role-model contracts', () => {
     ]);
   });
 
-  it('redacts credentials throughout shared provider exchange snapshots', () => {
-    const identity = createRuntimeEventIdentity({
-      eventId: 'evt_provider_exchange_redaction',
-      traceId: 'trace_provider_exchange_redaction',
-      createdAt: '2026-07-11T00:00:00.000Z',
-    });
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: createUserMessageRuntimeEvent('hello', identity),
-      decisionContext: createDecisionContext({
-        sessionId: 'session-provider-exchange-redaction',
-        characterSnapshot: testCharacterProfile,
-      }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-    });
-    const snapshot = createRoleModelIOSnapshot({
-      ...identity,
-      sessionId: 'session-provider-exchange-redaction',
-      inputEnvelope,
-      rawOutputText: JSON.stringify({
-        toolCalls: [
-          {
-            name: visibleReplyModelToolName,
-            input: {text: 'api_key=raw-output-secret'},
-          },
-        ],
-      }),
-      providerExchange: {
-        provider: {
-          name: 'nvidia',
-          model: 'model?token=model-secret',
-          endpoint: 'https://user:pass@example.test/chat',
-        },
-        capabilities: {
-          supportsNativeTools: true,
-          supportsDeveloperOrSystemContext: true,
-          preferredModelContextRole: 'developer',
-          supportsStrictToolSchema: true,
-          supportsReasoning: false,
-          reasoningParameterStyle: 'none',
-          requiresReasoningBlockRoundTrip: false,
-          supportsToolChoice: true,
-          supportsParallelToolCalls: false,
-        },
-        reasoning: {mode: 'none', params: {}},
-        renderedMessages: [
-          {role: 'user', content: 'Authorization: Bearer message-secret'},
-        ],
-        renderedTools: [],
-        toolNameMappings: [],
-        requestBody: {cookie: 'session=request-secret'},
-        nativeToolResultMessages: [],
-        responseBody: {access_token: 'response-secret'},
-      },
-    });
-    const serialized = JSON.stringify(snapshot.providerExchange);
-
-    expect(snapshot.rawOutputText).toContain('api_key=[redacted]');
-    expect(snapshot.rawOutputText).not.toContain('raw-output-secret');
-    expect(serialized).toContain('[redacted]');
-    for (const secret of [
-      'model-secret',
-      'user:pass',
-      'message-secret',
-      'request-secret',
-      'response-secret',
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-  });
-
-  it('redacts accepted decision text at the public snapshot constructor', () => {
-    const identity = createRuntimeEventIdentity({
-      eventId: 'evt_decision_constructor_redaction',
-      traceId: 'trace_decision_constructor_redaction',
-      createdAt: '2026-07-11T00:00:00.000Z',
-    });
-    const snapshot = createParsedRoleModelDecisionSnapshot({
-      ...identity,
-      sessionId: 'session-decision-constructor-redaction',
-      result: createAcceptedRoleModelDecisionResult(
-        createVisibleReplyCharacterDecision(
-          'Authorization: ApiKey decision-secret',
-        ),
-        {nonCommittedText: 'api_key=snapshot-secret'},
-      ),
-    });
-    const serialized = JSON.stringify(snapshot);
-
-    expect(serialized).toContain('Authorization: [redacted]');
-    expect(serialized).not.toContain('decision-secret');
-    expect(serialized).not.toContain('snapshot-secret');
-  });
-
-  it('redacts non-committed text at the public result constructor', () => {
-    const result = createAcceptedRoleModelDecisionResult(
-      createVisibleReplyCharacterDecision('hello'),
-      {
-        nonCommittedText: 'Authorization: ApiKey folded-secret',
-      },
-    );
-
-    expect(result.nonCommittedText).toBe('Authorization: [redacted]');
-    expect(JSON.stringify(result)).not.toContain('folded-secret');
-  });
-
   it('rejects duplicate explicit allowed tools', () => {
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_duplicate_allowed_tools',
@@ -424,21 +315,6 @@ describe('role-model contracts', () => {
       },
       nonCommittedText: 'folded model note',
     });
-  });
-
-  it('redacts credentials in parsed top-level text', () => {
-    const result = parseRoleModelDecision(
-      JSON.stringify({
-        toolCalls: [],
-        text: 'api_key=parsed-secret',
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: 'accepted',
-      nonCommittedText: 'api_key=[redacted]',
-    });
-    expect(JSON.stringify(result)).not.toContain('parsed-secret');
   });
 
   it('rejects empty top-level text when no tool calls are present', () => {

@@ -13,8 +13,11 @@ import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 
 import {
-  appendCharacterMessage,
-  appendUserMessage,
+  appendCommittedMessage,
+  type ConversationSession,
+  type VisibleMessage,
+  createCharacterMessage,
+  createUserMessage,
   ConversationRehydrationError,
   createConversationSession,
   createUserMessageRuntimeEvent,
@@ -873,4 +876,24 @@ async function expectStorageErrorCode(
   }
 
   throw new Error(`Expected local runtime storage error code "${code}".`);
+}
+
+function appendUserMessage(
+  session: ConversationSession,
+  text: string | undefined,
+): VisibleMessage {
+  const message = createUserMessage(session, text);
+
+  appendCommittedMessage(session, message);
+  return message;
+}
+
+function appendCharacterMessage(
+  session: ConversationSession,
+  reply: unknown,
+): VisibleMessage {
+  const message = createCharacterMessage(session, reply);
+
+  appendCommittedMessage(session, message);
+  return message;
 }

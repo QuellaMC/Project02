@@ -67,10 +67,7 @@ const acceptedScenarios = [
     run(logStore, currentSessionId) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, currentSessionId);
-      logStore.appendConversationMessage(
-        characterMessage(currentSessionId),
-        miraCharacter,
-      );
+      appendCharacterMessage(logStore, currentSessionId, miraCharacter);
       logStore.appendRawEvent({
         ...identity,
         kind: 'runtime_turn_completed',
@@ -232,10 +229,7 @@ const rejectedScenarios = [
     run(logStore, currentSessionId) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, currentSessionId);
-      logStore.appendConversationMessage(
-        characterMessage(currentSessionId),
-        novaCharacter,
-      );
+      appendCharacterMessage(logStore, currentSessionId, novaCharacter);
     },
   },
   {
@@ -402,15 +396,46 @@ function appendUserMessage(
   logStore: RuntimeLogStore,
   currentSessionId: string,
 ): void {
-  logStore.appendConversationMessage({
+  logStore.appendRawEvent({
     ...identity,
-    id: `${currentSessionId}:message-1`,
-    role: 'user',
-    speakerId: 'local-user',
-    speakerName: 'You',
-    text: 'hello',
+    kind: 'visible_message_committed',
+    eventType: 'USER_MESSAGE',
+    visibleMessageIds: [`${currentSessionId}:message-1`],
+    visibleMessage: {
+      id: `${currentSessionId}:message-1`,
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello',
+    },
     committedAt: '2026-07-16T00:00:01.000Z',
   });
+}
+
+function appendCharacterMessage(
+  logStore: RuntimeLogStore,
+  currentSessionId: string,
+  character: CharacterProfile,
+): void {
+  const message = characterMessage(currentSessionId);
+
+  logStore.appendRawEvent(
+    {
+      ...identity,
+      kind: 'visible_message_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: [message.id],
+      visibleMessage: {
+        id: message.id,
+        role: message.role,
+        speakerId: message.speakerId,
+        speakerName: message.speakerName,
+        text: message.text,
+      },
+      committedAt: message.committedAt,
+    },
+    character,
+  );
 }
 
 function characterMessage(currentSessionId: string) {
