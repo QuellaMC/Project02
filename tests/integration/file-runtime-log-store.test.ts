@@ -1363,6 +1363,62 @@ describe('file runtime log store plugin tool event validation', () => {
       /must match the accepted reply/iu,
     );
   });
+  it('rejects replies committed out of their decision order', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-reply-order',
+      createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
+    );
+    const commits = rawLines.filter(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+
+    if (commits.length !== 2) {
+      throw new Error(
+        `Expected two character commit events, got ${String(commits.length)}.`,
+      );
+    }
+
+    // Swap only the text, so IDs stay in sequence and each row still
+    // matches an accepted reply — only the order between them is wrong.
+    const records = commits.map(
+      line => JSON.parse(line) as Record<string, unknown>,
+    );
+    const texts = records.map(
+      record => (record['visibleMessage'] as {text: string}).text,
+    );
+    const swappedLines = new Map(
+      commits.map((line, index) => [
+        line,
+        JSON.stringify({
+          ...records[index],
+          visibleMessage: {
+            ...(records[index]?.['visibleMessage'] as object),
+            text: texts[texts.length - 1 - index],
+          },
+          commitValidation: {
+            ...(records[index]?.['commitValidation'] as object),
+            result: {
+              status: 'accepted',
+              acceptedVisibleReplyText: texts[texts.length - 1 - index],
+            },
+          },
+        }),
+      ]),
+    );
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => swappedLines.get(line) ?? line).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /must follow the order their decision asked for/iu,
+    );
+  });
+
   it('rejects a duplicated visible_message_committed anchor for one message', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-duplicate-commit-anchor',
@@ -2509,7 +2565,10 @@ function createHealthRejectingPluginHost(options?: {
   });
 }
 
-async function committedTurnRawLines(sessionId: string): Promise<{
+async function committedTurnRawLines(
+  sessionId: string,
+  adapter: RoleModelAdapter = createMultilineVisibleReplyAdapter(),
+): Promise<{
   readonly paths: NonNullable<RuntimeLogStore['localRuntimeSessionPaths']>;
   readonly rawLines: readonly string[];
 }> {
@@ -2533,7 +2592,7 @@ async function committedTurnRawLines(sessionId: string): Promise<{
       id: sessionId,
     }),
     logStore,
-    roleModelAdapter: createMultilineVisibleReplyAdapter(),
+    roleModelAdapter: adapter,
     pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
   });
 
@@ -2560,4 +2619,21 @@ function reopenStore(
     characterId: testCharacterProfile.id,
     boundCharacter: testCharacterProfile,
   });
+}
+
+function createSequencedVisibleReplyAdapter(
+  texts: readonly string[],
+): RoleModelAdapter {
+  return {
+    invoke() {
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: texts.map(text => ({
+            name: 'visible_reply',
+            input: {text},
+          })),
+        }),
+      };
+    },
+  };
 }

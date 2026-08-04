@@ -25,7 +25,7 @@ import {
 import {
   applyRecoverableDurablePluginFileStoreOperation,
   type DurablePluginFileStoreFaultInjector,
-  recoverDirectDurablePluginFileStoreMutation,
+  recoverDirectDurablePluginFileStoreMutationLocked,
 } from './wal.ts';
 
 export type DurableRuntimePluginFileStoreDependencies = {
@@ -49,8 +49,13 @@ export function createDurableRuntimePluginFileStore(
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
 
+  /**
+   * Finishes an interrupted write. Callers already holding the mutation
+   * lease pass it through, so no writer can journal a new one between
+   * recovery and the read that follows it.
+   */
   function recoverInterruptedWrite(): void {
-    recoverDirectDurablePluginFileStoreMutation({
+    recoverDirectDurablePluginFileStoreMutationLocked({
       storeRoot: durableOptions.storeRoot,
       sessionId: durableOptions.sessionId,
       pluginId: durableOptions.pluginId,
@@ -59,78 +64,75 @@ export function createDurableRuntimePluginFileStore(
     });
   }
 
+  function readUnderLease<T>(operation: () => T): T {
+    return withDurablePluginStoreMutation(
+      {storeRoot: durableOptions.storeRoot, root, ownerToken},
+      () => {
+        recoverInterruptedWrite();
+        return operation();
+      },
+    );
+  }
+
   // A write is durable when its call returns, so opening a store only
   // finishes a single interrupted write.
-  recoverInterruptedWrite();
-  withDurablePluginStoreMutation(
-    {storeRoot: durableOptions.storeRoot, root, ownerToken},
-    () => {
-      assertSafeDurablePluginRoot(root);
-      cleanupDurablePluginStoreAtomicTempFiles(root);
-    },
-  );
+  readUnderLease(() => {
+    assertSafeDurablePluginRoot(root);
+    cleanupDurablePluginStoreAtomicTempFiles(root);
+  });
 
   return Object.freeze({
     readJson(path) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      recoverInterruptedWrite();
-      return withDurablePluginStoreMutation(
-        {storeRoot: durableOptions.storeRoot, root, ownerToken},
-        () => {
-          assertSafeDurablePluginPath(root, safePath);
-          assertDurableOperationPathMode({
-            filePath,
-            mode: readDurablePathMode(root, safePath),
-            operation: {kind: 'write_json', path: safePath},
-          });
+      return readUnderLease(() => {
+        assertSafeDurablePluginPath(root, safePath);
+        assertDurableOperationPathMode({
+          filePath,
+          mode: readDurablePathMode(root, safePath),
+          operation: {kind: 'write_json', path: safePath},
+        });
 
-          try {
-            return freezeRuntimePluginFileStoreJsonValue(
-              JSON.parse(readTextFileSync(filePath)) as unknown,
-            );
-          } catch (error: unknown) {
-            if (isMissingFileError(error)) {
-              return undefined;
-            }
-
-            throw error;
+        try {
+          return freezeRuntimePluginFileStoreJsonValue(
+            JSON.parse(readTextFileSync(filePath)) as unknown,
+          );
+        } catch (error: unknown) {
+          if (isMissingFileError(error)) {
+            return undefined;
           }
-        },
-      );
+
+          throw error;
+        }
+      });
     },
     readJsonl(path) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      recoverInterruptedWrite();
-      return withDurablePluginStoreMutation(
-        {storeRoot: durableOptions.storeRoot, root, ownerToken},
-        () => {
-          assertSafeDurablePluginPath(root, safePath);
-          assertDurableOperationPathMode({
-            filePath,
-            mode: readDurablePathMode(root, safePath),
-            operation: {kind: 'append_jsonl', path: safePath},
-          });
+      return readUnderLease(() => {
+        assertSafeDurablePluginPath(root, safePath);
+        assertDurableOperationPathMode({
+          filePath,
+          mode: readDurablePathMode(root, safePath),
+          operation: {kind: 'append_jsonl', path: safePath},
+        });
 
-          try {
-            return parseRuntimePluginJsonlContent(readTextFileSync(filePath));
-          } catch (error: unknown) {
-            if (isMissingFileError(error)) {
-              return Object.freeze([]);
-            }
-
-            throw error;
+        try {
+          return parseRuntimePluginJsonlContent(readTextFileSync(filePath));
+        } catch (error: unknown) {
+          if (isMissingFileError(error)) {
+            return Object.freeze([]);
           }
-        },
-      );
+
+          throw error;
+        }
+      });
     },
     writeJsonAtomic(path, value) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
 
-      recoverInterruptedWrite();
       applyRecoverableDurablePluginFileStoreOperation({
         storeRoot: durableOptions.storeRoot,
         sessionId: durableOptions.sessionId,
@@ -148,7 +150,6 @@ export function createDurableRuntimePluginFileStore(
     appendJsonl(path, value) {
       const safePath = normalizeRuntimePluginFileStorePath(path);
 
-      recoverInterruptedWrite();
       applyRecoverableDurablePluginFileStoreOperation({
         storeRoot: durableOptions.storeRoot,
         sessionId: durableOptions.sessionId,
@@ -164,14 +165,10 @@ export function createDurableRuntimePluginFileStore(
       });
     },
     revision() {
-      recoverInterruptedWrite();
-      return withDurablePluginStoreMutation(
-        {storeRoot: durableOptions.storeRoot, root, ownerToken},
-        () => {
-          assertSafeDurablePluginRoot(root);
-          return readDurableRevision(root);
-        },
-      );
+      return readUnderLease(() => {
+        assertSafeDurablePluginRoot(root);
+        return readDurableRevision(root);
+      });
     },
   } satisfies RuntimePluginFileStore);
 }

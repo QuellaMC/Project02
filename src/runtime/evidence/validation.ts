@@ -1,3 +1,4 @@
+import {visibleReplyModelToolName} from '../../role-model/index.ts';
 import {
   conversationMessageForRawEvent,
   conversationMessagesFromRawEvents,
@@ -2128,6 +2129,11 @@ function assertConversationTurnShape(options: {
         );
       }
     }
+
+    assertCharacterRowsFollowTheirDecision(
+      turnMessages,
+      commitEventByMessageKey,
+    );
   }
 }
 
@@ -2195,6 +2201,61 @@ function assertSingleLeadingUserMessage(
       'malformed_record',
       `A runtime turn must commit exactly one user message before its replies: ${turnMessages[0]?.eventId ?? 'unknown event'}.`,
     );
+  }
+}
+
+/**
+ * Replies committed from one decision keep that decision's order. Each row
+ * already matches an accepted reply of its decision; this is what stops a
+ * writer reordering or repeating them across rows of the same decision.
+ */
+function assertCharacterRowsFollowTheirDecision(
+  turnMessages: readonly ConversationLogRecord[],
+  commitEventByMessageKey: ReadonlyMap<string, RawEventLogRecord>,
+): void {
+  const rowsByDecision = new Map<
+    string,
+    {readonly texts: string[]; readonly replies: readonly string[]}
+  >();
+
+  for (const message of turnMessages) {
+    if (message.role !== 'character') {
+      continue;
+    }
+
+    const commitEvent = commitEventByMessageKey.get(
+      visibleMessageEvidenceKey(message, message.id),
+    );
+
+    if (commitEvent === undefined) {
+      continue;
+    }
+
+    const decision = commitEvent.parsedRoleModelDecisionSnapshot?.result;
+
+    if (decision?.status !== 'accepted') {
+      continue;
+    }
+
+    const replies = decision.decision.toolCalls
+      .filter(call => call.name === visibleReplyModelToolName)
+      .map(call => String(call.input['text']));
+    // Keyed by the decision, not the event: one decision commits each of
+    // its replies as its own event, and they share the ordering rule.
+    const key = replies.join('\u0000');
+    const seen = rowsByDecision.get(key) ?? {texts: [], replies};
+
+    seen.texts.push(message.text);
+    rowsByDecision.set(key, seen);
+  }
+
+  for (const {texts, replies} of rowsByDecision.values()) {
+    if (!sameOrderedValues(texts, replies.slice(0, texts.length))) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Character messages must follow the order their decision asked for.',
+      );
+    }
   }
 }
 

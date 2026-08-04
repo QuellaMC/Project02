@@ -45,25 +45,6 @@ export type DurablePluginFileStoreFaultInjector = (
   point: DurablePluginFileStoreFaultPoint,
 ) => void;
 
-export function recoverDirectDurablePluginFileStoreMutation(options: {
-  readonly storeRoot: string;
-  readonly sessionId: string;
-  readonly pluginId: string;
-  readonly root: string;
-  readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
-}): void {
-  withDurablePluginStoreMutation(
-    {
-      storeRoot: options.storeRoot,
-      root: options.root,
-      ownerToken: options.ownerToken,
-    },
-    () => {
-      recoverDirectDurablePluginFileStoreMutationLocked(options);
-    },
-  );
-}
-
 export function applyRecoverableDurablePluginFileStoreOperation(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
@@ -347,7 +328,7 @@ function directDurablePluginFileStoreJournalPath(root: string): string {
   return join(root, durableDirectMutationJournalFileName);
 }
 
-function recoverDirectDurablePluginFileStoreMutationLocked(options: {
+export function recoverDirectDurablePluginFileStoreMutationLocked(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
   readonly pluginId: string;

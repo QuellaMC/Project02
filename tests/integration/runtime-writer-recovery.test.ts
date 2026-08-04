@@ -145,6 +145,8 @@ describe('abandoned durable runtime writer recovery', () => {
       throw new Error('Expected durable runtime paths.');
     }
 
+    const abandonedToolCallId = `${abandonedIdentity.eventId}.${abandonedIdentity.traceId}.round-1.1.memory.search`;
+
     writeJsonLines(paths.tracePath, [
       {...abandonedIdentity, step: 'runtime_event_received'},
     ]);
@@ -158,6 +160,27 @@ describe('abandoned durable runtime writer recovery', () => {
         ...abandonedIdentity,
         kind: 'runtime_event_normalized',
         eventType: 'USER_MESSAGE',
+      },
+      {
+        ...abandonedIdentity,
+        kind: 'tool_call_started',
+        eventType: 'USER_MESSAGE',
+        toolCallId: abandonedToolCallId,
+        toolRound: 1,
+        toolName: 'memory.search',
+        toolPluginId: 'memory.fixture',
+        toolInput: {query: 'abandoned'},
+      },
+      {
+        ...abandonedIdentity,
+        kind: 'tool_call_finished',
+        eventType: 'USER_MESSAGE',
+        toolCallId: abandonedToolCallId,
+        toolRound: 1,
+        toolName: 'memory.search',
+        toolPluginId: 'memory.fixture',
+        dispatchedToHost: true,
+        toolResult: {status: 'accepted', output: {}, evidence: []},
       },
       {
         ...abandonedIdentity,
@@ -231,6 +254,15 @@ describe('abandoned durable runtime writer recovery', () => {
       'next input',
       'next reply',
     ]);
+    // The tool changed durable state before the crash, so its call stays
+    // on the terminal: inspect reads tool events through these IDs.
+    expect(
+      evidence.rawEvents.find(
+        record =>
+          record.eventId === abandonedIdentity.eventId &&
+          record.kind === 'runtime_turn_rejected',
+      )?.toolCallIds,
+    ).toEqual([abandonedToolCallId]);
     expect(existsSync(abandonedTempPath)).toBe(false);
   });
 

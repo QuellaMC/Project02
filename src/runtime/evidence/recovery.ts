@@ -134,6 +134,17 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
         runtimeEventIdentityKey(record) === identityKey,
     )
     .flatMap(record => record.visibleMessageIds ?? []);
+  // A tool that finished changed durable state before the crash, so its
+  // call belongs on the terminal: inspect reads tool events through these.
+  const finishedToolCallIds = options.evidence.rawEvents
+    .filter(
+      record =>
+        record.kind === 'tool_call_finished' &&
+        runtimeEventIdentityKey(record) === identityKey,
+    )
+    .flatMap(record =>
+      record.toolCallId === undefined ? [] : [record.toolCallId],
+    );
   const rejectedTerminal = decodeRawEventLogRecord(
     encodeRawEventLogRecord({
       eventId: finalOpenRawEvent.eventId,
@@ -146,6 +157,9 @@ export function recoverAbandonedRuntimeWriterEvidence(options: {
       ...(openTurnMessageIds.length === 0
         ? {}
         : {visibleMessageIds: openTurnMessageIds}),
+      ...(finishedToolCallIds.length === 0
+        ? {}
+        : {toolCallIds: finishedToolCallIds}),
     }),
   );
   const storedTraceSteps = new Set(
