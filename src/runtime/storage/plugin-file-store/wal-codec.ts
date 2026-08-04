@@ -17,8 +17,11 @@ import {
   normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
 
+// v2 carries one operation where v1 carried an array. A v1 journal is a
+// crash remnant from a pre-release build; it decodes as an unknown version
+// and is reported rather than silently misread as this shape.
 export const durableTransactionJournalVersion =
-  'project02.plugin_transaction.v1';
+  'project02.plugin_transaction.v2';
 
 /**
  * One durable write, described completely enough to finish or verify it
@@ -87,6 +90,15 @@ export function readDurablePluginFileStoreJournal(
   const ownerNonce = value['ownerNonce'];
   const ownerPid = value['ownerPid'];
   const sessionId = value['sessionId'];
+
+  if (
+    typeof version === 'string' &&
+    version !== durableTransactionJournalVersion
+  ) {
+    throw new TypeError(
+      `Plugin fileStore transaction journal was written by another version (${version}); this build writes ${durableTransactionJournalVersion}.`,
+    );
+  }
 
   if (
     version !== durableTransactionJournalVersion ||

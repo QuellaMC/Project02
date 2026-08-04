@@ -672,7 +672,7 @@ describe('local runtime session store', () => {
       'utf8',
     );
     await writeFile(layout.sessionCatalogPath, '', 'utf8');
-    await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
+    await writeFile(orphanPaths.rawEventsPath, '{"orphan":true}\n', 'utf8');
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
@@ -720,7 +720,7 @@ describe('local runtime session store', () => {
       sessionId: 'orphan',
     });
     await mkdir(orphanPaths.sessionRoot, {recursive: true});
-    await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
+    await writeFile(orphanPaths.rawEventsPath, '{"orphan":true}\n', 'utf8');
 
     await expectStorageErrorCode(
       async () =>

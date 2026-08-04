@@ -205,6 +205,36 @@ describe('runtime plugin file store', () => {
     ).toThrow();
   });
 
+  it('names the version when a journal was written by another build', () => {
+    const storeRoot = createTempRoot();
+    const sessionId = 'session-foreign-journal-version';
+    const pluginId = 'plugin.foreign-journal-version';
+    const options = {storeRoot, sessionId, pluginId};
+
+    createRuntimePluginFileStore(options).appendJsonl('events.jsonl', {
+      value: 1,
+    });
+    writeFileSync(
+      join(
+        pluginRoot(storeRoot, sessionId, pluginId),
+        '.project02-plugin-store-direct-mutation.json',
+      ),
+      `${JSON.stringify({
+        version: 'project02.plugin_transaction.v1',
+        ownerHostname: 'host',
+        ownerNonce: '2f1c4f0e-6a1b-4c6d-9e2a-7b3d5f8c1a90',
+        ownerPid: 1234,
+        sessionId,
+        operations: [],
+      })}\n`,
+      'utf8',
+    );
+
+    expect(() => createRuntimePluginFileStore(options)).toThrow(
+      /written by another version \(project02\.plugin_transaction\.v1\)/iu,
+    );
+  });
+
   it('recovers a direct JSON write when metadata persistence fails after content', () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-direct-json-recovery';

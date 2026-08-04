@@ -90,7 +90,6 @@ export type LocalRuntimeSessionPaths = {
   readonly pluginsRoot: string;
   readonly tracePath: string;
   readonly rawEventsPath: string;
-  readonly conversationPath: string;
 };
 
 export type LocalRuntimePluginPaths = {
@@ -192,8 +191,6 @@ const traceFileName = 'trace.jsonl';
 
 const rawEventsFileName = 'raw-events.jsonl';
 
-const conversationFileName = 'conversation.jsonl';
-
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
 export function createProject02HomeLayout(
@@ -292,7 +289,6 @@ export function createLocalRuntimeSessionPaths(
     pluginsRoot,
     tracePath: join(sessionRoot, traceFileName),
     rawEventsPath: join(sessionRoot, rawEventsFileName),
-    conversationPath: join(sessionRoot, conversationFileName),
   } satisfies LocalRuntimeSessionPaths);
 }
 

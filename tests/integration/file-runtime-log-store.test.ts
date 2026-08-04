@@ -80,7 +80,6 @@ describe('file runtime log store plugin tool event validation', () => {
 
     writeFileSync(paths.tracePath, '', 'utf8');
     writeFileSync(paths.rawEventsPath, '', 'utf8');
-    writeFileSync(paths.conversationPath, '', 'utf8');
 
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
@@ -102,7 +101,6 @@ describe('file runtime log store plugin tool event validation', () => {
       expect(evidenceReads).toEqual([]);
       expect(readFileSync(paths.tracePath, 'utf8')).toBe('');
       expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe('');
-      expect(readFileSync(paths.conversationPath, 'utf8')).toBe('');
       expect(readFileSync(schemaPath, 'utf8')).toBe(markerBeforeMutation);
     } finally {
       await writerLease.release();
