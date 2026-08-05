@@ -6,21 +6,6 @@ import {
 import type {DurableRuntimeSessionEvidence} from './contract.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 
-export function assertDurableRuntimeSessionIdentity(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly evidence: DurableRuntimeSessionEvidence;
-  readonly boundCharacter?: CharacterProfile;
-  readonly boundUserSpeaker?: SpeakerIdentity;
-}): void {
-  validateDurableRuntimeSessionIdentity({
-    paths: options.paths,
-    evidence: options.evidence,
-    boundCharacter: options.boundCharacter,
-    boundUserSpeaker: options.boundUserSpeaker,
-    allowUnanchoredCustomCharacter: false,
-  });
-}
-
 export function validateDurableRuntimeSessionIdentity(options: {
   readonly paths: LocalRuntimeSessionPaths;
   readonly evidence: DurableRuntimeSessionEvidence;

@@ -13,9 +13,15 @@ import {
   maxSpeakerDisplayNameLength,
   type CharacterProfile,
 } from '../../core/index.ts';
-import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  isJsonRecord,
+} from '../../shared/json-boundary.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
-import {packageDescriptorSchemaRefIsValid} from '../../shared/package-metadata.ts';
+import {
+  compareText,
+  packageDescriptorSchemaRefIsValid,
+} from '../../shared/package-metadata.ts';
 import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 
 export const characterPackageDescriptorFormat = 'project02.character.v1';
@@ -96,7 +102,7 @@ export type CharacterPackageDescriptorParseResult =
 export function parseCharacterPackageDescriptor(
   value: unknown,
 ): CharacterPackageDescriptorParseResult {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return rejectedDescriptor(
       'invalid_descriptor',
       'Character package descriptor must be an object.',
@@ -117,7 +123,7 @@ export function parseCharacterPackageDescriptor(
   }
 
   const unknownDescriptorField = Object.keys(descriptor)
-    .sort(compareDescriptorText)
+    .sort(compareText)
     .find(field => !characterPackageDescriptorFields.has(field));
 
   if (unknownDescriptorField !== undefined) {
@@ -184,7 +190,7 @@ type CharacterIdentityParseResult =
     };
 
 function parseCharacterIdentity(value: unknown): CharacterIdentityParseResult {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return rejectedDescriptor(
       'invalid_identity',
       'Character package identity must be an object.',
@@ -192,7 +198,7 @@ function parseCharacterIdentity(value: unknown): CharacterIdentityParseResult {
   }
 
   const unknownField = Object.keys(value)
-    .sort(compareDescriptorText)
+    .sort(compareText)
     .find(field => !characterIdentityFields.has(field));
 
   if (unknownField !== undefined) {
@@ -240,7 +246,7 @@ type CharacterPersonaParseResult =
     };
 
 function parseCharacterPersona(value: unknown): CharacterPersonaParseResult {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return rejectedDescriptor(
       'invalid_persona',
       'Character package persona must be an object.',
@@ -248,7 +254,7 @@ function parseCharacterPersona(value: unknown): CharacterPersonaParseResult {
   }
 
   const unknownField = Object.keys(value)
-    .sort(compareDescriptorText)
+    .sort(compareText)
     .find(field => !characterPersonaFields.has(field));
 
   if (unknownField !== undefined) {
@@ -310,7 +316,7 @@ type CharacterMetaParseResult =
     };
 
 function parseCharacterMeta(value: unknown): CharacterMetaParseResult {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return rejectedDescriptor(
       'invalid_meta',
       'Character package meta must be an object.',
@@ -318,7 +324,7 @@ function parseCharacterMeta(value: unknown): CharacterMetaParseResult {
   }
 
   const unknownField = Object.keys(value)
-    .sort(compareDescriptorText)
+    .sort(compareText)
     .find(field => !characterMetaFields.has(field));
 
   if (unknownField !== undefined) {
@@ -358,7 +364,7 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
     return Object.freeze({status: 'accepted', plugins: undefined});
   }
 
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return rejectedDescriptor(
       'invalid_plugins',
       'Character package plugins must be an object.',
@@ -366,7 +372,7 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
   }
 
   const unknownField = Object.keys(value)
-    .sort(compareDescriptorText)
+    .sort(compareText)
     .find(field => !characterPluginsFields.has(field));
 
   if (unknownField !== undefined) {
@@ -393,7 +399,7 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
 
   const rawConfig = value['config'];
 
-  if (rawConfig !== undefined && !isRecord(rawConfig)) {
+  if (rawConfig !== undefined && !isJsonRecord(rawConfig)) {
     return rejectedDescriptor(
       'invalid_plugins',
       'Character package plugins.config must be an object keyed by plugin id.',
@@ -403,7 +409,7 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
   const config: Record<string, Readonly<Record<string, unknown>>> = {};
 
   for (const [pluginId, pluginConfig] of Object.entries(rawConfig ?? {}).sort(
-    ([left], [right]) => compareDescriptorText(left, right),
+    ([left], [right]) => compareText(left, right),
   )) {
     if (!isProject02Identifier(pluginId)) {
       return rejectedDescriptor(
@@ -412,7 +418,7 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
       );
     }
 
-    if (!isRecord(pluginConfig)) {
+    if (!isJsonRecord(pluginConfig)) {
       return rejectedDescriptor(
         'invalid_plugins',
         `Character package plugins.config["${pluginId}"] must be an object.`,
@@ -499,12 +505,4 @@ function rejectedDescriptor(
     status: 'rejected',
     issue: Object.freeze({code, message}),
   });
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function compareDescriptorText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -1,3 +1,4 @@
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   roleModelProviderErrorRejectionReason,
   type RoleModelInputEnvelope,
@@ -1284,10 +1285,4 @@ async function defaultFetchClient(
       return await response.text();
     },
   } satisfies NvidiaFetchResponse);
-}
-
-function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

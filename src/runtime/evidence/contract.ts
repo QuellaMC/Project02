@@ -67,9 +67,6 @@ export type RuntimeEvidenceIncrementalState = {
   openTurnConversationStart: number;
 };
 
-export type RuntimeTurnEvidenceState =
-  'completed' | 'empty' | 'raw_started' | 'rejected';
-
 export type RuntimeLogStore = {
   readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
   readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;

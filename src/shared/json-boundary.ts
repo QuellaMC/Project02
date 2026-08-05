@@ -157,7 +157,7 @@ function normalizeJsonBoundaryValue(
     }
   }
 
-  if (isRecord(value)) {
+  if (isJsonRecord(value)) {
     assertContainerCanBeVisited(value, field, state);
     const entries = Object.entries(value);
     if (entries.length > state.options.limits.maxEntriesPerContainer) {
@@ -219,7 +219,7 @@ function measureRedactedCredentialValue(
     return;
   }
 
-  if (isRecord(value)) {
+  if (isJsonRecord(value)) {
     assertContainerCanBeVisited(value, field, state);
     const entries = Object.entries(value);
     if (entries.length > state.options.limits.maxEntriesPerContainer) {
@@ -303,9 +303,12 @@ function assertContainerCanBeVisited(
 export function isJsonBoundaryObject(
   value: JsonBoundaryValue,
 ): value is JsonBoundaryObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return isJsonRecord(value);
 }
 
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+/** The one "plain JSON object" predicate; every boundary narrows with this. */
+export function isJsonRecord(
+  value: unknown,
+): value is Readonly<Record<string, unknown>> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

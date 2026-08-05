@@ -1,3 +1,4 @@
+import {isJsonRecord} from '../../src/shared/json-boundary.ts';
 import {readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
@@ -59,13 +60,9 @@ function requiredRecord(
   value: unknown,
   label: string,
 ): Readonly<Record<string, unknown>> {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     throw new Error(`Expected ${label} to be an object.`);
   }
 
   return value;
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

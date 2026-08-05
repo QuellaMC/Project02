@@ -80,9 +80,6 @@ export {
 export {
   freezeProviderMetadata,
   freezeRoleModelProviderExchangeSnapshot,
-  freezeRuntimePluginJsonObject,
-  freezeRuntimePluginJsonValue,
-  isJsonRecord,
   parseRoleModelProviderExchangeSnapshot,
 } from './api/provider-exchange.ts';
 export {

@@ -23,6 +23,7 @@ import {
 import {isAbsolute, join, resolve, sep} from 'node:path';
 
 import {
+  compareText,
   filesystemMetadataIdentity,
   packageDirectorySnapshotIsCurrent,
   snapshotPackageDirectory,
@@ -740,8 +741,4 @@ function captureError(
   reason: PackageCaptureRejectionReason,
 ): PackageCaptureError {
   return new PackageCaptureError({path, reason});
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

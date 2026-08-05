@@ -1,4 +1,5 @@
 import {readFlagValue} from '../shared/flags.ts';
+import {writeJson} from '../shared/output.ts';
 import type {CharacterProfile} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
@@ -373,10 +374,6 @@ async function writeSessionEvidence(
       traceEntries,
     }),
   } satisfies InspectSessionOutput);
-}
-
-function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
-  stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 if (isMainModule(import.meta.url)) {

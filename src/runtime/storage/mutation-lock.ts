@@ -203,6 +203,12 @@ async function acquireNormalizedMutationLock(
   }
 }
 
+/**
+ * @internal Production multi-target acquisition is sync-only
+ * ({@link acquireLocalRuntimeMutationLocksSync}); this async form exists for
+ * concurrency regression tests, which interleave contenders across awaits
+ * and spawn child-process lock holders that production cannot simulate.
+ */
 export async function acquireLocalRuntimeMutationLocks(
   options: AcquireLocalRuntimeMutationLocksOptions,
 ): Promise<LocalRuntimeMutationLocksLease> {
@@ -250,6 +256,11 @@ export async function acquireLocalRuntimeMutationLocks(
   } satisfies LocalRuntimeMutationLocksLease);
 }
 
+/**
+ * @internal Production sync callers hold multiple targets
+ * ({@link acquireLocalRuntimeMutationLocksSync}); the single-target sync
+ * form exists for reentrancy and abandoned-lock regression tests.
+ */
 export function acquireLocalRuntimeMutationLockSync(
   options: AcquireLocalRuntimeMutationLockOptions,
 ): LocalRuntimeMutationLockLeaseSync {

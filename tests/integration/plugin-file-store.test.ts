@@ -1,3 +1,4 @@
+import {isJsonRecord} from '../../src/shared/json-boundary.ts';
 import {
   mkdirSync,
   mkdtempSync,
@@ -1075,7 +1076,7 @@ function createProtoKeyValue(): RuntimePluginJsonObject {
 }
 
 function expectProtoKeyValue(value: unknown): void {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     throw new Error('Expected plugin file value to be a JSON object.');
   }
 
@@ -1086,15 +1087,11 @@ function expectProtoKeyValue(value: unknown): void {
   expect(JSON.stringify(value)).toContain('"__proto__":{"preserved":true}');
 
   const nested = value['nested'];
-  if (!isRecord(nested)) {
+  if (!isJsonRecord(nested)) {
     throw new Error('Expected nested plugin file value to be a JSON object.');
   }
 
   expect(Object.hasOwn(nested, '__proto__')).toBe(true);
   expect(nested['__proto__']).toBe('nested-value');
   expect(JSON.stringify(nested)).toContain('"__proto__":"nested-value"');
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

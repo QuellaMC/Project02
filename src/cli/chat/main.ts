@@ -96,6 +96,7 @@ import {
   runBestEffortPluginShutdown,
 } from '../../plugins/host/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
+import {writeJson} from '../shared/output.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -312,7 +313,7 @@ function writeTerminalToolConfirmationRequest(
 ): void {
   stdout.write('\nPlugin config update requires your approval.\n');
   stdout.write(`${request.summary}\n`);
-  stdout.write(`${JSON.stringify(request.preview, null, 2)}\n`);
+  writeJson(stdout, request.preview);
   stdout.write('Approve this one exact change? [y/N] ');
 }
 

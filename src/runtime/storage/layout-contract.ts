@@ -1,3 +1,4 @@
+import {isJsonRecord as isRecord} from '../../shared/json-boundary.ts';
 import {basename, dirname, join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
@@ -590,13 +591,11 @@ export function requiredNonEmptyString(
   return value;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function throwMalformedSchemaMarker(field: string): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_schema_marker',
     `Stored local runtime schema field "${field}" is malformed.`,
   );
 }
+
+export {isRecord};

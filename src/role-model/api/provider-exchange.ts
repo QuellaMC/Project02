@@ -1,3 +1,4 @@
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   freezeRoleModelChatMessage,
   type RoleModelChatCompletionTool,
@@ -479,7 +480,7 @@ function finiteProviderMetadataNumber(value: number, field: string): number {
   return value;
 }
 
-export function freezeRuntimePluginJsonObject(
+function freezeRuntimePluginJsonObject(
   value: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, RuntimePluginJsonValue>> {
   const snapshot: Record<string, RuntimePluginJsonValue> = {};
@@ -491,9 +492,7 @@ export function freezeRuntimePluginJsonObject(
   return Object.freeze(snapshot);
 }
 
-export function freezeRuntimePluginJsonValue(
-  value: unknown,
-): RuntimePluginJsonValue {
+function freezeRuntimePluginJsonValue(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -514,10 +513,4 @@ export function freezeRuntimePluginJsonValue(
   throw new TypeError(
     'Role-model tool observation values must be JSON-compatible.',
   );
-}
-
-export function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

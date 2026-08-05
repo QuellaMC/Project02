@@ -48,7 +48,6 @@ import {
   truncateSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
   type BigIntStats,
   type Dirent,
   type Stats,
@@ -376,19 +375,6 @@ export function writeToFileSync(
   content: string | Uint8Array,
 ): void {
   writeFileSync(fileDescriptor, content);
-}
-
-/**
- * One write syscall's worth of text, returning how much of it landed.
- * `writeToFileSync` above loops until the whole content is written; this
- * is the single call, for a caller appending to a descriptor it opened
- * itself and flushes explicitly.
- */
-export function writeTextToFileSync(
-  fileDescriptor: number,
-  text: string,
-): number {
-  return writeSync(fileDescriptor, text);
 }
 
 export function readBytesFromFileSync(

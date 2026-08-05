@@ -18,10 +18,8 @@ import {
 } from '../api/contracts.ts';
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
 import {normalizeReplayableRejectedRoleModelDecisionResult} from './replay-evidence.ts';
-import {
-  isJsonRecord,
-  parseRoleModelProviderExchangeSnapshot,
-} from '../api/provider-exchange.ts';
+import {isJsonRecord} from '../../shared/json-boundary.ts';
+import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
 import type {RoleModelNativeToolCallArgumentError} from '../api/adapter.ts';
 import type {
   RoleModelAssistantChatMessage,

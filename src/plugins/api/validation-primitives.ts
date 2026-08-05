@@ -1,4 +1,9 @@
-import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {
+  isJsonRecord as isRecord,
+  ownJsonRecordValue,
+} from '../../shared/json-boundary.ts';
+
+export {isRecord};
 import {isProject02Identifier} from '../../shared/identifier.ts';
 import {isJsonBoundaryCredentialKey} from '../../shared/redaction.ts';
 import {runtimePluginSourceKindValues} from './contract.ts';
@@ -293,12 +298,6 @@ export function reject(
     reason,
     details,
   } satisfies RuntimePluginValidationResult<never>);
-}
-
-export function isRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 export function isOneOf<T extends string>(

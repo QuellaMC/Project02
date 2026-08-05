@@ -62,7 +62,6 @@ import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginToolCallResultSnapshot,
   type PreparedRuntimePluginConfigEffect,
-  type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallExecutionResult,
@@ -904,13 +903,7 @@ async function routeExecutableToolCalls(options: {
       round: options.round,
       toolName: toolCall.name,
     });
-    const routedCall = createRuntimePluginToolCall({
-      callId,
-      identity: options.identity,
-      pluginId: pluginId ?? undeclaredToolPluginId(toolCall.name),
-      toolCall,
-    });
-    const executionCall = createRuntimePluginExecutionToolCall({
+    const {routedCall, executionCall} = createRuntimePluginToolCallViews({
       callId,
       identity: options.identity,
       pluginId: pluginId ?? undeclaredToolPluginId(toolCall.name),
@@ -1196,40 +1189,47 @@ function findPluginToolDefinition(
   return definitions.find(definition => definition.name === toolName);
 }
 
-function createRuntimePluginToolCall(options: {
+/**
+ * One proposed tool call, two views. The routed view is what hooks,
+ * rejections, and evidence carry, so credential-shaped input values are
+ * redacted before anything records or displays them. The execution view
+ * is what the plugin runs on and keeps the real values — redacting it
+ * would execute the tool against "[redacted]" placeholders. Both are
+ * built from one identity here so the views cannot drift apart.
+ */
+function createRuntimePluginToolCallViews(options: {
   readonly callId: string;
   readonly identity: RuntimeEventIdentity;
   readonly pluginId: string;
   readonly toolCall: ModelToolCall;
-}): RuntimePluginToolCall {
-  return Object.freeze({
+}): {
+  readonly routedCall: RuntimePluginToolCall;
+  readonly executionCall: RuntimePluginToolCall;
+} {
+  const sharedIdentity = {
     toolCallId: options.callId,
     eventId: options.identity.eventId,
     traceId: options.identity.traceId,
     createdAt: options.identity.createdAt,
     pluginId: options.pluginId,
     toolName: options.toolCall.name,
-    input: freezeRuntimePluginJsonObject(options.toolCall.input),
-  } satisfies RuntimePluginToolCall);
-}
+  };
 
-function createRuntimePluginExecutionToolCall(options: {
-  readonly callId: string;
-  readonly identity: RuntimeEventIdentity;
-  readonly pluginId: string;
-  readonly toolCall: ModelToolCall;
-}): RuntimePluginToolCall {
   return Object.freeze({
-    toolCallId: options.callId,
-    eventId: options.identity.eventId,
-    traceId: options.identity.traceId,
-    createdAt: options.identity.createdAt,
-    pluginId: options.pluginId,
-    toolName: options.toolCall.name,
-    input: createJsonBoundaryObjectSnapshot(options.toolCall.input, {
-      field: 'Plugin tool execution input',
-    }),
-  } satisfies RuntimePluginToolCall);
+    routedCall: Object.freeze({
+      ...sharedIdentity,
+      input: createJsonBoundaryObjectSnapshot(options.toolCall.input, {
+        field: 'Plugin tool input',
+        redact: true,
+      }),
+    } satisfies RuntimePluginToolCall),
+    executionCall: Object.freeze({
+      ...sharedIdentity,
+      input: createJsonBoundaryObjectSnapshot(options.toolCall.input, {
+        field: 'Plugin tool execution input',
+      }),
+    } satisfies RuntimePluginToolCall),
+  });
 }
 
 function undeclaredToolPluginId(toolName: string): string {
@@ -1293,15 +1293,6 @@ function assertRoutedPluginEvidenceIdentity(
       );
     }
   }
-}
-
-function freezeRuntimePluginJsonObject(
-  value: Readonly<Record<string, unknown>>,
-): RuntimePluginJsonObject {
-  return createJsonBoundaryObjectSnapshot(value, {
-    field: 'Plugin tool input',
-    redact: true,
-  });
 }
 
 function createSnapshotIdentity(
