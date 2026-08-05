@@ -27,11 +27,7 @@ import {
   runtimePluginEvidenceOption,
   runtimePluginTurnEvidenceOption,
 } from './plugin-evidence.ts';
-import {
-  appendRawEvent,
-  appendTrace,
-  visibleMessageIdsForTurnOption,
-} from './commit.ts';
+import {appendRawEvent, visibleMessageIdsForTurnOption} from './commit.ts';
 import {
   type LocalRuntimeUserMessageRejectedResult,
   type RoleModelRawEvidence,
@@ -60,7 +56,6 @@ export async function appendRejectedResult(
     healthResult.evidence,
   );
 
-  appendTrace(state, optionsForRejection.traceStep);
   appendRawEvent(state, {
     ...state.identity,
     kind: optionsForRejection.rawKind,
@@ -101,9 +96,6 @@ export async function appendRejectedResult(
     }),
   });
 
-  appendTrace(state, 'raw_event_log_appended');
-  appendTrace(state, 'runtime_turn_rejected');
-
   return Object.freeze({
     status: 'rejected',
     event: state.event,
@@ -111,7 +103,6 @@ export async function appendRejectedResult(
     message: optionsForRejection.message,
     rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
-    traceEntries: Object.freeze([...state.traceEntries]),
   } satisfies LocalRuntimeUserMessageRejectedResult);
 }
 
@@ -152,7 +143,6 @@ export function appendRoleModelRejectedResult(
     rawReason: rejection.reason,
     reason: rejection.reason,
     ...(runtimePluginContext === undefined ? {} : {runtimePluginContext}),
-    traceStep: 'commit_validation_rejected',
     toolCallIds: Object.freeze([...state.finishedToolCallIds]),
     ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
   });
@@ -173,7 +163,6 @@ export async function handleRuntimeTurnFailure(
       rawReason: error.message,
       reason: 'input_validation_rejected',
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
-      traceStep: 'input_validation_rejected',
     });
   }
 
@@ -186,7 +175,6 @@ export async function handleRuntimeTurnFailure(
       rawReason: rejection.reason,
       reason: rejection.reason,
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
-      traceStep: 'character_reply_rejected',
       ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     });
   }
@@ -201,8 +189,6 @@ export async function handleRuntimeTurnFailure(
     ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'raw_event_log_appended');
-  appendTrace(state, 'runtime_turn_rejected');
 
   throw error;
 }

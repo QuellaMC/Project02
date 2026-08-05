@@ -5,7 +5,7 @@ import {
   type ConversationSession,
   type SpeakerIdentity,
 } from '../../core/index.ts';
-import type {RuntimeLogStore} from '../evidence/records.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {
   createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
@@ -105,7 +105,6 @@ export async function createDurableChatRuntime(
       boundCharacter: character,
       boundUserSpeaker,
     });
-    logStore.recoverAbandonedWriterEvidence?.();
 
     return Object.freeze({
       session: await sessionStore.rehydrateConversationSession(sessionId, {
@@ -140,7 +139,7 @@ export function readDurableConversationEvidence(
   boundCharacter: CharacterProfile,
   boundUserSpeaker?: SpeakerIdentity,
 ): LocalRuntimeSessionConversationEvidence {
-  const evidence = logStore.readSessionEvidence().stored;
+  const evidence = logStore.readSessionEvidence();
   const recordedUserMessage = evidence.conversationMessages.find(
     message => message.role === 'user',
   );

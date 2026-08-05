@@ -54,7 +54,6 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createRawEventAppendFailingLogStore,
   createAfterTurnCommittedProbeHost,
-  createOneShotTerminalTraceAppendFailingLogStore,
   createSequencedAdapter,
   createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
@@ -820,80 +819,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
       status: 'rejected',
       visibleMessageIds,
     });
-  });
-
-  it('reconciles a one-shot terminal trace failure without rejecting the completed turn', async () => {
-    const sessionId = 'session-terminal-trace-reconciliation';
-    const storeRoot = createTestTempRoot('project02-plugin-loop-');
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-
-    const fileLogStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-    const logStore =
-      createOneShotTerminalTraceAppendFailingLogStore(fileLogStore);
-    const result = await runLocalUserMessageEvent({
-      event: createTestEvent('hello', 'evt_terminal_trace_reconciliation'),
-      session: createConversationSession({
-        id: sessionId,
-        character: testCharacterProfile,
-      }),
-      logStore,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {
-                text: 'the completed reply survives trace reconciliation',
-              },
-            },
-          ],
-        },
-      ]),
-    });
-    const reopened = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-
-    expect(result.status).toBe('completed');
-    if (result.status !== 'completed') {
-      throw new Error('Expected a completed runtime turn.');
-    }
-    expect(result.conversationMessages.at(-1)).toMatchObject({
-      role: 'character',
-      text: 'the completed reply survives trace reconciliation',
-    });
-    expect(result).not.toHaveProperty('postCommitFailures');
-    expect(
-      reopened
-        .rawEvents()
-        .filter(record => record.kind === 'runtime_turn_completed'),
-    ).toHaveLength(1);
-    expect(
-      reopened
-        .traceEntries()
-        .filter(
-          entry =>
-            entry.eventId === 'evt_terminal_trace_reconciliation' &&
-            (entry.step === 'raw_event_log_appended' ||
-              entry.step === 'runtime_turn_completed'),
-        )
-        .map(entry => entry.step),
-    ).toEqual(['raw_event_log_appended', 'runtime_turn_completed']);
   });
 
   it('commits a prepared Character State patch when terminal append throws after persisting', async () => {

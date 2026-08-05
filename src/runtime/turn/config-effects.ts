@@ -8,7 +8,8 @@ import {
 } from '../../plugins/api/index.ts';
 import type {AcceptedRoleModelLoopResult} from '../../role-model/index.ts';
 import {RuntimeConfigConflictError} from '../config/mutate.ts';
-import type {RawEventLogRecord, RuntimeLogStore} from '../evidence/records.ts';
+import type {RawEventLogRecord} from '../evidence/records.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {runtimePluginEvidenceOption} from './plugin-evidence.ts';
 import type {RuntimeTurnState} from './contracts.ts';
 
@@ -20,7 +21,7 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     return;
   }
 
-  const rawEvents = options.logStore.readSessionEvidence().stored.rawEvents;
+  const rawEvents = options.logStore.readSessionEvidence().rawEvents;
   const reconciledEffectIds = reconciledRuntimeConfigEffectIds(rawEvents);
   const acceptedReconciledIds = reconciledRuntimeConfigEffectIds(rawEvents, [
     'accepted',

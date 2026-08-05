@@ -1,14 +1,12 @@
 /**
  * Public API of the runtime evidence module: the durable-evidence
- * transition machine, validation/recovery/cache over persisted session
- * evidence, and the in-memory RuntimeLogStore. Cross-module imports land
- * here (arch:check rule 5); runtime-internal files may import deeper.
+ * transition machine, validation and cache over the persisted event log,
+ * projections derived from it, and the in-memory RuntimeLogStore.
+ * Cross-module imports land here (arch:check rule 5); runtime-internal
+ * files may import deeper.
  */
 export {createRuntimeLogStore} from './memory-store.ts';
-export {
-  createRuntimeSessionEvidenceSnapshot,
-  recoverAbandonedRuntimeWriterEvidence,
-} from './recovery.ts';
+export {deriveRuntimeTraceEntries} from './trace-projection.ts';
 export {
   createTraceSummary,
   sameTraceIdentity,

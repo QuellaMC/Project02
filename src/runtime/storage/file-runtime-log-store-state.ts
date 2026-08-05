@@ -17,11 +17,9 @@ import {
 } from './mutation-lock.ts';
 import type {
   CachedRuntimeSessionEvidence,
-  DurableRuntimeSessionEvidence,
   MutableDurableRuntimeSessionEvidence,
 } from '../evidence/contract.ts';
 import {
-  createMutableDurableRuntimeSessionEvidence,
   readCoherentRuntimeSessionEvidence,
   readRuntimeEvidenceFileStamps,
   sameRuntimeEvidenceFileStamps,
@@ -31,11 +29,7 @@ import {
   createRuntimeEvidenceTransitionMachine,
   type RuntimeEvidenceTransitionMachine,
 } from '../evidence/transition.ts';
-import {
-  assertDurableRuntimeSessionEvidence,
-  reconcileTerminalRawTraceEvidence,
-} from '../evidence/validation.ts';
-import {recoverAbandonedRuntimeWriterEvidence} from '../evidence/recovery.ts';
+import {assertDurableRuntimeSessionEvidence} from '../evidence/validation.ts';
 
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
@@ -60,7 +54,6 @@ export class FileRuntimeLogStoreState {
   private readonly writerResourceKey: string;
   private cachedEvidence: CachedRuntimeSessionEvidence | undefined;
   private transitionMachine: RuntimeEvidenceTransitionMachine | undefined;
-  private writerRecoveryChecked = false;
   private sessionReadabilityChecked = false;
   private temporaryFilesScavenged = false;
 
@@ -143,7 +136,6 @@ export class FileRuntimeLogStoreState {
     );
     this.cachedEvidence = loaded;
     this.transitionMachine = undefined;
-    this.writerRecoveryChecked = false;
     return loaded.evidence;
   }
 
@@ -154,7 +146,7 @@ export class FileRuntimeLogStoreState {
       this.options.onEvidenceValidation?.('cold_snapshot');
       assertDurableRuntimeSessionEvidence({
         paths: this.paths,
-        evidence: reconcileTerminalRawTraceEvidence(evidence),
+        evidence,
         mode: 'public',
         ...(this.options.boundCharacter === undefined
           ? {}
@@ -196,42 +188,6 @@ export class FileRuntimeLogStoreState {
   invalidateCachedEvidence(): void {
     this.cachedEvidence = undefined;
     this.transitionMachine = undefined;
-    this.writerRecoveryChecked = false;
-  }
-
-  recoverAbandonedWriterEvidence(): boolean {
-    this.assertSessionReadable();
-    this.assertWriterOwnership();
-
-    if (this.writerRecoveryChecked) {
-      return false;
-    }
-
-    const cacheBeforeRefresh = this.cachedEvidence;
-    const evidence = this.refreshStoredEvidence();
-
-    if (this.recoveryStateIsAlreadyClean(cacheBeforeRefresh)) {
-      this.writerRecoveryChecked = true;
-      return false;
-    }
-
-    const recovered = this.recoverEvidence(evidence);
-    this.writerRecoveryChecked = true;
-
-    if (recovered === undefined) {
-      return false;
-    }
-
-    const recoveredEvidence = this.replaceCachedEvidence(recovered);
-    this.ensureTransitionMachine(recoveredEvidence);
-    this.writerRecoveryChecked = true;
-    return true;
-  }
-
-  checkpointWriterEvidence(): void {
-    this.assertWriterOwnership();
-    this.checkpointCachedEvidenceStamps();
-    this.writerRecoveryChecked = false;
   }
 
   private writerIsActive(): boolean {
@@ -240,67 +196,5 @@ export class FileRuntimeLogStoreState {
       resourceKey: this.writerResourceKey,
       ownerToken: this.writerLockOwnerToken,
     });
-  }
-
-  private recoveryStateIsAlreadyClean(
-    cacheBeforeRefresh: CachedRuntimeSessionEvidence | undefined,
-  ): boolean {
-    return (
-      cacheBeforeRefresh === this.cachedEvidence &&
-      this.transitionMachine !== undefined &&
-      this.transitionMachine.state.openRawIdentity === undefined &&
-      this.transitionMachine.state.traceStartedWithoutRaw.size === 0 &&
-      this.transitionMachine.state.missingStoredTerminalTraceEvidence.size === 0
-    );
-  }
-
-  private recoverEvidence(
-    evidence: MutableDurableRuntimeSessionEvidence,
-  ): DurableRuntimeSessionEvidence | undefined {
-    try {
-      const recovered = recoverAbandonedRuntimeWriterEvidence({
-        paths: this.paths,
-        evidence,
-        ...(this.options.boundCharacter === undefined
-          ? {}
-          : {boundCharacter: this.options.boundCharacter}),
-        ...(this.options.boundUserSpeaker === undefined
-          ? {}
-          : {boundUserSpeaker: this.options.boundUserSpeaker}),
-      });
-
-      if (recovered === undefined) {
-        this.ensureTransitionMachine(evidence);
-      }
-
-      return recovered;
-    } catch (error: unknown) {
-      if (
-        error instanceof LocalRuntimeStorageContractError &&
-        error.code === 'partial_write'
-      ) {
-        throw error;
-      }
-
-      throw new LocalRuntimeStorageContractError(
-        'partial_write',
-        `Local runtime evidence cannot safely recover the abandoned writer for session "${this.paths.sessionId}".`,
-        {cause: error},
-      );
-    }
-  }
-
-  private replaceCachedEvidence(
-    evidence: DurableRuntimeSessionEvidence,
-  ): MutableDurableRuntimeSessionEvidence {
-    const mutableEvidence =
-      createMutableDurableRuntimeSessionEvidence(evidence);
-
-    this.cachedEvidence = {
-      evidence: mutableEvidence,
-      stamps: readRuntimeEvidenceFileStamps(this.paths),
-    };
-    this.transitionMachine = undefined;
-    return mutableEvidence;
   }
 }

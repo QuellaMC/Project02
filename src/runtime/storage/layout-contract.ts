@@ -10,7 +10,11 @@ export const defaultLocalRuntimeSessionId = 'local-session';
 // a recorded fact, turns may hold any number of visible messages, and each
 // message anchors to its own visible_message_committed raw event. v4 stores
 // were written under the strict user/character pair rule and fail closed.
-export const localRuntimeStorageSchemaVersion = 5;
+// v6: raw-events.jsonl became the one session log. The turn trace is
+// derived from it, trace.jsonl is no longer written or read, and a
+// trailing turn a crash left without its terminal event is an incomplete
+// state the reader surfaces, not damage. v5 stores fail closed.
+export const localRuntimeStorageSchemaVersion = 6;
 
 export type LocalRuntimeReadableStorageSchemaVersion =
   typeof localRuntimeStorageSchemaVersion;
@@ -88,7 +92,6 @@ export type LocalRuntimeSessionPaths = {
   readonly sessionId: string;
   readonly sessionRoot: string;
   readonly pluginsRoot: string;
-  readonly tracePath: string;
   readonly rawEventsPath: string;
 };
 
@@ -186,8 +189,6 @@ const pluginsDirectoryName = 'plugins';
 const charactersDirectoryName = 'characters';
 
 export const characterDataDirectoryName = 'character-data';
-
-const traceFileName = 'trace.jsonl';
 
 const rawEventsFileName = 'raw-events.jsonl';
 
@@ -287,7 +288,6 @@ export function createLocalRuntimeSessionPaths(
     sessionId,
     sessionRoot,
     pluginsRoot,
-    tracePath: join(sessionRoot, traceFileName),
     rawEventsPath: join(sessionRoot, rawEventsFileName),
   } satisfies LocalRuntimeSessionPaths);
 }

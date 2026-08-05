@@ -7,7 +7,6 @@ import {
   localRuntimeStorageSchemaVersion,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
-import {decodeRuntimeTraceEntry} from '../../src/runtime/storage/trace-codec.ts';
 
 type FileRuntimeLogStoreRequiresCharacter =
   CreateFileRuntimeLogStoreOptions extends {
@@ -23,8 +22,8 @@ describe('local storage plugin schema', () => {
     expect(requiresCharacter).toBe(true);
   });
 
-  it('uses scoped schema version 5 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(5);
+  it('uses scoped schema version 6 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(6);
     expect(
       createLocalRuntimeSessionPaths({storeRoot: 'store'}),
     ).not.toHaveProperty('characterStatePath');
@@ -34,14 +33,14 @@ describe('local storage plugin schema', () => {
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 5,
+          schemaVersion: 6,
           scope: 'character-data',
           characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
       ),
     ).toEqual({
-      schemaVersion: 5,
+      schemaVersion: 6,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-06-04T00:00:00.000Z',
@@ -49,7 +48,7 @@ describe('local storage plugin schema', () => {
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 5,
+          schemaVersion: 6,
           scope: 'character-data',
           characterId: 'mira',
           createdAt: '2026-06-04T00:00:00.000Z',
@@ -57,13 +56,13 @@ describe('local storage plugin schema', () => {
         }),
       ),
     ).toMatchObject({
-      schemaVersion: 5,
+      schemaVersion: 6,
       materializedCharacterPackageVersion: '2.3.4',
     });
     expect(
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 5,
+          schemaVersion: 6,
           scope: 'home',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
@@ -81,7 +80,7 @@ describe('local storage plugin schema', () => {
     expect(() =>
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 5,
+          schemaVersion: 6,
           scope: 'other',
           createdAt: '2026-06-04T00:00:00.000Z',
         }),
@@ -93,7 +92,7 @@ describe('local storage plugin schema', () => {
     expect(() =>
       decodeStorageSchemaMarker(
         JSON.stringify({
-          schemaVersion: 5,
+          schemaVersion: 6,
           scope: 'character-data',
           characterId: '../mira',
           createdAt: '2026-06-04T00:00:00.000Z',
@@ -211,48 +210,15 @@ describe('local storage plugin schema', () => {
     },
   );
 
-  it.each([
-    [
-      'trace',
-      () =>
-        decodeRuntimeTraceEntry(
-          JSON.stringify({
-            eventId: 'same-id',
-            traceId: 'same-id',
-            createdAt: '2026-06-15T00:00:00.000Z',
-            step: 'runtime_event_received',
-          }),
-        ),
-    ],
-    [
-      'raw event',
-      () =>
-        decodeRawEventLogRecord(
-          JSON.stringify({
-            eventId: 'same-id',
-            traceId: 'same-id',
-            createdAt: '2026-06-15T00:00:00.000Z',
-            kind: 'runtime_event_received',
-            eventType: 'USER_MESSAGE',
-          }),
-        ),
-    ],
-  ])('rejects equal event and trace IDs in the %s decoder', (_name, decode) => {
-    expect(decode).toThrow(
-      expect.objectContaining({
-        code: 'malformed_record',
-      }),
-    );
-  });
-
-  it('rejects trace entries with an unknown step', () => {
+  it('rejects equal event and trace IDs in the raw event decoder', () => {
     expect(() =>
-      decodeRuntimeTraceEntry(
+      decodeRawEventLogRecord(
         JSON.stringify({
-          eventId: 'evt_unknown_trace_step',
-          traceId: 'trace_unknown_trace_step',
+          eventId: 'same-id',
+          traceId: 'same-id',
           createdAt: '2026-06-15T00:00:00.000Z',
-          step: 'unknown_step',
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE',
         }),
       ),
     ).toThrow(

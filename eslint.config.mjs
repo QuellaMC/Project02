@@ -146,19 +146,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/evidence/validation.ts'],
     rules: {
-      // Re-pinned +1 for the shared localUserSpeaker import (mechanical
-      // growth; replaces inline 'local-user'/'You' literals), +19 for
-      // bound-character injection (expected-character chain guard,
-      // unanchored-guard parameterization, character-less placeholder),
-      // then +45 for the session user speaker: recorded/bound user-speaker
-      // state, the one-user-speaker-per-session derivation, and restored
-      // transcripts validating against the recorded user display name,
-      // then +1 to extend the bound-character check to anchored evidence,
-      // then +8 to anchor a custom first user speaker when the store
-      // binds none (direct-runtime stores with custom display names).
+      // Ratcheted down after the one-log migration retired the trace
+      // cross-checks, the reconciliation path, and the open-turn gate.
       'max-lines': [
         'error',
-        {max: 2193, skipBlankLines: true, skipComments: true},
+        {max: 1232, skipBlankLines: true, skipComments: true},
       ],
     },
   },

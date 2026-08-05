@@ -1,24 +1,24 @@
 import type {
   ConversationLogRecord,
   RawEventLogRecord,
+  RawEventLogRecordInput,
   RuntimeTraceEntry,
 } from './records.ts';
+import type {LocalRuntimeSessionPaths} from '../storage/layout-contract.ts';
+import type {LocalRuntimeMutationLockOwnerToken} from '../storage/mutation-lock.ts';
 import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 
-export type RuntimeLogReadMode =
-  'append' | 'appendTrace' | 'public' | 'publicDecode';
+export type RuntimeLogReadMode = 'append' | 'public' | 'publicDecode';
 
 export type RuntimeLogValidationMode =
-  'appendConversation' | 'appendRawEvent' | 'appendTrace' | 'public';
+  'appendConversation' | 'appendRawEvent' | 'public';
 
 export type DurableRuntimeSessionEvidence = {
-  readonly traceEntries: readonly RuntimeTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly conversationMessages: readonly ConversationLogRecord[];
 };
 
 export type MutableDurableRuntimeSessionEvidence = {
-  readonly traceEntries: RuntimeTraceEntry[];
   readonly rawEvents: RawEventLogRecord[];
   readonly conversationMessages: ConversationLogRecord[];
 };
@@ -35,7 +35,6 @@ export type RuntimeEvidenceFileStamp =
     };
 
 export type RuntimeEvidenceFileStamps = {
-  readonly trace: RuntimeEvidenceFileStamp;
   readonly rawEvents: RuntimeEvidenceFileStamp;
 };
 
@@ -46,18 +45,11 @@ export type CachedRuntimeSessionEvidence = {
 
 export type RuntimeEvidenceIncrementalState = {
   readonly createdAtByIdentity: Map<string, string>;
-  readonly traceStepsByIdentity: Map<string, Set<RuntimeTraceEntry['step']>>;
-  readonly traceStartedWithoutRaw: Set<string>;
-  readonly terminalTraceByIdentity: Map<
-    string,
-    'runtime_turn_completed' | 'runtime_turn_rejected'
-  >;
   readonly rawKindsByIdentity: Map<string, Set<RawEventLogRecord['kind']>>;
   readonly terminalRawByIdentity: Map<
     string,
     'runtime_turn_completed' | 'runtime_turn_rejected'
   >;
-  readonly missingStoredTerminalTraceEvidence: Set<string>;
   readonly startedToolCalls: Map<
     string,
     {readonly identityKey: string; readonly record: RawEventLogRecord}
@@ -76,4 +68,28 @@ export type RuntimeEvidenceIncrementalState = {
 };
 
 export type RuntimeTurnEvidenceState =
-  'completed' | 'empty' | 'raw_started' | 'rejected' | 'trace_started';
+  'completed' | 'empty' | 'raw_started' | 'rejected';
+
+export type RuntimeLogStore = {
+  readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
+  readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
+  appendRawEvent(
+    record: RawEventLogRecordInput,
+    expectedCharacter?: CharacterProfile,
+  ): RawEventLogRecord;
+  /**
+   * Validates a record and returns it in stored form without writing.
+   * Callers that must show a message before it is durable validate here,
+   * then persist with {@link persistPreparedRawEvent}.
+   */
+  prepareRawEvent(
+    record: RawEventLogRecordInput,
+    expectedCharacter?: CharacterProfile,
+  ): RawEventLogRecord;
+  persistPreparedRawEvent(record: RawEventLogRecord): void;
+  readSessionEvidence(): DurableRuntimeSessionEvidence;
+  /** The turn trace, derived from the event log — never stored. */
+  traceEntries(): readonly RuntimeTraceEntry[];
+  rawEvents(): readonly RawEventLogRecord[];
+  conversationMessages(): readonly ConversationLogRecord[];
+};

@@ -5,7 +5,6 @@ import type {
   RuntimeTraceEntry,
   RuntimeTurnStatus,
 } from './records.ts';
-import type {RuntimeDerivedTraceEntry} from './records.ts';
 import {isTerminalRawEventLogRecordKind} from './records.ts';
 import {canonicalJsonStringify} from '../../shared/canonical-json.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
@@ -39,7 +38,6 @@ import type {
 
 export function createTurnEvidence(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
-  readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
 }): readonly InspectTurnEvidence[] {
@@ -57,10 +55,6 @@ export function createTurnEvidence(options: {
 
 type InspectEvidenceIndexes = {
   readonly conversationById: ReadonlyMap<string, ConversationLogRecord>;
-  readonly derivedTraceByIdentity: ReadonlyMap<
-    string,
-    readonly RuntimeDerivedTraceEntry[]
-  >;
   readonly terminalRawEvents: readonly InspectTerminalRawEvent[];
   readonly turnProjectionsByIdentity: ReadonlyMap<
     string,
@@ -94,7 +88,6 @@ type MutableInspectTurnRawEventProjection = {
 
 function createInspectEvidenceIndexes(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
-  readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
 }): InspectEvidenceIndexes {
@@ -103,9 +96,6 @@ function createInspectEvidenceIndexes(options: {
   return Object.freeze({
     conversationById: new Map(
       options.conversationMessages.map(message => [message.id, message]),
-    ),
-    derivedTraceByIdentity: groupEvidenceByIdentity(
-      options.derivedTraceEntries,
     ),
     terminalRawEvents: rawEventIndexes.terminalRawEvents,
     turnProjectionsByIdentity: rawEventIndexes.turnProjectionsByIdentity,
@@ -267,26 +257,14 @@ function createTurnEvidenceEntry(options: {
   const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
   const identityKey = runtimeEventIdentityKey(rawEvent);
   const projection = options.indexes.turnProjectionsByIdentity.get(identityKey);
-  const storedTraceEntries =
+  const traceEntries =
     options.indexes.traceEntriesByIdentity.get(identityKey) ?? [];
-  const derivedTraceEntries =
-    options.indexes.derivedTraceByIdentity.get(identityKey) ?? [];
 
   return Object.freeze({
     eventId: rawEvent.eventId,
     traceId: rawEvent.traceId,
     status: terminalTurnStatus(rawEvent),
-    steps: Object.freeze(storedTraceEntries.map(entry => entry.step)),
-    derivedSteps: Object.freeze(
-      derivedTraceEntries.map(entry =>
-        Object.freeze({
-          step: entry.step,
-          source: entry.provenance.source,
-          reason: entry.provenance.reason,
-          rawEventAnchor: entry.provenance.rawEventAnchor,
-        }),
-      ),
-    ),
+    steps: Object.freeze(traceEntries.map(entry => entry.step)),
     visibleMessages: Object.freeze(
       visibleMessageIds.flatMap(messageId =>
         visibleMessagesForId(options.indexes.conversationById, messageId),

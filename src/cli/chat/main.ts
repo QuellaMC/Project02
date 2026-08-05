@@ -27,6 +27,7 @@ import {
   type ChatTraceSummary,
   createRuntimeLogStore,
   createTraceSummary,
+  deriveRuntimeTraceEntries,
   sameTraceIdentity,
   type TraceIdentity,
 } from '../../runtime/evidence/index.ts';
@@ -672,7 +673,6 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
       : configuredLogStore;
 
   try {
-    activeLogStore.recoverAbandonedWriterEvidence?.();
     return await runChatCliWithActiveWriter({
       ...options,
       logStore: activeLogStore,
@@ -910,10 +910,6 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
     normalizedCurrentUserMessage: exitCommand,
   };
 
-  options.logStore.appendTrace({
-    ...identity,
-    step: 'runtime_event_received',
-  });
   options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
@@ -935,14 +931,6 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
       evidence: sessionEndResult.evidence,
       health: [],
     }),
-  });
-  options.logStore.appendTrace({
-    ...identity,
-    step: 'raw_event_log_appended',
-  });
-  options.logStore.appendTrace({
-    ...identity,
-    step: 'runtime_turn_completed',
   });
 }
 
@@ -1009,14 +997,16 @@ async function handleUserMessageThroughRuntime(
         throw error;
       }
 
-      const evidence = options.logStore.readSessionEvidence().stored;
+      const evidence = options.logStore.readSessionEvidence();
 
       return mapUnexpectedRuntimeFailureResult(
         identity,
-        evidence.traceEntries.filter(entry =>
-          sameTraceIdentity(entry, identity),
+        options.logStore
+          .traceEntries()
+          .filter(traceEntry => sameTraceIdentity(traceEntry, identity)),
+        evidence.rawEvents.filter(rawEvent =>
+          sameTraceIdentity(rawEvent, identity),
         ),
-        evidence.rawEvents.filter(event => sameTraceIdentity(event, identity)),
       );
     }
   } catch (error: unknown) {
@@ -1045,7 +1035,7 @@ function mapRuntimeResult(
       traceSummary: createTraceSummary(
         result.event,
         'completed',
-        result.traceEntries,
+        deriveRuntimeTraceEntries(result.rawEventLogRecords),
         undefined,
         result.rawEvent,
         result.rawEventLogRecords,
@@ -1064,7 +1054,7 @@ function mapRuntimeResult(
     traceSummary: createTraceSummary(
       result.event,
       'rejected',
-      result.traceEntries,
+      deriveRuntimeTraceEntries(result.rawEventLogRecords),
       result.message,
       result.rawEvent,
       result.rawEventLogRecords,
@@ -1151,7 +1141,7 @@ function mapInputRejectionResult(
     traceSummary: createTraceSummary(
       result.identity,
       'rejected',
-      result.traceEntries,
+      deriveRuntimeTraceEntries([result.rawEvent]),
       result.message,
       result.rawEvent,
     ),

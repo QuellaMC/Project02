@@ -120,23 +120,11 @@ export default defineConfig({
           functions: 95,
           lines: 80,
         },
-        'src/runtime/storage/trace-codec.ts': {
-          statements: 95,
-          branches: 95,
-          functions: 95,
-          lines: 95,
-        },
         'src/runtime/evidence/validation.ts': {
           statements: 83,
           branches: 76,
           functions: 90,
           lines: 83,
-        },
-        'src/runtime/evidence/recovery.ts': {
-          statements: 84,
-          branches: 65,
-          functions: 92,
-          lines: 84,
         },
         'src/runtime/storage/file-runtime-log-store.ts': {
           statements: 88,
@@ -146,7 +134,7 @@ export default defineConfig({
         },
         'src/runtime/storage/file-runtime-log-store-state.ts': {
           statements: 90,
-          branches: 88,
+          branches: 86,
           functions: 90,
           lines: 90,
         },

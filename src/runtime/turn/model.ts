@@ -106,7 +106,6 @@ async function runPreparedLocalRuntimeTurn(
       rawKind: 'input_validation_rejected',
       rawReason: state.normalizedEventResult.message,
       reason: 'input_validation_rejected',
-      traceStep: 'input_validation_rejected',
     });
   }
 
@@ -169,7 +168,6 @@ async function prepareRuntimeTurn(
         rawReason: beforeRoleModelCallResult.message,
         reason: beforeRoleModelCallResult.reason,
         runtimePluginContext,
-        traceStep: runtimePluginBeforeRoleModelCallRejectionReason,
         // The user message committed before this gate; the terminal
         // event must reference it or later full-evidence reads rebuild
         // a prior conversation that is missing a durable message.
@@ -431,7 +429,6 @@ async function rejectPreCommitHealth(options: {
     rawReason: roleModelCommitValidationFailureRejectionReason,
     reason: runtimePluginHealthRejectionReason,
     runtimePluginContext: options.prepared.runtimePluginContext,
-    traceStep: 'commit_validation_rejected',
     ...visibleMessageIdsForTurnOption(options.state.committedVisibleMessages),
   });
 }

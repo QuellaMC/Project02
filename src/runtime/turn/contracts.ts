@@ -31,10 +31,8 @@ import type {
   RawEventLogRecord,
   RawEventLogRecordInput,
   RoleModelCommitValidationSnapshot,
-  RuntimeLogStore,
-  RuntimeTraceEntry,
-  RuntimeTraceStepName,
 } from '../evidence/records.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 
 export const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 
@@ -85,7 +83,6 @@ export type LocalRuntimeUserMessageCompletedResult = {
   readonly conversationMessages: readonly ConversationLogRecord[];
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
-  readonly traceEntries: readonly RuntimeTraceEntry[];
   readonly postCommitFailures?: readonly string[];
 };
 
@@ -96,7 +93,6 @@ export type LocalRuntimeUserMessageRejectedResult = {
   readonly message: string;
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
-  readonly traceEntries: readonly RuntimeTraceEntry[];
 };
 
 export type LocalRuntimeUserMessageInputRejectedResult = {
@@ -106,7 +102,6 @@ export type LocalRuntimeUserMessageInputRejectedResult = {
   readonly reason: 'input_validation_rejected';
   readonly message: string;
   readonly rawEvent: RawEventLogRecord;
-  readonly traceEntries: readonly RuntimeTraceEntry[];
 };
 
 export type LocalRuntimeUserMessageResult =
@@ -144,7 +139,6 @@ export type NormalizeUserMessageRuntimeEventResult =
 
 export type RuntimeTurnState = {
   readonly options: RunLocalUserMessageEventOptions;
-  readonly traceEntries: RuntimeTraceEntry[];
   readonly rawEventLogRecords: RawEventLogRecord[];
   readonly identity: RuntimeEventIdentity;
   readonly normalizedEventResult: NormalizeUserMessageRuntimeEventResult;
@@ -187,7 +181,6 @@ export type RuntimeTurnRejectionOptions = {
   readonly rawReason: string;
   readonly reason: LocalRuntimeUserMessageRejectionReason;
   readonly runtimePluginContext?: RuntimePluginContext;
-  readonly traceStep: RuntimeTraceStepName;
   readonly toolCallIds?: readonly string[];
   readonly visibleMessageIds?: readonly string[];
 };

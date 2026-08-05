@@ -14,17 +14,6 @@ export type InspectTurnEvidence = {
   readonly traceId: string;
   readonly status: RuntimeTurnStatus;
   readonly steps: readonly string[];
-  readonly derivedSteps: readonly {
-    readonly step: string;
-    readonly source: 'terminal_raw_event';
-    readonly reason: 'missing_persisted_trace_entry';
-    readonly rawEventAnchor: {
-      readonly eventId: string;
-      readonly traceId: string;
-      readonly createdAt: string;
-      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
-    };
-  }[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
   readonly toolEvents: readonly InspectToolCallEvent[];

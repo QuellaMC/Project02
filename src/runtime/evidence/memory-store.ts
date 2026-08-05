@@ -1,8 +1,8 @@
 import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
-import type {RuntimeLogStore} from './records.ts';
+import type {RuntimeLogStore} from './contract.ts';
 import type {MutableDurableRuntimeSessionEvidence} from './contract.ts';
-import {createRuntimeSessionEvidenceSnapshot} from './recovery.ts';
 import {createRuntimeEvidenceTransitionMachine} from './transition.ts';
+import {deriveRuntimeTraceEntries} from './trace-projection.ts';
 
 /**
  * In-memory `RuntimeLogStore`: the second store implementation next to
@@ -18,7 +18,6 @@ export function createRuntimeLogStore(
   } = {},
 ): RuntimeLogStore {
   const evidence: MutableDurableRuntimeSessionEvidence = {
-    traceEntries: [],
     rawEvents: [],
     conversationMessages: [],
   };
@@ -34,13 +33,6 @@ export function createRuntimeLogStore(
   });
 
   return Object.freeze({
-    appendTrace(entry) {
-      const storedEntry = transitionMachine.prepareTraceAppend(entry);
-
-      transitionMachine.commitTraceAppend(storedEntry);
-
-      return storedEntry;
-    },
     appendRawEvent(record, expectedCharacter) {
       const storedRecord = transitionMachine.prepareRawEventAppend(
         record,
@@ -58,23 +50,18 @@ export function createRuntimeLogStore(
       transitionMachine.commitRawEventAppend(record);
     },
     readSessionEvidence() {
-      transitionMachine.assertPublicReadable();
-
-      return createRuntimeSessionEvidenceSnapshot(evidence);
+      return Object.freeze({
+        rawEvents: Object.freeze([...evidence.rawEvents]),
+        conversationMessages: Object.freeze([...evidence.conversationMessages]),
+      });
     },
     traceEntries() {
-      transitionMachine.assertPublicReadable();
-
-      return Object.freeze([...evidence.traceEntries]);
+      return deriveRuntimeTraceEntries(evidence.rawEvents);
     },
     rawEvents() {
-      transitionMachine.assertPublicReadable();
-
       return Object.freeze([...evidence.rawEvents]);
     },
     conversationMessages() {
-      transitionMachine.assertPublicReadable();
-
       return Object.freeze([...evidence.conversationMessages]);
     },
   } satisfies RuntimeLogStore);

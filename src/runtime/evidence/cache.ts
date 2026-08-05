@@ -12,7 +12,6 @@ import {
   storeWriteFailed,
 } from '../storage/store-file.ts';
 import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
-import {decodeRuntimeTraceEntry} from '../storage/trace-codec.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 import type {
   CachedRuntimeSessionEvidence,
@@ -26,7 +25,6 @@ export function createMutableDurableRuntimeSessionEvidence(
   evidence: DurableRuntimeSessionEvidence,
 ): MutableDurableRuntimeSessionEvidence {
   return {
-    traceEntries: [...evidence.traceEntries],
     rawEvents: [...evidence.rawEvents],
     conversationMessages: [...evidence.conversationMessages],
   };
@@ -90,11 +88,6 @@ export function readCoherentRuntimeSessionEvidence(
     }
 
     const evidence = createMutableDurableRuntimeSessionEvidence({
-      traceEntries: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.tracePath,
-        content: contents.trace,
-        decodeLine: decodeRuntimeTraceEntry,
-      }),
       rawEvents: decodeRuntimeEvidenceJsonLines({
         filePath: paths.rawEventsPath,
         content: contents.rawEvents,
@@ -124,16 +117,9 @@ function readRuntimeEvidenceFileContents(
     | ((event: {readonly filePath: string; readonly attempt: number}) => void)
     | undefined,
 ): {
-  readonly trace: string | undefined;
   readonly rawEvents: string | undefined;
 } {
   return Object.freeze({
-    trace: readStampedRuntimeEvidenceFile(
-      paths.tracePath,
-      stamps.trace,
-      attempt,
-      onEvidenceFileRead,
-    ),
     rawEvents: readStampedRuntimeEvidenceFile(
       paths.rawEventsPath,
       stamps.rawEvents,
@@ -191,7 +177,6 @@ export function readRuntimeEvidenceFileStamps(
   paths: LocalRuntimeSessionPaths,
 ): RuntimeEvidenceFileStamps {
   return Object.freeze({
-    trace: readRuntimeEvidenceFileStamp(paths.tracePath),
     rawEvents: readRuntimeEvidenceFileStamp(paths.rawEventsPath),
   });
 }
@@ -227,10 +212,7 @@ export function sameRuntimeEvidenceFileStamps(
   left: RuntimeEvidenceFileStamps,
   right: RuntimeEvidenceFileStamps,
 ): boolean {
-  return (
-    sameRuntimeEvidenceFileStamp(left.trace, right.trace) &&
-    sameRuntimeEvidenceFileStamp(left.rawEvents, right.rawEvents)
-  );
+  return sameRuntimeEvidenceFileStamp(left.rawEvents, right.rawEvents);
 }
 
 function sameRuntimeEvidenceFileStamp(
@@ -255,7 +237,6 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
 ): void {
   try {
     cleanupAbandonedAtomicReplacementsIn(paths.sessionRoot, [
-      basename(paths.tracePath),
       basename(paths.rawEventsPath),
     ]);
   } catch (error: unknown) {

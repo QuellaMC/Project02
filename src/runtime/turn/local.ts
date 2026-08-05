@@ -50,18 +50,13 @@ async function runLocalUserMessageEventWithWriterLease(
   });
 
   try {
-    options.logStore.recoverAbandonedWriterEvidence?.();
     await recoverPendingRuntimeConfigEffects({
       logStore: options.logStore,
       pluginHost: options.pluginHost,
     });
     return await runSerializedLocalUserMessageEvent(options);
   } finally {
-    try {
-      options.logStore.checkpointWriterEvidence?.();
-    } finally {
-      await lease.release();
-    }
+    await lease.release();
   }
 }
 

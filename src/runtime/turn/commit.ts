@@ -35,8 +35,6 @@ import type {
   ConversationLogRecord,
   RawEventLogRecord,
   RawEventLogRecordInput,
-  RuntimeTraceEntry,
-  RuntimeTraceStepName,
 } from '../evidence/records.ts';
 import type {
   DecisionContext,
@@ -73,34 +71,18 @@ export type CompleteRuntimeTurnOptions = {
 };
 
 export function initializeRuntimeTurnEvidence(state: RuntimeTurnState): void {
-  appendTrace(state, 'runtime_event_received');
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_event_received',
     eventType: state.event.type,
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'runtime_event_normalized');
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_event_normalized',
     eventType: state.event.type,
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'runtime_turn_started');
-}
-
-export function appendTrace(
-  state: RuntimeTurnState,
-  step: RuntimeTraceStepName,
-): RuntimeTraceEntry {
-  const traceEntry = state.options.logStore.appendTrace({
-    ...state.identity,
-    step,
-  });
-
-  state.traceEntries.push(traceEntry);
-  return traceEntry;
 }
 
 export function appendRawEvent(
@@ -207,7 +189,6 @@ async function commitVisibleMessage(
   state.options.logStore.persistPreparedRawEvent(rawEvent);
   state.rawEventLogRecords.push(rawEvent);
   state.committedVisibleMessages.push(record);
-  appendTrace(state, 'visible_message_committed');
   return record;
 }
 
@@ -235,7 +216,6 @@ export function appendToolCallStarted(
       optionsForTool.parsedRoleModelDecisionSnapshot,
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'tool_call_started');
 }
 
 export function appendToolCallFinished(
@@ -263,7 +243,6 @@ export function appendToolCallFinished(
     payloadSummary: state.payloadSummary,
   });
   state.finishedToolCallIds.push(optionsForTool.callId);
-  appendTrace(state, 'tool_call_finished');
 }
 
 export async function completeRuntimeTurn(
@@ -287,10 +266,12 @@ export async function completeRuntimeTurn(
     terminalPluginEvidence,
     runtimeConfigEffects,
   });
-  const durability = finalizeCompletedDurability(
-    state,
-    terminalAppend.terminalAppendFailure,
-  );
+  const durability = {
+    postCommitFailures:
+      terminalAppend.terminalAppendFailure === undefined
+        ? []
+        : [terminalAppend.terminalAppendFailure],
+  };
   const configEffectEvidence = reconcileCompletedRuntimeConfigEffects({
     pluginHost: options.pluginHost,
     effects: runtimeConfigEffects,
@@ -310,7 +291,6 @@ export async function completeRuntimeTurn(
     conversationMessages: Object.freeze([...state.committedVisibleMessages]),
     rawEvent: terminalAppend.rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
-    traceEntries: Object.freeze([...state.traceEntries]),
     ...(durability.postCommitFailures.length === 0
       ? {}
       : {
@@ -434,91 +414,6 @@ function recoverCompletedTerminalRawEvent(
     rawEvent: durableTerminal,
     terminalAppendFailure: runtimePostCommitFailureMessage(error),
   };
-}
-
-/** Plugin writes are already durable, so only the terminal trace closes. */
-function finalizeCompletedDurability(
-  state: RuntimeTurnState,
-  terminalAppendFailure: string | undefined,
-): {readonly postCommitFailures: string[]} {
-  const postCommitFailures =
-    terminalAppendFailure === undefined ? [] : [terminalAppendFailure];
-
-  try {
-    appendTrace(state, 'raw_event_log_appended');
-    appendTrace(state, 'runtime_turn_completed');
-  } catch (error: unknown) {
-    reconcileCompletedTerminalTrace(state, error, postCommitFailures);
-  }
-
-  return {postCommitFailures};
-}
-
-function reconcileCompletedTerminalTrace(
-  state: RuntimeTurnState,
-  originalError: unknown,
-  postCommitFailures: string[],
-): void {
-  try {
-    const terminalSteps = [
-      'raw_event_log_appended',
-      'runtime_turn_completed',
-    ] as const;
-    const persisted = [
-      ...state.options.logStore.readSessionEvidence().stored.traceEntries,
-    ];
-
-    for (const step of terminalSteps) {
-      if (!hasTerminalTraceEntry(state, persisted, step)) {
-        persisted.push(appendTrace(state, step));
-      }
-    }
-
-    for (const step of terminalSteps) {
-      restoreTerminalTraceEntry(state, persisted, step);
-    }
-  } catch (reconciliationError: unknown) {
-    postCommitFailures.push(
-      `${runtimePostCommitFailureMessage(originalError)} ` +
-        `Trace reconciliation failed: ${runtimePostCommitFailureMessage(reconciliationError)}`,
-    );
-  }
-}
-
-function hasTerminalTraceEntry(
-  state: RuntimeTurnState,
-  entries: readonly RuntimeTraceEntry[],
-  step: RuntimeTraceStepName,
-): boolean {
-  return entries.some(
-    entry =>
-      entry.eventId === state.identity.eventId &&
-      entry.traceId === state.identity.traceId &&
-      entry.step === step,
-  );
-}
-
-function restoreTerminalTraceEntry(
-  state: RuntimeTurnState,
-  persisted: readonly RuntimeTraceEntry[],
-  step: RuntimeTraceStepName,
-): void {
-  if (state.traceEntries.some(entry => entry.step === step)) {
-    return;
-  }
-
-  const storedEntry = persisted.find(
-    entry =>
-      entry.eventId === state.identity.eventId &&
-      entry.traceId === state.identity.traceId &&
-      entry.step === step,
-  );
-
-  if (storedEntry === undefined) {
-    throw new Error(`Completed runtime trace is missing ${step}.`);
-  }
-
-  state.traceEntries.push(storedEntry);
 }
 
 async function recordAfterTurnCommitted(

@@ -10,7 +10,6 @@ import {createRoleModelCommitValidationSnapshot} from '../../src/runtime/evidenc
 import type {
   ConversationLogRecordInput,
   RawEventLogRecordInput,
-  RuntimeTraceEntryInput,
 } from '../../src/runtime/evidence/records.ts';
 import {
   createDecisionContext,
@@ -35,22 +34,16 @@ const identity = {
 } as const;
 
 describe('runtime log store', () => {
-  it('appends trace entries in order and returns immutable snapshots', () => {
+  it('derives the trace from the event log in append order', () => {
     const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
-    const received: RuntimeTraceEntryInput = {
-      ...identity,
-      step: 'runtime_event_received',
-    };
-    const started: RuntimeTraceEntryInput = {
-      ...identity,
-      step: 'runtime_turn_started',
-    };
-
-    store.appendTrace(received);
-    store.appendTrace(started);
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
+    store.appendRawEvent({
+      ...identity,
+      kind: 'runtime_event_normalized',
       eventType: 'USER_MESSAGE',
     });
     store.appendRawEvent({
@@ -62,16 +55,15 @@ describe('runtime log store', () => {
 
     const snapshot = store.traceEntries();
 
-    expect(snapshot).toEqual([received, started]);
+    expect(snapshot.map(entry => entry.step)).toEqual([
+      'runtime_event_received',
+      'runtime_event_normalized',
+      'runtime_turn_started',
+      'raw_event_log_appended',
+      'runtime_turn_completed',
+    ]);
     expect(Object.isFrozen(snapshot)).toBe(true);
     expect(Object.isFrozen(snapshot[0])).toBe(true);
-    expect(
-      Reflect.set(snapshot, '0', {
-        ...identity,
-        step: 'runtime_turn_completed',
-      } satisfies RuntimeTraceEntryInput),
-    ).toBe(false);
-    expect(store.traceEntries()).toEqual([received, started]);
   });
 
   it('copies raw event records with source event and trace identity', () => {
@@ -105,8 +97,6 @@ describe('runtime log store', () => {
       visibleMessageIds,
       runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity),
     };
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     const receivedRecord = store.appendRawEvent(received);
     const normalizedRecord = store.appendRawEvent(normalized);
     appendVisibleMessageWithCommitAnchor(store, {
@@ -195,8 +185,6 @@ describe('runtime log store', () => {
         evidence: [],
       },
     };
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -241,8 +229,6 @@ describe('runtime log store', () => {
       text: "I'm here. Tell me what you need.",
       committedAt: '2026-06-04T00:00:02.000Z',
     };
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -262,7 +248,6 @@ describe('runtime log store', () => {
       userMessage,
       characterMessage,
     ]);
-    expect(store.traceEntries()).toHaveLength(1);
     expect(
       store
         .rawEvents()
@@ -279,8 +264,6 @@ describe('runtime log store', () => {
       status: 'rejected',
       reason: 'Provide exactly one non-empty message.',
     };
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     const received = store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -294,8 +277,6 @@ describe('runtime log store', () => {
 
   it('rejects a conversation append when no character is expected, recorded, or bound', () => {
     const store = createRuntimeLogStore();
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -330,8 +311,6 @@ describe('runtime log store', () => {
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
     });
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -410,8 +389,6 @@ describe('runtime log store', () => {
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
     });
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -468,8 +445,6 @@ describe('runtime log store', () => {
       boundCharacter: testCharacterProfile,
     });
     const nova = {id: 'nova', displayName: 'Nova'} as const;
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',
@@ -526,8 +501,6 @@ describe('runtime log store', () => {
       boundCharacter: testCharacterProfile,
       boundUserSpeaker: {id: 'local-user', displayName: 'Mike'},
     });
-
-    store.appendTrace({...identity, step: 'runtime_event_received'});
     store.appendRawEvent({
       ...identity,
       kind: 'runtime_event_received',

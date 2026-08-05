@@ -1,6 +1,5 @@
 import {
   assertCanonicalRuntimeTimestamp,
-  type CharacterProfile,
   type RuntimeEventIdentity,
   type RuntimeEventType,
   type VisibleMessage,
@@ -17,8 +16,6 @@ import type {
   RuntimePluginToolCallResult,
   RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
-import type {LocalRuntimeSessionPaths} from '../storage/layout-contract.ts';
-import type {LocalRuntimeMutationLockOwnerToken} from '../storage/mutation-lock.ts';
 
 export const runtimeTurnStatusValues = [
   'completed',
@@ -107,10 +104,6 @@ export type ConversationLogRecord = VisibleMessage &
     readonly committedAt: string;
   };
 
-export type RuntimeTraceEntryInput = RuntimeEventIdentity & {
-  readonly step: RuntimeTraceStepName;
-};
-
 export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly kind: RawEventLogRecordKind;
   readonly eventType: RuntimeEventType;
@@ -144,57 +137,6 @@ export type ConversationLogRecordInput = VisibleMessage &
   RuntimeEventIdentity & {
     readonly committedAt: string;
   };
-
-export type RuntimeDerivedTraceEntry = RuntimeTraceEntry & {
-  readonly provenance: {
-    readonly source: 'terminal_raw_event';
-    readonly reason: 'missing_persisted_trace_entry';
-    readonly rawEventAnchor: RuntimeEventIdentity & {
-      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
-    };
-  };
-};
-
-export type RuntimeStoredSessionEvidence = {
-  readonly traceEntries: readonly RuntimeTraceEntry[];
-  readonly rawEvents: readonly RawEventLogRecord[];
-  readonly conversationMessages: readonly ConversationLogRecord[];
-};
-
-export type RuntimeDerivedSessionEvidence = {
-  readonly traceEntries: readonly RuntimeDerivedTraceEntry[];
-};
-
-export type RuntimeSessionEvidenceSnapshot = {
-  readonly stored: RuntimeStoredSessionEvidence;
-  readonly derived: RuntimeDerivedSessionEvidence;
-};
-
-export type RuntimeLogStore = {
-  readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
-  readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
-  appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
-  appendRawEvent(
-    record: RawEventLogRecordInput,
-    expectedCharacter?: CharacterProfile,
-  ): RawEventLogRecord;
-  /**
-   * Validates a record and returns it in stored form without writing.
-   * Callers that must show a message before it is durable validate here,
-   * then persist with {@link persistPreparedRawEvent}.
-   */
-  prepareRawEvent(
-    record: RawEventLogRecordInput,
-    expectedCharacter?: CharacterProfile,
-  ): RawEventLogRecord;
-  persistPreparedRawEvent(record: RawEventLogRecord): void;
-  checkpointWriterEvidence?(): void;
-  recoverAbandonedWriterEvidence?(): boolean;
-  readSessionEvidence(): RuntimeSessionEvidenceSnapshot;
-  traceEntries(): readonly RuntimeTraceEntry[];
-  rawEvents(): readonly RawEventLogRecord[];
-  conversationMessages(): readonly ConversationLogRecord[];
-};
 
 export type AcceptedRoleModelCommitValidationResult = {
   readonly status: 'accepted';

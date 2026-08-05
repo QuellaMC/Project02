@@ -112,15 +112,13 @@ describe('inspect CLI plugin evidence', () => {
         readonly runtimeConfig: string;
         readonly activation: string;
         readonly storedSessionEvidence: string;
-        readonly derivedTraceEvidence: string;
+        readonly traceEvidence: string;
       };
       readonly counts: {
         readonly traceEntries: number;
-        readonly derivedTraceEntries: number;
       };
       readonly turns: readonly [
         {
-          readonly derivedSteps: readonly unknown[];
           readonly modelRounds: readonly {
             readonly rawEventKind: string;
             readonly roleModelEvidence: {
@@ -166,10 +164,9 @@ describe('inspect CLI plugin evidence', () => {
       runtimeConfig: 'current_at_inspection',
       activation: 'current_at_inspection',
       storedSessionEvidence: 'stored_history',
-      derivedTraceEvidence: 'derived_not_persisted',
+      traceEvidence: 'derived_from_event_log',
     });
-    expect(output.counts.derivedTraceEntries).toBe(0);
-    expect(output.turns[0].derivedSteps).toEqual([]);
+    expect(output.counts.traceEntries).toBeGreaterThan(0);
     expect(output.turns[0].modelRounds).toHaveLength(2);
     expect(
       output.turns[0].modelRounds.map(round => round.rawEventKind),
@@ -783,7 +780,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 5,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -820,7 +817,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 5,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -855,7 +852,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 5,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

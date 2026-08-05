@@ -1,10 +1,5 @@
 import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
-import type {
-  RawEventLogRecord,
-  RawEventLogRecordInput,
-  RuntimeTraceEntry,
-  RuntimeTraceEntryInput,
-} from './records.ts';
+import type {RawEventLogRecord, RawEventLogRecordInput} from './records.ts';
 import {conversationMessageForRawEvent} from './cache.ts';
 import type {
   MutableDurableRuntimeSessionEvidence,
@@ -17,28 +12,18 @@ import {
 import {
   applyIncrementalConversationAppend,
   applyIncrementalRawEventAppend,
-  applyIncrementalTraceAppend,
   assertIncrementalConversationAppend,
   assertIncrementalRawEventAppend,
-  assertIncrementalStatePublicReadable,
-  assertIncrementalTraceAppend,
   createRuntimeEvidenceIncrementalState,
 } from './validation.ts';
-import {
-  decodeRuntimeTraceEntry,
-  encodeRuntimeTraceEntry,
-} from '../storage/trace-codec.ts';
 
 export type RuntimeEvidenceTransitionMachine = {
   readonly state: RuntimeEvidenceIncrementalState;
-  prepareTraceAppend(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
-  commitTraceAppend(entry: RuntimeTraceEntry): void;
   prepareRawEventAppend(
     record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
   ): RawEventLogRecord;
   commitRawEventAppend(record: RawEventLogRecord): void;
-  assertPublicReadable(): void;
 };
 
 export function createRuntimeEvidenceTransitionMachine(options: {
@@ -55,18 +40,6 @@ export function createRuntimeEvidenceTransitionMachine(options: {
 
   return Object.freeze({
     state,
-    prepareTraceAppend(entry) {
-      const storedEntry = decodeRuntimeTraceEntry(
-        encodeRuntimeTraceEntry(entry),
-      );
-
-      assertIncrementalTraceAppend(state, storedEntry);
-      return storedEntry;
-    },
-    commitTraceAppend(entry) {
-      options.evidence.traceEntries.push(entry);
-      applyIncrementalTraceAppend(state, entry);
-    },
     prepareRawEventAppend(record, expectedCharacter) {
       const storedRecord = decodeRawEventLogRecord(
         encodeRawEventLogRecord(record),
@@ -111,9 +84,6 @@ export function createRuntimeEvidenceTransitionMachine(options: {
         options.evidence.conversationMessages.push(message);
         applyIncrementalConversationAppend(state, message);
       }
-    },
-    assertPublicReadable() {
-      assertIncrementalStatePublicReadable(state, options.evidence);
     },
   } satisfies RuntimeEvidenceTransitionMachine);
 }

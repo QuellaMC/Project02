@@ -21,7 +21,7 @@ import {
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithExplicitHost,
   type RunLocalUserMessageEventOptions,
@@ -248,25 +248,6 @@ export function createRawEventAppendFailingLogStore(options: {
   } satisfies RuntimeLogStore);
 }
 
-/** Fails the first terminal trace append, then behaves normally. */
-export function createOneShotTerminalTraceAppendFailingLogStore(
-  logStore: RuntimeLogStore,
-): RuntimeLogStore {
-  let failed = false;
-
-  return Object.freeze({
-    ...delegateRuntimeLogStore(logStore),
-    appendTrace(entry) {
-      if (!failed && entry.step === 'raw_event_log_appended') {
-        failed = true;
-        throw new Error('one-shot terminal trace append failed');
-      }
-
-      return logStore.appendTrace(entry);
-    },
-  } satisfies RuntimeLogStore);
-}
-
 /** Every store method forwarded, so a wrapper names only what it overrides. */
 function delegateRuntimeLogStore(logStore: RuntimeLogStore): RuntimeLogStore {
   return Object.freeze({
@@ -279,23 +260,6 @@ function delegateRuntimeLogStore(logStore: RuntimeLogStore): RuntimeLogStore {
           localRuntimeWriterLockOwnerToken:
             logStore.localRuntimeWriterLockOwnerToken,
         }),
-    ...(logStore.checkpointWriterEvidence === undefined
-      ? {}
-      : {
-          checkpointWriterEvidence() {
-            logStore.checkpointWriterEvidence?.();
-          },
-        }),
-    ...(logStore.recoverAbandonedWriterEvidence === undefined
-      ? {}
-      : {
-          recoverAbandonedWriterEvidence() {
-            return logStore.recoverAbandonedWriterEvidence?.() ?? false;
-          },
-        }),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
     appendRawEvent(record, expectedCharacter) {
       return logStore.appendRawEvent(record, expectedCharacter);
     },

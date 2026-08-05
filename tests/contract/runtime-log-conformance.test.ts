@@ -2,7 +2,7 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import type {CharacterProfile} from '../../src/core/index.ts';
-import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import {type RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
@@ -87,10 +87,6 @@ const rejectedScenarios = [
     name: 'rejects tool metadata on a non-tool raw event',
     expected: 'malformed_record',
     run(logStore) {
-      logStore.appendTrace({
-        ...identity,
-        step: 'runtime_event_received',
-      });
       logStore.appendRawEvent({
         ...identity,
         kind: 'runtime_event_received',
@@ -108,16 +104,6 @@ const rejectedScenarios = [
         kind: 'runtime_turn_completed',
         eventType: 'USER_MESSAGE',
         status: 'completed',
-      });
-    },
-  },
-  {
-    name: 'rejects runtime_turn_started as the first trace record',
-    expected: 'malformed_record',
-    run(logStore) {
-      logStore.appendTrace({
-        ...identity,
-        step: 'runtime_turn_started',
       });
     },
   },
@@ -244,34 +230,16 @@ const rejectedScenarios = [
 
 const readScenarios = [
   {
-    name: 'blocks readSessionEvidence while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
+    // A crash ends every turn it interrupts exactly like this, so an open
+    // turn is a state reads surface, never one they refuse.
+    name: 'surfaces an open turn to every read',
+    expected: 'accepted',
+    run(logStore, currentSessionId) {
       appendTurnStart(logStore);
+      appendUserMessage(logStore, currentSessionId);
       logStore.readSessionEvidence();
-    },
-  },
-  {
-    name: 'blocks rawEvents while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
-      appendTurnStart(logStore);
       logStore.rawEvents();
-    },
-  },
-  {
-    name: 'blocks conversationMessages while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
-      appendTurnStart(logStore);
       logStore.conversationMessages();
-    },
-  },
-  {
-    name: 'blocks traceEntries while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
-      appendTurnStart(logStore);
       logStore.traceEntries();
     },
   },
@@ -381,10 +349,6 @@ function captureOutcome(operation: () => void): RuntimeLogScenarioResult {
 }
 
 function appendTurnStart(logStore: RuntimeLogStore): void {
-  logStore.appendTrace({
-    ...identity,
-    step: 'runtime_event_received',
-  });
   logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
