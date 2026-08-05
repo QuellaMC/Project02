@@ -26,7 +26,6 @@ import {
   createLocalRuntimeStorageLayout,
 } from '../layout-contract.ts';
 import {
-  acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
   LocalRuntimeMutationLocksAcquireError,
   type LocalRuntimeMutationLockOwnerToken,
@@ -128,43 +127,6 @@ export function withDurablePluginStoreMutations<T>(
     return operation();
   } finally {
     lease.release();
-  }
-}
-
-export async function withDurablePluginStoreMutationsAsync<T>(
-  options: {
-    readonly resourceKeys?: readonly string[];
-    readonly storeRoot: string;
-    readonly roots: readonly string[];
-    readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
-  },
-  operation: () => T | Promise<T>,
-): Promise<T> {
-  const locksRoot = createLocalRuntimeStorageLayout({
-    storeRoot: options.storeRoot,
-  }).locksRoot;
-  const resourceKeys = [
-    ...options.roots.map(durablePluginStoreMutationResourceKey),
-    ...(options.resourceKeys ?? []),
-  ];
-  let lease: Awaited<ReturnType<typeof acquireLocalRuntimeMutationLocks>>;
-
-  try {
-    lease = await acquireLocalRuntimeMutationLocks({
-      targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
-      waitTimeoutMs: 0,
-      ...(options.ownerToken === undefined
-        ? {}
-        : {ownerToken: options.ownerToken}),
-    });
-  } catch (error: unknown) {
-    throw singleMutationLockError(error);
-  }
-
-  try {
-    return await operation();
-  } finally {
-    await lease.release();
   }
 }
 

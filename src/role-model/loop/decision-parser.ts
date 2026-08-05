@@ -30,7 +30,6 @@ import {
   roleModelTerminalEmptyOutputRejectionDetails,
   roleModelUnsupportedEffectRejectionReason,
   type CharacterDecision,
-  type RoleModelToolObservation,
   type AcceptedRoleModelDecisionResult,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionResult,
@@ -47,13 +46,11 @@ export function parseRoleModelDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = createDefaultRoleModelPluginToolDefinitions(),
-  toolObservations: readonly RoleModelToolObservation[] = [],
 ): RoleModelDecisionResult {
   return parseRoleModelDecisionForBoundary(
     rawOutputText,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations,
     'public_snapshot',
   );
 }
@@ -62,13 +59,11 @@ export function parseRoleModelExecutionDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = createDefaultRoleModelPluginToolDefinitions(),
-  toolObservations: readonly RoleModelToolObservation[] = [],
 ): RoleModelDecisionResult {
   return parseRoleModelDecisionForBoundary(
     rawOutputText,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations,
     'execution',
   );
 }
@@ -79,7 +74,6 @@ function parseRoleModelDecisionForBoundary(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[],
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
   boundary: RoleModelDecisionBoundary,
 ): RoleModelDecisionResult {
   let parsedOutput: unknown;
@@ -94,7 +88,6 @@ function parseRoleModelDecisionForBoundary(
     parsedOutput,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations,
     boundary,
   );
 }
@@ -127,7 +120,6 @@ function parseRoleModelDecisionObject(
   parsedOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
   boundary: RoleModelDecisionBoundary,
 ): RoleModelDecisionResult {
   const frozenPluginToolDefinitions = createRoleModelPluginToolDefinitions(

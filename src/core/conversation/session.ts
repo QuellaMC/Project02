@@ -193,9 +193,30 @@ export function validateRestoredVisibleTranscript(
 }
 
 /**
+ * The number the next committed message will carry.
+ *
+ * Counted from the last message the session holds rather than from how
+ * many it holds, because the log is allowed to lag: a write that fails
+ * leaves a said message with no row, and the next number still has to
+ * clear every number already used. Length would reissue one.
+ *
+ * This is the only place a message number is chosen. The log checks that
+ * numbers climb, never what the next one should be, so the session stays
+ * the single source.
+ */
+export function nextMessageNumber(session: ConversationSession): number {
+  const transcript = getMutableTranscript(session);
+  const lastMessage = transcript.at(-1);
+
+  if (lastMessage === undefined) {
+    return 1;
+  }
+
+  return (messageNumberFromId(lastMessage.id) ?? transcript.length) + 1;
+}
+
+/**
  * The next user message for this session, not yet part of the transcript.
- * A message joins the transcript only once it is durable, so the two
- * cannot disagree.
  */
 export function createUserMessage(
   session: ConversationSession,
@@ -204,7 +225,7 @@ export function createUserMessage(
   const normalizedMessage = normalizeCharacterInput(message);
 
   return Object.freeze({
-    id: createMessageId(session, getMutableTranscript(session).length + 1),
+    id: createMessageId(session, nextMessageNumber(session)),
     role: 'user',
     speakerId: session.userSpeaker.id,
     speakerName: session.userSpeaker.displayName,
@@ -226,7 +247,7 @@ export function createCharacterMessage(
   reply: unknown,
 ): VisibleMessage {
   return createCharacterVisibleMessage({
-    messageNumber: getMutableTranscript(session).length + 1,
+    messageNumber: nextMessageNumber(session),
     replyText: normalizeCharacterReply(reply),
     session,
   });
@@ -338,16 +359,52 @@ function createInitialVisibleTranscript(options: {
   readonly visibleTranscript?: readonly VisibleMessage[];
 }): VisibleMessage[] {
   const visibleTranscript = options.visibleTranscript ?? [];
+  let previousMessageNumber = 0;
 
-  return visibleTranscript.map((message, index) =>
-    freezeValidatedRestoredVisibleMessage({
+  return visibleTranscript.map(message => {
+    // Climbing, not dense. A message whose write failed was still said, so
+    // the log can be missing a number the session issued; what must never
+    // happen is a number going backwards or repeating, which is what
+    // reordered or duplicated rows look like.
+    const messageNumber = restoredMessageNumber(
+      options.sessionId,
+      message,
+      previousMessageNumber,
+    );
+
+    previousMessageNumber = messageNumber;
+    return freezeValidatedRestoredVisibleMessage({
       sessionId: options.sessionId,
       character: options.character,
       userSpeaker: options.userSpeaker,
       message,
-      expectedMessageNumber: index + 1,
-    }),
-  );
+    });
+  });
+}
+
+function restoredMessageNumber(
+  sessionId: string,
+  message: VisibleMessage,
+  previousMessageNumber: number,
+): number {
+  const messageNumber = messageNumberFromId(message.id);
+
+  if (
+    messageNumber === undefined ||
+    sessionIdFromMessageId(message.id) !== sessionId
+  ) {
+    throw new ConversationRehydrationError(
+      `Restored visible message must carry a "${sessionId}" message ID: "${message.id}".`,
+    );
+  }
+
+  if (messageNumber <= previousMessageNumber) {
+    throw new ConversationRehydrationError(
+      `Restored visible messages must climb in session order: "${message.id}" follows message ${String(previousMessageNumber)}.`,
+    );
+  }
+
+  return messageNumber;
 }
 
 function freezeValidatedRestoredVisibleMessage(options: {
@@ -355,19 +412,7 @@ function freezeValidatedRestoredVisibleMessage(options: {
   readonly character: CharacterProfile;
   readonly userSpeaker: SpeakerIdentity;
   readonly message: VisibleMessage;
-  readonly expectedMessageNumber: number;
 }): VisibleMessage {
-  const expectedId = createMessageIdForSessionId(
-    options.sessionId,
-    options.expectedMessageNumber,
-  );
-
-  if (options.message.id !== expectedId) {
-    throw new ConversationRehydrationError(
-      `Restored visible message must have sequential ID "${expectedId}".`,
-    );
-  }
-
   validateRestoredSpeaker({
     character: options.character,
     userSpeaker: options.userSpeaker,
@@ -441,9 +486,42 @@ function validateRestoredSpeaker(options: {
   );
 }
 
-function createMessageIdForSessionId(
+export function createMessageIdForSessionId(
   sessionId: string,
   messageNumber: number,
 ): string {
   return `${sessionId}:message-${String(messageNumber)}`;
 }
+
+/**
+ * The position a message ID claims, or undefined when the ID is not one of
+ * ours. The one reader of the format `createMessageIdForSessionId` writes,
+ * so nothing else has to know how a message ID is spelled.
+ */
+export function messageNumberFromId(id: string): number | undefined {
+  const separator = id.lastIndexOf(messageIdInfix);
+
+  if (separator < 0) {
+    return undefined;
+  }
+
+  const digits = id.slice(separator + messageIdInfix.length);
+
+  if (!/^[1-9][0-9]*$/u.test(digits)) {
+    return undefined;
+  }
+
+  const messageNumber = Number(digits);
+  return Number.isSafeInteger(messageNumber) ? messageNumber : undefined;
+}
+
+/** The session ID a message ID carries, or undefined when it carries none. */
+export function sessionIdFromMessageId(id: string): string | undefined {
+  const separator = id.lastIndexOf(messageIdInfix);
+
+  return separator < 0 || messageNumberFromId(id) === undefined
+    ? undefined
+    : id.slice(0, separator);
+}
+
+const messageIdInfix = ':message-';

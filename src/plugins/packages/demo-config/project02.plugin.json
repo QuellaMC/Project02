@@ -69,17 +69,13 @@
         }
       ]
     },
-    "localTrustLevel": "first_party",
+    "firstParty": true,
     "runtimePolicy": {
-      "requiredForTurn": false,
-      "confirmation": "not_required",
       "timeoutMs": 1000,
-      "sourceReferencesRequired": false,
       "redactionLabels": [],
       "failureBehavior": {
         "beforeRoleModelCall": "degrade",
         "handleToolCall": "reject_tool_call",
-        "afterTurnCommitted": "log_failure",
         "health": "degrade"
       }
     },

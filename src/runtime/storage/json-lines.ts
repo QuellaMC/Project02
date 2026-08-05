@@ -23,6 +23,17 @@ export function readCompleteJsonLines(content: string): readonly string[] {
 }
 
 /**
+ * Committed records with damaged ones dropped, for a reader that must
+ * survive a row it does not need. Same definition of "committed" and
+ * "damaged" as {@link readCompleteJsonLines} — the only difference is
+ * what happens to damage, so the two can never disagree about which
+ * bytes are a record.
+ */
+export function readUndamagedJsonLines(content: string): readonly string[] {
+  return Object.freeze(committedJsonLines(content).filter(isParseableJson));
+}
+
+/**
  * The framing alone, for readers that tolerate a damaged record instead of
  * failing the whole file.
  */

@@ -27,7 +27,7 @@ export function pluginToolDefinitionsForEnabledPlugins(options: {
           accessByPluginId: options.accessByPluginId,
         });
 
-        return modelVisiblePluginTools({
+        return discoverableCurrentTurnPluginTools({
           plugin,
           access,
           confirmationAvailable: options.confirmationAvailable,
@@ -56,24 +56,6 @@ function modelToolDefinitionOrder(
   return leftBuiltIn ? -1 : 1;
 }
 
-export function modelVisiblePluginTools(options: {
-  readonly plugin: RuntimePlugin;
-  readonly access: RuntimePluginAccessSnapshot;
-  readonly confirmationAvailable: boolean;
-}): readonly RuntimePluginProvidedTool[] {
-  return Object.freeze(
-    options.plugin.providedTools.filter(
-      tool =>
-        pluginToolHasRequiredGrantedAccess({access: options.access}) &&
-        (!tool.requiresConfirmation || options.confirmationAvailable) &&
-        isModelVisiblePluginTool({
-          plugin: options.plugin,
-          tool,
-        }),
-    ),
-  );
-}
-
 export function routableModelFacingPluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
@@ -85,7 +67,7 @@ export function routableModelFacingPluginTools(options: {
   return Object.freeze(
     options.plugin.providedTools.filter(
       tool =>
-        pluginToolHasRequiredGrantedAccess({access: options.access}) &&
+        pluginCanWriteModelInput(options.access) &&
         isModelFacingRuntimePluginTool({
           manifest: options.plugin.manifest,
           tool,
@@ -104,18 +86,6 @@ export function pluginCanWriteModelInput(
   });
 }
 
-/**
- * A tool reaches the model only if its plugin may write model input.
- * File-store writes are governed where they happen — the hook context
- * hands out a write-capable store only under a file_store write grant —
- * so this no longer second-guesses that from a tool's declared class.
- */
-export function pluginToolHasRequiredGrantedAccess(options: {
-  readonly access: RuntimePluginAccessSnapshot;
-}): boolean {
-  return pluginCanWriteModelInput(options.access);
-}
-
 export function discoverableCurrentTurnPluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
@@ -125,7 +95,7 @@ export function discoverableCurrentTurnPluginTools(options: {
   return Object.freeze(
     options.plugin.providedTools.filter(
       tool =>
-        pluginToolHasRequiredGrantedAccess({access: options.access}) &&
+        pluginCanWriteModelInput(options.access) &&
         (!tool.requiresConfirmation || options.confirmationAvailable) &&
         isDiscoverableCurrentTurnTool({
           plugin: options.plugin,
@@ -141,6 +111,14 @@ export function discoverableCurrentTurnPluginTools(options: {
   );
 }
 
+/**
+ * Whether the model may be shown this tool on this turn.
+ *
+ * A plugin tool needs a handler to run; a first-party built-in is owned
+ * by the host and has none. The two cases cannot overlap, because
+ * `isModelFacingRuntimePluginTool` excludes built-in names and
+ * `isFirstPartyBuiltInModelTool` requires one.
+ */
 export function isDiscoverableCurrentTurnTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;
@@ -155,7 +133,12 @@ export function isDiscoverableCurrentTurnTool(options: {
     return options.plugin.lifecycleHooks.handleToolCall !== undefined;
   }
 
-  return isFirstPartyBuiltInModelTool(options);
+  return isFirstPartyBuiltInModelTool({
+    ...options,
+    isHostOwnedFirstPartyModelToolsPlugin:
+      options.isHostOwnedFirstPartyModelToolsPlugin ??
+      isFirstPartyModelToolsPlugin,
+  });
 }
 
 export function isFirstPartyBuiltInModelTool(options: {
@@ -168,28 +151,6 @@ export function isFirstPartyBuiltInModelTool(options: {
     options.tool.validationOwner === 'built_in_model_tools' &&
     isBuiltInModelToolName(options.tool.name) &&
     !toolRequiresConfirmation(options.tool)
-  );
-}
-
-export function isModelVisiblePluginTool(options: {
-  readonly plugin: RuntimePlugin;
-  readonly tool: RuntimePluginProvidedTool;
-}): boolean {
-  if (
-    isFirstPartyBuiltInModelTool({
-      ...options,
-      isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin,
-    })
-  ) {
-    return true;
-  }
-
-  return (
-    options.plugin.lifecycleHooks.handleToolCall !== undefined &&
-    isModelFacingRuntimePluginTool({
-      manifest: options.plugin.manifest,
-      tool: options.tool,
-    })
   );
 }
 

@@ -1,17 +1,10 @@
-import {
-  isJsonBoundaryCredentialKey,
-  redactJsonBoundaryText,
-} from '../../shared/redaction.ts';
+import {isJsonBoundaryCredentialKey} from '../../shared/redaction.ts';
 import {valueIsSecretMarker} from '../../shared/secret-marker.ts';
 import type {
   RuntimeConfigValue,
   RedactedRuntimeConfigField,
   ResolvedRuntimeConfigField,
 } from './types.ts';
-
-export function redactRuntimeConfigText(value: string): string {
-  return redactJsonBoundaryText(value);
-}
 
 export function redactRuntimeConfigValue(
   value: RuntimeConfigValue,
@@ -25,12 +18,9 @@ export function redactRuntimeConfigValue(
     return '[redacted]';
   }
 
-  if (typeof value === 'string') {
-    return redactJsonBoundaryText(value);
-  }
-
   if (
     value === null ||
+    typeof value === 'string' ||
     typeof value === 'number' ||
     typeof value === 'boolean'
   ) {

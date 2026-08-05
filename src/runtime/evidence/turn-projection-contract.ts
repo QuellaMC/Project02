@@ -123,7 +123,7 @@ export type InspectPluginListing = {
   readonly displayName: string;
   readonly version: string;
   readonly kind: string;
-  readonly localTrustLevel: string;
+  readonly firstParty: boolean;
   readonly installed: boolean;
   readonly registered: boolean;
   readonly enabled: boolean;
@@ -141,7 +141,6 @@ export type InspectPluginToolListing = {
   readonly name: string;
   readonly validationOwner: string;
   readonly requiresConfirmation: boolean;
-  readonly sourceReferencesRequired: boolean;
   /**
    * What the tool said about itself, so an audit can tell a read-only
    * tool from one that deletes or reaches the network. Absent when the

@@ -13,11 +13,9 @@ import type {
   runtimePluginContractVersion,
   RuntimePluginAccessMap,
   RuntimePluginAccessSnapshot,
-  RuntimePluginAfterTurnCommittedFailureBehavior,
   RuntimePluginBeforeRoleModelFailureBehavior,
   RuntimePluginConfigScope,
   RuntimePluginConfigValueType,
-  RuntimePluginConfirmationRequirement,
   RuntimePluginToolAnnotations,
   RuntimePluginToolConcurrency,
   RuntimePluginContextItemKind,
@@ -31,7 +29,6 @@ import type {
   RuntimePluginPolicyOutcome,
   RuntimePluginSourceKind,
   RuntimePluginToolValidationOwner,
-  RuntimePluginTrustLevel,
 } from './contract.ts';
 
 export type RuntimePluginJsonValue = JsonBoundaryValue;
@@ -76,15 +73,11 @@ export type RuntimePluginConfigMetadata = {
 };
 
 export type RuntimePluginRuntimePolicy = {
-  readonly requiredForTurn: boolean;
-  readonly confirmation: RuntimePluginConfirmationRequirement;
   readonly timeoutMs: number;
-  readonly sourceReferencesRequired: boolean;
   readonly redactionLabels: readonly string[];
   readonly failureBehavior: {
     readonly beforeRoleModelCall: RuntimePluginBeforeRoleModelFailureBehavior;
     readonly handleToolCall: RuntimePluginHandleToolCallFailureBehavior;
-    readonly afterTurnCommitted: RuntimePluginAfterTurnCommittedFailureBehavior;
     readonly health: RuntimePluginHealthFailureBehavior;
   };
 };
@@ -104,7 +97,8 @@ export type RuntimePluginManifest = {
   readonly compatibility: RuntimePluginCompatibilityMetadata;
   readonly declaredPlugins: readonly RuntimePluginDeclaration[];
   readonly config: RuntimePluginConfigMetadata;
-  readonly localTrustLevel: RuntimePluginTrustLevel;
+  /** Shipped with Project02, rather than installed by the user. */
+  readonly firstParty: boolean;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activation: RuntimePluginActivationMetadata;
   readonly requestedAccess: RuntimePluginAccessMap;
@@ -115,12 +109,11 @@ export type RuntimePluginProvidedTool = {
   readonly description: string;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  /** Absent hints mean unknown, which the runtime treats conservatively. */
+  /** Advisory only, for whoever enables the plugin. Never read at runtime. */
   readonly annotations?: RuntimePluginToolAnnotations;
   /** Absent means exclusive: a tool overlaps only when it says so. */
   readonly concurrency?: RuntimePluginToolConcurrency;
   readonly requiresConfirmation: boolean;
-  readonly sourceReferencesRequired: boolean;
 };
 
 export type RuntimePluginSourceReference = {

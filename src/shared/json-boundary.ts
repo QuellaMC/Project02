@@ -1,7 +1,4 @@
-import {
-  isJsonBoundaryCredentialKey,
-  redactJsonBoundaryText,
-} from './redaction.ts';
+import {isJsonBoundaryCredentialKey} from './redaction.ts';
 
 export type JsonBoundaryValue =
   | string
@@ -121,11 +118,7 @@ function normalizeJsonBoundaryValue(
       return '[redacted]';
     }
 
-    const snapshot = state.options.redact
-      ? redactJsonBoundaryText(value)
-      : value;
-
-    return snapshot;
+    return value;
   }
 
   if (typeof value === 'number') {
@@ -304,30 +297,6 @@ function assertContainerCanBeVisited(
 ): void {
   if (state.activeContainers.has(value)) {
     throw new TypeError(`${field} must not contain cycles.`);
-  }
-}
-
-export function redactJsonTextPreservingStructure(
-  value: string,
-  field: string,
-): string {
-  let parsed: unknown;
-
-  try {
-    parsed = JSON.parse(value);
-  } catch {
-    return redactJsonBoundaryText(value);
-  }
-
-  try {
-    return JSON.stringify(
-      createJsonBoundarySnapshot(parsed, {
-        field,
-        redact: true,
-      }),
-    );
-  } catch {
-    return '';
   }
 }
 

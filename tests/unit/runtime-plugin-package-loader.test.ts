@@ -878,11 +878,11 @@ describe('runtime plugin package loader', () => {
   it('preserves operator claims as metadata but excludes host-reserved ids', () => {
     const root = createTestTempRoot('project02-plugin-packages-');
     const claimedManifest = testPluginManifest('operator.claims', {
-      localTrustLevel: 'first_party',
+      firstParty: true,
       defaultEnabled: true,
     });
     const reservedManifest = testPluginManifest('runtime.plugin', {
-      localTrustLevel: 'first_party',
+      firstParty: true,
       defaultEnabled: true,
     });
 
@@ -907,7 +907,7 @@ describe('runtime plugin package loader', () => {
       provenance: 'operator',
       manifest: {
         id: claimedManifest.id,
-        localTrustLevel: 'first_party',
+        firstParty: true,
         activation: {defaultEnabled: true},
       },
     });
@@ -1899,7 +1899,7 @@ async function instantiatePackage(
 function testPluginManifest(
   id: string,
   options: {
-    readonly localTrustLevel?: RuntimePluginManifest['localTrustLevel'];
+    readonly firstParty?: RuntimePluginManifest['firstParty'];
     readonly defaultEnabled?: boolean;
   } = {},
 ): RuntimePluginManifest {
@@ -1915,17 +1915,13 @@ function testPluginManifest(
     },
     declaredPlugins: ['plugin_discovery'],
     config: {scope: 'global_with_character_overrides', fields: []},
-    localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
+    firstParty: options.firstParty ?? false,
     runtimePolicy: {
-      requiredForTurn: false,
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

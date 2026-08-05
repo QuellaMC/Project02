@@ -31,7 +31,6 @@ export function createDefaultRoleModelPluginToolDefinitions(): readonly RoleMode
         annotations: {readOnlyHint: true},
         concurrency: 'shared',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       } satisfies RoleModelPluginToolDefinition),
     ),
   );

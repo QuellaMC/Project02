@@ -5,7 +5,6 @@ import type {
   RuntimePluginAfterTurnCommittedContext,
   RuntimePluginContext,
   RuntimePluginFileStore,
-  RuntimePluginManifest,
 } from '../api/types.ts';
 import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
@@ -24,7 +23,6 @@ export function createPluginHookContext<
 >(options: {
   readonly context: TContext;
   readonly plugin: RuntimePlugin;
-  readonly policyManifest?: RuntimePluginManifest | undefined;
   readonly pluginId?: string | undefined;
   readonly access: RuntimePluginAccessSnapshot;
   readonly deadlineAt: number;

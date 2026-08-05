@@ -20,7 +20,6 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
     annotations: {readOnlyHint: true},
     concurrency: 'shared',
     requiresConfirmation: false,
-    sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
 }
 
@@ -44,6 +43,5 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
     annotations: {readOnlyHint: false},
     concurrency: 'exclusive',
     requiresConfirmation: false,
-    sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
 }

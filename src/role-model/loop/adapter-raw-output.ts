@@ -18,14 +18,16 @@ import {
 } from '../api/contracts.ts';
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
 import {normalizeReplayableRejectedRoleModelDecisionResult} from './replay-evidence.ts';
-import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
+import {
+  isJsonRecord,
+  parseRoleModelProviderExchangeSnapshot,
+} from '../api/provider-exchange.ts';
 import type {RoleModelNativeToolCallArgumentError} from '../api/adapter.ts';
 import type {
   RoleModelAssistantChatMessage,
   RoleModelChatToolCall,
 } from '../api/chat-wire.ts';
 import {type RoleModelAllowedToolName} from '../api/tool-names.ts';
-import {redactRuntimePluginText} from '../../plugins/api/index.ts';
 
 export type RoleModelAdapterRawOutputValidationResult =
   | {
@@ -64,7 +66,7 @@ export function validateRoleModelAdapterRawOutput(
   const providerMetadataResult = optionalProviderMetadata(
     rawOutput['providerMetadata'],
   );
-  const providerExchange = optionalProviderExchange(
+  const providerExchange = parseRoleModelProviderExchangeSnapshot(
     rawOutput['providerExchange'],
   );
 
@@ -223,8 +225,8 @@ function optionalRoleModelNativeToolCallArgumentErrors(
       Object.freeze({
         executableIndex,
         toolName,
-        reason: redactRuntimePluginText(reason),
-        message: redactRuntimePluginText(message),
+        reason: reason,
+        message: message,
       } satisfies RoleModelNativeToolCallArgumentError),
     );
   }
@@ -359,12 +361,6 @@ function optionalProviderMetadata(value: unknown):
   });
 }
 
-function optionalProviderExchange(
-  value: unknown,
-): RoleModelProviderExchangeSnapshot | undefined {
-  return parseRoleModelProviderExchangeSnapshot(value);
-}
-
 type ProviderRequestMetadata = NonNullable<
   RoleModelProviderMetadata['request']
 >;
@@ -399,9 +395,7 @@ function optionalProviderRequestMetadata(value: unknown):
   return Object.freeze({
     status: 'accepted',
     request: Object.freeze({
-      ...(typeof endpoint === 'string'
-        ? {endpoint: redactRuntimePluginText(endpoint)}
-        : {}),
+      ...(typeof endpoint === 'string' ? {endpoint: endpoint} : {}),
       ...(typeof messageCount === 'number' ? {messageCount} : {}),
       stream: false,
     }),
@@ -454,8 +448,8 @@ function optionalProviderErrorMetadata(
   }
 
   return Object.freeze({
-    code: redactRuntimePluginText(code),
-    message: redactRuntimePluginText(message),
+    code: code,
+    message: message,
   });
 }
 
@@ -475,9 +469,7 @@ function optionalRoleModelDecisionRejection(
 
   return Object.freeze({
     reason,
-    ...(typeof details === 'string'
-      ? {details: redactRuntimePluginText(details)}
-      : {}),
+    ...(typeof details === 'string' ? {details: details} : {}),
   } satisfies RoleModelDecisionRejection);
 }
 
@@ -490,10 +482,4 @@ function isRoleModelDecisionRejectionReason(
       value as RoleModelDecisionRejectionReason,
     )
   );
-}
-
-function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

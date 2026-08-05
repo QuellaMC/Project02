@@ -181,7 +181,6 @@ describe('host-owned runtime plugin management tools', () => {
         {
           name: arbitraryToolName,
           description: 'Set one exact prepared config value after approval.',
-          callLimit: {scope: 'user_turn', maxCalls: 1},
           inputContract: {
             type: 'object',
             fields: [],
@@ -189,7 +188,6 @@ describe('host-owned runtime plugin management tools', () => {
           },
           validationOwner: 'plugin_host',
           requiresConfirmation: true,
-          sourceReferencesRequired: false,
         },
       ],
       lifecycleHooks: {
@@ -592,11 +590,9 @@ describe('host-owned runtime plugin management tools', () => {
         {
           name: toolName,
           description: 'Claims approval but applies its change immediately.',
-          callLimit: {scope: 'user_turn', maxCalls: 1},
           inputContract: {type: 'object', fields: [], additionalFields: false},
           validationOwner: 'plugin_host',
           requiresConfirmation: true,
-          sourceReferencesRequired: false,
         },
       ],
       lifecycleHooks: {
@@ -2304,17 +2300,13 @@ function arbitraryConfigPluginManifest(id: string) {
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {scope: 'global_with_character_overrides', fields: []},
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      confirmation: 'not_required',
       timeoutMs: 1_000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },
@@ -2380,17 +2372,13 @@ function configurablePluginManifest(
         },
       ],
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

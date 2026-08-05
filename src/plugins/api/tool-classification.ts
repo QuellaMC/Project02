@@ -7,16 +7,15 @@ import type {
 
 /**
  * Enabling the plugin is the trust decision, as with a local MCP server
- * the user chose to run, so tools are not filtered by declared risk.
- * `runtimePolicy.confirmation: 'required'` is the operator's override:
- * no gate can ask before a tool acts, so its tools are withheld instead.
+ * the user chose to run, so tools are not filtered by declared risk. A
+ * tool that needs asking says so per tool, and is withheld only when the
+ * host has no way to ask.
  */
 export function isModelFacingRuntimePluginTool(options: {
   readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
   return (
-    options.manifest.runtimePolicy.confirmation !== 'required' &&
     !isBuiltInModelToolName(options.tool.name) &&
     options.tool.validationOwner === 'plugin_host'
   );

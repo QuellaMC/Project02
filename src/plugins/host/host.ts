@@ -4,10 +4,7 @@ import {
   createRuntimePluginToolCallResultSnapshot,
 } from '../api/constructors.ts';
 import {createRuntimePluginContextItem} from '../api/manifest-validation.ts';
-import {
-  isRecord,
-  redactRuntimePluginText,
-} from '../api/validation-primitives.ts';
+import {isRecord} from '../api/validation-primitives.ts';
 import type {
   RuntimePluginEvidenceKind,
   RuntimePluginEvidenceStatus,
@@ -55,8 +52,6 @@ import {
   routableModelFacingPluginTools,
 } from '../policy/tool-policy.ts';
 import {
-  assertAcceptedToolEvidenceSourceReferences,
-  assertContextItemSourceReferences,
   assertSnapshotPluginId,
   createHookFailureEvidence,
   failurePolicyOutcomeOption,
@@ -1323,7 +1318,6 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
-      policyManifest: catalogManifest,
       pluginId: catalogPluginId,
       deadlineAt: executionScope.deadlineAt,
       signal: executionScope.abortController.signal,
@@ -1478,12 +1472,6 @@ function normalizeToolCallResult(options: {
       value: value['evidence'],
     });
 
-    assertAcceptedToolEvidenceSourceReferences({
-      plugin: options.plugin,
-      providedTool: options.providedTool,
-      evidence,
-    });
-
     if (evidence.some(runtimePluginEvidenceBlocksToolInvocation)) {
       return Object.freeze({
         status: 'rejected',
@@ -1560,7 +1548,7 @@ function normalizeToolCallResult(options: {
       );
     }
 
-    const redactedMessage = redactRuntimePluginText(message);
+    const redactedMessage = message;
     const evidence = normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
@@ -1952,11 +1940,6 @@ function normalizeContextItems(options: {
         actualPluginId: contextItem.pluginId,
         field: 'contextItems.pluginId',
       });
-      assertContextItemSourceReferences({
-        plugin: options.plugin,
-        contextItem,
-      });
-
       return contextItem;
     }),
   );
@@ -2015,9 +1998,8 @@ function handleToolCallFailureDegrades(options: {
   readonly providedTool: RuntimePluginProvidedTool;
 }): boolean {
   return (
-    !options.plugin.manifest.runtimePolicy.requiredForTurn &&
     options.plugin.manifest.runtimePolicy.failureBehavior.handleToolCall ===
-      'degrade'
+    'degrade'
   );
 }
 

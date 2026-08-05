@@ -94,6 +94,7 @@ import {
 } from '../evidence/records.ts';
 import {
   isOneOf,
+  optionalCommittedMessage,
   requiredNormalizedVisibleMessageText,
   requiredRuntimeEventIdentity,
   requiredVisibleMessage,
@@ -129,7 +130,6 @@ const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
   validationOwner: 'plugin_host',
   concurrency: 'exclusive',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
@@ -277,38 +277,6 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       : {runtimePluginTurnEvidence}),
     ...(runtimeConfigEffects === undefined ? {} : {runtimeConfigEffects}),
   } satisfies RawEventLogRecord);
-}
-
-/**
- * A commit event's message and the moment it committed. They are one
- * fact, so they are decoded together and neither appears without the other.
- */
-function optionalCommittedMessage(record: Record<string, unknown>): {
-  readonly visibleMessage?: VisibleMessage;
-  readonly committedAt?: string;
-} {
-  const value = record['visibleMessage'];
-
-  if (value === undefined) {
-    if (record['committedAt'] !== undefined) {
-      throwMalformedRecord('visibleMessage');
-    }
-
-    return {};
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('visibleMessage');
-  }
-
-  return Object.freeze({
-    committedAt: requiredRecordCanonicalTimestamp(
-      record,
-      'committedAt',
-      'malformed_record',
-    ),
-    visibleMessage: requiredVisibleMessage(value, 'visibleMessage'),
-  });
 }
 
 function optionalRecordString(

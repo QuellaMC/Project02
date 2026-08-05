@@ -92,7 +92,7 @@ type MutableInspectTurnRawEventProjection = {
   readonly toolEvents: InspectToolCallEvent[];
 };
 
-export function createInspectEvidenceIndexes(options: {
+function createInspectEvidenceIndexes(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
   readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
@@ -113,7 +113,7 @@ export function createInspectEvidenceIndexes(options: {
   });
 }
 
-export function createInspectRawEventIndexes(
+function createInspectRawEventIndexes(
   rawEvents: readonly RawEventLogRecord[],
 ): Pick<
   InspectEvidenceIndexes,
@@ -240,7 +240,7 @@ function freezeInspectTurnProjections(
   return projections;
 }
 
-export function groupEvidenceByIdentity<
+function groupEvidenceByIdentity<
   T extends {
     readonly eventId: string;
     readonly traceId: string;
@@ -464,7 +464,7 @@ function pluginListings(
         displayName: plugin.manifest.displayName,
         version: plugin.manifest.version,
         kind: plugin.manifest.kind,
-        localTrustLevel: plugin.manifest.localTrustLevel,
+        firstParty: plugin.manifest.firstParty,
         installed: plugin.installed,
         registered: plugin.registered,
         enabled: plugin.enabled,
@@ -477,7 +477,6 @@ function pluginListings(
               name: tool.name,
               validationOwner: tool.validationOwner,
               requiresConfirmation: tool.requiresConfirmation,
-              sourceReferencesRequired: tool.sourceReferencesRequired,
               // Carried through rather than summarized: an audit needs
               // what the tool declared, including having declared nothing.
               ...(tool.annotations === undefined
@@ -738,9 +737,7 @@ function roleModelCommitValidation(
   } satisfies InspectRoleModelCommitValidation);
 }
 
-export function terminalTurnStatus(
-  record: RawEventLogRecord,
-): RuntimeTurnStatus {
+function terminalTurnStatus(record: RawEventLogRecord): RuntimeTurnStatus {
   if (record.status !== undefined) {
     return record.status;
   }
@@ -751,7 +748,7 @@ export function terminalTurnStatus(
   );
 }
 
-export function visibleMessagesForId(
+function visibleMessagesForId(
   conversationById: ReadonlyMap<string, ConversationLogRecord>,
   messageId: string,
 ): readonly InspectVisibleMessage[] {

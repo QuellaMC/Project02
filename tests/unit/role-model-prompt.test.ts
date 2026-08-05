@@ -156,49 +156,6 @@ describe('role-model prompt rendering', () => {
     );
   });
 
-  it('redacts credential variants before plugin context reaches the prompt', () => {
-    const sentinels = [
-      'auth-sentinel',
-      'proxy-sentinel',
-      'mssql-user:pass',
-      'oracle-user:pass',
-    ];
-    const contextItem = createRuntimePluginContextItem({
-      pluginId: 'memory.credentials',
-      id: 'credential-context',
-      kind: 'memory',
-      text: [
-        'Authorization: ApiKey auth-sentinel',
-        'Proxy-Authorization: Digest proxy-sentinel',
-        'mssql://mssql-user:pass@example.test/db',
-        'oracle://oracle-user:pass@example.test/db',
-      ].join('\n'),
-      budget: {estimatedTokens: 32, priority: 50},
-      sourceReferences: [],
-      redactionLabels: [],
-    });
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: createUserMessageRuntimeEvent('hello', testIdentity()),
-      decisionContext: createDecisionContext({
-        sessionId: 'session-redacted-plugin-context',
-        characterSnapshot: testCharacterProfile,
-        pluginContextItems: [contextItem],
-      }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-    });
-    const serialized = JSON.stringify(
-      renderRoleModelTurnContext(inputEnvelope),
-    );
-
-    for (const sentinel of sentinels) {
-      expect(serialized).not.toContain(sentinel);
-    }
-    expect(serialized).toContain('Authorization: [redacted]');
-    expect(serialized).toContain('Proxy-Authorization: [redacted]');
-    expect(serialized).toContain('mssql://[redacted]@example.test/db');
-    expect(serialized).toContain('oracle://[redacted]@example.test/db');
-  });
-
   it('omits CharacterDecision JSON instructions for native tools but keeps JSON fallback available', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
@@ -323,7 +280,6 @@ describe('role-model prompt rendering', () => {
       },
       validationOwner: 'plugin_host',
       requiresConfirmation: false,
-      sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition);
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('list plugins', testIdentity()),
@@ -497,7 +453,6 @@ const nestedSchemaToolDefinition = Object.freeze({
   },
   validationOwner: 'plugin_host',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 const openUnionSchemaToolDefinition = Object.freeze({
@@ -531,7 +486,6 @@ const openUnionSchemaToolDefinition = Object.freeze({
   },
   validationOwner: 'plugin_host',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 function testIdentity() {

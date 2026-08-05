@@ -35,10 +35,7 @@ import type {
   RoleModelAdapterRawOutput,
   RoleModelNativeToolCallArgumentError,
 } from '../api/adapter.ts';
-import {
-  redactRuntimePluginText,
-  type RuntimePluginJsonValue,
-} from '../../plugins/api/index.ts';
+import {type RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,
@@ -396,8 +393,8 @@ function createBaseNvidiaProviderExchange(options: {
     base: Object.freeze({
       provider: Object.freeze({
         name: nvidiaRoleModelProviderName,
-        model: redactRuntimePluginText(options.model),
-        endpoint: redactRuntimePluginText(options.endpoint),
+        model: options.model,
+        endpoint: options.endpoint,
       }),
       capabilities: nvidiaRoleModelProviderCapabilities,
       reasoning: Object.freeze({
@@ -640,8 +637,7 @@ function createProviderRejectedOutput(options: {
     model: options.model,
     ...(options.status === undefined ? {} : {status: options.status}),
   });
-  const rejectionDetails =
-    providerMetadata.error?.message ?? redactRuntimePluginText(options.message);
+  const rejectionDetails = providerMetadata.error?.message ?? options.message;
 
   return Object.freeze({
     rawOutputText: '',
@@ -664,15 +660,13 @@ function createProviderMetadata(options: {
   readonly model: string;
   readonly status?: number;
 }): RoleModelProviderMetadata {
-  const redactedEndpoint = redactRuntimePluginText(options.endpoint);
+  const redactedEndpoint = options.endpoint;
   const redactedMessage =
-    options.message === undefined
-      ? undefined
-      : redactRuntimePluginText(options.message);
+    options.message === undefined ? undefined : options.message;
 
   return Object.freeze({
     provider: nvidiaRoleModelProviderName,
-    model: redactRuntimePluginText(options.model),
+    model: options.model,
     request: Object.freeze({
       endpoint: redactedEndpoint,
       ...(options.messageCount === undefined

@@ -143,6 +143,7 @@ export function executionVisibleReplyTexts(
   );
 }
 
+/** A rejected decision ends the turn: nothing retries a parse failure. */
 export function appendRejectedRoleModelLoopRound(options: {
   readonly state: RoleModelLoopState;
   readonly invokedRound: RejectedRoundView;
@@ -165,23 +166,6 @@ export function appendRejectedRoleModelLoopRound(options: {
     parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
     rounds: options.state.rounds,
   });
-}
-
-/**
- * Reasons whose rejection details are actionable model feedback: the model
- * wrote a semantically incomplete response it can plausibly correct, but no
- * tool call exists to anchor the error to, so it rides the message thread as
- * a correction note instead of a failed tool observation.
- */
-
-/** A rejected decision ends the turn: nothing retries a parse failure. */
-export function handleRejectedRoleModelLoopRound(options: {
-  readonly state: RoleModelLoopState;
-  readonly invokedRound: RejectedRoundView;
-  readonly round: number;
-  readonly maxToolRounds: number;
-}): RejectedRoleModelLoopResult | undefined {
-  return appendRejectedRoleModelLoopRound(options);
 }
 
 function recordDecisionErrorFeedbackRound(options: {

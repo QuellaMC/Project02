@@ -80,7 +80,6 @@ export function mapOpenClawMemoryPluginFixture(
         toolInputSchemaFromMetadata(toolMetadata, toolName),
       ),
       validationOwner: 'adapter',
-      sourceReferencesRequired: true,
     }),
   );
   const notes = [
@@ -180,7 +179,6 @@ export function mapTencentDbMemoryGatewayFixture(
       description: 'Search TencentDB memory records from the fixture gateway.',
       inputContract: inputContractFromSchema(searchMemories.requestSchema),
       validationOwner: 'adapter',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
     createProvidedToolFromSchema({
@@ -189,7 +187,6 @@ export function mapTencentDbMemoryGatewayFixture(
         'Search TencentDB conversation records from the fixture gateway.',
       inputContract: inputContractFromSchema(searchConversations.requestSchema),
       validationOwner: 'adapter',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
   ];
@@ -403,7 +400,6 @@ export function mapHermesMemoryProviderFixture(
         requiredRecord(tool['inputSchema'], 'behavior.searchTools.inputSchema'),
       ),
       validationOwner: 'adapter',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
   );
@@ -577,7 +573,6 @@ export function mapMcpToolsResourcesFixture(
         requiredRecord(tool['inputSchema'], 'tools.inputSchema'),
       ),
       validationOwner: 'adapter',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
   );
@@ -610,7 +605,6 @@ export function mapMcpToolsResourcesFixture(
     ],
     runtimePolicy: createAdapterPolicy({
       timeoutMs: 1000,
-      sourceReferencesRequired: true,
     }),
     activationReasons: ['mcp_fixture_mapping'],
     compatibilityNotes: notes,
@@ -763,7 +757,6 @@ function createOpenClawManifest(options: {
     configFields: options.configFields,
     runtimePolicy: createAdapterPolicy({
       timeoutMs: 1000,
-      sourceReferencesRequired: true,
     }),
     activationReasons: options.activationReasons,
     compatibilityNotes: options.compatibilityNotes,
@@ -805,7 +798,6 @@ function createMemoryGatewayManifest(options: {
     configFingerprint: options.configFingerprint,
     runtimePolicy: createAdapterPolicy({
       timeoutMs: 2000,
-      sourceReferencesRequired: true,
       redactionLabels: ['secret'],
     }),
     activationReasons: ['memory_fixture_mapping'],
@@ -854,7 +846,7 @@ function createRuntimePluginManifestForAdapter(options: {
         ? {}
         : {fingerprint: options.configFingerprint}),
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: options.runtimePolicy,
     activation: {
       defaultEnabled: false,
@@ -894,19 +886,14 @@ function adapterRequestedAccess(options: {
 
 function createAdapterPolicy(options: {
   readonly timeoutMs: number;
-  readonly sourceReferencesRequired: boolean;
   readonly redactionLabels?: readonly string[];
 }): RuntimePluginRuntimePolicy {
   return {
-    requiredForTurn: false,
-    confirmation: 'not_required',
     timeoutMs: options.timeoutMs,
-    sourceReferencesRequired: options.sourceReferencesRequired,
     redactionLabels: options.redactionLabels ?? [],
     failureBehavior: {
       beforeRoleModelCall: 'degrade',
       handleToolCall: 'degrade',
-      afterTurnCommitted: 'log_failure',
       health: 'degrade',
     },
   };
@@ -917,7 +904,6 @@ function createProvidedToolFromSchema(options: {
   readonly description: string;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  readonly sourceReferencesRequired: boolean;
   readonly maxCalls?: number;
 }): RuntimePluginProvidedTool {
   return {
@@ -926,7 +912,6 @@ function createProvidedToolFromSchema(options: {
     inputContract: options.inputContract,
     validationOwner: options.validationOwner,
     requiresConfirmation: false,
-    sourceReferencesRequired: options.sourceReferencesRequired,
   };
 }
 

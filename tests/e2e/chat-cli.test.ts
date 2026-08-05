@@ -2100,7 +2100,7 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'fatal-cleanup-session';
     const configuredPlugin = createSessionEndPlugin(() => {}, {
       pluginId: 'chat.session-end.fatal-cleanup.fixture',
-      requiredForTurn: true,
+      rejectsTurn: true,
       beforeRoleModelCall() {
         throw new Error('configured before-role-model hook failed');
       },
@@ -2134,7 +2134,7 @@ describe('chat CLI plugin lifecycle', () => {
                 },
                 {
                   pluginId: configuredPlugin.manifest.id,
-                  requiredForTurn: true,
+                  rejectsTurn: true,
                   beforeRoleModelCall() {
                     throw new Error('configured before-role-model hook failed');
                   },
@@ -2650,17 +2650,13 @@ function createChatConfigurablePlugin(): RuntimePlugin {
           },
         ],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2685,7 +2681,7 @@ function createSessionEndPlugin(
     readonly onShutdown?: NonNullable<
       RuntimePlugin['lifecycleHooks']['onShutdown']
     >;
-    readonly requiredForTurn?: boolean;
+    readonly rejectsTurn?: boolean;
     readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
     readonly defaultEnabled?: boolean;
   } = {},
@@ -2716,18 +2712,14 @@ function createSessionEndPlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: options.requiredForTurn === true,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall:
-            options.requiredForTurn === true ? 'reject_turn' : 'degrade',
+            options.rejectsTurn === true ? 'reject_turn' : 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2789,17 +2781,13 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2860,17 +2848,13 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
           },
         ],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },

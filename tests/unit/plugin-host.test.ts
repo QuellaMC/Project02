@@ -532,7 +532,6 @@ describe('runtime plugin host catalog and routing', () => {
           name: 'memory.search',
           description: 'Search memory.',
           validationOwner: 'plugin_host',
-          sourceReferencesRequired: false,
         }),
       ]),
     );
@@ -734,35 +733,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(host.pluginToolDefinitions().map(tool => tool.name)).not.toContain(
       'memory.search',
     );
-  });
-
-  it('turns handler failures into redacted rejected tool observations', async () => {
-    const plugin = createMemorySearchPlugin(
-      'memory.failing',
-      true,
-      'search backend failed api_key=super-secret Bearer secret-token',
-    );
-    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
-
-    const result = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: plugin.manifest.id,
-        toolName: 'memory.search',
-        input: {
-          query: 'Mira',
-        },
-      },
-      testPluginContext(),
-    );
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      reason: 'handler_failed',
-      message: 'search backend failed api_key=[redacted] Bearer [redacted]',
-    });
-    expect(JSON.stringify(result)).not.toContain('super-secret');
-    expect(JSON.stringify(result)).not.toContain('secret-token');
   });
 
   it('blocks fileStore writes attempted after handleToolCall timeout', async () => {

@@ -7,7 +7,6 @@ import {
 } from '../../core/index.ts';
 import {
   createRuntimePluginContextItem,
-  redactRuntimePluginText,
   type RuntimePluginContextItem,
 } from '../../plugins/api/index.ts';
 import {
@@ -421,8 +420,8 @@ function freezeRoleModelToolObservationResult(
 
   return Object.freeze({
     status: 'rejected',
-    reason: redactRuntimePluginText(result.reason),
-    message: redactRuntimePluginText(result.message),
+    reason: result.reason,
+    message: result.message,
   } satisfies RoleModelToolObservationResult);
 }
 
@@ -440,9 +439,7 @@ function freezeRoleModelDecisionRejection(
 ): RoleModelDecisionRejection {
   return Object.freeze({
     reason: rejection.reason,
-    ...(rejection.details === undefined
-      ? {}
-      : {details: redactRuntimePluginText(rejection.details)}),
+    ...(rejection.details === undefined ? {} : {details: rejection.details}),
   } satisfies RoleModelDecisionRejection);
 }
 

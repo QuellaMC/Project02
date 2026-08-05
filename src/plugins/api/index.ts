@@ -8,11 +8,9 @@
  * be imported from runtime.
  */
 export {
-  afterTurnCommittedFailureBehaviorValues,
   beforeRoleModelFailureBehaviorValues,
   characterStatePatchModelToolName,
   characterStatePluginId,
-  confirmationRequirementValues,
   firstPartyModelToolsPluginId,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
@@ -36,17 +34,14 @@ export {
   runtimePluginToolConcurrencyValues,
   runtimePluginSourceKindValues,
   runtimePluginToolValidationOwnerValues,
-  runtimePluginTrustLevelValues,
   type RuntimePluginAccessLevel,
   type RuntimePluginAccessMap,
   type RuntimePluginAccessName,
   type RuntimePluginAccessSnapshot,
-  type RuntimePluginAfterTurnCommittedFailureBehavior,
   type RuntimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginBeforeRoleModelFailureBehavior,
   type RuntimePluginConfigScope,
   type RuntimePluginConfigValueType,
-  type RuntimePluginConfirmationRequirement,
   type RuntimePluginContextItemKind,
   type RuntimePluginDeclaration,
   type RuntimePluginEvidenceKind,
@@ -60,7 +55,6 @@ export {
   type RuntimePluginToolConcurrency,
   type RuntimePluginSourceKind,
   type RuntimePluginToolValidationOwner,
-  type RuntimePluginTrustLevel,
 } from './contract.ts';
 export {
   type CreateRuntimePluginAfterTurnCommittedContextOptions,
@@ -122,10 +116,7 @@ export {
   validateRuntimePluginManifest,
   validateRuntimePluginProvidedTool,
 } from './manifest-validation.ts';
-export {
-  isRuntimePluginCredentialKey,
-  redactRuntimePluginText,
-} from './validation-primitives.ts';
+export {isRuntimePluginCredentialKey} from './validation-primitives.ts';
 export {
   isApprovalGatedRuntimePluginTool,
   isModelFacingRuntimePluginTool,

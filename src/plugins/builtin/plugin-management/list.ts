@@ -80,7 +80,6 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
     annotations: {readOnlyHint: true},
     concurrency: 'shared',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   };
 }
 
@@ -293,7 +292,6 @@ function createRuntimePluginListToolSummary(
     ...(tool.concurrency === undefined ? {} : {concurrency: tool.concurrency}),
     requiresConfirmation: tool.requiresConfirmation,
     validationOwner: tool.validationOwner,
-    sourceReferencesRequired: tool.sourceReferencesRequired,
   } satisfies RuntimePluginJsonObject);
 }
 

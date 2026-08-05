@@ -31,7 +31,6 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
     options.rawOutputText,
     options.allowedTools,
     options.pluginToolDefinitions,
-    options.toolObservations,
   );
 
   return (
@@ -108,7 +107,6 @@ function fillRequestedToolNamesFromRawOutput(options: {
     options.rawOutputText,
     options.allowedTools,
     options.pluginToolDefinitions,
-    options.toolObservations,
   );
   const requestedToolNames =
     canonicalResult.status === 'rejected'

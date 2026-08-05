@@ -253,17 +253,13 @@ function dottedConfigManifest(): RuntimePluginManifest {
         },
       ],
     },
-    localTrustLevel: 'trusted_adapter',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'degrade',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

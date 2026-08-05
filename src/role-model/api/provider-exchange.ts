@@ -6,7 +6,6 @@ import {
 } from './chat-wire.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {isModelToolJsonSchemaType} from './model-tools.ts';
-import {redactRuntimePluginText} from '../../plugins/api/index.ts';
 import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import type {
   RoleModelProviderExchangeSnapshot,
@@ -442,16 +441,14 @@ export function freezeProviderMetadata(
 
   return Object.freeze({
     provider: metadata.provider,
-    ...(metadata.model === undefined
-      ? {}
-      : {model: redactRuntimePluginText(metadata.model)}),
+    ...(metadata.model === undefined ? {} : {model: metadata.model}),
     ...(metadata.request === undefined
       ? {}
       : {
           request: Object.freeze({
             ...(metadata.request.endpoint === undefined
               ? {}
-              : {endpoint: redactRuntimePluginText(metadata.request.endpoint)}),
+              : {endpoint: metadata.request.endpoint}),
             ...(messageCount === undefined ? {} : {messageCount}),
             stream: false,
           }),
@@ -467,8 +464,8 @@ export function freezeProviderMetadata(
       ? {}
       : {
           error: Object.freeze({
-            code: redactRuntimePluginText(metadata.error.code),
-            message: redactRuntimePluginText(metadata.error.message),
+            code: metadata.error.code,
+            message: metadata.error.message,
           }),
         }),
   } satisfies RoleModelProviderMetadata);

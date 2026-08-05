@@ -44,17 +44,13 @@ export function createMemoryProviderRuntimePlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'trusted_adapter',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        confirmation: 'not_required',
         timeoutMs: 1500,
-        sourceReferencesRequired: true,
         redactionLabels: ['memory'],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },

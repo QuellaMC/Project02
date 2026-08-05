@@ -2,10 +2,6 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
-  appendCommittedMessage,
-  type ConversationSession,
-  createCharacterMessage,
-  createUserMessage,
   CharacterInputError,
   CharacterReplyValidationError,
   createConversationSession,
@@ -14,6 +10,10 @@ import {
   ConversationRehydrationError,
   type VisibleMessage,
 } from '../../src/core/index.ts';
+import {
+  appendCharacterMessage,
+  appendUserMessage,
+} from '../support/committed-messages.ts';
 
 describe('conversation core', () => {
   it('creates a local session for the provided character with an empty visible transcript', () => {
@@ -299,23 +299,3 @@ describe('conversation core', () => {
     );
   });
 });
-
-function appendUserMessage(
-  session: ConversationSession,
-  text: string | undefined,
-): VisibleMessage {
-  const message = createUserMessage(session, text);
-
-  appendCommittedMessage(session, message);
-  return message;
-}
-
-function appendCharacterMessage(
-  session: ConversationSession,
-  reply: unknown,
-): VisibleMessage {
-  const message = createCharacterMessage(session, reply);
-
-  appendCommittedMessage(session, message);
-  return message;
-}

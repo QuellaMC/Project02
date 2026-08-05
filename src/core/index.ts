@@ -41,7 +41,11 @@ export {
 export {
   appendCommittedMessage,
   createCharacterMessage,
+  createMessageIdForSessionId,
   createUserMessage,
+  messageNumberFromId,
+  nextMessageNumber,
+  sessionIdFromMessageId,
   CharacterInputError,
   CharacterReplyValidationError,
   ConversationRehydrationError,

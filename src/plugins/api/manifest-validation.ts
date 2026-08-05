@@ -4,9 +4,7 @@ import {
 } from '../../shared/json-boundary.ts';
 import {normalizeRuntimePluginAccessMap} from '../policy/access-control.ts';
 import {
-  afterTurnCommittedFailureBehaviorValues,
   beforeRoleModelFailureBehaviorValues,
-  confirmationRequirementValues,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
   runtimePluginConfigScopeValues,
@@ -18,7 +16,6 @@ import {
   runtimePluginToolConcurrencyValues,
   type RuntimePluginToolAnnotations,
   runtimePluginToolValidationOwnerValues,
-  runtimePluginTrustLevelValues,
   type RuntimePluginAccessMap,
   type RuntimePluginConfigValueType,
   type RuntimePluginDeclaration,
@@ -45,7 +42,6 @@ import {
   isRecord,
   optionalConfidence,
   optionalString,
-  redactRuntimePluginText,
   reject,
   requiredBoolean,
   requiredContextBudget,
@@ -105,13 +101,10 @@ export function validateRuntimePluginManifest(
     return config;
   }
 
-  const localTrustLevel = value['localTrustLevel'];
+  const firstParty = requiredBoolean(value['firstParty'], 'firstParty');
 
-  if (!isOneOf(localTrustLevel, runtimePluginTrustLevelValues)) {
-    return reject(
-      'malformed_manifest',
-      'Plugin manifest localTrustLevel is not supported.',
-    );
+  if (firstParty.status === 'rejected') {
+    return firstParty;
   }
 
   const runtimePolicy = requiredRuntimePolicy(value['runtimePolicy']);
@@ -168,15 +161,15 @@ export function validateRuntimePluginManifest(
   return accept(
     Object.freeze({
       id: id.value,
-      displayName: redactRuntimePluginText(displayName.value),
-      version: redactRuntimePluginText(version.value),
+      displayName: displayName.value,
+      version: version.value,
       kind,
-      description: redactRuntimePluginText(description.value),
+      description: description.value,
       contractVersion: runtimePluginContractVersion,
       compatibility: compatibility.value,
       declaredPlugins: declaredPlugins.value,
       config: config.value,
-      localTrustLevel,
+      firstParty: firstParty.value,
       runtimePolicy: runtimePolicy.value,
       activation: activation.value,
       requestedAccess: requestedAccess.value,
@@ -200,6 +193,12 @@ export function validateRuntimePluginProvidedTool(
     );
   }
 
+  const retired = retiredToolDeclaration(value);
+
+  if (retired !== undefined) {
+    return retired;
+  }
+
   const name = requiredIdentifier(value['name'], 'name');
   const description = requiredNonEmptyString(
     value['description'],
@@ -213,24 +212,18 @@ export function validateRuntimePluginProvidedTool(
     value['requiresConfirmation'],
     'requiresConfirmation',
   );
-  const sourceReferencesRequired = requiredBoolean(
-    value['sourceReferencesRequired'],
-    'sourceReferencesRequired',
-  );
 
   if (
     name.status === 'rejected' ||
     description.status === 'rejected' ||
     inputContract.status === 'rejected' ||
-    requiresConfirmation.status === 'rejected' ||
-    sourceReferencesRequired.status === 'rejected'
+    requiresConfirmation.status === 'rejected'
   ) {
     return firstRejected([
       name,
       description,
       inputContract,
       requiresConfirmation,
-      sourceReferencesRequired,
     ]);
   }
 
@@ -258,7 +251,7 @@ export function validateRuntimePluginProvidedTool(
   return accept(
     Object.freeze({
       name: name.value,
-      description: redactRuntimePluginText(description.value),
+      description: description.value,
       inputContract: inputContract.value,
       validationOwner,
       ...(annotations.value === undefined
@@ -266,7 +259,6 @@ export function validateRuntimePluginProvidedTool(
         : {annotations: annotations.value}),
       ...(concurrency === undefined ? {} : {concurrency}),
       requiresConfirmation: requiresConfirmation.value,
-      sourceReferencesRequired: sourceReferencesRequired.value,
     } satisfies RuntimePluginProvidedTool),
   );
 }
@@ -352,7 +344,7 @@ export function validateRuntimePluginContextItem(
       pluginId: pluginId.value,
       id: id.value,
       kind,
-      text: redactRuntimePluginText(text.value),
+      text: text.value,
       budget: budget.value,
       sourceReferences: freezeSourceReferences(sourceReferences.value),
       ...(confidence.value === undefined ? {} : {confidence: confidence.value}),
@@ -481,16 +473,16 @@ function requiredCompatibilityMetadata(
       hostContractVersions: hostContractVersions.value,
       ...(sourceSystem.value === undefined
         ? {}
-        : {sourceSystem: redactRuntimePluginText(sourceSystem.value)}),
+        : {sourceSystem: sourceSystem.value}),
       ...(sourceVersion.value === undefined
         ? {}
-        : {sourceVersion: redactRuntimePluginText(sourceVersion.value)}),
+        : {sourceVersion: sourceVersion.value}),
       ...(externalContract.value === undefined
         ? {}
-        : {externalContract: redactRuntimePluginText(externalContract.value)}),
+        : {externalContract: externalContract.value}),
       ...(notes.value === undefined
         ? {}
-        : {notes: Object.freeze(notes.value.map(redactRuntimePluginText))}),
+        : {notes: Object.freeze(notes.value.map(value => value))}),
     } satisfies RuntimePluginCompatibilityMetadata),
   );
 }
@@ -556,7 +548,7 @@ function requiredConfigMetadata(
       fields: Object.freeze(fields),
       ...(fingerprint.value === undefined
         ? {}
-        : {fingerprint: redactRuntimePluginText(fingerprint.value)}),
+        : {fingerprint: fingerprint.value}),
     } satisfies RuntimePluginConfigMetadata),
   );
 }
@@ -658,7 +650,7 @@ function acceptRuntimePluginConfigField(options: {
   return accept(
     Object.freeze({
       name: options.name,
-      description: redactRuntimePluginText(options.description),
+      description: options.description,
       required: options.required,
       secret: options.secret,
       ...(options.valueType === undefined
@@ -666,20 +658,12 @@ function acceptRuntimePluginConfigField(options: {
         : {valueType: options.valueType}),
       ...(options.defaultValueSummary === undefined
         ? {}
-        : {
-            defaultValueSummary: redactRuntimePluginText(
-              options.defaultValueSummary,
-            ),
-          }),
-      ...(options.envVar === undefined
-        ? {}
-        : {envVar: redactRuntimePluginText(options.envVar)}),
+        : {defaultValueSummary: options.defaultValueSummary}),
+      ...(options.envVar === undefined ? {} : {envVar: options.envVar}),
       ...(options.allowedValues === undefined
         ? {}
         : {
-            allowedValues: Object.freeze(
-              options.allowedValues.map(redactRuntimePluginText),
-            ),
+            allowedValues: Object.freeze([...options.allowedValues]),
           }),
       ...(options.agentMutable === undefined
         ? {}
@@ -690,11 +674,7 @@ function acceptRuntimePluginConfigField(options: {
       redactionLabels: freezeRedactedStrings(options.redactionLabels),
       ...(options.configFingerprint === undefined
         ? {}
-        : {
-            configFingerprint: redactRuntimePluginText(
-              options.configFingerprint,
-            ),
-          }),
+        : {configFingerprint: options.configFingerprint}),
     } satisfies RuntimePluginConfigField),
   );
 }
@@ -726,16 +706,7 @@ function requiredRuntimePolicy(
     );
   }
 
-  const requiredForTurn = requiredBoolean(
-    value['requiredForTurn'],
-    'requiredForTurn',
-  );
-  const confirmation = value['confirmation'];
   const timeoutMs = requiredPositiveInteger(value['timeoutMs'], 'timeoutMs');
-  const sourceReferencesRequired = requiredBoolean(
-    value['sourceReferencesRequired'],
-    'sourceReferencesRequired',
-  );
   const redactionLabels = requiredStringArray(
     value['redactionLabels'],
     'redactionLabels',
@@ -743,34 +714,16 @@ function requiredRuntimePolicy(
   const failureBehavior = requiredFailureBehavior(value['failureBehavior']);
 
   if (
-    requiredForTurn.status === 'rejected' ||
     timeoutMs.status === 'rejected' ||
-    sourceReferencesRequired.status === 'rejected' ||
     redactionLabels.status === 'rejected' ||
     failureBehavior.status === 'rejected'
   ) {
-    return firstRejected([
-      requiredForTurn,
-      timeoutMs,
-      sourceReferencesRequired,
-      redactionLabels,
-      failureBehavior,
-    ]);
-  }
-
-  if (!isOneOf(confirmation, confirmationRequirementValues)) {
-    return reject(
-      'malformed_manifest',
-      'Plugin runtimePolicy.confirmation is not supported.',
-    );
+    return firstRejected([timeoutMs, redactionLabels, failureBehavior]);
   }
 
   return accept(
     Object.freeze({
-      requiredForTurn: requiredForTurn.value,
-      confirmation,
       timeoutMs: timeoutMs.value,
-      sourceReferencesRequired: sourceReferencesRequired.value,
       redactionLabels: freezeRedactedStrings(redactionLabels.value),
       failureBehavior: failureBehavior.value,
     } satisfies RuntimePluginRuntimePolicy),
@@ -783,6 +736,36 @@ function requiredRuntimePolicy(
  * a malformed hint would silently read as "unknown" and change whether
  * the user is asked.
  */
+/**
+ * Fields a tool may no longer declare, and what to write instead.
+ *
+ * Ignoring one would silently reverse what its author asked for: a tool
+ * marked `external_write` was withheld from the model, and dropping the
+ * field on the floor hands it over. Refusing to load says so once, to the
+ * person who can fix the manifest.
+ */
+const retiredProvidedToolFields = Object.freeze({
+  sideEffectLevel:
+    'use annotations (readOnlyHint, destructiveHint, openWorldHint)',
+  requiredForUserTurn: 'no longer supported; remove it',
+  callLimit: 'no longer supported; remove it',
+});
+
+function retiredToolDeclaration(
+  value: Readonly<Record<string, unknown>>,
+): RuntimePluginValidationResult<RuntimePluginProvidedTool> | undefined {
+  for (const [field, guidance] of Object.entries(retiredProvidedToolFields)) {
+    if (value[field] !== undefined) {
+      return reject(
+        'malformed_tool_definition',
+        `Plugin provided tool declares retired field "${field}": ${guidance}.`,
+      );
+    }
+  }
+
+  return undefined;
+}
+
 function optionalToolAnnotations(
   value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginToolAnnotations | undefined> {
@@ -838,13 +821,11 @@ function requiredFailureBehavior(
 
   const beforeRoleModelCall = value['beforeRoleModelCall'];
   const handleToolCall = value['handleToolCall'];
-  const afterTurnCommitted = value['afterTurnCommitted'];
   const health = value['health'];
 
   if (
     !isOneOf(beforeRoleModelCall, beforeRoleModelFailureBehaviorValues) ||
     !isOneOf(handleToolCall, handleToolCallFailureBehaviorValues) ||
-    !isOneOf(afterTurnCommitted, afterTurnCommittedFailureBehaviorValues) ||
     !isOneOf(health, healthFailureBehaviorValues)
   ) {
     return reject(
@@ -857,7 +838,6 @@ function requiredFailureBehavior(
     Object.freeze({
       beforeRoleModelCall,
       handleToolCall,
-      afterTurnCommitted,
       health,
     } satisfies RuntimePluginRuntimePolicy['failureBehavior']),
   );

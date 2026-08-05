@@ -64,6 +64,11 @@ export function createFileRuntimeLogStore(
     persistPreparedRawEvent(record) {
       const machine = state.ensureTransitionMachine(state.readStoredEvidence());
 
+      // Re-checked here, not just in prepareRawEvent: a caller may await
+      // between preparing and persisting, and the lease has to hold at the
+      // moment the bytes land, not only when the record was built.
+      state.assertWriterOwnership();
+
       try {
         appendJsonLine(paths.rawEventsPath, encodeRawEventLogRecord(record));
         machine.commitRawEventAppend(record);

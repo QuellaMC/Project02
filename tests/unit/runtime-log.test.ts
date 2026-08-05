@@ -145,7 +145,7 @@ describe('runtime log store', () => {
             pluginId: 'memory.fixture',
             evidenceKind: 'policy',
             status: 'failed',
-            summary: 'handler token=[redacted]',
+            summary: 'handler token=secret-token',
             policyOutcome: 'handler_rejected',
             redactionLabels: ['secret'],
           },

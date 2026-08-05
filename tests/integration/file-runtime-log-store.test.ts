@@ -38,6 +38,7 @@ import {
 } from '../../src/runtime/storage/layout-contract.ts';
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
+import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
@@ -1149,7 +1150,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('keeps a shown reply in the session when its raw append fails', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-custom-character-raw-rollback';
+    const sessionId = 'session-custom-character-raw-append-failure';
     const character = {id: 'nova', displayName: 'Nova'};
     await createLocalRuntimeSessionStore({
       storeRoot,
@@ -1164,44 +1165,14 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: character.id,
       boundCharacter: character,
     });
-    const appendFailure = new Error('visible reply raw append failed');
-    let failedVisibleReplyAppend = false;
-    const failingStore = Object.freeze({
-      ...(underlying.localRuntimeSessionPaths === undefined
-        ? {}
-        : {localRuntimeSessionPaths: underlying.localRuntimeSessionPaths}),
-      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
-        ? {}
-        : {
-            localRuntimeWriterLockOwnerToken:
-              underlying.localRuntimeWriterLockOwnerToken,
-          }),
-      appendTrace: entry => underlying.appendTrace(entry),
-      appendRawEvent(record, expectedCharacter) {
-        return underlying.appendRawEvent(record, expectedCharacter);
-      },
-      prepareRawEvent: (record, expectedCharacter) =>
-        underlying.prepareRawEvent(record, expectedCharacter),
-      persistPreparedRawEvent(record) {
-        if (
-          !failedVisibleReplyAppend &&
-          record.kind === 'visible_message_committed' &&
-          record.visibleMessage?.role === 'character'
-        ) {
-          failedVisibleReplyAppend = true;
-          throw appendFailure;
-        }
-
-        underlying.persistPreparedRawEvent(record);
-      },
-      checkpointWriterEvidence: () => underlying.checkpointWriterEvidence?.(),
-      recoverAbandonedWriterEvidence: () =>
-        underlying.recoverAbandonedWriterEvidence?.() ?? false,
-      readSessionEvidence: () => underlying.readSessionEvidence(),
-      traceEntries: () => underlying.traceEntries(),
-      rawEvents: () => underlying.rawEvents(),
-      conversationMessages: () => underlying.conversationMessages(),
-    } satisfies RuntimeLogStore);
+    const appendFailureMessage = 'visible reply raw append failed';
+    const failingStore = createRawEventAppendFailingLogStore({
+      logStore: underlying,
+      matches: record =>
+        record.kind === 'visible_message_committed' &&
+        record.visibleMessage?.role === 'character',
+      message: appendFailureMessage,
+    });
     const failedSession = createConversationSession({
       id: sessionId,
       character,
@@ -1211,14 +1182,14 @@ describe('file runtime log store plugin tool event validation', () => {
       runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent(
           'show me the stars',
-          identity('evt_custom_character_raw_rollback'),
+          identity('evt_custom_character_raw_append_failure'),
         ),
         session: failedSession,
         logStore: failingStore,
         pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
         roleModelAdapter: createMultilineVisibleReplyAdapter(),
       }),
-    ).rejects.toBe(appendFailure);
+    ).rejects.toThrow(appendFailureMessage);
 
     // The reply reached the user before the append, so it stays said.
     expect(failedSession.visibleTranscript).toMatchObject([
@@ -1440,6 +1411,107 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toEqual(['checking', 'checking']);
   });
 
+  it('keeps taking turns on the session whose reply the log never got', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-lagging-log-retry';
+    const character = {id: 'nova', displayName: 'Nova'};
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: character.id,
+    }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+
+    const underlying = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: character.id,
+      boundCharacter: character,
+    });
+    const failingStore = createRawEventAppendFailingLogStore({
+      logStore: underlying,
+      matches: record =>
+        record.kind === 'visible_message_committed' &&
+        record.visibleMessage?.role === 'character',
+      message: 'visible reply raw append failed',
+    });
+    // The one session this process keeps, the way the CLI holds it.
+    const session = createConversationSession({id: sessionId, character});
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('first', identity('evt_lag_1')),
+        session,
+        logStore: failingStore,
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).rejects.toThrow('visible reply raw append failed');
+
+    // The reply was said, so the session holds it and the log is a row behind.
+    expect(session.visibleTranscript).toHaveLength(2);
+    expect(underlying.conversationMessages()).toHaveLength(1);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('second', identity('evt_lag_2')),
+        session,
+        logStore: underlying,
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+
+    // The log now skips the number the failed reply took, so a session
+    // rebuilt from it holds fewer messages than the highest number used.
+    expect(
+      underlying.conversationMessages().map(message => message.id),
+    ).toEqual([
+      `${sessionId}:message-1`,
+      `${sessionId}:message-3`,
+      `${sessionId}:message-4`,
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent(
+          'after restart',
+          identity('evt_lag_3'),
+        ),
+        session: createConversationSession({
+          id: sessionId,
+          character,
+          visibleTranscript: underlying.conversationMessages(),
+        }),
+        logStore: underlying,
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+
+    expect(
+      underlying.conversationMessages().map(message => message.text),
+    ).toEqual([
+      'first',
+      'second',
+      expect.stringContaining('I can use:'),
+      'after restart',
+      expect.stringContaining('I can use:'),
+    ]);
+  });
+
+  it('reads back two rounds of one turn that said exactly the same thing', async () => {
+    const {paths} = await committedTurnRawLines(
+      'session-repeated-rounds',
+      createRepeatedRoundAdapter(),
+    );
+
+    expect(
+      reopenStore(paths)
+        .conversationMessages()
+        .filter(message => message.role === 'character')
+        .map(message => message.text),
+    ).toEqual(['checking', 'checking', 'done']);
+  });
+
   it('rejects a duplicated visible_message_committed anchor for one message', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-duplicate-commit-anchor',
@@ -1548,41 +1620,6 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
-  it('rejects a user row whose text disagrees with the recorded model input', async () => {
-    const {paths, rawLines} = await committedTurnRawLines(
-      'session-user-text-drift',
-    );
-    const index = rawLines.findIndex(
-      line =>
-        line.includes('"visible_message_committed"') &&
-        line.includes('"role":"user"'),
-    );
-    const record = JSON.parse(rawLines[index] ?? '{}') as {
-      visibleMessage?: Record<string, unknown>;
-    };
-
-    writeFileSync(
-      paths.rawEventsPath,
-      `${rawLines
-        .map((line, at) =>
-          at === index
-            ? JSON.stringify({
-                ...record,
-                visibleMessage: {
-                  ...record.visibleMessage,
-                  text: 'a different question',
-                },
-              })
-            : line,
-        )
-        .join('\n')}\n`,
-      'utf8',
-    );
-
-    expect(() => reopenStore(paths).conversationMessages()).toThrow(
-      LocalRuntimeStorageContractError,
-    );
-  });
   it('rejects a second user row appended into one turn', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-second-user-row',
@@ -2326,7 +2363,6 @@ function storedRecordWithPluginToolJsonSchema(
     },
     validationOwner: 'plugin_host',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   });
   allowedTools.push('memory.capture');
 
@@ -2487,17 +2523,13 @@ function createBeforeCallRejectingPluginHost() {
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: true,
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'reject_turn',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'degrade',
             },
           },
@@ -2548,17 +2580,13 @@ function createHealthRejectingPluginHost(options?: {
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: true,
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'reject_turn',
             },
           },
@@ -2640,6 +2668,36 @@ function reopenStore(
     characterId: testCharacterProfile.id,
     boundCharacter: testCharacterProfile,
   });
+}
+
+/**
+ * A model that repeats itself: two rounds whose raw output is the same
+ * bytes, then a terminal one. The repeated rounds are distinguishable only
+ * by which round they were, never by what they said.
+ */
+function createRepeatedRoundAdapter(): RoleModelAdapter {
+  const repeatedRound = JSON.stringify({
+    toolCalls: [
+      {name: 'visible_reply', input: {text: 'checking'}},
+      {name: characterStatePatchModelToolName, input: {mood: 'curious'}},
+    ],
+  });
+  let round = 0;
+
+  return {
+    invoke() {
+      round += 1;
+
+      return {
+        rawOutputText:
+          round <= 2
+            ? repeatedRound
+            : JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: 'done'}}],
+              }),
+      };
+    },
+  };
 }
 
 function createSequencedVisibleReplyAdapter(

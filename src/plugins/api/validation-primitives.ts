@@ -1,9 +1,6 @@
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
-import {
-  isJsonBoundaryCredentialKey,
-  redactJsonBoundaryText,
-} from '../../shared/redaction.ts';
+import {isJsonBoundaryCredentialKey} from '../../shared/redaction.ts';
 import {runtimePluginSourceKindValues} from './contract.ts';
 import type {
   RuntimePluginContextBudget,
@@ -119,13 +116,13 @@ export function freezeSourceReferences(
     value.map(sourceReference =>
       Object.freeze({
         kind: sourceReference.kind,
-        id: redactRuntimePluginText(sourceReference.id),
+        id: sourceReference.id,
         ...(sourceReference.title === undefined
           ? {}
-          : {title: redactRuntimePluginText(sourceReference.title)}),
+          : {title: sourceReference.title}),
         ...(sourceReference.uri === undefined
           ? {}
-          : {uri: redactRuntimePluginText(sourceReference.uri)}),
+          : {uri: sourceReference.uri}),
       } satisfies RuntimePluginSourceReference),
     ),
   );
@@ -134,7 +131,7 @@ export function freezeSourceReferences(
 export function freezeRedactedStrings(
   values: readonly string[],
 ): readonly string[] {
-  return Object.freeze(values.map(redactRuntimePluginText));
+  return Object.freeze(values.map(value => value));
 }
 
 export function optionalConfidence(
@@ -416,10 +413,6 @@ export function requirePlainNonEmptyStringFromUnknown(
   }
 
   return requirePlainNonEmptyString(value, field);
-}
-
-export function redactRuntimePluginText(value: string): string {
-  return redactJsonBoundaryText(value);
 }
 
 export function isRuntimePluginCredentialKey(value: string): boolean {

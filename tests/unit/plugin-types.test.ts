@@ -6,7 +6,6 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
-  createRuntimePluginListingSnapshot,
   createRuntimePluginToolInvocationSnapshot,
   runtimePluginContractVersion,
   validateRuntimePluginContextItem,
@@ -104,107 +103,6 @@ describe('runtime plugin source references', () => {
     ).toThrow('exceeds the aggregate JSON text limit.');
   }, 20_000);
 
-  it('redacts credential-bearing redaction labels in public snapshots', () => {
-    const labels = [
-      'api_key=label-secret',
-      'Bearer label-token',
-      'Cookie: session=label-cookie',
-    ];
-    const contextItem = createRuntimePluginContextItem({
-      pluginId: 'memory.labels.fixture',
-      id: 'labels',
-      kind: 'memory',
-      text: 'safe',
-      budget: {estimatedTokens: 1, priority: 1},
-      sourceReferences: [],
-      redactionLabels: labels,
-    });
-    const evidence = createRuntimePluginEvidenceSnapshot({
-      eventId: 'evt_labels',
-      traceId: 'trace_labels',
-      createdAt: '2026-07-11T00:00:00.000Z',
-      kind: 'runtime_plugin_evidence_snapshot',
-      pluginId: 'memory.labels.fixture',
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      summary: 'safe',
-      redactionLabels: labels,
-    });
-    const health = createRuntimePluginHealthSnapshot({
-      pluginId: 'memory.labels.fixture',
-      status: 'ok',
-      checkedAt: '2026-07-11T00:00:00.000Z',
-      summary: 'safe',
-      redactionLabels: labels,
-    });
-    const manifest = createRuntimePluginManifest(
-      runtimePluginManifestFixture({
-        displayName: 'Authorization: ApiKey display-secret',
-        version: '1.0.0?token=version-secret',
-        runtimePolicy: {
-          requiredForTurn: false,
-          confirmation: 'not_required',
-          timeoutMs: 1_000,
-          sourceReferencesRequired: false,
-          redactionLabels: labels,
-          failureBehavior: {
-            beforeRoleModelCall: 'degrade',
-            handleToolCall: 'degrade',
-            afterTurnCommitted: 'log_failure',
-            health: 'degrade',
-          },
-        },
-        activation: {
-          defaultEnabled: false,
-          reasons: ['api_key=reason-secret'],
-        },
-      }),
-    );
-    const listing = createRuntimePluginListingSnapshot({
-      pluginId: manifest.id,
-      manifest,
-      providedTools: [],
-      registeredLifecycleHooks: [],
-      installed: true,
-      registered: true,
-      enabled: true,
-      availableForTurn: true,
-      redactionLabels: labels,
-      requestedAccess: {},
-      grantedAccess: {},
-    });
-    const serialized = JSON.stringify({contextItem, evidence, health, listing});
-
-    for (const secret of [
-      'label-secret',
-      'label-token',
-      'label-cookie',
-      'display-secret',
-      'version-secret',
-      'reason-secret',
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-    expect(listing.manifest).toMatchObject({
-      displayName: 'Authorization: [redacted]',
-      version: '1.0.0?token=[redacted]',
-      activation: {reasons: ['api_key=[redacted]']},
-    });
-    for (const snapshotLabels of [
-      contextItem.redactionLabels,
-      evidence.redactionLabels,
-      health.redactionLabels,
-      listing.redactionLabels,
-      listing.manifest.runtimePolicy.redactionLabels,
-    ]) {
-      expect(snapshotLabels).toEqual([
-        'api_key=[redacted]',
-        'Bearer [redacted]',
-        'Cookie: [redacted]',
-      ]);
-    }
-  });
-
   it('enforces tool-result evidence and aggregate limits at the public constructor', () => {
     const evidence = (count: number, summary = 'accepted') =>
       Array.from({length: count}, (_value, index) => ({
@@ -245,56 +143,6 @@ describe('runtime plugin source references', () => {
         invocation(evidence(5, 'x'.repeat(14 * 1_024))),
       ),
     ).toThrow('Plugin tool result exceeds the aggregate JSON text limit.');
-  });
-
-  it('redacts credential-bearing source IDs and rejected tool reasons', () => {
-    const snapshot = createRuntimePluginToolInvocationSnapshot({
-      eventId: 'evt_redacted_tool_snapshot',
-      traceId: 'trace_redacted_tool_snapshot',
-      createdAt: '2026-07-11T00:00:00.000Z',
-      kind: 'runtime_plugin_tool_invocation_snapshot',
-      pluginId: 'memory.redaction.fixture',
-      toolName: 'memory.search',
-      input: {query: 'Authorization: Bearer input-secret'},
-      result: {
-        status: 'rejected',
-        reason: 'handler_failed token=reason-secret',
-        message: 'Cookie: session=message-secret',
-        evidence: [
-          {
-            eventId: 'evt_redacted_tool_snapshot',
-            traceId: 'trace_redacted_tool_snapshot',
-            createdAt: '2026-07-11T00:00:00.000Z',
-            kind: 'runtime_plugin_evidence_snapshot',
-            pluginId: 'memory.redaction.fixture',
-            evidenceKind: 'tool_invocation',
-            status: 'rejected',
-            summary: 'api_key=summary-secret',
-            sourceReferences: [{kind: 'memory', id: 'token=source-secret'}],
-            redactionLabels: [],
-          },
-        ],
-      },
-    });
-    const serialized = JSON.stringify(snapshot);
-
-    for (const secret of [
-      'input-secret',
-      'reason-secret',
-      'message-secret',
-      'summary-secret',
-      'source-secret',
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-    expect(snapshot.result).toMatchObject({
-      status: 'rejected',
-      reason: 'handler_failed token=[redacted]',
-      message: 'Cookie: [redacted]',
-    });
-    expect(snapshot.result.evidence[0]?.sourceReferences?.[0]?.id).toBe(
-      'token=[redacted]',
-    );
   });
 
   it('enforces source-reference and context-text byte limits exactly', () => {
@@ -525,42 +373,17 @@ describe('runtime plugin access control', () => {
 });
 
 describe('runtime plugin model-facing tool policy', () => {
-  it('rejects credential-bearing legacy and JSON Schema enum values', () => {
+  it.each([
+    ['sideEffectLevel', 'external_write'],
+    ['requiredForUserTurn', false],
+    ['callLimit', {scope: 'user_turn', maxCalls: 1}],
+  ])('refuses a tool still declaring retired field %s', (field, value) => {
+    // Ignoring the field would hand the model a tool its author withheld.
     expect(() =>
       createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({
-          inputContract: {
-            type: 'object',
-            fields: [
-              {
-                name: 'mode',
-                description: 'Mode.',
-                required: false,
-                allowedValues: ['api_key=legacy-enum-secret'],
-              },
-            ],
-            additionalFields: false,
-          },
-        }),
+        runtimePluginProvidedToolFixture({[field]: value}),
       ),
-    ).toThrow(
-      'Model tool inputContract field allowedValues must not contain credential-bearing values.',
-    );
-    expect(() =>
-      createRuntimePluginProvidedToolWithJsonSchema({
-        type: 'object',
-        properties: {
-          mode: {
-            type: 'string',
-            enum: ['Authorization: ApiKey schema-enum-secret'],
-          },
-        },
-        required: [],
-        additionalProperties: false,
-      }),
-    ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.mode.enum must not contain credential-bearing values.',
-    );
+    ).toThrow(`declares retired field "${field}"`);
   });
 
   it('rejects unsupported root JSON Schema keywords with their field path', () => {
@@ -793,24 +616,6 @@ describe('runtime plugin model-facing tool policy', () => {
     expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
   });
 
-  it('keeps every tool of a confirm-required plugin away from the model', () => {
-    // runtimePolicy.confirmation is the operator's switch, not the
-    // plugin's: it says every call here must be approved. No gate can ask
-    // before a tool acts, so the tools are withheld rather than exposed
-    // and prompted for nothing.
-    const base = createRuntimePluginManifest(runtimePluginManifestFixture({}));
-    const manifest = createRuntimePluginManifest({
-      ...runtimePluginManifestFixture({}),
-      runtimePolicy: {...base.runtimePolicy, confirmation: 'required'},
-    });
-    const tool = createRuntimePluginProvidedTool(
-      runtimePluginProvidedToolFixture({name: 'settings.arbitrary.update'}),
-    );
-
-    expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(false);
-    expect(isApprovalGatedRuntimePluginTool({manifest, tool})).toBe(false);
-  });
-
   it('requires model_input write for a plugin that provides model tools', () => {
     // Every host-validated tool reaches the model now, so a plugin that
     // provides one must declare the access that implies. The old
@@ -926,17 +731,13 @@ describe('runtime plugin config metadata', () => {
           ],
           fingerprint: 'declared-config-v1',
         },
-        localTrustLevel: 'test_fixture',
+        firstParty: false,
         runtimePolicy: {
-          requiredForTurn: false,
-          confirmation: 'not_required',
           timeoutMs: 1000,
-          sourceReferencesRequired: false,
           redactionLabels: [],
           failureBehavior: {
             beforeRoleModelCall: 'degrade',
             handleToolCall: 'degrade',
-            afterTurnCommitted: 'log_failure',
             health: 'degrade',
           },
         },
@@ -1003,17 +804,13 @@ function runtimePluginManifestFixture(
       scope: 'global_with_character_overrides',
       fields: [],
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'degrade',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },
@@ -1051,7 +848,6 @@ function runtimePluginProvidedToolFixture(
     },
     validationOwner: 'plugin_host',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
     ...overrides,
   });
 }

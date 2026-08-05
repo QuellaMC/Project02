@@ -61,17 +61,6 @@ type AcceptedRoleModelLoopResult = Extract<
   {readonly status: 'accepted'}
 >;
 
-export class IncompleteConversationRollbackError extends AggregateError {
-  constructor(cleanupErrors: readonly unknown[], originalError: unknown) {
-    super(
-      cleanupErrors,
-      'Runtime conversation commit failed and rollback was incomplete.',
-      {cause: originalError},
-    );
-    this.name = 'IncompleteConversationRollbackError';
-  }
-}
-
 export type CompleteRuntimeTurnOptions = {
   readonly state: RuntimeTurnState;
   readonly decisionContext: DecisionContext;
@@ -173,6 +162,7 @@ export async function appendVisibleReplyForDecision(
     parsedRoleModelDecisionSnapshot:
       optionsForReply.parsedRoleModelDecisionSnapshot,
     commitValidation,
+    decisionRound: optionsForReply.round,
     ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
   });
 }

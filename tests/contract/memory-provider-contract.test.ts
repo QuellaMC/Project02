@@ -28,7 +28,6 @@ describe('memory provider runtime plugin helper', () => {
     expect(plugin.providedTools).toEqual([]);
     expect(plugin.manifest.runtimePolicy.failureBehavior).toMatchObject({
       beforeRoleModelCall: 'degrade',
-      afterTurnCommitted: 'log_failure',
       health: 'degrade',
     });
   });
@@ -422,9 +421,6 @@ describe('memory provider runtime plugin helper', () => {
       'memory.search',
       'memory.add',
     ]);
-    expect(
-      plugin.providedTools.every(tool => tool.sourceReferencesRequired),
-    ).toBe(true);
 
     const search = await host.handleToolCall(
       {

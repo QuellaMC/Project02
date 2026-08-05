@@ -1,4 +1,7 @@
-import {visibleReplyModelToolName} from '../../role-model/index.ts';
+import {
+  type CharacterDecision,
+  visibleReplyToolCalls,
+} from '../../role-model/index.ts';
 import {
   conversationMessageForRawEvent,
   conversationMessagesFromRawEvents,
@@ -8,13 +11,13 @@ import {
   ConversationRehydrationError,
   isValidSpeakerDisplayName,
   localUserSpeaker,
+  messageNumberFromId,
   normalizeVisibleMessageText,
   type RuntimeEventIdentity,
   type SpeakerIdentity,
   runtimeEventIdentityKey,
-  selectRecentVisibleMessages,
+  sessionIdFromMessageId,
   validateRestoredVisibleTranscript,
-  type VisibleMessage,
 } from '../../core/index.ts';
 import {
   LocalRuntimeStorageContractError,
@@ -345,21 +348,12 @@ function assertIncrementalRawCrossLogEvidence(options: {
   }
   assertIncrementalRawVisibleReferences(state, record);
   assertIncrementalCharacterEvidence(state, record);
-  assertRoleModelInputTextMatchesCommittedUserMessage({
-    messagesById: state.messagesById,
-    rawEvent: record,
-  });
   if (options.sessionId !== undefined) {
     assertRoleModelEvidenceMatchesSessionId({
       sessionId: options.sessionId,
       rawEvents: [record],
     });
   }
-  assertIncrementalRoleModelRecentContext({
-    evidence: options.evidence,
-    state,
-    record,
-  });
 }
 
 function assertIncrementalTerminalRawEvent(
@@ -543,46 +537,6 @@ function assertIncrementalRawVisibleReferences(
   }
 }
 
-function assertIncrementalRoleModelRecentContext(options: {
-  readonly evidence: DurableRuntimeSessionEvidence;
-  readonly state: RuntimeEvidenceIncrementalState;
-  readonly record: RawEventLogRecord;
-}): void {
-  const recent =
-    options.record.roleModelIOSnapshot?.inputEnvelope.decisionContext
-      .recentVisibleMessages;
-
-  if (recent === undefined) {
-    return;
-  }
-
-  const end = options.state.openTurnConversationStart;
-  const start = Math.max(0, end - recent.length);
-
-  if (end - start !== recent.length) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'Role-model recent visible context must match the durable prior conversation messages for the turn.',
-    );
-  }
-
-  for (let index = 0; index < recent.length; index += 1) {
-    const expected = options.evidence.conversationMessages[start + index];
-    const actual = recent[index];
-
-    if (
-      expected === undefined ||
-      actual === undefined ||
-      !sameVisibleMessages([actual], [expected])
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Role-model recent visible context must match the durable prior conversation messages for the turn.',
-      );
-    }
-  }
-}
-
 export function assertIncrementalConversationAppend(options: {
   readonly evidence: DurableRuntimeSessionEvidence;
   readonly sessionId?: string;
@@ -600,27 +554,7 @@ export function assertIncrementalConversationAppend(options: {
     );
   }
 
-  const messageNumber = options.evidence.conversationMessages.length + 1;
-  const expectedId = incrementalConversationMessageId({
-    state: options.state,
-    candidateId: options.record.id,
-    ...(options.sessionId === undefined ? {} : {sessionId: options.sessionId}),
-    messageNumber,
-  });
-  const expectedIdSuffix = `:message-${String(messageNumber)}`;
-
-  if (
-    expectedId === undefined
-      ? !options.record.id.endsWith(expectedIdSuffix)
-      : options.record.id !== expectedId
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      expectedId === undefined
-        ? 'Restored visible message must have a sequential session message ID.'
-        : `Restored visible message must have sequential ID "${expectedId}".`,
-    );
-  }
+  assertConversationMessageIdClimbs(options);
 
   const expectedCharacter =
     options.expectedCharacter ??
@@ -736,36 +670,77 @@ export function applyIncrementalConversationAppend(
   }
 }
 
-function incrementalConversationMessageId(options: {
-  readonly state: RuntimeEvidenceIncrementalState;
-  readonly candidateId: string;
+/**
+ * A message ID names its session and climbs.
+ *
+ * Climbing rather than counting: the session chooses message numbers and
+ * the log records them, so a write that failed leaves a number the log
+ * never sees. Demanding the next number here would make the session's own
+ * count a second answer to a question it already answers, and the two
+ * would disagree on exactly the lagging log this design expects. What a
+ * damaged or forged log looks like is a number that repeats or goes
+ * backwards, and that is what this rejects.
+ */
+function assertConversationMessageIdClimbs(options: {
+  readonly evidence: DurableRuntimeSessionEvidence;
   readonly sessionId?: string;
-  readonly messageNumber: number;
-}): string | undefined {
-  if (options.sessionId !== undefined) {
-    return `${options.sessionId}:message-${String(options.messageNumber)}`;
+  readonly state: RuntimeEvidenceIncrementalState;
+  readonly record: ConversationLogRecord;
+}): void {
+  const messageNumber = messageNumberFromId(options.record.id);
+  const messageSessionId = sessionIdFromMessageId(options.record.id);
+
+  if (messageNumber === undefined || messageSessionId === undefined) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Restored visible message must have a sequential session message ID.',
+    );
   }
 
+  assertConversationMessageSessionId({...options, messageSessionId});
+
+  const previousMessage = options.evidence.conversationMessages.at(-1);
+  const previousNumber =
+    previousMessage === undefined
+      ? 0
+      : (messageNumberFromId(previousMessage.id) ?? 0);
+
+  if (messageNumber <= previousNumber) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Restored visible message must climb in session order: "${options.record.id}" follows message ${String(previousNumber)}.`,
+    );
+  }
+}
+
+function assertConversationMessageSessionId(options: {
+  readonly sessionId?: string;
+  readonly state: RuntimeEvidenceIncrementalState;
+  readonly messageSessionId: string;
+}): void {
   const firstMessage = options.state.messagesById.values().next().value;
-  const sourceMessageId = firstMessage?.id ?? options.candidateId;
-  const sourceMessageSuffix =
-    firstMessage === undefined
-      ? `:message-${String(options.messageNumber)}`
-      : ':message-1';
+  const expectedSessionId =
+    options.sessionId ??
+    (firstMessage === undefined
+      ? undefined
+      : sessionIdFromMessageId(firstMessage.id));
 
-  if (!sourceMessageId.endsWith(sourceMessageSuffix)) {
-    return undefined;
+  if (expectedSessionId === undefined) {
+    assertValidLocalRuntimeSessionId(options.messageSessionId);
+    return;
   }
 
-  const inferredSessionId = sourceMessageId.slice(
-    0,
-    -sourceMessageSuffix.length,
-  );
+  if (options.messageSessionId !== expectedSessionId) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Restored visible message must belong to session "${expectedSessionId}".`,
+    );
+  }
+}
 
+function assertValidLocalRuntimeSessionId(sessionId: string): void {
   try {
-    const normalizedSessionId =
-      normalizeLocalRuntimeSessionId(inferredSessionId);
-    return `${normalizedSessionId}:message-${String(options.messageNumber)}`;
+    normalizeLocalRuntimeSessionId(sessionId);
   } catch (error: unknown) {
     if (
       error instanceof LocalRuntimeStorageContractError &&
@@ -1929,7 +1904,6 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
   const messagesById = new Map(
     options.messages.map(message => [message.id, message]),
   );
-  const priorVisibleMessages: ConversationLogRecord[] = [];
 
   for (const rawEvent of options.rawEvents) {
     for (const messageId of rawEvent.visibleMessageIds ?? []) {
@@ -1952,93 +1926,7 @@ function assertRawEventVisibleReferencesMatchConversationMessages(options: {
         );
       }
     }
-
-    assertRoleModelInputTextMatchesCommittedUserMessage({
-      messagesById,
-      rawEvent,
-    });
-    assertRoleModelDecisionContextMatchesPriorConversation({
-      priorVisibleMessages,
-      rawEvent,
-    });
-
-    if (isVisibleMessageTerminalRawEventLogRecord(rawEvent)) {
-      priorVisibleMessages.push(
-        ...visibleConversationMessagesForRawEvent({
-          messagesById,
-          rawEvent,
-        }),
-      );
-    }
   }
-}
-
-function assertRoleModelInputTextMatchesCommittedUserMessage(options: {
-  readonly messagesById: ReadonlyMap<string, ConversationLogRecord>;
-  readonly rawEvent: RawEventLogRecord;
-}): void {
-  const inputText =
-    options.rawEvent.roleModelIOSnapshot?.inputEnvelope.event.payload
-      .currentUserMessage;
-
-  if (inputText === undefined) {
-    return;
-  }
-
-  // By event identity, not by which rows this event references: the
-  // recorded model input must match the turn's committed user text.
-  const identityKey = runtimeEventIdentityKey(options.rawEvent);
-
-  for (const message of options.messagesById.values()) {
-    if (
-      message.role === 'user' &&
-      runtimeEventIdentityKey(message) === identityKey &&
-      message.text !== inputText
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Role-model input text must match the committed user visible message for the turn.',
-      );
-    }
-  }
-}
-
-function assertRoleModelDecisionContextMatchesPriorConversation(options: {
-  readonly priorVisibleMessages: readonly ConversationLogRecord[];
-  readonly rawEvent: RawEventLogRecord;
-}): void {
-  const recentVisibleMessages =
-    options.rawEvent.roleModelIOSnapshot?.inputEnvelope.decisionContext
-      .recentVisibleMessages;
-
-  if (recentVisibleMessages === undefined) {
-    return;
-  }
-
-  const expectedVisibleMessages = selectRecentVisibleMessages(
-    options.priorVisibleMessages,
-    recentVisibleMessages.length,
-  );
-
-  if (sameVisibleMessages(recentVisibleMessages, expectedVisibleMessages)) {
-    return;
-  }
-
-  throw new LocalRuntimeStorageContractError(
-    'malformed_record',
-    'Role-model recent visible context must match the durable prior conversation messages for the turn.',
-  );
-}
-
-function visibleConversationMessagesForRawEvent(options: {
-  readonly messagesById: ReadonlyMap<string, ConversationLogRecord>;
-  readonly rawEvent: RawEventLogRecord;
-}): readonly ConversationLogRecord[] {
-  return (options.rawEvent.visibleMessageIds ?? [])
-    .map(messageId => options.messagesById.get(messageId))
-    .filter((message): message is ConversationLogRecord => {
-      return message !== undefined;
-    });
 }
 
 /**
@@ -2214,11 +2102,12 @@ function assertCharacterRowsFollowTheirDecision(
   turnMessages: readonly ConversationLogRecord[],
   commitEventByMessageKey: ReadonlyMap<string, RawEventLogRecord>,
 ): void {
-  // Keyed by the round's raw model output: one decision commits each of its
-  // replies as its own event, and two rounds may legitimately say the same
-  // thing, so the key has to name the round rather than what it said.
+  // Keyed by the sampling round the commit event records: one decision
+  // commits each of its replies as its own event, and two rounds may
+  // legitimately say the same thing, so the key names the round rather
+  // than what it said.
   const rowsByDecision = new Map<
-    string,
+    number,
     {readonly texts: string[]; readonly replies: readonly string[]}
   >();
 
@@ -2227,7 +2116,7 @@ function assertCharacterRowsFollowTheirDecision(
       visibleMessageEvidenceKey(message, message.id),
     );
     const decision = commitEvent?.parsedRoleModelDecisionSnapshot?.result;
-    const round = commitEvent?.roleModelIOSnapshot?.rawOutputText;
+    const round = commitEvent?.decisionRound;
 
     if (
       message.role !== 'character' ||
@@ -2239,11 +2128,7 @@ function assertCharacterRowsFollowTheirDecision(
 
     const seen = rowsByDecision.get(round) ?? {
       texts: [],
-      // Compared against stored text, so replies carry the same
-      // normalization the commit path applied before storing them.
-      replies: decision.decision.toolCalls
-        .filter(call => call.name === visibleReplyModelToolName)
-        .map(call => normalizeVisibleMessageText(String(call.input['text']))),
+      replies: storedDecisionReplyTexts(decision.decision),
     };
 
     seen.texts.push(message.text);
@@ -2258,6 +2143,29 @@ function assertCharacterRowsFollowTheirDecision(
       );
     }
   }
+}
+
+/**
+ * A decision's replies as the commit path would have stored them, so the
+ * rows compare through the same normalization. A stored reply that cannot
+ * be normalized is a damaged record, named as one: this runs inside a
+ * store read, where an unclassified text error would reach the operator
+ * without saying which file broke.
+ */
+function storedDecisionReplyTexts(
+  decision: CharacterDecision,
+): readonly string[] {
+  return visibleReplyToolCalls(decision).map(call => {
+    try {
+      return normalizeVisibleMessageText(call.input.text);
+    } catch (error: unknown) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Character message decision carries a reply text that is not a visible message.',
+        {cause: error},
+      );
+    }
+  });
 }
 
 function assertCharacterCommitCarriesItsDecision(
@@ -2278,9 +2186,8 @@ function assertCharacterCommitCarriesItsDecision(
     );
   }
 
-  // Evidence holds the redacted projection of the reply the transcript
-  // shows, so the rows compare through that same projection: credential
-  // redaction stays legitimate while unrelated edited text is rejected.
+  // The commit anchor holds the reply text verbatim, so any difference
+  // between it and the row is edited text rather than a projection.
   if (commitResult.acceptedVisibleReplyText !== message.text) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
@@ -2351,27 +2258,6 @@ function sameOrderedValues(
   return (
     actualValues.length === expectedValues.length &&
     actualValues.every((value, index) => value === expectedValues[index])
-  );
-}
-
-function sameVisibleMessages(
-  actualMessages: readonly VisibleMessage[],
-  expectedMessages: readonly VisibleMessage[],
-): boolean {
-  return (
-    actualMessages.length === expectedMessages.length &&
-    actualMessages.every((actualMessage, index) => {
-      const expectedMessage = expectedMessages[index];
-
-      return (
-        expectedMessage !== undefined &&
-        actualMessage.id === expectedMessage.id &&
-        actualMessage.role === expectedMessage.role &&
-        actualMessage.speakerId === expectedMessage.speakerId &&
-        actualMessage.speakerName === expectedMessage.speakerName &&
-        actualMessage.text === expectedMessage.text
-      );
-    })
   );
 }
 

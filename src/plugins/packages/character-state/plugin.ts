@@ -131,7 +131,6 @@ function createCharacterStatePluginFromManifest(
         annotations: {readOnlyHint: false, destructiveHint: true},
         concurrency: 'exclusive',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       }),
     ],
     lifecycleHooks: {

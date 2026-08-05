@@ -4,7 +4,6 @@ import {
   createJsonBoundarySnapshot,
   defaultJsonBoundaryLimits,
 } from '../../src/shared/json-boundary.ts';
-import {redactJsonBoundaryText} from '../../src/shared/redaction.ts';
 import {
   canonicalJsonStringify,
   canonicalJsonValuesEqual,
@@ -44,55 +43,6 @@ describe('shared JSON boundary', () => {
     expect(canonicalJsonStringify(left)).toBe(canonicalJsonStringify(right));
     expect(createCanonicalJsonFingerprint(left)).toBe(
       createCanonicalJsonFingerprint(right),
-    );
-  });
-
-  it('redacts structured credentials and credential-bearing text recursively', () => {
-    const snapshot = createJsonBoundarySnapshot(
-      {
-        authorization: 'Basic dXNlcjpwYXNz',
-        cookie: 'session=very-secret',
-        auth_token: 'auth-secret',
-        csrfToken: 'csrf-secret',
-        'id-token': 'identity-secret',
-        aws_secret_access_key: 'aws-secret',
-        ssh_private_key_pem: 'ssh-secret',
-        oauth_client_secret_value: 'oauth-secret',
-        safe: 'keep',
-        nested: {
-          endpoint: 'postgresql://user:pass@example.test/db',
-          mssqlEndpoint: 'mssql://user:pass@example.test/db',
-          graphEndpoint: 'neo4j+s://user:pass@example.test/db',
-          message: 'Authorization: ApiKey auth-sentinel',
-          proxyMessage: 'Proxy-Authorization: Digest proxy-sentinel',
-        },
-      },
-      {field: 'result', redact: true},
-    );
-
-    expect(snapshot).toEqual({
-      authorization: '[redacted]',
-      cookie: '[redacted]',
-      auth_token: '[redacted]',
-      csrfToken: '[redacted]',
-      'id-token': '[redacted]',
-      aws_secret_access_key: '[redacted]',
-      ssh_private_key_pem: '[redacted]',
-      oauth_client_secret_value: '[redacted]',
-      safe: 'keep',
-      nested: {
-        endpoint: 'postgresql://[redacted]@example.test/db',
-        mssqlEndpoint: 'mssql://[redacted]@example.test/db',
-        graphEndpoint: 'neo4j+s://[redacted]@example.test/db',
-        message: 'Authorization: [redacted]',
-        proxyMessage: 'Proxy-Authorization: [redacted]',
-      },
-    });
-    expect(JSON.stringify(snapshot)).not.toContain('very-secret');
-    expect(JSON.stringify(snapshot)).not.toContain('auth-sentinel');
-    expect(JSON.stringify(snapshot)).not.toContain('proxy-sentinel');
-    expect(redactJsonBoundaryText('Basic dXNlcjpwYXNz')).toBe(
-      'Basic [redacted]',
     );
   });
 

@@ -6,7 +6,6 @@ import {
 } from '../builtin/plugin-management/index.ts';
 import {createRuntimePluginEvidenceSnapshot} from '../api/constructors.ts';
 import {mergedRedactionLabels} from '../api/evidence-policy.ts';
-import {redactRuntimePluginText} from '../api/validation-primitives.ts';
 import type {
   RuntimePluginEvidenceStatus,
   RuntimePluginPolicyOutcome,
@@ -258,7 +257,7 @@ export function createRejectedToolCallResult(options: {
   readonly evidenceStatus?: RuntimePluginEvidenceStatus;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RuntimePluginToolCallResult {
-  const message = redactRuntimePluginText(options.message);
+  const message = options.message;
 
   return Object.freeze({
     status: 'rejected',

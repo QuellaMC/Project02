@@ -55,7 +55,7 @@ import {
   handleRuntimeTurnFailure,
   healthResultRejectionMessage,
   healthResultRejectsTurn,
-} from './rollback.ts';
+} from './rejection.ts';
 
 type PreparedRuntimeTurn = {
   readonly decisionContext: DecisionContext;
@@ -304,6 +304,7 @@ async function commitVisibleReply(
     runtimePluginEvidence: prepared.beforeRoleModelCallResult.evidence,
     roleModelIOSnapshot: event.ioSnapshot,
     parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,
+    round: event.round,
     text: event.text,
   });
 }

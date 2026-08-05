@@ -104,6 +104,15 @@ function planDurablePluginFileStoreOperation(options: {
 
   const filePath = join(options.root, options.path);
 
+  // Validate before touching anything: truncating a torn tail is a write,
+  // and an operation this gate rejects must not have already changed the
+  // file it was rejected for.
+  assertDurableOperationPathMode({
+    filePath,
+    mode: readDurablePathModes(options.root).get(options.path),
+    operation: options,
+  });
+
   // Before the bytes this journal is planned against are read. A write
   // replaces the file, so only an append can splice onto a torn tail.
   if (options.kind === 'append_jsonl') {
@@ -111,12 +120,6 @@ function planDurablePluginFileStoreOperation(options: {
   }
 
   const beforeContent = readOptionalRegularFile(filePath);
-
-  assertDurableOperationPathMode({
-    filePath,
-    mode: readDurablePathModes(options.root).get(options.path),
-    operation: options,
-  });
 
   const beforeRevision = readDurableRevision(options.root);
   const common = {

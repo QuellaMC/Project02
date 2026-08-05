@@ -1,8 +1,7 @@
-import {mkdtemp, readFile, realpath, rm, writeFile} from 'node:fs/promises';
-import {tmpdir} from 'node:os';
+import {readFile, writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 
-import {afterEach, describe, expect, it} from 'vitest';
+import {describe, expect, it} from 'vitest';
 
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {durablePluginStoreMutationResourceKey} from '../../src/runtime/storage/plugin-file-store/durable-primitives.ts';
@@ -11,20 +10,11 @@ import {
   createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {acquireLocalRuntimeMutationLockSync} from '../../src/runtime/storage/mutation-lock.ts';
-
-const tempRoots: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(
-    tempRoots.splice(0).map(async root => {
-      await rm(root, {force: true, recursive: true});
-    }),
-  );
-});
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('runtime plugin file store concurrency', () => {
   it('reclaims a dead plugin-root owner before mutating durable state', async () => {
-    const storeRoot = await createTempStoreRoot();
+    const storeRoot = createTestTempRoot('project02-plugin-lock-');
     const sessionId = 'session-dead-plugin-lock';
     const pluginId = 'plugin.dead-lock';
     const root = createLocalRuntimePluginPaths({
@@ -64,12 +54,6 @@ describe('runtime plugin file store concurrency', () => {
     abandoned.release();
   });
 });
-
-async function createTempStoreRoot(): Promise<string> {
-  return await realpath(
-    await mkdtemp(join(tmpdir(), 'project02-plugin-lock-')),
-  );
-}
 
 function requiredRecord(
   value: unknown,

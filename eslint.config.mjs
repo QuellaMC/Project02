@@ -135,11 +135,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/storage/raw-event-codec.ts'],
     rules: {
-      // Ratcheted down after merging two copies of the visible-message
-      // decoder onto one seam in codec-primitives.ts.
+      // Ratcheted down after moving the commit-event message decoder onto
+      // the same codec-primitives.ts seam as the visible-message decoder.
       'max-lines': [
         'error',
-        {max: 1699, skipBlankLines: true, skipComments: true},
+        {max: 1677, skipBlankLines: true, skipComments: true},
       ],
     },
   },

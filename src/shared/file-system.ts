@@ -68,6 +68,8 @@ import {
   type FileHandle,
 } from 'node:fs/promises';
 
+import {isNodeErrorWithCode} from './node-error.ts';
+
 export type {BigIntStats, Dirent, FileHandle, Stats};
 
 /** `node:fs` flag constants, for callers that pass their own open flags. */
@@ -100,7 +102,7 @@ export function readFinalByteSync(path: string): number | undefined {
   try {
     handle = openSync(path, 'r');
   } catch (error: unknown) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
       return undefined;
     }
 

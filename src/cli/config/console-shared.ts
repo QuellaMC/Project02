@@ -8,7 +8,6 @@ import {
   assertResolvedProject02HomeAdoptable,
   assertScopedGlobalLayerLoadable,
   readCharacterOverlayForScope,
-  redactRuntimeConfigText,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigValueMatchesField,
@@ -288,7 +287,7 @@ export function formatCurrentValue(
 
   return defaultValueSummary === undefined
     ? '(unset)'
-    : `(unset; default: ${redactRuntimeConfigText(defaultValueSummary)})`;
+    : `(unset; default: ${defaultValueSummary})`;
 }
 
 export function formatPreviewValue(
@@ -311,7 +310,7 @@ export function writeDiagnostics(
       stdout,
       `- ${diagnostic.severity}: ${runtimeConfigDiagnosticAttribution(
         diagnostic,
-      )}${redactRuntimeConfigText(diagnostic.message)}`,
+      )}${diagnostic.message}`,
     );
   }
 }

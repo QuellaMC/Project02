@@ -344,17 +344,13 @@ export function createHealthRejectingPlugin() {
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: true,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'reject_turn',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'reject_turn',
         },
       },
@@ -406,17 +402,13 @@ export function createHandleFileStoreWritePlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: healthRejectsWhenValue === undefined ? false : true,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health:
             healthRejectsWhenValue === undefined ? 'degrade' : 'reject_turn',
         },
@@ -444,7 +436,6 @@ export function createHandleFileStoreWritePlugin(
         },
         validationOwner: 'plugin_host',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       }),
     ],
     lifecycleHooks: {
@@ -550,17 +541,13 @@ export function createAfterTurnCommittedProbeHost(
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: false,
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'degrade',
             },
           },
@@ -629,17 +616,13 @@ export function createPluginStoreRevisionFixtureHost() {
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: false,
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'degrade',
             },
           },
@@ -681,7 +664,6 @@ export function createRevisionFixtureTool(name: string) {
     },
     validationOwner: 'plugin_host',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   } as const;
 }
 

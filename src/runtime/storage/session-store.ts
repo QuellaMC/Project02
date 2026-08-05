@@ -10,7 +10,7 @@ import {
   type Dirent,
 } from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
-import {committedJsonLines} from './json-lines.ts';
+import {readUndamagedJsonLines} from './json-lines.ts';
 import {readStoreJsonLines} from './store-file.ts';
 import {
   describeRealEntry,
@@ -548,18 +548,8 @@ function decodeRequestedSessionCatalogEntry(
 ): LocalRuntimeSessionMetadata | undefined {
   let metadata: LocalRuntimeSessionMetadata | undefined;
 
-  for (const line of committedJsonLines(catalog)) {
-    if (line.trim().length === 0) {
-      continue;
-    }
-
-    let parsed: unknown;
-
-    try {
-      parsed = JSON.parse(line);
-    } catch {
-      continue;
-    }
+  for (const line of readUndamagedJsonLines(catalog)) {
+    const parsed: unknown = JSON.parse(line);
 
     if (isRecord(parsed) && parsed['sessionId'] === sessionId) {
       metadata = decodeSessionMetadata(line);

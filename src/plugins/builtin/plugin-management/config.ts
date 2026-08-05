@@ -44,7 +44,6 @@ export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
     annotations: {readOnlyHint: true},
     concurrency: 'shared',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   };
 }
 

@@ -154,7 +154,7 @@ describe('runtime plugin host access and lifecycle', () => {
   it('does not trust manifest-declared first_party for default sensitive access', async () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.fake-first-party.fixture',
-      localTrustLevel: 'first_party',
+      firstParty: true,
       requestedAccess: {file_store: 'read', model_input: 'write'},
     });
     const host = createRuntimePluginHost({plugins: [plugin]});
@@ -167,15 +167,15 @@ describe('runtime plugin host access and lifecycle', () => {
     });
   });
 
-  it('denies trusted_adapter and test_fixture plugins by default', async () => {
+  it('denies non-first-party plugins by default', async () => {
     const trustedAdapter = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.trusted-adapter-denied.fixture',
-      localTrustLevel: 'trusted_adapter',
+      firstParty: false,
       requestedAccess: {file_store: 'read', model_input: 'write'},
     });
     const testFixture = createFileStoreAvailabilityProbePlugin({
       pluginId: 'memory.test-fixture-denied.fixture',
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       requestedAccess: {file_store: 'read', model_input: 'write'},
     });
     const trustedAdapterHost = createRuntimePluginHost({
@@ -295,7 +295,7 @@ describe('runtime plugin host access and lifecycle', () => {
     const plugin = createFileStoreAvailabilityProbePlugin({
       pluginId: characterStatePluginId,
       requestedAccess: {file_store: 'read', model_input: 'write'},
-      localTrustLevel: 'first_party',
+      firstParty: true,
     });
     const host = createRuntimePluginHost({plugins: [plugin]});
 

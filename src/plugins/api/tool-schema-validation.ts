@@ -14,7 +14,6 @@ import {
   firstRejected,
   isOneOf,
   isRecord,
-  redactRuntimePluginText,
   reject,
   requiredBoolean,
   requiredIdentifier,
@@ -176,17 +175,6 @@ function requiredModelToolJsonSchema(
   if (properties.status === 'rejected') return properties;
   if (items.status === 'rejected') return items;
 
-  if (
-    enumValues.value?.some(
-      enumValue => redactRuntimePluginText(enumValue) !== enumValue,
-    ) === true
-  ) {
-    return reject(
-      'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.enum must not contain credential-bearing values.`,
-    );
-  }
-
   const parts = {
     type: type.value,
     description: description.value,
@@ -297,7 +285,7 @@ function acceptModelToolJsonSchema(
       ...(parts.type === undefined ? {} : {type: parts.type}),
       ...(parts.description === undefined
         ? {}
-        : {description: redactRuntimePluginText(parts.description)}),
+        : {description: parts.description}),
       ...(parts.enumValues === undefined ? {} : {enum: parts.enumValues}),
       ...(parts.properties === undefined ? {} : {properties: parts.properties}),
       ...(parts.required === undefined ? {} : {required: parts.required}),
@@ -425,21 +413,11 @@ function requiredModelToolInputField(
       allowedValues,
     ]);
   }
-  if (
-    allowedValues.value?.some(
-      allowedValue => redactRuntimePluginText(allowedValue) !== allowedValue,
-    ) === true
-  ) {
-    return reject(
-      'malformed_tool_definition',
-      'Model tool inputContract field allowedValues must not contain credential-bearing values.',
-    );
-  }
 
   return accept(
     Object.freeze({
       name: name.value,
-      description: redactRuntimePluginText(description.value),
+      description: description.value,
       required: required.value,
       ...(valueType.value === undefined ? {} : {valueType: valueType.value}),
       ...(allowedValues.value === undefined

@@ -23,7 +23,6 @@ export const firstPartyModelToolsProvidedTools = Object.freeze(
       annotations: {readOnlyHint: true},
       concurrency: 'shared',
       requiresConfirmation: false,
-      sourceReferencesRequired: false,
     } satisfies RuntimePluginProvidedTool),
   ),
 );
@@ -58,17 +57,13 @@ export function createFirstPartyModelToolsPluginManifest(): RuntimePluginManifes
       scope: 'global_with_character_overrides',
       fields: [],
     },
-    localTrustLevel: 'first_party',
+    firstParty: true,
     runtimePolicy: {
-      requiredForTurn: true,
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'reject_turn',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

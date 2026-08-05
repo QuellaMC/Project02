@@ -142,17 +142,13 @@ export function createRuntimePluginManagementPluginManifest() {
       scope: 'global_with_character_overrides',
       fields: [],
     },
-    localTrustLevel: 'first_party',
+    firstParty: true,
     runtimePolicy: {
-      requiredForTurn: false,
-      confirmation: 'not_required',
       timeoutMs: runtimePluginConfigUpdateExecutionTimeoutMs,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

@@ -86,7 +86,6 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
     annotations: {readOnlyHint: false, destructiveHint: true},
     concurrency: 'exclusive',
     requiresConfirmation: true,
-    sourceReferencesRequired: false,
   };
 }
 

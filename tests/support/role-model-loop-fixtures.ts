@@ -38,7 +38,6 @@ export const memorySearchToolDefinition = Object.freeze({
   },
   validationOwner: 'plugin_host',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 export const memoryRecallToolDefinition = Object.freeze({
@@ -91,17 +90,13 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -128,7 +123,6 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         },
         validationOwner: 'plugin_host',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       },
     ],
     lifecycleHooks: {

@@ -1,6 +1,5 @@
 import {
   createRuntimePluginEvidenceSnapshot,
-  redactRuntimePluginText,
   type RuntimePluginContext,
   type RuntimePluginEvidenceStatus,
   type RuntimePluginPolicyOutcome,
@@ -25,8 +24,8 @@ export function createRejectedToolRoutingEvidence(options: {
   readonly evidenceStatus?: RuntimePluginEvidenceStatus;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RoleModelPluginToolRoutingEvidence {
-  const reason = redactRuntimePluginText(options.reason);
-  const message = redactRuntimePluginText(options.message);
+  const reason = options.reason;
+  const message = options.message;
 
   return Object.freeze({
     callId: options.callId,

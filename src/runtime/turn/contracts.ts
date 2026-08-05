@@ -167,6 +167,12 @@ export type AppendVisibleReplyOptions = {
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
   readonly roleModelIOSnapshot: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  /**
+   * The sampling round that asked for this reply. Recorded on the commit
+   * event so a reader can tell two rounds apart by which round they were,
+   * not by whether they happened to say the same thing.
+   */
+  readonly round: number;
   readonly text: string;
 };
 

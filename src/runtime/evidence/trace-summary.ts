@@ -1,3 +1,4 @@
+import {visibleReplyToolCalls} from '../../role-model/index.ts';
 import type {
   RawEventLogRecord,
   RuntimeTraceEntry,
@@ -275,6 +276,7 @@ function rawEventDecisionIsTerminal(event: RawEventLogRecord): boolean {
 
   return (
     result?.status === 'accepted' &&
-    result.decision.toolCalls.every(call => call.name === 'visible_reply')
+    visibleReplyToolCalls(result.decision).length ===
+      result.decision.toolCalls.length
   );
 }

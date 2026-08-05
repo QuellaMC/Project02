@@ -26,17 +26,13 @@ describe('runtime plugin hook result boundaries', () => {
         },
         declaredPlugins: ['before_role_model_call'],
         config: {scope: 'global_with_character_overrides', fields: []},
-        localTrustLevel: 'test_fixture',
+        firstParty: false,
         runtimePolicy: {
-          requiredForTurn: false,
-          confirmation: 'not_required',
           timeoutMs: 10_000,
-          sourceReferencesRequired: false,
           redactionLabels: [],
           failureBehavior: {
             beforeRoleModelCall: 'degrade',
             handleToolCall: 'reject_tool_call',
-            afterTurnCommitted: 'log_failure',
             health: 'degrade',
           },
         },

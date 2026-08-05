@@ -160,9 +160,9 @@ export {
   type RoleModelLoopState,
 } from './round-outcome.ts';
 import {
+  appendRejectedRoleModelLoopRound,
   createRoleModelLoopRound,
   executionVisibleReplyTexts,
-  handleRejectedRoleModelLoopRound,
   terminalRoleModelLoopResult,
   type RoleModelLoopResult,
   type RoleModelLoopState,
@@ -205,18 +205,7 @@ export async function runRoleModelLoop(
     });
 
     if (invokedRound.status === 'rejected') {
-      const rejectedResult = handleRejectedRoleModelLoopRound({
-        state,
-        invokedRound,
-        round,
-        maxToolRounds,
-      });
-
-      if (rejectedResult !== undefined) {
-        return rejectedResult;
-      }
-
-      continue;
+      return appendRejectedRoleModelLoopRound({state, invokedRound, round});
     }
 
     const terminalResult = terminalRoleModelLoopResult({
@@ -354,7 +343,6 @@ async function invokeRoleModelLoopRound(options: {
           rawOutputValidation.rawOutputText,
           inputEnvelope.allowedTools,
           inputEnvelope.pluginToolDefinitions,
-          options.state.toolObservations,
         )
       : rawOutputValidation.decisionResult;
   const parsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
@@ -570,7 +558,6 @@ function nativeAssistantMessageForAcceptedDecision(options: {
     }),
     options.allowedTools,
     options.pluginToolDefinitions,
-    options.toolObservations,
   );
 
   if (
@@ -878,9 +865,10 @@ async function routeExecutableToolCalls(options: {
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
   readonly priorToolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
-  // Admission runs in call order because per-turn limits count earlier
-  // calls in the same batch. Execution then runs concurrently under the
-  // batch lock, with results reassembled by slot.
+  // Admission runs in call order because it appends the tool_call_started
+  // record for each call, and those must land in the order the model asked
+  // so the terminal event's toolCallIds match. Execution then runs
+  // concurrently under the batch lock, with results reassembled by slot.
   const results: (RoleModelPluginToolRoutingEvidence | undefined)[] = [];
   const admitted: {
     readonly slot: number;
@@ -1053,10 +1041,21 @@ async function routeExecutableToolCalls(options: {
       results[entry.slot] = await report(await lock.run(entry.mode, entry.run));
     }),
   );
-  const failure = settled.find(outcome => outcome.status === 'rejected');
+  // Every cause, not the first: concurrent calls fail for independent
+  // reasons, and a turn that lost two records must not report one.
+  const failures = settled.flatMap((outcome): unknown[] =>
+    outcome.status === 'rejected' ? [outcome.reason] : [],
+  );
 
-  if (failure !== undefined) {
-    throw failure.reason;
+  if (failures.length === 1) {
+    throw failures[0];
+  }
+
+  if (failures.length > 1) {
+    throw new AggregateError(
+      failures,
+      `${String(failures.length)} tool calls in one batch failed.`,
+    );
   }
 
   return createAcceptedPluginToolRoutingResult(

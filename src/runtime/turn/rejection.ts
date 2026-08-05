@@ -28,7 +28,6 @@ import {
   runtimePluginTurnEvidenceOption,
 } from './plugin-evidence.ts';
 import {
-  IncompleteConversationRollbackError,
   appendRawEvent,
   appendTrace,
   visibleMessageIdsForTurnOption,
@@ -163,10 +162,7 @@ export async function handleRuntimeTurnFailure(
   state: RuntimeTurnState,
   error: unknown,
 ): Promise<LocalRuntimeUserMessageRejectedResult> {
-  if (
-    state.terminalRawEventMayBeDurable ||
-    error instanceof IncompleteConversationRollbackError
-  ) {
+  if (state.terminalRawEventMayBeDurable) {
     throw error;
   }
 

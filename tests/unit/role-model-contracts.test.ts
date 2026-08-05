@@ -39,7 +39,6 @@ describe('role-model contracts', () => {
         },
         validationOwner: 'plugin_host',
         requiresConfirmation: true,
-        sourceReferencesRequired: false,
       },
     ]);
 
@@ -76,52 +75,6 @@ describe('role-model contracts', () => {
       ).toThrow('must be finite JSON.');
     },
   );
-
-  it('redacts credentials in public tool observations', () => {
-    const observation = createRoleModelToolObservation({
-      round: 1,
-      pluginId: 'memory',
-      toolName: 'memory.search',
-      input: {
-        query: 'Authorization: ApiKey input-secret',
-        authorization: 'Bearer input-token',
-        aws_secret_access_key: 'aws-secret',
-        ssh_private_key_pem: 'ssh-secret',
-        oauth_client_secret_value: 'oauth-secret',
-        endpoint: 'cockroachdb://user:pass@example.test/db',
-      },
-      result: {
-        status: 'rejected',
-        reason: 'handler_failed token=reason-secret',
-        message: 'Cookie: session=message-secret',
-      },
-    });
-    const serialized = JSON.stringify(observation);
-
-    expect(serialized).not.toContain('input-secret');
-    expect(serialized).not.toContain('input-token');
-    expect(serialized).not.toContain('reason-secret');
-    expect(serialized).not.toContain('message-secret');
-    expect(serialized).not.toContain('aws-secret');
-    expect(serialized).not.toContain('ssh-secret');
-    expect(serialized).not.toContain('oauth-secret');
-    expect(serialized).not.toContain('user:pass');
-    expect(observation).toMatchObject({
-      input: {
-        query: 'Authorization: [redacted]',
-        authorization: '[redacted]',
-        aws_secret_access_key: '[redacted]',
-        ssh_private_key_pem: '[redacted]',
-        oauth_client_secret_value: '[redacted]',
-        endpoint: 'cockroachdb://[redacted]@example.test/db',
-      },
-      result: {
-        status: 'rejected',
-        reason: 'handler_failed token=[redacted]',
-        message: 'Cookie: [redacted]',
-      },
-    });
-  });
 
   it.each([
     'Adapter raw output must include string rawOutputText.',
@@ -366,7 +319,6 @@ describe('role-model contracts', () => {
         },
         validationOwner: 'plugin_host',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       },
     ] satisfies readonly RoleModelPluginToolDefinition[];
     const toolObservations = [
@@ -400,7 +352,6 @@ describe('role-model contracts', () => {
       rawOutputText,
       allowedTools,
       pluginToolDefinitions,
-      toolObservations,
     );
 
     expect(decisionResult).toMatchObject({
@@ -454,7 +405,6 @@ describe('role-model contracts', () => {
       },
       validationOwner: 'plugin_host',
       requiresConfirmation: false,
-      sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition;
     const result = parseRoleModelDecision(
       JSON.stringify({
