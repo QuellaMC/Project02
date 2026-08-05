@@ -6,31 +6,23 @@ import {
   createRuntimePluginTurnEvidenceSnapshot,
 } from '../../src/plugins/api/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import {createRoleModelCommitValidationSnapshot} from '../../src/runtime/evidence/records.ts';
 import type {
   ConversationLogRecordInput,
   RawEventLogRecordInput,
 } from '../../src/runtime/evidence/records.ts';
-import {
-  createDecisionContext,
-  createDefaultRoleModelPluginToolDefinitions,
-  createParsedRoleModelDecisionSnapshot,
-  createRoleModelInputEnvelope,
-  createRoleModelIOSnapshot,
-  parseRoleModelExecutionDecision,
-} from '../../src/role-model/index.ts';
 import type {RuntimePluginTurnEvidenceSnapshot} from '../../src/plugins/api/index.ts';
-import {
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent,
-  type CharacterProfile,
-  type RuntimeEventIdentity,
-} from '../../src/core/index.ts';
+import type {RuntimeEventIdentity} from '../../src/core/index.ts';
+import {appendVisibleMessageWithCommitAnchor} from '../support/runtime-log-fixtures.ts';
 
 const identity = {
   eventId: 'evt_log_001',
   traceId: 'trace_log_001',
   createdAt: '2026-06-04T00:00:00.000Z',
+} as const;
+const secondTurnIdentity = {
+  eventId: 'evt_log_002',
+  traceId: 'trace_log_002',
+  createdAt: '2026-06-04T00:00:03.000Z',
 } as const;
 
 describe('runtime log store', () => {
@@ -347,23 +339,26 @@ describe('runtime log store', () => {
       },
       committedAt: '2026-06-04T00:00:01.000Z',
     });
-    store.appendRawEvent({
+    appendVisibleMessageWithCommitAnchor(store, {
       ...identity,
-      kind: 'visible_message_committed',
-      eventType: 'USER_MESSAGE',
-      visibleMessageIds: ['local-session:message-2'],
-      visibleMessage: {
-        id: 'local-session:message-2',
-        role: 'character',
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: 'hello back',
-      },
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
       committedAt: '2026-06-04T00:00:02.000Z',
+    });
+
+    // The anchor holds across turns: the next turn's user row must still
+    // carry the anchored name.
+    store.appendRawEvent({
+      ...secondTurnIdentity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
     });
     expect(() =>
       store.appendRawEvent({
-        ...identity,
+        ...secondTurnIdentity,
         kind: 'visible_message_committed',
         eventType: 'USER_MESSAGE',
         visibleMessageIds: ['local-session:message-3'],
@@ -537,26 +532,26 @@ describe('runtime log store', () => {
       },
       committedAt: '2026-06-04T00:00:01.000Z',
     });
-    store.appendRawEvent({
+    appendVisibleMessageWithCommitAnchor(store, {
       ...identity,
-      kind: 'visible_message_committed',
-      eventType: 'USER_MESSAGE',
-      visibleMessageIds: ['local-session:message-2'],
-      visibleMessage: {
-        id: 'local-session:message-2',
-        role: 'character',
-        speakerId: 'mira',
-        speakerName: 'Mira',
-        text: 'hello back',
-      },
+      id: 'local-session:message-2',
+      role: 'character',
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'hello back',
       committedAt: '2026-06-04T00:00:02.000Z',
     });
 
     // Once recorded, the session's user speaker wins over later intent:
     // one user speaker per session, mirroring the character rule.
+    store.appendRawEvent({
+      ...secondTurnIdentity,
+      kind: 'runtime_event_received',
+      eventType: 'USER_MESSAGE',
+    });
     expect(() =>
       store.appendRawEvent({
-        ...identity,
+        ...secondTurnIdentity,
         kind: 'visible_message_committed',
         eventType: 'USER_MESSAGE',
         visibleMessageIds: ['local-session:message-3'],
@@ -572,82 +567,6 @@ describe('runtime log store', () => {
     ).toThrow('speaker metadata is malformed');
   });
 });
-
-/**
- * The commit anchor the runtime writes for every visible message, so a
- * fixture transcript has the shape validation requires: user rows carry
- * no model evidence, character rows carry the accepted decision that
- * produced their text.
- */
-function appendVisibleMessageWithCommitAnchor(
-  store: ReturnType<typeof createRuntimeLogStore>,
-  message: ConversationLogRecordInput,
-  expectedCharacter?: CharacterProfile,
-): void {
-  const eventIdentity = {
-    eventId: message.eventId,
-    traceId: message.traceId,
-    createdAt: message.createdAt,
-  };
-
-  store.appendRawEvent({
-    ...eventIdentity,
-    kind: 'visible_message_committed',
-    eventType: 'USER_MESSAGE',
-    visibleMessageIds: [message.id],
-    visibleMessage: {
-      id: message.id,
-      role: message.role,
-      speakerId: message.speakerId,
-      speakerName: message.speakerName,
-      text: message.text,
-    },
-    committedAt: message.committedAt,
-    ...(message.role === 'user'
-      ? {}
-      : {
-          roleModelIOSnapshot: createRoleModelIOSnapshot({
-            ...eventIdentity,
-            sessionId: 'local-session',
-            inputEnvelope: createRoleModelInputEnvelope({
-              event: createUserMessageRuntimeEvent(
-                'hello',
-                createRuntimeEventIdentity(eventIdentity),
-              ),
-              decisionContext: createDecisionContext({
-                sessionId: 'local-session',
-                characterSnapshot: expectedCharacter ?? testCharacterProfile,
-              }),
-              pluginToolDefinitions:
-                createDefaultRoleModelPluginToolDefinitions(),
-            }),
-            rawOutputText: JSON.stringify({
-              toolCalls: [{name: 'visible_reply', input: {text: message.text}}],
-            }),
-          }),
-          parsedRoleModelDecisionSnapshot:
-            createParsedRoleModelDecisionSnapshot({
-              ...eventIdentity,
-              sessionId: 'local-session',
-              result: parseRoleModelExecutionDecision(
-                JSON.stringify({
-                  toolCalls: [
-                    {name: 'visible_reply', input: {text: message.text}},
-                  ],
-                }),
-              ),
-            }),
-          commitValidation: createRoleModelCommitValidationSnapshot({
-            ...eventIdentity,
-            sessionId: 'local-session',
-            result: {
-              status: 'accepted',
-              acceptedVisibleReplyText: message.text,
-            },
-          }),
-        }),
-  });
-}
 
 function createMinimalPluginTurnEvidence(
   eventIdentity: RuntimeEventIdentity,

@@ -1221,6 +1221,260 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
+  it('rejects replies reordered by stripping their decision rounds', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-stripped-rounds',
+      createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
+    );
+    const commits = rawLines.filter(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+
+    if (commits.length !== 2) {
+      throw new Error(
+        `Expected two character commit events, got ${String(commits.length)}.`,
+      );
+    }
+
+    // The ordering check keys on the decision round, so a forger who
+    // swaps texts and anchors while deleting the rounds must not slip
+    // past it: a character commit without its round is not a shape the
+    // writer produces.
+    const records = commits.map(
+      line => JSON.parse(line) as Record<string, unknown>,
+    );
+    const texts = records.map(
+      record => (record['visibleMessage'] as {text: string}).text,
+    );
+    const strippedLines = new Map(
+      commits.map((line, index) => {
+        const swapped: Record<string, unknown> = {
+          ...records[index],
+          visibleMessage: {
+            ...(records[index]?.['visibleMessage'] as object),
+            text: texts[texts.length - 1 - index],
+          },
+          commitValidation: {
+            ...(records[index]?.['commitValidation'] as object),
+            result: {
+              status: 'accepted',
+              acceptedVisibleReplyText: texts[texts.length - 1 - index],
+            },
+          },
+        };
+
+        delete swapped['decisionRound'];
+        return [line, JSON.stringify(swapped)];
+      }),
+    );
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => strippedLines.get(line) ?? line).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /must carry the accepted decision/iu,
+    );
+  });
+
+  it('rejects replies swapped across rounds behind self-consistent forged rounds', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-cross-round-swap',
+      createRepeatedRoundAdapter(),
+    );
+    const commits = rawLines.filter(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+
+    if (commits.length !== 3) {
+      throw new Error(
+        `Expected three character commit events, got ${String(commits.length)}.`,
+      );
+    }
+
+    // Swap the round-2 and round-3 rows wholesale — text, anchors, and
+    // round travel together, so every round group stays internally
+    // consistent and only the order between rounds is wrong. IDs and
+    // committedAt stay in place, so nothing else can object first.
+    const records = commits.map(
+      line => JSON.parse(line) as Record<string, unknown>,
+    );
+    const swapContent = (
+      target: Record<string, unknown>,
+      source: Record<string, unknown>,
+    ) =>
+      JSON.stringify({
+        ...target,
+        visibleMessage: {
+          ...(target['visibleMessage'] as object),
+          text: (source['visibleMessage'] as {text: string}).text,
+        },
+        commitValidation: source['commitValidation'],
+        parsedRoleModelDecisionSnapshot:
+          source['parsedRoleModelDecisionSnapshot'],
+        roleModelIOSnapshot: source['roleModelIOSnapshot'],
+        decisionRound: source['decisionRound'],
+      });
+    const secondCommit = commits[1];
+    const thirdCommit = commits[2];
+    const secondRecord = records[1];
+    const thirdRecord = records[2];
+
+    if (
+      secondCommit === undefined ||
+      thirdCommit === undefined ||
+      secondRecord === undefined ||
+      thirdRecord === undefined
+    ) {
+      throw new Error('Expected the round-2 and round-3 commit events.');
+    }
+
+    const swappedLines = new Map([
+      [secondCommit, swapContent(secondRecord, thirdRecord)],
+      [thirdCommit, swapContent(thirdRecord, secondRecord)],
+    ]);
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => swappedLines.get(line) ?? line).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /follow the order their decision asked for/iu,
+    );
+  });
+
+  it('rejects recorded model input that differs from the committed user row', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-input-drift',
+      createSequencedVisibleReplyAdapter(['a reply']),
+    );
+
+    // Evidence saying the model answered "hi" while the visible user row
+    // says "hello" is a transcript the user never saw. The forged record
+    // stays internally consistent — snapshot and summary agree — so only
+    // the cross-record rule can catch it.
+    const editedLines = rawLines.map(line => {
+      if (
+        !line.includes('"visible_message_committed"') ||
+        !line.includes('"role":"character"')
+      ) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as {
+        payloadSummary?: Record<string, unknown>;
+        roleModelIOSnapshot?: {
+          inputEnvelope: {event: {payload: Record<string, unknown>}};
+        };
+      };
+
+      if (record.roleModelIOSnapshot !== undefined) {
+        record.roleModelIOSnapshot.inputEnvelope.event.payload[
+          'currentUserMessage'
+        ] = 'hi';
+      }
+
+      if (record.payloadSummary !== undefined) {
+        record.payloadSummary['normalizedCurrentUserMessage'] = 'hi';
+      }
+
+      return JSON.stringify(record);
+    });
+
+    writeFileSync(paths.rawEventsPath, `${editedLines.join('\n')}\n`, 'utf8');
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /one model input text/iu,
+    );
+  });
+
+  it('refuses to persist a prepared record made stale by a later append', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-stale-prepared';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId,
+      ownerToken: fileLogStoreWriterOwnerToken(logStore),
+    });
+
+    try {
+      const turnIdentity = identity('evt_stale_prepared');
+
+      logStore.appendRawEvent({
+        ...turnIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
+      });
+
+      // Valid when prepared: the turn has no messages, so a rejection
+      // without visibleMessageIds matches the evidence of that moment.
+      const staleTerminal = logStore.prepareRawEvent({
+        ...turnIdentity,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'prepared before the user message committed',
+      });
+      const messageId = `${sessionId}:message-1`;
+
+      logStore.appendRawEvent({
+        ...turnIdentity,
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [messageId],
+        visibleMessage: {
+          id: messageId,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'now committed',
+        },
+        committedAt: turnIdentity.createdAt,
+      });
+
+      // The stale bytes must never land: a terminal that omits the
+      // committed row is a session the next start refuses to read.
+      expect(() => {
+        logStore.persistPreparedRawEvent(staleTerminal);
+      }).toThrow(/must exactly match the visible conversation messages/iu);
+      expect(
+        logStore
+          .rawEvents()
+          .filter(record => record.kind === 'runtime_turn_rejected'),
+      ).toHaveLength(0);
+    } finally {
+      await writerLease.release();
+    }
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // What remains is an open turn — the crash shape — which stays
+    // readable.
+    expect(reopenStore(paths).conversationMessages()).toHaveLength(1);
+  });
+
   it('accepts repeated replies whose text needed normalizing', async () => {
     const {paths} = await committedTurnRawLines(
       'session-repeated-normalized-replies',

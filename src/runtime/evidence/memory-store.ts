@@ -39,15 +39,15 @@ export function createRuntimeLogStore(
         expectedCharacter,
       );
 
-      transitionMachine.commitRawEventAppend(storedRecord);
+      transitionMachine.commitRawEventAppend(storedRecord, expectedCharacter);
 
       return storedRecord;
     },
     prepareRawEvent(record, expectedCharacter) {
       return transitionMachine.prepareRawEventAppend(record, expectedCharacter);
     },
-    persistPreparedRawEvent(record) {
-      transitionMachine.commitRawEventAppend(record);
+    persistPreparedRawEvent(record, expectedCharacter) {
+      transitionMachine.commitRawEventAppend(record, expectedCharacter);
     },
     readSessionEvidence() {
       return Object.freeze({

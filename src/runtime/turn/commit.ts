@@ -186,7 +186,10 @@ async function commitVisibleMessage(
 
   // Evidence bookkeeping describes the log, so it follows the write: a
   // terminal event must never reference a record that failed to land.
-  state.options.logStore.persistPreparedRawEvent(rawEvent);
+  state.options.logStore.persistPreparedRawEvent(
+    rawEvent,
+    state.options.session.character,
+  );
   state.rawEventLogRecords.push(rawEvent);
   state.committedVisibleMessages.push(record);
   return record;

@@ -58,6 +58,8 @@ export type RuntimeEvidenceIncrementalState = {
   readonly unfinishedToolCallIdsByIdentity: Map<string, Set<string>>;
   readonly messagesById: Map<string, ConversationLogRecord>;
   readonly messageIdsByIdentity: Map<string, string[]>;
+  readonly commitEventByMessageKey: Map<string, RawEventLogRecord>;
+  readonly turnModelInputByIdentity: Map<string, string>;
   roleModelCharacter: CharacterProfile | undefined;
   conversationCharacter: CharacterProfile | undefined;
   readonly boundCharacter: CharacterProfile | undefined;
@@ -83,7 +85,10 @@ export type RuntimeLogStore = {
     record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
   ): RawEventLogRecord;
-  persistPreparedRawEvent(record: RawEventLogRecord): void;
+  persistPreparedRawEvent(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void;
   readSessionEvidence(): DurableRuntimeSessionEvidence;
   /** The turn trace, derived from the event log — never stored. */
   traceEntries(): readonly RuntimeTraceEntry[];

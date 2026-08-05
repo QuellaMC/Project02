@@ -16,8 +16,8 @@ export function runtimeLogStoreWithWriterOwner(
     prepareRawEvent(record, expectedCharacter) {
       return logStore.prepareRawEvent(record, expectedCharacter);
     },
-    persistPreparedRawEvent(record) {
-      logStore.persistPreparedRawEvent(record);
+    persistPreparedRawEvent(record, expectedCharacter) {
+      logStore.persistPreparedRawEvent(record, expectedCharacter);
     },
     readSessionEvidence() {
       return logStore.readSessionEvidence();

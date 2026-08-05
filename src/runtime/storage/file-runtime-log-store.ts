@@ -28,7 +28,7 @@ export function createFileRuntimeLogStore(
     appendRawEvent(record, expectedCharacter) {
       const storedRecord = this.prepareRawEvent(record, expectedCharacter);
 
-      this.persistPreparedRawEvent(storedRecord);
+      this.persistPreparedRawEvent(storedRecord, expectedCharacter);
       return storedRecord;
     },
     prepareRawEvent(record, expectedCharacter) {
@@ -40,17 +40,21 @@ export function createFileRuntimeLogStore(
       state.recordIncrementalValidation();
       return machine.prepareRawEventAppend(record, expectedCharacter);
     },
-    persistPreparedRawEvent(record) {
+    persistPreparedRawEvent(record, expectedCharacter) {
       const machine = state.ensureTransitionMachine(state.readStoredEvidence());
 
       // Re-checked here, not just in prepareRawEvent: a caller may await
-      // between preparing and persisting, and the lease has to hold at the
-      // moment the bytes land, not only when the record was built.
+      // between preparing and persisting, and both the lease and the
+      // evidence state have to hold at the moment the bytes land, not
+      // only when the record was built — an append in between makes the
+      // prepared record stale, and stale bytes on disk are a session the
+      // next start refuses to read.
       state.assertWriterOwnership();
+      machine.assertRawEventAppend(record, expectedCharacter);
 
       try {
         appendJsonLine(paths.rawEventsPath, encodeRawEventLogRecord(record));
-        machine.commitRawEventAppend(record);
+        machine.commitRawEventAppend(record, expectedCharacter);
         state.checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
         state.invalidateCachedEvidence();

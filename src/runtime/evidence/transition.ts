@@ -23,7 +23,20 @@ export type RuntimeEvidenceTransitionMachine = {
     record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
   ): RawEventLogRecord;
-  commitRawEventAppend(record: RawEventLogRecord): void;
+  /**
+   * Re-runs the append checks a prepared record passed when it was
+   * prepared, against the machine's current state. A caller that appends
+   * between preparing and committing invalidates what prepare proved, so
+   * a durable store asserts this again before its bytes land.
+   */
+  assertRawEventAppend(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void;
+  commitRawEventAppend(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void;
 };
 
 export function createRuntimeEvidenceTransitionMachine(options: {
@@ -38,6 +51,34 @@ export function createRuntimeEvidenceTransitionMachine(options: {
     options.boundUserSpeaker,
   );
 
+  function assertStoredRawEventAppend(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void {
+    assertIncrementalRawEventAppend({
+      evidence: options.evidence,
+      state,
+      record,
+      ...(options.sessionId === undefined
+        ? {}
+        : {sessionId: options.sessionId}),
+    });
+
+    const message = conversationMessageForRawEvent(record);
+
+    if (message !== undefined) {
+      assertIncrementalConversationAppend({
+        evidence: options.evidence,
+        state,
+        record: message,
+        ...(options.sessionId === undefined
+          ? {}
+          : {sessionId: options.sessionId}),
+        ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
+      });
+    }
+  }
+
   return Object.freeze({
     state,
     prepareRawEventAppend(record, expectedCharacter) {
@@ -45,32 +86,17 @@ export function createRuntimeEvidenceTransitionMachine(options: {
         encodeRawEventLogRecord(record),
       );
 
-      assertIncrementalRawEventAppend({
-        evidence: options.evidence,
-        state,
-        record: storedRecord,
-        ...(options.sessionId === undefined
-          ? {}
-          : {sessionId: options.sessionId}),
-      });
-
-      const message = conversationMessageForRawEvent(storedRecord);
-
-      if (message !== undefined) {
-        assertIncrementalConversationAppend({
-          evidence: options.evidence,
-          state,
-          record: message,
-          ...(options.sessionId === undefined
-            ? {}
-            : {sessionId: options.sessionId}),
-          ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
-        });
-      }
-
+      assertStoredRawEventAppend(storedRecord, expectedCharacter);
       return storedRecord;
     },
-    commitRawEventAppend(record) {
+    assertRawEventAppend(record, expectedCharacter) {
+      assertStoredRawEventAppend(record, expectedCharacter);
+    },
+    commitRawEventAppend(record, expectedCharacter) {
+      // Committing asserts again: apply mutates shared evidence, so a
+      // record no valid append could produce must never enter it, however
+      // long ago it was prepared.
+      assertStoredRawEventAppend(record, expectedCharacter);
       options.evidence.rawEvents.push(record);
       applyIncrementalRawEventAppend({
         evidence: options.evidence,

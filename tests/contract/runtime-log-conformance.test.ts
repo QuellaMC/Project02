@@ -16,6 +16,7 @@ import {
   createLocalRuntimeSessionStore,
 } from '../../src/runtime/storage/session-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {appendVisibleMessageWithCommitAnchor} from '../support/runtime-log-fixtures.ts';
 
 type RuntimeLogBackend = 'memory' | 'file';
 
@@ -226,6 +227,62 @@ const rejectedScenarios = [
       appendUserMessage(logStore, '');
     },
   },
+  {
+    name: 'rejects a second user row committed into one turn',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+      appendUserMessage(logStore, currentSessionId);
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [`${currentSessionId}:message-2`],
+        visibleMessage: {
+          id: `${currentSessionId}:message-2`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+        },
+        committedAt: '2026-07-16T00:00:02.000Z',
+      });
+    },
+  },
+  {
+    name: 'rejects persisting a prepared record made stale by a later append',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+
+      const staleTerminal = logStore.prepareRawEvent({
+        ...identity,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'prepared before the user message committed',
+      });
+
+      appendUserMessage(logStore, currentSessionId);
+      logStore.persistPreparedRawEvent(staleTerminal);
+    },
+  },
+  {
+    name: 'rejects a record whose model input differs from the turn user row',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+      appendUserMessage(logStore, currentSessionId);
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+        visibleMessageIds: [`${currentSessionId}:message-1`],
+        payloadSummary: {normalizedCurrentUserMessage: 'not what the row says'},
+      });
+    },
+  },
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
 const readScenarios = [
@@ -381,23 +438,9 @@ function appendCharacterMessage(
   currentSessionId: string,
   character: CharacterProfile,
 ): void {
-  const message = characterMessage(currentSessionId);
-
-  logStore.appendRawEvent(
-    {
-      ...identity,
-      kind: 'visible_message_committed',
-      eventType: 'USER_MESSAGE',
-      visibleMessageIds: [message.id],
-      visibleMessage: {
-        id: message.id,
-        role: message.role,
-        speakerId: message.speakerId,
-        speakerName: message.speakerName,
-        text: message.text,
-      },
-      committedAt: message.committedAt,
-    },
+  appendVisibleMessageWithCommitAnchor(
+    logStore,
+    characterMessage(currentSessionId),
     character,
   );
 }

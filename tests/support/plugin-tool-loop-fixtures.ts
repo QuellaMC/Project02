@@ -233,14 +233,14 @@ export function createRawEventAppendFailingLogStore(options: {
 
       throw new Error(options.message);
     },
-    persistPreparedRawEvent(record) {
+    persistPreparedRawEvent(record, expectedCharacter) {
       if (!failsOn(record)) {
-        logStore.persistPreparedRawEvent(record);
+        logStore.persistPreparedRawEvent(record, expectedCharacter);
         return;
       }
 
       if (options.persist === true) {
-        logStore.persistPreparedRawEvent(record);
+        logStore.persistPreparedRawEvent(record, expectedCharacter);
       }
 
       throw new Error(options.message);
@@ -266,8 +266,8 @@ function delegateRuntimeLogStore(logStore: RuntimeLogStore): RuntimeLogStore {
     prepareRawEvent(record, expectedCharacter) {
       return logStore.prepareRawEvent(record, expectedCharacter);
     },
-    persistPreparedRawEvent(record) {
-      logStore.persistPreparedRawEvent(record);
+    persistPreparedRawEvent(record, expectedCharacter) {
+      logStore.persistPreparedRawEvent(record, expectedCharacter);
     },
     readSessionEvidence() {
       return logStore.readSessionEvidence();
