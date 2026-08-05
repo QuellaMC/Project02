@@ -32,7 +32,10 @@ import {
   readOptionalStoreText,
   readStoreJsonLines,
 } from '../storage/store-file.ts';
-import {preparedRuntimePluginConfigEffectHasApprovalEvidence} from '../../plugins/api/index.ts';
+import {
+  approvalToolRecordsByCallId,
+  runtimeConfigEffectHasLoggedApproval,
+} from './config-effect-approval.ts';
 import type {
   DurableRuntimeSessionEvidence,
   RuntimeEvidenceIncrementalState,
@@ -633,7 +636,6 @@ function findValidatedTerminalRawEventForIdentity(
   assertRawEventStartsWithReceived(rawEvents);
   assertRawEventTurnsDoNotOverlap(rawEvents);
   assertToolCallRawEventsAreComplete(rawEvents);
-  assertRuntimeConfigEffectsHaveApprovedToolEvidence(rawEvents);
 
   const matchingIdentityKey = runtimeEventIdentityKey(identity);
   const createdAtByIdentity = new Map<string, string>();
@@ -741,7 +743,6 @@ export function assertDurableRuntimeSessionEvidence(options: {
   assertRawEventStartsWithReceived(rawEvents);
   assertRawEventTurnsDoNotOverlap(rawEvents);
   assertToolCallRawEventsAreComplete(rawEvents);
-  assertRuntimeConfigEffectsHaveApprovedToolEvidence(rawEvents);
   assertRawEventVisibleReferencesMatchConversationMessages({
     messages: conversationMessages,
     rawEvents,
@@ -869,22 +870,7 @@ function assertToolCallRawEventsAreComplete(
 function assertRuntimeConfigEffectsHaveApprovedToolEvidence(
   rawEvents: readonly RawEventLogRecord[],
 ): void {
-  const startedByCallId = new Map<string, RawEventLogRecord>();
-  const finishedByCallId = new Map<string, RawEventLogRecord>();
-
-  for (const rawEvent of rawEvents) {
-    if (
-      rawEvent.kind === 'tool_call_started' &&
-      rawEvent.toolCallId !== undefined
-    ) {
-      startedByCallId.set(rawEvent.toolCallId, rawEvent);
-    } else if (
-      rawEvent.kind === 'tool_call_finished' &&
-      rawEvent.toolCallId !== undefined
-    ) {
-      finishedByCallId.set(rawEvent.toolCallId, rawEvent);
-    }
-  }
+  const approvalRecords = approvalToolRecordsByCallId(rawEvents);
 
   for (const terminal of rawEvents) {
     if (terminal.kind !== 'runtime_turn_completed') {
@@ -892,25 +878,7 @@ function assertRuntimeConfigEffectsHaveApprovedToolEvidence(
     }
 
     for (const effect of terminal.runtimeConfigEffects ?? []) {
-      const started = startedByCallId.get(effect.effectId);
-      const finished = finishedByCallId.get(effect.effectId);
-
-      if (
-        started === undefined ||
-        finished === undefined ||
-        !preparedRuntimePluginConfigEffectHasApprovalEvidence({
-          effect,
-          eventIdentity: finished,
-          inputIdentity: started,
-          inputPluginId: started.toolPluginId,
-          inputToolName: started.toolName,
-          toolCallId: finished.toolCallId,
-          dispatchedToHost: finished.dispatchedToHost,
-          pluginId: finished.toolPluginId,
-          toolName: finished.toolName,
-          result: finished.toolResult,
-        })
-      ) {
+      if (!runtimeConfigEffectHasLoggedApproval(effect, approvalRecords)) {
         throw new LocalRuntimeStorageContractError(
           'malformed_record',
           `Runtime config effect "${effect.effectId}" is missing matching approved config-update tool evidence.`,

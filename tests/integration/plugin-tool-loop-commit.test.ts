@@ -1,7 +1,6 @@
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {readFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {readFileSync, writeFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
 import {createConversationSession} from '../../src/core/index.ts';
@@ -101,15 +100,16 @@ async function createConfigEffectTestFixture(label: string) {
       },
     },
   );
-  const before = inspectRuntimePluginConfig({
-    targetScope: 'global',
-    runtimeLocation: runtimeLocationForTest({
-      configPath: configPath,
-      storeRoot: homeRoot,
-    }),
-    manifest: targetPlugin.manifest,
-    pluginManifests: [targetPlugin.manifest],
-  });
+  const inspectTarget = () =>
+    inspectRuntimePluginConfig({
+      targetScope: 'global',
+      runtimeLocation: runtimeLocationForTest({
+        configPath: configPath,
+        storeRoot: homeRoot,
+      }),
+      manifest: targetPlugin.manifest,
+      pluginManifests: [targetPlugin.manifest],
+    });
 
   return {
     sessionId,
@@ -117,7 +117,8 @@ async function createConfigEffectTestFixture(label: string) {
     storeRoot,
     targetPlugin,
     configPath,
-    before,
+    before: inspectTarget(),
+    inspectTarget,
   };
 }
 
@@ -2120,55 +2121,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ).toBe(false);
   });
 
-  it('recovers a durable pending config effect once and records its effect marker', async () => {
-    const sessionId = 'session-config-update-recovery';
-    const homeRoot = createTestTempRoot('project02-config-update-recovery-');
-    const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-07-16T00:00:00.000Z',
-    });
-
-    const basePlugin = requiredDottedConfigPlugin(
-      'config-update-recovery-target.fixture',
-      'tone',
-    );
-    const targetPlugin = createRuntimePlugin({
-      manifest: {
-        ...basePlugin.manifest,
-        config: {
-          scope: 'global_with_character_overrides',
-          fields: basePlugin.manifest.config.fields.map(field => ({
-            ...field,
-            required: false,
-            agentMutable: true,
-          })),
-        },
-      },
-    });
-    const configPath = writeRuntimeConfig(
-      createProject02HomeLayout({homeRoot}).configPath,
-      {
-        plugins: {
-          [targetPlugin.manifest.id]: {
-            config: {tone: 'cool'},
-          },
-        },
-      },
-    );
-    const before = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+  it('refuses a pending config effect whose approval evidence the log does not carry', async () => {
+    const fixture = await createConfigEffectTestFixture('forged');
+    const {sessionId, storeRoot, before, inspectTarget} = fixture;
     const session = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -2179,24 +2134,111 @@ describe('plugin-driven tool loop commit and rollback', () => {
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
     });
-    const baseHost = createRuntimePluginHost({
-      fileStore: testRuntimePluginFileStoreProvider,
+    const interruptedHost = Object.freeze({
+      ...createConfigEffectTestHost({fixture, session}),
+      reconcileConfigEffect() {
+        throw new Error('simulated config reconciliation interruption');
+      },
+    } satisfies RuntimePluginHost);
+
+    await runLocalUserMessageEvent({
+      event: createTestEvent('update config', 'evt_config_effect_forged'),
+      session,
+      logStore,
+      roleModelAdapter: createConfigEffectTestAdapter({
+        fixture,
+        reply: 'Committed.',
+      }),
+      pluginHost: interruptedHost,
+    });
+
+    // Forge the pending instruction: the effect on the terminal now names
+    // a result the approved tool call never produced.
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    const forgedLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0)
+      .map(line => {
+        const record = JSON.parse(line) as {
+          kind: string;
+          runtimeConfigEffects?: {resultFingerprint: string}[];
+        };
+        const effect = record.runtimeConfigEffects?.[0];
+
+        if (record.kind !== 'runtime_turn_completed' || effect === undefined) {
+          return line;
+        }
+
+        const prefix = effect.resultFingerprint.startsWith('0000')
+          ? 'ffff'
+          : '0000';
+
+        effect.resultFingerprint = `${prefix}${effect.resultFingerprint.slice(4)}`;
+        return JSON.stringify(record);
+      });
+
+    writeFileSync(paths.rawEventsPath, `${forgedLines.join('\n')}\n`, 'utf8');
+
+    const reopenedLogStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
-      sessionIdentity: session,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: homeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [targetPlugin.manifest],
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
+    });
+    const restoredSession = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+      visibleTranscript: reopenedLogStore.conversationMessages(),
+    });
+    const followupResult = await runLocalUserMessageEvent({
+      event: createTestEvent('continue', 'evt_config_effect_forged_followup'),
+      session: restoredSession,
+      logStore: reopenedLogStore,
+      pluginHost: createConfigEffectTestHost({
+        fixture,
+        session: restoredSession,
       }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
+      roleModelAdapter: createSequencedAdapter([
+        {
+          toolCalls: [{name: 'visible_reply', input: {text: 'Still here.'}}],
+        },
+      ]),
+    });
+
+    // The forged instruction was refused where it would have executed:
+    // nothing wrote config, the refusal is durable, and the session lives.
+    expect(followupResult.status).toBe('completed');
+    expect(inspectTarget().fingerprint).toBe(before.fingerprint);
+
+    const refusal = reopenedLogStore
+      .rawEvents()
+      .filter(event => event.kind === 'after_turn_committed')
+      .flatMap(event => event.runtimePluginEvidence ?? [])
+      .find(evidence => evidence.status === 'rejected');
+
+    expect(refusal?.summary).toContain('no approved config-update tool call');
+  });
+
+  it('recovers a durable pending config effect once and records its effect marker', async () => {
+    const fixture = await createConfigEffectTestFixture('recovery');
+    const {sessionId, storeRoot, targetPlugin, before, inspectTarget} = fixture;
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      boundCharacter: testCharacterProfile,
+      characterId: testCharacterProfile.id,
     });
     const recoveryPendingHost = Object.freeze({
-      ...baseHost,
+      ...createConfigEffectTestHost({fixture, session}),
       reconcileConfigEffect() {
         throw new Error('simulated config reconciliation interruption');
       },
@@ -2205,30 +2247,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
       event: createTestEvent('update config', 'evt_config_update_recovery'),
       session,
       logStore,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {
-              name: runtimePluginConfigUpdateToolName,
-              input: {
-                pluginId: targetPlugin.manifest.id,
-                fieldName: 'tone',
-                operation: 'set',
-                value: 'warm',
-                expectedFingerprint: before.fingerprint,
-              },
-            },
-          ],
-        },
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {text: 'Config update is committed.'},
-            },
-          ],
-        },
-      ]),
+      roleModelAdapter: createConfigEffectTestAdapter({
+        fixture,
+        reply: 'Config update is committed.',
+      }),
       pluginHost: recoveryPendingHost,
     });
     const terminal = logStore
@@ -2238,15 +2260,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const toolFinished = logStore
       .rawEvents()
       .find(event => event.kind === 'tool_call_finished');
-    const afterInterruptedCommit = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+    const afterInterruptedCommit = inspectTarget();
 
     expect(firstResult).toMatchObject({
       status: 'completed',
@@ -2283,21 +2297,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
       id: sessionId,
       visibleTranscript: reopenedLogStore.conversationMessages(),
     });
-    const recoveryHost = createRuntimePluginHost({
-      fileStore: testRuntimePluginFileStoreProvider,
-      storeRoot,
-      sessionId,
-      sessionIdentity: restoredSession,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: homeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [targetPlugin.manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
+    const recoveryHost = createConfigEffectTestHost({
+      fixture,
+      session: restoredSession,
     });
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('continue', 'evt_config_update_recovery_followup'),
@@ -2315,15 +2317,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         },
       ]),
     });
-    const afterRecovery = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+    const afterRecovery = inspectTarget();
     const effectMarkers = reopenedLogStore
       .rawEvents()
       .flatMap(event =>
@@ -2352,51 +2346,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('leaves authored config unchanged when config-update finish logging fails', async () => {
-    const sessionId = 'session-config-update-finish-log-failure';
-    const homeRoot = createTestTempRoot('project02-config-update-loop-');
-    const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-07-16T00:00:00.000Z',
-    });
-
-    const basePlugin = requiredDottedConfigPlugin(
-      'config-update-target.fixture',
-      'tone',
-    );
-    const targetPlugin = createRuntimePlugin({
-      manifest: {
-        ...basePlugin.manifest,
-        config: {
-          scope: 'global_with_character_overrides',
-          fields: basePlugin.manifest.config.fields.map(field => ({
-            ...field,
-            required: false,
-            agentMutable: true,
-          })),
-        },
-      },
-    });
-    const configPath = writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      plugins: {
-        [targetPlugin.manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    });
-    const before = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+    const fixture = await createConfigEffectTestFixture('finish-log-failure');
+    const {sessionId, storeRoot, before} = fixture;
     const session = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -2411,46 +2362,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       matches: record => record.kind === 'tool_call_finished',
       message: 'tool_call_finished raw event append failed',
     });
-    const pluginHost = createRuntimePluginHost({
-      fileStore: testRuntimePluginFileStoreProvider,
-      storeRoot,
-      sessionId,
-      sessionIdentity: session,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: homeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [targetPlugin.manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-    });
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: runtimePluginConfigUpdateToolName,
-            input: {
-              pluginId: targetPlugin.manifest.id,
-              fieldName: 'tone',
-              operation: 'set',
-              value: 'warm',
-              expectedFingerprint: before.fingerprint,
-            },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {text: 'Config updated.'},
-          },
-        ],
-      },
-    ]);
+    const pluginHost = createConfigEffectTestHost({fixture, session});
 
     await expect(
       runLocalUserMessageEvent({
@@ -2460,20 +2372,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
         ),
         session,
         logStore,
-        roleModelAdapter: adapter,
+        roleModelAdapter: createConfigEffectTestAdapter({
+          fixture,
+          reply: 'Config updated.',
+        }),
         pluginHost,
       }),
     ).rejects.toThrow('tool_call_finished raw event append failed');
 
-    const after = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+    const after = fixture.inspectTarget();
 
     expect(after.fingerprint).toBe(before.fingerprint);
     expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
@@ -2492,51 +2399,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('leaves authored config unchanged when the terminal append fails with a prepared effect', async () => {
-    const sessionId = 'session-config-update-terminal-append-failure';
-    const homeRoot = createTestTempRoot('project02-config-update-loop-');
-    const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
-
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-    }).createSession({
-      sessionId,
-      createdAt: '2026-07-16T00:00:00.000Z',
-    });
-
-    const basePlugin = requiredDottedConfigPlugin(
-      'config-update-terminal.fixture',
-      'tone',
+    const fixture = await createConfigEffectTestFixture(
+      'terminal-append-failure',
     );
-    const targetPlugin = createRuntimePlugin({
-      manifest: {
-        ...basePlugin.manifest,
-        config: {
-          scope: 'global_with_character_overrides',
-          fields: basePlugin.manifest.config.fields.map(field => ({
-            ...field,
-            required: false,
-            agentMutable: true,
-          })),
-        },
-      },
-    });
-    const configPath = writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      plugins: {
-        [targetPlugin.manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    });
-    const before = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+    const {sessionId, storeRoot, before} = fixture;
     const session = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -2551,46 +2417,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       matches: record => record.kind === 'runtime_turn_completed',
       message: 'runtime_turn_completed raw event append failed',
     });
-    const pluginHost = createRuntimePluginHost({
-      fileStore: testRuntimePluginFileStoreProvider,
-      storeRoot,
-      sessionId,
-      sessionIdentity: session,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: homeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [targetPlugin.manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-    });
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: runtimePluginConfigUpdateToolName,
-            input: {
-              pluginId: targetPlugin.manifest.id,
-              fieldName: 'tone',
-              operation: 'set',
-              value: 'warm',
-              expectedFingerprint: before.fingerprint,
-            },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {text: 'Config updated.'},
-          },
-        ],
-      },
-    ]);
+    const pluginHost = createConfigEffectTestHost({fixture, session});
 
     await expect(
       runLocalUserMessageEvent({
@@ -2600,20 +2427,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
         ),
         session,
         logStore,
-        roleModelAdapter: adapter,
+        roleModelAdapter: createConfigEffectTestAdapter({
+          fixture,
+          reply: 'Config updated.',
+        }),
         pluginHost,
       }),
     ).rejects.toThrow('runtime_turn_completed raw event append failed');
 
-    const after = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: homeRoot,
-      }),
-      manifest: targetPlugin.manifest,
-      pluginManifests: [targetPlugin.manifest],
-    });
+    const after = fixture.inspectTarget();
 
     expect(after.fingerprint).toBe(before.fingerprint);
     expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
