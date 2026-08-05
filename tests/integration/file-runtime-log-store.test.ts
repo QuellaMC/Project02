@@ -8,8 +8,8 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
-  findValidatedTerminalRawEventForSession,
 } from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {findRuntimeTurnTerminalRawEvent} from '../../src/runtime/evidence/validation.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
@@ -341,9 +341,11 @@ describe('file runtime log store plugin tool event validation', () => {
       legacySchema1PatchCompletedEvent(sessionId),
     ]);
 
-    expect(() =>
-      findValidatedTerminalRawEventForSession(paths, eventIdentity),
-    ).toThrow(LocalRuntimeStorageContractError);
+    // The lookup takes a validated store read, so an invalid log fails
+    // at the read rather than yielding a terminal.
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
 
     writeJsonLines(paths.rawEventsPath, [
       {
@@ -354,7 +356,10 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
 
     expect(
-      findValidatedTerminalRawEventForSession(paths, eventIdentity),
+      findRuntimeTurnTerminalRawEvent(
+        reopenStore(paths).rawEvents(),
+        eventIdentity,
+      ),
     ).toBeUndefined();
 
     writeJsonLines(paths.rawEventsPath, [
@@ -367,10 +372,13 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
 
     expect(
-      findValidatedTerminalRawEventForSession(paths, eventIdentity)?.kind,
+      findRuntimeTurnTerminalRawEvent(
+        reopenStore(paths).rawEvents(),
+        eventIdentity,
+      )?.kind,
     ).toBe('runtime_turn_completed');
     expect(
-      findValidatedTerminalRawEventForSession(paths, {
+      findRuntimeTurnTerminalRawEvent(reopenStore(paths).rawEvents(), {
         ...eventIdentity,
         createdAt: '2026-06-15T00:00:01.000Z',
       }),
@@ -408,9 +416,9 @@ describe('file runtime log store plugin tool event validation', () => {
       },
     ]);
 
-    expect(() =>
-      findValidatedTerminalRawEventForSession(paths, eventIdentity),
-    ).toThrow(LocalRuntimeStorageContractError);
+    expect(() => orphanedLogStore.rawEvents()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
   });
 
   it('rejects malformed persisted provider exchange evidence with the storage contract error', () => {
@@ -924,9 +932,7 @@ describe('file runtime log store plugin tool event validation', () => {
         characterId: character.id,
         boundCharacter: character,
       }).conversationMessages(),
-    ).toThrow(
-      'Durable character speaker metadata must match recorded role-model character evidence.',
-    );
+    ).toThrow('Restored character message speaker metadata is malformed.');
 
     for (const rawRecord of rawRecords) {
       const message = rawRecord['visibleMessage'] as

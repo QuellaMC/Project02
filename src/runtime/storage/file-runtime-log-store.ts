@@ -9,10 +9,7 @@ import {
   type FileRuntimeLogStoreStateOptions,
 } from './file-runtime-log-store-state.ts';
 
-export {
-  durableRuntimeSessionCharacterProfile,
-  findValidatedTerminalRawEventForSession,
-} from '../evidence/validation.ts';
+export {durableRuntimeSessionCharacterProfile} from '../evidence/validation.ts';
 
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 
@@ -32,16 +29,14 @@ export function createFileRuntimeLogStore(
       return storedRecord;
     },
     prepareRawEvent(record, expectedCharacter) {
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
+      const machine = state.transitionMachine();
 
-      state.assertSessionReadable();
       state.assertWriterOwnership();
       state.recordIncrementalValidation();
       return machine.prepareRawEventAppend(record, expectedCharacter);
     },
     persistPreparedRawEvent(record, expectedCharacter) {
-      const machine = state.ensureTransitionMachine(state.readStoredEvidence());
+      const machine = state.transitionMachine();
 
       // Re-checked here, not just in prepareRawEvent: a caller may await
       // between preparing and persisting, and both the lease and the
@@ -62,10 +57,8 @@ export function createFileRuntimeLogStore(
       }
     },
     readSessionEvidence() {
-      state.assertSessionReadable();
       const evidence = state.readStoredEvidence();
 
-      state.ensureTransitionMachine(evidence);
       return Object.freeze({
         rawEvents: Object.freeze([...evidence.rawEvents]),
         conversationMessages: Object.freeze([...evidence.conversationMessages]),
@@ -75,18 +68,12 @@ export function createFileRuntimeLogStore(
       return deriveRuntimeTraceEntries(this.rawEvents());
     },
     rawEvents() {
-      state.assertSessionReadable();
-      const evidence = state.readStoredEvidence();
-
-      state.ensureTransitionMachine(evidence);
-      return Object.freeze([...evidence.rawEvents]);
+      return Object.freeze([...state.readStoredEvidence().rawEvents]);
     },
     conversationMessages() {
-      state.assertSessionReadable();
-      const evidence = state.readStoredEvidence();
-
-      state.ensureTransitionMachine(evidence);
-      return Object.freeze([...evidence.conversationMessages]);
+      return Object.freeze([
+        ...state.readStoredEvidence().conversationMessages,
+      ]);
     },
   } satisfies RuntimeLogStore);
 }

@@ -14,37 +14,9 @@ import {
 import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 import type {
-  CachedRuntimeSessionEvidence,
-  DurableRuntimeSessionEvidence,
-  MutableDurableRuntimeSessionEvidence,
   RuntimeEvidenceFileStamp,
   RuntimeEvidenceFileStamps,
 } from './contract.ts';
-
-export function createMutableDurableRuntimeSessionEvidence(
-  evidence: DurableRuntimeSessionEvidence,
-): MutableDurableRuntimeSessionEvidence {
-  return {
-    rawEvents: [...evidence.rawEvents],
-    conversationMessages: [...evidence.conversationMessages],
-  };
-}
-
-/**
- * The transcript, rebuilt from the events that committed it. Message text
- * has one home: the commit event that made it visible.
- */
-export function conversationMessagesFromRawEvents(
-  rawEvents: readonly RawEventLogRecord[],
-): readonly ConversationLogRecord[] {
-  return Object.freeze(
-    rawEvents.flatMap(rawEvent => {
-      const message = conversationMessageForRawEvent(rawEvent);
-
-      return message === undefined ? [] : [message];
-    }),
-  );
-}
 
 /** The message a commit event carries, or undefined for any other event. */
 export function conversationMessageForRawEvent(
@@ -67,12 +39,20 @@ export function conversationMessageForRawEvent(
   } satisfies ConversationLogRecord);
 }
 
-export function readCoherentRuntimeSessionEvidence(
+/**
+ * The file's decoded records under a stable stamp — codec-valid lines,
+ * not yet a validated session. The caller replays them through the
+ * transition machine; only what replays is evidence.
+ */
+export function readCoherentRuntimeSessionRecords(
   paths: LocalRuntimeSessionPaths,
   onEvidenceFileRead:
     | ((event: {readonly filePath: string; readonly attempt: number}) => void)
     | undefined,
-): CachedRuntimeSessionEvidence {
+): {
+  readonly stamps: RuntimeEvidenceFileStamps;
+  readonly rawEvents: readonly RawEventLogRecord[];
+} {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = readRuntimeEvidenceFileStamps(paths);
     const contents = readRuntimeEvidenceFileContents(
@@ -87,20 +67,14 @@ export function readCoherentRuntimeSessionEvidence(
       continue;
     }
 
-    const evidence = createMutableDurableRuntimeSessionEvidence({
+    return {
+      stamps: after,
       rawEvents: decodeRuntimeEvidenceJsonLines({
         filePath: paths.rawEventsPath,
         content: contents.rawEvents,
         decodeLine: decodeRawEventLogRecord,
       }),
-      conversationMessages: [],
-    });
-
-    evidence.conversationMessages.push(
-      ...conversationMessagesFromRawEvents(evidence.rawEvents),
-    );
-
-    return {stamps: after, evidence};
+    };
   }
 
   throw new LocalRuntimeStorageContractError(

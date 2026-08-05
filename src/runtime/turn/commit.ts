@@ -45,7 +45,7 @@ import {
   executionVisibleReplyTexts,
   type RoleModelLoopResult,
 } from '../../role-model/index.ts';
-import {findValidatedTerminalRawEventForSession} from '../storage/file-runtime-log-store.ts';
+import {findRuntimeTurnTerminalRawEvent} from '../evidence/validation.ts';
 import type {
   AppendVisibleReplyOptions,
   LocalRuntimeTurnProgressEvent,
@@ -385,17 +385,14 @@ function recoverCompletedTerminalRawEvent(
   readonly rawEvent: RawEventLogRecord;
   readonly terminalAppendFailure?: string;
 } {
-  const sessionPaths = state.options.logStore.localRuntimeSessionPaths;
-
-  if (sessionPaths === undefined) {
-    throw error;
-  }
-
   let durableTerminal: RawEventLogRecord | undefined;
 
   try {
-    durableTerminal = findValidatedTerminalRawEventForSession(
-      sessionPaths,
+    // A fresh validated read through the store's own gate: the failed
+    // append invalidated its cache, so this re-reads what actually
+    // landed and answers whether the terminal is among it.
+    durableTerminal = findRuntimeTurnTerminalRawEvent(
+      state.options.logStore.rawEvents(),
       state.identity,
     );
   } catch {

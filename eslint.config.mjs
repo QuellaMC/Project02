@@ -144,18 +144,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/runtime/evidence/validation.ts'],
-    rules: {
-      // Ratcheted down after the one-log migration retired the trace
-      // cross-checks, the reconciliation path, and the open-turn gate,
-      // then again when the turn-shape rules moved to turn-shape.ts.
-      'max-lines': [
-        'error',
-        {max: 1091, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
     files: ['src/runtime/storage/session-store.ts'],
     rules: {
       // Re-pinned +3 for the evidence-required rehydration error (the

@@ -2190,38 +2190,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
     });
-    const restoredSession = createConversationSession({
-      character: testCharacterProfile,
-      id: sessionId,
-      visibleTranscript: reopenedLogStore.conversationMessages(),
-    });
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('continue', 'evt_config_effect_forged_followup'),
-      session: restoredSession,
-      logStore: reopenedLogStore,
-      pluginHost: createConfigEffectTestHost({
-        fixture,
-        session: restoredSession,
-      }),
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [{name: 'visible_reply', input: {text: 'Still here.'}}],
-        },
-      ]),
-    });
 
-    // The forged instruction was refused where it would have executed:
-    // nothing wrote config, the refusal is durable, and the session lives.
-    expect(followupResult.status).toBe('completed');
+    // A pending effect the approved tool call never produced is not a
+    // state the writer can record, so the tampered log fails closed at
+    // the read — before any turn could carry the instruction forward —
+    // and nothing writes config.
+    expect(() => reopenedLogStore.conversationMessages()).toThrow(
+      /missing matching approved config-update tool evidence/iu,
+    );
     expect(inspectTarget().fingerprint).toBe(before.fingerprint);
-
-    const refusal = reopenedLogStore
-      .rawEvents()
-      .filter(event => event.kind === 'after_turn_committed')
-      .flatMap(event => event.runtimePluginEvidence ?? [])
-      .find(evidence => evidence.status === 'rejected');
-
-    expect(refusal?.summary).toContain('no approved config-update tool call');
   });
 
   it('recovers a durable pending config effect once and records its effect marker', async () => {

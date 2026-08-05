@@ -1,10 +1,6 @@
-import {
-  conversationMessageForRawEvent,
-  conversationMessagesFromRawEvents,
-} from './cache.ts';
+import {conversationMessageForRawEvent} from './cache.ts';
 import {
   type CharacterProfile,
-  ConversationRehydrationError,
   isValidSpeakerDisplayName,
   localUserSpeaker,
   messageNumberFromId,
@@ -12,12 +8,10 @@ import {
   type SpeakerIdentity,
   runtimeEventIdentityKey,
   sessionIdFromMessageId,
-  validateRestoredVisibleTranscript,
 } from '../../core/index.ts';
 import {
   assertAgreedModelInputText,
   assertCharacterRowsFollowTheirDecision,
-  assertConversationTurnShape,
   assertSingleLeadingUserMessage,
   assertVisibleMessageCommitEvidence,
   sameOrderedValues,
@@ -27,16 +21,9 @@ import {
 import {
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,
-  type LocalRuntimeSessionPaths,
 } from '../storage/layout-contract.ts';
-import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 import {isTerminalRawEventLogRecord} from './records.ts';
-import {assertLocalRuntimeSessionReadable} from '../storage/session-store.ts';
-import {
-  readOptionalStoreText,
-  readStoreJsonLines,
-} from '../storage/store-file.ts';
 import {
   approvalToolRecordsByCallId,
   runtimeConfigEffectHasLoggedApproval,
@@ -44,20 +31,14 @@ import {
 import type {
   DurableRuntimeSessionEvidence,
   RuntimeEvidenceIncrementalState,
-  RuntimeLogReadMode,
-  RuntimeLogValidationMode,
 } from './contract.ts';
 import {
   assertRoleModelEvidenceMatchesSessionId,
   durableCharacterProfile,
-  recordedConversationCharacterProfile,
-  recordedRoleModelCharacterProfile,
-  recordedUserSpeakerIdentity,
   roleModelCharacterSnapshot,
   sameCharacterProfiles,
   speakerMatchesCharacter,
   validateDurableCharacterProfiles,
-  validateDurableRuntimeSessionIdentity,
 } from './identity.ts';
 
 export function createRuntimeEvidenceIncrementalState(
@@ -65,7 +46,19 @@ export function createRuntimeEvidenceIncrementalState(
   boundCharacter?: CharacterProfile,
   boundUserSpeaker?: SpeakerIdentity,
 ): RuntimeEvidenceIncrementalState {
-  const state: RuntimeEvidenceIncrementalState = {
+  // Every record enters through the machine's assert-then-apply — a
+  // stored log by replay, a live append directly. Seeding state from
+  // pre-populated evidence would readmit the unasserted path.
+  if (
+    evidence.rawEvents.length > 0 ||
+    evidence.conversationMessages.length > 0
+  ) {
+    throw new TypeError(
+      'Runtime evidence state starts empty; replay stored records through the transition machine.',
+    );
+  }
+
+  return {
     createdAtByIdentity: new Map(),
     rawKindsByIdentity: new Map(),
     terminalRawByIdentity: new Map(),
@@ -76,47 +69,14 @@ export function createRuntimeEvidenceIncrementalState(
     messageIdsByIdentity: new Map(),
     commitEventByMessageKey: new Map(),
     turnModelInputByIdentity: new Map(),
-    roleModelCharacter: recordedRoleModelCharacterProfile(evidence.rawEvents),
-    conversationCharacter: recordedConversationCharacterProfile(
-      evidence.conversationMessages,
-    ),
+    roleModelCharacter: undefined,
+    conversationCharacter: undefined,
     boundCharacter,
-    userSpeaker: recordedUserSpeakerIdentity(evidence.conversationMessages),
+    userSpeaker: undefined,
     boundUserSpeaker,
     openRawIdentity: undefined,
-    openTurnConversationStart: evidence.conversationMessages.length,
+    openTurnConversationStart: 0,
   };
-
-  for (const rawEvent of evidence.rawEvents) {
-    recordIncrementalIdentityTimestamp(state, rawEvent);
-    const identityKey = runtimeEventIdentityKey(rawEvent);
-    const kinds = state.rawKindsByIdentity.get(identityKey) ?? new Set();
-
-    kinds.add(rawEvent.kind);
-    state.rawKindsByIdentity.set(identityKey, kinds);
-
-    if (
-      rawEvent.kind === 'runtime_turn_completed' ||
-      rawEvent.kind === 'runtime_turn_rejected'
-    ) {
-      state.terminalRawByIdentity.set(identityKey, rawEvent.kind);
-    }
-
-    applyIncrementalToolCallState(state, rawEvent);
-    applyIncrementalTurnShapeState(state, rawEvent);
-  }
-
-  for (const message of evidence.conversationMessages) {
-    recordIncrementalIdentityTimestamp(state, message);
-    state.messagesById.set(message.id, message);
-    const identityKey = runtimeEventIdentityKey(message);
-    const messageIds = state.messageIdsByIdentity.get(identityKey) ?? [];
-
-    messageIds.push(message.id);
-    state.messageIdsByIdentity.set(identityKey, messageIds);
-  }
-
-  return state;
 }
 
 export function assertIncrementalRawEventAppend(options: {
@@ -505,6 +465,14 @@ export function assertIncrementalConversationAppend(options: {
   readonly state: RuntimeEvidenceIncrementalState;
   readonly record: ConversationLogRecord;
   readonly expectedCharacter?: CharacterProfile;
+  /**
+   * The character snapshot the committing raw event itself carries. On
+   * the session's first character row nothing is recorded yet, and the
+   * store binding pins only the id — the display name is the session's
+   * own historical fact, so the row's decision evidence supplies it.
+   * Cross-record agreement is already asserted at the raw-event level.
+   */
+  readonly recordCharacter?: CharacterProfile;
 }): void {
   assertIncrementalIdentityTimestamp(options.state, options.record);
   const identityKey = runtimeEventIdentityKey(options.record);
@@ -522,6 +490,7 @@ export function assertIncrementalConversationAppend(options: {
     options.expectedCharacter ??
     options.state.roleModelCharacter ??
     options.state.conversationCharacter ??
+    options.recordCharacter ??
     options.state.boundCharacter;
 
   if (expectedCharacter === undefined) {
@@ -569,7 +538,8 @@ export function assertIncrementalConversationAppend(options: {
     options.record.role === 'user'
       ? userRecordSpeakerIsValid(
           options.record,
-          options.state.userSpeaker ?? options.state.boundUserSpeaker,
+          options.state.userSpeaker,
+          options.state.boundUserSpeaker,
         )
       : speakerMatchesCharacter(options.record, expectedCharacter);
 
@@ -581,9 +551,12 @@ export function assertIncrementalConversationAppend(options: {
   }
 }
 
-// With no recorded and no store-bound user speaker, the first user
-// record anchors the session's speaker (a direct-runtime store may
-// carry a custom display name); the id is never negotiable.
+// The first user record anchors the session's speaker name; every later
+// row must match the anchor exactly. The store binding pins only the id
+// — a display name is a historical per-session fact, so a session
+// written under an earlier configured name stays valid under a renamed
+// binding, and the current name reaches new sessions through the writer
+// that stamps it.
 //
 // The anchoring name is judged by the same rule every other speaker
 // name is. A looser check here only decided *which* write produced an
@@ -594,13 +567,20 @@ export function assertIncrementalConversationAppend(options: {
 // judging one field by two rules, with the lenient one writing first.
 function userRecordSpeakerIsValid(
   record: {readonly speakerId: string; readonly speakerName: string},
-  expectedUserSpeaker: SpeakerIdentity | undefined,
+  recordedUserSpeaker: SpeakerIdentity | undefined,
+  boundUserSpeaker: SpeakerIdentity | undefined,
 ): boolean {
-  return expectedUserSpeaker === undefined
-    ? record.speakerId === localUserSpeaker.id &&
-        isValidSpeakerDisplayName(record.speakerName)
-    : record.speakerId === expectedUserSpeaker.id &&
-        record.speakerName === expectedUserSpeaker.displayName;
+  if (recordedUserSpeaker !== undefined) {
+    return (
+      record.speakerId === recordedUserSpeaker.id &&
+      record.speakerName === recordedUserSpeaker.displayName
+    );
+  }
+
+  return (
+    record.speakerId === (boundUserSpeaker?.id ?? localUserSpeaker.id) &&
+    isValidSpeakerDisplayName(record.speakerName)
+  );
 }
 
 export function applyIncrementalConversationAppend(
@@ -753,245 +733,6 @@ function runtimeEventBaseIdentityKey(identity: {
   return `${identity.eventId}\u0000${identity.traceId}`;
 }
 
-function findValidatedTerminalRawEventForIdentity(
-  rawEvents: readonly RawEventLogRecord[],
-  identity: RuntimeEventIdentity,
-): RawEventLogRecord | undefined {
-  assertRawEventTerminalOrder(rawEvents);
-  assertRawEventStartsWithReceived(rawEvents);
-  assertRawEventTurnsDoNotOverlap(rawEvents);
-  assertToolCallRawEventsAreComplete(rawEvents);
-
-  const matchingIdentityKey = runtimeEventIdentityKey(identity);
-  const createdAtByIdentity = new Map<string, string>();
-
-  for (const rawEvent of rawEvents) {
-    const baseIdentityKey = runtimeEventBaseIdentityKey(rawEvent);
-    const priorCreatedAt = createdAtByIdentity.get(baseIdentityKey);
-
-    if (priorCreatedAt !== undefined && priorCreatedAt !== rawEvent.createdAt) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Raw event log contains inconsistent createdAt values for one event identity.',
-      );
-    }
-
-    createdAtByIdentity.set(baseIdentityKey, rawEvent.createdAt);
-  }
-
-  if (
-    createdAtByIdentity.get(runtimeEventBaseIdentityKey(identity)) !==
-    identity.createdAt
-  ) {
-    return undefined;
-  }
-
-  return [...rawEvents]
-    .reverse()
-    .find(
-      rawEvent =>
-        isTerminalRawEventLogRecord(rawEvent) &&
-        runtimeEventIdentityKey(rawEvent) === matchingIdentityKey,
-    );
-}
-
-export function findValidatedTerminalRawEventForSession(
-  paths: LocalRuntimeSessionPaths,
-  identity: RuntimeEventIdentity,
-): RawEventLogRecord | undefined {
-  assertLocalRuntimeSessionReadable({
-    storeRoot: paths.storeRoot,
-    sessionId: paths.sessionId,
-  });
-
-  const evidence = readRuntimeSessionEvidence(paths, 'publicDecode');
-
-  assertDurableRuntimeSessionEvidence({
-    paths,
-    evidence,
-    mode: 'appendRawEvent',
-  });
-
-  return findValidatedTerminalRawEventForIdentity(evidence.rawEvents, identity);
-}
-
-function readValidatedRuntimeSessionEvidence(
-  paths: LocalRuntimeSessionPaths,
-  mode: RuntimeLogValidationMode,
-): DurableRuntimeSessionEvidence {
-  const evidence = readRuntimeSessionEvidence(paths, 'publicDecode');
-
-  assertDurableRuntimeSessionEvidence({
-    paths,
-    evidence,
-    mode,
-  });
-
-  return evidence;
-}
-
-function readRuntimeSessionEvidence(
-  paths: LocalRuntimeSessionPaths,
-  readMode: RuntimeLogReadMode,
-): DurableRuntimeSessionEvidence {
-  return Object.freeze({
-    rawEvents: readRawEventLogRecords(paths, readMode),
-    conversationMessages: readConversationLogRecords(paths, readMode),
-  } satisfies DurableRuntimeSessionEvidence);
-}
-
-export function assertDurableRuntimeSessionEvidence(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly evidence: DurableRuntimeSessionEvidence;
-  readonly mode: RuntimeLogValidationMode;
-  readonly boundCharacter?: CharacterProfile;
-  readonly boundUserSpeaker?: SpeakerIdentity;
-  readonly nextConversationMessage?: ConversationLogRecord;
-  readonly nextRawEvent?: RawEventLogRecord;
-}): void {
-  const rawEvents = Object.freeze([
-    ...options.evidence.rawEvents,
-    ...(options.nextRawEvent === undefined ? [] : [options.nextRawEvent]),
-  ]);
-  const conversationMessages = Object.freeze([
-    ...options.evidence.conversationMessages,
-    ...(options.nextConversationMessage === undefined
-      ? []
-      : [options.nextConversationMessage]),
-  ]);
-
-  // A trailing turn with no terminal event is not checked for here: a
-  // crash produces exactly that log, so it is a state the reader
-  // surfaces, never damage it rejects.
-  assertRuntimeEvidenceCreatedAtAgreement(rawEvents);
-  assertRawEventTerminalOrder(rawEvents);
-  assertRawEventStartsWithReceived(rawEvents);
-  assertRawEventTurnsDoNotOverlap(rawEvents);
-  assertToolCallRawEventsAreComplete(rawEvents);
-  assertRawEventVisibleReferencesMatchConversationMessages({
-    messages: conversationMessages,
-    rawEvents,
-  });
-  const identity = validateDurableRuntimeSessionIdentity({
-    paths: options.paths,
-    evidence: {rawEvents, conversationMessages},
-    boundCharacter: options.boundCharacter,
-    boundUserSpeaker: options.boundUserSpeaker,
-    allowUnanchoredCustomCharacter: false,
-  });
-
-  assertRestoredConversationInvariants(options.paths, conversationMessages, {
-    ...(identity.character === undefined
-      ? {}
-      : {character: identity.character}),
-    ...(identity.userSpeaker === undefined
-      ? {}
-      : {userDisplayName: identity.userSpeaker.displayName}),
-  });
-  assertConversationTurnShape({
-    messages: conversationMessages,
-    rawEvents,
-  });
-}
-
-function assertRuntimeEvidenceCreatedAtAgreement(
-  rawEvents: readonly RawEventLogRecord[],
-): void {
-  const createdAtByIdentity = new Map<string, string>();
-
-  for (const record of rawEvents) {
-    const key = runtimeEventBaseIdentityKey(record);
-    const prior = createdAtByIdentity.get(key);
-
-    if (prior !== undefined && prior !== record.createdAt) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Runtime evidence for one event identity must share one createdAt timestamp.',
-      );
-    }
-
-    createdAtByIdentity.set(key, record.createdAt);
-  }
-}
-
-function assertToolCallRawEventsAreComplete(
-  rawEvents: readonly RawEventLogRecord[],
-): void {
-  const started = new Map<string, RawEventLogRecord>();
-  const finished = new Map<string, RawEventLogRecord>();
-  const completedTerminalIdentityKeys = new Set(
-    rawEvents
-      .filter(rawEvent => rawEvent.kind === 'runtime_turn_completed')
-      .map(runtimeEventIdentityKey),
-  );
-
-  for (const rawEvent of rawEvents) {
-    if (rawEvent.kind === 'tool_call_started') {
-      const callId = requiredToolCallId(rawEvent);
-
-      if (started.has(callId)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Tool call started more than once: ${callId}.`,
-        );
-      }
-
-      started.set(callId, rawEvent);
-      continue;
-    }
-
-    if (rawEvent.kind === 'tool_call_finished') {
-      const callId = requiredToolCallId(rawEvent);
-
-      if (!started.has(callId)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Tool call finished before start: ${callId}.`,
-        );
-      }
-
-      if (finished.has(callId)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Tool call finished more than once: ${callId}.`,
-        );
-      }
-
-      finished.set(callId, rawEvent);
-    }
-  }
-
-  for (const [callId, rawEvent] of started) {
-    if (finished.has(callId)) {
-      continue;
-    }
-
-    // A crash mid-call leaves started-without-finish in an unterminated
-    // or rejected turn; only a turn that claims completion may not.
-    if (!completedTerminalIdentityKeys.has(runtimeEventIdentityKey(rawEvent))) {
-      continue;
-    }
-
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      `Tool call started without finish: ${callId}.`,
-    );
-  }
-
-  for (const rawEvent of rawEvents.filter(isTerminalRawEventLogRecord)) {
-    for (const callId of rawEvent.toolCallIds ?? []) {
-      if (finished.has(callId)) {
-        continue;
-      }
-
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Terminal raw event references unfinished tool call: ${callId}.`,
-      );
-    }
-  }
-}
-
 function assertRuntimeConfigEffectsHaveApprovedToolEvidence(
   rawEvents: readonly RawEventLogRecord[],
 ): void {
@@ -1023,73 +764,6 @@ function requiredToolCallId(rawEvent: RawEventLogRecord): string {
 
   return rawEvent.toolCallId;
 }
-
-function readRawEventLogRecords(
-  paths: LocalRuntimeSessionPaths,
-  mode: RuntimeLogReadMode = 'public',
-): readonly RawEventLogRecord[] {
-  if (mode === 'public') {
-    return readValidatedRuntimeSessionEvidence(paths, 'public').rawEvents;
-  }
-
-  const records = readJsonLines({
-    filePath: paths.rawEventsPath,
-    decodeLine: line => decodeRawEventLogRecord(line),
-    missingFileIsAllowed: () => true,
-    emptyFileIsAllowed: () => true,
-  });
-
-  return Object.freeze(records);
-}
-
-function readConversationLogRecords(
-  paths: LocalRuntimeSessionPaths,
-  mode: RuntimeLogReadMode = 'public',
-): readonly ConversationLogRecord[] {
-  if (mode === 'public') {
-    return readValidatedRuntimeSessionEvidence(paths, 'public')
-      .conversationMessages;
-  }
-
-  return conversationMessagesFromRawEvents(readRawEventLogRecords(paths, mode));
-}
-
-function assertRestoredConversationInvariants(
-  paths: LocalRuntimeSessionPaths,
-  messages: readonly ConversationLogRecord[],
-  options: {
-    readonly character?: CharacterProfile;
-    readonly userDisplayName?: string;
-  } = {},
-): void {
-  try {
-    validateRestoredVisibleTranscript({
-      id: paths.sessionId,
-      ...(options.userDisplayName === undefined
-        ? {}
-        : {userDisplayName: options.userDisplayName}),
-      // The character is undefined only for transcripts with zero
-      // character-role messages (it is derived from them), so the
-      // placeholder below can never be consulted by a speaker check.
-      character: options.character ?? unboundSessionCharacterPlaceholder,
-      visibleTranscript: messages,
-    });
-  } catch (error: unknown) {
-    if (error instanceof ConversationRehydrationError) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        error.message,
-      );
-    }
-
-    throw error;
-  }
-}
-
-const unboundSessionCharacterPlaceholder: CharacterProfile = Object.freeze({
-  id: 'runtime.unbound-character',
-  displayName: 'Runtime Unbound Character',
-});
 
 function assertIncrementalCharacterEvidence(
   state: RuntimeEvidenceIncrementalState,
@@ -1134,183 +808,24 @@ export function durableRuntimeSessionCharacterProfile(
   );
 }
 
-function assertRawEventStartsWithReceived(
+/**
+ * The terminal record a turn identity landed, from an already-validated
+ * record list — pass a store read, never a raw decode. An identity whose
+ * records carry a different createdAt is a different occurrence of the
+ * ids, so it has no terminal here.
+ */
+export function findRuntimeTurnTerminalRawEvent(
   rawEvents: readonly RawEventLogRecord[],
-): void {
-  const startedRawEventIdentities = new Set<string>();
+  identity: RuntimeEventIdentity,
+): RawEventLogRecord | undefined {
+  const matchingIdentityKey = runtimeEventIdentityKey(identity);
 
-  for (const rawEvent of rawEvents) {
-    const identityKey = runtimeEventIdentityKey(rawEvent);
-
-    if (startedRawEventIdentities.has(identityKey)) {
-      continue;
-    }
-
-    if (rawEvent.kind !== 'runtime_event_received') {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Raw event log turn evidence must start with runtime_event_received.',
-      );
-    }
-
-    startedRawEventIdentities.add(identityKey);
-  }
-}
-
-function assertRawEventTerminalOrder(
-  rawEvents: readonly RawEventLogRecord[],
-): void {
-  assertTerminalEvidenceOrder({
-    records: rawEvents,
-    isTerminalRecord: isTerminalRawEventLogRecord,
-    isPrerequisiteEvidence: rawEvent =>
-      rawEvent.kind === 'runtime_event_received',
-    isAllowedAfterTerminalRecord: rawEvent =>
-      rawEvent.kind === 'after_turn_committed',
-    recordAfterTerminalMessage:
-      'Raw event log contains records after terminal turn evidence.',
-    terminalWithoutPrerequisiteMessage:
-      'Raw event log contains terminal turn evidence before start evidence.',
-  });
-}
-
-function assertTerminalEvidenceOrder<T extends RuntimeEventIdentity>(options: {
-  readonly records: readonly T[];
-  readonly isTerminalRecord: (record: T) => boolean;
-  readonly isPrerequisiteEvidence: (record: T) => boolean;
-  readonly isAllowedAfterTerminalRecord?: (record: T) => boolean;
-  readonly recordAfterTerminalMessage: string;
-  readonly terminalWithoutPrerequisiteMessage: string;
-}): void {
-  const prerequisiteEvidenceIdentities = new Set<string>();
-  const terminalTurnIdentities = new Set<string>();
-
-  for (const record of options.records) {
-    const identityKey = runtimeEventIdentityKey(record);
-
-    if (
-      terminalTurnIdentities.has(identityKey) &&
-      options.isAllowedAfterTerminalRecord?.(record) !== true
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        options.recordAfterTerminalMessage,
-      );
-    }
-
-    if (options.isTerminalRecord(record)) {
-      if (!prerequisiteEvidenceIdentities.has(identityKey)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          options.terminalWithoutPrerequisiteMessage,
-        );
-      }
-
-      terminalTurnIdentities.add(identityKey);
-      continue;
-    }
-
-    if (options.isPrerequisiteEvidence(record)) {
-      prerequisiteEvidenceIdentities.add(identityKey);
-    }
-  }
-}
-
-function assertRawEventTurnsDoNotOverlap(
-  rawEvents: readonly RawEventLogRecord[],
-): void {
-  let openTurnIdentity: string | undefined;
-
-  for (const rawEvent of rawEvents) {
-    const identityKey = runtimeEventIdentityKey(rawEvent);
-
-    if (rawEvent.kind === 'after_turn_committed') {
-      continue;
-    }
-
-    // A turn start closes any turn a crash left open; only a non-start
-    // record belonging to neither the open turn nor a new one overlaps.
-    if (
-      rawEvent.kind !== 'runtime_event_received' &&
-      openTurnIdentity !== undefined &&
-      openTurnIdentity !== identityKey
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Raw event log contains overlapping turn evidence.',
-      );
-    }
-
-    if (isTerminalRawEventLogRecord(rawEvent)) {
-      openTurnIdentity = undefined;
-      continue;
-    }
-
-    openTurnIdentity = identityKey;
-  }
-}
-
-function assertRawEventVisibleReferencesMatchConversationMessages(options: {
-  readonly messages: readonly ConversationLogRecord[];
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  const messagesById = new Map(
-    options.messages.map(message => [message.id, message]),
-  );
-
-  for (const rawEvent of options.rawEvents) {
-    for (const messageId of rawEvent.visibleMessageIds ?? []) {
-      const message = messagesById.get(messageId);
-
-      if (message === undefined) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Raw event references a missing visible conversation message: ${messageId}.`,
-        );
-      }
-
-      if (
-        message.eventId !== rawEvent.eventId ||
-        message.traceId !== rawEvent.traceId
-      ) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Raw event references a visible conversation message from another event: ${messageId}.`,
-        );
-      }
-    }
-  }
-}
-
-function readJsonLines<T>(options: {
-  readonly filePath: string;
-  readonly decodeLine: (line: string) => T;
-  readonly missingFileIsAllowed: () => boolean;
-  readonly emptyFileIsAllowed: () => boolean;
-}): T[] {
-  const content = readOptionalStoreText(options.filePath);
-
-  if (content === undefined) {
-    if (!options.missingFileIsAllowed()) {
-      throw new LocalRuntimeStorageContractError(
-        'missing_file',
-        `Required local runtime log file is missing: ${options.filePath}.`,
-      );
-    }
-
-    return [];
-  }
-
-  if (content.length === 0) {
-    if (!options.emptyFileIsAllowed()) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Required local runtime log file is empty: ${options.filePath}.`,
-      );
-    }
-
-    return [];
-  }
-
-  return readStoreJsonLines(options.filePath, content).map(options.decodeLine);
+  return [...rawEvents]
+    .reverse()
+    .find(
+      rawEvent =>
+        isTerminalRawEventLogRecord(rawEvent) &&
+        runtimeEventIdentityKey(rawEvent) === matchingIdentityKey &&
+        rawEvent.createdAt === identity.createdAt,
+    );
 }

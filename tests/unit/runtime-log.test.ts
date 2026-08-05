@@ -491,7 +491,7 @@ describe('runtime log store', () => {
     ).toBe('local-session:message-1');
   });
 
-  it('stamps user messages against the bound user speaker and rejects drift', () => {
+  it('pins the bound user id and rejects drift from the anchored name', () => {
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
       boundUserSpeaker: {id: 'local-user', displayName: 'Mike'},
@@ -501,6 +501,8 @@ describe('runtime log store', () => {
       kind: 'runtime_event_received',
       eventType: 'USER_MESSAGE',
     });
+    // The binding pins the id only — a display name is a per-session
+    // historical fact, so a renamed binding keeps old sessions valid.
     expect(() =>
       store.appendRawEvent({
         ...identity,
@@ -510,8 +512,8 @@ describe('runtime log store', () => {
         visibleMessage: {
           id: 'local-session:message-1',
           role: 'user',
-          speakerId: 'local-user',
-          speakerName: 'You',
+          speakerId: 'someone-else',
+          speakerName: 'Mike',
           text: 'hello',
         },
         committedAt: '2026-06-04T00:00:01.000Z',

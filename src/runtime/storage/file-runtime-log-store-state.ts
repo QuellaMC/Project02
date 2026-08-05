@@ -16,20 +16,19 @@ import {
   type LocalRuntimeMutationLockOwnerToken,
 } from './mutation-lock.ts';
 import type {
-  CachedRuntimeSessionEvidence,
   MutableDurableRuntimeSessionEvidence,
+  RuntimeEvidenceFileStamps,
 } from '../evidence/contract.ts';
 import {
-  readCoherentRuntimeSessionEvidence,
+  readCoherentRuntimeSessionRecords,
   readRuntimeEvidenceFileStamps,
   sameRuntimeEvidenceFileStamps,
   scavengeAbandonedRuntimeEvidenceTemporaryFiles,
 } from '../evidence/cache.ts';
 import {
-  createRuntimeEvidenceTransitionMachine,
+  replayRuntimeEvidence,
   type RuntimeEvidenceTransitionMachine,
 } from '../evidence/transition.ts';
-import {assertDurableRuntimeSessionEvidence} from '../evidence/validation.ts';
 
 export type FileRuntimeLogStoreStateOptions =
   LocalRuntimeSessionPathsOptions & {
@@ -46,14 +45,19 @@ export type FileRuntimeLogStoreStateOptions =
     }) => void;
   };
 
+type LoadedRuntimeSessionEvidence = {
+  readonly stamps: RuntimeEvidenceFileStamps;
+  readonly evidence: MutableDurableRuntimeSessionEvidence;
+  readonly machine: RuntimeEvidenceTransitionMachine;
+};
+
 export class FileRuntimeLogStoreState {
   readonly paths: LocalRuntimeSessionPaths;
   readonly writerLockOwnerToken: LocalRuntimeMutationLockOwnerToken;
   private readonly options: FileRuntimeLogStoreStateOptions;
   private readonly locksRoot: string;
   private readonly writerResourceKey: string;
-  private cachedEvidence: CachedRuntimeSessionEvidence | undefined;
-  private transitionMachine: RuntimeEvidenceTransitionMachine | undefined;
+  private loadedEvidence: LoadedRuntimeSessionEvidence | undefined;
   private sessionReadabilityChecked = false;
   private temporaryFilesScavenged = false;
 
@@ -110,6 +114,14 @@ export class FileRuntimeLogStoreState {
   }
 
   readStoredEvidence(): MutableDurableRuntimeSessionEvidence {
+    return this.loadStoredEvidence().evidence;
+  }
+
+  transitionMachine(): RuntimeEvidenceTransitionMachine {
+    return this.loadStoredEvidence().machine;
+  }
+
+  private loadStoredEvidence(): LoadedRuntimeSessionEvidence {
     this.assertSessionReadable();
 
     if (this.writerIsActive() && !this.temporaryFilesScavenged) {
@@ -117,57 +129,41 @@ export class FileRuntimeLogStoreState {
       this.temporaryFilesScavenged = true;
     }
 
-    return this.refreshStoredEvidence();
-  }
-
-  refreshStoredEvidence(): MutableDurableRuntimeSessionEvidence {
     const currentStamps = readRuntimeEvidenceFileStamps(this.paths);
 
     if (
-      this.cachedEvidence !== undefined &&
-      sameRuntimeEvidenceFileStamps(this.cachedEvidence.stamps, currentStamps)
+      this.loadedEvidence !== undefined &&
+      sameRuntimeEvidenceFileStamps(this.loadedEvidence.stamps, currentStamps)
     ) {
-      return this.cachedEvidence.evidence;
+      return this.loadedEvidence;
     }
 
-    const loaded = readCoherentRuntimeSessionEvidence(
+    const loaded = readCoherentRuntimeSessionRecords(
       this.paths,
       this.options.onEvidenceFileRead,
     );
-    this.cachedEvidence = loaded;
-    this.transitionMachine = undefined;
-    return loaded.evidence;
-  }
 
-  ensureTransitionMachine(
-    evidence: MutableDurableRuntimeSessionEvidence,
-  ): RuntimeEvidenceTransitionMachine {
-    if (this.transitionMachine === undefined) {
-      this.options.onEvidenceValidation?.('cold_snapshot');
-      assertDurableRuntimeSessionEvidence({
-        paths: this.paths,
-        evidence,
-        mode: 'public',
-        ...(this.options.boundCharacter === undefined
-          ? {}
-          : {boundCharacter: this.options.boundCharacter}),
-        ...(this.options.boundUserSpeaker === undefined
-          ? {}
-          : {boundUserSpeaker: this.options.boundUserSpeaker}),
-      });
-      this.transitionMachine = createRuntimeEvidenceTransitionMachine({
-        evidence,
-        sessionId: this.paths.sessionId,
-        ...(this.options.boundCharacter === undefined
-          ? {}
-          : {boundCharacter: this.options.boundCharacter}),
-        ...(this.options.boundUserSpeaker === undefined
-          ? {}
-          : {boundUserSpeaker: this.options.boundUserSpeaker}),
-      });
-    }
+    // The stored log is validated the one way anything enters evidence:
+    // by replaying it through the append gate. A file that does not
+    // replay never becomes cached evidence.
+    this.options.onEvidenceValidation?.('cold_snapshot');
+    const replayed = replayRuntimeEvidence({
+      rawEvents: loaded.rawEvents,
+      sessionId: this.paths.sessionId,
+      ...(this.options.boundCharacter === undefined
+        ? {}
+        : {boundCharacter: this.options.boundCharacter}),
+      ...(this.options.boundUserSpeaker === undefined
+        ? {}
+        : {boundUserSpeaker: this.options.boundUserSpeaker}),
+    });
 
-    return this.transitionMachine;
+    this.loadedEvidence = {
+      stamps: loaded.stamps,
+      evidence: replayed.evidence,
+      machine: replayed.machine,
+    };
+    return this.loadedEvidence;
   }
 
   recordIncrementalValidation(): void {
@@ -175,19 +171,18 @@ export class FileRuntimeLogStoreState {
   }
 
   checkpointCachedEvidenceStamps(): void {
-    if (this.cachedEvidence === undefined) {
+    if (this.loadedEvidence === undefined) {
       return;
     }
 
-    this.cachedEvidence = {
-      evidence: this.cachedEvidence.evidence,
+    this.loadedEvidence = {
+      ...this.loadedEvidence,
       stamps: readRuntimeEvidenceFileStamps(this.paths),
     };
   }
 
   invalidateCachedEvidence(): void {
-    this.cachedEvidence = undefined;
-    this.transitionMachine = undefined;
+    this.loadedEvidence = undefined;
   }
 
   private writerIsActive(): boolean {

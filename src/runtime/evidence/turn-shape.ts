@@ -1,10 +1,8 @@
 /**
- * What a valid conversation turn looks like — stated once, applied twice.
- *
- * {@link assertConversationTurnShape} walks a whole store on a cold read;
- * the incremental append path in validation.ts applies the same per-turn
- * rules record by record, so a live writer cannot append what a reopen
- * would reject. Both compositions share the rule functions here.
+ * What a valid conversation turn looks like, stated once. The append
+ * gate in validation.ts applies these rules to every record — a live
+ * append directly, a stored log by replaying it through the same gate —
+ * so a stored file is valid iff it replays.
  */
 import {
   type CharacterDecision,
@@ -17,91 +15,6 @@ import {
 } from '../../core/index.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
-
-/**
- * The one statement of what a valid conversation turn looks like — the
- * exact shape the runtime writer produces and nothing wider:
- *
- *   1. Every message pairs 1:1 with a visible_message_committed raw
- *      event of its own turn identity, and each such event anchors
- *      exactly one message.
- *   2. A turn with messages holds exactly one user message, committed
- *      first; any number of character replies follow it.
- *   3. A character reply's commit event carries the accepted decision
- *      that produced it — named by its decision round — and the
- *      committed text is that decision's visible reply. The user
- *      message's commit event carries no decision.
- *   4. A turn records one model input text: every record that carries
- *      one agrees, and it is the committed user message's text wherever
- *      the turn committed one.
- *
- * Fragmented per-event checks are deliberately folded in here: a store
- * shape the writer cannot produce fails this one gate at first read
- * instead of slipping between scattered assertions.
- */
-export function assertConversationTurnShape(options: {
-  readonly messages: readonly ConversationLogRecord[];
-  readonly rawEvents: readonly RawEventLogRecord[];
-}): void {
-  const commitEventByMessageKey = collectMessageCommitEvents(options.rawEvents);
-
-  for (const message of options.messages) {
-    if (
-      !commitEventByMessageKey.has(
-        visibleMessageEvidenceKey(message, message.id),
-      )
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        `Conversation message lacks its visible_message_committed raw event: ${message.id}.`,
-      );
-    }
-  }
-
-  const messagesByTurnIdentity = groupByTurnIdentity(options.messages);
-
-  // Both terminal kinds enumerate their turn's committed messages;
-  // transcript reconstruction reads prior messages from these references.
-  for (const rawEvent of options.rawEvents.filter(
-    isVisibleMessageTerminalRawEventLogRecord,
-  )) {
-    const expectedMessageIds = (
-      messagesByTurnIdentity.get(runtimeEventIdentityKey(rawEvent)) ?? []
-    ).map(message => message.id);
-
-    if (
-      !sameOrderedValues(rawEvent.visibleMessageIds ?? [], expectedMessageIds)
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
-      );
-    }
-  }
-
-  for (const turnMessages of messagesByTurnIdentity.values()) {
-    assertSingleLeadingUserMessage(turnMessages);
-
-    for (const message of turnMessages) {
-      const commitEvent = commitEventByMessageKey.get(
-        visibleMessageEvidenceKey(message, message.id),
-      );
-
-      if (commitEvent === undefined) {
-        continue;
-      }
-
-      assertVisibleMessageCommitEvidence(message, commitEvent);
-    }
-
-    assertCharacterRowsFollowTheirDecision(
-      turnMessages,
-      commitEventByMessageKey,
-    );
-  }
-
-  assertTurnsRecordOneModelInput(options.rawEvents);
-}
 
 export function assertVisibleMessageCommitEvidence(
   message: ConversationLogRecord,
@@ -119,31 +32,6 @@ export function assertVisibleMessageCommitEvidence(
       'malformed_record',
       `User message commit must not carry model commit validation: ${message.id}.`,
     );
-  }
-}
-
-/**
- * One model input per turn. The visible user row, the payload summary on
- * each record, and the role-model input snapshot all restate what the
- * user said; evidence in which they disagree describes a model answering
- * a message the transcript never showed. The user row participates
- * through its own commit event, which carries its text.
- */
-function assertTurnsRecordOneModelInput(
-  rawEvents: readonly RawEventLogRecord[],
-): void {
-  const textsByIdentity = new Map<string, string[]>();
-
-  for (const rawEvent of rawEvents) {
-    const identityKey = runtimeEventIdentityKey(rawEvent);
-    const texts = textsByIdentity.get(identityKey) ?? [];
-
-    texts.push(...turnModelInputTexts(rawEvent));
-    textsByIdentity.set(identityKey, texts);
-  }
-
-  for (const texts of textsByIdentity.values()) {
-    assertAgreedModelInputText(texts);
   }
 }
 
@@ -176,58 +64,6 @@ export function assertAgreedModelInputText(texts: readonly string[]): void {
       );
     }
   }
-}
-
-function collectMessageCommitEvents(
-  rawEvents: readonly RawEventLogRecord[],
-): ReadonlyMap<string, RawEventLogRecord> {
-  const commitEventByMessageKey = new Map<string, RawEventLogRecord>();
-
-  for (const record of rawEvents) {
-    if (record.kind !== 'visible_message_committed') {
-      continue;
-    }
-
-    const messageIds = record.visibleMessageIds ?? [];
-
-    if (messageIds.length !== 1) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'A visible_message_committed raw event must anchor exactly one conversation message.',
-      );
-    }
-
-    for (const messageId of messageIds) {
-      const key = visibleMessageEvidenceKey(record, messageId);
-
-      if (commitEventByMessageKey.has(key)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Conversation message has more than one visible_message_committed raw event: ${messageId}.`,
-        );
-      }
-
-      commitEventByMessageKey.set(key, record);
-    }
-  }
-
-  return commitEventByMessageKey;
-}
-
-function groupByTurnIdentity(
-  messages: readonly ConversationLogRecord[],
-): ReadonlyMap<string, readonly ConversationLogRecord[]> {
-  const messagesByTurn = new Map<string, ConversationLogRecord[]>();
-
-  for (const message of messages) {
-    const key = runtimeEventIdentityKey(message);
-    const turnMessages = messagesByTurn.get(key) ?? [];
-
-    turnMessages.push(message);
-    messagesByTurn.set(key, turnMessages);
-  }
-
-  return messagesByTurn;
 }
 
 export function assertSingleLeadingUserMessage(
@@ -362,15 +198,6 @@ function assertCharacterCommitCarriesItsDecision(
       `Character message text must match the accepted reply its commit anchored: ${message.id}.`,
     );
   }
-}
-
-function isVisibleMessageTerminalRawEventLogRecord(
-  record: RawEventLogRecord,
-): boolean {
-  return (
-    record.kind === 'runtime_turn_completed' ||
-    record.kind === 'runtime_turn_rejected'
-  );
 }
 
 export function visibleMessageEvidenceKey(

@@ -16,6 +16,7 @@ import {
   assertIncrementalRawEventAppend,
   createRuntimeEvidenceIncrementalState,
 } from './validation.ts';
+import {roleModelCharacterSnapshot} from './identity.ts';
 
 export type RuntimeEvidenceTransitionMachine = {
   readonly state: RuntimeEvidenceIncrementalState;
@@ -38,6 +39,44 @@ export type RuntimeEvidenceTransitionMachine = {
     expectedCharacter?: CharacterProfile,
   ): void;
 };
+
+/**
+ * The one gate, applied to a stored log: a log is valid iff it replays
+ * record by record through the same assert-then-apply a live append
+ * runs. A log a crash cut short replays fewer records — that is the
+ * crash contract — while a record no valid append could have produced
+ * fails exactly as it would have failed to append.
+ */
+export function replayRuntimeEvidence(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly sessionId?: string;
+  readonly boundCharacter?: CharacterProfile;
+  readonly boundUserSpeaker?: SpeakerIdentity;
+}): {
+  readonly evidence: MutableDurableRuntimeSessionEvidence;
+  readonly machine: RuntimeEvidenceTransitionMachine;
+} {
+  const evidence: MutableDurableRuntimeSessionEvidence = {
+    rawEvents: [],
+    conversationMessages: [],
+  };
+  const machine = createRuntimeEvidenceTransitionMachine({
+    evidence,
+    ...(options.sessionId === undefined ? {} : {sessionId: options.sessionId}),
+    ...(options.boundCharacter === undefined
+      ? {}
+      : {boundCharacter: options.boundCharacter}),
+    ...(options.boundUserSpeaker === undefined
+      ? {}
+      : {boundUserSpeaker: options.boundUserSpeaker}),
+  });
+
+  for (const record of options.rawEvents) {
+    machine.commitRawEventAppend(record);
+  }
+
+  return {evidence, machine};
+}
 
 export function createRuntimeEvidenceTransitionMachine(options: {
   readonly evidence: MutableDurableRuntimeSessionEvidence;
@@ -67,6 +106,8 @@ export function createRuntimeEvidenceTransitionMachine(options: {
     const message = conversationMessageForRawEvent(record);
 
     if (message !== undefined) {
+      const recordCharacter = roleModelCharacterSnapshot(record);
+
       assertIncrementalConversationAppend({
         evidence: options.evidence,
         state,
@@ -75,6 +116,7 @@ export function createRuntimeEvidenceTransitionMachine(options: {
           ? {}
           : {sessionId: options.sessionId}),
         ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
+        ...(recordCharacter === undefined ? {} : {recordCharacter}),
       });
     }
   }

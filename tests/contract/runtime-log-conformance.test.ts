@@ -283,6 +283,27 @@ const rejectedScenarios = [
       });
     },
   },
+  {
+    name: 'rejects a user row whose text is not normalized',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [`${currentSessionId}:message-1`],
+        visibleMessage: {
+          id: `${currentSessionId}:message-1`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: '  padded  ',
+        },
+        committedAt: '2026-07-16T00:00:01.000Z',
+      });
+    },
+  },
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
 const readScenarios = [

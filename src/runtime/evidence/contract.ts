@@ -8,11 +8,6 @@ import type {LocalRuntimeSessionPaths} from '../storage/layout-contract.ts';
 import type {LocalRuntimeMutationLockOwnerToken} from '../storage/mutation-lock.ts';
 import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
 
-export type RuntimeLogReadMode = 'append' | 'public' | 'publicDecode';
-
-export type RuntimeLogValidationMode =
-  'appendConversation' | 'appendRawEvent' | 'public';
-
 export type DurableRuntimeSessionEvidence = {
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly conversationMessages: readonly ConversationLogRecord[];
@@ -36,11 +31,6 @@ export type RuntimeEvidenceFileStamp =
 
 export type RuntimeEvidenceFileStamps = {
   readonly rawEvents: RuntimeEvidenceFileStamp;
-};
-
-export type CachedRuntimeSessionEvidence = {
-  readonly stamps: RuntimeEvidenceFileStamps;
-  readonly evidence: MutableDurableRuntimeSessionEvidence;
 };
 
 export type RuntimeEvidenceIncrementalState = {
