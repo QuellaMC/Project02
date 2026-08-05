@@ -4,6 +4,7 @@ import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {deriveRuntimeTraceEntries} from '../../src/runtime/evidence/trace-projection.ts';
 
 import {
   createFileRuntimeLogStore,
@@ -1496,6 +1497,22 @@ describe('file runtime log store plugin tool event validation', () => {
       'after restart',
       expect.stringContaining('I can use:'),
     ]);
+  });
+
+  it('derives the whole trace from the event log, byte for byte', async () => {
+    // The proof that trace.jsonl carries nothing: for a turn with tool
+    // calls, several commits and a terminal record, the derivation and the
+    // written file agree entry for entry. A second file could only repeat
+    // this or disagree with it.
+    const {paths} = await committedTurnRawLines(
+      'session-derived-trace',
+      createRepeatedRoundAdapter(),
+    );
+    const store = reopenStore(paths);
+
+    expect(deriveRuntimeTraceEntries(store.rawEvents())).toEqual(
+      store.traceEntries(),
+    );
   });
 
   it('reads back two rounds of one turn that said exactly the same thing', async () => {
