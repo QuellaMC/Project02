@@ -102,6 +102,7 @@ export type LocalRuntimeUserMessageInputRejectedResult = {
   readonly reason: 'input_validation_rejected';
   readonly message: string;
   readonly rawEvent: RawEventLogRecord;
+  readonly rawEventLogRecords: readonly RawEventLogRecord[];
 };
 
 export type LocalRuntimeUserMessageResult =

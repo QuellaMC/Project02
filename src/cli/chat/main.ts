@@ -1142,9 +1142,10 @@ function mapInputRejectionResult(
     traceSummary: createTraceSummary(
       result.identity,
       'rejected',
-      deriveRuntimeTraceEntries([result.rawEvent]),
+      deriveRuntimeTraceEntries(result.rawEventLogRecords),
       result.message,
       result.rawEvent,
+      result.rawEventLogRecords,
     ),
   };
 }

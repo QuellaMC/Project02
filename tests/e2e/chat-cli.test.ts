@@ -147,6 +147,42 @@ describe('chat CLI trace summary', () => {
     });
   });
 
+  it('traces every appended record for rejected user input', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
+      pluginHost: createDefaultProject02PluginHost(),
+      // A whitespace-only line reaches the runtime and fails input
+      // validation before any model call.
+      stdin: Readable.from(['   \n', '/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter: {
+        invoke() {
+          throw new Error('rejected input must never reach the model');
+        },
+      },
+    });
+
+    expect(exitCode).toBe(0);
+
+    // The rejection helper appends three records; the operator trace
+    // shows all of them, including the validation step that names why
+    // the turn ended.
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      steps: [
+        'runtime_event_received',
+        'input_validation_rejected',
+        'raw_event_log_appended',
+        'runtime_turn_rejected',
+      ],
+    });
+  });
+
   it('does not classify an interrupted executable round as terminal', async () => {
     let adapterRound = 0;
     let stderr = '';
