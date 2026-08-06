@@ -9,9 +9,7 @@ import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.t
 import {
   visibleReplyModelToolName,
   type ModelToolCall,
-  type ModelToolInputContract,
 } from '../api/model-tools.ts';
-import {validateModelToolInputAgainstContract} from '../api/model-tool-input-validation.ts';
 import type {
   RoleModelAssistantChatMessage,
   RoleModelChatCompletionTool,
@@ -120,12 +118,6 @@ type NvidiaProviderErrorCode =
   | 'provider_error'
   | 'request_timeout';
 
-const nvidiaNativeToolArgumentsContract = Object.freeze({
-  type: 'object',
-  properties: Object.freeze({}),
-  required: Object.freeze([]),
-  additionalProperties: true,
-} satisfies ModelToolInputContract);
 const terminalNvidiaFinishReasons = Object.freeze(['stop', 'tool_calls']);
 
 export function createNvidiaRoleModelProviderConfigFromEnv(
@@ -1158,22 +1150,9 @@ function parseNvidiaToolCallArguments(options: {
     );
   }
 
-  const validatedInput = validateModelToolInputAgainstContract({
-    toolName: options.runtimeToolName,
-    input: parsed,
-    inputContract: nvidiaNativeToolArgumentsContract,
-  });
-
-  if (validatedInput.status === 'rejected') {
-    return rejectResponse(
-      'malformed_response',
-      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must contain JSON-compatible finite values: ${validatedInput.details}`,
-    );
-  }
-
   return Object.freeze({
     status: 'accepted',
-    input: createJsonBoundaryObjectSnapshot(validatedInput.input, {
+    input: createJsonBoundaryObjectSnapshot(parsed, {
       field: `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments`,
     }),
   } satisfies ParsedNvidiaToolCallArguments);

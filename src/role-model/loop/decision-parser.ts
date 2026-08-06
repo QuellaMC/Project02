@@ -9,7 +9,6 @@ import {
   type ModelToolCall,
   type VisibleReplyModelToolCall,
 } from '../api/model-tools.ts';
-import {validateModelToolInputAgainstContract} from '../api/model-tool-input-validation.ts';
 import {
   isRoleModelToolNameSyntax,
   roleModelAllowedToolNames,
@@ -290,33 +289,14 @@ function parseModelToolCall(options: {
     );
   }
 
-  const jsonInputValidation = validateModelToolInputAgainstContract({
-    toolName: name,
-    input,
-    inputContract: {
-      type: 'object',
-      properties: {},
-      required: [],
-      additionalProperties: true,
-    },
-  });
-
-  if (jsonInputValidation.status === 'rejected') {
-    return rejectToolCall(jsonInputValidation.details);
-  }
-
+  // The plugin's own contract is checked by the host; here the call only
+  // has to cross the JSON boundary, which the freeze below does.
   return {
     status: 'accepted',
     toolCall:
       options.boundary === 'execution'
-        ? freezeExecutionModelToolCall({
-            name,
-            input: jsonInputValidation.input,
-          })
-        : freezeModelToolCall({
-            name,
-            input: jsonInputValidation.input,
-          }),
+        ? freezeExecutionModelToolCall({name, input})
+        : freezeModelToolCall({name, input}),
   };
 }
 

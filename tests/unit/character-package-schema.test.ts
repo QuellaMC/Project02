@@ -232,13 +232,6 @@ describe('character package descriptor schema parity', () => {
       },
     ],
     [
-      'non-finite numbers',
-      () => ({
-        ...validDescriptor(),
-        plugins: {config: {'demo-config': {temperature: Number.NaN}}},
-      }),
-    ],
-    [
       'excessive nesting',
       () => {
         let nested: Record<string, unknown> = {value: true};

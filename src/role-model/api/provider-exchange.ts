@@ -422,23 +422,19 @@ function freezeProviderExchangeTool(
   } satisfies RoleModelChatCompletionTool);
 }
 
+function recordableMetadataNumber(
+  value: number | undefined,
+): number | undefined {
+  return value !== undefined && Number.isFinite(value) ? value : undefined;
+}
+
 export function freezeProviderMetadata(
   metadata: RoleModelProviderMetadata,
 ): RoleModelProviderMetadata {
-  const messageCount =
-    metadata.request?.messageCount === undefined
-      ? undefined
-      : finiteProviderMetadataNumber(
-          metadata.request.messageCount,
-          'providerMetadata.request.messageCount',
-        );
-  const status =
-    metadata.response?.status === undefined
-      ? undefined
-      : finiteProviderMetadataNumber(
-          metadata.response.status,
-          'providerMetadata.response.status',
-        );
+  // A count JSON cannot carry is not a count. Dropping the field records
+  // that we have none, rather than a number that would read back as null.
+  const messageCount = recordableMetadataNumber(metadata.request?.messageCount);
+  const status = recordableMetadataNumber(metadata.response?.status);
 
   return Object.freeze({
     provider: metadata.provider,
@@ -470,14 +466,6 @@ export function freezeProviderMetadata(
           }),
         }),
   } satisfies RoleModelProviderMetadata);
-}
-
-function finiteProviderMetadataNumber(value: number, field: string): number {
-  if (!Number.isFinite(value)) {
-    throw new TypeError(`${field} must be finite JSON.`);
-  }
-
-  return value;
 }
 
 function freezeRuntimePluginJsonObject(

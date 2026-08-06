@@ -2,14 +2,17 @@
  * Model tool input validation: checks a proposed tool call's input
  * against the tool's declared JSON Schema input contract before the call
  * may commit.
+ *
+ * The shape decision belongs to Ajv — the contract is ordinary JSON
+ * Schema, and a hand-written walker for it was a second implementation
+ * of a solved problem. What stays here is what Ajv does not answer:
+ * whether the value survives the JSON boundary, and how a failure is
+ * phrased, because rejection details are fed back to the model as its
+ * correction note.
  */
+import {Ajv, type ErrorObject, type ValidateFunction} from 'ajv';
 import {isJsonRecord} from '../../shared/json-boundary.ts';
-import {
-  isModelToolJsonSchemaTypeArray,
-  type ModelToolInputContract,
-  type ModelToolJsonSchema,
-  type ModelToolJsonSchemaType,
-} from './model-tools.ts';
+import {type ModelToolInputContract} from './model-tools.ts';
 
 export type ModelToolInputValidationResult =
   | {
@@ -21,20 +24,33 @@ export type ModelToolInputValidationResult =
       readonly details: string;
     };
 
+// Schemas reach Ajv already meta-validated by the plugin manifest gate,
+// which enforces a narrower keyword set than Ajv's strict mode would.
+// Union types are part of that set.
+const ajv = new Ajv({allErrors: true, strict: false, allowUnionTypes: true});
+
+// Contracts are frozen and long-lived, so one compile per contract lasts
+// the session rather than one per tool call.
+const compiledContracts = new WeakMap<
+  ModelToolInputContract,
+  ValidateFunction
+>();
+
 export function validateModelToolInputAgainstContract(options: {
   readonly toolName: string;
   readonly input: Readonly<Record<string, unknown>>;
   readonly inputContract: ModelToolInputContract;
 }): ModelToolInputValidationResult {
-  const schemaValidation = validateModelToolInputAgainstJsonSchema({
-    toolName: options.toolName,
-    value: options.input,
-    schema: options.inputContract,
-    fieldPath: '',
-  });
+  const validate = compiledContractValidator(options.inputContract);
 
-  if (schemaValidation !== undefined) {
-    return rejectModelToolInput(schemaValidation);
+  if (!validate(options.input)) {
+    return rejectModelToolInput(
+      modelToolInputRejectionDetails({
+        toolName: options.toolName,
+        input: options.input,
+        errors: validate.errors ?? [],
+      }),
+    );
   }
 
   return Object.freeze({
@@ -43,230 +59,146 @@ export function validateModelToolInputAgainstContract(options: {
   } satisfies ModelToolInputValidationResult);
 }
 
+function compiledContractValidator(
+  inputContract: ModelToolInputContract,
+): ValidateFunction {
+  const compiled = compiledContracts.get(inputContract);
+
+  if (compiled !== undefined) {
+    return compiled;
+  }
+
+  // Ajv annotates the schema object it is given, and a contract is
+  // frozen, so it compiles from a structural copy.
+  const validate = ajv.compile(structuredClone(inputContract));
+  compiledContracts.set(inputContract, validate);
+  return validate;
+}
+
+/**
+ * The first failure, phrased for the model. Ajv reports every failure;
+ * the model can only act on one at a time, and the order below is the
+ * order a reader would notice them: a missing field before an unexpected
+ * one, either before a value that is merely the wrong shape.
+ */
+function modelToolInputRejectionDetails(options: {
+  readonly toolName: string;
+  readonly input: Readonly<Record<string, unknown>>;
+  readonly errors: readonly ErrorObject[];
+}): string {
+  const missing = options.errors.find(error => error.keyword === 'required');
+
+  if (missing !== undefined) {
+    return `${options.toolName} input missing required field "${fieldPathFor(
+      missing.instancePath,
+      requiredPropertyName(missing),
+    )}".`;
+  }
+
+  const unsupported = options.errors.filter(
+    error => error.keyword === 'additionalProperties',
+  );
+
+  if (unsupported.length > 0) {
+    return `${options.toolName} input includes unsupported fields: ${unsupported
+      .map(error =>
+        fieldPathFor(error.instancePath, additionalPropertyName(error)),
+      )
+      .join(', ')}.`;
+  }
+
+  const first = options.errors[0];
+
+  if (first === undefined) {
+    return `${options.toolName} input does not match its declared contract.`;
+  }
+
+  return `${options.toolName} input field "${fieldPathFor(
+    first.instancePath,
+  )}" ${describeExpectation(first)}.`;
+}
+
+function describeExpectation(error: ErrorObject): string {
+  if (error.keyword === 'enum') {
+    const allowed = enumValues(error);
+
+    return allowed.length > 0
+      ? `must be one of: ${allowed.join(', ')}`
+      : 'must be an allowed value';
+  }
+
+  if (error.keyword === 'type') {
+    return `must be ${schemaTypeNames(error).join(' or ')}`;
+  }
+
+  return error.message ?? 'is not valid';
+}
+
+function requiredPropertyName(error: ErrorObject): string | undefined {
+  const params: unknown = error.params;
+
+  return isJsonRecord(params) && typeof params['missingProperty'] === 'string'
+    ? params['missingProperty']
+    : undefined;
+}
+
+function additionalPropertyName(error: ErrorObject): string | undefined {
+  const params: unknown = error.params;
+
+  return isJsonRecord(params) &&
+    typeof params['additionalProperty'] === 'string'
+    ? params['additionalProperty']
+    : undefined;
+}
+
+function enumValues(error: ErrorObject): readonly string[] {
+  const params: unknown = error.params;
+  const allowed = isJsonRecord(params) ? params['allowedValues'] : undefined;
+
+  return Array.isArray(allowed) ? allowed.map(value => String(value)) : [];
+}
+
+function schemaTypeNames(error: ErrorObject): readonly string[] {
+  const schema: unknown = error.schema;
+
+  if (Array.isArray(schema)) {
+    return schema.map(value => String(value));
+  }
+
+  return typeof schema === 'string' ? [schema] : ['valid'];
+}
+
+/**
+ * Ajv reports `/memory/tags/0`; the model was shown `memory.tags[0]`.
+ * The root is `$` so a whole-input failure still names something.
+ */
+function fieldPathFor(instancePath: string, property?: string): string {
+  const segments = instancePath
+    .split('/')
+    .filter(segment => segment.length > 0);
+
+  if (property !== undefined) {
+    segments.push(property);
+  }
+
+  const path = segments.reduce(
+    (joined, segment) =>
+      /^\d+$/u.test(segment)
+        ? `${joined}[${segment}]`
+        : joined.length === 0
+          ? segment
+          : `${joined}.${segment}`,
+    '',
+  );
+
+  return path.length === 0 ? '$' : path;
+}
+
 function rejectModelToolInput(details: string): ModelToolInputValidationResult {
   return Object.freeze({
     status: 'rejected',
     details,
   } satisfies ModelToolInputValidationResult);
-}
-
-function validateModelToolInputJsonValue(options: {
-  readonly toolName: string;
-  readonly fieldPath: string;
-  readonly value: unknown;
-}): string | undefined {
-  if (
-    options.value === null ||
-    typeof options.value === 'string' ||
-    typeof options.value === 'boolean'
-  ) {
-    return undefined;
-  }
-
-  if (typeof options.value === 'number') {
-    if (Number.isFinite(options.value)) {
-      return undefined;
-    }
-
-    return `${options.toolName} input field "${options.fieldPath}" must be finite JSON.`;
-  }
-
-  if (Array.isArray(options.value)) {
-    for (const [index, item] of options.value.entries()) {
-      const result = validateModelToolInputJsonValue({
-        toolName: options.toolName,
-        fieldPath: `${options.fieldPath}[${String(index)}]`,
-        value: item,
-      });
-
-      if (result !== undefined) {
-        return result;
-      }
-    }
-
-    return undefined;
-  }
-
-  if (isJsonRecord(options.value)) {
-    for (const [key, item] of Object.entries(options.value)) {
-      const result = validateModelToolInputJsonValue({
-        toolName: options.toolName,
-        fieldPath: `${options.fieldPath}.${key}`,
-        value: item,
-      });
-
-      if (result !== undefined) {
-        return result;
-      }
-    }
-
-    return undefined;
-  }
-
-  return `${options.toolName} input field "${options.fieldPath}" must be JSON serializable.`;
-}
-
-function validateModelToolInputAgainstJsonSchema(options: {
-  readonly toolName: string;
-  readonly value: unknown;
-  readonly schema: ModelToolJsonSchema;
-  readonly fieldPath: string;
-}): string | undefined {
-  const typeError = validateJsonSchemaType({
-    toolName: options.toolName,
-    value: options.value,
-    schema: options.schema,
-    fieldPath: options.fieldPath,
-  });
-
-  if (typeError !== undefined) {
-    return typeError;
-  }
-
-  if (
-    options.schema.enum !== undefined &&
-    (typeof options.value !== 'string' ||
-      !options.schema.enum.includes(options.value))
-  ) {
-    return `${options.toolName} input field "${displayFieldPath(options.fieldPath)}" must be one of: ${options.schema.enum.join(', ')}.`;
-  }
-
-  if (Array.isArray(options.value)) {
-    if (options.schema.items === undefined) {
-      return validateModelToolInputJsonValue({
-        toolName: options.toolName,
-        fieldPath: displayFieldPath(options.fieldPath),
-        value: options.value,
-      });
-    }
-
-    for (const [index, item] of options.value.entries()) {
-      const itemError = validateModelToolInputAgainstJsonSchema({
-        toolName: options.toolName,
-        value: item,
-        schema: options.schema.items,
-        fieldPath: `${options.fieldPath}[${String(index)}]`,
-      });
-
-      if (itemError !== undefined) {
-        return itemError;
-      }
-    }
-
-    return undefined;
-  }
-
-  if (isJsonRecord(options.value)) {
-    const properties = options.schema.properties ?? {};
-    const required = options.schema.required ?? [];
-
-    for (const field of required) {
-      if (options.value[field] === undefined) {
-        return `${options.toolName} input missing required field "${displayFieldPath(
-          appendFieldPath(options.fieldPath, field),
-        )}".`;
-      }
-    }
-
-    if (options.schema.additionalProperties === false) {
-      const unsupportedKeys = Object.keys(options.value).filter(
-        key => properties[key] === undefined,
-      );
-
-      if (unsupportedKeys.length > 0) {
-        return `${options.toolName} input includes unsupported fields: ${unsupportedKeys
-          .map(key => displayFieldPath(appendFieldPath(options.fieldPath, key)))
-          .join(', ')}.`;
-      }
-    }
-
-    for (const [field, schema] of Object.entries(properties)) {
-      const childValue = options.value[field];
-
-      if (childValue === undefined) {
-        continue;
-      }
-
-      const childError = validateModelToolInputAgainstJsonSchema({
-        toolName: options.toolName,
-        value: childValue,
-        schema,
-        fieldPath: appendFieldPath(options.fieldPath, field),
-      });
-
-      if (childError !== undefined) {
-        return childError;
-      }
-    }
-  }
-
-  return validateModelToolInputJsonValue({
-    toolName: options.toolName,
-    fieldPath: displayFieldPath(options.fieldPath),
-    value: options.value,
-  });
-}
-
-function validateJsonSchemaType(options: {
-  readonly toolName: string;
-  readonly value: unknown;
-  readonly schema: ModelToolJsonSchema;
-  readonly fieldPath: string;
-}): string | undefined {
-  const schemaType = options.schema.type;
-
-  if (schemaType === undefined) {
-    return undefined;
-  }
-
-  const types = modelToolJsonSchemaTypes(schemaType);
-
-  if (types.some(type => jsonValueMatchesSchemaType(options.value, type))) {
-    return undefined;
-  }
-
-  return `${options.toolName} input field "${displayFieldPath(
-    options.fieldPath,
-  )}" must be ${types.join(' or ')}.`;
-}
-
-function jsonValueMatchesSchemaType(
-  value: unknown,
-  type: ModelToolJsonSchemaType,
-): boolean {
-  if (type === 'array') {
-    return Array.isArray(value);
-  }
-
-  if (type === 'object') {
-    return isJsonRecord(value);
-  }
-
-  if (type === 'number') {
-    return typeof value === 'number' && Number.isFinite(value);
-  }
-
-  if (type === 'null') {
-    return value === null;
-  }
-
-  return typeof value === type;
-}
-
-function modelToolJsonSchemaTypes(
-  type: NonNullable<ModelToolJsonSchema['type']>,
-): readonly ModelToolJsonSchemaType[] {
-  return isModelToolJsonSchemaTypeArray(type)
-    ? Object.freeze([...type])
-    : Object.freeze([type]);
-}
-
-function appendFieldPath(path: string, field: string): string {
-  return path.length === 0 ? field : `${path}.${field}`;
-}
-
-function displayFieldPath(path: string): string {
-  return path.length === 0 ? '$' : path;
 }
 
 function freezeJsonRecord(

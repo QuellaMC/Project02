@@ -315,7 +315,7 @@ describe('role-model loop evidence and boundary validation', () => {
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
   ])(
-    'rejects non-finite %s accepted plugin tool output from custom hosts',
+    'normalizes non-finite %s in accepted plugin tool output from custom hosts',
     async (label, outputValue) => {
       let invocations = 0;
       let handledCalls = 0;
@@ -380,9 +380,8 @@ describe('role-model loop evidence and boundary validation', () => {
       expect(result.pluginToolResults[0]).toMatchObject({
         callId: `${eventId}.trace_${eventId}.round-1.1.memory.search`,
         result: {
-          status: 'rejected',
-          reason: 'invalid_tool_output',
-          message: 'Plugin tool output must be finite JSON.',
+          status: 'accepted',
+          output: {score: null},
         },
       });
       expect(result.rounds).toHaveLength(2);
@@ -781,7 +780,7 @@ describe('role-model loop evidence and boundary validation', () => {
     ).toBe(true);
   });
 
-  it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
+  it('drops a non-finite provider request count from the snapshot', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_request'),
@@ -798,18 +797,12 @@ describe('role-model loop evidence and boundary validation', () => {
       ),
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: 'providerMetadata.request.messageCount must be finite JSON.',
-      },
-    });
-    expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
+    expect(result.ioSnapshot.providerMetadata?.request).not.toHaveProperty(
+      'messageCount',
+    );
   });
 
-  it('rejects non-finite provider response metadata before snapshots can serialize it', async () => {
+  it('drops a non-finite provider response status from the snapshot', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_response'),
@@ -825,15 +818,9 @@ describe('role-model loop evidence and boundary validation', () => {
       ),
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: 'providerMetadata.response.status must be finite JSON.',
-      },
-    });
-    expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
+    expect(result.ioSnapshot.providerMetadata?.response).not.toHaveProperty(
+      'status',
+    );
   });
 
   it('rejects malformed provider exchange evidence at the adapter boundary', async () => {

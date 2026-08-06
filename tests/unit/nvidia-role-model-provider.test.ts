@@ -1301,7 +1301,7 @@ describe('NVIDIA role-model provider', () => {
     expect(rawDecision).not.toHaveProperty('text');
   });
 
-  it('surfaces non-finite native tool arguments as tool-call argument errors', async () => {
+  it('carries a non-finite native tool argument through as null', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
         ok: true,
@@ -1342,27 +1342,20 @@ describe('NVIDIA role-model provider', () => {
       turnContext: renderRoleModelTurnContext(inputEnvelope),
     });
 
+    // The provider sent 1e999-style arithmetic; JSON has no value for it,
+    // so the argument reaches the loop as the null it would be written as.
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
         {
           name: 'runtime.plugin.list',
-          input: {},
+          input: {score: null},
         },
       ],
     });
     expect(output.rejection).toBeUndefined();
-    expect(output.nativeToolCallArgumentErrors).toEqual([
-      {
-        executableIndex: 0,
-        toolName: 'runtime.plugin.list',
-        reason: 'invalid_native_tool_arguments',
-        message:
-          'NVIDIA response message.tool_calls[0].function.arguments must contain JSON-compatible finite values: runtime.plugin.list input field "$.score" must be finite JSON.',
-      },
-    ]);
+    expect(output.nativeToolCallArgumentErrors).toBeUndefined();
     expect(output.providerMetadata?.error).toBeUndefined();
     expect(output.providerMetadata?.response?.status).toBe(200);
-    expect(output.rawOutputText).not.toContain('null');
   });
 });
 

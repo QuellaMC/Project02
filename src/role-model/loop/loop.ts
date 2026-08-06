@@ -1255,12 +1255,6 @@ function freezeRuntimePluginToolCallResult(
   try {
     boundedResult = createRuntimePluginToolCallResultSnapshot(result);
   } catch (error: unknown) {
-    if (error instanceof TypeError && error.message.includes('finite JSON')) {
-      throw new TypeError('Plugin tool output must be finite JSON.', {
-        cause: error,
-      });
-    }
-
     if (
       error instanceof TypeError &&
       error.message.includes('JSON serializable')

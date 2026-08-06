@@ -54,26 +54,31 @@ describe('role-model contracts', () => {
     ['input', Number.NaN],
     ['output', Number.POSITIVE_INFINITY],
   ] as const)(
-    'rejects non-finite tool observation %s at the public constructor',
+    'normalizes a non-finite tool observation %s to null',
     (surface, nonFiniteValue) => {
-      expect(() =>
-        createRoleModelToolObservation({
-          round: 1,
-          pluginId: 'memory',
-          toolName: 'memory.search',
-          input: {
-            query: 'Mira',
-            ...(surface === 'input' ? {score: nonFiniteValue} : {}),
-          },
-          result: {
-            status: 'accepted',
-            output:
-              surface === 'output'
-                ? {score: nonFiniteValue}
-                : {summary: 'found'},
-          },
-        }),
-      ).toThrow('must be finite JSON.');
+      const observation = createRoleModelToolObservation({
+        round: 1,
+        pluginId: 'memory',
+        toolName: 'memory.search',
+        input: {
+          query: 'Mira',
+          ...(surface === 'input' ? {score: nonFiniteValue} : {}),
+        },
+        result: {
+          status: 'accepted',
+          output:
+            surface === 'output' ? {score: nonFiniteValue} : {summary: 'found'},
+        },
+      });
+
+      const recorded =
+        surface === 'input'
+          ? observation.input
+          : observation.result.status === 'accepted'
+            ? observation.result.output
+            : undefined;
+
+      expect(recorded).toMatchObject({score: null});
     },
   );
 
@@ -82,8 +87,6 @@ describe('role-model contracts', () => {
     'Role-model adapter provider exchange is malformed.',
     'Adapter rejection must be replayable from rawOutputText.',
     'Role-model adapter native tool-call argument errors are malformed.',
-    'providerMetadata.request.messageCount must be finite JSON.',
-    'providerMetadata.response.status must be finite JSON.',
   ])('replays malformed adapter evidence detail %s', details => {
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
