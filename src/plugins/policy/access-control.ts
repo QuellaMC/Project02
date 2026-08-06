@@ -10,6 +10,7 @@ import type {RuntimePlugin} from '../api/types.ts';
 import {assertUniqueRuntimePluginIds} from '../api/identity.ts';
 import {isRecord} from '../api/validation-primitives.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {isOneOf} from '../../shared/one-of.ts';
 
 export type RuntimePluginAccessMapByPluginId = Readonly<
   Record<string, RuntimePluginAccessSnapshot>
@@ -181,16 +182,6 @@ export function normalizeRuntimePluginAccessMap(
   }
 
   return Object.freeze(accessMap);
-}
-
-function isOneOf<T extends string>(
-  value: unknown,
-  allowedValues: readonly T[],
-): value is T {
-  return (
-    typeof value === 'string' &&
-    allowedValues.some(allowedValue => allowedValue === value)
-  );
 }
 
 /**

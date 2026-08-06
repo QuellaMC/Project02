@@ -1,3 +1,6 @@
+import {isOneOf} from '../../shared/one-of.ts';
+
+export {isOneOf};
 import {
   createRuntimeEventIdentitySnapshot,
   normalizeVisibleMessageText,
@@ -144,13 +147,6 @@ function requiredVisibleMessageRole(value: unknown): VisibleMessageRole {
   }
 
   throwMalformedRecord('role');
-}
-
-export function isOneOf<const T extends string>(
-  value: unknown,
-  allowedValues: readonly T[],
-): value is T {
-  return typeof value === 'string' && allowedValues.includes(value as T);
 }
 
 export function throwMalformedRecord(field: string): never {

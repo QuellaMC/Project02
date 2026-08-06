@@ -8,7 +8,6 @@ import {
   roleModelDecisionRejectionReasons,
   roleModelMalformedOutputRejectionReason,
   type RoleModelDecisionRejection,
-  type RoleModelDecisionRejectionReason,
   type RoleModelMalformedAdapterRawOutputDetails,
   type RoleModelPluginToolDefinition,
   type RoleModelProviderExchangeSnapshot,
@@ -19,6 +18,7 @@ import {
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
 import {normalizeReplayableRejectedRoleModelDecisionResult} from './replay-evidence.ts';
 import {isJsonRecord} from '../../shared/json-boundary.ts';
+import {isOneOf} from '../../shared/one-of.ts';
 import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
 import type {RoleModelNativeToolCallArgumentError} from '../api/adapter.ts';
 import type {
@@ -461,7 +461,7 @@ function optionalRoleModelDecisionRejection(
   const reason = value['reason'];
   const details = value['details'];
 
-  if (!isRoleModelDecisionRejectionReason(reason)) {
+  if (!isOneOf(reason, roleModelDecisionRejectionReasons)) {
     return undefined;
   }
 
@@ -469,15 +469,4 @@ function optionalRoleModelDecisionRejection(
     reason,
     ...(typeof details === 'string' ? {details: details} : {}),
   } satisfies RoleModelDecisionRejection);
-}
-
-function isRoleModelDecisionRejectionReason(
-  value: unknown,
-): value is RoleModelDecisionRejectionReason {
-  return (
-    typeof value === 'string' &&
-    roleModelDecisionRejectionReasons.includes(
-      value as RoleModelDecisionRejectionReason,
-    )
-  );
 }
