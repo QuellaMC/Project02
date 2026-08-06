@@ -10,7 +10,6 @@ import {
 } from '../../core/index.ts';
 import {
   createAcceptedRoleModelDecisionResult,
-  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
@@ -22,7 +21,6 @@ import {
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
-  normalizeReplayableRejectedRoleModelDecisionResult,
   parseRoleModelProviderExchangeSnapshot,
   roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
@@ -68,7 +66,6 @@ import {
   type RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
 import {
-  characterStatePatchModelToolName,
   runtimePluginEvidenceKindValues,
   runtimePluginEvidenceStatusValues,
   runtimePluginPolicyOutcomeValues,
@@ -117,21 +114,6 @@ const commitOwnedRoleModelRejectionReasons = [
   roleModelCommitValidationFailureRejectionReason,
 ] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
-const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
-  pluginId: 'character-state',
-  name: characterStatePatchModelToolName,
-  description:
-    'Legacy schema 1 compatibility definition for persisted character_state.patch evidence.',
-  inputContract: {
-    type: 'object',
-    fields: [],
-    additionalFields: true,
-  },
-  validationOwner: 'plugin_host',
-  concurrency: 'exclusive',
-  requiresConfirmation: false,
-} satisfies RoleModelPluginToolDefinition);
-
 export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
   return JSON.stringify(record);
 }
@@ -174,15 +156,10 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const roleModelIOSnapshot = optionalRoleModelIOSnapshot(
     record['roleModelIOSnapshot'],
   );
-  const decodedParsedRoleModelDecisionSnapshot =
+  const parsedRoleModelDecisionSnapshot =
     optionalParsedRoleModelDecisionSnapshot(
       record['parsedRoleModelDecisionSnapshot'],
     );
-  const parsedRoleModelDecisionSnapshot =
-    normalizeLegacyRejectedDecisionRequestedToolNames({
-      roleModelIOSnapshot,
-      parsedRoleModelDecisionSnapshot: decodedParsedRoleModelDecisionSnapshot,
-    });
   const commitValidation = optionalRoleModelCommitValidationSnapshot(
     record['commitValidation'],
   );
@@ -993,50 +970,6 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   });
 }
 
-function normalizeLegacyRejectedDecisionRequestedToolNames(options: {
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
-  readonly parsedRoleModelDecisionSnapshot:
-    ParsedRoleModelDecisionSnapshot | undefined;
-}): ParsedRoleModelDecisionSnapshot | undefined {
-  const roleModelIOSnapshot = options.roleModelIOSnapshot;
-  const parsedSnapshot = options.parsedRoleModelDecisionSnapshot;
-  const storedResult = parsedSnapshot?.result;
-
-  if (
-    roleModelIOSnapshot === undefined ||
-    parsedSnapshot === undefined ||
-    storedResult?.status !== 'rejected' ||
-    storedResult.requestedToolNames !== undefined
-  ) {
-    return parsedSnapshot;
-  }
-
-  const normalizedResult = normalizeReplayableRejectedRoleModelDecisionResult({
-    rawOutputText: roleModelIOSnapshot.rawOutputText,
-    providerMetadata: roleModelIOSnapshot.providerMetadata,
-    decisionResult: storedResult,
-    allowedTools: roleModelIOSnapshot.inputEnvelope.allowedTools,
-    pluginToolDefinitions:
-      roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
-    toolObservations: roleModelIOSnapshot.inputEnvelope.toolObservations,
-  });
-
-  if (
-    normalizedResult === undefined ||
-    normalizedResult.requestedToolNames === undefined
-  ) {
-    return parsedSnapshot;
-  }
-
-  return createParsedRoleModelDecisionSnapshot({
-    eventId: parsedSnapshot.eventId,
-    traceId: parsedSnapshot.traceId,
-    createdAt: parsedSnapshot.createdAt,
-    sessionId: parsedSnapshot.sessionId,
-    result: normalizedResult,
-  });
-}
-
 function assertRoleModelInputTextMatchesPayloadSummary(options: {
   readonly payloadSummary: RawEventLogPayloadSummary | undefined;
   readonly inputText: string;
@@ -1303,11 +1236,9 @@ function requiredRoleModelInputEnvelope(
     throwMalformedRecord('roleModelInputEnvelope');
   }
   const allowedTools = requiredRoleModelAllowedTools(value['allowedTools']);
-  const storedPluginToolDefinitions = value['pluginToolDefinitions'];
-  const pluginToolDefinitions =
-    storedPluginToolDefinitions === undefined
-      ? legacyRoleModelPluginToolDefinitions(allowedTools)
-      : optionalRoleModelPluginToolDefinitions(storedPluginToolDefinitions);
+  const pluginToolDefinitions = requiredRoleModelPluginToolDefinitions(
+    value['pluginToolDefinitions'],
+  );
 
   try {
     return createRoleModelInputEnvelope({
@@ -1327,21 +1258,6 @@ function requiredRoleModelInputEnvelope(
 
     throw error;
   }
-}
-
-function legacyRoleModelPluginToolDefinitions(
-  allowedTools: readonly RoleModelAllowedToolName[],
-): readonly RoleModelPluginToolDefinition[] {
-  // Schema 1 stored character_state.patch as a built-in tool before plugin
-  // definitions were persisted with role-model envelopes.
-  return Object.freeze([
-    ...createDefaultRoleModelPluginToolDefinitions().filter(definition =>
-      allowedTools.includes(definition.name),
-    ),
-    ...(allowedTools.includes(characterStatePatchModelToolName)
-      ? [legacySchema1CharacterStatePatchPluginToolDefinition]
-      : []),
-  ]);
 }
 
 function requiredUserMessageRuntimeEvent(
@@ -1457,13 +1373,11 @@ function optionalRuntimePluginContextItems(
   return Object.freeze(contextItems);
 }
 
-function optionalRoleModelPluginToolDefinitions(
+// Every envelope the runtime writes carries this array, empty or not, so
+// an absent one is a damaged record rather than an older shape.
+function requiredRoleModelPluginToolDefinitions(
   value: unknown,
 ): readonly RoleModelPluginToolDefinition[] {
-  if (value === undefined) {
-    return Object.freeze([]);
-  }
-
   const definitions: RoleModelPluginToolDefinition[] = [];
 
   for (const item of requiredArray(value, 'pluginToolDefinitions')) {
