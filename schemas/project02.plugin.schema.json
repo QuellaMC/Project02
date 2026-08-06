@@ -113,10 +113,7 @@
           "required": ["scope", "fields"],
           "properties": {
             "scope": {
-              "enum": [
-                "global_with_character_overrides",
-                "character_only"
-              ],
+              "enum": ["global_with_character_overrides", "character_only"],
               "description": "Whether enablement and non-secret settings may be authored globally with character overrides, or only in character/package config. Secrets always remain global."
             },
             "fields": {
@@ -132,22 +129,14 @@
         "runtimePolicy": {
           "type": "object",
           "additionalProperties": false,
-          "required": [
-            "timeoutMs",
-            "redactionLabels",
-            "failureBehavior"
-          ],
+          "required": ["timeoutMs", "redactionLabels", "failureBehavior"],
           "properties": {
             "timeoutMs": {"type": "integer", "minimum": 1},
             "redactionLabels": {"$ref": "#/definitions/stringArray"},
             "failureBehavior": {
               "type": "object",
               "additionalProperties": false,
-              "required": [
-                "beforeRoleModelCall",
-                "handleToolCall",
-                    "health"
-              ],
+              "required": ["beforeRoleModelCall", "handleToolCall", "health"],
               "properties": {
                 "beforeRoleModelCall": {"enum": ["reject_turn", "degrade"]},
                 "handleToolCall": {"enum": ["reject_tool_call", "degrade"]},
@@ -206,7 +195,13 @@
     "configField": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["name", "description", "required", "secret", "redactionLabels"],
+      "required": [
+        "name",
+        "description",
+        "required",
+        "secret",
+        "redactionLabels"
+      ],
       "properties": {
         "name": {"$ref": "#/definitions/identifier"},
         "description": {"$ref": "#/definitions/nonEmptyString"},
