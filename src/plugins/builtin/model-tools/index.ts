@@ -13,7 +13,7 @@ import type {
 
 const firstPartyModelToolsPluginInstances = new WeakSet<RuntimePlugin>();
 
-export const firstPartyModelToolsProvidedTools = Object.freeze(
+const firstPartyModelToolsProvidedTools = Object.freeze(
   builtInModelToolDefinitionsForUserTurn().map(definition =>
     Object.freeze({
       name: definition.name,

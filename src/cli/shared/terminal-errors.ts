@@ -22,7 +22,7 @@ export function isLocalRuntimeTerminalError(
   );
 }
 
-export function formatLocalRuntimeTerminalError(
+function formatLocalRuntimeTerminalError(
   error: LocalRuntimeTerminalError,
 ): string {
   if (error instanceof LocalRuntimeStorageContractError) {

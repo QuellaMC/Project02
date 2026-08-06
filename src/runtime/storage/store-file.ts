@@ -58,7 +58,7 @@ export function readStoreText(path: string): string {
   }
 }
 
-export function storeReadFailed(
+function storeReadFailed(
   path: string,
   cause: unknown,
 ): LocalRuntimeStorageContractError {

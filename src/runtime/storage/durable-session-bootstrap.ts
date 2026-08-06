@@ -134,7 +134,7 @@ export async function createDurableChatRuntime(
   }
 }
 
-export function readDurableConversationEvidence(
+function readDurableConversationEvidence(
   logStore: RuntimeLogStore,
   boundCharacter: CharacterProfile,
   boundUserSpeaker?: SpeakerIdentity,
@@ -160,7 +160,7 @@ export function readDurableConversationEvidence(
   } satisfies LocalRuntimeSessionConversationEvidence);
 }
 
-export async function selectOrCreateDefaultSession(
+async function selectOrCreateDefaultSession(
   sessionStore: ReturnType<typeof createLocalRuntimeSessionStore>,
   sessionId: string,
 ): Promise<void> {

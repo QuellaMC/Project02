@@ -1,8 +1,8 @@
 import type {MemoryRecallItem} from './types.ts';
 
 export const memoryProviderMaxItems = 5;
-export const memoryProviderMaxTextLength = 600;
-export const memoryProviderMaxSourceReferences = 5;
+const memoryProviderMaxTextLength = 600;
+const memoryProviderMaxSourceReferences = 5;
 
 export function boundedMemoryItems(
   items: readonly MemoryRecallItem[],

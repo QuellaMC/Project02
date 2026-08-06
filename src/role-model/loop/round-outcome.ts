@@ -104,7 +104,7 @@ export function createRoleModelLoopRound(options: {
   } satisfies RoleModelLoopRound);
 }
 
-export function createRejectedRoleModelLoopResult(options: {
+function createRejectedRoleModelLoopResult(options: {
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;

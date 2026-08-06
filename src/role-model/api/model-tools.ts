@@ -169,7 +169,7 @@ function createBuiltInModelToolDefinition(options: {
   } satisfies BuiltInModelToolDefinition);
 }
 
-export function freezeModelToolInputContract(
+function freezeModelToolInputContract(
   inputContract: ModelToolInputContract,
 ): ModelToolInputContract {
   const frozen = freezeModelToolJsonSchema(inputContract);

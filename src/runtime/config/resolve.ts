@@ -234,7 +234,7 @@ export function runtimeConfigDiagnosticMatchesPlugin(options: {
   );
 }
 
-export function runtimeConfigDiagnosticMatchesPluginConfig(options: {
+function runtimeConfigDiagnosticMatchesPluginConfig(options: {
   readonly diagnostic: RuntimeConfigDiagnostic;
   readonly pluginId: string;
 }): boolean {

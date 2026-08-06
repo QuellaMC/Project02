@@ -746,7 +746,7 @@ export function requireResolvedProject02RuntimeLocation(
   );
 }
 
-export function isResolvedProject02RuntimeLocation(
+function isResolvedProject02RuntimeLocation(
   value: unknown,
 ): value is ResolvedProject02RuntimeLocation {
   return (
