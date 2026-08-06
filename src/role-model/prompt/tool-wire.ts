@@ -9,11 +9,8 @@ import {
   isModelToolJsonSchemaTypeArray,
   type ModelToolDefinition,
   type ModelToolInputContract,
-  type ModelToolInputField,
-  type ModelToolInputFieldValueType,
   type ModelToolJsonSchema,
   type ModelToolJsonSchemaType,
-  type ModelToolObjectJsonSchema,
 } from '../api/model-tools.ts';
 import type {
   RoleModelChatCompletionTool,
@@ -104,33 +101,7 @@ function roleModelProviderSafeToolName(runtimeName: string): string {
 function modelToolInputContractToJsonSchema(
   contract: ModelToolInputContract,
 ): RoleModelObjectJsonSchema {
-  if (contract.jsonSchema !== undefined) {
-    return modelToolObjectJsonSchemaToRoleModelSchema(contract.jsonSchema);
-  }
-
-  const properties: Record<string, RoleModelJsonSchema> = {};
-  const required: string[] = [];
-
-  for (const field of contract.fields) {
-    properties[field.name] = modelToolInputFieldToJsonSchema(field);
-
-    if (field.required) {
-      required.push(field.name);
-    }
-  }
-
-  return Object.freeze({
-    type: 'object',
-    properties: Object.freeze(properties),
-    required: Object.freeze(required),
-    additionalProperties: contract.additionalFields,
-  } satisfies RoleModelObjectJsonSchema);
-}
-
-function modelToolObjectJsonSchemaToRoleModelSchema(
-  schema: ModelToolObjectJsonSchema,
-): RoleModelObjectJsonSchema {
-  const converted = modelToolJsonSchemaToRoleModelSchema(schema);
+  const converted = modelToolJsonSchemaToRoleModelSchema(contract);
 
   return Object.freeze({
     type: 'object',
@@ -181,40 +152,6 @@ function freezeRoleModelJsonSchemaType(
   type: ModelToolJsonSchema['type'],
 ): ModelToolJsonSchema['type'] {
   return type === undefined ? undefined : freezeModelToolJsonSchemaType(type);
-}
-
-function modelToolInputFieldToJsonSchema(
-  field: ModelToolInputField,
-): RoleModelJsonSchema {
-  return Object.freeze({
-    ...(field.valueType === undefined && field.allowedValues === undefined
-      ? {}
-      : {type: modelToolInputFieldJsonSchemaType(field)}),
-    description: field.description,
-    ...(field.allowedValues === undefined
-      ? {}
-      : {enum: Object.freeze([...field.allowedValues])}),
-  } satisfies RoleModelJsonSchema);
-}
-
-function modelToolInputFieldJsonSchemaType(
-  field: ModelToolInputField,
-): NonNullable<RoleModelJsonSchema['type']> {
-  if (field.allowedValues !== undefined) {
-    return 'string';
-  }
-
-  return modelToolValueTypeToJsonSchemaType(field.valueType);
-}
-
-function modelToolValueTypeToJsonSchemaType(
-  valueType: ModelToolInputFieldValueType | undefined,
-): NonNullable<RoleModelJsonSchema['type']> {
-  if (valueType === undefined) {
-    return 'string';
-  }
-
-  return valueType;
 }
 
 function jsonSchemaSupportsStrictTools(schema: RoleModelJsonSchema): boolean {

@@ -1,13 +1,12 @@
 /**
  * Model tool input validation: checks a proposed tool call's input
- * against the tool's declared input contract (legacy field list or
- * JSON schema) before the call may commit.
+ * against the tool's declared JSON Schema input contract before the call
+ * may commit.
  */
 import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   isModelToolJsonSchemaTypeArray,
   type ModelToolInputContract,
-  type ModelToolInputFieldValueType,
   type ModelToolJsonSchema,
   type ModelToolJsonSchemaType,
 } from './model-tools.ts';
@@ -27,89 +26,15 @@ export function validateModelToolInputAgainstContract(options: {
   readonly input: Readonly<Record<string, unknown>>;
   readonly inputContract: ModelToolInputContract;
 }): ModelToolInputValidationResult {
-  if (options.inputContract.jsonSchema !== undefined) {
-    const schemaValidation = validateModelToolInputAgainstJsonSchema({
-      toolName: options.toolName,
-      value: options.input,
-      schema: options.inputContract.jsonSchema,
-      fieldPath: '',
-    });
-
-    if (schemaValidation !== undefined) {
-      return rejectModelToolInput(schemaValidation);
-    }
-
-    return Object.freeze({
-      status: 'accepted',
-      input: freezeJsonRecord(options.input),
-    } satisfies ModelToolInputValidationResult);
-  }
-
-  const supportedFieldNames = options.inputContract.fields.map(
-    field => field.name,
-  );
-
-  if (!options.inputContract.additionalFields) {
-    const unsupportedInputKeys = Object.keys(options.input).filter(
-      key => !supportedFieldNames.includes(key),
-    );
-
-    if (unsupportedInputKeys.length > 0) {
-      return rejectModelToolInput(
-        `${options.toolName} input includes unsupported fields: ${unsupportedInputKeys.join(
-          ', ',
-        )}.`,
-      );
-    }
-  }
-
-  for (const field of options.inputContract.fields) {
-    const fieldValue = options.input[field.name];
-
-    if (field.required && fieldValue === undefined) {
-      return rejectModelToolInput(
-        `${options.toolName} input missing required field "${field.name}".`,
-      );
-    }
-
-    if (fieldValue === undefined) {
-      continue;
-    }
-
-    if (
-      field.valueType !== undefined &&
-      !modelToolInputValueMatchesType(fieldValue, field.valueType)
-    ) {
-      return rejectModelToolInput(
-        `${options.toolName} input field "${field.name}" must be ${modelToolInputFieldTypeArticle(
-          field.valueType,
-        )} ${modelToolInputFieldTypeLabel(field.valueType)}.`,
-      );
-    }
-
-    if (field.allowedValues === undefined) {
-      continue;
-    }
-
-    if (
-      typeof fieldValue !== 'string' ||
-      !field.allowedValues.includes(fieldValue)
-    ) {
-      return rejectModelToolInput(
-        `${options.toolName} input field "${field.name}" must be one of: ${field.allowedValues.join(
-          ', ',
-        )}.`,
-      );
-    }
-  }
-
-  const jsonValueValidation = validateModelToolInputJsonValues({
+  const schemaValidation = validateModelToolInputAgainstJsonSchema({
     toolName: options.toolName,
-    input: options.input,
+    value: options.input,
+    schema: options.inputContract,
+    fieldPath: '',
   });
 
-  if (jsonValueValidation !== undefined) {
-    return rejectModelToolInput(jsonValueValidation);
+  if (schemaValidation !== undefined) {
+    return rejectModelToolInput(schemaValidation);
   }
 
   return Object.freeze({
@@ -123,56 +48,6 @@ function rejectModelToolInput(details: string): ModelToolInputValidationResult {
     status: 'rejected',
     details,
   } satisfies ModelToolInputValidationResult);
-}
-
-function modelToolInputValueMatchesType(
-  value: unknown,
-  valueType: ModelToolInputFieldValueType,
-): boolean {
-  if (valueType === 'number') {
-    return typeof value === 'number' && Number.isFinite(value);
-  }
-
-  if (valueType === 'array') {
-    return Array.isArray(value);
-  }
-
-  if (valueType === 'object') {
-    return typeof value === 'object' && value !== null && !Array.isArray(value);
-  }
-
-  return typeof value === valueType;
-}
-
-function modelToolInputFieldTypeArticle(
-  valueType: ModelToolInputFieldValueType,
-): 'a' | 'an' {
-  return valueType === 'array' || valueType === 'object' ? 'an' : 'a';
-}
-
-function modelToolInputFieldTypeLabel(
-  valueType: ModelToolInputFieldValueType,
-): string {
-  return valueType === 'number' ? 'finite number' : valueType;
-}
-
-function validateModelToolInputJsonValues(options: {
-  readonly toolName: string;
-  readonly input: Readonly<Record<string, unknown>>;
-}): string | undefined {
-  for (const [key, value] of Object.entries(options.input)) {
-    const result = validateModelToolInputJsonValue({
-      toolName: options.toolName,
-      fieldPath: key,
-      value,
-    });
-
-    if (result !== undefined) {
-      return result;
-    }
-  }
-
-  return undefined;
 }
 
 function validateModelToolInputJsonValue(options: {

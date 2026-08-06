@@ -316,7 +316,7 @@ describe('configured runtime plugin reloader', () => {
     writeFileSync(
       join(dirname(overlayPath), 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 6,
+        schemaVersion: 7,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

@@ -389,14 +389,11 @@ export function createHandleFileStoreWritePlugin(
         description: 'Write a test value through the plugin file store.',
         inputContract: {
           type: 'object',
-          fields: [
-            {
-              name: 'value',
-              description: 'Value to write.',
-              required: true,
-            },
-          ],
-          additionalFields: false,
+          properties: {
+            value: {type: 'string', description: 'Value to write.'},
+          },
+          required: ['value'],
+          additionalProperties: false,
         },
         validationOwner: 'plugin_host',
         requiresConfirmation: false,
@@ -623,8 +620,9 @@ export function createRevisionFixtureTool(name: string) {
     description: 'Return plugin store revision metadata.',
     inputContract: {
       type: 'object',
-      fields: [],
-      additionalFields: false,
+      properties: {},
+      required: [],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     requiresConfirmation: false,

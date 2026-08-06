@@ -59,22 +59,20 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
       'List plugins available to you in the current turn or inspect the installed plugin catalog. Call this when you need canonical plugin inventory.',
     inputContract: {
       type: 'object',
-      fields: [
-        {
-          name: 'includeDisabled',
+      properties: {
+        includeDisabled: {
+          type: 'boolean',
           description: 'Include disabled or unavailable plugins when true.',
-          required: false,
-          valueType: 'boolean',
         },
-        {
-          name: 'scope',
+        scope: {
+          type: 'string',
           description:
             'Use "enabled" for current-turn plugins or "all" for every installed plugin.',
-          required: false,
-          allowedValues: ['enabled', 'all'],
+          enum: ['enabled', 'all'],
         },
-      ],
-      additionalFields: false,
+      },
+      required: [],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     annotations: {readOnlyHint: true},
