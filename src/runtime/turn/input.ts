@@ -4,11 +4,7 @@ import {
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
 } from '../../core/index.ts';
-import type {
-  RawEventLogPayloadSummary,
-  RuntimeTraceEntry,
-  RuntimeTraceStepName,
-} from '../evidence/records.ts';
+import type {RawEventLogPayloadSummary} from '../evidence/records.ts';
 import type {
   LocalRuntimeUserMessageInputRejectedResult,
   NormalizeUserMessageRuntimeEventResult,
@@ -22,27 +18,13 @@ export function recordLocalUserMessageInputRejection(
 ): LocalRuntimeUserMessageInputRejectedResult {
   const identity = freezeRuntimeEventIdentity(options.identity);
   const payloadSummary = createRawInputPayloadSummary(options.rawInput);
-  const traceEntries: RuntimeTraceEntry[] = [];
-
-  function appendTrace(step: RuntimeTraceStepName): RuntimeTraceEntry {
-    const traceEntry = options.logStore.appendTrace({
-      ...identity,
-      step,
-    });
-
-    traceEntries.push(traceEntry);
-    return traceEntry;
-  }
-
-  appendTrace('runtime_event_received');
-  options.logStore.appendRawEvent({
+  const receivedRawEvent = options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
     eventType: 'USER_MESSAGE',
     ...(payloadSummary === undefined ? {} : {payloadSummary}),
   });
-  appendTrace('input_validation_rejected');
-  options.logStore.appendRawEvent({
+  const validationRawEvent = options.logStore.appendRawEvent({
     ...identity,
     kind: 'input_validation_rejected',
     eventType: 'USER_MESSAGE',
@@ -50,7 +32,6 @@ export function recordLocalUserMessageInputRejection(
     reason: options.message,
     ...(payloadSummary === undefined ? {} : {payloadSummary}),
   });
-
   const rawEvent = options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_turn_rejected',
@@ -60,9 +41,6 @@ export function recordLocalUserMessageInputRejection(
     ...(payloadSummary === undefined ? {} : {payloadSummary}),
   });
 
-  appendTrace('raw_event_log_appended');
-  appendTrace('runtime_turn_rejected');
-
   return Object.freeze({
     status: 'rejected',
     identity,
@@ -70,7 +48,11 @@ export function recordLocalUserMessageInputRejection(
     reason: 'input_validation_rejected',
     message: options.message,
     rawEvent,
-    traceEntries: Object.freeze([...traceEntries]),
+    rawEventLogRecords: Object.freeze([
+      receivedRawEvent,
+      validationRawEvent,
+      rawEvent,
+    ]),
   } satisfies LocalRuntimeUserMessageInputRejectedResult);
 }
 
@@ -94,7 +76,6 @@ export function createRuntimeTurnState(
 
   return {
     options,
-    traceEntries: [],
     rawEventLogRecords: [],
     identity,
     normalizedEventResult,
@@ -102,15 +83,12 @@ export function createRuntimeTurnState(
     payloadSummary,
     runtimePluginContextForTurn: undefined,
     runtimePluginHostForTurn: undefined,
-    pluginFileStoreTransactionActive: false,
-    preparedPluginFileStoreTransaction: undefined,
     terminalRawEventMayBeDurable: false,
     committedVisibleMessages: [],
     startedPluginToolCalls: new Map(),
     finishedToolCallIds: [],
     finishedPluginToolResults: [],
     preparedConfigEffectsByToolCallId: new Map(),
-    userConversationMessage: undefined,
   } satisfies RuntimeTurnState;
 }
 

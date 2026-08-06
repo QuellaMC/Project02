@@ -6,7 +6,6 @@ import {
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
-  createRuntimePluginListingSnapshot,
   createRuntimePluginToolInvocationSnapshot,
   runtimePluginContractVersion,
   validateRuntimePluginContextItem,
@@ -104,108 +103,6 @@ describe('runtime plugin source references', () => {
     ).toThrow('exceeds the aggregate JSON text limit.');
   }, 20_000);
 
-  it('redacts credential-bearing redaction labels in public snapshots', () => {
-    const labels = [
-      'api_key=label-secret',
-      'Bearer label-token',
-      'Cookie: session=label-cookie',
-    ];
-    const contextItem = createRuntimePluginContextItem({
-      pluginId: 'memory.labels.fixture',
-      id: 'labels',
-      kind: 'memory',
-      text: 'safe',
-      budget: {estimatedTokens: 1, priority: 1},
-      sourceReferences: [],
-      redactionLabels: labels,
-    });
-    const evidence = createRuntimePluginEvidenceSnapshot({
-      eventId: 'evt_labels',
-      traceId: 'trace_labels',
-      createdAt: '2026-07-11T00:00:00.000Z',
-      kind: 'runtime_plugin_evidence_snapshot',
-      pluginId: 'memory.labels.fixture',
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      summary: 'safe',
-      redactionLabels: labels,
-    });
-    const health = createRuntimePluginHealthSnapshot({
-      pluginId: 'memory.labels.fixture',
-      status: 'ok',
-      checkedAt: '2026-07-11T00:00:00.000Z',
-      summary: 'safe',
-      redactionLabels: labels,
-    });
-    const manifest = createRuntimePluginManifest(
-      runtimePluginManifestFixture({
-        displayName: 'Authorization: ApiKey display-secret',
-        version: '1.0.0?token=version-secret',
-        runtimePolicy: {
-          requiredForTurn: false,
-          sideEffectLevel: 'runtime_read',
-          confirmation: 'not_required',
-          timeoutMs: 1_000,
-          sourceReferencesRequired: false,
-          redactionLabels: labels,
-          failureBehavior: {
-            beforeRoleModelCall: 'degrade',
-            handleToolCall: 'degrade',
-            afterTurnCommitted: 'log_failure',
-            health: 'degrade',
-          },
-        },
-        activation: {
-          defaultEnabled: false,
-          reasons: ['api_key=reason-secret'],
-        },
-      }),
-    );
-    const listing = createRuntimePluginListingSnapshot({
-      pluginId: manifest.id,
-      manifest,
-      providedTools: [],
-      registeredLifecycleHooks: [],
-      installed: true,
-      registered: true,
-      enabled: true,
-      availableForTurn: true,
-      redactionLabels: labels,
-      requestedAccess: {},
-      grantedAccess: {},
-    });
-    const serialized = JSON.stringify({contextItem, evidence, health, listing});
-
-    for (const secret of [
-      'label-secret',
-      'label-token',
-      'label-cookie',
-      'display-secret',
-      'version-secret',
-      'reason-secret',
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-    expect(listing.manifest).toMatchObject({
-      displayName: 'Authorization: [redacted]',
-      version: '1.0.0?token=[redacted]',
-      activation: {reasons: ['api_key=[redacted]']},
-    });
-    for (const snapshotLabels of [
-      contextItem.redactionLabels,
-      evidence.redactionLabels,
-      health.redactionLabels,
-      listing.redactionLabels,
-      listing.manifest.runtimePolicy.redactionLabels,
-    ]) {
-      expect(snapshotLabels).toEqual([
-        'api_key=[redacted]',
-        'Bearer [redacted]',
-        'Cookie: [redacted]',
-      ]);
-    }
-  });
-
   it('enforces tool-result evidence and aggregate limits at the public constructor', () => {
     const evidence = (count: number, summary = 'accepted') =>
       Array.from({length: count}, (_value, index) => ({
@@ -246,56 +143,6 @@ describe('runtime plugin source references', () => {
         invocation(evidence(5, 'x'.repeat(14 * 1_024))),
       ),
     ).toThrow('Plugin tool result exceeds the aggregate JSON text limit.');
-  });
-
-  it('redacts credential-bearing source IDs and rejected tool reasons', () => {
-    const snapshot = createRuntimePluginToolInvocationSnapshot({
-      eventId: 'evt_redacted_tool_snapshot',
-      traceId: 'trace_redacted_tool_snapshot',
-      createdAt: '2026-07-11T00:00:00.000Z',
-      kind: 'runtime_plugin_tool_invocation_snapshot',
-      pluginId: 'memory.redaction.fixture',
-      toolName: 'memory.search',
-      input: {query: 'Authorization: Bearer input-secret'},
-      result: {
-        status: 'rejected',
-        reason: 'handler_failed token=reason-secret',
-        message: 'Cookie: session=message-secret',
-        evidence: [
-          {
-            eventId: 'evt_redacted_tool_snapshot',
-            traceId: 'trace_redacted_tool_snapshot',
-            createdAt: '2026-07-11T00:00:00.000Z',
-            kind: 'runtime_plugin_evidence_snapshot',
-            pluginId: 'memory.redaction.fixture',
-            evidenceKind: 'tool_invocation',
-            status: 'rejected',
-            summary: 'api_key=summary-secret',
-            sourceReferences: [{kind: 'memory', id: 'token=source-secret'}],
-            redactionLabels: [],
-          },
-        ],
-      },
-    });
-    const serialized = JSON.stringify(snapshot);
-
-    for (const secret of [
-      'input-secret',
-      'reason-secret',
-      'message-secret',
-      'summary-secret',
-      'source-secret',
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-    expect(snapshot.result).toMatchObject({
-      status: 'rejected',
-      reason: 'handler_failed token=[redacted]',
-      message: 'Cookie: [redacted]',
-    });
-    expect(snapshot.result.evidence[0]?.sourceReferences?.[0]?.id).toBe(
-      'token=[redacted]',
-    );
   });
 
   it('enforces source-reference and context-text byte limits exactly', () => {
@@ -526,42 +373,17 @@ describe('runtime plugin access control', () => {
 });
 
 describe('runtime plugin model-facing tool policy', () => {
-  it('rejects credential-bearing legacy and JSON Schema enum values', () => {
+  it.each([
+    ['sideEffectLevel', 'external_write'],
+    ['requiredForUserTurn', false],
+    ['callLimit', {scope: 'user_turn', maxCalls: 1}],
+  ])('refuses a tool still declaring retired field %s', (field, value) => {
+    // Ignoring the field would hand the model a tool its author withheld.
     expect(() =>
       createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({
-          inputContract: {
-            type: 'object',
-            fields: [
-              {
-                name: 'mode',
-                description: 'Mode.',
-                required: false,
-                allowedValues: ['api_key=legacy-enum-secret'],
-              },
-            ],
-            additionalFields: false,
-          },
-        }),
+        runtimePluginProvidedToolFixture({[field]: value}),
       ),
-    ).toThrow(
-      'Model tool inputContract field allowedValues must not contain credential-bearing values.',
-    );
-    expect(() =>
-      createRuntimePluginProvidedToolWithJsonSchema({
-        type: 'object',
-        properties: {
-          mode: {
-            type: 'string',
-            enum: ['Authorization: ApiKey schema-enum-secret'],
-          },
-        },
-        required: [],
-        additionalProperties: false,
-      }),
-    ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.mode.enum must not contain credential-bearing values.',
-    );
+    ).toThrow(`declares retired field "${field}"`);
   });
 
   it('rejects unsupported root JSON Schema keywords with their field path', () => {
@@ -732,29 +554,6 @@ describe('runtime plugin model-facing tool policy', () => {
     );
   });
 
-  it('accepts absent call limits and rejects malformed ones', () => {
-    const unlimited = createRuntimePluginProvidedTool(
-      runtimePluginProvidedToolFixture({callLimit: undefined}),
-    );
-
-    expect(unlimited.callLimit).toBeUndefined();
-    expect(() =>
-      createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({callLimit: 5}),
-      ),
-    ).toThrow('Plugin provided tool callLimit must be an object.');
-    expect(() =>
-      createRuntimePluginProvidedTool(
-        runtimePluginProvidedToolFixture({
-          callLimit: {
-            scope: 'session',
-            maxCalls: 1,
-          },
-        }),
-      ),
-    ).toThrow('Plugin provided tool callLimit.scope is not supported.');
-  });
-
   it('rejects model-facing tools without requestedAccess.model_input write', () => {
     expect(() =>
       createRuntimePlugin({
@@ -799,67 +598,47 @@ describe('runtime plugin model-facing tool policy', () => {
     expect(plugin.providedTools).toHaveLength(1);
   });
 
-  it('classifies approval-gated config writes by policy instead of plugin identity', () => {
+  it('offers a confirm-gated tool to the model instead of hiding it', () => {
     const manifest = createRuntimePluginManifest(
-      runtimePluginManifestFixture({
-        id: 'settings.arbitrary.fixture',
-        requestedAccess: {model_input: 'write'},
-      }),
+      runtimePluginManifestFixture({}),
     );
     const tool = createRuntimePluginProvidedTool(
       runtimePluginProvidedToolFixture({
         name: 'settings.arbitrary.update',
-        sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
       }),
     );
 
-    expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
+    // Enabling the plugin is the trust decision. A tool that prepares an
+    // effect for approval says so and is prompted, rather than being kept
+    // away from the model by its declared class.
+    expect(isApprovalGatedRuntimePluginTool({manifest, tool})).toBe(true);
     expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
-    expect(
-      isModelFacingRuntimePluginTool({
-        manifest: createRuntimePluginManifest(
-          runtimePluginManifestFixture({
-            id: 'settings.arbitrary.fixture',
-            requestedAccess: {model_input: 'write'},
-            runtimePolicy: {
-              ...manifest.runtimePolicy,
-              confirmation: 'required',
-            },
-          }),
-        ),
-        tool,
-      }),
-    ).toBe(false);
   });
 
-  it('accepts non-model-facing tools without model_input write', () => {
-    for (const tool of [
-      runtimePluginProvidedToolFixture({sideEffectLevel: 'external_write'}),
-      runtimePluginProvidedToolFixture({
-        sideEffectLevel: 'runtime_config_write',
-        requiresConfirmation: false,
-      }),
-    ]) {
-      expect(() =>
-        createRuntimePlugin({
-          manifest: runtimePluginManifestFixture({
-            declaredPlugins: ['tool_provider', 'handle_tool_call'],
-            requestedAccess: {},
-          }),
-          providedTools: [tool],
-          lifecycleHooks: {
-            handleToolCall() {
-              return {
-                status: 'accepted',
-                output: {},
-                evidence: [],
-              };
-            },
-          },
+  it('requires model_input write for a plugin that provides model tools', () => {
+    // Every host-validated tool reaches the model now, so a plugin that
+    // provides one must declare the access that implies. The old
+    // "non-model-facing tool" carve-out was defined by the retired
+    // effect-level enum and no longer exists.
+    expect(() =>
+      createRuntimePlugin({
+        manifest: runtimePluginManifestFixture({
+          declaredPlugins: ['tool_provider', 'handle_tool_call'],
+          requestedAccess: {},
         }),
-      ).not.toThrow();
-    }
+        providedTools: [runtimePluginProvidedToolFixture({})],
+        lifecycleHooks: {
+          handleToolCall() {
+            return {
+              status: 'accepted',
+              output: {},
+              evidence: [],
+            };
+          },
+        },
+      }),
+    ).toThrow('model_input');
   });
 
   it('requires shutdown hooks to declare the shutdown lifecycle', () => {
@@ -889,11 +668,6 @@ describe('runtime plugin model-facing tool policy', () => {
         'Expected first-party model tools plugin to provide a tool.',
       );
     }
-
-    expect(firstPartyTool.callLimit).toEqual({
-      scope: 'model_response',
-      maxCalls: 1,
-    });
 
     expect(
       isFirstPartyBuiltInModelTool({
@@ -957,18 +731,13 @@ describe('runtime plugin config metadata', () => {
           ],
           fingerprint: 'declared-config-v1',
         },
-        localTrustLevel: 'test_fixture',
+        firstParty: false,
         runtimePolicy: {
-          requiredForTurn: false,
-          sideEffectLevel: 'runtime_read',
-          confirmation: 'not_required',
           timeoutMs: 1000,
-          sourceReferencesRequired: false,
           redactionLabels: [],
           failureBehavior: {
             beforeRoleModelCall: 'degrade',
             handleToolCall: 'degrade',
-            afterTurnCommitted: 'log_failure',
             health: 'degrade',
           },
         },
@@ -1035,18 +804,13 @@ function runtimePluginManifestFixture(
       scope: 'global_with_character_overrides',
       fields: [],
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'degrade',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },
@@ -1077,20 +841,13 @@ function runtimePluginProvidedToolFixture(
   return Object.freeze({
     name: 'memory.search',
     description: 'Search memory.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
     ...overrides,
   });
 }

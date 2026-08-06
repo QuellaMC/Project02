@@ -18,7 +18,7 @@
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\" \"eslint.config.mjs\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"vitest.config.ts\" \"eslint.config.mjs\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs",
+    "arch:check": "node scripts/arch-check.mjs && node scripts/check-shared-consumers.mjs && node scripts/check-source-text.mjs",
     "plugin:new": "node scripts/create-plugin.mjs",
     "character:new": "node scripts/create-character.mjs",
     "arch:baseline": "node scripts/arch-check.mjs --baseline",

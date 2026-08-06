@@ -10,7 +10,6 @@ import {
   type RoleModelAssistantChatMessage,
   type RoleModelPluginToolDefinition,
   roleModelProviderErrorRejectionReason,
-  runRoleModelLoop,
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
 import {
@@ -31,14 +30,9 @@ import {createDefaultProject02PluginHost} from '../support/default-plugin-host.t
 import {runtimePluginConfigControlStateForTest} from '../support/runtime-config.ts';
 import {testRuntimePluginConfigControlCapability} from '../support/plugin-host-fixtures.ts';
 import {createRuntimePluginContextItem} from '../../src/plugins/api/index.ts';
-import {
-  createTestDecisionContext,
-  createTestEvent,
-  createTestPluginContext,
-} from '../support/role-model-loop-fixtures.ts';
 
 describe('NVIDIA role-model provider', () => {
-  it('preserves successful assistant content for execution while redacting provider evidence', async () => {
+  it('preserves successful assistant content for execution', async () => {
     let requestBody = '';
     const fetchClient: NvidiaFetchClient = (_url, request) => {
       requestBody = request.body;
@@ -73,10 +67,6 @@ describe('NVIDIA role-model provider', () => {
     const output = await adapter.invoke(inputEnvelope, {
       turnContext: renderRoleModelTurnContext(inputEnvelope),
     });
-    const serializedEvidence = JSON.stringify({
-      providerExchange: output.providerExchange,
-      providerMetadata: output.providerMetadata,
-    });
 
     expect(requestBody).toContain('user-secret');
     expect(JSON.parse(output.rawOutputText)).toMatchObject({
@@ -87,8 +77,6 @@ describe('NVIDIA role-model provider', () => {
       ],
     });
     expect(output.nativeAssistantMessage?.content).toBe('api_key=reply-secret');
-    expect(serializedEvidence).not.toContain('reply-secret');
-    expect(serializedEvidence).not.toContain('user-secret');
   });
 
   it('retries transient transport failures and succeeds within the deadline', async () => {
@@ -322,7 +310,7 @@ describe('NVIDIA role-model provider', () => {
     expect(clearTimeoutSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('preserves native tool-call identities and arguments for execution while redacting provider evidence', async () => {
+  it('preserves native tool-call identities and arguments for execution', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
         ok: true,
@@ -362,7 +350,6 @@ describe('NVIDIA role-model provider', () => {
     const output = await adapter.invoke(inputEnvelope, {
       turnContext: renderRoleModelTurnContext(inputEnvelope),
     });
-    const serializedEvidence = JSON.stringify(output.providerExchange);
 
     expect(JSON.parse(output.rawOutputText)).toMatchObject({
       toolCalls: [
@@ -378,173 +365,6 @@ describe('NVIDIA role-model provider', () => {
         arguments: '{"text":"Cookie: reply-cookie"}',
       },
     });
-    expect(serializedEvidence).not.toContain('id-secret');
-    expect(serializedEvidence).not.toContain('reply-cookie');
-  });
-
-  it('routes authoritative native tool arguments while public loop surfaces stay redacted', async () => {
-    let responseIndex = 0;
-    let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
-    const fetchClient: NvidiaFetchClient = () =>
-      Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          responseIndex += 1;
-
-          return Promise.resolve(
-            responseIndex === 1
-              ? {
-                  choices: [
-                    {
-                      finish_reason: 'tool_calls',
-                      message: {
-                        role: 'assistant',
-                        content: null,
-                        tool_calls: [
-                          {
-                            id: 'call_credential_use',
-                            type: 'function',
-                            function: {
-                              name: 'credential_use',
-                              arguments: JSON.stringify({
-                                query:
-                                  'Authorization: Bearer native-input-secret',
-                                accessToken: 'native-structured-secret',
-                              }),
-                            },
-                          },
-                        ],
-                      },
-                    },
-                  ],
-                }
-              : {
-                  choices: [
-                    {
-                      finish_reason: 'stop',
-                      message: {
-                        role: 'assistant',
-                        content: 'Finished safely.',
-                      },
-                    },
-                  ],
-                },
-          );
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'provider-secret',
-      fetchClient,
-    });
-    const credentialToolDefinition = Object.freeze({
-      pluginId: 'credential.fixture',
-      name: 'credential.use',
-      description: 'Use an explicitly supplied credential.',
-      requiredForUserTurn: false,
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
-      inputContract: {
-        type: 'object',
-        fields: [
-          {
-            name: 'query',
-            description: 'Credential use request.',
-            required: true,
-            valueType: 'string',
-          },
-        ],
-        additionalFields: true,
-      },
-      validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
-      requiresConfirmation: false,
-      sourceReferencesRequired: false,
-    } satisfies RoleModelPluginToolDefinition);
-    const {publicResult: result} = await runRoleModelLoop({
-      event: createTestEvent(
-        'use the supplied credential',
-        'evt_nvidia_authoritative_arguments',
-      ),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: [
-        ...createDefaultRoleModelPluginToolDefinitions(),
-        credentialToolDefinition,
-      ],
-      pluginToolHost: Object.freeze({
-        handleToolCall(call) {
-          dispatchedInput = call.input;
-          return {
-            status: 'accepted',
-            output: {used: true},
-            evidence: [],
-          };
-        },
-      }),
-      runtimePluginContext: createTestPluginContext(
-        'evt_nvidia_authoritative_arguments',
-      ),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(dispatchedInput).toEqual({
-      query: 'Authorization: Bearer native-input-secret',
-      accessToken: 'native-structured-secret',
-    });
-    expect(result.pluginToolResults[0]?.call.input).toEqual({
-      query: 'Authorization: [redacted]',
-      accessToken: '[redacted]',
-    });
-    expect(JSON.stringify(result)).not.toContain('native-input-secret');
-    expect(JSON.stringify(result)).not.toContain('native-structured-secret');
-  });
-
-  it('redacts configured model credentials from direct provider evidence', async () => {
-    let requestBody: unknown;
-    const model = 'model?token=model-secret';
-    const fetchClient: NvidiaFetchClient = (_url, request) => {
-      requestBody = JSON.parse(request.body) as unknown;
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {role: 'assistant', content: 'Hello.'},
-              },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    };
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'secret',
-      model,
-      fetchClient,
-    });
-    const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
-    const serialized = JSON.stringify(output);
-
-    expect(requestBody).toMatchObject({model});
-    expect(output.providerMetadata?.model).toBe('model?token=[redacted]');
-    expect(output.providerExchange?.provider.model).toBe(
-      'model?token=[redacted]',
-    );
-    expect(serialized).not.toContain('model-secret');
   });
 
   it('reads the model name from environment configuration', () => {
@@ -554,110 +374,6 @@ describe('NVIDIA role-model provider', () => {
         [nvidiaModelEnvName]: 'nvidia/test-model',
       }).model,
     ).toBe('nvidia/test-model');
-  });
-
-  it('redacts credential-bearing custom endpoints in successful provider metadata', async () => {
-    const endpoint =
-      'https://user:pass@example.test/v1/chat/completions?safe=value&token=endpoint-secret';
-    let capturedUrl: string | undefined;
-    const fetchClient: NvidiaFetchClient = url => {
-      capturedUrl = url;
-
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'Hello.',
-                },
-              },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    };
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'secret',
-      endpoint,
-      fetchClient,
-    });
-    const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
-
-    expect(capturedUrl).toBe(endpoint);
-    expect(output.providerMetadata?.request?.endpoint).toBe(
-      'https://[redacted]@example.test/v1/chat/completions?safe=value&token=[redacted]',
-    );
-    expect(JSON.stringify(output.providerMetadata)).not.toContain('user:pass');
-    expect(JSON.stringify(output.providerMetadata)).not.toContain(
-      'endpoint-secret',
-    );
-  });
-
-  it('redacts credential-bearing custom endpoints in replayable provider rejections', async () => {
-    const endpoint =
-      'https://user:pass@example.test/v1/chat/completions?token=endpoint-secret';
-    const redactedEndpoint =
-      'https://[redacted]@example.test/v1/chat/completions?token=[redacted]';
-    const redactedFailureMessage = `connect failed for ${redactedEndpoint}`;
-    const fetchClient: NvidiaFetchClient = () =>
-      Promise.reject(new Error(`connect failed for ${endpoint}`));
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'secret',
-      endpoint,
-      fetchClient,
-    });
-    const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
-    const serializedOutput = JSON.stringify(output);
-
-    expect(output.providerMetadata?.request?.endpoint).toBe(redactedEndpoint);
-    expect(output.providerMetadata?.error?.message).toBe(
-      redactedFailureMessage,
-    );
-    expect(output.rejection).toEqual({
-      reason: roleModelProviderErrorRejectionReason,
-      details: redactedFailureMessage,
-    });
-    expect(output.rejection?.details).toBe(
-      output.providerMetadata?.error?.message,
-    );
-    expect(serializedOutput).not.toContain('user:pass');
-    expect(serializedOutput).not.toContain('endpoint-secret');
-
-    const {publicResult: loopResult} = await runRoleModelLoop({
-      event: inputEnvelope.event,
-      decisionContext: inputEnvelope.decisionContext,
-      pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
-      adapter,
-    });
-
-    if (loopResult.status !== 'rejected') {
-      throw new Error('Expected NVIDIA provider failure to reject.');
-    }
-
-    expect(loopResult.rejection).toEqual({
-      reason: roleModelProviderErrorRejectionReason,
-      details: redactedFailureMessage,
-    });
-    expect(loopResult.ioSnapshot.providerMetadata?.error?.message).toBe(
-      redactedFailureMessage,
-    );
-    expect(loopResult.ioSnapshot.rawOutputText).toBe('');
-    expect(JSON.stringify(loopResult)).not.toContain('user:pass');
-    expect(JSON.stringify(loopResult)).not.toContain('endpoint-secret');
   });
 
   it('redacts credential-bearing response keys from provider exchange evidence', async () => {
@@ -1764,20 +1480,13 @@ function createAliasCollisionToolDefinition(options: {
     pluginId: options.pluginId,
     name: options.name,
     description: `Alias collision fixture for ${options.name}.`,
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   } satisfies RoleModelPluginToolDefinition);
 }
 

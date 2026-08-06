@@ -2,7 +2,7 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import type {CharacterProfile} from '../../src/core/index.ts';
-import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import {type RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
@@ -16,6 +16,7 @@ import {
   createLocalRuntimeSessionStore,
 } from '../../src/runtime/storage/session-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {appendVisibleMessageWithCommitAnchor} from '../support/runtime-log-fixtures.ts';
 
 type RuntimeLogBackend = 'memory' | 'file';
 
@@ -67,10 +68,7 @@ const acceptedScenarios = [
     run(logStore, currentSessionId) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, currentSessionId);
-      logStore.appendConversationMessage(
-        characterMessage(currentSessionId),
-        miraCharacter,
-      );
+      appendCharacterMessage(logStore, currentSessionId, miraCharacter);
       logStore.appendRawEvent({
         ...identity,
         kind: 'runtime_turn_completed',
@@ -90,10 +88,6 @@ const rejectedScenarios = [
     name: 'rejects tool metadata on a non-tool raw event',
     expected: 'malformed_record',
     run(logStore) {
-      logStore.appendTrace({
-        ...identity,
-        step: 'runtime_event_received',
-      });
       logStore.appendRawEvent({
         ...identity,
         kind: 'runtime_event_received',
@@ -111,16 +105,6 @@ const rejectedScenarios = [
         kind: 'runtime_turn_completed',
         eventType: 'USER_MESSAGE',
         status: 'completed',
-      });
-    },
-  },
-  {
-    name: 'rejects runtime_turn_started as the first trace record',
-    expected: 'malformed_record',
-    run(logStore) {
-      logStore.appendTrace({
-        ...identity,
-        step: 'runtime_turn_started',
       });
     },
   },
@@ -232,10 +216,7 @@ const rejectedScenarios = [
     run(logStore, currentSessionId) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, currentSessionId);
-      logStore.appendConversationMessage(
-        characterMessage(currentSessionId),
-        novaCharacter,
-      );
+      appendCharacterMessage(logStore, currentSessionId, novaCharacter);
     },
   },
   {
@@ -246,38 +227,97 @@ const rejectedScenarios = [
       appendUserMessage(logStore, '');
     },
   },
+  {
+    name: 'rejects a second user row committed into one turn',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+      appendUserMessage(logStore, currentSessionId);
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [`${currentSessionId}:message-2`],
+        visibleMessage: {
+          id: `${currentSessionId}:message-2`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'hello',
+        },
+        committedAt: '2026-07-16T00:00:02.000Z',
+      });
+    },
+  },
+  {
+    name: 'rejects persisting a prepared record made stale by a later append',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+
+      const staleTerminal = logStore.prepareRawEvent({
+        ...identity,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'prepared before the user message committed',
+      });
+
+      appendUserMessage(logStore, currentSessionId);
+      logStore.persistPreparedRawEvent(staleTerminal);
+    },
+  },
+  {
+    name: 'rejects a record whose model input differs from the turn user row',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+      appendUserMessage(logStore, currentSessionId);
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+        visibleMessageIds: [`${currentSessionId}:message-1`],
+        payloadSummary: {normalizedCurrentUserMessage: 'not what the row says'},
+      });
+    },
+  },
+  {
+    name: 'rejects a user row whose text is not normalized',
+    expected: 'malformed_record',
+    run(logStore, currentSessionId) {
+      appendTurnStart(logStore);
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [`${currentSessionId}:message-1`],
+        visibleMessage: {
+          id: `${currentSessionId}:message-1`,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: '  padded  ',
+        },
+        committedAt: '2026-07-16T00:00:01.000Z',
+      });
+    },
+  },
 ] as const satisfies readonly RuntimeLogConformanceScenario[];
 
 const readScenarios = [
   {
-    name: 'blocks readSessionEvidence while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
+    // A crash ends every turn it interrupts exactly like this, so an open
+    // turn is a state reads surface, never one they refuse.
+    name: 'surfaces an open turn to every read',
+    expected: 'accepted',
+    run(logStore, currentSessionId) {
       appendTurnStart(logStore);
+      appendUserMessage(logStore, currentSessionId);
       logStore.readSessionEvidence();
-    },
-  },
-  {
-    name: 'blocks rawEvents while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
-      appendTurnStart(logStore);
       logStore.rawEvents();
-    },
-  },
-  {
-    name: 'blocks conversationMessages while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
-      appendTurnStart(logStore);
       logStore.conversationMessages();
-    },
-  },
-  {
-    name: 'blocks traceEntries while a turn is open',
-    expected: 'partial_write',
-    run(logStore) {
-      appendTurnStart(logStore);
       logStore.traceEntries();
     },
   },
@@ -387,10 +427,6 @@ function captureOutcome(operation: () => void): RuntimeLogScenarioResult {
 }
 
 function appendTurnStart(logStore: RuntimeLogStore): void {
-  logStore.appendTrace({
-    ...identity,
-    step: 'runtime_event_received',
-  });
   logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
@@ -402,15 +438,32 @@ function appendUserMessage(
   logStore: RuntimeLogStore,
   currentSessionId: string,
 ): void {
-  logStore.appendConversationMessage({
+  logStore.appendRawEvent({
     ...identity,
-    id: `${currentSessionId}:message-1`,
-    role: 'user',
-    speakerId: 'local-user',
-    speakerName: 'You',
-    text: 'hello',
+    kind: 'visible_message_committed',
+    eventType: 'USER_MESSAGE',
+    visibleMessageIds: [`${currentSessionId}:message-1`],
+    visibleMessage: {
+      id: `${currentSessionId}:message-1`,
+      role: 'user',
+      speakerId: 'local-user',
+      speakerName: 'You',
+      text: 'hello',
+    },
     committedAt: '2026-07-16T00:00:01.000Z',
   });
+}
+
+function appendCharacterMessage(
+  logStore: RuntimeLogStore,
+  currentSessionId: string,
+  character: CharacterProfile,
+): void {
+  appendVisibleMessageWithCommitAnchor(
+    logStore,
+    characterMessage(currentSessionId),
+    character,
+  );
 }
 
 function characterMessage(currentSessionId: string) {

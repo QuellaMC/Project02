@@ -408,6 +408,11 @@ function rejectedPackageJson(
   return Object.freeze({status: 'rejected', reason});
 }
 
-function compareText(left: string, right: string): number {
+/**
+ * Deterministic code-point order for package listings and diagnostics —
+ * deliberately locale-independent so two machines order the same bytes
+ * the same way.
+ */
+export function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -1,65 +1,6 @@
-import {type CharacterProfile, type SpeakerIdentity} from '../../core/index.ts';
-import {
-  LocalRuntimeStorageContractError,
-  type LocalRuntimeSessionPaths,
-} from '../storage/layout-contract.ts';
-import type {DurableRuntimeSessionEvidence} from './contract.ts';
+import {type CharacterProfile} from '../../core/index.ts';
+import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
-
-export function assertDurableRuntimeSessionIdentity(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly evidence: DurableRuntimeSessionEvidence;
-  readonly boundCharacter?: CharacterProfile;
-  readonly boundUserSpeaker?: SpeakerIdentity;
-}): void {
-  validateDurableRuntimeSessionIdentity({
-    paths: options.paths,
-    evidence: options.evidence,
-    boundCharacter: options.boundCharacter,
-    boundUserSpeaker: options.boundUserSpeaker,
-    allowUnanchoredCustomCharacter: false,
-  });
-}
-
-export function validateDurableRuntimeSessionIdentity(options: {
-  readonly paths: LocalRuntimeSessionPaths;
-  readonly evidence: DurableRuntimeSessionEvidence;
-  readonly boundCharacter: CharacterProfile | undefined;
-  readonly boundUserSpeaker: SpeakerIdentity | undefined;
-  readonly allowUnanchoredCustomCharacter: boolean;
-}): {
-  readonly character: CharacterProfile | undefined;
-  readonly userSpeaker: SpeakerIdentity | undefined;
-} {
-  assertRoleModelEvidenceMatchesSessionId({
-    sessionId: options.paths.sessionId,
-    rawEvents: options.evidence.rawEvents,
-  });
-  const character = durableCharacterProfile({
-    messages: options.evidence.conversationMessages,
-    rawEvents: options.evidence.rawEvents,
-    boundCharacter: options.boundCharacter,
-    allowUnanchoredCustomCharacter: options.allowUnanchoredCustomCharacter,
-  });
-  const userSpeaker = recordedUserSpeakerIdentity(
-    options.evidence.conversationMessages,
-  );
-
-  if (
-    userSpeaker !== undefined &&
-    options.boundUserSpeaker !== undefined &&
-    // Display names are historical per-session facts; the stable id is
-    // the store-bound user identity.
-    userSpeaker.id !== options.boundUserSpeaker.id
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'Durable user evidence must match the store-bound user.',
-    );
-  }
-
-  return Object.freeze({character, userSpeaker});
-}
 
 export function durableCharacterProfile(options: {
   readonly messages: readonly ConversationLogRecord[];
@@ -103,38 +44,6 @@ export function recordedRoleModelCharacterProfile(
   }
 
   return recordedCharacter;
-}
-
-export function recordedUserSpeakerIdentity(
-  messages: readonly ConversationLogRecord[],
-): SpeakerIdentity | undefined {
-  let userSpeaker: SpeakerIdentity | undefined;
-
-  for (const message of messages) {
-    if (message.role !== 'user') {
-      continue;
-    }
-
-    const candidate = Object.freeze({
-      id: message.speakerId,
-      displayName: message.speakerName,
-    } satisfies SpeakerIdentity);
-
-    if (
-      userSpeaker !== undefined &&
-      (userSpeaker.id !== candidate.id ||
-        userSpeaker.displayName !== candidate.displayName)
-    ) {
-      throw new LocalRuntimeStorageContractError(
-        'malformed_record',
-        'Durable user messages must identify one session user speaker.',
-      );
-    }
-
-    userSpeaker = candidate;
-  }
-
-  return userSpeaker;
 }
 
 export function recordedConversationCharacterProfile(

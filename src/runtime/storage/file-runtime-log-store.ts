@@ -1,22 +1,15 @@
 import {appendTextFileSync} from '../../shared/file-system.ts';
+import {discardTornJsonLineTail} from './json-lines.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
-import {encodeConversationLogRecord} from './conversation-codec.ts';
 import {encodeRawEventLogRecord} from './raw-event-codec.ts';
-import {encodeRuntimeTraceEntry} from './trace-codec.ts';
-import type {RuntimeLogStore} from '../evidence/records.ts';
-import {
-  createRuntimeSessionEvidenceSnapshot,
-  removeConversationLogRecords,
-} from '../evidence/recovery.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
+import {deriveRuntimeTraceEntries} from '../evidence/trace-projection.ts';
 import {
   FileRuntimeLogStoreState,
   type FileRuntimeLogStoreStateOptions,
 } from './file-runtime-log-store-state.ts';
 
-export {
-  durableRuntimeSessionCharacterProfile,
-  findValidatedTerminalRawEventForSession,
-} from '../evidence/validation.ts';
+export {durableRuntimeSessionCharacterProfile} from '../evidence/validation.ts';
 
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 
@@ -29,126 +22,65 @@ export function createFileRuntimeLogStore(
   return Object.freeze({
     localRuntimeSessionPaths: paths,
     localRuntimeWriterLockOwnerToken: writerLockOwnerToken,
-    appendTrace(entry) {
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
+    appendRawEvent(record, expectedCharacter) {
+      const storedRecord = this.prepareRawEvent(record, expectedCharacter);
 
-      state.assertSessionReadable();
-      state.assertWriterOwnership();
-      state.recordIncrementalValidation();
-      const storedEntry = machine.prepareTraceAppend(entry);
-
-      try {
-        appendJsonLine(paths.tracePath, encodeRuntimeTraceEntry(storedEntry));
-        machine.commitTraceAppend(storedEntry);
-        state.checkpointCachedEvidenceStamps();
-      } catch (error: unknown) {
-        state.invalidateCachedEvidence();
-        throw error;
-      }
-
-      return storedEntry;
-    },
-    appendRawEvent(record) {
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
-
-      state.assertSessionReadable();
-      state.assertWriterOwnership();
-      state.recordIncrementalValidation();
-      const storedRecord = machine.prepareRawEventAppend(record);
-
-      try {
-        appendJsonLine(
-          paths.rawEventsPath,
-          encodeRawEventLogRecord(storedRecord),
-        );
-        machine.commitRawEventAppend(storedRecord);
-        state.checkpointCachedEvidenceStamps();
-      } catch (error: unknown) {
-        state.invalidateCachedEvidence();
-        throw error;
-      }
-
+      this.persistPreparedRawEvent(storedRecord, expectedCharacter);
       return storedRecord;
     },
-    appendConversationMessage(record, expectedCharacter) {
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
+    prepareRawEvent(record, expectedCharacter) {
+      const machine = state.transitionMachine();
 
-      state.assertSessionReadable();
       state.assertWriterOwnership();
       state.recordIncrementalValidation();
-      const storedRecord = machine.prepareConversationAppend(
-        record,
-        expectedCharacter,
-      );
+      return machine.prepareRawEventAppend(record, expectedCharacter);
+    },
+    persistPreparedRawEvent(record, expectedCharacter) {
+      const machine = state.transitionMachine();
+
+      // Re-checked here, not just in prepareRawEvent: a caller may await
+      // between preparing and persisting, and both the lease and the
+      // evidence state have to hold at the moment the bytes land, not
+      // only when the record was built — an append in between makes the
+      // prepared record stale, and stale bytes on disk are a session the
+      // next start refuses to read.
+      state.assertWriterOwnership();
+      machine.assertRawEventAppend(record, expectedCharacter);
 
       try {
-        appendJsonLine(
-          paths.conversationPath,
-          encodeConversationLogRecord(storedRecord),
-        );
-        machine.commitConversationAppend(storedRecord);
+        appendJsonLine(paths.rawEventsPath, encodeRawEventLogRecord(record));
+        machine.commitRawEventAppend(record, expectedCharacter);
         state.checkpointCachedEvidenceStamps();
       } catch (error: unknown) {
         state.invalidateCachedEvidence();
         throw error;
-      }
-
-      return storedRecord;
-    },
-    recoverAbandonedWriterEvidence() {
-      return state.recoverAbandonedWriterEvidence();
-    },
-    checkpointWriterEvidence() {
-      state.checkpointWriterEvidence();
-    },
-    removeConversationMessages(messageIds) {
-      state.assertSessionReadable();
-      state.assertWriterOwnership();
-      const evidence = state.readStoredEvidence();
-      const machine = state.ensureTransitionMachine(evidence);
-      const updated = removeConversationLogRecords({
-        paths,
-        evidence,
-        messageIds,
-      });
-
-      if (updated !== undefined) {
-        machine.removeConversationMessages(messageIds);
-        state.checkpointCachedEvidenceStamps();
       }
     },
     readSessionEvidence() {
-      state.assertSessionReadable();
       const evidence = state.readStoredEvidence();
-      state.ensureTransitionMachine(evidence).assertPublicReadable();
-      return createRuntimeSessionEvidenceSnapshot(evidence);
+
+      return Object.freeze({
+        rawEvents: Object.freeze([...evidence.rawEvents]),
+        conversationMessages: Object.freeze([...evidence.conversationMessages]),
+      });
     },
     traceEntries() {
-      state.assertSessionReadable();
-      const evidence = state.readStoredEvidence();
-      state.ensureTransitionMachine(evidence).assertPublicReadable();
-      return Object.freeze([...evidence.traceEntries]);
+      return deriveRuntimeTraceEntries(this.rawEvents());
     },
     rawEvents() {
-      state.assertSessionReadable();
-      const evidence = state.readStoredEvidence();
-      state.ensureTransitionMachine(evidence).assertPublicReadable();
-      return Object.freeze([...evidence.rawEvents]);
+      return Object.freeze([...state.readStoredEvidence().rawEvents]);
     },
     conversationMessages() {
-      state.assertSessionReadable();
-      const evidence = state.readStoredEvidence();
-      state.ensureTransitionMachine(evidence).assertPublicReadable();
-      return Object.freeze([...evidence.conversationMessages]);
+      return Object.freeze([
+        ...state.readStoredEvidence().conversationMessages,
+      ]);
     },
   } satisfies RuntimeLogStore);
 }
 
 function appendJsonLine(filePath: string, line: string): void {
   try {
+    discardTornJsonLineTail(filePath);
     appendTextFileSync(filePath, `${line}\n`, 0o600);
   } catch (error: unknown) {
     throw new LocalRuntimeStorageContractError(

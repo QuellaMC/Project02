@@ -156,49 +156,6 @@ describe('role-model prompt rendering', () => {
     );
   });
 
-  it('redacts credential variants before plugin context reaches the prompt', () => {
-    const sentinels = [
-      'auth-sentinel',
-      'proxy-sentinel',
-      'mssql-user:pass',
-      'oracle-user:pass',
-    ];
-    const contextItem = createRuntimePluginContextItem({
-      pluginId: 'memory.credentials',
-      id: 'credential-context',
-      kind: 'memory',
-      text: [
-        'Authorization: ApiKey auth-sentinel',
-        'Proxy-Authorization: Digest proxy-sentinel',
-        'mssql://mssql-user:pass@example.test/db',
-        'oracle://oracle-user:pass@example.test/db',
-      ].join('\n'),
-      budget: {estimatedTokens: 32, priority: 50},
-      sourceReferences: [],
-      redactionLabels: [],
-    });
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: createUserMessageRuntimeEvent('hello', testIdentity()),
-      decisionContext: createDecisionContext({
-        sessionId: 'session-redacted-plugin-context',
-        characterSnapshot: testCharacterProfile,
-        pluginContextItems: [contextItem],
-      }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-    });
-    const serialized = JSON.stringify(
-      renderRoleModelTurnContext(inputEnvelope),
-    );
-
-    for (const sentinel of sentinels) {
-      expect(serialized).not.toContain(sentinel);
-    }
-    expect(serialized).toContain('Authorization: [redacted]');
-    expect(serialized).toContain('Proxy-Authorization: [redacted]');
-    expect(serialized).toContain('mssql://[redacted]@example.test/db');
-    expect(serialized).toContain('oracle://[redacted]@example.test/db');
-  });
-
   it('omits CharacterDecision JSON instructions for native tools but keeps JSON fallback available', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
@@ -251,12 +208,6 @@ describe('role-model prompt rendering', () => {
     );
     expect(protocol).toContain(
       'If you sent an interim visible_reply, make a new visible_reply call',
-    );
-    expect(
-      rendered.tools.find(tool => tool.function.name === 'visible_reply')
-        ?.function.description,
-    ).toContain(
-      'Optional for this user turn; at most 1 call per model response.',
     );
   });
 
@@ -322,17 +273,13 @@ describe('role-model prompt rendering', () => {
       pluginId: 'runtime.management.fixture',
       name: runtimePluginListToolName,
       description: 'List installed runtime plugins.',
-      requiredForUserTurn: false,
-      callLimit: {scope: 'user_turn', maxCalls: 1},
       inputContract: {
         type: 'object',
         fields: [],
         additionalFields: false,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
-      sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition);
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('list plugins', testIdentity()),
@@ -471,11 +418,6 @@ const nestedSchemaToolDefinition = Object.freeze({
   pluginId: 'memory.fixture',
   name: 'memory.capture',
   description: 'Capture a nested memory object.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [],
@@ -510,20 +452,13 @@ const nestedSchemaToolDefinition = Object.freeze({
     },
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'local_memory_write',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 const openUnionSchemaToolDefinition = Object.freeze({
   pluginId: 'memory.fixture',
   name: 'memory.union',
   description: 'Accept nullable object and array unions.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [],
@@ -550,9 +485,7 @@ const openUnionSchemaToolDefinition = Object.freeze({
     },
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'runtime_read',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 function testIdentity() {

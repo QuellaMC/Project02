@@ -1,4 +1,4 @@
-import type {RuntimeLogStore} from '../evidence/records.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {type createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
 
 export function runtimeLogStoreWithWriterOwner(
@@ -10,32 +10,15 @@ export function runtimeLogStoreWithWriterOwner(
       ? {}
       : {localRuntimeSessionPaths: logStore.localRuntimeSessionPaths}),
     localRuntimeWriterLockOwnerToken: ownerToken,
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
+    appendRawEvent(record, expectedCharacter) {
+      return logStore.appendRawEvent(record, expectedCharacter);
     },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
+    prepareRawEvent(record, expectedCharacter) {
+      return logStore.prepareRawEvent(record, expectedCharacter);
     },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
+    persistPreparedRawEvent(record, expectedCharacter) {
+      logStore.persistPreparedRawEvent(record, expectedCharacter);
     },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    ...(logStore.checkpointWriterEvidence === undefined
-      ? {}
-      : {
-          checkpointWriterEvidence() {
-            logStore.checkpointWriterEvidence?.();
-          },
-        }),
-    ...(logStore.recoverAbandonedWriterEvidence === undefined
-      ? {}
-      : {
-          recoverAbandonedWriterEvidence() {
-            return logStore.recoverAbandonedWriterEvidence?.() ?? false;
-          },
-        }),
     readSessionEvidence() {
       return logStore.readSessionEvidence();
     },

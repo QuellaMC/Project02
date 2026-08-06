@@ -1,3 +1,5 @@
+import {isJsonRecord} from '../../../shared/json-boundary.ts';
+
 export const characterRuntimeStateVersion = 'mvp-006.character_state.v1';
 
 export const characterMoodValues = Object.freeze([
@@ -572,10 +574,4 @@ function requiredEnumValue<const T extends string>(
   }
 
   fail(`characterState.current.${field}`);
-}
-
-function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

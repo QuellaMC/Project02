@@ -4,11 +4,6 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({
     name,
     description: 'Search configured memory for relevant context.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 2,
-    },
     inputContract: {
       type: 'object',
       fields: [
@@ -22,9 +17,9 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
+    annotations: {readOnlyHint: true},
+    concurrency: 'shared',
     requiresConfirmation: false,
-    sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
 }
 
@@ -32,11 +27,6 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
   return Object.freeze({
     name,
     description: 'Add a bounded memory item.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [
@@ -50,8 +40,8 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'local_memory_write',
+    annotations: {readOnlyHint: false},
+    concurrency: 'exclusive',
     requiresConfirmation: false,
-    sourceReferencesRequired: true,
   } satisfies RuntimePluginProvidedTool);
 }

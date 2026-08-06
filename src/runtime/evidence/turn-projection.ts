@@ -5,7 +5,6 @@ import type {
   RuntimeTraceEntry,
   RuntimeTurnStatus,
 } from './records.ts';
-import type {RuntimeDerivedTraceEntry} from './records.ts';
 import {isTerminalRawEventLogRecordKind} from './records.ts';
 import {canonicalJsonStringify} from '../../shared/canonical-json.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
@@ -39,7 +38,6 @@ import type {
 
 export function createTurnEvidence(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
-  readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
 }): readonly InspectTurnEvidence[] {
@@ -57,10 +55,6 @@ export function createTurnEvidence(options: {
 
 type InspectEvidenceIndexes = {
   readonly conversationById: ReadonlyMap<string, ConversationLogRecord>;
-  readonly derivedTraceByIdentity: ReadonlyMap<
-    string,
-    readonly RuntimeDerivedTraceEntry[]
-  >;
   readonly terminalRawEvents: readonly InspectTerminalRawEvent[];
   readonly turnProjectionsByIdentity: ReadonlyMap<
     string,
@@ -92,9 +86,8 @@ type MutableInspectTurnRawEventProjection = {
   readonly toolEvents: InspectToolCallEvent[];
 };
 
-export function createInspectEvidenceIndexes(options: {
+function createInspectEvidenceIndexes(options: {
   readonly conversationMessages: readonly ConversationLogRecord[];
-  readonly derivedTraceEntries: readonly RuntimeDerivedTraceEntry[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly traceEntries: readonly RuntimeTraceEntry[];
 }): InspectEvidenceIndexes {
@@ -104,16 +97,13 @@ export function createInspectEvidenceIndexes(options: {
     conversationById: new Map(
       options.conversationMessages.map(message => [message.id, message]),
     ),
-    derivedTraceByIdentity: groupEvidenceByIdentity(
-      options.derivedTraceEntries,
-    ),
     terminalRawEvents: rawEventIndexes.terminalRawEvents,
     turnProjectionsByIdentity: rawEventIndexes.turnProjectionsByIdentity,
     traceEntriesByIdentity: groupEvidenceByIdentity(options.traceEntries),
   });
 }
 
-export function createInspectRawEventIndexes(
+function createInspectRawEventIndexes(
   rawEvents: readonly RawEventLogRecord[],
 ): Pick<
   InspectEvidenceIndexes,
@@ -240,7 +230,7 @@ function freezeInspectTurnProjections(
   return projections;
 }
 
-export function groupEvidenceByIdentity<
+function groupEvidenceByIdentity<
   T extends {
     readonly eventId: string;
     readonly traceId: string;
@@ -267,26 +257,14 @@ function createTurnEvidenceEntry(options: {
   const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
   const identityKey = runtimeEventIdentityKey(rawEvent);
   const projection = options.indexes.turnProjectionsByIdentity.get(identityKey);
-  const storedTraceEntries =
+  const traceEntries =
     options.indexes.traceEntriesByIdentity.get(identityKey) ?? [];
-  const derivedTraceEntries =
-    options.indexes.derivedTraceByIdentity.get(identityKey) ?? [];
 
   return Object.freeze({
     eventId: rawEvent.eventId,
     traceId: rawEvent.traceId,
     status: terminalTurnStatus(rawEvent),
-    steps: Object.freeze(storedTraceEntries.map(entry => entry.step)),
-    derivedSteps: Object.freeze(
-      derivedTraceEntries.map(entry =>
-        Object.freeze({
-          step: entry.step,
-          source: entry.provenance.source,
-          reason: entry.provenance.reason,
-          rawEventAnchor: entry.provenance.rawEventAnchor,
-        }),
-      ),
-    ),
+    steps: Object.freeze(traceEntries.map(entry => entry.step)),
     visibleMessages: Object.freeze(
       visibleMessageIds.flatMap(messageId =>
         visibleMessagesForId(options.indexes.conversationById, messageId),
@@ -464,7 +442,7 @@ function pluginListings(
         displayName: plugin.manifest.displayName,
         version: plugin.manifest.version,
         kind: plugin.manifest.kind,
-        localTrustLevel: plugin.manifest.localTrustLevel,
+        firstParty: plugin.manifest.firstParty,
         installed: plugin.installed,
         registered: plugin.registered,
         enabled: plugin.enabled,
@@ -476,9 +454,15 @@ function pluginListings(
             Object.freeze({
               name: tool.name,
               validationOwner: tool.validationOwner,
-              sideEffectLevel: tool.sideEffectLevel,
               requiresConfirmation: tool.requiresConfirmation,
-              sourceReferencesRequired: tool.sourceReferencesRequired,
+              // Carried through rather than summarized: an audit needs
+              // what the tool declared, including having declared nothing.
+              ...(tool.annotations === undefined
+                ? {}
+                : {annotations: tool.annotations}),
+              ...(tool.concurrency === undefined
+                ? {}
+                : {concurrency: tool.concurrency}),
             } satisfies InspectPluginToolListing),
           ),
         ),
@@ -731,9 +715,7 @@ function roleModelCommitValidation(
   } satisfies InspectRoleModelCommitValidation);
 }
 
-export function terminalTurnStatus(
-  record: RawEventLogRecord,
-): RuntimeTurnStatus {
+function terminalTurnStatus(record: RawEventLogRecord): RuntimeTurnStatus {
   if (record.status !== undefined) {
     return record.status;
   }
@@ -744,7 +726,7 @@ export function terminalTurnStatus(
   );
 }
 
-export function visibleMessagesForId(
+function visibleMessagesForId(
   conversationById: ReadonlyMap<string, ConversationLogRecord>,
   messageId: string,
 ): readonly InspectVisibleMessage[] {

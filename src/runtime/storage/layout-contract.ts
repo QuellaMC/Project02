@@ -1,3 +1,4 @@
+import {isJsonRecord as isRecord} from '../../shared/json-boundary.ts';
 import {basename, dirname, join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
@@ -6,7 +7,15 @@ export const defaultProject02HomeRoot = '.project02';
 
 export const defaultLocalRuntimeSessionId = 'local-session';
 
-export const localRuntimeStorageSchemaVersion = 4;
+// v5: the conversation log became per-message (commit-as-emitted) — role is
+// a recorded fact, turns may hold any number of visible messages, and each
+// message anchors to its own visible_message_committed raw event. v4 stores
+// were written under the strict user/character pair rule and fail closed.
+// v6: raw-events.jsonl became the one session log. The turn trace is
+// derived from it, trace.jsonl is no longer written or read, and a
+// trailing turn a crash left without its terminal event is an incomplete
+// state the reader surfaces, not damage. v5 stores fail closed.
+export const localRuntimeStorageSchemaVersion = 6;
 
 export type LocalRuntimeReadableStorageSchemaVersion =
   typeof localRuntimeStorageSchemaVersion;
@@ -34,7 +43,6 @@ export type LocalRuntimeStorageContractErrorCode =
   | 'partial_write'
   | 'read_failed'
   | 'session_busy'
-  | 'stale_session'
   | 'storage_busy'
   | 'unsupported_schema_version'
   | 'write_failed';
@@ -85,9 +93,7 @@ export type LocalRuntimeSessionPaths = {
   readonly sessionId: string;
   readonly sessionRoot: string;
   readonly pluginsRoot: string;
-  readonly tracePath: string;
   readonly rawEventsPath: string;
-  readonly conversationPath: string;
 };
 
 export type LocalRuntimePluginPaths = {
@@ -185,11 +191,7 @@ const charactersDirectoryName = 'characters';
 
 export const characterDataDirectoryName = 'character-data';
 
-const traceFileName = 'trace.jsonl';
-
 const rawEventsFileName = 'raw-events.jsonl';
-
-const conversationFileName = 'conversation.jsonl';
 
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
@@ -287,9 +289,7 @@ export function createLocalRuntimeSessionPaths(
     sessionId,
     sessionRoot,
     pluginsRoot,
-    tracePath: join(sessionRoot, traceFileName),
     rawEventsPath: join(sessionRoot, rawEventsFileName),
-    conversationPath: join(sessionRoot, conversationFileName),
   } satisfies LocalRuntimeSessionPaths);
 }
 
@@ -429,7 +429,11 @@ export function decodeStorageSchemaMarker(
   if (!isLocalRuntimeReadableStorageSchemaVersion(schemaVersion)) {
     throw new LocalRuntimeStorageContractError(
       'unsupported_schema_version',
-      `Unsupported local runtime storage schema version: ${String(schemaVersion)}.`,
+      `This store uses storage schema version ${String(schemaVersion)}, but this ` +
+        `version of Project02 reads only version ${String(localRuntimeStorageSchemaVersion)}. ` +
+        'To keep this store, run the Project02 version that created it; to ' +
+        'continue here, choose a different store directory or delete this one ' +
+        'and start fresh.',
     );
   }
 
@@ -587,13 +591,11 @@ export function requiredNonEmptyString(
   return value;
 }
 
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function throwMalformedSchemaMarker(field: string): never {
   throw new LocalRuntimeStorageContractError(
     'malformed_schema_marker',
     `Stored local runtime schema field "${field}" is malformed.`,
   );
 }
+
+export {isRecord};

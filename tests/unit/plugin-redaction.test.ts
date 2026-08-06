@@ -1,42 +1,12 @@
 import {describe, expect, it} from 'vitest';
 
-import {
-  createRuntimePluginToolInvocationSnapshot,
-  redactRuntimePluginText,
-} from '../../src/plugins/api/index.ts';
+import {createRuntimePluginToolInvocationSnapshot} from '../../src/plugins/api/index.ts';
 import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
 } from '../../src/plugins/api/index.ts';
 
 describe('runtime plugin text redaction', () => {
-  it('redacts JSON-shaped quoted secret keys', () => {
-    const cases = [
-      ['{"api_key":"super-secret"}', '{"api_key":"[redacted]"}'],
-      ['"password": "open-sesame"', '"password": "[redacted]"'],
-      ['{ "token" : "secret-token" }', '{ "token" : "[redacted]" }'],
-      ["'secret': 'hidden-value'", "'secret': '[redacted]'"],
-    ] as const;
-
-    for (const [input, expected] of cases) {
-      expect(redactRuntimePluginText(input)).toBe(expected);
-    }
-  });
-
-  it('redacts URI query values with credential-shaped keys', () => {
-    const input =
-      'https://example.test/search?api.key=dotted-secret&api_key=underscore-secret&api-key=hyphen-secret&safe=kept#section';
-
-    const redacted = redactRuntimePluginText(input);
-
-    expect(redacted).toBe(
-      'https://example.test/search?api.key=[redacted]&api_key=[redacted]&api-key=[redacted]&safe=kept#section',
-    );
-    expect(redacted).not.toContain('dotted-secret');
-    expect(redacted).not.toContain('underscore-secret');
-    expect(redacted).not.toContain('hyphen-secret');
-  });
-
   it('redacts structured values under credential-shaped plugin result keys', () => {
     const snapshot = createRuntimePluginToolInvocationSnapshot({
       eventId: 'evt_plugin_structured_redaction',

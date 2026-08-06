@@ -3,6 +3,7 @@
  * against the tool's declared input contract (legacy field list or
  * JSON schema) before the call may commit.
  */
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   isModelToolJsonSchemaTypeArray,
   type ModelToolInputContract,
@@ -415,10 +416,4 @@ function freezeJsonValue(value: unknown): unknown {
   }
 
   return value;
-}
-
-function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

@@ -48,7 +48,7 @@
         "compatibility",
         "declaredPlugins",
         "config",
-        "localTrustLevel",
+        "firstParty",
         "runtimePolicy",
         "activation",
         "requestedAccess"
@@ -126,36 +126,19 @@
             "fingerprint": {"type": "string"}
           }
         },
-        "localTrustLevel": {
-          "enum": ["first_party", "trusted_adapter", "test_fixture"]
+        "firstParty": {
+          "type": "boolean"
         },
         "runtimePolicy": {
           "type": "object",
           "additionalProperties": false,
           "required": [
-            "requiredForTurn",
-            "sideEffectLevel",
-            "confirmation",
             "timeoutMs",
-            "sourceReferencesRequired",
             "redactionLabels",
             "failureBehavior"
           ],
           "properties": {
-            "requiredForTurn": {"type": "boolean"},
-            "sideEffectLevel": {
-              "enum": [
-                "none",
-                "runtime_read",
-                "runtime_config_write",
-                "local_memory_write",
-                "external_read",
-                "external_write"
-              ]
-            },
-            "confirmation": {"enum": ["not_required", "required"]},
             "timeoutMs": {"type": "integer", "minimum": 1},
-            "sourceReferencesRequired": {"type": "boolean"},
             "redactionLabels": {"$ref": "#/definitions/stringArray"},
             "failureBehavior": {
               "type": "object",
@@ -163,13 +146,11 @@
               "required": [
                 "beforeRoleModelCall",
                 "handleToolCall",
-                "afterTurnCommitted",
-                "health"
+                    "health"
               ],
               "properties": {
                 "beforeRoleModelCall": {"enum": ["reject_turn", "degrade"]},
                 "handleToolCall": {"enum": ["reject_tool_call", "degrade"]},
-                "afterTurnCommitted": {"enum": ["log_failure"]},
                 "health": {"enum": ["degrade", "reject_turn"]}
               }
             }

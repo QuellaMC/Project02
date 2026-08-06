@@ -51,8 +51,7 @@ export function beforeRoleModelFailureRejectsTurn(
   plugin: RuntimePlugin,
 ): boolean {
   return (
-    plugin.manifest.runtimePolicy.requiredForTurn ||
     plugin.manifest.runtimePolicy.failureBehavior.beforeRoleModelCall ===
-      'reject_turn'
+    'reject_turn'
   );
 }

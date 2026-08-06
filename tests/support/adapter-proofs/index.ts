@@ -19,7 +19,6 @@ import {
   type RuntimePluginManifest,
   type RuntimePluginProvidedTool,
   type RuntimePluginRuntimePolicy,
-  type RuntimePluginSideEffectLevel,
   type RuntimePluginSourceReference,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
@@ -33,7 +32,7 @@ import {
   type ModelToolInputFieldValueType,
   modelToolInputFieldValueTypes,
 } from '../../../src/role-model/index.ts';
-import {isModelFacingPluginTool} from '../../../src/plugins/policy/tool-policy.ts';
+import {isModelFacingRuntimePluginTool} from '../../../src/plugins/api/tool-classification.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
@@ -81,8 +80,6 @@ export function mapOpenClawMemoryPluginFixture(
         toolInputSchemaFromMetadata(toolMetadata, toolName),
       ),
       validationOwner: 'adapter',
-      sideEffectLevel: 'runtime_read',
-      sourceReferencesRequired: true,
     }),
   );
   const notes = [
@@ -182,8 +179,6 @@ export function mapTencentDbMemoryGatewayFixture(
       description: 'Search TencentDB memory records from the fixture gateway.',
       inputContract: inputContractFromSchema(searchMemories.requestSchema),
       validationOwner: 'adapter',
-      sideEffectLevel: 'external_read',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
     createProvidedToolFromSchema({
@@ -192,8 +187,6 @@ export function mapTencentDbMemoryGatewayFixture(
         'Search TencentDB conversation records from the fixture gateway.',
       inputContract: inputContractFromSchema(searchConversations.requestSchema),
       validationOwner: 'adapter',
-      sideEffectLevel: 'external_read',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
   ];
@@ -407,8 +400,6 @@ export function mapHermesMemoryProviderFixture(
         requiredRecord(tool['inputSchema'], 'behavior.searchTools.inputSchema'),
       ),
       validationOwner: 'adapter',
-      sideEffectLevel: 'external_read',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
   );
@@ -582,8 +573,6 @@ export function mapMcpToolsResourcesFixture(
         requiredRecord(tool['inputSchema'], 'tools.inputSchema'),
       ),
       validationOwner: 'adapter',
-      sideEffectLevel: 'external_read',
-      sourceReferencesRequired: true,
       maxCalls: 2,
     }),
   );
@@ -615,9 +604,7 @@ export function mapMcpToolsResourcesFixture(
       }),
     ],
     runtimePolicy: createAdapterPolicy({
-      sideEffectLevel: 'external_read',
       timeoutMs: 1000,
-      sourceReferencesRequired: true,
     }),
     activationReasons: ['mcp_fixture_mapping'],
     compatibilityNotes: notes,
@@ -769,9 +756,7 @@ function createOpenClawManifest(options: {
     providedTools: options.providedTools,
     configFields: options.configFields,
     runtimePolicy: createAdapterPolicy({
-      sideEffectLevel: 'runtime_read',
       timeoutMs: 1000,
-      sourceReferencesRequired: true,
     }),
     activationReasons: options.activationReasons,
     compatibilityNotes: options.compatibilityNotes,
@@ -812,9 +797,7 @@ function createMemoryGatewayManifest(options: {
     configFields: options.configFields,
     configFingerprint: options.configFingerprint,
     runtimePolicy: createAdapterPolicy({
-      sideEffectLevel: 'local_memory_write',
       timeoutMs: 2000,
-      sourceReferencesRequired: true,
       redactionLabels: ['secret'],
     }),
     activationReasons: ['memory_fixture_mapping'],
@@ -863,7 +846,7 @@ function createRuntimePluginManifestForAdapter(options: {
         ? {}
         : {fingerprint: options.configFingerprint}),
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: options.runtimePolicy,
     activation: {
       defaultEnabled: false,
@@ -885,16 +868,8 @@ function adapterRequestedAccess(options: {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): RuntimePluginAccessMap {
-  const pluginShape = {
-    manifest: options.manifest,
-    providedTools: options.providedTools,
-    lifecycleHooks: {},
-  } satisfies RuntimePlugin;
   const hasModelFacingPluginHostTool = options.providedTools.some(tool =>
-    isModelFacingPluginTool({
-      plugin: pluginShape,
-      tool,
-    }),
+    isModelFacingRuntimePluginTool({manifest: options.manifest, tool}),
   );
 
   return Object.freeze({
@@ -910,22 +885,15 @@ function adapterRequestedAccess(options: {
 }
 
 function createAdapterPolicy(options: {
-  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
   readonly timeoutMs: number;
-  readonly sourceReferencesRequired: boolean;
   readonly redactionLabels?: readonly string[];
 }): RuntimePluginRuntimePolicy {
   return {
-    requiredForTurn: false,
-    sideEffectLevel: options.sideEffectLevel,
-    confirmation: 'not_required',
     timeoutMs: options.timeoutMs,
-    sourceReferencesRequired: options.sourceReferencesRequired,
     redactionLabels: options.redactionLabels ?? [],
     failureBehavior: {
       beforeRoleModelCall: 'degrade',
       handleToolCall: 'degrade',
-      afterTurnCommitted: 'log_failure',
       health: 'degrade',
     },
   };
@@ -936,23 +904,14 @@ function createProvidedToolFromSchema(options: {
   readonly description: string;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
-  readonly sourceReferencesRequired: boolean;
   readonly maxCalls?: number;
 }): RuntimePluginProvidedTool {
   return {
     name: options.name,
     description: options.description,
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: options.maxCalls ?? 1,
-    },
     inputContract: options.inputContract,
     validationOwner: options.validationOwner,
-    sideEffectLevel: options.sideEffectLevel,
     requiresConfirmation: false,
-    sourceReferencesRequired: options.sourceReferencesRequired,
   };
 }
 

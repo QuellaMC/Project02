@@ -36,12 +36,6 @@ export type CharacterAgent = {
   ): Promise<CharacterAgentReply> | CharacterAgentReply;
 };
 
-export type CharacterTurnResult = {
-  readonly userMessage: VisibleMessage;
-  readonly characterMessage: VisibleMessage;
-  readonly reply: CharacterAgentReply;
-};
-
 export type ConversationSessionOptions = {
   readonly id?: string;
   readonly character: CharacterProfile;
@@ -50,13 +44,7 @@ export type ConversationSessionOptions = {
 };
 
 export type RestoredVisibleTranscriptValidationOptions =
-  ConversationSessionOptions & {
-    readonly allowIncompleteFinalTurn?: boolean;
-  };
-
-export type CharacterTurnOptions = {
-  readonly recentMessageLimit?: number;
-};
+  ConversationSessionOptions;
 
 export const defaultRecentVisibleMessageLimit = 8;
 
@@ -129,7 +117,6 @@ export function validateConversationParticipants(options: {
 
 const defaultSessionId = 'local-session';
 const sessionTranscripts = new WeakMap<ConversationSession, VisibleMessage[]>();
-const sessionTurnQueues = new WeakMap<ConversationSession, Promise<void>>();
 
 export class CharacterInputError extends Error {
   constructor(message: string) {
@@ -201,101 +188,69 @@ export function validateRestoredVisibleTranscript(
       ...(options.visibleTranscript === undefined
         ? {}
         : {visibleTranscript: options.visibleTranscript}),
-      allowIncompleteFinalTurn: options.allowIncompleteFinalTurn ?? false,
     }),
   );
 }
 
-export async function runCharacterTurn(
-  session: ConversationSession,
-  message: string | undefined,
-  agent: CharacterAgent,
-  options: CharacterTurnOptions = {},
-): Promise<CharacterTurnResult> {
-  return await enqueueSessionTurn(session, async () => {
-    return await runSerializedCharacterTurn(session, message, agent, options);
-  });
-}
-
-export function rollbackLastCharacterTurn(
-  session: ConversationSession,
-  turn: CharacterTurnResult,
-): void {
+/**
+ * The number the next committed message will carry.
+ *
+ * Counted from the last message the session holds rather than from how
+ * many it holds, because the log is allowed to lag: a write that fails
+ * leaves a said message with no row, and the next number still has to
+ * clear every number already used. Length would reissue one.
+ *
+ * This is the only place a message number is chosen. The log checks that
+ * numbers climb, never what the next one should be, so the session stays
+ * the single source.
+ */
+export function nextMessageNumber(session: ConversationSession): number {
   const transcript = getMutableTranscript(session);
-  const userMessageIndex = transcript.length - 2;
+  const lastMessage = transcript.at(-1);
 
-  if (
-    userMessageIndex < 0 ||
-    transcript[userMessageIndex] !== turn.userMessage ||
-    transcript[userMessageIndex + 1] !== turn.characterMessage
-  ) {
-    throw new Error(
-      'Cannot roll back a character turn that is no longer latest.',
-    );
+  if (lastMessage === undefined) {
+    return 1;
   }
 
-  transcript.splice(userMessageIndex, 2);
+  return (messageNumberFromId(lastMessage.id) ?? transcript.length) + 1;
 }
 
-async function runSerializedCharacterTurn(
+/**
+ * The next user message for this session, not yet part of the transcript.
+ */
+export function createUserMessage(
   session: ConversationSession,
   message: string | undefined,
-  agent: CharacterAgent,
-  options: CharacterTurnOptions,
-): Promise<CharacterTurnResult> {
+): VisibleMessage {
   const normalizedMessage = normalizeCharacterInput(message);
-  const transcript = getMutableTranscript(session);
-  const recentVisibleMessages = selectRecentVisibleMessages(
-    transcript,
-    options.recentMessageLimit ?? defaultRecentVisibleMessageLimit,
-  );
-  const reply = await agent.reply({
-    character: session.character,
-    message: normalizedMessage,
-    recentVisibleMessages,
-  });
-  const normalizedReplyText = normalizeCharacterReply(reply);
-  const nextMessageNumber = transcript.length + 1;
-  const userMessage = Object.freeze({
-    id: createMessageId(session, nextMessageNumber),
+
+  return Object.freeze({
+    id: createMessageId(session, nextMessageNumber(session)),
     role: 'user',
     speakerId: session.userSpeaker.id,
     speakerName: session.userSpeaker.displayName,
     text: normalizedMessage,
   } satisfies VisibleMessage);
-  const characterMessage = createCharacterVisibleMessage({
-    messageNumber: nextMessageNumber + 1,
-    replyText: normalizedReplyText,
-    session,
-  });
-
-  transcript.push(userMessage, characterMessage);
-
-  return {
-    userMessage,
-    characterMessage,
-    reply: {
-      text: normalizedReplyText,
-    },
-  };
 }
 
-async function enqueueSessionTurn<T>(
+/** Adds a durable message to the session the model reads. */
+export function appendCommittedMessage(
   session: ConversationSession,
-  operation: () => Promise<T>,
-): Promise<T> {
-  const previousTurn = sessionTurnQueues.get(session) ?? Promise.resolve();
-  const currentTurn = previousTurn.then(operation, operation);
+  message: VisibleMessage,
+): void {
+  getMutableTranscript(session).push(message);
+}
 
-  sessionTurnQueues.set(
+/** The next character message for this session, not yet in the transcript. */
+export function createCharacterMessage(
+  session: ConversationSession,
+  reply: unknown,
+): VisibleMessage {
+  return createCharacterVisibleMessage({
+    messageNumber: nextMessageNumber(session),
+    replyText: normalizeCharacterReply(reply),
     session,
-    currentTurn.then(
-      () => undefined,
-      () => undefined,
-    ),
-  );
-
-  return await currentTurn;
+  });
 }
 
 function normalizeCharacterInput(message: string | undefined): string {
@@ -402,30 +357,54 @@ function createInitialVisibleTranscript(options: {
   readonly character: CharacterProfile;
   readonly userSpeaker: SpeakerIdentity;
   readonly visibleTranscript?: readonly VisibleMessage[];
-  readonly allowIncompleteFinalTurn: boolean;
 }): VisibleMessage[] {
   const visibleTranscript = options.visibleTranscript ?? [];
-  const restoredMessages: VisibleMessage[] = [];
+  let previousMessageNumber = 0;
 
-  visibleTranscript.forEach((message, index) => {
-    restoredMessages.push(
-      freezeValidatedRestoredVisibleMessage({
-        sessionId: options.sessionId,
-        character: options.character,
-        userSpeaker: options.userSpeaker,
-        message,
-        expectedMessageNumber: index + 1,
-      }),
+  return visibleTranscript.map(message => {
+    // Climbing, not dense. A message whose write failed was still said, so
+    // the log can be missing a number the session issued; what must never
+    // happen is a number going backwards or repeating, which is what
+    // reordered or duplicated rows look like.
+    const messageNumber = restoredMessageNumber(
+      options.sessionId,
+      message,
+      previousMessageNumber,
     );
-  });
 
-  if (!options.allowIncompleteFinalTurn && restoredMessages.length % 2 !== 0) {
+    previousMessageNumber = messageNumber;
+    return freezeValidatedRestoredVisibleMessage({
+      sessionId: options.sessionId,
+      character: options.character,
+      userSpeaker: options.userSpeaker,
+      message,
+    });
+  });
+}
+
+function restoredMessageNumber(
+  sessionId: string,
+  message: VisibleMessage,
+  previousMessageNumber: number,
+): number {
+  const messageNumber = messageNumberFromId(message.id);
+
+  if (
+    messageNumber === undefined ||
+    sessionIdFromMessageId(message.id) !== sessionId
+  ) {
     throw new ConversationRehydrationError(
-      'Restored visible messages must end after a complete user/character turn.',
+      `Restored visible message must carry a "${sessionId}" message ID: "${message.id}".`,
     );
   }
 
-  return restoredMessages;
+  if (messageNumber <= previousMessageNumber) {
+    throw new ConversationRehydrationError(
+      `Restored visible messages must climb in session order: "${message.id}" follows message ${String(previousMessageNumber)}.`,
+    );
+  }
+
+  return messageNumber;
 }
 
 function freezeValidatedRestoredVisibleMessage(options: {
@@ -433,23 +412,7 @@ function freezeValidatedRestoredVisibleMessage(options: {
   readonly character: CharacterProfile;
   readonly userSpeaker: SpeakerIdentity;
   readonly message: VisibleMessage;
-  readonly expectedMessageNumber: number;
 }): VisibleMessage {
-  const expectedId = createMessageIdForSessionId(
-    options.sessionId,
-    options.expectedMessageNumber,
-  );
-
-  if (options.message.id !== expectedId) {
-    throw new ConversationRehydrationError(
-      `Restored visible message must have sequential ID "${expectedId}".`,
-    );
-  }
-
-  validateRestoredRoleOrder({
-    expectedMessageNumber: options.expectedMessageNumber,
-    message: options.message,
-  });
   validateRestoredSpeaker({
     character: options.character,
     userSpeaker: options.userSpeaker,
@@ -483,20 +446,6 @@ function freezeValidatedRestoredVisibleMessage(options: {
     speakerName: options.message.speakerName,
     text: options.message.text,
   } satisfies VisibleMessage);
-}
-
-function validateRestoredRoleOrder(options: {
-  readonly expectedMessageNumber: number;
-  readonly message: VisibleMessage;
-}): void {
-  const expectedRole =
-    options.expectedMessageNumber % 2 === 1 ? 'user' : 'character';
-
-  if (options.message.role !== expectedRole) {
-    throw new ConversationRehydrationError(
-      'Restored visible messages must preserve user/character commit order.',
-    );
-  }
 }
 
 function validateRestoredSpeaker(options: {
@@ -537,9 +486,42 @@ function validateRestoredSpeaker(options: {
   );
 }
 
-function createMessageIdForSessionId(
+export function createMessageIdForSessionId(
   sessionId: string,
   messageNumber: number,
 ): string {
   return `${sessionId}:message-${String(messageNumber)}`;
 }
+
+/**
+ * The position a message ID claims, or undefined when the ID is not one of
+ * ours. The one reader of the format `createMessageIdForSessionId` writes,
+ * so nothing else has to know how a message ID is spelled.
+ */
+export function messageNumberFromId(id: string): number | undefined {
+  const separator = id.lastIndexOf(messageIdInfix);
+
+  if (separator < 0) {
+    return undefined;
+  }
+
+  const digits = id.slice(separator + messageIdInfix.length);
+
+  if (!/^[1-9][0-9]*$/u.test(digits)) {
+    return undefined;
+  }
+
+  const messageNumber = Number(digits);
+  return Number.isSafeInteger(messageNumber) ? messageNumber : undefined;
+}
+
+/** The session ID a message ID carries, or undefined when it carries none. */
+export function sessionIdFromMessageId(id: string): string | undefined {
+  const separator = id.lastIndexOf(messageIdInfix);
+
+  return separator < 0 || messageNumberFromId(id) === undefined
+    ? undefined
+    : id.slice(0, separator);
+}
+
+const messageIdInfix = ':message-';

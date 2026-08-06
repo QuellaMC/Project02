@@ -8,8 +8,8 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
-  findValidatedTerminalRawEventForSession,
 } from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {findRuntimeTurnTerminalRawEvent} from '../../src/runtime/evidence/validation.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
@@ -21,7 +21,7 @@ import {
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
-import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {
   defaultRoleModelProviderCapabilities,
   type RoleModelAdapter,
@@ -38,6 +38,7 @@ import {
 } from '../../src/runtime/storage/layout-contract.ts';
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
+import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
@@ -78,9 +79,7 @@ describe('file runtime log store plugin tool event validation', () => {
     const schemaPath = createLocalRuntimeStorageLayout({storeRoot}).schemaPath;
     const markerBeforeMutation = readFileSync(schemaPath, 'utf8');
 
-    writeFileSync(paths.tracePath, '', 'utf8');
     writeFileSync(paths.rawEventsPath, '', 'utf8');
-    writeFileSync(paths.conversationPath, '', 'utf8');
 
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
@@ -90,9 +89,10 @@ describe('file runtime log store plugin tool event validation', () => {
 
     try {
       expect(() =>
-        logStore.appendTrace({
+        logStore.appendRawEvent({
           ...identity('evt_foreign_character_marker'),
-          step: 'runtime_event_received',
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE',
         }),
       ).toThrow(
         expect.objectContaining({
@@ -100,9 +100,7 @@ describe('file runtime log store plugin tool event validation', () => {
         }),
       );
       expect(evidenceReads).toEqual([]);
-      expect(readFileSync(paths.tracePath, 'utf8')).toBe('');
       expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe('');
-      expect(readFileSync(paths.conversationPath, 'utf8')).toBe('');
       expect(readFileSync(schemaPath, 'utf8')).toBe(markerBeforeMutation);
     } finally {
       await writerLease.release();
@@ -143,12 +141,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
     try {
       expect(() =>
-        storeB.appendTrace({
+        storeB.appendRawEvent({
           ...identity('evt_owner_token_append'),
-          step: 'runtime_event_received',
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE',
         }),
       ).toThrow(expect.objectContaining({code: 'session_busy'}));
-      expect(storeA.traceEntries()).toEqual([]);
+      expect(storeA.rawEvents()).toEqual([]);
     } finally {
       await writerLease.release();
     }
@@ -186,7 +185,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    const abandonedTemporaryPath = `${paths.sessionRoot}/.trace.jsonl.2147483647.00000000-0000-4000-8000-000000000000.tmp`;
+    const abandonedTemporaryPath = `${paths.sessionRoot}/.raw-events.jsonl.2147483647.00000000-0000-4000-8000-000000000000.tmp`;
     writeFileSync(abandonedTemporaryPath, 'abandoned', 'utf8');
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
@@ -223,19 +222,20 @@ describe('file runtime log store plugin tool event validation', () => {
     });
 
     expect(() =>
-      logStore.appendTrace({
+      logStore.appendRawEvent({
         ...identity('evt_low_level_writer'),
-        step: 'runtime_event_received',
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
       }),
     ).toThrow(
       expect.objectContaining({
         code: 'session_busy',
       }),
     );
-    expect(logStore.readSessionEvidence().stored.traceEntries).toEqual([]);
+    expect(logStore.readSessionEvidence().rawEvents).toEqual([]);
   });
 
-  it('rejects canonical timestamps that disagree across evidence streams', async () => {
+  it('rejects canonical timestamps that disagree within one event identity', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-created-at-agreement';
     const eventIdentity = identity('evt_created_at_agreement');
@@ -258,14 +258,16 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    writeJsonLines(paths.tracePath, [
-      {...eventIdentity, step: 'runtime_event_received'},
-    ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
-        createdAt: '2026-06-15T00:00:01.000Z',
         kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
+      },
+      {
+        ...eventIdentity,
+        createdAt: '2026-06-15T00:00:01.000Z',
+        kind: 'runtime_event_normalized',
         eventType: 'USER_MESSAGE',
       },
     ]);
@@ -298,175 +300,18 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    writeJsonLines(paths.tracePath, [
+    writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
         createdAt: '2026-06-15T00:00:00Z',
-        step: 'runtime_event_received',
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
       },
     ]);
 
     expect(() => logStore.readSessionEvidence()).toThrow(
       'Stored local runtime field "createdAt" must be a canonical UTC ISO timestamp.',
     );
-  });
-
-  it('reports a missing terminal trace as anchored derived evidence without changing stored reads', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-read-only-terminal-trace-reconciliation';
-    const eventIdentity = identity('evt_legacy_schema1_patch');
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: eventIdentity.createdAt,
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    writeJsonLines(paths.tracePath, [
-      {
-        ...eventIdentity,
-        step: 'runtime_event_received',
-      },
-    ]);
-    writeJsonLines(paths.rawEventsPath, [
-      {
-        ...eventIdentity,
-        kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE',
-      },
-      {
-        ...eventIdentity,
-        kind: 'runtime_event_normalized',
-        eventType: 'USER_MESSAGE',
-        payloadSummary: {
-          rawInput: 'remember the mood',
-          normalizedCurrentUserMessage: 'remember the mood',
-        },
-      },
-      legacySchema1PatchCompletedEvent(sessionId),
-    ]);
-    const traceBeforePublicReads = readFileSync(paths.tracePath, 'utf8');
-    const rawEventsBeforePublicReads = readFileSync(
-      paths.rawEventsPath,
-      'utf8',
-    );
-
-    const evidence = logStore.readSessionEvidence();
-
-    expect(evidence.stored.traceEntries.map(entry => entry.step)).toEqual([
-      'runtime_event_received',
-    ]);
-    expect(evidence.derived.traceEntries).toEqual([
-      {
-        ...eventIdentity,
-        step: 'raw_event_log_appended',
-        provenance: {
-          source: 'terminal_raw_event',
-          reason: 'missing_persisted_trace_entry',
-          rawEventAnchor: {
-            ...eventIdentity,
-            kind: 'runtime_turn_completed',
-          },
-        },
-      },
-      {
-        ...eventIdentity,
-        step: 'runtime_turn_completed',
-        provenance: {
-          source: 'terminal_raw_event',
-          reason: 'missing_persisted_trace_entry',
-          rawEventAnchor: {
-            ...eventIdentity,
-            kind: 'runtime_turn_completed',
-          },
-        },
-      },
-    ]);
-    expect(logStore.traceEntries().map(entry => entry.step)).toEqual([
-      'runtime_event_received',
-    ]);
-    expect(logStore.rawEvents().at(-1)?.kind).toBe('runtime_turn_completed');
-    expect(logStore.conversationMessages()).toEqual([]);
-    expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicReads);
-    expect(readFileSync(paths.rawEventsPath, 'utf8')).toBe(
-      rawEventsBeforePublicReads,
-    );
-  });
-
-  it('keeps rejected terminal trace compatibility evidence separate from stored trace', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'session-read-only-rejected-trace-reconciliation';
-    const eventIdentity = identity(
-      'evt_read_only_rejected_trace_reconciliation',
-    );
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: eventIdentity.createdAt,
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    writeJsonLines(paths.tracePath, [
-      {
-        ...eventIdentity,
-        step: 'runtime_event_received',
-      },
-    ]);
-    writeJsonLines(paths.rawEventsPath, [
-      {
-        ...eventIdentity,
-        kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE',
-      },
-      {
-        ...eventIdentity,
-        kind: 'runtime_turn_rejected',
-        eventType: 'USER_MESSAGE',
-        status: 'rejected',
-        reason: 'fixture rejection',
-      },
-    ]);
-    const traceBeforePublicRead = readFileSync(paths.tracePath, 'utf8');
-
-    const evidence = logStore.readSessionEvidence();
-
-    expect(logStore.traceEntries().map(entry => entry.step)).toEqual([
-      'runtime_event_received',
-    ]);
-    expect(evidence.derived.traceEntries.map(entry => entry.step)).toEqual([
-      'raw_event_log_appended',
-      'runtime_turn_rejected',
-    ]);
-    expect(
-      evidence.derived.traceEntries.map(
-        entry => entry.provenance.rawEventAnchor.kind,
-      ),
-    ).toEqual(['runtime_turn_rejected', 'runtime_turn_rejected']);
-    expect(readFileSync(paths.tracePath, 'utf8')).toBe(traceBeforePublicRead);
   });
 
   it('validates full session evidence before returning an exact terminal identity', async () => {
@@ -496,16 +341,12 @@ describe('file runtime log store plugin tool event validation', () => {
       legacySchema1PatchCompletedEvent(sessionId),
     ]);
 
-    expect(() =>
-      findValidatedTerminalRawEventForSession(paths, eventIdentity),
-    ).toThrow(LocalRuntimeStorageContractError);
+    // The lookup takes a validated store read, so an invalid log fails
+    // at the read rather than yielding a terminal.
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
 
-    writeJsonLines(paths.tracePath, [
-      {
-        ...eventIdentity,
-        step: 'runtime_event_received',
-      },
-    ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
@@ -515,7 +356,10 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
 
     expect(
-      findValidatedTerminalRawEventForSession(paths, eventIdentity),
+      findRuntimeTurnTerminalRawEvent(
+        reopenStore(paths).rawEvents(),
+        eventIdentity,
+      ),
     ).toBeUndefined();
 
     writeJsonLines(paths.rawEventsPath, [
@@ -528,10 +372,13 @@ describe('file runtime log store plugin tool event validation', () => {
     ]);
 
     expect(
-      findValidatedTerminalRawEventForSession(paths, eventIdentity)?.kind,
+      findRuntimeTurnTerminalRawEvent(
+        reopenStore(paths).rawEvents(),
+        eventIdentity,
+      )?.kind,
     ).toBe('runtime_turn_completed');
     expect(
-      findValidatedTerminalRawEventForSession(paths, {
+      findRuntimeTurnTerminalRawEvent(reopenStore(paths).rawEvents(), {
         ...eventIdentity,
         createdAt: '2026-06-15T00:00:01.000Z',
       }),
@@ -561,12 +408,6 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     mkdirSync(paths.sessionRoot, {recursive: true});
-    writeJsonLines(paths.tracePath, [
-      {
-        ...eventIdentity,
-        step: 'runtime_event_received',
-      },
-    ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...eventIdentity,
@@ -575,9 +416,9 @@ describe('file runtime log store plugin tool event validation', () => {
       },
     ]);
 
-    expect(() =>
-      findValidatedTerminalRawEventForSession(paths, eventIdentity),
-    ).toThrow(LocalRuntimeStorageContractError);
+    expect(() => orphanedLogStore.rawEvents()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
   });
 
   it('rejects malformed persisted provider exchange evidence with the storage contract error', () => {
@@ -736,14 +577,6 @@ describe('file runtime log store plugin tool event validation', () => {
         },
       },
     });
-    expect(
-      reloadedTerminalEvent?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
-        definition => definition.name === visibleReplyModelToolName,
-      )?.callLimit,
-    ).toEqual({
-      scope: 'model_response',
-      maxCalls: 1,
-    });
   });
 
   it('keeps provider credential-key values out of durable raw-event evidence', async () => {
@@ -862,7 +695,7 @@ describe('file runtime log store plugin tool event validation', () => {
     writeFileSync(
       createLocalRuntimeStorageLayout({storeRoot}).schemaPath,
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-06-15T00:00:00.000Z',
@@ -883,16 +716,6 @@ describe('file runtime log store plugin tool event validation', () => {
     }
 
     mkdirSync(paths.sessionRoot, {recursive: true});
-    writeJsonLines(paths.tracePath, [
-      {
-        ...identity('evt_legacy_schema1_patch'),
-        step: 'runtime_event_received',
-      },
-      {
-        ...identity('evt_legacy_schema1_patch'),
-        step: 'runtime_turn_completed',
-      },
-    ]);
     writeJsonLines(paths.rawEventsPath, [
       {
         ...identity('evt_legacy_schema1_patch'),
@@ -1056,10 +879,10 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: character.id,
       conversationLogReader: {
         readConversationMessages() {
-          return durableStore.readSessionEvidence().stored.conversationMessages;
+          return durableStore.readSessionEvidence().conversationMessages;
         },
         readConversationEvidence() {
-          const evidence = durableStore.readSessionEvidence().stored;
+          const evidence = durableStore.readSessionEvidence();
 
           return {
             // The reader's bound character matches this store's custom
@@ -1086,16 +909,21 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    const conversationRecords = readFileSync(paths.conversationPath, 'utf8')
+    const rawRecords = readFileSync(paths.rawEventsPath, 'utf8')
       .trimEnd()
       .split('\n')
       .map(line => JSON.parse(line) as Record<string, unknown>);
-    for (const conversationRecord of conversationRecords) {
-      if (conversationRecord['role'] === 'character') {
-        conversationRecord['speakerName'] = 'Not Nova';
+
+    for (const rawRecord of rawRecords) {
+      const message = rawRecord['visibleMessage'] as
+        Record<string, unknown> | undefined;
+
+      if (message?.['role'] === 'character') {
+        message['speakerName'] = 'Not Nova';
       }
     }
-    writeJsonLines(paths.conversationPath, conversationRecords);
+
+    writeJsonLines(paths.rawEventsPath, rawRecords);
 
     expect(() =>
       createFileRuntimeLogStore({
@@ -1104,16 +932,18 @@ describe('file runtime log store plugin tool event validation', () => {
         characterId: character.id,
         boundCharacter: character,
       }).conversationMessages(),
-    ).toThrow(
-      'Durable character speaker metadata must match recorded role-model character evidence.',
-    );
+    ).toThrow('Restored character message speaker metadata is malformed.');
 
-    for (const conversationRecord of conversationRecords) {
-      if (conversationRecord['role'] === 'character') {
-        conversationRecord['speakerName'] = 'Nova';
+    for (const rawRecord of rawRecords) {
+      const message = rawRecord['visibleMessage'] as
+        Record<string, unknown> | undefined;
+
+      if (message?.['role'] === 'character') {
+        message['speakerName'] = 'Nova';
       }
     }
-    writeJsonLines(paths.conversationPath, conversationRecords);
+
+    writeJsonLines(paths.rawEventsPath, rawRecords);
 
     const resumedResult = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -1148,9 +978,9 @@ describe('file runtime log store plugin tool event validation', () => {
     });
   });
 
-  it('rolls back a custom first turn when visible-reply raw evidence fails before append', async () => {
+  it('keeps a shown reply in the session when its raw append fails', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-custom-character-raw-rollback';
+    const sessionId = 'session-custom-character-raw-append-failure';
     const character = {id: 'nova', displayName: 'Nova'};
     await createLocalRuntimeSessionStore({
       storeRoot,
@@ -1165,43 +995,14 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: character.id,
       boundCharacter: character,
     });
-    const appendFailure = new Error('visible reply raw append failed');
-    let failedVisibleReplyAppend = false;
-    const failingStore = Object.freeze({
-      ...(underlying.localRuntimeSessionPaths === undefined
-        ? {}
-        : {localRuntimeSessionPaths: underlying.localRuntimeSessionPaths}),
-      ...(underlying.localRuntimeWriterLockOwnerToken === undefined
-        ? {}
-        : {
-            localRuntimeWriterLockOwnerToken:
-              underlying.localRuntimeWriterLockOwnerToken,
-          }),
-      appendTrace: entry => underlying.appendTrace(entry),
-      appendRawEvent(record) {
-        if (
-          !failedVisibleReplyAppend &&
-          record.kind === 'visible_reply_committed'
-        ) {
-          failedVisibleReplyAppend = true;
-          throw appendFailure;
-        }
-
-        return underlying.appendRawEvent(record);
-      },
-      appendConversationMessage: (record, expectedCharacter) =>
-        underlying.appendConversationMessage(record, expectedCharacter),
-      removeConversationMessages: messageIds => {
-        underlying.removeConversationMessages(messageIds);
-      },
-      checkpointWriterEvidence: () => underlying.checkpointWriterEvidence?.(),
-      recoverAbandonedWriterEvidence: () =>
-        underlying.recoverAbandonedWriterEvidence?.() ?? false,
-      readSessionEvidence: () => underlying.readSessionEvidence(),
-      traceEntries: () => underlying.traceEntries(),
-      rawEvents: () => underlying.rawEvents(),
-      conversationMessages: () => underlying.conversationMessages(),
-    } satisfies RuntimeLogStore);
+    const appendFailureMessage = 'visible reply raw append failed';
+    const failingStore = createRawEventAppendFailingLogStore({
+      logStore: underlying,
+      matches: record =>
+        record.kind === 'visible_message_committed' &&
+        record.visibleMessage?.role === 'character',
+      message: appendFailureMessage,
+    });
     const failedSession = createConversationSession({
       id: sessionId,
       character,
@@ -1211,29 +1012,30 @@ describe('file runtime log store plugin tool event validation', () => {
       runLocalUserMessageEvent({
         event: createUserMessageRuntimeEvent(
           'show me the stars',
-          identity('evt_custom_character_raw_rollback'),
+          identity('evt_custom_character_raw_append_failure'),
         ),
         session: failedSession,
         logStore: failingStore,
         pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
         roleModelAdapter: createMultilineVisibleReplyAdapter(),
       }),
-    ).rejects.toBe(appendFailure);
+    ).rejects.toThrow(appendFailureMessage);
 
-    expect(failedSession.visibleTranscript).toEqual([]);
+    // The reply reached the user before the append, so it stays said.
+    expect(failedSession.visibleTranscript).toMatchObject([
+      {role: 'user', text: 'show me the stars'},
+      {role: 'character', speakerName: 'Nova'},
+    ]);
+
     const reopened = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
       characterId: character.id,
       boundCharacter: character,
     });
-    expect(reopened.readSessionEvidence().stored.conversationMessages).toEqual(
-      [],
-    );
-    expect(reopened.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-    });
+    expect(reopened.readSessionEvidence().conversationMessages).toEqual([
+      expect.objectContaining({role: 'user', text: 'show me the stars'}),
+    ]);
 
     await expect(
       runLocalUserMessageEvent({
@@ -1244,6 +1046,7 @@ describe('file runtime log store plugin tool event validation', () => {
         session: createConversationSession({
           id: sessionId,
           character,
+          visibleTranscript: reopened.conversationMessages(),
         }),
         logStore: reopened,
         pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
@@ -1252,6 +1055,7 @@ describe('file runtime log store plugin tool event validation', () => {
     ).resolves.toMatchObject({status: 'completed'});
 
     expect(reopened.conversationMessages()).toEqual([
+      expect.objectContaining({role: 'user', text: 'show me the stars'}),
       expect.objectContaining({role: 'user', text: 'try again'}),
       expect.objectContaining({
         role: 'character',
@@ -1259,6 +1063,926 @@ describe('file runtime log store plugin tool event validation', () => {
         speakerName: 'Nova',
       }),
     ]);
+  });
+
+  it('rejects a terminal event that omits one of its turn committed messages', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-terminal-omits-message';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_terminal_omits_message'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // Transcript reconstruction reads prior messages from terminal
+    // references, so a dropped id desyncs a later turn's context.
+    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const trimmedLines = rawLines.map(line => {
+      if (!line.includes('"runtime_turn_completed"')) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as {visibleMessageIds?: string[]};
+
+      return JSON.stringify({
+        ...record,
+        visibleMessageIds: (record.visibleMessageIds ?? []).slice(0, 1),
+      });
+    });
+
+    writeFileSync(paths.rawEventsPath, `${trimmedLines.join('\n')}\n`, 'utf8');
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow(
+      'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
+    );
+  });
+
+  it('rejects a character row edited away from its accepted reply', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-edited-character-text',
+    );
+    const index = rawLines.findIndex(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+    const record = JSON.parse(rawLines[index] ?? '{}') as {
+      visibleMessage?: Record<string, unknown>;
+    };
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .map((line, at) =>
+          at === index
+            ? JSON.stringify({
+                ...record,
+                visibleMessage: {
+                  ...record.visibleMessage,
+                  text: 'edited by hand',
+                },
+              })
+            : line,
+        )
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /must match the accepted reply/iu,
+    );
+  });
+  it('rejects replies committed out of their decision order', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-reply-order',
+      createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
+    );
+    const commits = rawLines.filter(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+
+    if (commits.length !== 2) {
+      throw new Error(
+        `Expected two character commit events, got ${String(commits.length)}.`,
+      );
+    }
+
+    // Swap only the text, so IDs stay in sequence and each row still
+    // matches an accepted reply — only the order between them is wrong.
+    const records = commits.map(
+      line => JSON.parse(line) as Record<string, unknown>,
+    );
+    const texts = records.map(
+      record => (record['visibleMessage'] as {text: string}).text,
+    );
+    const swappedLines = new Map(
+      commits.map((line, index) => [
+        line,
+        JSON.stringify({
+          ...records[index],
+          visibleMessage: {
+            ...(records[index]?.['visibleMessage'] as object),
+            text: texts[texts.length - 1 - index],
+          },
+          commitValidation: {
+            ...(records[index]?.['commitValidation'] as object),
+            result: {
+              status: 'accepted',
+              acceptedVisibleReplyText: texts[texts.length - 1 - index],
+            },
+          },
+        }),
+      ]),
+    );
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => swappedLines.get(line) ?? line).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /must follow the order their decision asked for/iu,
+    );
+  });
+
+  it('rejects replies reordered by stripping their decision rounds', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-stripped-rounds',
+      createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
+    );
+    const commits = rawLines.filter(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+
+    if (commits.length !== 2) {
+      throw new Error(
+        `Expected two character commit events, got ${String(commits.length)}.`,
+      );
+    }
+
+    // The ordering check keys on the decision round, so a forger who
+    // swaps texts and anchors while deleting the rounds must not slip
+    // past it: a character commit without its round is not a shape the
+    // writer produces.
+    const records = commits.map(
+      line => JSON.parse(line) as Record<string, unknown>,
+    );
+    const texts = records.map(
+      record => (record['visibleMessage'] as {text: string}).text,
+    );
+    const strippedLines = new Map(
+      commits.map((line, index) => {
+        const swapped: Record<string, unknown> = {
+          ...records[index],
+          visibleMessage: {
+            ...(records[index]?.['visibleMessage'] as object),
+            text: texts[texts.length - 1 - index],
+          },
+          commitValidation: {
+            ...(records[index]?.['commitValidation'] as object),
+            result: {
+              status: 'accepted',
+              acceptedVisibleReplyText: texts[texts.length - 1 - index],
+            },
+          },
+        };
+
+        delete swapped['decisionRound'];
+        return [line, JSON.stringify(swapped)];
+      }),
+    );
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => strippedLines.get(line) ?? line).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /must carry the accepted decision/iu,
+    );
+  });
+
+  it('rejects replies swapped across rounds behind self-consistent forged rounds', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-cross-round-swap',
+      createRepeatedRoundAdapter(),
+    );
+    const commits = rawLines.filter(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+
+    if (commits.length !== 3) {
+      throw new Error(
+        `Expected three character commit events, got ${String(commits.length)}.`,
+      );
+    }
+
+    // Swap the round-2 and round-3 rows wholesale — text, anchors, and
+    // round travel together, so every round group stays internally
+    // consistent and only the order between rounds is wrong. IDs and
+    // committedAt stay in place, so nothing else can object first.
+    const records = commits.map(
+      line => JSON.parse(line) as Record<string, unknown>,
+    );
+    const swapContent = (
+      target: Record<string, unknown>,
+      source: Record<string, unknown>,
+    ) =>
+      JSON.stringify({
+        ...target,
+        visibleMessage: {
+          ...(target['visibleMessage'] as object),
+          text: (source['visibleMessage'] as {text: string}).text,
+        },
+        commitValidation: source['commitValidation'],
+        parsedRoleModelDecisionSnapshot:
+          source['parsedRoleModelDecisionSnapshot'],
+        roleModelIOSnapshot: source['roleModelIOSnapshot'],
+        decisionRound: source['decisionRound'],
+      });
+    const secondCommit = commits[1];
+    const thirdCommit = commits[2];
+    const secondRecord = records[1];
+    const thirdRecord = records[2];
+
+    if (
+      secondCommit === undefined ||
+      thirdCommit === undefined ||
+      secondRecord === undefined ||
+      thirdRecord === undefined
+    ) {
+      throw new Error('Expected the round-2 and round-3 commit events.');
+    }
+
+    const swappedLines = new Map([
+      [secondCommit, swapContent(secondRecord, thirdRecord)],
+      [thirdCommit, swapContent(thirdRecord, secondRecord)],
+    ]);
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => swappedLines.get(line) ?? line).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /follow the order their decision asked for/iu,
+    );
+  });
+
+  it('rejects recorded model input that differs from the committed user row', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-input-drift',
+      createSequencedVisibleReplyAdapter(['a reply']),
+    );
+
+    // Evidence saying the model answered "hi" while the visible user row
+    // says "hello" is a transcript the user never saw. The forged record
+    // stays internally consistent — snapshot and summary agree — so only
+    // the cross-record rule can catch it.
+    const editedLines = rawLines.map(line => {
+      if (
+        !line.includes('"visible_message_committed"') ||
+        !line.includes('"role":"character"')
+      ) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as {
+        payloadSummary?: Record<string, unknown>;
+        roleModelIOSnapshot?: {
+          inputEnvelope: {event: {payload: Record<string, unknown>}};
+        };
+      };
+
+      if (record.roleModelIOSnapshot !== undefined) {
+        record.roleModelIOSnapshot.inputEnvelope.event.payload[
+          'currentUserMessage'
+        ] = 'hi';
+      }
+
+      if (record.payloadSummary !== undefined) {
+        record.payloadSummary['normalizedCurrentUserMessage'] = 'hi';
+      }
+
+      return JSON.stringify(record);
+    });
+
+    writeFileSync(paths.rawEventsPath, `${editedLines.join('\n')}\n`, 'utf8');
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      /one model input text/iu,
+    );
+  });
+
+  it('refuses to persist a prepared record made stale by a later append', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-stale-prepared';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const writerLease = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot,
+      sessionId,
+      ownerToken: fileLogStoreWriterOwnerToken(logStore),
+    });
+
+    try {
+      const turnIdentity = identity('evt_stale_prepared');
+
+      logStore.appendRawEvent({
+        ...turnIdentity,
+        kind: 'runtime_event_received',
+        eventType: 'USER_MESSAGE',
+      });
+
+      // Valid when prepared: the turn has no messages, so a rejection
+      // without visibleMessageIds matches the evidence of that moment.
+      const staleTerminal = logStore.prepareRawEvent({
+        ...turnIdentity,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'prepared before the user message committed',
+      });
+      const messageId = `${sessionId}:message-1`;
+
+      logStore.appendRawEvent({
+        ...turnIdentity,
+        kind: 'visible_message_committed',
+        eventType: 'USER_MESSAGE',
+        visibleMessageIds: [messageId],
+        visibleMessage: {
+          id: messageId,
+          role: 'user',
+          speakerId: 'local-user',
+          speakerName: 'You',
+          text: 'now committed',
+        },
+        committedAt: turnIdentity.createdAt,
+      });
+
+      // The stale bytes must never land: a terminal that omits the
+      // committed row is a session the next start refuses to read.
+      expect(() => {
+        logStore.persistPreparedRawEvent(staleTerminal);
+      }).toThrow(/must exactly match the visible conversation messages/iu);
+      expect(
+        logStore
+          .rawEvents()
+          .filter(record => record.kind === 'runtime_turn_rejected'),
+      ).toHaveLength(0);
+    } finally {
+      await writerLease.release();
+    }
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // What remains is an open turn — the crash shape — which stays
+    // readable.
+    expect(reopenStore(paths).conversationMessages()).toHaveLength(1);
+  });
+
+  it('accepts repeated replies whose text needed normalizing', async () => {
+    const {paths} = await committedTurnRawLines(
+      'session-repeated-normalized-replies',
+      createSequencedVisibleReplyAdapter(['  checking  ', 'checking\r\n']),
+    );
+
+    expect(
+      reopenStore(paths)
+        .conversationMessages()
+        .filter(message => message.role === 'character')
+        .map(message => message.text),
+    ).toEqual(['checking', 'checking']);
+  });
+
+  it('keeps taking turns on the session whose reply the log never got', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-lagging-log-retry';
+    const character = {id: 'nova', displayName: 'Nova'};
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: character.id,
+    }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+
+    const underlying = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: character.id,
+      boundCharacter: character,
+    });
+    const failingStore = createRawEventAppendFailingLogStore({
+      logStore: underlying,
+      matches: record =>
+        record.kind === 'visible_message_committed' &&
+        record.visibleMessage?.role === 'character',
+      message: 'visible reply raw append failed',
+    });
+    // The one session this process keeps, the way the CLI holds it.
+    const session = createConversationSession({id: sessionId, character});
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('first', identity('evt_lag_1')),
+        session,
+        logStore: failingStore,
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).rejects.toThrow('visible reply raw append failed');
+
+    // The reply was said, so the session holds it and the log is a row behind.
+    expect(session.visibleTranscript).toHaveLength(2);
+    expect(underlying.conversationMessages()).toHaveLength(1);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('second', identity('evt_lag_2')),
+        session,
+        logStore: underlying,
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+
+    // The log now skips the number the failed reply took, so a session
+    // rebuilt from it holds fewer messages than the highest number used.
+    expect(
+      underlying.conversationMessages().map(message => message.id),
+    ).toEqual([
+      `${sessionId}:message-1`,
+      `${sessionId}:message-3`,
+      `${sessionId}:message-4`,
+    ]);
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent(
+          'after restart',
+          identity('evt_lag_3'),
+        ),
+        session: createConversationSession({
+          id: sessionId,
+          character,
+          visibleTranscript: underlying.conversationMessages(),
+        }),
+        logStore: underlying,
+        pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+        roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+
+    expect(
+      underlying.conversationMessages().map(message => message.text),
+    ).toEqual([
+      'first',
+      'second',
+      expect.stringContaining('I can use:'),
+      'after restart',
+      expect.stringContaining('I can use:'),
+    ]);
+  });
+
+  it('reads back two rounds of one turn that said exactly the same thing', async () => {
+    const {paths} = await committedTurnRawLines(
+      'session-repeated-rounds',
+      createRepeatedRoundAdapter(),
+    );
+
+    expect(
+      reopenStore(paths)
+        .conversationMessages()
+        .filter(message => message.role === 'character')
+        .map(message => message.text),
+    ).toEqual(['checking', 'checking', 'done']);
+  });
+
+  it('rejects a duplicated visible_message_committed anchor for one message', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-duplicate-commit-anchor',
+    );
+    const anchor = rawLines.find(line =>
+      line.includes('"visible_message_committed"'),
+    );
+
+    if (anchor === undefined) {
+      throw new Error('Expected a commit anchor line.');
+    }
+
+    // One message, one commit event: a duplicate must fail closed. It is
+    // inserted before the terminal, so the turn-shape gate decides rather
+    // than the records-after-terminal rule.
+    const terminalIndex = rawLines.findIndex(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${[
+        ...rawLines.slice(0, terminalIndex),
+        anchor,
+        ...rawLines.slice(terminalIndex),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
+  it('rejects a forged character row committed without its accepted decision', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-forged-character-row';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+    const result = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'hello',
+        identity('evt_forged_character_row'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(result.status).toBe('completed');
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected file runtime log store session paths.');
+    }
+
+    // A forged reply can carry a bare commit event but not the accepted
+    // decision that produced its text.
+    const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0);
+    const strippedLines = rawLines.map(line => {
+      if (!line.includes('"visible_message_committed"')) {
+        return line;
+      }
+
+      const record = JSON.parse(line) as Record<string, unknown>;
+
+      if (record['commitValidation'] === undefined) {
+        return line;
+      }
+
+      delete record['commitValidation'];
+      delete record['parsedRoleModelDecisionSnapshot'];
+      delete record['roleModelIOSnapshot'];
+      return JSON.stringify(record);
+    });
+
+    writeFileSync(paths.rawEventsPath, `${strippedLines.join('\n')}\n`, 'utf8');
+
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).toThrow(
+      'Character message commit must carry the accepted decision that produced its text',
+    );
+  });
+
+  it('rejects a second user row appended into one turn', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-second-user-row',
+    );
+    const index = rawLines.findIndex(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"user"'),
+    );
+    const record = JSON.parse(rawLines[index] ?? '{}') as {
+      visibleMessage?: Record<string, unknown>;
+      visibleMessageIds?: string[];
+    };
+    const forgedId = `session-second-user-row:message-9`;
+
+    // One runtime input, one user row — even with its own commit event.
+    writeFileSync(
+      paths.rawEventsPath,
+      `${[
+        ...rawLines,
+        JSON.stringify({
+          ...record,
+          visibleMessageIds: [forgedId],
+          visibleMessage: {...record.visibleMessage, id: forgedId},
+        }),
+      ].join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
+  it('rejects conversation rows reordered out of their session sequence', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-reordered-rows',
+    );
+    const commits = rawLines.filter(line =>
+      line.includes('"visible_message_committed"'),
+    );
+
+    if (commits.length < 2) {
+      throw new Error('Expected two commit events.');
+    }
+
+    // Message IDs are assigned per session and checked against position,
+    // so swapping two commit events breaks the file-wide sequence.
+    const [first, second] = commits;
+    const swapped = rawLines.map(line =>
+      line === first ? second : line === second ? first : line,
+    );
+
+    writeFileSync(paths.rawEventsPath, `${swapped.join('\n')}\n`, 'utf8');
+
+    expect(() => reopenStore(paths).conversationMessages()).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
+  it('keeps a session readable when a crash left its last turn unfinished', async () => {
+    // A killed process ends the log mid-turn: messages committed, no
+    // terminal event. That is a state the reader surfaces — the shown
+    // messages stay in the transcript — and the next writer's turn
+    // implicitly closes it.
+    const {paths} = await committedTurnRawLines(
+      'session-crash-open-turn',
+      createMultilineVisibleReplyAdapter(),
+    );
+    const survivingLines = readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0)
+      .filter(line => {
+        const record = JSON.parse(line) as {kind: string};
+
+        return (
+          record.kind !== 'runtime_turn_completed' &&
+          record.kind !== 'after_turn_committed'
+        );
+      });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${survivingLines.join('\n')}\n`,
+      'utf8',
+    );
+
+    const reopened = reopenStore(paths);
+
+    expect(
+      reopened.conversationMessages().map(message => message.role),
+    ).toEqual(['user', 'character']);
+
+    // The next writer rehydrates from the log, so the session resumes
+    // from the messages the crashed turn already showed.
+    const session = createConversationSession({
+      id: paths.sessionId,
+      character: testCharacterProfile,
+      visibleTranscript: reopened.conversationMessages(),
+    });
+
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'still there?',
+        identity('evt_after_crash'),
+      ),
+      session,
+      logStore: reopened,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({
+        storeRoot: paths.storeRoot,
+        sessionId: paths.sessionId,
+      }),
+    });
+
+    const finalEvents = reopenStore(paths).rawEvents();
+
+    expect(
+      finalEvents.filter(event => event.kind === 'runtime_turn_completed'),
+    ).toHaveLength(1);
+    expect(reopenStore(paths).conversationMessages()).toHaveLength(4);
+  });
+
+  it('keeps a session readable when a crash left its last record unfinished', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-torn-final-record';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent('hello', identity('evt_torn_first')),
+      session: createConversationSession({
+        character: testCharacterProfile,
+        id: sessionId,
+      }),
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost(),
+    });
+
+    const paths = logStore.localRuntimeSessionPaths;
+
+    if (paths === undefined) {
+      throw new Error('Expected local runtime session paths.');
+    }
+
+    // The writer died partway through its next raw event.
+    const rawEvents = readFileSync(paths.rawEventsPath, 'utf8');
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawEvents}{"eventId":"evt_torn_second","kind":"runtime_tu`,
+      'utf8',
+    );
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+
+    // The unfinished write costs its own record, not the conversation.
+    expect(reopened.conversationMessages()).toHaveLength(2);
+    expect(
+      reopened.rawEvents().some(record => record.eventId === 'evt_torn_second'),
+    ).toBe(false);
+
+    // The next turn appends cleanly rather than splicing onto it.
+    const followupResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'still there?',
+        identity('evt_after_torn'),
+      ),
+      session: createConversationSession({
+        character: testCharacterProfile,
+        id: sessionId,
+        visibleTranscript: reopened.conversationMessages(),
+      }),
+      logStore: reopened,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost(),
+    });
+
+    expect(followupResult.status).toBe('completed');
+    expect(
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).conversationMessages(),
+    ).toHaveLength(4);
+  });
+
+  it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
+    const storeRoot = createStoreRoot();
+    const sessionId = 'session-before-call-rejected';
+    await createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    }).createSession({
+      sessionId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
+    const logStore = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const session = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    });
+
+    const rejectedResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'blocked question',
+        identity('evt_before_call_rejected'),
+      ),
+      session,
+      logStore,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createBeforeCallRejectingPluginHost(),
+    });
+
+    expect(rejectedResult.status).toBe('rejected');
+    // The user message committed before the gate ran, so the terminal
+    // rejection must reference it — otherwise later full-evidence reads
+    // rebuild a prior conversation missing a durable message.
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      visibleMessageIds: [`${sessionId}:message-1`],
+    });
+
+    const reopened = createFileRuntimeLogStore({
+      storeRoot,
+      sessionId,
+      characterId: testCharacterProfile.id,
+      boundCharacter: testCharacterProfile,
+    });
+    const followupSession = createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+      visibleTranscript: reopened.conversationMessages(),
+    });
+    const followupResult = await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'try again',
+        identity('evt_after_before_call_rejected'),
+      ),
+      session: followupSession,
+      logStore: reopened,
+      roleModelAdapter: createMultilineVisibleReplyAdapter(),
+      pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+    });
+
+    expect(followupResult.status).toBe('completed');
+    // The completed turn's recent-context snapshot includes the kept user
+    // message; a full validated reload must accept that agreement.
+    expect(() =>
+      createFileRuntimeLogStore({
+        storeRoot,
+        sessionId,
+        characterId: testCharacterProfile.id,
+        boundCharacter: testCharacterProfile,
+      }).readSessionEvidence(),
+    ).not.toThrow();
   });
 
   it('persists decodable commit validation for plugin health rejections', async () => {
@@ -1297,7 +2021,11 @@ describe('file runtime log store plugin tool event validation', () => {
       reason: 'plugin_health_rejected',
       message: 'Plugin health unavailable: health fixture offline',
     });
-    expect(logStore.conversationMessages()).toEqual([]);
+    // Health gates run after delivery: they reject the turn and stop
+    // future messages, but never un-say text the user already saw.
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user', 'character']);
 
     const rawEvents = logStore.rawEvents();
     const commitRejection = rawEvents.find(
@@ -1382,7 +2110,11 @@ describe('file runtime log store plugin tool event validation', () => {
       reason: 'plugin_health_rejected',
       message: 'Plugin health degraded: health fixture backpressure',
     });
-    expect(logStore.conversationMessages()).toEqual([]);
+    // Health gates run after delivery: they reject the turn and stop
+    // future messages, but never un-say text the user already saw.
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user', 'character']);
 
     const rawEvents = logStore.rawEvents();
     const commitRejection = rawEvents.find(
@@ -1437,7 +2169,7 @@ describe('file runtime log store plugin tool event validation', () => {
     });
   });
 
-  it('rejects started tool calls without matching finished records', async () => {
+  it('keeps an unfinished tool call readable and refuses to complete over it', async () => {
     const storeRoot = createStoreRoot();
     await createLocalRuntimeSessionStore({
       storeRoot,
@@ -1473,9 +2205,17 @@ describe('file runtime log store plugin tool event validation', () => {
         },
       });
 
-      expect(() => logStore.rawEvents()).toThrow(
-        LocalRuntimeStorageContractError,
-      );
+      // A crash mid-call leaves exactly this log, so reads surface it.
+      expect(logStore.rawEvents().at(-1)?.kind).toBe('tool_call_started');
+      // Claiming completion over an unfinished call is a writer bug.
+      expect(() =>
+        logStore.appendRawEvent({
+          ...identity(),
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE',
+          status: 'completed',
+        }),
+      ).toThrow(LocalRuntimeStorageContractError);
     } finally {
       await writerLease.release();
     }
@@ -1524,11 +2264,6 @@ describe('file runtime log store plugin tool event validation', () => {
         status: 'rejected',
         reason: 'Runtime turn failed before producing a reply.',
       });
-      logStore.appendTrace({
-        ...identity(eventId),
-        step: 'runtime_turn_rejected',
-      });
-
       expect(logStore.rawEvents().at(-1)).toMatchObject({
         kind: 'runtime_turn_rejected',
         status: 'rejected',
@@ -1604,10 +2339,6 @@ function appendTurnPrefix(
   logStore: ReturnType<typeof createFileRuntimeLogStore>,
   eventId = 'evt_tool_events',
 ): void {
-  logStore.appendTrace({
-    ...identity(eventId),
-    step: 'runtime_event_received',
-  });
   logStore.appendRawEvent({
     ...identity(eventId),
     kind: 'runtime_event_received',
@@ -1770,11 +2501,6 @@ function storedRecordWithPluginToolJsonSchema(
     pluginId: 'memory.fixture',
     name: 'memory.capture',
     description: 'Capture a memory.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],
@@ -1782,9 +2508,7 @@ function storedRecordWithPluginToolJsonSchema(
       jsonSchema,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'local_memory_write',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   });
   allowedTools.push('memory.capture');
 
@@ -1925,6 +2649,57 @@ function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
   };
 }
 
+function createBeforeCallRejectingPluginHost() {
+  return createRuntimePluginHost({
+    plugins: [
+      createRuntimePlugin({
+        manifest: {
+          id: 'before-call.reject.fixture',
+          displayName: 'Before Call Reject Fixture',
+          version: '1.0.0',
+          kind: 'first_party',
+          description: 'Test plugin that rejects turns before the model call.',
+          contractVersion: runtimePluginContractVersion,
+          compatibility: {
+            hostContractVersions: [runtimePluginContractVersion],
+            sourceSystem: 'test',
+          },
+          declaredPlugins: ['before_role_model_call'],
+          config: {
+            scope: 'global_with_character_overrides',
+            fields: [],
+          },
+          firstParty: false,
+          runtimePolicy: {
+            timeoutMs: 1000,
+            redactionLabels: [],
+            failureBehavior: {
+              beforeRoleModelCall: 'reject_turn',
+              handleToolCall: 'reject_tool_call',
+              health: 'degrade',
+            },
+          },
+          activation: {
+            defaultEnabled: true,
+            reasons: ['test'],
+          },
+          requestedAccess: {},
+        },
+        providedTools: [],
+        lifecycleHooks: {
+          beforeRoleModelCall() {
+            throw new Error('before-call fixture rejects the turn');
+          },
+        },
+      }),
+    ],
+    enabledPluginIds: [
+      firstPartyModelToolsPluginId,
+      'before-call.reject.fixture',
+    ],
+  });
+}
+
 function createHealthRejectingPluginHost(options?: {
   readonly status?: RuntimePluginHealthStatus;
   readonly summary?: string;
@@ -1951,18 +2726,13 @@ function createHealthRejectingPluginHost(options?: {
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: true,
-            sideEffectLevel: 'runtime_read',
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'reject_turn',
             },
           },
@@ -1988,4 +2758,107 @@ function createHealthRejectingPluginHost(options?: {
     ],
     enabledPluginIds: [firstPartyModelToolsPluginId, 'health.reject.fixture'],
   });
+}
+
+async function committedTurnRawLines(
+  sessionId: string,
+  adapter: RoleModelAdapter = createMultilineVisibleReplyAdapter(),
+): Promise<{
+  readonly paths: NonNullable<RuntimeLogStore['localRuntimeSessionPaths']>;
+  readonly rawLines: readonly string[];
+}> {
+  const storeRoot = createStoreRoot();
+  await createLocalRuntimeSessionStore({
+    storeRoot,
+    characterId: 'mira',
+  }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+
+  const logStore = createFileRuntimeLogStore({
+    storeRoot,
+    sessionId,
+    characterId: testCharacterProfile.id,
+    boundCharacter: testCharacterProfile,
+  });
+
+  await runLocalUserMessageEvent({
+    event: createUserMessageRuntimeEvent('hello', identity(`evt_${sessionId}`)),
+    session: createConversationSession({
+      character: testCharacterProfile,
+      id: sessionId,
+    }),
+    logStore,
+    roleModelAdapter: adapter,
+    pluginHost: createDefaultProject02PluginHost({storeRoot, sessionId}),
+  });
+
+  const paths = logStore.localRuntimeSessionPaths;
+
+  if (paths === undefined) {
+    throw new Error('Expected file runtime log store session paths.');
+  }
+
+  return {
+    paths,
+    rawLines: readFileSync(paths.rawEventsPath, 'utf8')
+      .split('\n')
+      .filter(line => line.length > 0),
+  };
+}
+
+function reopenStore(
+  paths: NonNullable<RuntimeLogStore['localRuntimeSessionPaths']>,
+): RuntimeLogStore {
+  return createFileRuntimeLogStore({
+    storeRoot: paths.storeRoot,
+    sessionId: paths.sessionId,
+    characterId: testCharacterProfile.id,
+    boundCharacter: testCharacterProfile,
+  });
+}
+
+/**
+ * A model that repeats itself: two rounds whose raw output is the same
+ * bytes, then a terminal one. The repeated rounds are distinguishable only
+ * by which round they were, never by what they said.
+ */
+function createRepeatedRoundAdapter(): RoleModelAdapter {
+  const repeatedRound = JSON.stringify({
+    toolCalls: [
+      {name: 'visible_reply', input: {text: 'checking'}},
+      {name: characterStatePatchModelToolName, input: {mood: 'curious'}},
+    ],
+  });
+  let round = 0;
+
+  return {
+    invoke() {
+      round += 1;
+
+      return {
+        rawOutputText:
+          round <= 2
+            ? repeatedRound
+            : JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: 'done'}}],
+              }),
+      };
+    },
+  };
+}
+
+function createSequencedVisibleReplyAdapter(
+  texts: readonly string[],
+): RoleModelAdapter {
+  return {
+    invoke() {
+      return {
+        rawOutputText: JSON.stringify({
+          toolCalls: texts.map(text => ({
+            name: 'visible_reply',
+            input: {text},
+          })),
+        }),
+      };
+    },
+  };
 }

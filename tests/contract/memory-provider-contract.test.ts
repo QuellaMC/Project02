@@ -28,7 +28,6 @@ describe('memory provider runtime plugin helper', () => {
     expect(plugin.providedTools).toEqual([]);
     expect(plugin.manifest.runtimePolicy.failureBehavior).toMatchObject({
       beforeRoleModelCall: 'degrade',
-      afterTurnCommitted: 'log_failure',
       health: 'degrade',
     });
   });
@@ -201,7 +200,7 @@ describe('memory provider runtime plugin helper', () => {
     );
   });
 
-  it('classifies capture-only providers as memory writers', () => {
+  it('gives a capture-only provider the after-turn hook and no tool surface', () => {
     const provider: Project02MemoryProvider = {
       id: 'memory.capture-only',
       displayName: 'Capture Only Provider',
@@ -214,9 +213,10 @@ describe('memory provider runtime plugin helper', () => {
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
 
-    expect(plugin.manifest.runtimePolicy.sideEffectLevel).toBe(
-      'local_memory_write',
-    );
+    // Providers own their storage behind the provider interface and
+    // never touch the host file store, so they request no file_store
+    // access; capture shows up as the after-turn hook instead.
+    expect(plugin.manifest.requestedAccess.file_store).toBeUndefined();
     expect(plugin.manifest.declaredPlugins).toContain('after_turn_committed');
     expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
   });
@@ -421,9 +421,6 @@ describe('memory provider runtime plugin helper', () => {
       'memory.search',
       'memory.add',
     ]);
-    expect(
-      plugin.providedTools.every(tool => tool.sourceReferencesRequired),
-    ).toBe(true);
 
     const search = await host.handleToolCall(
       {

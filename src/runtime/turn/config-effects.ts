@@ -8,7 +8,12 @@ import {
 } from '../../plugins/api/index.ts';
 import type {AcceptedRoleModelLoopResult} from '../../role-model/index.ts';
 import {RuntimeConfigConflictError} from '../config/mutate.ts';
-import type {RawEventLogRecord, RuntimeLogStore} from '../evidence/records.ts';
+import type {RawEventLogRecord} from '../evidence/records.ts';
+import {
+  approvalToolRecordsByCallId,
+  runtimeConfigEffectHasLoggedApproval,
+} from '../evidence/config-effect-approval.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {runtimePluginEvidenceOption} from './plugin-evidence.ts';
 import type {RuntimeTurnState} from './contracts.ts';
 
@@ -20,7 +25,8 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     return;
   }
 
-  const rawEvents = options.logStore.readSessionEvidence().stored.rawEvents;
+  const rawEvents = options.logStore.readSessionEvidence().rawEvents;
+  const approvalRecords = approvalToolRecordsByCallId(rawEvents);
   const reconciledEffectIds = reconciledRuntimeConfigEffectIds(rawEvents);
   const acceptedReconciledIds = reconciledRuntimeConfigEffectIds(rawEvents, [
     'accepted',
@@ -49,6 +55,19 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     const failedEffectIds = new Set<string>();
 
     for (const effect of pendingEffects) {
+      // Replaying acts purely on what the log says, so the instruction is
+      // validated where it is consumed: an effect with no matching
+      // approved config-update call is closed rejected, never applied.
+      if (!runtimeConfigEffectHasLoggedApproval(effect, approvalRecords)) {
+        reconcileEvidence.push(
+          closeRejectedPreparedRuntimePluginConfigEffect({
+            effect,
+            summary: `Refused plugin "${effect.targetPluginId}" config effect "${effect.effectId}" without applying it: the session log carries no approved config-update tool call for it.`,
+          }),
+        );
+        continue;
+      }
+
       try {
         reconcileEvidence.push(
           reconcileRuntimeConfigEffect({
@@ -468,6 +487,16 @@ export function closeConflictedPreparedRuntimePluginConfigEffect(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly reason: string;
 }): RuntimePluginEvidenceSnapshot {
+  return closeRejectedPreparedRuntimePluginConfigEffect({
+    effect: options.effect,
+    summary: `Closed conflicted plugin "${options.effect.targetPluginId}" config effect "${options.effect.effectId}" without applying it: ${options.reason}`,
+  });
+}
+
+function closeRejectedPreparedRuntimePluginConfigEffect(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly summary: string;
+}): RuntimePluginEvidenceSnapshot {
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.effect.eventId,
     traceId: options.effect.traceId,
@@ -476,7 +505,7 @@ export function closeConflictedPreparedRuntimePluginConfigEffect(options: {
     pluginId: runtimePluginId,
     evidenceKind: 'after_turn_committed',
     status: 'rejected',
-    summary: `Closed conflicted plugin "${options.effect.targetPluginId}" config effect "${options.effect.effectId}" without applying it: ${options.reason}`,
+    summary: options.summary,
     sourceReferences: [
       {
         kind: 'runtime',

@@ -2,20 +2,15 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
-  createAcceptedRoleModelDecisionResult,
   createDecisionContext,
   createDefaultRoleModelPluginToolDefinitions,
-  createParsedRoleModelDecisionSnapshot,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
-  createRoleModelIOSnapshot,
   createRoleModelPluginToolDefinitions,
   createRoleModelToolObservation,
-  createVisibleReplyCharacterDecision,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
-  roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   type RoleModelPluginToolDefinition,
   roleModelTerminalEmptyOutputRejectionDetails,
@@ -37,20 +32,13 @@ describe('role-model contracts', () => {
         pluginId: 'settings.arbitrary.fixture',
         name: 'settings.arbitrary.update',
         description: 'Update one arbitrary settings field after approval.',
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [],
           additionalFields: false,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
-        sourceReferencesRequired: false,
       },
     ]);
 
@@ -87,52 +75,6 @@ describe('role-model contracts', () => {
       ).toThrow('must be finite JSON.');
     },
   );
-
-  it('redacts credentials in public tool observations', () => {
-    const observation = createRoleModelToolObservation({
-      round: 1,
-      pluginId: 'memory',
-      toolName: 'memory.search',
-      input: {
-        query: 'Authorization: ApiKey input-secret',
-        authorization: 'Bearer input-token',
-        aws_secret_access_key: 'aws-secret',
-        ssh_private_key_pem: 'ssh-secret',
-        oauth_client_secret_value: 'oauth-secret',
-        endpoint: 'cockroachdb://user:pass@example.test/db',
-      },
-      result: {
-        status: 'rejected',
-        reason: 'handler_failed token=reason-secret',
-        message: 'Cookie: session=message-secret',
-      },
-    });
-    const serialized = JSON.stringify(observation);
-
-    expect(serialized).not.toContain('input-secret');
-    expect(serialized).not.toContain('input-token');
-    expect(serialized).not.toContain('reason-secret');
-    expect(serialized).not.toContain('message-secret');
-    expect(serialized).not.toContain('aws-secret');
-    expect(serialized).not.toContain('ssh-secret');
-    expect(serialized).not.toContain('oauth-secret');
-    expect(serialized).not.toContain('user:pass');
-    expect(observation).toMatchObject({
-      input: {
-        query: 'Authorization: [redacted]',
-        authorization: '[redacted]',
-        aws_secret_access_key: '[redacted]',
-        ssh_private_key_pem: '[redacted]',
-        oauth_client_secret_value: '[redacted]',
-        endpoint: 'cockroachdb://[redacted]@example.test/db',
-      },
-      result: {
-        status: 'rejected',
-        reason: 'handler_failed token=[redacted]',
-        message: 'Cookie: [redacted]',
-      },
-    });
-  });
 
   it.each([
     'Adapter raw output must include string rawOutputText.',
@@ -175,119 +117,6 @@ describe('role-model contracts', () => {
       runtimePluginListToolName,
       characterStatePatchModelToolName,
     ]);
-    expect(
-      inputEnvelope.toolDefinitions.find(
-        definition => definition.name === visibleReplyModelToolName,
-      )?.callLimit,
-    ).toEqual({
-      scope: 'model_response',
-      maxCalls: 1,
-    });
-  });
-
-  it('redacts credentials throughout shared provider exchange snapshots', () => {
-    const identity = createRuntimeEventIdentity({
-      eventId: 'evt_provider_exchange_redaction',
-      traceId: 'trace_provider_exchange_redaction',
-      createdAt: '2026-07-11T00:00:00.000Z',
-    });
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: createUserMessageRuntimeEvent('hello', identity),
-      decisionContext: createDecisionContext({
-        sessionId: 'session-provider-exchange-redaction',
-        characterSnapshot: testCharacterProfile,
-      }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-    });
-    const snapshot = createRoleModelIOSnapshot({
-      ...identity,
-      sessionId: 'session-provider-exchange-redaction',
-      inputEnvelope,
-      rawOutputText: JSON.stringify({
-        toolCalls: [
-          {
-            name: visibleReplyModelToolName,
-            input: {text: 'api_key=raw-output-secret'},
-          },
-        ],
-      }),
-      providerExchange: {
-        provider: {
-          name: 'nvidia',
-          model: 'model?token=model-secret',
-          endpoint: 'https://user:pass@example.test/chat',
-        },
-        capabilities: {
-          supportsNativeTools: true,
-          supportsDeveloperOrSystemContext: true,
-          preferredModelContextRole: 'developer',
-          supportsStrictToolSchema: true,
-          supportsReasoning: false,
-          reasoningParameterStyle: 'none',
-          requiresReasoningBlockRoundTrip: false,
-          supportsToolChoice: true,
-          supportsParallelToolCalls: false,
-        },
-        reasoning: {mode: 'none', params: {}},
-        renderedMessages: [
-          {role: 'user', content: 'Authorization: Bearer message-secret'},
-        ],
-        renderedTools: [],
-        toolNameMappings: [],
-        requestBody: {cookie: 'session=request-secret'},
-        nativeToolResultMessages: [],
-        responseBody: {access_token: 'response-secret'},
-      },
-    });
-    const serialized = JSON.stringify(snapshot.providerExchange);
-
-    expect(snapshot.rawOutputText).toContain('api_key=[redacted]');
-    expect(snapshot.rawOutputText).not.toContain('raw-output-secret');
-    expect(serialized).toContain('[redacted]');
-    for (const secret of [
-      'model-secret',
-      'user:pass',
-      'message-secret',
-      'request-secret',
-      'response-secret',
-    ]) {
-      expect(serialized).not.toContain(secret);
-    }
-  });
-
-  it('redacts accepted decision text at the public snapshot constructor', () => {
-    const identity = createRuntimeEventIdentity({
-      eventId: 'evt_decision_constructor_redaction',
-      traceId: 'trace_decision_constructor_redaction',
-      createdAt: '2026-07-11T00:00:00.000Z',
-    });
-    const snapshot = createParsedRoleModelDecisionSnapshot({
-      ...identity,
-      sessionId: 'session-decision-constructor-redaction',
-      result: createAcceptedRoleModelDecisionResult(
-        createVisibleReplyCharacterDecision(
-          'Authorization: ApiKey decision-secret',
-        ),
-        {nonCommittedText: 'api_key=snapshot-secret'},
-      ),
-    });
-    const serialized = JSON.stringify(snapshot);
-
-    expect(serialized).toContain('Authorization: [redacted]');
-    expect(serialized).not.toContain('decision-secret');
-    expect(serialized).not.toContain('snapshot-secret');
-  });
-
-  it('redacts non-committed text at the public result constructor', () => {
-    const result = createAcceptedRoleModelDecisionResult(
-      createVisibleReplyCharacterDecision('hello'),
-      {
-        nonCommittedText: 'Authorization: ApiKey folded-secret',
-      },
-    );
-
-    expect(result.nonCommittedText).toBe('Authorization: [redacted]');
-    expect(JSON.stringify(result)).not.toContain('folded-secret');
   });
 
   it('rejects duplicate explicit allowed tools', () => {
@@ -310,30 +139,25 @@ describe('role-model contracts', () => {
     ).toThrow('Role-model allowedTools must not contain duplicates.');
   });
 
-  it('allows one visible reply per model response', () => {
+  it('accepts several visible replies in one model response', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [
-          {
-            name: visibleReplyModelToolName,
-            input: {text: 'first'},
-          },
-          {
-            name: visibleReplyModelToolName,
-            input: {text: 'second'},
-          },
+          {name: visibleReplyModelToolName, input: {text: 'first'}},
+          {name: visibleReplyModelToolName, input: {text: 'second'}},
         ],
       }),
     );
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelDuplicateToolCallRejectionReason,
-        details:
-          'Decision must not include duplicate visible_reply tool calls.',
-      },
-    });
+    expect(result.status).toBe('accepted');
+    if (result.status !== 'accepted') {
+      throw new Error('Expected several replies to parse.');
+    }
+
+    expect(result.decision.toolCalls.map(call => call.input['text'])).toEqual([
+      'first',
+      'second',
+    ]);
   });
 
   it('stamps accepted versionless model output with the internal decision version', () => {
@@ -446,21 +270,6 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('redacts credentials in parsed top-level text', () => {
-    const result = parseRoleModelDecision(
-      JSON.stringify({
-        toolCalls: [],
-        text: 'api_key=parsed-secret',
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: 'accepted',
-      nonCommittedText: 'api_key=[redacted]',
-    });
-    expect(JSON.stringify(result)).not.toContain('parsed-secret');
-  });
-
   it('rejects empty top-level text when no tool calls are present', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
@@ -503,20 +312,13 @@ describe('role-model contracts', () => {
         pluginId: 'memory',
         name: requiredToolName,
         description: 'Look up relevant memory before answering.',
-        requiredForUserTurn: true,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [],
           additionalFields: true,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       },
     ] satisfies readonly RoleModelPluginToolDefinition[];
     const toolObservations = [
@@ -550,7 +352,6 @@ describe('role-model contracts', () => {
       rawOutputText,
       allowedTools,
       pluginToolDefinitions,
-      toolObservations,
     );
 
     expect(decisionResult).toMatchObject({
@@ -597,20 +398,13 @@ describe('role-model contracts', () => {
       pluginId: 'memory',
       name: 'memory.unknown',
       description: 'Exercise a defined but unavailable memory tool.',
-      requiredForUserTurn: false,
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
       inputContract: {
         type: 'object',
         fields: [],
         additionalFields: true,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
-      sourceReferencesRequired: false,
     } satisfies RoleModelPluginToolDefinition;
     const result = parseRoleModelDecision(
       JSON.stringify({

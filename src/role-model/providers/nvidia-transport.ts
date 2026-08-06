@@ -1,4 +1,4 @@
-import {isJsonRecord} from '../api/provider-exchange.ts';
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 
 export type NvidiaFetchRequest = {
   readonly method: 'POST';

@@ -1,3 +1,4 @@
+import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import * as fs from 'node:fs';
 
@@ -62,7 +63,7 @@ describe('file runtime log store evidence cache', () => {
       characterId: 'mira',
       boundCharacter: testCharacterProfile,
       onEvidenceFileRead({filePath}) {
-        if (!filePath.endsWith('trace.jsonl') || singleMutationCount > 0) {
+        if (!filePath.endsWith('raw-events.jsonl') || singleMutationCount > 0) {
           return;
         }
 
@@ -73,7 +74,7 @@ describe('file runtime log store evidence cache', () => {
     });
 
     expect(
-      retryingReader.readSessionEvidence().stored.rawEvents.length,
+      retryingReader.readSessionEvidence().rawEvents.length,
     ).toBeGreaterThan(0);
     expect(singleMutationCount).toBe(1);
 
@@ -84,7 +85,7 @@ describe('file runtime log store evidence cache', () => {
       characterId: 'mira',
       boundCharacter: testCharacterProfile,
       onEvidenceFileRead({filePath}) {
-        if (!filePath.endsWith('trace.jsonl')) {
+        if (!filePath.endsWith('raw-events.jsonl')) {
           return;
         }
 
@@ -148,11 +149,7 @@ describe('file runtime log store evidence cache', () => {
     vi.mocked(fs.readFileSync).mockClear();
     reopened.readSessionEvidence();
 
-    expect(evidenceFileReads()).toEqual([
-      'trace.jsonl',
-      'raw-events.jsonl',
-      'conversation.jsonl',
-    ]);
+    expect(evidenceFileReads()).toEqual(['raw-events.jsonl']);
 
     vi.mocked(fs.readFileSync).mockClear();
     reopened.traceEntries();
@@ -212,11 +209,7 @@ describe('file runtime log store evidence cache', () => {
 
     vi.mocked(fs.readFileSync).mockClear();
     reader.readSessionEvidence();
-    expect(evidenceFileReads()).toEqual([
-      'trace.jsonl',
-      'raw-events.jsonl',
-      'conversation.jsonl',
-    ]);
+    expect(evidenceFileReads()).toEqual(['raw-events.jsonl']);
     expect(coldValidations).toBe(1);
 
     vi.mocked(fs.readFileSync).mockClear();
@@ -226,11 +219,7 @@ describe('file runtime log store evidence cache', () => {
     await runTurn(session, writer, 1);
     vi.mocked(fs.readFileSync).mockClear();
     reader.readSessionEvidence();
-    expect(evidenceFileReads()).toEqual([
-      'trace.jsonl',
-      'raw-events.jsonl',
-      'conversation.jsonl',
-    ]);
+    expect(evidenceFileReads()).toEqual(['raw-events.jsonl']);
     expect(coldValidations).toBe(2);
 
     vi.mocked(fs.readFileSync).mockClear();
@@ -279,13 +268,13 @@ describe('file runtime log store evidence cache', () => {
         writerStore,
         0,
       );
-      const firstTraceEntry = writerStore.traceEntries()[0];
+      const firstRawEvent = writerStore.rawEvents()[0];
 
-      if (firstTraceEntry === undefined) {
-        throw new Error('Expected the writer to persist trace evidence.');
+      if (firstRawEvent === undefined) {
+        throw new Error('Expected the writer to persist raw evidence.');
       }
 
-      expect(() => staleStore.appendTrace(firstTraceEntry)).toThrow(
+      expect(() => staleStore.appendRawEvent(firstRawEvent)).toThrow(
         expect.objectContaining({code: 'session_busy'}),
       );
       expect(
@@ -343,10 +332,10 @@ describe('file runtime log store evidence cache', () => {
       currentStore,
       0,
     );
-    const firstTraceEntry = currentStore.traceEntries()[0];
+    const firstRawEvent = currentStore.rawEvents()[0];
 
-    if (firstTraceEntry === undefined) {
-      throw new Error('Expected the writer to persist trace evidence.');
+    if (firstRawEvent === undefined) {
+      throw new Error('Expected the writer to persist raw evidence.');
     }
 
     const secondLease = await acquireLocalRuntimeSessionWriterLease({
@@ -356,7 +345,7 @@ describe('file runtime log store evidence cache', () => {
     });
 
     try {
-      expect(() => staleStore.appendTrace(firstTraceEntry)).toThrow(
+      expect(() => staleStore.appendRawEvent(firstRawEvent)).toThrow(
         expect.objectContaining({code: 'malformed_record'}),
       );
     } finally {
@@ -378,16 +367,14 @@ async function runTurn(
     session,
     logStore,
     pluginHost: createRuntimePluginHost({plugins: []}),
-    agent: {reply: () => ({text: `reply ${String(turn)}`})},
+    roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
+      reply: () => ({text: `reply ${String(turn)}`}),
+    }),
   });
 }
 
 function evidenceFileReads(): readonly string[] {
-  const evidenceFileNames = new Set([
-    'trace.jsonl',
-    'raw-events.jsonl',
-    'conversation.jsonl',
-  ]);
+  const evidenceFileNames = new Set(['raw-events.jsonl']);
 
   return vi
     .mocked(fs.readFileSync)

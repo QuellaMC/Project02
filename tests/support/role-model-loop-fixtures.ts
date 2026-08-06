@@ -25,11 +25,6 @@ export const memorySearchToolDefinition = Object.freeze({
   pluginId: 'memory.search.fixture',
   name: 'memory.search',
   description: 'Search memory.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [
@@ -42,14 +37,7 @@ export const memorySearchToolDefinition = Object.freeze({
     additionalFields: false,
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'runtime_read',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
-} satisfies RoleModelPluginToolDefinition);
-
-export const requiredMemorySearchToolDefinition = Object.freeze({
-  ...memorySearchToolDefinition,
-  requiredForUserTurn: true,
 } satisfies RoleModelPluginToolDefinition);
 
 export const memoryRecallToolDefinition = Object.freeze({
@@ -65,12 +53,20 @@ export const visibleDotReplyToolDefinition = Object.freeze({
   description: 'Exercise a provider-name collision with visible_reply.',
 } satisfies RoleModelPluginToolDefinition);
 
-export function withVisibleReplyTool(
+/** A tool definition with an explicit concurrency mode. */
+export function toolWithConcurrency(
   definition: RoleModelPluginToolDefinition,
+  concurrency: 'shared' | 'exclusive',
+): RoleModelPluginToolDefinition {
+  return Object.freeze({...definition, concurrency});
+}
+
+export function withVisibleReplyTool(
+  ...definitions: readonly RoleModelPluginToolDefinition[]
 ): readonly RoleModelPluginToolDefinition[] {
   return Object.freeze([
     ...createDefaultRoleModelPluginToolDefinitions(),
-    definition,
+    ...definitions,
   ]);
 }
 
@@ -94,18 +90,13 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -119,11 +110,6 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
       {
         name: 'memory.search',
         description: 'Search memory.',
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [
@@ -136,9 +122,7 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
           additionalFields: false,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       },
     ],
     lifecycleHooks: {

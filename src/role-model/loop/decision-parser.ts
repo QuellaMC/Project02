@@ -4,7 +4,6 @@ import {
   freezeModelToolCall,
   visibleReplyModelToolName,
   createVisibleReplyModelToolCall,
-  findVisibleReplyModelToolCall,
   type BuiltInModelToolCall,
   type BuiltInModelToolName,
   type ModelToolCall,
@@ -21,25 +20,20 @@ import {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelPluginToolDefinitions,
   modelToolDefinitionsForPluginToolDefinitions,
-  toolDefinitionsForAllowedTools,
 } from '../api/plugin-tool-definitions.ts';
-import {isJsonRecord} from '../api/provider-exchange.ts';
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   roleModelDecisionContractVersion,
   roleModelDisallowedToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelMalformedToolCallRejectionReason,
-  roleModelMissingRequiredToolCallRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
   roleModelUnsupportedEffectRejectionReason,
   type CharacterDecision,
-  type RoleModelToolObservation,
   type AcceptedRoleModelDecisionResult,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionResult,
   type RoleModelPluginToolDefinition,
-  type RoleModelToolDefinition,
 } from '../api/contracts.ts';
 import {
   freezeAllowedTools,
@@ -52,13 +46,11 @@ export function parseRoleModelDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = createDefaultRoleModelPluginToolDefinitions(),
-  toolObservations: readonly RoleModelToolObservation[] = [],
 ): RoleModelDecisionResult {
   return parseRoleModelDecisionForBoundary(
     rawOutputText,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations,
     'public_snapshot',
   );
 }
@@ -67,13 +59,11 @@ export function parseRoleModelExecutionDecision(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[] = roleModelAllowedToolNames,
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[] = createDefaultRoleModelPluginToolDefinitions(),
-  toolObservations: readonly RoleModelToolObservation[] = [],
 ): RoleModelDecisionResult {
   return parseRoleModelDecisionForBoundary(
     rawOutputText,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations,
     'execution',
   );
 }
@@ -84,7 +74,6 @@ function parseRoleModelDecisionForBoundary(
   rawOutputText: string,
   allowedTools: readonly RoleModelAllowedToolName[],
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
   boundary: RoleModelDecisionBoundary,
 ): RoleModelDecisionResult {
   let parsedOutput: unknown;
@@ -99,7 +88,6 @@ function parseRoleModelDecisionForBoundary(
     parsedOutput,
     allowedTools,
     pluginToolDefinitions,
-    toolObservations,
     boundary,
   );
 }
@@ -107,7 +95,7 @@ function parseRoleModelDecisionForBoundary(
 export function getRequiredVisibleReplyText(
   decision: CharacterDecision,
 ): string {
-  const visibleReply = getVisibleReplyToolCall(decision);
+  const visibleReply = visibleReplyToolCalls(decision)[0];
 
   if (visibleReply === undefined) {
     throw new TypeError('CharacterDecision must include visible_reply.');
@@ -116,17 +104,22 @@ export function getRequiredVisibleReplyText(
   return visibleReply.input.text;
 }
 
-export function getVisibleReplyToolCall(
+/** Every reply the decision asks to send, in the order it asked. */
+export function visibleReplyToolCalls(
   decision: CharacterDecision,
-): VisibleReplyModelToolCall | undefined {
-  return findVisibleReplyModelToolCall(decision.toolCalls);
+): readonly VisibleReplyModelToolCall[] {
+  return Object.freeze(
+    decision.toolCalls.filter(
+      (call): call is VisibleReplyModelToolCall =>
+        call.name === visibleReplyModelToolName,
+    ),
+  );
 }
 
 function parseRoleModelDecisionObject(
   parsedOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
   boundary: RoleModelDecisionBoundary,
 ): RoleModelDecisionResult {
   const frozenPluginToolDefinitions = createRoleModelPluginToolDefinitions(
@@ -139,11 +132,6 @@ function parseRoleModelDecisionObject(
     allowedTools,
     modelToolDefinitions,
   );
-  const allowedModelToolDefinitions = toolDefinitionsForAllowedTools({
-    allowedTools: frozenAllowedTools,
-    toolDefinitions: modelToolDefinitions,
-  });
-
   if (!isJsonRecord(parsedOutput)) {
     return createMalformedOutputResult(
       'Adapter output must be a CharacterDecision JSON object.',
@@ -197,16 +185,6 @@ function parseRoleModelDecisionObject(
 
   if (availabilityResult !== undefined) {
     return availabilityResult;
-  }
-
-  const cardinalityResult = validateUserTurnToolCallCardinality(
-    toolCalls,
-    allowedModelToolDefinitions,
-    toolObservations,
-  );
-
-  if (cardinalityResult !== undefined) {
-    return cardinalityResult;
   }
 
   const topLevelText = parsedOutput['text'];
@@ -458,78 +436,6 @@ function validateToolCallAvailability(options: {
         requestedToolNames: options.toolCalls.map(call => call.name),
       },
     );
-  }
-
-  return undefined;
-}
-
-function validateUserTurnToolCallCardinality(
-  toolCalls: readonly ModelToolCall[],
-  modelToolDefinitions: readonly RoleModelToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
-): RejectedRoleModelDecisionResult | undefined {
-  const isTerminalDecision = toolCalls.every(
-    call => call.name === visibleReplyModelToolName,
-  );
-  const visibleReplyCount = toolCalls.filter(
-    call => call.name === visibleReplyModelToolName,
-  ).length;
-  if (visibleReplyCount > 1) {
-    return createRejectedRoleModelDecisionResult(
-      roleModelDuplicateToolCallRejectionReason,
-      'Decision must not include duplicate visible_reply tool calls.',
-      {
-        requestedToolNames: toolCalls.map(call => call.name),
-      },
-    );
-  }
-
-  for (const definition of modelToolDefinitions) {
-    const successfulRequiredCallCount = toolObservations.filter(
-      observation =>
-        observation.toolName === definition.name &&
-        observation.result.status === 'accepted',
-    ).length;
-
-    if (
-      isTerminalDecision &&
-      definition.requiredForUserTurn &&
-      successfulRequiredCallCount === 0
-    ) {
-      return createRejectedRoleModelDecisionResult(
-        roleModelMissingRequiredToolCallRejectionReason,
-        `Decision must include required ${definition.name} tool call.`,
-        {
-          requestedToolNames: toolCalls.map(call => call.name),
-        },
-      );
-    }
-
-    // user_turn budgets are enforced at tool routing, where an over-limit
-    // call becomes a rejected observation the model can react to; only
-    // per-response shape violations reject the decision itself. An absent
-    // callLimit means the tool is unlimited.
-    if (definition.callLimit?.scope !== 'model_response') {
-      continue;
-    }
-
-    const currentDecisionCount = toolCalls.filter(
-      call => call.name === definition.name,
-    ).length;
-
-    if (currentDecisionCount > definition.callLimit.maxCalls) {
-      return createRejectedRoleModelDecisionResult(
-        roleModelDuplicateToolCallRejectionReason,
-        `Decision requested ${definition.name} ${String(
-          currentDecisionCount,
-        )} times; ${definition.callLimit.scope} maxCalls is ${String(
-          definition.callLimit.maxCalls,
-        )}.`,
-        {
-          requestedToolNames: toolCalls.map(call => call.name),
-        },
-      );
-    }
   }
 
   return undefined;

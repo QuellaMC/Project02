@@ -99,7 +99,7 @@ describe('configured runtime plugin package activation', () => {
     const storeRoot = createTestTempRoot('project02-package-disabled-');
     const manifest = testPackageManifest('operator.cold', {
       defaultEnabled: true,
-      localTrustLevel: 'first_party',
+      firstParty: true,
     });
 
     writeOperatorPackage({
@@ -450,7 +450,7 @@ describe('configured runtime plugin package activation', () => {
     );
     const manifest = testPackageManifest(characterStatePluginId, {
       defaultEnabled: true,
-      localTrustLevel: 'first_party',
+      firstParty: true,
     });
 
     writeOperatorPackage({
@@ -701,7 +701,7 @@ function testPackageManifest(
   id: string,
   options: {
     readonly defaultEnabled?: boolean;
-    readonly localTrustLevel?: RuntimePluginManifest['localTrustLevel'];
+    readonly firstParty?: RuntimePluginManifest['firstParty'];
     readonly configFields?: RuntimePluginManifest['config']['fields'];
   } = {},
 ): RuntimePluginManifest {
@@ -720,18 +720,13 @@ function testPackageManifest(
       scope: 'global_with_character_overrides',
       fields: options.configFields ?? [],
     },
-    localTrustLevel: options.localTrustLevel ?? 'trusted_adapter',
+    firstParty: options.firstParty ?? false,
     runtimePolicy: {
-      requiredForTurn: false,
-      sideEffectLevel: 'none',
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

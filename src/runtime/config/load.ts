@@ -1,3 +1,4 @@
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   pathExistsSync,
   readTextFileSync,
@@ -203,7 +204,7 @@ function snapshotAuthoredRuntimeConfigDocument(value: unknown):
       readonly status: 'rejected';
       readonly diagnostic: RuntimeConfigDiagnostic;
     } {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return {status: 'accepted'};
   }
 
@@ -560,7 +561,7 @@ function parseProject02RuntimeConfig(value: unknown): {
 } {
   const diagnostics: RuntimeConfigDiagnostic[] = [];
 
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return {
       diagnostics: [
         createRuntimeConfigDiagnostic(
@@ -615,7 +616,7 @@ function optionalProject02HostConfig(
     return undefined;
   }
 
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
@@ -679,7 +680,7 @@ function optionalPluginConfigs(
     return undefined;
   }
 
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
@@ -694,7 +695,7 @@ function optionalPluginConfigs(
   return Object.freeze(
     Object.fromEntries(
       Object.entries(value).flatMap(([pluginId, pluginValue]) => {
-        if (!isRecord(pluginValue)) {
+        if (!isJsonRecord(pluginValue)) {
           diagnostics.push(
             createRuntimeConfigDiagnostic(
               'error',
@@ -746,7 +747,7 @@ function optionalConfigRecord(
     return undefined;
   }
 
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     diagnostics.push(
       createRuntimeConfigDiagnostic(
         'error',
@@ -859,7 +860,7 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
     return value.every(isRuntimeConfigValue);
   }
 
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return false;
   }
 
@@ -960,8 +961,4 @@ function snapshotRuntimeConfigValue(
 
     throw error;
   }
-}
-
-function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

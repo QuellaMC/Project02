@@ -51,6 +51,7 @@ import {
   type RuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import {
+  characterStatePatchModelToolName,
   firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
@@ -111,15 +112,13 @@ describe('inspect CLI plugin evidence', () => {
         readonly runtimeConfig: string;
         readonly activation: string;
         readonly storedSessionEvidence: string;
-        readonly derivedTraceEvidence: string;
+        readonly traceEvidence: string;
       };
       readonly counts: {
         readonly traceEntries: number;
-        readonly derivedTraceEntries: number;
       };
       readonly turns: readonly [
         {
-          readonly derivedSteps: readonly unknown[];
           readonly modelRounds: readonly {
             readonly rawEventKind: string;
             readonly roleModelEvidence: {
@@ -147,6 +146,14 @@ describe('inspect CLI plugin evidence', () => {
               readonly evidenceKind: string;
               readonly status: string;
             }[];
+            readonly plugins: readonly {
+              readonly pluginId: string;
+              readonly providedTools: readonly {
+                readonly name: string;
+                readonly annotations?: Readonly<Record<string, boolean>>;
+                readonly concurrency?: string;
+              }[];
+            }[];
           };
         },
       ];
@@ -157,14 +164,13 @@ describe('inspect CLI plugin evidence', () => {
       runtimeConfig: 'current_at_inspection',
       activation: 'current_at_inspection',
       storedSessionEvidence: 'stored_history',
-      derivedTraceEvidence: 'derived_not_persisted',
+      traceEvidence: 'derived_from_event_log',
     });
-    expect(output.counts.derivedTraceEntries).toBe(0);
-    expect(output.turns[0].derivedSteps).toEqual([]);
+    expect(output.counts.traceEntries).toBeGreaterThan(0);
     expect(output.turns[0].modelRounds).toHaveLength(2);
     expect(
       output.turns[0].modelRounds.map(round => round.rawEventKind),
-    ).toEqual(['tool_call_started', 'visible_reply_committed']);
+    ).toEqual(['tool_call_started', 'visible_message_committed']);
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText,
     ).toContain('character_state.patch');
@@ -201,6 +207,20 @@ describe('inspect CLI plugin evidence', () => {
         }),
       ]),
     );
+
+    // An audit has to be able to tell a tool that changes durable state
+    // from one that only reads, so the tool's own declaration is carried
+    // into the projection rather than summarized away.
+    const patchTool = output.turns[0].pluginEvidence.plugins
+      .find(plugin => plugin.pluginId === 'character-state')
+      ?.providedTools.find(
+        tool => tool.name === characterStatePatchModelToolName,
+      );
+
+    expect(patchTool).toMatchObject({
+      annotations: {destructiveHint: true},
+      concurrency: 'exclusive',
+    });
   });
 
   it('shows runtime config source and configured plugin activation', async () => {
@@ -760,7 +780,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -797,7 +817,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -832,7 +852,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 4,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -1502,18 +1522,13 @@ function createInspectFixturePlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -1599,18 +1614,13 @@ function createInspectSessionEndFixturePlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },

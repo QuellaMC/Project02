@@ -1,16 +1,6 @@
 import type {CharacterProfile, SpeakerIdentity} from '../../core/index.ts';
-import type {
-  ConversationLogRecord,
-  ConversationLogRecordInput,
-  RawEventLogRecord,
-  RawEventLogRecordInput,
-  RuntimeTraceEntry,
-  RuntimeTraceEntryInput,
-} from './records.ts';
-import {
-  decodeConversationLogRecord,
-  encodeConversationLogRecord,
-} from '../storage/conversation-codec.ts';
+import type {RawEventLogRecord, RawEventLogRecordInput} from './records.ts';
+import {conversationMessageForRawEvent} from './cache.ts';
 import type {
   MutableDurableRuntimeSessionEvidence,
   RuntimeEvidenceIncrementalState,
@@ -21,34 +11,72 @@ import {
 } from '../storage/raw-event-codec.ts';
 import {
   applyIncrementalConversationAppend,
-  applyIncrementalConversationRemoval,
   applyIncrementalRawEventAppend,
-  applyIncrementalTraceAppend,
   assertIncrementalConversationAppend,
   assertIncrementalRawEventAppend,
-  assertIncrementalStatePublicReadable,
-  assertIncrementalTraceAppend,
   createRuntimeEvidenceIncrementalState,
 } from './validation.ts';
-import {
-  decodeRuntimeTraceEntry,
-  encodeRuntimeTraceEntry,
-} from '../storage/trace-codec.ts';
+import {roleModelCharacterSnapshot} from './identity.ts';
 
 export type RuntimeEvidenceTransitionMachine = {
   readonly state: RuntimeEvidenceIncrementalState;
-  prepareTraceAppend(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
-  commitTraceAppend(entry: RuntimeTraceEntry): void;
-  prepareRawEventAppend(record: RawEventLogRecordInput): RawEventLogRecord;
-  commitRawEventAppend(record: RawEventLogRecord): void;
-  prepareConversationAppend(
-    record: ConversationLogRecordInput,
+  prepareRawEventAppend(
+    record: RawEventLogRecordInput,
     expectedCharacter?: CharacterProfile,
-  ): ConversationLogRecord;
-  commitConversationAppend(record: ConversationLogRecord): void;
-  removeConversationMessages(messageIds: readonly string[]): void;
-  assertPublicReadable(): void;
+  ): RawEventLogRecord;
+  /**
+   * Re-runs the append checks a prepared record passed when it was
+   * prepared, against the machine's current state. A caller that appends
+   * between preparing and committing invalidates what prepare proved, so
+   * a durable store asserts this again before its bytes land.
+   */
+  assertRawEventAppend(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void;
+  commitRawEventAppend(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void;
 };
+
+/**
+ * The one gate, applied to a stored log: a log is valid iff it replays
+ * record by record through the same assert-then-apply a live append
+ * runs. A log a crash cut short replays fewer records — that is the
+ * crash contract — while a record no valid append could have produced
+ * fails exactly as it would have failed to append.
+ */
+export function replayRuntimeEvidence(options: {
+  readonly rawEvents: readonly RawEventLogRecord[];
+  readonly sessionId?: string;
+  readonly boundCharacter?: CharacterProfile;
+  readonly boundUserSpeaker?: SpeakerIdentity;
+}): {
+  readonly evidence: MutableDurableRuntimeSessionEvidence;
+  readonly machine: RuntimeEvidenceTransitionMachine;
+} {
+  const evidence: MutableDurableRuntimeSessionEvidence = {
+    rawEvents: [],
+    conversationMessages: [],
+  };
+  const machine = createRuntimeEvidenceTransitionMachine({
+    evidence,
+    ...(options.sessionId === undefined ? {} : {sessionId: options.sessionId}),
+    ...(options.boundCharacter === undefined
+      ? {}
+      : {boundCharacter: options.boundCharacter}),
+    ...(options.boundUserSpeaker === undefined
+      ? {}
+      : {boundUserSpeaker: options.boundUserSpeaker}),
+  });
+
+  for (const record of options.rawEvents) {
+    machine.commitRawEventAppend(record);
+  }
+
+  return {evidence, machine};
+}
 
 export function createRuntimeEvidenceTransitionMachine(options: {
   readonly evidence: MutableDurableRuntimeSessionEvidence;
@@ -62,82 +90,68 @@ export function createRuntimeEvidenceTransitionMachine(options: {
     options.boundUserSpeaker,
   );
 
+  function assertStoredRawEventAppend(
+    record: RawEventLogRecord,
+    expectedCharacter?: CharacterProfile,
+  ): void {
+    assertIncrementalRawEventAppend({
+      evidence: options.evidence,
+      state,
+      record,
+      ...(options.sessionId === undefined
+        ? {}
+        : {sessionId: options.sessionId}),
+    });
+
+    const message = conversationMessageForRawEvent(record);
+
+    if (message !== undefined) {
+      const recordCharacter = roleModelCharacterSnapshot(record);
+
+      assertIncrementalConversationAppend({
+        evidence: options.evidence,
+        state,
+        record: message,
+        ...(options.sessionId === undefined
+          ? {}
+          : {sessionId: options.sessionId}),
+        ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
+        ...(recordCharacter === undefined ? {} : {recordCharacter}),
+      });
+    }
+  }
+
   return Object.freeze({
     state,
-    prepareTraceAppend(entry) {
-      const storedEntry = decodeRuntimeTraceEntry(
-        encodeRuntimeTraceEntry(entry),
-      );
-
-      assertIncrementalTraceAppend(state, storedEntry);
-      return storedEntry;
-    },
-    commitTraceAppend(entry) {
-      options.evidence.traceEntries.push(entry);
-      applyIncrementalTraceAppend(state, entry);
-    },
-    prepareRawEventAppend(record) {
+    prepareRawEventAppend(record, expectedCharacter) {
       const storedRecord = decodeRawEventLogRecord(
         encodeRawEventLogRecord(record),
       );
 
-      assertIncrementalRawEventAppend({
-        evidence: options.evidence,
-        state,
-        record: storedRecord,
-        ...(options.sessionId === undefined
-          ? {}
-          : {sessionId: options.sessionId}),
-      });
+      assertStoredRawEventAppend(storedRecord, expectedCharacter);
       return storedRecord;
     },
-    commitRawEventAppend(record) {
+    assertRawEventAppend(record, expectedCharacter) {
+      assertStoredRawEventAppend(record, expectedCharacter);
+    },
+    commitRawEventAppend(record, expectedCharacter) {
+      // Committing asserts again: apply mutates shared evidence, so a
+      // record no valid append could produce must never enter it, however
+      // long ago it was prepared.
+      assertStoredRawEventAppend(record, expectedCharacter);
       options.evidence.rawEvents.push(record);
       applyIncrementalRawEventAppend({
         evidence: options.evidence,
         state,
         record,
       });
-    },
-    prepareConversationAppend(record, expectedCharacter) {
-      const storedRecord = decodeConversationLogRecord(
-        encodeConversationLogRecord(record),
-      );
 
-      assertIncrementalConversationAppend({
-        evidence: options.evidence,
-        state,
-        record: storedRecord,
-        ...(options.sessionId === undefined
-          ? {}
-          : {sessionId: options.sessionId}),
-        ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
-      });
-      return storedRecord;
-    },
-    commitConversationAppend(record) {
-      options.evidence.conversationMessages.push(record);
-      applyIncrementalConversationAppend(state, record);
-    },
-    removeConversationMessages(messageIds) {
-      const ids = new Set(messageIds);
+      const message = conversationMessageForRawEvent(record);
 
-      for (
-        let index = options.evidence.conversationMessages.length - 1;
-        index >= 0;
-        index -= 1
-      ) {
-        const message = options.evidence.conversationMessages[index];
-
-        if (message !== undefined && ids.has(message.id)) {
-          options.evidence.conversationMessages.splice(index, 1);
-        }
+      if (message !== undefined) {
+        options.evidence.conversationMessages.push(message);
+        applyIncrementalConversationAppend(state, message);
       }
-
-      applyIncrementalConversationRemoval(state, messageIds);
-    },
-    assertPublicReadable() {
-      assertIncrementalStatePublicReadable(state);
     },
   } satisfies RuntimeEvidenceTransitionMachine);
 }

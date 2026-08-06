@@ -6,7 +6,6 @@ import {
 } from '../builtin/plugin-management/index.ts';
 import {createRuntimePluginEvidenceSnapshot} from '../api/constructors.ts';
 import {mergedRedactionLabels} from '../api/evidence-policy.ts';
-import {redactRuntimePluginText} from '../api/validation-primitives.ts';
 import type {
   RuntimePluginEvidenceStatus,
   RuntimePluginPolicyOutcome,
@@ -98,6 +97,9 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
   const effect = options.result.preparedConfigEffect;
 
   if (effect === undefined) {
+    // Unreachable: normalizing an accepted result already rejects an
+    // approval-gated tool that prepared no effect, so this is a type
+    // narrowing rather than a second copy of that rule.
     throw new TypeError(
       'Approval-gated runtime config tool result is missing its prepared effect.',
     );
@@ -255,7 +257,7 @@ export function createRejectedToolCallResult(options: {
   readonly evidenceStatus?: RuntimePluginEvidenceStatus;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RuntimePluginToolCallResult {
-  const message = redactRuntimePluginText(options.message);
+  const message = options.message;
 
   return Object.freeze({
     status: 'rejected',

@@ -2,7 +2,6 @@ import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {
   isRoleModelMalformedAdapterRawOutputDetails,
   roleModelDisallowedToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelMalformedOutputRejectionReason,
   roleModelPluginToolRejectedRejectionReason,
@@ -32,7 +31,6 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
     options.rawOutputText,
     options.allowedTools,
     options.pluginToolDefinitions,
-    options.toolObservations,
   );
 
   return (
@@ -109,7 +107,6 @@ function fillRequestedToolNamesFromRawOutput(options: {
     options.rawOutputText,
     options.allowedTools,
     options.pluginToolDefinitions,
-    options.toolObservations,
   );
   const requestedToolNames =
     canonicalResult.status === 'rejected'
@@ -165,7 +162,6 @@ const loopSynthesizedRejectionReasons: readonly string[] = Object.freeze([
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelDisallowedToolRejectionReason,
   roleModelUnknownToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
 ]);
 
 function isRoleModelLoopSynthesizedRejectionEvidence(options: {

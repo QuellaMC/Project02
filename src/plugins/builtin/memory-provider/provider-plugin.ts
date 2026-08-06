@@ -26,9 +26,6 @@ export function createMemoryProviderRuntimePlugin(
   const toolNamespace = options.toolNamespace ?? 'memory';
   const searchToolName = `${toolNamespace}.search`;
   const addToolName = `${toolNamespace}.add`;
-  const canWriteMemory =
-    provider.add !== undefined || provider.captureTurn !== undefined;
-
   return createRuntimePlugin({
     manifest: {
       id: pluginId,
@@ -47,18 +44,13 @@ export function createMemoryProviderRuntimePlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'trusted_adapter',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: canWriteMemory ? 'local_memory_write' : 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1500,
-        sourceReferencesRequired: true,
         redactionLabels: ['memory'],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'degrade',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },

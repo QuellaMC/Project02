@@ -47,9 +47,7 @@ export type {
   DurableRuntimePluginFileStoreOptions,
   InMemoryRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePathMode,
-  RuntimePluginFileStorePreparedTransaction,
   RuntimePluginFileStoreProvider,
-  RuntimePluginFileStoreTransaction,
 } from './api/file-store-contract.ts';
 export {
   runtimePluginBeforeRoleModelCallRejectionReason,

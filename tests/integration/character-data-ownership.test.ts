@@ -124,7 +124,7 @@ describe('character data ownership marker', () => {
     expect(first).toEqual({
       created: true,
       marker: {
-        schemaVersion: 4,
+        schemaVersion: 6,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -136,7 +136,7 @@ describe('character data ownership marker', () => {
         characterId: 'mira',
       }),
     ).toEqual({
-      schemaVersion: 4,
+      schemaVersion: 6,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',

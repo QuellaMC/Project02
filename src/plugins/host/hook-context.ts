@@ -1,15 +1,10 @@
 import {runtimePluginGrantsAccess} from '../policy/access-control.ts';
-import type {
-  RuntimePluginFileStoreProvider,
-  RuntimePluginFileStoreTransaction,
-} from '../api/file-store-contract.ts';
-import {sideEffectLevelAllowsFileStoreWrites} from '../policy/tool-policy.ts';
+import type {RuntimePluginFileStoreProvider} from '../api/file-store-contract.ts';
 import type {
   RuntimePlugin,
   RuntimePluginAfterTurnCommittedContext,
   RuntimePluginContext,
   RuntimePluginFileStore,
-  RuntimePluginManifest,
 } from '../api/types.ts';
 import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
@@ -28,7 +23,6 @@ export function createPluginHookContext<
 >(options: {
   readonly context: TContext;
   readonly plugin: RuntimePlugin;
-  readonly policyManifest?: RuntimePluginManifest | undefined;
   readonly pluginId?: string | undefined;
   readonly access: RuntimePluginAccessSnapshot;
   readonly deadlineAt: number;
@@ -37,30 +31,29 @@ export function createPluginHookContext<
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly allowFileStoreWrites?: boolean | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
   readonly createFileStore?:
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
 }): PluginHookContextScope<TContext> {
   const pluginId = options.pluginId ?? options.plugin.manifest.id;
-  const policyManifest = options.policyManifest ?? options.plugin.manifest;
   const grantsFileStore = runtimePluginGrantsAccess({
     access: options.access,
     accessName: 'file_store',
     requiredAccess: 'read',
   });
   const sessionId = options.sessionId ?? options.context.sessionId;
+  // The granted access decides. The retired sideEffectLevel enum gated
+  // this too, so a plugin the user had already granted file_store write
+  // could still be refused for declaring the "wrong" effect level —
+  // two permission systems answering one question.
   const allowWrites =
     runtimePluginGrantsAccess({
       access: options.access,
       accessName: 'file_store',
       requiredAccess: 'write',
     }) &&
-    (options.allowFileStoreWrites ??
-      sideEffectLevelAllowsFileStoreWrites(
-        policyManifest.runtimePolicy.sideEffectLevel,
-      ));
+    (options.allowFileStoreWrites ?? true);
   const baseFileStore = grantsFileStore
-    ? (options.fileStoreTransaction?.fileStoreFor({
+    ? options.createFileStore?.({
         ...(options.storeRoot === undefined
           ? {}
           : {storeRoot: options.storeRoot}),
@@ -69,17 +62,7 @@ export function createPluginHookContext<
           ? {}
           : {sessionIdentity: options.sessionIdentity}),
         pluginId,
-      }) ??
-      options.createFileStore?.({
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
-        sessionId,
-        ...(options.sessionIdentity === undefined
-          ? {}
-          : {sessionIdentity: options.sessionIdentity}),
-        pluginId,
-      }))
+      })
     : undefined;
 
   if (grantsFileStore && baseFileStore === undefined) {

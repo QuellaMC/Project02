@@ -4,10 +4,7 @@ import {
   createRuntimePluginToolCallResultSnapshot,
 } from '../api/constructors.ts';
 import {createRuntimePluginContextItem} from '../api/manifest-validation.ts';
-import {
-  isRecord,
-  redactRuntimePluginText,
-} from '../api/validation-primitives.ts';
+import {isRecord} from '../api/validation-primitives.ts';
 import type {
   RuntimePluginEvidenceKind,
   RuntimePluginEvidenceStatus,
@@ -43,25 +40,18 @@ import {
   isHostScopedFirstPartyRuntimePluginId,
 } from './catalog.ts';
 import {createPluginHookContext} from './hook-context.ts';
-import type {
-  RuntimePluginFileStorePreparedTransaction,
-  RuntimePluginFileStoreProvider,
-  RuntimePluginFileStoreTransaction,
-} from '../api/file-store-contract.ts';
-import {isApprovalGatedRuntimePluginTool} from '../api/tool-classification.ts';
-import type {RuntimeEventIdentity} from '../../core/index.ts';
+import type {RuntimePluginFileStoreProvider} from '../api/file-store-contract.ts';
+import {
+  isApprovalGatedRuntimePluginTool,
+  isModelFacingRuntimePluginTool,
+} from '../api/tool-classification.ts';
 import {validateModelToolInputAgainstContract} from '../../role-model/index.ts';
 import {
-  isModelFacingPluginTool,
   pluginCanWriteModelInput,
-  pluginToolHasRequiredGrantedAccess,
   pluginToolDefinitionsForEnabledPlugins,
   routableModelFacingPluginTools,
-  toolAllowsFileStoreWrites,
 } from '../policy/tool-policy.ts';
 import {
-  assertAcceptedToolEvidenceSourceReferences,
-  assertContextItemSourceReferences,
   assertSnapshotPluginId,
   createHookFailureEvidence,
   failurePolicyOutcomeOption,
@@ -238,11 +228,6 @@ export type RuntimePluginHost = {
       readonly turnResultFingerprint?: string;
     },
   ): Promise<RuntimePluginConfigReloadHostResult>;
-  beginFileStoreTransaction?(): void;
-  prepareFileStoreTransaction?(
-    identity: RuntimeEventIdentity,
-  ): Promise<RuntimePluginFileStorePreparedTransaction | undefined>;
-  rollbackFileStoreTransaction?(): void;
   afterTurnCommitted(
     context: RuntimePluginAfterTurnCommittedContext,
   ): Promise<RuntimePluginHookHostResult>;
@@ -321,7 +306,6 @@ export function createRuntimePluginHost(
     accessByPluginId,
     hasFileStoreProvider: options.fileStore !== undefined,
   });
-  let activeFileStoreTransaction: RuntimePluginFileStoreTransaction | undefined;
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
   let terminalStarted = false;
   const catalogManifestForPluginId = lifecycleCatalogManifestResolver(
@@ -355,7 +339,6 @@ export function createRuntimePluginHost(
         sessionId: options.sessionId,
         sessionIdentity,
         createFileStore: options.fileStore?.createFileStore,
-        fileStoreTransaction: activeFileStoreTransaction,
       });
     },
     async handleToolCall(call, context) {
@@ -370,7 +353,6 @@ export function createRuntimePluginHost(
         toolConfirmationHandler: options.toolConfirmationHandler,
         pluginConfigControl,
         createFileStore: options.fileStore?.createFileStore,
-        fileStoreTransaction: activeFileStoreTransaction,
       });
 
       // Settled results pass exactly one choke point, so the turn log sees
@@ -424,28 +406,6 @@ export function createRuntimePluginHost(
             : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
         }),
       );
-    },
-    beginFileStoreTransaction() {
-      if (activeFileStoreTransaction !== undefined) {
-        throw new Error('Plugin fileStore transaction is already active.');
-      }
-
-      // Without a provider no plugin can obtain a store, so there is nothing
-      // to stage; granted plugins still fail loudly in createPluginHookContext.
-      activeFileStoreTransaction =
-        options.fileStore?.createFileStoreTransaction();
-    },
-    async prepareFileStoreTransaction(identity) {
-      const transaction = activeFileStoreTransaction;
-
-      activeFileStoreTransaction = undefined;
-      return await transaction?.prepare(identity);
-    },
-    rollbackFileStoreTransaction() {
-      const transaction = activeFileStoreTransaction;
-
-      activeFileStoreTransaction = undefined;
-      transaction?.rollback();
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
@@ -508,7 +468,6 @@ export function createRuntimePluginHost(
         sessionId: options.sessionId,
         sessionIdentity,
         createFileStore: options.fileStore?.createFileStore,
-        fileStoreTransaction: activeFileStoreTransaction,
       });
     },
   } satisfies RuntimePluginHost);
@@ -811,7 +770,6 @@ type BeforeRoleModelCallOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 };
 
@@ -898,7 +856,6 @@ async function runBeforeRoleModelCallPlugin(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    fileStoreTransaction: options.fileStoreTransaction,
     createFileStore: options.createFileStore,
   });
   const result = await invokeBeforeRoleModelCallHook({
@@ -1005,7 +962,6 @@ type HandleToolCallOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
@@ -1058,9 +1014,7 @@ async function runHandleToolCall(
     storeRoot: options.storeRoot,
     sessionId: options.sessionId,
     sessionIdentity: options.sessionIdentity,
-    fileStoreTransaction: options.fileStoreTransaction,
     createFileStore: options.createFileStore,
-    allowFileStoreWrites: toolAllowsFileStoreWrites(providedTool),
   });
 
   try {
@@ -1208,8 +1162,8 @@ function rejectedRuntimePluginToolPolicy(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
 }): RejectedRuntimePluginToolExecution | undefined {
-  const modelFacing = isModelFacingPluginTool({
-    plugin: options.plugin,
+  const modelFacing = isModelFacingRuntimePluginTool({
+    manifest: options.plugin.manifest,
     tool: options.providedTool,
   });
 
@@ -1219,25 +1173,6 @@ function rejectedRuntimePluginToolPolicy(options: {
       context: options.context,
       reason: 'model_input_not_granted',
       message: `Plugin "${options.plugin.manifest.id}" did not declare model_input write access for model-facing tool "${options.providedTool.name}".`,
-      evidenceStatus: options.failureDegrades ? 'degraded' : 'rejected',
-      policyOutcome: options.failureDegrades
-        ? 'optional_degraded'
-        : 'disallowed_tool_call',
-    });
-  }
-
-  if (
-    modelFacing &&
-    !pluginToolHasRequiredGrantedAccess({
-      tool: options.providedTool,
-      access: options.access,
-    })
-  ) {
-    return rejectedRuntimePluginToolExecution({
-      call: options.call,
-      context: options.context,
-      reason: 'file_store_write_not_granted',
-      message: `Plugin "${options.plugin.manifest.id}" did not declare file_store write access for local-memory-write tool "${options.providedTool.name}".`,
       evidenceStatus: options.failureDegrades ? 'degraded' : 'rejected',
       policyOutcome: options.failureDegrades
         ? 'optional_degraded'
@@ -1306,7 +1241,10 @@ function resolveRuntimePluginToolHandler(options: {
     });
   }
 
-  const approvalGatedTool = isApprovalGatedRuntimePluginTool(providedTool);
+  const approvalGatedTool = isApprovalGatedRuntimePluginTool({
+    manifest: plugin.manifest,
+    tool: providedTool,
+  });
 
   if (
     approvalGatedTool &&
@@ -1380,7 +1318,6 @@ async function runHookPhase<TContext extends RuntimePluginContext>(options: {
     const hookContext = createPluginHookContext({
       context: options.context,
       plugin,
-      policyManifest: catalogManifest,
       pluginId: catalogPluginId,
       deadlineAt: executionScope.deadlineAt,
       signal: executionScope.abortController.signal,
@@ -1535,12 +1472,6 @@ function normalizeToolCallResult(options: {
       value: value['evidence'],
     });
 
-    assertAcceptedToolEvidenceSourceReferences({
-      plugin: options.plugin,
-      providedTool: options.providedTool,
-      evidence,
-    });
-
     if (evidence.some(runtimePluginEvidenceBlocksToolInvocation)) {
       return Object.freeze({
         status: 'rejected',
@@ -1550,18 +1481,26 @@ function normalizeToolCallResult(options: {
       } satisfies RuntimePluginToolCallResult);
     }
 
+    const approvalGatedTool = isApprovalGatedRuntimePluginTool({
+      manifest: options.plugin.manifest,
+      tool: options.providedTool,
+    });
     const preparedConfigEffect = normalizePreparedRuntimePluginConfigEffect({
       providedTool: options.providedTool,
+      approvalGatedTool,
       context: options.context,
       value: value['preparedConfigEffect'],
     });
-    const approvalGatedTool = isApprovalGatedRuntimePluginTool(
-      options.providedTool,
-    );
 
     if (approvalGatedTool && preparedConfigEffect === undefined) {
+      // requiresConfirmation asks the user to approve an effect the call
+      // only staged, and the prompt is honest because the hook applied
+      // nothing. A tool returning no prepared effect either acted
+      // already — asking now would be too late — or set the flag by
+      // mistake. Rejecting here means the effect is never confirmed and
+      // the model is told which contract the plugin broke.
       throw new TypeError(
-        'Approval-gated runtime config tools must prepare one config effect.',
+        `Tool "${options.providedTool.name}" sets requiresConfirmation but prepared no effect to confirm. A confirmable tool stages its effect as preparedConfigEffect and applies nothing until the user approves.`,
       );
     }
 
@@ -1609,7 +1548,7 @@ function normalizeToolCallResult(options: {
       );
     }
 
-    const redactedMessage = redactRuntimePluginText(message);
+    const redactedMessage = message;
     const evidence = normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
@@ -1691,7 +1630,6 @@ async function runHealth(options: {
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
-  readonly fileStoreTransaction?: RuntimePluginFileStoreTransaction | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
 }): Promise<RuntimePluginHealthHostResult> {
   const snapshots: RuntimePluginHealthSnapshot[] = [];
@@ -1717,7 +1655,6 @@ async function runHealth(options: {
       storeRoot: options.storeRoot,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
-      fileStoreTransaction: options.fileStoreTransaction,
       createFileStore: options.createFileStore,
     });
 
@@ -2003,11 +1940,6 @@ function normalizeContextItems(options: {
         actualPluginId: contextItem.pluginId,
         field: 'contextItems.pluginId',
       });
-      assertContextItemSourceReferences({
-        plugin: options.plugin,
-        contextItem,
-      });
-
       return contextItem;
     }),
   );
@@ -2066,10 +1998,8 @@ function handleToolCallFailureDegrades(options: {
   readonly providedTool: RuntimePluginProvidedTool;
 }): boolean {
   return (
-    !options.plugin.manifest.runtimePolicy.requiredForTurn &&
-    !options.providedTool.requiredForUserTurn &&
     options.plugin.manifest.runtimePolicy.failureBehavior.handleToolCall ===
-      'degrade'
+    'degrade'
   );
 }
 

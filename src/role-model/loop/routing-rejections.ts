@@ -1,17 +1,11 @@
 import {
   createRuntimePluginEvidenceSnapshot,
-  redactRuntimePluginText,
   type RuntimePluginContext,
   type RuntimePluginEvidenceStatus,
   type RuntimePluginPolicyOutcome,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallResult,
 } from '../../plugins/api/index.ts';
-import {
-  type RoleModelPluginToolDefinition,
-  type RoleModelToolObservation,
-} from '../api/contracts.ts';
-import {type ModelToolCall} from '../api/model-tools.ts';
 
 export type RoleModelPluginToolRoutingEvidence = {
   readonly callId: string;
@@ -30,8 +24,8 @@ export function createRejectedToolRoutingEvidence(options: {
   readonly evidenceStatus?: RuntimePluginEvidenceStatus;
   readonly policyOutcome?: RuntimePluginPolicyOutcome;
 }): RoleModelPluginToolRoutingEvidence {
-  const reason = redactRuntimePluginText(options.reason);
-  const message = redactRuntimePluginText(options.message);
+  const reason = options.reason;
+  const message = options.message;
 
   return Object.freeze({
     callId: options.callId,
@@ -81,55 +75,5 @@ export function missingRoutingTargetRejection(options: {
     policyOutcome: options.pluginDeclared
       ? 'handler_rejected'
       : 'disallowed_tool_call',
-  });
-}
-
-/**
- * Converts a user_turn call-budget violation into a rejected routing result
- * instead of failing the decision: the model sees the rejection as a tool
- * observation on the next round and can still finish the turn. Attempts
- * count regardless of outcome, so rejected calls consume budget too.
- */
-export function userTurnCallLimitRoutingRejection(options: {
-  readonly callId: string;
-  readonly call: RuntimePluginToolCall;
-  readonly toolCall: ModelToolCall;
-  readonly toolDefinition: RoleModelPluginToolDefinition | undefined;
-  readonly priorToolObservations: readonly RoleModelToolObservation[];
-  readonly routedResults: readonly RoleModelPluginToolRoutingEvidence[];
-  readonly context: RuntimePluginContext | undefined;
-}): RoleModelPluginToolRoutingEvidence | undefined {
-  const callLimit = options.toolDefinition?.callLimit;
-
-  if (callLimit === undefined || callLimit.scope !== 'user_turn') {
-    return undefined;
-  }
-
-  const attemptCount =
-    options.priorToolObservations.filter(
-      observation => observation.toolName === options.toolCall.name,
-    ).length +
-    options.routedResults.filter(
-      result => result.call.toolName === options.toolCall.name,
-    ).length;
-
-  if (attemptCount < callLimit.maxCalls) {
-    return undefined;
-  }
-
-  return createRejectedToolRoutingEvidence({
-    callId: options.callId,
-    call: options.call,
-    dispatchedToHost: false,
-    ...(options.context === undefined ? {} : {context: options.context}),
-    reason: 'tool_call_limit_reached',
-    message: `Tool "${options.toolCall.name}" was already attempted ${String(
-      attemptCount,
-    )} ${
-      attemptCount === 1 ? 'time' : 'times'
-    } this turn; user_turn maxCalls is ${String(
-      callLimit.maxCalls,
-    )}. Do not request it again.`,
-    policyOutcome: 'disallowed_tool_call',
   });
 }

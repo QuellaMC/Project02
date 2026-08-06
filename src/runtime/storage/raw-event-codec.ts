@@ -18,7 +18,7 @@ import {
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
   getRequiredVisibleReplyText,
-  getVisibleReplyToolCall,
+  visibleReplyToolCalls,
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
@@ -94,9 +94,10 @@ import {
 } from '../evidence/records.ts';
 import {
   isOneOf,
+  optionalCommittedMessage,
   requiredNormalizedVisibleMessageText,
   requiredRuntimeEventIdentity,
-  requiredVisibleMessageRole,
+  requiredVisibleMessage,
   throwMalformedRecord,
 } from './codec-primitives.ts';
 import {assertToolRawEventSemantics} from './raw-event-tool-semantics.ts';
@@ -121,20 +122,14 @@ const legacySchema1CharacterStatePatchPluginToolDefinition = Object.freeze({
   name: characterStatePatchModelToolName,
   description:
     'Legacy schema 1 compatibility definition for persisted character_state.patch evidence.',
-  requiredForUserTurn: false,
-  callLimit: {
-    scope: 'user_turn',
-    maxCalls: 1,
-  },
   inputContract: {
     type: 'object',
     fields: [],
     additionalFields: true,
   },
   validationOwner: 'plugin_host',
-  sideEffectLevel: 'local_memory_write',
+  concurrency: 'exclusive',
   requiresConfirmation: false,
-  sourceReferencesRequired: false,
 } satisfies RoleModelPluginToolDefinition);
 
 export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
@@ -152,6 +147,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     record['visibleMessageIds'],
     'visibleMessageIds',
   );
+  const committedMessage = optionalCommittedMessage(record);
   const toolCallIds = optionalStringArray(record['toolCallIds'], 'toolCallIds');
   const toolCallId = optionalRecordString(
     record,
@@ -259,6 +255,7 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     ...(status === undefined ? {} : {status}),
     ...(reason === undefined ? {} : {reason}),
     ...(visibleMessageIds === undefined ? {} : {visibleMessageIds}),
+    ...committedMessage,
     ...(toolCallIds === undefined ? {} : {toolCallIds}),
     ...(toolCallId === undefined ? {} : {toolCallId}),
     ...(dispatchedToHost === undefined ? {} : {dispatchedToHost}),
@@ -966,10 +963,7 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
   });
 
   if (commitValidation === undefined) {
-    if (
-      options.kind !== 'tool_call_started' &&
-      options.kind !== 'interim_visible_reply_emitted'
-    ) {
+    if (options.kind !== 'tool_call_started') {
       throwMalformedRecord('commitValidation');
     }
 
@@ -1134,7 +1128,7 @@ function assertRoleModelCommitStatusMatchesRawEvent(options: {
     });
 
     if (
-      options.kind !== 'visible_reply_committed' &&
+      options.kind !== 'visible_message_committed' &&
       options.kind !== 'runtime_turn_completed'
     ) {
       throwMalformedRecord('commitValidation');
@@ -1183,26 +1177,24 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
   readonly actual: string | undefined;
   readonly parsedDecision: CharacterDecision;
 }): void {
-  const parsedDecisionText = getVisibleReplyToolCall(options.parsedDecision)
-    ?.input.text;
+  const parsedTexts = visibleReplyToolCalls(options.parsedDecision).map(
+    call => call.input.text,
+  );
 
-  if (parsedDecisionText === undefined) {
-    if (options.actual === undefined) {
+  if (parsedTexts.length === 0 || options.actual === undefined) {
+    if (parsedTexts.length === 0 && options.actual === undefined) {
       return;
     }
 
     throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
   }
 
-  if (options.actual === undefined) {
-    throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
-  }
-
-  let normalizedParsedDecisionText: string;
+  let normalizedTexts: readonly string[];
 
   try {
-    normalizedParsedDecisionText =
-      normalizeVisibleMessageText(parsedDecisionText);
+    normalizedTexts = parsedTexts.map(text =>
+      normalizeVisibleMessageText(text),
+    );
   } catch (error: unknown) {
     if (error instanceof VisibleMessageTextValidationError) {
       throwMalformedRecord(
@@ -1213,7 +1205,7 @@ function assertAcceptedCommitTextMatchesParsedDecision(options: {
     throw error;
   }
 
-  if (options.actual !== normalizedParsedDecisionText) {
+  if (!normalizedTexts.includes(options.actual)) {
     throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
   }
 }
@@ -1421,24 +1413,10 @@ function requiredVisibleMessages(
   const messages: VisibleMessage[] = [];
 
   for (const item of requiredArray(value, key)) {
-    messages.push(requiredVisibleMessage(item));
+    messages.push(requiredVisibleMessage(item, 'recentVisibleMessages'));
   }
 
   return Object.freeze(messages);
-}
-
-function requiredVisibleMessage(value: unknown): VisibleMessage {
-  if (!isRecord(value)) {
-    throwMalformedRecord('recentVisibleMessages');
-  }
-
-  return Object.freeze({
-    id: requiredRecordString(value, 'id', 'malformed_record'),
-    role: requiredVisibleMessageRole(value['role']),
-    speakerId: requiredRecordString(value, 'speakerId', 'malformed_record'),
-    speakerName: requiredRecordString(value, 'speakerName', 'malformed_record'),
-    text: requiredNormalizedVisibleMessageText(value, 'text'),
-  } satisfies VisibleMessage);
 }
 
 function requiredStringArray(value: unknown, key: string): readonly string[] {

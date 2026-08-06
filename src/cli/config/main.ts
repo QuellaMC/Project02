@@ -33,6 +33,7 @@ import {
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {RuntimeLocationCliUsageError} from '../shared/runtime-location-flags.ts';
+import {writeJson} from '../shared/output.ts';
 import {
   assertProject02StoreConsent,
   Project02StoreConsentError,
@@ -830,10 +831,6 @@ function assertRuntimeConfigLoadedForEnvPath(
   throw new RuntimeConfigCliUsageError(
     errorDiagnostic?.message ?? 'Runtime config is invalid.',
   );
-}
-
-function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
-  stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 function handleRuntimeConfigCliError(

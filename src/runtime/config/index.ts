@@ -101,7 +101,7 @@ export {
   type RuntimeConfigAuthoredSnapshot,
   type RuntimeConfigMutationResult,
 } from './mutate.ts';
-export {redactRuntimeConfigText, redactRuntimeConfigValue} from './redact.ts';
+export {redactRuntimeConfigValue} from './redact.ts';
 export {
   runtimePluginScopeDiagnostics,
   runtimePluginScopeViolation,

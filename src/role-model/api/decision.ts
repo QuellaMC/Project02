@@ -7,13 +7,11 @@ import {
 } from '../../core/index.ts';
 import {
   createRuntimePluginContextItem,
-  redactRuntimePluginText,
   type RuntimePluginContextItem,
 } from '../../plugins/api/index.ts';
 import {
   createVisibleReplyModelToolCall,
   freezeModelToolCalls,
-  visibleReplyModelToolName,
   type ModelToolCall,
 } from './model-tools.ts';
 import {
@@ -26,8 +24,6 @@ import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,
 } from '../../shared/json-boundary.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
-import {redactJsonTextPreservingStructure} from '../../shared/json-boundary.ts';
 import type {RoleModelAllowedToolName} from './tool-names.ts';
 import {
   freezeProviderMetadata,
@@ -123,26 +119,10 @@ export function createRoleModelToolObservation(
 export function createCharacterDecision(
   toolCalls: readonly ModelToolCall[],
 ): CharacterDecision {
-  assertVisibleReplyCardinality(toolCalls);
-
   return freezeCharacterDecision({
     version: roleModelDecisionContractVersion,
     toolCalls,
   });
-}
-
-function assertVisibleReplyCardinality(
-  toolCalls: readonly ModelToolCall[],
-): void {
-  const visibleReplyCount = toolCalls.filter(
-    call => call.name === visibleReplyModelToolName,
-  ).length;
-
-  if (visibleReplyCount > 1) {
-    throw new TypeError(
-      'Decision must not include duplicate visible_reply tool calls.',
-    );
-  }
 }
 
 export function createVisibleReplyCharacterDecision(
@@ -162,7 +142,7 @@ export function createAcceptedRoleModelDecisionResult(
     decision: freezeCharacterDecision(decision),
     ...(options.nonCommittedText === undefined
       ? {}
-      : {nonCommittedText: redactJsonBoundaryText(options.nonCommittedText)}),
+      : {nonCommittedText: options.nonCommittedText}),
   } satisfies AcceptedRoleModelDecisionResult);
 }
 
@@ -212,10 +192,7 @@ export function createRoleModelIOSnapshot(
     kind: 'role_model_io_snapshot',
     sessionId: options.sessionId,
     inputEnvelope,
-    rawOutputText: redactJsonTextPreservingStructure(
-      options.rawOutputText,
-      'Role-model adapter raw output',
-    ),
+    rawOutputText: options.rawOutputText,
     ...(options.characterRef === undefined
       ? {}
       : {
@@ -443,8 +420,8 @@ function freezeRoleModelToolObservationResult(
 
   return Object.freeze({
     status: 'rejected',
-    reason: redactRuntimePluginText(result.reason),
-    message: redactRuntimePluginText(result.message),
+    reason: result.reason,
+    message: result.message,
   } satisfies RoleModelToolObservationResult);
 }
 
@@ -462,9 +439,7 @@ function freezeRoleModelDecisionRejection(
 ): RoleModelDecisionRejection {
   return Object.freeze({
     reason: rejection.reason,
-    ...(rejection.details === undefined
-      ? {}
-      : {details: redactRuntimePluginText(rejection.details)}),
+    ...(rejection.details === undefined ? {} : {details: rejection.details}),
   } satisfies RoleModelDecisionRejection);
 }
 

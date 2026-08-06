@@ -57,7 +57,6 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
     name: runtimePluginListToolName,
     description:
       'List plugins available to you in the current turn or inspect the installed plugin catalog. Call this when you need canonical plugin inventory.',
-    requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [
@@ -78,9 +77,9 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
+    annotations: {readOnlyHint: true},
+    concurrency: 'shared',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   };
 }
 
@@ -289,12 +288,10 @@ function createRuntimePluginListToolSummary(
   return Object.freeze({
     name: boundedRuntimePluginListText(tool.name),
     description: boundedRuntimePluginListText(tool.description),
-    sideEffectLevel: tool.sideEffectLevel,
-    requiredForUserTurn: tool.requiredForUserTurn,
-    ...(tool.callLimit === undefined ? {} : {callLimit: tool.callLimit}),
+    ...(tool.annotations === undefined ? {} : {annotations: tool.annotations}),
+    ...(tool.concurrency === undefined ? {} : {concurrency: tool.concurrency}),
     requiresConfirmation: tool.requiresConfirmation,
     validationOwner: tool.validationOwner,
-    sourceReferencesRequired: tool.sourceReferencesRequired,
   } satisfies RuntimePluginJsonObject);
 }
 

@@ -7,7 +7,6 @@ import {
   runtimePluginId,
 } from '../../api/contract.ts';
 import {runtimeIdentityMatchesContext} from '../../api/identity.ts';
-import {isApprovalGatedRuntimePluginTool} from '../../api/tool-classification.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
   RuntimePluginConfigField,
@@ -45,7 +44,6 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
     name: runtimePluginConfigUpdateToolName,
     description:
       'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. Committed changes apply by the next turn when the host can live-reload the plugin (reported per update as appliesTo), otherwise at a later host construction.',
-    requiredForUserTurn: false,
     inputContract: {
       type: 'object',
       fields: [
@@ -85,9 +83,9 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_config_write',
+    annotations: {readOnlyHint: false, destructiveHint: true},
+    concurrency: 'exclusive',
     requiresConfirmation: true,
-    sourceReferencesRequired: false,
   };
 }
 
@@ -217,6 +215,8 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
 
 export function normalizePreparedRuntimePluginConfigEffect(options: {
   readonly providedTool: RuntimePluginProvidedTool;
+  /** Decided by the host, which holds the manifest this depends on. */
+  readonly approvalGatedTool: boolean;
   readonly context: RuntimePluginContext;
   readonly value: unknown;
 }): PreparedRuntimePluginConfigEffect | undefined {
@@ -224,7 +224,7 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
     return undefined;
   }
 
-  if (!isApprovalGatedRuntimePluginTool(options.providedTool)) {
+  if (!options.approvalGatedTool) {
     throw new TypeError(
       'Only an approval-gated runtime config tool can prepare a config effect.',
     );

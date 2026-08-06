@@ -8,11 +8,9 @@
  * be imported from runtime.
  */
 export {
-  afterTurnCommittedFailureBehaviorValues,
   beforeRoleModelFailureBehaviorValues,
   characterStatePatchModelToolName,
   characterStatePluginId,
-  confirmationRequirementValues,
   firstPartyModelToolsPluginId,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
@@ -33,20 +31,17 @@ export {
   runtimePluginKindValues,
   runtimePluginListToolName,
   runtimePluginPolicyOutcomeValues,
-  runtimePluginSideEffectLevelValues,
+  runtimePluginToolConcurrencyValues,
   runtimePluginSourceKindValues,
   runtimePluginToolValidationOwnerValues,
-  runtimePluginTrustLevelValues,
   type RuntimePluginAccessLevel,
   type RuntimePluginAccessMap,
   type RuntimePluginAccessName,
   type RuntimePluginAccessSnapshot,
-  type RuntimePluginAfterTurnCommittedFailureBehavior,
   type RuntimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginBeforeRoleModelFailureBehavior,
   type RuntimePluginConfigScope,
   type RuntimePluginConfigValueType,
-  type RuntimePluginConfirmationRequirement,
   type RuntimePluginContextItemKind,
   type RuntimePluginDeclaration,
   type RuntimePluginEvidenceKind,
@@ -56,10 +51,10 @@ export {
   type RuntimePluginHealthStatus,
   type RuntimePluginKind,
   type RuntimePluginPolicyOutcome,
-  type RuntimePluginSideEffectLevel,
+  type RuntimePluginToolAnnotations,
+  type RuntimePluginToolConcurrency,
   type RuntimePluginSourceKind,
   type RuntimePluginToolValidationOwner,
-  type RuntimePluginTrustLevel,
 } from './contract.ts';
 export {
   type CreateRuntimePluginAfterTurnCommittedContextOptions,
@@ -121,10 +116,7 @@ export {
   validateRuntimePluginManifest,
   validateRuntimePluginProvidedTool,
 } from './manifest-validation.ts';
-export {
-  isRuntimePluginCredentialKey,
-  redactRuntimePluginText,
-} from './validation-primitives.ts';
+export {isRuntimePluginCredentialKey} from './validation-primitives.ts';
 export {
   isApprovalGatedRuntimePluginTool,
   isModelFacingRuntimePluginTool,
@@ -136,10 +128,7 @@ export {
   runtimePluginEvidenceBlocksToolInvocation,
   runtimePluginToolResultHasBlockingEvidence,
 } from './evidence-policy.ts';
-export {
-  requiredModelToolCallLimit,
-  requiredModelToolInputContract,
-} from './tool-schema-validation.ts';
+export {requiredModelToolInputContract} from './tool-schema-validation.ts';
 export {
   assertUniqueRuntimePluginIds,
   runtimeIdentityMatchesContext,
@@ -167,7 +156,5 @@ export {
   type DurableRuntimePluginFileStoreOptions,
   type InMemoryRuntimePluginFileStoreOptions,
   type RuntimePluginFileStorePathMode,
-  type RuntimePluginFileStorePreparedTransaction,
   type RuntimePluginFileStoreProvider,
-  type RuntimePluginFileStoreTransaction,
 } from './file-store-contract.ts';
