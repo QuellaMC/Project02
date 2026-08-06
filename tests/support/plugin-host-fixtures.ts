@@ -29,7 +29,6 @@ import type {
 } from '../../src/plugins/api/index.ts';
 import {
   createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
   type RuntimePluginFileStoreProvider,
 } from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {createRuntimePluginConfigControlCapability} from '../../src/runtime/config/index.ts';
@@ -60,7 +59,6 @@ export type TestRuntimePluginHostOptions = Omit<
 export const testRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
   Object.freeze({
     createFileStore: createRuntimePluginFileStore,
-    createFileStoreTransaction: createRuntimePluginFileStoreTransaction,
   });
 
 /** Real config-control capability wired the way the composition root does. */
@@ -281,32 +279,6 @@ export function createModelFacingToolWithoutModelInputPlugin(
   } satisfies RuntimePlugin);
 }
 
-export function createLocalMemoryWriteToolWithoutFileStorePlugin(
-  onHandle: () => void,
-): RuntimePlugin {
-  const pluginId = 'memory.tool-no-file-store-write.fixture';
-
-  return createRuntimePlugin({
-    manifest: {
-      ...memorySearchPluginManifest(pluginId),
-      requestedAccess: {file_store: 'read', model_input: 'write'},
-    },
-    providedTools: localMemoryWriteSearchProvidedTools(),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        onHandle();
-        const query = call.input['query'];
-
-        return createAcceptedMemorySearchResult({
-          pluginId,
-          query: typeof query === 'string' ? query : '',
-          context,
-        });
-      },
-    },
-  });
-}
-
 export function createDegradableMemorySearchPlugin(
   onHandle: () => void,
 ): RuntimePlugin {
@@ -325,77 +297,6 @@ export function createDegradableMemorySearchPlugin(
       },
     },
     providedTools: memorySearchProvidedTools(),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        onHandle();
-        const query = call.input['query'];
-
-        if (typeof query !== 'string') {
-          throw new Error('Expected query string.');
-        }
-
-        return createAcceptedMemorySearchResult({
-          pluginId: id,
-          query,
-          context,
-        });
-      },
-    },
-  });
-}
-
-export function createConfirmationRequiredMemorySearchPlugin(
-  onHandle: () => void = () => {},
-): RuntimePlugin {
-  const id = 'memory.confirmation-required.fixture';
-  const manifest = memorySearchPluginManifest(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-        confirmation: 'required',
-      },
-    },
-    providedTools: memorySearchProvidedTools(),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        onHandle();
-        const query = call.input['query'];
-
-        if (typeof query !== 'string') {
-          throw new Error('Expected query string.');
-        }
-
-        return createAcceptedMemorySearchResult({
-          pluginId: id,
-          query,
-          context,
-        });
-      },
-    },
-  });
-}
-
-export function createExternalReadMemorySearchPlugin(
-  onHandle: () => void,
-): RuntimePlugin {
-  const id = 'memory.external-read.fixture';
-  const manifest = memorySearchPluginManifest(id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-        sideEffectLevel: 'external_read',
-      },
-    },
-    providedTools: memorySearchProvidedTools().map(tool => ({
-      ...tool,
-      sideEffectLevel: 'external_read' as const,
-    })),
     lifecycleHooks: {
       handleToolCall(call, context) {
         onHandle();
@@ -621,71 +522,6 @@ export function createAcceptedBlockingEvidenceMemorySearchPlugin(
   });
 }
 
-export function createSourceRequiredMemorySearchPlugin(options: {
-  readonly id: string;
-  readonly evidenceKinds: readonly ('policy' | 'health' | 'tool_invocation')[];
-  readonly handleToolCallFailure?: 'reject_tool_call' | 'degrade';
-}): RuntimePlugin {
-  const manifest = memorySearchPluginManifest(options.id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-        failureBehavior: {
-          ...manifest.runtimePolicy.failureBehavior,
-          handleToolCall:
-            options.handleToolCallFailure ??
-            manifest.runtimePolicy.failureBehavior.handleToolCall,
-        },
-      },
-    },
-    providedTools: memorySearchProvidedTools().map(tool =>
-      Object.freeze({
-        ...tool,
-        sourceReferencesRequired: true,
-      }),
-    ),
-    lifecycleHooks: {
-      handleToolCall(call, context) {
-        const query = call.input['query'];
-
-        if (typeof query !== 'string') {
-          throw new Error('Expected query string.');
-        }
-
-        return {
-          status: 'accepted',
-          output: {
-            matched: query,
-          },
-          evidence: options.evidenceKinds.map(evidenceKind =>
-            createRuntimePluginEvidenceSnapshot({
-              eventId: context.eventId,
-              traceId: context.traceId,
-              createdAt: context.timestamp,
-              kind: 'runtime_plugin_evidence_snapshot',
-              pluginId: options.id,
-              evidenceKind,
-              status: 'accepted',
-              summary: `${evidenceKind} evidence.`,
-              sourceReferences: [
-                {
-                  kind: 'memory',
-                  id: `source.${evidenceKind}`,
-                  title: `${evidenceKind} source`,
-                },
-              ],
-              redactionLabels: [],
-            }),
-          ),
-        };
-      },
-    },
-  });
-}
-
 export function createAcceptedMemorySearchResult(options: {
   readonly pluginId: string;
   readonly query: string;
@@ -836,65 +672,9 @@ export function createSlowNormalizationPlugin(): RuntimePlugin {
   });
 }
 
-export function createSourceRequiredRuntimeNotesPlugin(options: {
-  readonly id: string;
-  readonly requiredForTurn?: boolean;
-}): RuntimePlugin {
-  const manifest = memorySearchPluginManifest(options.id);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      declaredPlugins: ['before_role_model_call'],
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-        requiredForTurn: options.requiredForTurn ?? false,
-        sourceReferencesRequired: true,
-      },
-    },
-    providedTools: [],
-    lifecycleHooks: {
-      beforeRoleModelCall(context) {
-        return {
-          contextItems: [
-            createRuntimePluginContextItem({
-              pluginId: options.id,
-              id: 'unsourced-note',
-              kind: 'runtime_note',
-              text: 'unsourced runtime note',
-              budget: {estimatedTokens: 5, priority: 50},
-              sourceReferences: [],
-              redactionLabels: [],
-            }),
-          ],
-          evidence: [
-            createRuntimePluginEvidenceSnapshot({
-              eventId: context.eventId,
-              traceId: context.traceId,
-              createdAt: context.timestamp,
-              kind: 'runtime_plugin_evidence_snapshot',
-              pluginId: options.id,
-              evidenceKind: 'before_role_model_call',
-              status: 'accepted',
-              summary: 'Loaded runtime note.',
-              sourceReferences: [
-                {
-                  kind: 'memory',
-                  id: 'source.before_role_model_call',
-                },
-              ],
-              redactionLabels: [],
-            }),
-          ],
-        };
-      },
-    },
-  });
-}
-
 export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
   readonly id: string;
-  readonly requiredForTurn?: boolean;
+  readonly rejectsTurn?: boolean;
   readonly evidenceStatus: 'rejected' | 'failed';
 }): RuntimePlugin {
   const manifest = memorySearchPluginManifest(options.id);
@@ -905,7 +685,11 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
       declaredPlugins: ['before_role_model_call'],
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        requiredForTurn: options.requiredForTurn ?? false,
+        failureBehavior: {
+          ...manifest.runtimePolicy.failureBehavior,
+          beforeRoleModelCall:
+            options.rejectsTurn === true ? 'reject_turn' : 'degrade',
+        },
       },
     },
     providedTools: [],
@@ -939,7 +723,7 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
               policyOutcome:
                 options.evidenceStatus === 'failed'
                   ? 'timeout'
-                  : options.requiredForTurn === true
+                  : options.rejectsTurn === true
                     ? 'required_rejected'
                     : 'handler_rejected',
               redactionLabels: [],
@@ -1064,7 +848,6 @@ export function createRetainedBeforeRoleModelFileStorePlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       declaredPlugins: ['before_role_model_call'],
       requestedAccess: {file_store: 'write'},
@@ -1090,10 +873,14 @@ export function createRetainedBeforeRoleModelFileStorePlugin(
 export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   const pluginId = 'memory.read-only-file-store.fixture';
 
+  // Genuinely read-only: the granted access is what withholds writes.
+  // This fixture used to request write access and rely on a declared
+  // effect level to be refused anyway — two systems answering one
+  // question, which is the overlap the annotations model retired.
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),
-      requestedAccess: {file_store: 'write', model_input: 'write'},
+      requestedAccess: {file_store: 'read', model_input: 'write'},
     },
     providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
@@ -1150,7 +937,7 @@ export function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlug
     manifest: {
       ...memorySearchPluginManifest(pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: {file_store: 'write', model_input: 'write'},
+      requestedAccess: {file_store: 'read', model_input: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -1204,7 +991,7 @@ export function createRetainedHandleToolCallFileStorePlugin(
       ...memorySearchPluginManifest(pluginId),
       requestedAccess: {file_store: 'write', model_input: 'write'},
     },
-    providedTools: localMemoryWriteSearchProvidedTools(),
+    providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
         writeDuringHookAndRetainFileStore({
@@ -1236,7 +1023,7 @@ export function createStagedAppendFileStorePlugin(): RuntimePlugin {
       ...memorySearchPluginManifest(pluginId),
       requestedAccess: {file_store: 'write', model_input: 'write'},
     },
-    providedTools: localMemoryWriteSearchProvidedTools(),
+    providedTools: memorySearchProvidedTools(),
     lifecycleHooks: {
       handleToolCall(call, context) {
         if (context.fileStore === undefined) {
@@ -1276,7 +1063,6 @@ export function createRetainedHealthFileStorePlugin(
       ...manifest,
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       declaredPlugins: ['health'],
       requestedAccess: {file_store: 'write'},
@@ -1436,14 +1222,14 @@ export async function callFileStoreAvailabilityProbe(
 export function createFileStoreAvailabilityProbePlugin(options: {
   readonly pluginId: string;
   readonly requestedAccess: RuntimePlugin['manifest']['requestedAccess'];
-  readonly localTrustLevel?: RuntimePlugin['manifest']['localTrustLevel'];
+  readonly firstParty?: RuntimePlugin['manifest']['firstParty'];
 }): RuntimePlugin {
   const manifest = memorySearchPluginManifest(options.pluginId);
 
   return createRuntimePlugin({
     manifest: {
       ...manifest,
-      localTrustLevel: options.localTrustLevel ?? manifest.localTrustLevel,
+      firstParty: options.firstParty ?? manifest.firstParty,
       requestedAccess: options.requestedAccess,
     },
     providedTools: memorySearchProvidedTools(),
@@ -1486,7 +1272,6 @@ export function createSessionEndFileStoreProbePlugin(options: {
       declaredPlugins: ['on_session_end'],
       runtimePolicy: {
         ...manifest.runtimePolicy,
-        sideEffectLevel: 'local_memory_write',
       },
       requestedAccess: options.requestedAccess,
     },
@@ -1521,18 +1306,13 @@ export function memorySearchPluginManifest(id: string) {
       scope: 'global_with_character_overrides',
       fields: [],
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },
@@ -1549,11 +1329,6 @@ export function memorySearchProvidedTools() {
     {
       name: 'memory.search',
       description: 'Search memory.',
-      requiredForUserTurn: false,
-      callLimit: {
-        scope: 'user_turn',
-        maxCalls: 1,
-      },
       inputContract: {
         type: 'object',
         fields: [
@@ -1566,20 +1341,9 @@ export function memorySearchProvidedTools() {
         additionalFields: false,
       },
       validationOwner: 'plugin_host',
-      sideEffectLevel: 'runtime_read',
       requiresConfirmation: false,
-      sourceReferencesRequired: false,
     },
   ];
-}
-
-export function localMemoryWriteSearchProvidedTools() {
-  return memorySearchProvidedTools().map(tool =>
-    Object.freeze({
-      ...tool,
-      sideEffectLevel: 'local_memory_write' as const,
-    }),
-  );
 }
 
 export function testPluginContext(

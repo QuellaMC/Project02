@@ -76,7 +76,7 @@ describe('character persona through the role-model loop', () => {
     // The committed raw event round-trips characterRef through the codec.
     const committed = logStore
       .rawEvents()
-      .find(rawEvent => rawEvent.kind === 'visible_reply_committed');
+      .findLast(rawEvent => rawEvent.kind === 'visible_message_committed');
 
     expect(committed?.roleModelIOSnapshot?.characterRef).toEqual(characterRef);
   });
@@ -154,7 +154,7 @@ describe('character persona through the role-model loop', () => {
     expect(result.status).toBe('completed');
     const committed = logStore
       .rawEvents()
-      .find(rawEvent => rawEvent.kind === 'visible_reply_committed');
+      .findLast(rawEvent => rawEvent.kind === 'visible_message_committed');
 
     expect(committed?.roleModelIOSnapshot).toBeDefined();
     expect(committed?.roleModelIOSnapshot?.characterRef).toBeUndefined();

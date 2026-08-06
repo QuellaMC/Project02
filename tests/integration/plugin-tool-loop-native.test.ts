@@ -98,6 +98,7 @@ describe('plugin-driven native tool loop routing', () => {
       logStore.conversationMessages().map(message => message.text),
     ).toEqual([
       'check plugins with progress',
+      'Checking plugins.',
       'Plugins are available after progress.',
     ]);
     expect(messagesByRound).toHaveLength(2);

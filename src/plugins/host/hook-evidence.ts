@@ -8,11 +8,8 @@ import {runtimeIdentityMatchesContext} from '../api/identity.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
-  RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginManifest,
-  RuntimePluginProvidedTool,
-  RuntimePluginSourceReference,
 } from '../api/types.ts';
 import {mergedRedactionLabels} from '../api/evidence-policy.ts';
 
@@ -131,53 +128,6 @@ function assertSnapshotRuntimeIdentity(options: {
   throw new TypeError(
     `${options.field} identity must match current runtime event identity.`,
   );
-}
-
-export function assertContextItemSourceReferences(options: {
-  readonly plugin: RuntimePlugin;
-  readonly contextItem: RuntimePluginContextItem;
-}): void {
-  assertRequiredSourceReferences({
-    sourceReferencesRequired:
-      options.plugin.manifest.runtimePolicy.sourceReferencesRequired,
-    sourceReferences: options.contextItem.sourceReferences,
-    message: `Plugin "${options.plugin.manifest.id}" context item "${options.contextItem.id}" requires source references.`,
-  });
-}
-
-export function assertAcceptedToolEvidenceSourceReferences(options: {
-  readonly plugin: RuntimePlugin;
-  readonly providedTool: RuntimePluginProvidedTool;
-  readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
-}): void {
-  assertRequiredSourceReferences({
-    sourceReferencesRequired: options.providedTool.sourceReferencesRequired,
-    sourceReferences: options.evidence
-      .filter(
-        evidence =>
-          evidence.evidenceKind === 'tool_invocation' &&
-          evidence.status === 'accepted',
-      )
-      .flatMap(evidence => evidence.sourceReferences ?? []),
-    message: `Plugin "${options.plugin.manifest.id}" tool "${options.providedTool.name}" accepted result requires source references.`,
-  });
-}
-
-function assertRequiredSourceReferences(options: {
-  readonly sourceReferencesRequired: boolean;
-  readonly sourceReferences:
-    readonly RuntimePluginSourceReference[] | undefined;
-  readonly message: string;
-}): void {
-  if (!options.sourceReferencesRequired) {
-    return;
-  }
-
-  if ((options.sourceReferences?.length ?? 0) > 0) {
-    return;
-  }
-
-  throw new TypeError(options.message);
 }
 
 export function requiredArray(

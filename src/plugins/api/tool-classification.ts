@@ -5,33 +5,34 @@ import type {
   RuntimePluginProvidedTool,
 } from './types.ts';
 
+/**
+ * Enabling the plugin is the trust decision, as with a local MCP server
+ * the user chose to run, so tools are not filtered by declared risk. A
+ * tool that needs asking says so per tool, and is withheld only when the
+ * host has no way to ask.
+ */
 export function isModelFacingRuntimePluginTool(options: {
   readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
 }): boolean {
-  const manifestAllowsModelFacingTools =
-    options.manifest.runtimePolicy.confirmation !== 'required';
-
   return (
-    manifestAllowsModelFacingTools &&
-    (isApprovalGatedRuntimePluginTool(options.tool) ||
-      (!isBuiltInModelToolName(options.tool.name) &&
-        options.tool.validationOwner === 'plugin_host' &&
-        !options.tool.requiresConfirmation &&
-        (options.tool.sideEffectLevel === 'none' ||
-          options.tool.sideEffectLevel === 'runtime_read' ||
-          options.tool.sideEffectLevel === 'local_memory_write')))
+    !isBuiltInModelToolName(options.tool.name) &&
+    options.tool.validationOwner === 'plugin_host'
   );
 }
 
-export function isApprovalGatedRuntimePluginTool(
-  tool: RuntimePluginProvidedTool,
-): boolean {
+/**
+ * A tool whose call stages a `preparedConfigEffect` for the user to
+ * approve, applying nothing until they do. It cannot gate a tool that
+ * acts when called — the prompt would come after the action — so one
+ * that prepares nothing is rejected when its result is normalized.
+ */
+export function isApprovalGatedRuntimePluginTool(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly tool: RuntimePluginProvidedTool;
+}): boolean {
   return (
-    !isBuiltInModelToolName(tool.name) &&
-    tool.validationOwner === 'plugin_host' &&
-    tool.requiresConfirmation &&
-    tool.sideEffectLevel === 'runtime_config_write'
+    isModelFacingRuntimePluginTool(options) && options.tool.requiresConfirmation
   );
 }
 
@@ -40,10 +41,7 @@ export function validateRuntimePluginModelFacingToolAccess(options: {
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): void {
   const hasModelFacingTool = options.providedTools.some(tool =>
-    isModelFacingRuntimePluginTool({
-      manifest: options.manifest,
-      tool,
-    }),
+    isModelFacingRuntimePluginTool({manifest: options.manifest, tool}),
   );
 
   if (

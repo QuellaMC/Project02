@@ -33,7 +33,7 @@ import {
   type RuntimePlugin,
   type RuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
-import {type RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   runtimeConfigEnvVarName,
@@ -100,7 +100,10 @@ describe('chat CLI trace summary', () => {
         stderr += chunk;
       }),
       traceMode: true,
-      logStore: createTerminalRawEventAppendFailingLogStore(),
+      logStore: createRawEventAppendFailingLogStore({
+        matches: record => record.kind === 'runtime_turn_completed',
+        message: 'terminal raw event append failed',
+      }),
       roleModelAdapter: {
         invoke() {
           return {
@@ -141,6 +144,42 @@ describe('chat CLI trace summary', () => {
       requestedToolCalls: ['visible_reply'],
       executedToolCalls: [],
       terminalToolCalls: ['visible_reply'],
+    });
+  });
+
+  it('traces every appended record for rejected user input', async () => {
+    let stderr = '';
+    const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
+      pluginHost: createDefaultProject02PluginHost(),
+      // A whitespace-only line reaches the runtime and fails input
+      // validation before any model call.
+      stdin: Readable.from(['   \n', '/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      traceMode: true,
+      roleModelAdapter: {
+        invoke() {
+          throw new Error('rejected input must never reach the model');
+        },
+      },
+    });
+
+    expect(exitCode).toBe(0);
+
+    // The rejection helper appends three records; the operator trace
+    // shows all of them, including the validation step that names why
+    // the turn ended.
+    expect(JSON.parse(stderr.trim())).toMatchObject({
+      status: 'rejected',
+      steps: [
+        'runtime_event_received',
+        'input_validation_rejected',
+        'raw_event_log_appended',
+        'runtime_turn_rejected',
+      ],
     });
   });
 
@@ -202,249 +241,6 @@ describe('chat CLI trace summary', () => {
       executedToolCalls: ['runtime.plugin.list'],
       terminalToolCalls: [],
     });
-  });
-
-  it('recovers requested calls from interim evidence when tool-start tracing fails', async () => {
-    let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['inspect plugins\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      logStore: createToolTraceFailingLogStore('tool_call_started'),
-      roleModelAdapter: {
-        invoke() {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {
-                    text: 'Checking the plugin inventory.',
-                  },
-                },
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
-                },
-              ],
-            }),
-          };
-        },
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      requestedToolCalls: ['visible_reply', 'runtime.plugin.list'],
-      executedToolCalls: [],
-      terminalToolCalls: [],
-    });
-  });
-
-  it('keeps tool-only requested evidence when tool-start tracing fails', async () => {
-    let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['inspect plugins\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      logStore: createToolTraceFailingLogStore('tool_call_started'),
-      roleModelAdapter: {
-        invoke() {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
-                },
-              ],
-            }),
-          };
-        },
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      requestedToolCalls: ['runtime.plugin.list'],
-      executedToolCalls: [],
-      terminalToolCalls: [],
-    });
-  });
-
-  it('keeps host-executed evidence when tool-finish tracing fails', async () => {
-    let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['inspect plugins\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      logStore: createToolTraceFailingLogStore('tool_call_finished'),
-      roleModelAdapter: {
-        invoke() {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
-                },
-              ],
-            }),
-          };
-        },
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      requestedToolCalls: ['runtime.plugin.list'],
-      executedToolCalls: ['runtime.plugin.list'],
-      terminalToolCalls: [],
-    });
-  });
-
-  it('keeps interim requested evidence when interim tracing fails', async () => {
-    let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['inspect plugins\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      logStore: createToolTraceFailingLogStore('interim_visible_reply_emitted'),
-      roleModelAdapter: {
-        invoke() {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {
-                    text: 'Checking the plugin inventory.',
-                  },
-                },
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
-                },
-              ],
-            }),
-          };
-        },
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      requestedToolCalls: ['visible_reply', 'runtime.plugin.list'],
-      executedToolCalls: [],
-      terminalToolCalls: [],
-    });
-  });
-
-  it('keeps final terminal evidence and a readable conversation when commit tracing fails', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-chat-visible-trace-failure-',
-    );
-    const sessionId = 'visible-trace-failure';
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-07-10T00:00:00.000Z',
-    });
-    const backingLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId,
-    });
-    let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost({
-        storeRoot: characterDataDirPath(storeRoot, 'mira'),
-        sessionId,
-      }),
-      stdin: Readable.from(['hello\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      session: createConversationSession({
-        id: sessionId,
-        character: testCharacterProfile,
-      }),
-      logStore: createToolTraceFailingLogStore(
-        'visible_reply_committed',
-        backingLogStore,
-      ),
-      roleModelAdapter: {
-        invoke() {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {
-                    text: 'Final reply before trace failure.',
-                  },
-                },
-              ],
-            }),
-          };
-        },
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      requestedToolCalls: ['visible_reply'],
-      executedToolCalls: [],
-      terminalToolCalls: ['visible_reply'],
-    });
-
-    const reopenedLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId,
-    });
-
-    expect(
-      reopenedLogStore.conversationMessages().map(message => message.text),
-    ).toEqual(['hello', 'Final reply before trace failure.']);
-    expect(reopenedLogStore.rawEvents().map(event => event.kind)).toEqual(
-      expect.arrayContaining([
-        'visible_reply_committed',
-        'runtime_turn_rejected',
-      ]),
-    );
   });
 
   it('distinguishes requested, executed, and terminal tool calls for the whole turn', async () => {
@@ -2096,7 +1892,7 @@ describe('chat CLI plugin lifecycle', () => {
     const sessionId = 'fatal-cleanup-session';
     const configuredPlugin = createSessionEndPlugin(() => {}, {
       pluginId: 'chat.session-end.fatal-cleanup.fixture',
-      requiredForTurn: true,
+      rejectsTurn: true,
       beforeRoleModelCall() {
         throw new Error('configured before-role-model hook failed');
       },
@@ -2130,7 +1926,7 @@ describe('chat CLI plugin lifecycle', () => {
                 },
                 {
                   pluginId: configuredPlugin.manifest.id,
-                  requiredForTurn: true,
+                  rejectsTurn: true,
                   beforeRoleModelCall() {
                     throw new Error('configured before-role-model hook failed');
                   },
@@ -2186,7 +1982,6 @@ describe('chat CLI plugin lifecycle', () => {
         }
       },
       {
-        sideEffectLevel: 'local_memory_write',
         requestedAccess: {file_store: 'write', turn_context: 'read'},
       },
     );
@@ -2267,7 +2062,6 @@ describe('chat CLI plugin lifecycle', () => {
         sessionEndContexts.push(context);
       },
       {
-        sideEffectLevel: 'local_memory_write',
         requestedAccess: {file_store: 'write', turn_context: 'read'},
       },
     );
@@ -2648,18 +2442,13 @@ function createChatConfigurablePlugin(): RuntimePlugin {
           },
         ],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2684,9 +2473,8 @@ function createSessionEndPlugin(
     readonly onShutdown?: NonNullable<
       RuntimePlugin['lifecycleHooks']['onShutdown']
     >;
-    readonly requiredForTurn?: boolean;
+    readonly rejectsTurn?: boolean;
     readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
-    readonly sideEffectLevel?: RuntimePlugin['manifest']['runtimePolicy']['sideEffectLevel'];
     readonly defaultEnabled?: boolean;
   } = {},
 ): RuntimePlugin {
@@ -2716,19 +2504,14 @@ function createSessionEndPlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: options.requiredForTurn === true,
-        sideEffectLevel: options.sideEffectLevel ?? 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall:
-            options.requiredForTurn === true ? 'reject_turn' : 'degrade',
+            options.rejectsTurn === true ? 'reject_turn' : 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2790,18 +2573,13 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2862,18 +2640,13 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
           },
         ],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: false,
-        sideEffectLevel: 'runtime_read',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'degrade',
         },
       },
@@ -2943,88 +2716,4 @@ async function waitForMicrotasks(predicate: () => boolean): Promise<void> {
   }
 
   throw new Error('Expected asynchronous chat state was not reached.');
-}
-
-function createTerminalRawEventAppendFailingLogStore(): RuntimeLogStore {
-  const logStore = createRuntimeLogStore();
-
-  return Object.freeze({
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      if (record.kind === 'runtime_turn_completed') {
-        throw new Error('terminal raw event append failed');
-      }
-
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-function createToolTraceFailingLogStore(
-  failingStep:
-    | 'interim_visible_reply_emitted'
-    | 'tool_call_started'
-    | 'tool_call_finished'
-    | 'visible_reply_committed',
-  logStore: RuntimeLogStore = createRuntimeLogStore(),
-): RuntimeLogStore {
-  return Object.freeze({
-    ...(logStore.localRuntimeSessionPaths === undefined
-      ? {}
-      : {localRuntimeSessionPaths: logStore.localRuntimeSessionPaths}),
-    ...(logStore.localRuntimeWriterLockOwnerToken === undefined
-      ? {}
-      : {
-          localRuntimeWriterLockOwnerToken:
-            logStore.localRuntimeWriterLockOwnerToken,
-        }),
-    appendTrace(entry) {
-      if (entry.step === failingStep) {
-        throw new Error(`${failingStep} trace append failed`);
-      }
-
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
 }

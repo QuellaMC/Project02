@@ -1,6 +1,5 @@
 import {
   assertCanonicalRuntimeTimestamp,
-  type CharacterProfile,
   type RuntimeEventIdentity,
   type RuntimeEventType,
   type VisibleMessage,
@@ -17,9 +16,6 @@ import type {
   RuntimePluginToolCallResult,
   RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
-import type {LocalRuntimeSessionPaths} from '../storage/layout-contract.ts';
-import type {LocalRuntimeMutationLockOwnerToken} from '../storage/mutation-lock.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 
 export const runtimeTurnStatusValues = [
   'completed',
@@ -36,8 +32,7 @@ export const runtimeTraceStepValues = [
   'plugin_before_role_model_call_rejected',
   'tool_call_started',
   'tool_call_finished',
-  'interim_visible_reply_emitted',
-  'visible_reply_committed',
+  'visible_message_committed',
   'input_validation_rejected',
   'character_reply_rejected',
   'commit_validation_rejected',
@@ -58,8 +53,7 @@ export const rawEventLogRecordKindValues = [
   'plugin_before_role_model_call_rejected',
   'tool_call_started',
   'tool_call_finished',
-  'interim_visible_reply_emitted',
-  'visible_reply_committed',
+  'visible_message_committed',
   'input_validation_rejected',
   'character_reply_rejected',
   'commit_validation_rejected',
@@ -82,6 +76,11 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  /** The message this event commits; present exactly on commit events. */
+  readonly visibleMessage?: VisibleMessage;
+  readonly committedAt?: string;
+  /** The sampling round that asked for a committed reply. */
+  readonly decisionRound?: number;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
   readonly dispatchedToHost?: boolean;
@@ -105,16 +104,17 @@ export type ConversationLogRecord = VisibleMessage &
     readonly committedAt: string;
   };
 
-export type RuntimeTraceEntryInput = RuntimeEventIdentity & {
-  readonly step: RuntimeTraceStepName;
-};
-
 export type RawEventLogRecordInput = RuntimeEventIdentity & {
   readonly kind: RawEventLogRecordKind;
   readonly eventType: RuntimeEventType;
   readonly status?: RuntimeTurnStatus;
   readonly reason?: string;
   readonly visibleMessageIds?: readonly string[];
+  /** The message this event commits; present exactly on commit events. */
+  readonly visibleMessage?: VisibleMessage;
+  readonly committedAt?: string;
+  /** The sampling round that asked for a committed reply. */
+  readonly decisionRound?: number;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
   readonly dispatchedToHost?: boolean;
@@ -137,49 +137,6 @@ export type ConversationLogRecordInput = VisibleMessage &
   RuntimeEventIdentity & {
     readonly committedAt: string;
   };
-
-export type RuntimeDerivedTraceEntry = RuntimeTraceEntry & {
-  readonly provenance: {
-    readonly source: 'terminal_raw_event';
-    readonly reason: 'missing_persisted_trace_entry';
-    readonly rawEventAnchor: RuntimeEventIdentity & {
-      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
-    };
-  };
-};
-
-export type RuntimeStoredSessionEvidence = {
-  readonly traceEntries: readonly RuntimeTraceEntry[];
-  readonly rawEvents: readonly RawEventLogRecord[];
-  readonly conversationMessages: readonly ConversationLogRecord[];
-};
-
-export type RuntimeDerivedSessionEvidence = {
-  readonly traceEntries: readonly RuntimeDerivedTraceEntry[];
-};
-
-export type RuntimeSessionEvidenceSnapshot = {
-  readonly stored: RuntimeStoredSessionEvidence;
-  readonly derived: RuntimeDerivedSessionEvidence;
-};
-
-export type RuntimeLogStore = {
-  readonly localRuntimeSessionPaths?: LocalRuntimeSessionPaths;
-  readonly localRuntimeWriterLockOwnerToken?: LocalRuntimeMutationLockOwnerToken;
-  appendTrace(entry: RuntimeTraceEntryInput): RuntimeTraceEntry;
-  appendRawEvent(record: RawEventLogRecordInput): RawEventLogRecord;
-  appendConversationMessage(
-    record: ConversationLogRecordInput,
-    expectedCharacter?: CharacterProfile,
-  ): ConversationLogRecord;
-  removeConversationMessages(messageIds: readonly string[]): void;
-  checkpointWriterEvidence?(): void;
-  recoverAbandonedWriterEvidence?(): boolean;
-  readSessionEvidence(): RuntimeSessionEvidenceSnapshot;
-  traceEntries(): readonly RuntimeTraceEntry[];
-  rawEvents(): readonly RawEventLogRecord[];
-  conversationMessages(): readonly ConversationLogRecord[];
-};
 
 export type AcceptedRoleModelCommitValidationResult = {
   readonly status: 'accepted';
@@ -244,9 +201,7 @@ function freezeRoleModelCommitValidationResult(
       ...(result.acceptedVisibleReplyText === undefined
         ? {}
         : {
-            acceptedVisibleReplyText: redactJsonBoundaryText(
-              result.acceptedVisibleReplyText,
-            ),
+            acceptedVisibleReplyText: result.acceptedVisibleReplyText,
           }),
     } satisfies AcceptedRoleModelCommitValidationResult);
   }

@@ -1,3 +1,4 @@
+import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
@@ -395,13 +396,13 @@ describe('runtime config activation planning', () => {
       }),
       logStore,
       pluginHost: configured.host,
-      agent: {
+      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
         reply() {
           return {
             text: 'Character agent reply.',
           };
         },
-      },
+      }),
     });
 
     expect(configured.activation.enabledPluginIds).not.toContain(
@@ -424,9 +425,14 @@ describe('runtime config activation planning', () => {
         toolCalls: [],
       },
     });
-    expect(result).not.toHaveProperty('turn');
-    expect(result.conversationMessages).toEqual([]);
-    expect(logStore.conversationMessages()).toEqual([]);
+    // Only the accepted user message is history; with visible_reply
+    // disabled the model's folded text stays non-committed.
+    expect(result.conversationMessages.map(message => message.role)).toEqual([
+      'user',
+    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user']);
   });
 
   it('loads runtime env before reporting mixed check activation diagnostics', async () => {

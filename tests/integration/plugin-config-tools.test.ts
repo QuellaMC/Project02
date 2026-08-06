@@ -76,9 +76,7 @@ describe('host-owned runtime plugin management tools', () => {
       runtimePluginConfigReadToolName,
       runtimePluginConfigUpdateToolName,
     ]);
-    expect(plugin.manifest.runtimePolicy).toMatchObject({
-      sideEffectLevel: 'runtime_config_write',
-    });
+    expect(plugin.manifest.runtimePolicy).toMatchObject({});
   });
 
   it('exposes list always, config read with state, and config update only with confirmation', () => {
@@ -114,7 +112,6 @@ describe('host-owned runtime plugin management tools', () => {
       expect.objectContaining({
         pluginId: runtimePluginId,
         name: runtimePluginConfigReadToolName,
-        sideEffectLevel: 'runtime_read',
         requiresConfirmation: false,
       }),
     );
@@ -125,7 +122,6 @@ describe('host-owned runtime plugin management tools', () => {
       expect.objectContaining({
         pluginId: runtimePluginId,
         name: runtimePluginConfigUpdateToolName,
-        sideEffectLevel: 'runtime_config_write',
         requiresConfirmation: true,
       }),
     );
@@ -138,11 +134,6 @@ describe('host-owned runtime plugin management tools', () => {
       expect.objectContaining({name: runtimePluginConfigReadToolName}),
       expect.objectContaining({name: runtimePluginConfigUpdateToolName}),
     ]);
-    for (const tool of writableHost
-      .pluginToolDefinitions()
-      .filter(definition => definition.pluginId === runtimePluginId)) {
-      expect(tool.callLimit).toBeUndefined();
-    }
     expect(
       bareHost.registrySnapshot().plugins.map(plugin => plugin.manifest.id),
     ).toContain(runtimePluginId);
@@ -185,52 +176,18 @@ describe('host-owned runtime plugin management tools', () => {
     const toolCallId = 'arbitrary-config-call';
     let preparationCalls = 0;
     const plugin = createRuntimePlugin({
-      manifest: {
-        id: arbitraryPluginId,
-        displayName: 'Arbitrary settings fixture',
-        version: '1.0.0',
-        kind: 'tool_provider',
-        description: 'Prepares an arbitrary policy-category config effect.',
-        contractVersion: runtimePluginContractVersion,
-        compatibility: {
-          hostContractVersions: [runtimePluginContractVersion],
-          sourceSystem: 'test',
-        },
-        declaredPlugins: ['tool_provider', 'handle_tool_call'],
-        config: {scope: 'global_with_character_overrides', fields: []},
-        localTrustLevel: 'test_fixture',
-        runtimePolicy: {
-          requiredForTurn: false,
-          sideEffectLevel: 'runtime_config_write',
-          confirmation: 'not_required',
-          timeoutMs: 1_000,
-          sourceReferencesRequired: false,
-          redactionLabels: [],
-          failureBehavior: {
-            beforeRoleModelCall: 'degrade',
-            handleToolCall: 'reject_tool_call',
-            afterTurnCommitted: 'log_failure',
-            health: 'degrade',
-          },
-        },
-        activation: {defaultEnabled: false, reasons: ['test']},
-        requestedAccess: {model_input: 'write'},
-      },
+      manifest: arbitraryConfigPluginManifest(arbitraryPluginId),
       providedTools: [
         {
           name: arbitraryToolName,
           description: 'Set one exact prepared config value after approval.',
-          requiredForUserTurn: false,
-          callLimit: {scope: 'user_turn', maxCalls: 1},
           inputContract: {
             type: 'object',
             fields: [],
             additionalFields: false,
           },
           validationOwner: 'plugin_host',
-          sideEffectLevel: 'runtime_config_write',
           requiresConfirmation: true,
-          sourceReferencesRequired: false,
         },
       ],
       lifecycleHooks: {
@@ -617,6 +574,59 @@ describe('host-owned runtime plugin management tools', () => {
       status: 'rejected',
       reason: 'plugin_config_unknown_plugin',
     });
+    expect(confirmationCalls).toBe(0);
+  });
+
+  it('names the broken contract when a confirmable tool prepares nothing', async () => {
+    // A tool returning no prepared effect either acted already or set
+    // the flag by mistake; the model is told which contract it broke.
+    const manifest = configurablePluginManifest();
+    let confirmationCalls = 0;
+    const pluginId = 'settings.acts-immediately.fixture';
+    const toolName = 'settings.acts-immediately.update';
+    const plugin = createRuntimePlugin({
+      manifest: arbitraryConfigPluginManifest(pluginId),
+      providedTools: [
+        {
+          name: toolName,
+          description: 'Claims approval but applies its change immediately.',
+          inputContract: {type: 'object', fields: [], additionalFields: false},
+          validationOwner: 'plugin_host',
+          requiresConfirmation: true,
+        },
+      ],
+      lifecycleHooks: {
+        handleToolCall() {
+          return {status: 'accepted', output: {applied: true}, evidence: []};
+        },
+      },
+    });
+    const host = createRuntimePluginHost({
+      plugins: [plugin],
+      enabledPluginIds: [runtimePluginId, pluginId],
+      pluginConfigControl: runtimePluginConfigControlStateForTest({
+        control: testRuntimePluginConfigControlCapability,
+        pluginManifests: [manifest],
+      }),
+      toolConfirmationHandler: () => {
+        confirmationCalls += 1;
+        return {status: 'approved'};
+      },
+    });
+
+    const result = await host.handleToolCall(
+      {...testIdentity(), pluginId, toolName, input: {}},
+      testContext(),
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'handler_failed',
+    });
+    expect((result as {message?: string}).message).toMatch(
+      /prepared no effect to confirm/iu,
+    );
+    // No prompt: there was never an effect to show the user.
     expect(confirmationCalls).toBe(0);
   });
 
@@ -2271,6 +2281,40 @@ describe('host-owned runtime plugin management tools', () => {
   });
 });
 
+/**
+ * A third-party plugin that prepares a config effect for approval, rather
+ * than the host's own config-update tool. Used to prove the confirmation
+ * protocol is a contract any plugin can meet, not a carve-out for one ID.
+ */
+function arbitraryConfigPluginManifest(id: string) {
+  return {
+    id,
+    displayName: 'Arbitrary settings fixture',
+    version: '1.0.0',
+    kind: 'tool_provider',
+    description: 'Prepares an arbitrary policy-category config effect.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+      sourceSystem: 'test',
+    },
+    declaredPlugins: ['tool_provider', 'handle_tool_call'],
+    config: {scope: 'global_with_character_overrides', fields: []},
+    firstParty: false,
+    runtimePolicy: {
+      timeoutMs: 1_000,
+      redactionLabels: [],
+      failureBehavior: {
+        beforeRoleModelCall: 'degrade',
+        handleToolCall: 'reject_tool_call',
+        health: 'degrade',
+      },
+    },
+    activation: {defaultEnabled: false, reasons: ['test']},
+    requestedAccess: {model_input: 'write'},
+  } as const;
+}
+
 function configurablePluginManifest(
   defaultEnabled = false,
 ): RuntimePluginManifest {
@@ -2328,18 +2372,13 @@ function configurablePluginManifest(
         },
       ],
     },
-    localTrustLevel: 'test_fixture',
+    firstParty: false,
     runtimePolicy: {
-      requiredForTurn: false,
-      sideEffectLevel: 'runtime_read',
-      confirmation: 'not_required',
       timeoutMs: 1000,
-      sourceReferencesRequired: false,
       redactionLabels: [],
       failureBehavior: {
         beforeRoleModelCall: 'degrade',
         handleToolCall: 'reject_tool_call',
-        afterTurnCommitted: 'log_failure',
         health: 'degrade',
       },
     },

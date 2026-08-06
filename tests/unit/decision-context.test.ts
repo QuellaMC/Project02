@@ -3,10 +3,8 @@ import {describe, expect, it} from 'vitest';
 
 import {buildUserTurnDecisionContext} from '../../src/role-model/api/decision-context.ts';
 import {
-  type CharacterAgent,
   createConversationSession,
   defaultRecentVisibleMessageLimit,
-  runCharacterTurn,
   type VisibleMessage,
 } from '../../src/core/index.ts';
 
@@ -50,7 +48,7 @@ describe('user-turn decision context builder', () => {
     }).toThrow(TypeError);
   });
 
-  it('uses the same recent visible message selection as the deterministic chat path', async () => {
+  it('selects the default recent visible window from the session transcript', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
       id: 'session-resumed',
@@ -59,17 +57,6 @@ describe('user-turn decision context builder', () => {
     const context = buildUserTurnDecisionContext({
       session,
     });
-    const observedRecentMessages: VisibleMessage[][] = [];
-    const agent: CharacterAgent = {
-      reply(input) {
-        observedRecentMessages.push([...input.recentVisibleMessages]);
-        return {
-          text: 'reply after selected context',
-        };
-      },
-    };
-
-    await runCharacterTurn(session, 'current user message', agent);
 
     expect(context.recentVisibleMessages).toEqual(
       createVisibleTranscriptSeed('session-resumed', 5).slice(
@@ -86,7 +73,6 @@ describe('user-turn decision context builder', () => {
       'session-resumed:message-9',
       'session-resumed:message-10',
     ]);
-    expect(observedRecentMessages).toEqual([context.recentVisibleMessages]);
   });
 
   it('honors an explicit recent message limit without reordering selected messages', () => {

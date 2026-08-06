@@ -1,3 +1,4 @@
+import {visibleReplyToolCalls} from '../../role-model/index.ts';
 import type {
   RawEventLogRecord,
   RuntimeTraceEntry,
@@ -153,7 +154,16 @@ export function requestedToolCallNames(
   for (const event of turnRawEvents) {
     if (
       event.kind !== 'tool_call_started' &&
-      event.kind !== 'interim_visible_reply_emitted'
+      event.kind !== 'visible_message_committed'
+    ) {
+      continue;
+    }
+
+    // The terminal decision's calls are appended once by the summary
+    // composer; scanning its commit event here would double-count them.
+    if (
+      event.kind === 'visible_message_committed' &&
+      rawEventDecisionIsTerminal(event)
     ) {
       continue;
     }
@@ -247,12 +257,26 @@ export function terminalDecisionEvidenceRawEvent(
       event.parsedRoleModelDecisionSnapshot !== undefined,
   );
 
+  // Commit events exist for every visible message. Only one carrying a
+  // decision with no executable tool calls is the terminal decision — the
+  // same rule the loop uses to stop; interim commits carry executable
+  // calls and user-message commits carry no decision at all.
   return (
     persistedTerminalEvent ??
     reverseEvents.find(
       event =>
-        event.kind === 'visible_reply_committed' &&
-        (event.visibleMessageIds?.length ?? 0) > 0,
+        event.kind === 'visible_message_committed' &&
+        rawEventDecisionIsTerminal(event),
     )
+  );
+}
+
+function rawEventDecisionIsTerminal(event: RawEventLogRecord): boolean {
+  const result = event.parsedRoleModelDecisionSnapshot?.result;
+
+  return (
+    result?.status === 'accepted' &&
+    visibleReplyToolCalls(result.decision).length ===
+      result.decision.toolCalls.length
   );
 }

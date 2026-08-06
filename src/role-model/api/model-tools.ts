@@ -1,5 +1,4 @@
 import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
-import {redactJsonBoundaryText} from '../../shared/redaction.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
 
@@ -70,33 +69,14 @@ export type ModelToolInputContract = {
   readonly jsonSchema?: ModelToolObjectJsonSchema;
 };
 
-export const modelToolCallLimitScopes = Object.freeze([
-  'model_response',
-  'user_turn',
-] as const);
-
-export type ModelToolCallLimitScope = (typeof modelToolCallLimitScopes)[number];
-
-export type ModelToolCallLimit = {
-  readonly scope: ModelToolCallLimitScope;
-  readonly maxCalls: number;
-};
-
 export type ModelToolDefinition = {
   readonly name: string;
   readonly description: string;
-  readonly requiredForUserTurn: boolean;
-  /** Absent means unlimited: tools are only call-limited when they declare one. */
-  readonly callLimit?: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
 };
 
 export type BuiltInModelToolDefinition = ModelToolDefinition & {
   readonly name: BuiltInModelToolName;
-  readonly callLimit: {
-    readonly scope: 'model_response';
-    readonly maxCalls: 1;
-  };
 };
 
 export type VisibleReplyToolInput = {
@@ -124,8 +104,7 @@ export const userTurnBuiltInModelToolNames = Object.freeze([
 export const builtInModelToolDefinitions = Object.freeze([
   createBuiltInModelToolDefinition({
     name: visibleReplyModelToolName,
-    description: 'Send one user-visible reply message from you.',
-    requiredForUserTurn: false,
+    description: 'Send a user-visible reply message from you.',
     inputContract: {
       type: 'object',
       fields: [
@@ -156,9 +135,7 @@ export function createVisibleReplyModelToolCall(
 ): VisibleReplyModelToolCall {
   return Object.freeze({
     name: visibleReplyModelToolName,
-    input: Object.freeze({
-      text: redactJsonBoundaryText(text),
-    } satisfies VisibleReplyToolInput),
+    input: Object.freeze({text} satisfies VisibleReplyToolInput),
   } satisfies VisibleReplyModelToolCall);
 }
 
@@ -168,36 +145,12 @@ export function freezeBuiltInModelToolCall(
   return createVisibleReplyModelToolCall(call.input.text);
 }
 
-export function findVisibleReplyModelToolCall(
-  calls: readonly ModelToolCall[],
-): VisibleReplyModelToolCall | undefined {
-  const call = calls.find(
-    candidate => candidate.name === visibleReplyModelToolName,
-  );
-
-  if (call === undefined) {
-    return undefined;
-  }
-
-  const text = call.input['text'];
-
-  if (typeof text !== 'string') {
-    return undefined;
-  }
-
-  return createVisibleReplyModelToolCall(text);
-}
-
 export function freezeModelToolDefinition(
   definition: ModelToolDefinition,
 ): ModelToolDefinition {
   return Object.freeze({
     name: definition.name,
     description: definition.description,
-    requiredForUserTurn: definition.requiredForUserTurn,
-    ...(definition.callLimit === undefined
-      ? {}
-      : {callLimit: freezeModelToolCallLimit(definition.callLimit)}),
     inputContract: freezeModelToolInputContract(definition.inputContract),
   } satisfies ModelToolDefinition);
 }
@@ -229,28 +182,13 @@ export function freezeModelToolCalls(
 function createBuiltInModelToolDefinition(options: {
   readonly name: BuiltInModelToolName;
   readonly description: string;
-  readonly requiredForUserTurn: boolean;
   readonly inputContract: ModelToolInputContract;
 }): BuiltInModelToolDefinition {
   return Object.freeze({
     name: options.name,
     description: options.description,
-    requiredForUserTurn: options.requiredForUserTurn,
-    callLimit: Object.freeze({
-      scope: 'model_response',
-      maxCalls: 1,
-    }),
     inputContract: freezeModelToolInputContract(options.inputContract),
   } satisfies BuiltInModelToolDefinition);
-}
-
-function freezeModelToolCallLimit(
-  callLimit: ModelToolCallLimit,
-): ModelToolCallLimit {
-  return Object.freeze({
-    scope: callLimit.scope,
-    maxCalls: callLimit.maxCalls,
-  });
 }
 
 function freezeModelToolInputContract(

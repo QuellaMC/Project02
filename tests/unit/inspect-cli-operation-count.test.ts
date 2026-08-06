@@ -1,22 +1,21 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {describe, expect, it, vi} from 'vitest';
 
-import type {
-  RawEventLogRecord,
-  RuntimeSessionEvidenceSnapshot,
-} from '../../src/runtime/evidence/records.ts';
+import type {RawEventLogRecord} from '../../src/runtime/evidence/records.ts';
+import type {DurableRuntimeSessionEvidence} from '../../src/runtime/evidence/contract.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 const runtimeLogStoreFixture = vi.hoisted(() => ({
-  readSessionEvidence: vi.fn<() => RuntimeSessionEvidenceSnapshot>(),
+  readSessionEvidence: vi.fn<() => DurableRuntimeSessionEvidence>(),
 }));
 
 vi.mock('../../src/runtime/storage/file-runtime-log-store.ts', () => ({
   createFileRuntimeLogStore: () => ({
     readSessionEvidence: runtimeLogStoreFixture.readSessionEvidence,
+    traceEntries: () => [],
   }),
 }));
 
@@ -62,14 +61,8 @@ describe('inspect CLI evidence indexing', () => {
       createdAt: identity.createdAt,
     });
     runtimeLogStoreFixture.readSessionEvidence.mockReturnValue({
-      stored: {
-        traceEntries: [],
-        rawEvents: countedRawEvents.values,
-        conversationMessages: [],
-      },
-      derived: {
-        traceEntries: [],
-      },
+      rawEvents: countedRawEvents.values,
+      conversationMessages: [],
     });
 
     let stdout = '';

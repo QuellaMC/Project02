@@ -8,6 +8,7 @@
 import {extname} from 'node:path';
 
 import {
+  compareText,
   packageDescriptorSchemaRefIsValid,
   readBoundedPackageJsonFile,
 } from '../../shared/package-metadata.ts';
@@ -62,7 +63,7 @@ export function parseRuntimePluginPackageDescriptor(
   }
 
   const unknownDescriptorField = Object.keys(descriptor)
-    .sort(compareDescriptorText)
+    .sort(compareText)
     .find(field => !runtimePluginPackageDescriptorFields.has(field));
 
   if (unknownDescriptorField !== undefined) {
@@ -168,8 +169,4 @@ function rejectedDescriptor(
     status: 'rejected',
     issue: Object.freeze({code, message}),
   });
-}
-
-function compareDescriptorText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -1,3 +1,4 @@
+import type {RawEventLogRecordInput} from '../../src/runtime/evidence/records.ts';
 import {testCharacterProfile} from './character-fixtures.ts';
 import {
   createConversationSession,
@@ -20,7 +21,7 @@ import {
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import type {RuntimeLogStore} from '../../src/runtime/evidence/records.ts';
+import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {
   runLocalUserMessageEvent as runLocalUserMessageEventWithExplicitHost,
   type RunLocalUserMessageEventOptions,
@@ -193,318 +194,62 @@ export function createSequencedAdapter(
   } satisfies RoleModelAdapter);
 }
 
-export function createConversationAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore({
-    boundCharacter: testCharacterProfile,
-  }),
-): RuntimeLogStore {
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage() {
-      throw new Error('conversation append failed');
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
+/**
+ * A store whose raw-event append fails on the matching record. `persist`
+ * appends first and then throws, which is what a write reaching disk
+ * before its caller fails looks like.
+ */
+export function createRawEventAppendFailingLogStore(options: {
+  readonly logStore?: RuntimeLogStore;
+  readonly matches: (record: RawEventLogRecordInput) => boolean;
+  readonly message: string;
+  readonly persist?: boolean;
+  readonly skip?: number;
+}): RuntimeLogStore {
+  const logStore =
+    options.logStore ??
+    createRuntimeLogStore({boundCharacter: testCharacterProfile});
+  let matched = 0;
 
-export function createCharacterAppendFailingLogStore(
-  logStore: RuntimeLogStore,
-): RuntimeLogStore {
-  let conversationAppendCount = 0;
+  function failsOn(record: RawEventLogRecordInput): boolean {
+    if (!options.matches(record)) {
+      return false;
+    }
+
+    matched += 1;
+    return matched > (options.skip ?? 0);
+  }
 
   return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record) {
-      conversationAppendCount += 1;
-
-      if (conversationAppendCount === 2) {
-        throw new Error('character append failed');
+    ...delegateRuntimeLogStore(logStore),
+    appendRawEvent(record, expectedCharacter) {
+      if (!failsOn(record)) {
+        return logStore.appendRawEvent(record, expectedCharacter);
       }
 
-      return logStore.appendConversationMessage(record);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-export function createRuntimeTurnCompletedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore({
-    boundCharacter: testCharacterProfile,
-  }),
-): RuntimeLogStore {
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      if (record.kind === 'runtime_turn_completed') {
-        throw new Error('terminal raw event append failed');
+      if (options.persist === true) {
+        logStore.appendRawEvent(record, expectedCharacter);
       }
 
-      return logStore.appendRawEvent(record);
+      throw new Error(options.message);
     },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-export function createRuntimeTurnCompletedAppendThenThrowLogStore(
-  logStore: RuntimeLogStore,
-): RuntimeLogStore {
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      const stored = logStore.appendRawEvent(record);
-
-      if (record.kind === 'runtime_turn_completed') {
-        throw new Error(
-          'terminal raw event append reported failure after write',
-        );
+    persistPreparedRawEvent(record, expectedCharacter) {
+      if (!failsOn(record)) {
+        logStore.persistPreparedRawEvent(record, expectedCharacter);
+        return;
       }
 
-      return stored;
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-export function createOneShotTerminalTraceAppendFailingLogStore(
-  logStore: RuntimeLogStore,
-): RuntimeLogStore {
-  let failed = false;
-
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      if (!failed && entry.step === 'raw_event_log_appended') {
-        failed = true;
-        throw new Error('one-shot terminal trace append failed');
+      if (options.persist === true) {
+        logStore.persistPreparedRawEvent(record, expectedCharacter);
       }
 
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
+      throw new Error(options.message);
     },
   } satisfies RuntimeLogStore);
 }
 
-export function createAfterTurnCommittedAppendFailingLogStore(
-  logStore: RuntimeLogStore = createRuntimeLogStore({
-    boundCharacter: testCharacterProfile,
-  }),
-): RuntimeLogStore {
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      if (record.kind === 'after_turn_committed') {
-        throw new Error('after-turn raw event append failed');
-      }
-
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-export function createTurnCompletedAppendFailingLogStore(
-  logStore: RuntimeLogStore,
-): RuntimeLogStore {
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      if (record.kind === 'runtime_turn_completed') {
-        throw new Error('runtime_turn_completed raw event append failed');
-      }
-
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-export function createToolCallFinishedAppendFailingLogStore(
-  logStore: RuntimeLogStore,
-): RuntimeLogStore {
-  return Object.freeze({
-    ...delegateRuntimeLogStoreLifecycle(logStore),
-    appendTrace(entry) {
-      return logStore.appendTrace(entry);
-    },
-    appendRawEvent(record) {
-      if (record.kind === 'tool_call_finished') {
-        throw new Error('tool_call_finished raw event append failed');
-      }
-
-      return logStore.appendRawEvent(record);
-    },
-    appendConversationMessage(record, expectedCharacter) {
-      return logStore.appendConversationMessage(record, expectedCharacter);
-    },
-    removeConversationMessages(messageIds) {
-      logStore.removeConversationMessages(messageIds);
-    },
-    readSessionEvidence() {
-      return logStore.readSessionEvidence();
-    },
-    traceEntries() {
-      return logStore.traceEntries();
-    },
-    rawEvents() {
-      return logStore.rawEvents();
-    },
-    conversationMessages() {
-      return logStore.conversationMessages();
-    },
-  } satisfies RuntimeLogStore);
-}
-
-type DelegatedRuntimeLogStoreLifecycle = Pick<
-  RuntimeLogStore,
-  | 'localRuntimeSessionPaths'
-  | 'localRuntimeWriterLockOwnerToken'
-  | 'checkpointWriterEvidence'
-  | 'recoverAbandonedWriterEvidence'
->;
-
-function delegateRuntimeLogStoreLifecycle(
-  logStore: RuntimeLogStore,
-): DelegatedRuntimeLogStoreLifecycle {
+/** Every store method forwarded, so a wrapper names only what it overrides. */
+function delegateRuntimeLogStore(logStore: RuntimeLogStore): RuntimeLogStore {
   return Object.freeze({
     ...(logStore.localRuntimeSessionPaths === undefined
       ? {}
@@ -515,21 +260,28 @@ function delegateRuntimeLogStoreLifecycle(
           localRuntimeWriterLockOwnerToken:
             logStore.localRuntimeWriterLockOwnerToken,
         }),
-    ...(logStore.checkpointWriterEvidence === undefined
-      ? {}
-      : {
-          checkpointWriterEvidence() {
-            logStore.checkpointWriterEvidence?.();
-          },
-        }),
-    ...(logStore.recoverAbandonedWriterEvidence === undefined
-      ? {}
-      : {
-          recoverAbandonedWriterEvidence() {
-            return logStore.recoverAbandonedWriterEvidence?.() ?? false;
-          },
-        }),
-  } satisfies DelegatedRuntimeLogStoreLifecycle);
+    appendRawEvent(record, expectedCharacter) {
+      return logStore.appendRawEvent(record, expectedCharacter);
+    },
+    prepareRawEvent(record, expectedCharacter) {
+      return logStore.prepareRawEvent(record, expectedCharacter);
+    },
+    persistPreparedRawEvent(record, expectedCharacter) {
+      logStore.persistPreparedRawEvent(record, expectedCharacter);
+    },
+    readSessionEvidence() {
+      return logStore.readSessionEvidence();
+    },
+    traceEntries() {
+      return logStore.traceEntries();
+    },
+    rawEvents() {
+      return logStore.rawEvents();
+    },
+    conversationMessages() {
+      return logStore.conversationMessages();
+    },
+  } satisfies RuntimeLogStore);
 }
 
 export const handleFileStoreWritePluginId = 'handle-write.fixture';
@@ -556,18 +308,13 @@ export function createHealthRejectingPlugin() {
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: true,
-        sideEffectLevel: 'none',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'reject_turn',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health: 'reject_turn',
         },
       },
@@ -619,18 +366,13 @@ export function createHandleFileStoreWritePlugin(
         scope: 'global_with_character_overrides',
         fields: [],
       },
-      localTrustLevel: 'test_fixture',
+      firstParty: false,
       runtimePolicy: {
-        requiredForTurn: healthRejectsWhenValue === undefined ? false : true,
-        sideEffectLevel: 'local_memory_write',
-        confirmation: 'not_required',
         timeoutMs: 1000,
-        sourceReferencesRequired: false,
         redactionLabels: [],
         failureBehavior: {
           beforeRoleModelCall: 'degrade',
           handleToolCall: 'reject_tool_call',
-          afterTurnCommitted: 'log_failure',
           health:
             healthRejectsWhenValue === undefined ? 'degrade' : 'reject_turn',
         },
@@ -645,11 +387,6 @@ export function createHandleFileStoreWritePlugin(
       Object.freeze({
         name: handleFileStoreWriteToolName,
         description: 'Write a test value through the plugin file store.',
-        requiredForUserTurn: false,
-        callLimit: {
-          scope: 'user_turn',
-          maxCalls: 1,
-        },
         inputContract: {
           type: 'object',
           fields: [
@@ -662,9 +399,7 @@ export function createHandleFileStoreWritePlugin(
           additionalFields: false,
         },
         validationOwner: 'plugin_host',
-        sideEffectLevel: 'local_memory_write',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       }),
     ],
     lifecycleHooks: {
@@ -770,18 +505,13 @@ export function createAfterTurnCommittedProbeHost(
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: false,
-            sideEffectLevel: 'local_memory_write',
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'degrade',
             },
           },
@@ -850,18 +580,13 @@ export function createPluginStoreRevisionFixtureHost() {
             scope: 'global_with_character_overrides',
             fields: [],
           },
-          localTrustLevel: 'test_fixture',
+          firstParty: false,
           runtimePolicy: {
-            requiredForTurn: false,
-            sideEffectLevel: 'runtime_read',
-            confirmation: 'not_required',
             timeoutMs: 1000,
-            sourceReferencesRequired: false,
             redactionLabels: [],
             failureBehavior: {
               beforeRoleModelCall: 'degrade',
               handleToolCall: 'reject_tool_call',
-              afterTurnCommitted: 'log_failure',
               health: 'degrade',
             },
           },
@@ -896,20 +621,13 @@ export function createRevisionFixtureTool(name: string) {
   return {
     name,
     description: 'Return plugin store revision metadata.',
-    requiredForUserTurn: false,
-    callLimit: {
-      scope: 'user_turn',
-      maxCalls: 1,
-    },
     inputContract: {
       type: 'object',
       fields: [],
       additionalFields: false,
     },
     validationOwner: 'plugin_host',
-    sideEffectLevel: 'runtime_read',
     requiresConfirmation: false,
-    sourceReferencesRequired: false,
   } as const;
 }
 

@@ -17,6 +17,7 @@ import {
   parseBoundedPackageJsonSource,
   scanPackageSourceRoot,
   snapshotPackageDirectory,
+  compareText,
   snapshotPackageDirectoryFromSource,
   snapshotPackageSourceDirectory,
   type BoundedPackageJsonRejectionReason,
@@ -769,8 +770,4 @@ function packageDiagnostic(
       ? {}
       : {claimedPluginId: options.claimedPluginId}),
   } satisfies RuntimePluginPackageDiagnostic);
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

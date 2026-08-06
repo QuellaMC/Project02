@@ -3,7 +3,7 @@ import {sep} from 'node:path';
 import {parseAtomicReplacementFileName} from '../atomic-file.ts';
 import {createJsonBoundarySnapshot} from '../../../shared/json-boundary.ts';
 import {isNodeErrorWithCode} from '../../../shared/node-error.ts';
-import {splitCompleteJsonLines} from '../json-lines.ts';
+import {readCompleteJsonLines} from '../json-lines.ts';
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import type {RuntimePluginFileStorePathMode} from '../../../plugins/index.ts';
 
@@ -50,7 +50,7 @@ export function parseRuntimePluginJsonlContent(
   content: string,
 ): readonly RuntimePluginJsonValue[] {
   return Object.freeze(
-    splitCompleteJsonLines(content).map(line =>
+    readCompleteJsonLines(content).map(line =>
       freezeRuntimePluginFileStoreJsonValue(JSON.parse(line) as unknown),
     ),
   );

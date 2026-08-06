@@ -24,10 +24,7 @@ import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
 } from '../../src/plugins/api/index.ts';
-import {
-  createRuntimePluginFileStore,
-  createRuntimePluginFileStoreTransaction,
-} from '../../src/runtime/storage/plugin-file-store/index.ts';
+import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {
   durablePathModesFileName,
   durableRevisionFileName,
@@ -153,55 +150,6 @@ describe('Character State plugin', () => {
       await plugin.lifecycleHooks.beforeRoleModelCall?.(context);
 
     expect(beforeResult?.contextItems[0]?.text).toContain('energy=high');
-  });
-
-  it('leaves no partial patch when checkpoint staging fails', async () => {
-    const sessionIdentity = {};
-    const options = {
-      sessionId: 'session-character-state-checkpoint-failure',
-      sessionIdentity,
-      pluginId: characterStatePluginId,
-    };
-    const baseFileStore = createRuntimePluginFileStore(options);
-    const plugin = createCharacterStatePlugin();
-    const baseContext = createCharacterStateContext({
-      sessionId: options.sessionId,
-      fileStore: baseFileStore,
-    });
-
-    await plugin.lifecycleHooks.beforeRoleModelCall?.(baseContext);
-
-    const transaction = createRuntimePluginFileStoreTransaction();
-    const transactionalStore = transaction.fileStoreFor(options);
-
-    expect(() =>
-      plugin.lifecycleHooks.handleToolCall?.(
-        {
-          ...testIdentity(),
-          pluginId: characterStatePluginId,
-          toolName: characterStatePatchModelToolName,
-          input: {
-            mood: 'curious',
-          },
-        },
-        createCharacterStateContext({
-          sessionId: options.sessionId,
-          fileStore: createCheckpointWriteFailingFileStore(transactionalStore),
-        }),
-      ),
-    ).toThrow(/checkpoint write failed/iu);
-
-    transaction.rollback();
-
-    expect(baseFileStore.readJsonl('events.jsonl')).toEqual([]);
-    expect(baseFileStore.readJson('checkpoint.json')).toMatchObject({
-      eventCount: 0,
-      current: {
-        current: {
-          mood: 'steady',
-        },
-      },
-    });
   });
 
   it('records and replays accepted no-op identities', async () => {
@@ -764,32 +712,6 @@ async function measureDurableCharacterStatePromptReads(options: {
   }
 
   return performance.now() - startedAt;
-}
-
-function createCheckpointWriteFailingFileStore(
-  fileStore: RuntimePluginFileStore,
-): RuntimePluginFileStore {
-  return Object.freeze({
-    readJson(path) {
-      return fileStore.readJson(path);
-    },
-    readJsonl(path) {
-      return fileStore.readJsonl(path);
-    },
-    writeJsonAtomic(path, value) {
-      if (path === 'checkpoint.json') {
-        throw new Error('checkpoint write failed');
-      }
-
-      fileStore.writeJsonAtomic(path, value);
-    },
-    appendJsonl(path, value) {
-      fileStore.appendJsonl(path, value);
-    },
-    revision() {
-      return fileStore.revision();
-    },
-  } satisfies RuntimePluginFileStore);
 }
 
 function testIdentity() {

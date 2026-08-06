@@ -12,13 +12,10 @@ import {join} from 'node:path';
 
 import {afterEach, describe, expect, it} from 'vitest';
 
-import {createDeterministicCharacterAgent} from '../../src/role-model/providers/deterministic.ts';
-
 import {
   ConversationRehydrationError,
   createConversationSession,
   createUserMessageRuntimeEvent,
-  runCharacterTurn,
 } from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
@@ -38,6 +35,10 @@ import type {ConversationLogRecord} from '../../src/runtime/evidence/records.ts'
 import type {LocalRuntimeStorageContractErrorCode} from '../../src/runtime/storage/layout-contract.ts';
 import type {LocalRuntimeSessionConversationLogReader} from '../../src/runtime/storage/session-store.ts';
 import {assertLocalRuntimeSessionReadable} from '../../src/runtime/storage/session-store.ts';
+import {
+  appendCharacterMessage,
+  appendUserMessage,
+} from '../support/committed-messages.ts';
 
 const tempRoots: string[] = [];
 
@@ -176,6 +177,34 @@ describe('local runtime session store', () => {
     );
   });
 
+  it('ignores an uncommitted catalog tail on a point read', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
+    });
+    const alpha = await store.createSession({sessionId: 'alpha'});
+
+    // A complete row that a crash left without its committing newline: it
+    // is not an entry yet, so neither read may report it.
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `${JSON.stringify(alpha)}\n${JSON.stringify({
+        ...alpha,
+        sessionId: 'unfinished',
+      })}`,
+      'utf8',
+    );
+
+    await expect(store.readSession('unfinished')).rejects.toMatchObject({
+      code: 'session_not_found',
+    });
+    expect(
+      (await store.listSessions()).map(session => session.sessionId),
+    ).toEqual(['alpha']);
+  });
+
   it('ignores malformed unrelated catalog metadata on a point read', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
@@ -196,6 +225,32 @@ describe('local runtime session store', () => {
     );
 
     await expect(store.readSession('alpha')).resolves.toEqual(alpha);
+    await expectStorageErrorCode(
+      async () => await store.listSessions(),
+      'malformed_record',
+    );
+  });
+
+  it('opens a healthy session even when another catalog row is damaged', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:00:00.000Z']),
+    });
+    const alpha = await store.createSession({sessionId: 'alpha'});
+
+    // A syntactically damaged row for a different session, with a valid
+    // row after it so it cannot be read as an unfinished append.
+    await writeFile(
+      store.layout.sessionCatalogPath,
+      `{"sessionId":"corr\n${JSON.stringify(alpha)}\n`,
+      'utf8',
+    );
+
+    // Alpha's own entry and directory are intact, so opening it works.
+    await expect(store.readSession('alpha')).resolves.toEqual(alpha);
+    // Listing is where the damage is reported.
     await expectStorageErrorCode(
       async () => await store.listSessions(),
       'malformed_record',
@@ -306,17 +361,19 @@ describe('local runtime session store', () => {
     });
 
     const rehydrated = await store.rehydrateConversationSession('mira-local');
-    const result = await runCharacterTurn(
-      rehydrated,
-      'second',
-      createDeterministicCharacterAgent(),
-    );
 
-    expect(result.reply.text).toBe(
-      'I remember you said "first" Stay with me for a minute.',
-    );
-    expect(result.userMessage.id).toBe('mira-local:message-3');
-    expect(result.characterMessage.id).toBe('mira-local:message-4');
+    expect(rehydrated.visibleTranscript.map(message => message.text)).toEqual([
+      'first',
+      "I'm here. Tell me what you need.",
+    ]);
+
+    const userMessage = appendUserMessage(rehydrated, 'second');
+    const characterMessage = appendCharacterMessage(rehydrated, {
+      text: 'reply after rehydration',
+    });
+
+    expect(userMessage.id).toBe('mira-local:message-3');
+    expect(characterMessage.id).toBe('mira-local:message-4');
   });
 
   it('keeps separate session transcripts isolated during rehydration', async () => {
@@ -372,20 +429,25 @@ describe('local runtime session store', () => {
     const alpha = await store.rehydrateConversationSession('alpha');
     const beta = await store.rehydrateConversationSession('beta');
 
-    await expect(
-      runCharacterTurn(alpha, 'second', createDeterministicCharacterAgent()),
-    ).resolves.toMatchObject({
-      reply: {
-        text: 'I remember you said "alpha first" Stay with me for a minute.',
-      },
-    });
-    await expect(
-      runCharacterTurn(beta, 'second', createDeterministicCharacterAgent()),
-    ).resolves.toMatchObject({
-      reply: {
-        text: 'I remember you said "beta first" Stay with me for a minute.',
-      },
-    });
+    appendUserMessage(alpha, 'second');
+    const alphaReply = appendCharacterMessage(alpha, {text: 'alpha again'});
+    appendUserMessage(beta, 'second');
+    const betaReply = appendCharacterMessage(beta, {text: 'beta again'});
+
+    expect(alphaReply.id).toBe('alpha:message-4');
+    expect(betaReply.id).toBe('beta:message-4');
+    expect(alpha.visibleTranscript.map(message => message.text)).toEqual([
+      'alpha first',
+      'alpha reply',
+      'second',
+      'alpha again',
+    ]);
+    expect(beta.visibleTranscript.map(message => message.text)).toEqual([
+      'beta first',
+      'beta reply',
+      'second',
+      'beta again',
+    ]);
   });
 
   it('fails loudly when persisted visible messages are malformed', async () => {
@@ -434,52 +496,27 @@ describe('local runtime session store', () => {
     );
   });
 
-  it('fails partial session catalog records with CT-01 partial-write errors', async () => {
+  it('keeps listing sessions when a crash cut the catalog short', async () => {
     const storeRoot = await createTempStoreRoot();
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
-      now: fixedClock(['2026-06-04T00:00:00.000Z']),
-    });
-
-    await store.createSession({
-      sessionId: 'alpha',
-    });
-    await writeFile(
-      store.layout.sessionCatalogPath,
-      JSON.stringify({
-        sessionId: 'alpha',
-        createdAt: '2026-06-04T00:00:00.000Z',
-        updatedAt: '2026-06-04T00:00:00.000Z',
-      }),
-      'utf8',
-    );
-
-    await expectStorageErrorCode(
-      async () => await store.listSessions(),
-      'partial_write',
-    );
-  });
-
-  it('rejects interior blank session catalog records', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const store = createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-      now: fixedClock(['2026-06-04T00:00:00.000Z']),
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
 
+    await store.createSession({sessionId: 'beta'});
+    // The catalog write died partway through its second entry.
     await writeFile(
       store.layout.sessionCatalogPath,
-      `${JSON.stringify(alpha)}\n\n`,
+      `${JSON.stringify(alpha)}\n{"sessionId":"be`,
       'utf8',
     );
 
-    await expectStorageErrorCode(
-      async () => await store.readSession('alpha'),
-      'malformed_record',
-    );
+    // The session whose entry landed is still listed and still opens; the
+    // one whose entry did not is simply absent.
+    await expect(store.listSessions()).resolves.toEqual([alpha]);
+    await expect(store.readSession('alpha')).resolves.toEqual(alpha);
   });
 
   it('fails non-canonical session IDs in stored catalog records', async () => {
@@ -634,7 +671,7 @@ describe('local runtime session store', () => {
       'utf8',
     );
     await writeFile(layout.sessionCatalogPath, '', 'utf8');
-    await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
+    await writeFile(orphanPaths.rawEventsPath, '{"orphan":true}\n', 'utf8');
 
     const store = createLocalRuntimeSessionStore({
       storeRoot,
@@ -682,7 +719,7 @@ describe('local runtime session store', () => {
       sessionId: 'orphan',
     });
     await mkdir(orphanPaths.sessionRoot, {recursive: true});
-    await writeFile(orphanPaths.conversationPath, '{"orphan":true}\n', 'utf8');
+    await writeFile(orphanPaths.rawEventsPath, '{"orphan":true}\n', 'utf8');
 
     await expectStorageErrorCode(
       async () =>

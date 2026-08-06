@@ -9,8 +9,9 @@ import {
   removeDirectory,
   type Dirent,
 } from '../../shared/file-system.ts';
-import {CompleteJsonLinesError, splitCompleteJsonLines} from './json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {readUndamagedJsonLines} from './json-lines.ts';
+import {readStoreJsonLines} from './store-file.ts';
 import {
   describeRealEntry,
   describeRealEntryAsync,
@@ -452,11 +453,7 @@ async function readSessionCatalogEntry(
     );
   }
 
-  const metadata = decodeRequestedSessionCatalogEntry(
-    catalog,
-    layout.sessionCatalogPath,
-    sessionId,
-  );
+  const metadata = decodeRequestedSessionCatalogEntry(catalog, sessionId);
 
   if (metadata === undefined) {
     await assertRequestedSessionIsNotMissingFromCatalog(layout, sessionId);
@@ -487,11 +484,7 @@ function readSessionCatalogEntrySync(
     );
   }
 
-  const metadata = decodeRequestedSessionCatalogEntry(
-    catalog,
-    layout.sessionCatalogPath,
-    sessionId,
-  );
+  const metadata = decodeRequestedSessionCatalogEntry(catalog, sessionId);
 
   if (metadata === undefined) {
     assertRequestedSessionIsNotMissingFromCatalogSync(layout, sessionId);
@@ -521,13 +514,18 @@ async function decodeSessionCatalogForLayout(
   return sessions;
 }
 
+/**
+ * Every catalog entry, with a damaged one failing the read: listing
+ * sessions is where an operator is told the catalog is broken. A record
+ * a crash left unfinished is not an entry yet and is skipped.
+ */
 function decodeSessionCatalog(
   catalog: string,
   filePath: string,
 ): Map<string, LocalRuntimeSessionMetadata> {
   const sessions = new Map<string, LocalRuntimeSessionMetadata>();
 
-  for (const line of splitJsonLines(catalog, filePath)) {
+  for (const line of readStoreJsonLines(filePath, catalog)) {
     const metadata = decodeSessionMetadata(line);
 
     sessions.set(metadata.sessionId, metadata);
@@ -536,21 +534,22 @@ function decodeSessionCatalog(
   return sessions;
 }
 
+/**
+ * The requested entry alone, so opening one session does not depend on
+ * every other entry being intact. A damaged row belonging to another
+ * session is skipped rather than failing this read — the listing path
+ * above still reports it, and refusing to open a healthy session because
+ * an unrelated one is corrupt helps nobody. Framing is shared with that
+ * path, so an unfinished tail row is not an entry here either.
+ */
 function decodeRequestedSessionCatalogEntry(
   catalog: string,
-  filePath: string,
   sessionId: string,
 ): LocalRuntimeSessionMetadata | undefined {
   let metadata: LocalRuntimeSessionMetadata | undefined;
 
-  for (const line of splitJsonLines(catalog, filePath)) {
-    let parsed: unknown;
-
-    try {
-      parsed = JSON.parse(line) as unknown;
-    } catch {
-      continue;
-    }
+  for (const line of readUndamagedJsonLines(catalog)) {
+    const parsed: unknown = JSON.parse(line);
 
     if (isRecord(parsed) && parsed['sessionId'] === sessionId) {
       metadata = decodeSessionMetadata(line);
@@ -947,26 +946,6 @@ function throwMalformedStoredSessionId(): never {
     'malformed_record',
     'Stored local runtime session metadata field "sessionId" must be canonical.',
   );
-}
-
-function splitJsonLines(content: string, filePath: string): readonly string[] {
-  try {
-    return splitCompleteJsonLines(content);
-  } catch (error: unknown) {
-    if (error instanceof CompleteJsonLinesError) {
-      throw new LocalRuntimeStorageContractError(
-        error.reason === 'missing_terminal_newline'
-          ? 'partial_write'
-          : 'malformed_record',
-        error.reason === 'missing_terminal_newline'
-          ? `Local runtime JSONL file ended without a complete record: ${filePath}.`
-          : `Local runtime JSONL file contains a blank record: ${filePath}.`,
-        {cause: error},
-      );
-    }
-
-    throw error;
-  }
 }
 
 function readRecordString(

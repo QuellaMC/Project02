@@ -1,7 +1,4 @@
 import {
-  type CharacterAgent,
-  type CharacterTurnOptions,
-  type CharacterTurnResult,
   type ConversationSession,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
@@ -16,7 +13,6 @@ import type {
 } from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
-  RuntimePluginFileStorePreparedTransaction,
   RuntimePluginHost,
 } from '../../plugins/index.ts';
 import type {
@@ -35,10 +31,8 @@ import type {
   RawEventLogRecord,
   RawEventLogRecordInput,
   RoleModelCommitValidationSnapshot,
-  RuntimeLogStore,
-  RuntimeTraceEntry,
-  RuntimeTraceStepName,
 } from '../evidence/records.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 
 export const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 
@@ -54,11 +48,10 @@ export type RunLocalUserMessageEventOptions = {
   readonly session: ConversationSession;
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
-  readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly maxToolRounds?: number;
+  readonly recentMessageLimit?: number;
   readonly pluginHost: RuntimePluginHost;
-  readonly characterTurnOptions?: CharacterTurnOptions;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
   readonly committedAt?: string;
@@ -70,7 +63,6 @@ export type RunLocalUserMessageEventOptions = {
 export type LocalRuntimeTurnProgressEvent =
   | {
       readonly kind: 'visible_reply';
-      readonly final: boolean;
       readonly text: string;
     }
   | {
@@ -88,12 +80,9 @@ export type LocalRuntimeTurnProgressEvent =
 export type LocalRuntimeUserMessageCompletedResult = {
   readonly status: 'completed';
   readonly event: UserMessageRuntimeEvent;
-  readonly turn?: CharacterTurnResult;
   readonly conversationMessages: readonly ConversationLogRecord[];
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
-  readonly traceEntries: readonly RuntimeTraceEntry[];
-  readonly pluginFileStoreRecoveryPending?: boolean;
   readonly postCommitFailures?: readonly string[];
 };
 
@@ -104,7 +93,6 @@ export type LocalRuntimeUserMessageRejectedResult = {
   readonly message: string;
   readonly rawEvent: RawEventLogRecord;
   readonly rawEventLogRecords: readonly RawEventLogRecord[];
-  readonly traceEntries: readonly RuntimeTraceEntry[];
 };
 
 export type LocalRuntimeUserMessageInputRejectedResult = {
@@ -114,7 +102,7 @@ export type LocalRuntimeUserMessageInputRejectedResult = {
   readonly reason: 'input_validation_rejected';
   readonly message: string;
   readonly rawEvent: RawEventLogRecord;
-  readonly traceEntries: readonly RuntimeTraceEntry[];
+  readonly rawEventLogRecords: readonly RawEventLogRecord[];
 };
 
 export type LocalRuntimeUserMessageResult =
@@ -152,7 +140,6 @@ export type NormalizeUserMessageRuntimeEventResult =
 
 export type RuntimeTurnState = {
   readonly options: RunLocalUserMessageEventOptions;
-  readonly traceEntries: RuntimeTraceEntry[];
   readonly rawEventLogRecords: RawEventLogRecord[];
   readonly identity: RuntimeEventIdentity;
   readonly normalizedEventResult: NormalizeUserMessageRuntimeEventResult;
@@ -160,9 +147,6 @@ export type RuntimeTurnState = {
   readonly payloadSummary: RawEventLogPayloadSummary;
   runtimePluginContextForTurn: RuntimePluginContext | undefined;
   runtimePluginHostForTurn: RuntimePluginHost | undefined;
-  pluginFileStoreTransactionActive: boolean;
-  preparedPluginFileStoreTransaction:
-    RuntimePluginFileStorePreparedTransaction | undefined;
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
   readonly startedPluginToolCalls: Map<string, RuntimePluginToolCall>;
@@ -172,14 +156,18 @@ export type RuntimeTurnState = {
     string,
     PreparedRuntimePluginConfigEffect
   >;
-  userConversationMessage: ConversationLogRecord | undefined;
 };
 
 export type AppendVisibleReplyOptions = {
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
-  readonly final: boolean;
   readonly roleModelIOSnapshot: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  /**
+   * The sampling round that asked for this reply. Recorded on the commit
+   * event so a reader can tell two rounds apart by which round they were,
+   * not by whether they happened to say the same thing.
+   */
+  readonly round: number;
   readonly text: string;
 };
 
@@ -194,7 +182,6 @@ export type RuntimeTurnRejectionOptions = {
   readonly rawReason: string;
   readonly reason: LocalRuntimeUserMessageRejectionReason;
   readonly runtimePluginContext?: RuntimePluginContext;
-  readonly traceStep: RuntimeTraceStepName;
   readonly toolCallIds?: readonly string[];
   readonly visibleMessageIds?: readonly string[];
 };

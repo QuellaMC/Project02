@@ -1,8 +1,6 @@
 import {
   isModelToolJsonSchemaType,
-  modelToolCallLimitScopes,
   modelToolInputFieldValueTypes,
-  type ModelToolCallLimit,
   type ModelToolInputContract,
   type ModelToolInputField,
   type ModelToolInputFieldValueType,
@@ -16,57 +14,12 @@ import {
   firstRejected,
   isOneOf,
   isRecord,
-  redactRuntimePluginText,
   reject,
   requiredBoolean,
   requiredIdentifier,
   requiredNonEmptyString,
-  requiredPositiveInteger,
   requiredStringArray,
 } from './validation-primitives.ts';
-
-export function requiredModelToolCallLimit(
-  value: unknown,
-): RuntimePluginValidationResult<ModelToolCallLimit> {
-  if (!isRecord(value)) {
-    return reject(
-      'malformed_tool_definition',
-      'Plugin provided tool callLimit must be an object.',
-    );
-  }
-
-  const scope = value['scope'];
-  const maxCalls = requiredPositiveInteger(
-    value['maxCalls'],
-    'callLimit.maxCalls',
-  );
-
-  if (!isOneOf(scope, modelToolCallLimitScopes)) {
-    return reject(
-      'malformed_tool_definition',
-      'Plugin provided tool callLimit.scope is not supported.',
-    );
-  }
-
-  if (maxCalls.status === 'rejected') {
-    return maxCalls;
-  }
-
-  return accept(
-    Object.freeze({
-      scope,
-      maxCalls: maxCalls.value,
-    } satisfies ModelToolCallLimit),
-  );
-}
-
-export function optionalModelToolCallLimit(
-  value: unknown,
-): RuntimePluginValidationResult<ModelToolCallLimit | undefined> {
-  return value === undefined
-    ? accept(undefined)
-    : requiredModelToolCallLimit(value);
-}
 
 export function requiredModelToolInputContract(
   value: unknown,
@@ -222,17 +175,6 @@ function requiredModelToolJsonSchema(
   if (properties.status === 'rejected') return properties;
   if (items.status === 'rejected') return items;
 
-  if (
-    enumValues.value?.some(
-      enumValue => redactRuntimePluginText(enumValue) !== enumValue,
-    ) === true
-  ) {
-    return reject(
-      'malformed_tool_definition',
-      `Model tool inputContract.${fieldPath}.enum must not contain credential-bearing values.`,
-    );
-  }
-
   const parts = {
     type: type.value,
     description: description.value,
@@ -343,7 +285,7 @@ function acceptModelToolJsonSchema(
       ...(parts.type === undefined ? {} : {type: parts.type}),
       ...(parts.description === undefined
         ? {}
-        : {description: redactRuntimePluginText(parts.description)}),
+        : {description: parts.description}),
       ...(parts.enumValues === undefined ? {} : {enum: parts.enumValues}),
       ...(parts.properties === undefined ? {} : {properties: parts.properties}),
       ...(parts.required === undefined ? {} : {required: parts.required}),
@@ -471,21 +413,11 @@ function requiredModelToolInputField(
       allowedValues,
     ]);
   }
-  if (
-    allowedValues.value?.some(
-      allowedValue => redactRuntimePluginText(allowedValue) !== allowedValue,
-    ) === true
-  ) {
-    return reject(
-      'malformed_tool_definition',
-      'Model tool inputContract field allowedValues must not contain credential-bearing values.',
-    );
-  }
 
   return accept(
     Object.freeze({
       name: name.value,
-      description: redactRuntimePluginText(description.value),
+      description: description.value,
       required: required.value,
       ...(valueType.value === undefined ? {} : {valueType: valueType.value}),
       ...(allowedValues.value === undefined

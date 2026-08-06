@@ -20,12 +20,12 @@ import {
   isAbandonedAtomicReplacementFile,
   parseAtomicReplacementFileName,
 } from '../atomic-file.ts';
+import {isParseableJson} from '../json-lines.ts';
 import {
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout,
 } from '../layout-contract.ts';
 import {
-  acquireLocalRuntimeMutationLocks,
   acquireLocalRuntimeMutationLocksSync,
   LocalRuntimeMutationLocksAcquireError,
   type LocalRuntimeMutationLockOwnerToken,
@@ -127,43 +127,6 @@ export function withDurablePluginStoreMutations<T>(
     return operation();
   } finally {
     lease.release();
-  }
-}
-
-export async function withDurablePluginStoreMutationsAsync<T>(
-  options: {
-    readonly resourceKeys?: readonly string[];
-    readonly storeRoot: string;
-    readonly roots: readonly string[];
-    readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
-  },
-  operation: () => T | Promise<T>,
-): Promise<T> {
-  const locksRoot = createLocalRuntimeStorageLayout({
-    storeRoot: options.storeRoot,
-  }).locksRoot;
-  const resourceKeys = [
-    ...options.roots.map(durablePluginStoreMutationResourceKey),
-    ...(options.resourceKeys ?? []),
-  ];
-  let lease: Awaited<ReturnType<typeof acquireLocalRuntimeMutationLocks>>;
-
-  try {
-    lease = await acquireLocalRuntimeMutationLocks({
-      targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
-      waitTimeoutMs: 0,
-      ...(options.ownerToken === undefined
-        ? {}
-        : {ownerToken: options.ownerToken}),
-    });
-  } catch (error: unknown) {
-    throw singleMutationLockError(error);
-  }
-
-  try {
-    return await operation();
-  } finally {
-    await lease.release();
   }
 }
 
@@ -291,32 +254,8 @@ export function hashOptionalFileContent(
     : createPresentFileContentHash(content).digest('hex');
 }
 
-export function createPresentFileContentHash(content: string | Buffer): Hash {
+function createPresentFileContentHash(content: string | Buffer): Hash {
   return createHash('sha256').update('present\u0000').update(content);
-}
-
-export function requiredJournalOperationString(
-  value: string | undefined,
-): string {
-  if (value === undefined) {
-    throw new TypeError(
-      'Plugin fileStore transaction operation is not planned.',
-    );
-  }
-
-  return value;
-}
-
-export function requiredJournalOperationRevision(
-  value: number | undefined,
-): number {
-  if (!isNonNegativeSafeInteger(value)) {
-    throw new TypeError(
-      'Plugin fileStore transaction operation is not planned.',
-    );
-  }
-
-  return value;
 }
 
 export function isNonNegativeSafeInteger(value: unknown): value is number {
@@ -621,37 +560,41 @@ function assertDurableJsonlPathMode(options: {
     return;
   }
 
-  if (options.path.endsWith('.jsonl')) {
-    try {
-      const records = parseRuntimePluginJsonlContent(
-        readTextFileSync(options.filePath),
-      );
+  const content = readOptionalRegularFile(options.filePath);
 
-      if (records.length !== 1 || !Array.isArray(records[0])) {
-        return;
-      }
-    } catch (error: unknown) {
-      if (isMissingFileError(error)) {
-        return;
-      }
-
-      if (!(error instanceof SyntaxError)) {
-        throw error;
-      }
-    }
+  if (content === undefined) {
+    return;
   }
 
+  // A lone array reads as one JSONL record and as a JSON document, so it
+  // stays ambiguous and the whole-file parse decides.
+  const records = options.path.endsWith('.jsonl')
+    ? readOptionalJsonlRecords(content)
+    : undefined;
+
+  if (
+    records !== undefined &&
+    (records.length !== 1 || !Array.isArray(records[0]))
+  ) {
+    return;
+  }
+
+  if (isParseableJson(content)) {
+    throw new TypeError('Plugin JSONL path already stores JSON.');
+  }
+}
+
+/** Records when the content is JSONL, undefined when it is not. */
+function readOptionalJsonlRecords(
+  content: string,
+): readonly RuntimePluginJsonValue[] | undefined {
   try {
-    JSON.parse(readTextFileSync(options.filePath));
-  } catch (error: unknown) {
-    if (isMissingFileError(error) || error instanceof SyntaxError) {
-      return;
-    }
+    const records = parseRuntimePluginJsonlContent(content);
 
-    throw error;
+    return records.length === 0 ? undefined : records;
+  } catch {
+    return undefined;
   }
-
-  throw new TypeError('Plugin JSONL path already stores JSON.');
 }
 
 function assertDurableJsonPathMode(options: {

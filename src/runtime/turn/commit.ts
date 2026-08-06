@@ -1,11 +1,10 @@
+import {conversationMessageForRawEvent} from '../evidence/cache.ts';
 import {
-  CharacterReplyValidationError,
+  appendCommittedMessage,
+  createCharacterMessage,
+  createUserMessage,
   normalizeCharacterAgentReply,
-  rollbackLastCharacterTurn,
-  runCharacterTurn,
-  type CharacterAgent,
-  type CharacterAgentReply,
-  type CharacterTurnResult,
+  type VisibleMessage,
 } from '../../core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
@@ -36,16 +35,17 @@ import type {
   ConversationLogRecord,
   RawEventLogRecord,
   RawEventLogRecordInput,
-  RuntimeTraceEntry,
-  RuntimeTraceStepName,
 } from '../evidence/records.ts';
 import type {
   DecisionContext,
   ParsedRoleModelDecisionSnapshot,
   RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
-import type {RoleModelLoopResult} from '../../role-model/index.ts';
-import {findValidatedTerminalRawEventForSession} from '../storage/file-runtime-log-store.ts';
+import {
+  executionVisibleReplyTexts,
+  type RoleModelLoopResult,
+} from '../../role-model/index.ts';
+import {findRuntimeTurnTerminalRawEvent} from '../evidence/validation.ts';
 import type {
   AppendVisibleReplyOptions,
   LocalRuntimeTurnProgressEvent,
@@ -59,17 +59,6 @@ type AcceptedRoleModelLoopResult = Extract<
   {readonly status: 'accepted'}
 >;
 
-export class IncompleteConversationRollbackError extends AggregateError {
-  constructor(cleanupErrors: readonly unknown[], originalError: unknown) {
-    super(
-      cleanupErrors,
-      'Runtime conversation commit failed and rollback was incomplete.',
-      {cause: originalError},
-    );
-    this.name = 'IncompleteConversationRollbackError';
-  }
-}
-
 export type CompleteRuntimeTurnOptions = {
   readonly state: RuntimeTurnState;
   readonly decisionContext: DecisionContext;
@@ -79,38 +68,21 @@ export type CompleteRuntimeTurnOptions = {
   readonly roleModelPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly roleModelPluginToolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
   readonly preCommitHealthResult: RuntimePluginHealthHostResult;
-  readonly visibleReplyText: string | undefined;
 };
 
 export function initializeRuntimeTurnEvidence(state: RuntimeTurnState): void {
-  appendTrace(state, 'runtime_event_received');
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_event_received',
     eventType: state.event.type,
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'runtime_event_normalized');
   appendRawEvent(state, {
     ...state.identity,
     kind: 'runtime_event_normalized',
     eventType: state.event.type,
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'runtime_turn_started');
-}
-
-export function appendTrace(
-  state: RuntimeTurnState,
-  step: RuntimeTraceStepName,
-): RuntimeTraceEntry {
-  const traceEntry = state.options.logStore.appendTrace({
-    ...state.identity,
-    step,
-  });
-
-  state.traceEntries.push(traceEntry);
-  return traceEntry;
 }
 
 export function appendRawEvent(
@@ -134,109 +106,24 @@ export async function emitProgress(
   }
 }
 
-export function beginPluginFileStoreTransaction(
+export async function commitUserMessage(
   state: RuntimeTurnState,
-  pluginHost: RuntimePluginHost,
-): void {
-  pluginHost.beginFileStoreTransaction?.();
-  state.pluginFileStoreTransactionActive =
-    pluginHost.beginFileStoreTransaction !== undefined;
-}
+): Promise<ConversationLogRecord> {
+  const message = createUserMessage(
+    state.options.session,
+    state.event.payload.currentUserMessage,
+  );
 
-export async function preparePluginFileStoreTransaction(
-  state: RuntimeTurnState,
-): Promise<void> {
-  if (!state.pluginFileStoreTransactionActive) {
-    return;
-  }
-
-  state.preparedPluginFileStoreTransaction =
-    await state.runtimePluginHostForTurn?.prepareFileStoreTransaction?.(
-      state.identity,
-    );
-  state.pluginFileStoreTransactionActive = false;
-}
-
-export async function rollbackPluginFileStoreTransaction(
-  state: RuntimeTurnState,
-): Promise<void> {
-  if (state.pluginFileStoreTransactionActive) {
-    state.runtimePluginHostForTurn?.rollbackFileStoreTransaction?.();
-    state.pluginFileStoreTransactionActive = false;
-  }
-
-  await state.preparedPluginFileStoreTransaction?.discard();
-  state.preparedPluginFileStoreTransaction = undefined;
-}
-
-async function finalizePluginFileStoreTransaction(
-  state: RuntimeTurnState,
-): Promise<void> {
-  const prepared = state.preparedPluginFileStoreTransaction;
-
-  state.preparedPluginFileStoreTransaction = undefined;
-  await prepared?.finalize();
+  return await commitVisibleMessage(state, message, {});
 }
 
 export async function appendVisibleReplyForDecision(
   state: RuntimeTurnState,
   optionsForReply: AppendVisibleReplyOptions,
-): Promise<CharacterTurnResult | undefined> {
+): Promise<ConversationLogRecord> {
   const normalizedReply = normalizeCharacterAgentReply({
     text: optionsForReply.text,
   });
-
-  if (!optionsForReply.final) {
-    appendInterimVisibleReply(state, optionsForReply);
-    await emitProgress(state, {
-      kind: 'visible_reply',
-      final: false,
-      text: normalizedReply.text,
-    });
-    return undefined;
-  }
-
-  if (state.userConversationMessage !== undefined) {
-    throw new CharacterReplyValidationError(
-      'Runtime cannot commit more than one final visible reply per turn.',
-    );
-  }
-
-  const turn = await commitFinalVisibleReply(
-    state,
-    optionsForReply,
-    normalizedReply.text,
-  );
-  await emitProgress(state, {
-    kind: 'visible_reply',
-    final: true,
-    text: turn.reply.text,
-  });
-  return turn;
-}
-
-function appendInterimVisibleReply(
-  state: RuntimeTurnState,
-  optionsForReply: AppendVisibleReplyOptions,
-): void {
-  appendRawEvent(state, {
-    ...state.identity,
-    kind: 'interim_visible_reply_emitted',
-    eventType: state.event.type,
-    payloadSummary: state.payloadSummary,
-    roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      optionsForReply.parsedRoleModelDecisionSnapshot,
-    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
-  });
-  appendTrace(state, 'interim_visible_reply_emitted');
-}
-
-async function commitFinalVisibleReply(
-  state: RuntimeTurnState,
-  optionsForReply: AppendVisibleReplyOptions,
-  replyText: string,
-): Promise<CharacterTurnResult> {
   const commitValidation = createRoleModelCommitValidationSnapshot({
     ...state.identity,
     sessionId: roleModelIOSnapshotSessionId(
@@ -244,100 +131,68 @@ async function commitFinalVisibleReply(
     ),
     result: {
       status: 'accepted',
-      acceptedVisibleReplyText: replyText,
+      acceptedVisibleReplyText: normalizedReply.text,
     },
   });
-  const turn = await runCharacterTurn(
+  const message = createCharacterMessage(
     state.options.session,
-    state.event.payload.currentUserMessage,
-    createFixedReplyAgent(replyText),
-    state.options.characterTurnOptions,
+    normalizedReply,
   );
-  const visibleMessages = appendConversationTurn(state, turn);
 
-  try {
-    appendRawEvent(state, {
+  return await commitVisibleMessage(state, message, {
+    roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
+    parsedRoleModelDecisionSnapshot:
+      optionsForReply.parsedRoleModelDecisionSnapshot,
+    commitValidation,
+    decisionRound: optionsForReply.round,
+    ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
+  });
+}
+
+/**
+ * Saying something is what makes it real, so the message enters the
+ * session and reaches the user before it reaches disk. A storage failure
+ * after that point is reported, never un-said: the conversation happened.
+ */
+async function commitVisibleMessage(
+  state: RuntimeTurnState,
+  message: VisibleMessage,
+  evidence: Partial<RawEventLogRecordInput>,
+): Promise<ConversationLogRecord> {
+  const rawEvent = state.options.logStore.prepareRawEvent(
+    {
       ...state.identity,
-      kind: 'visible_reply_committed',
+      kind: 'visible_message_committed',
       eventType: state.event.type,
-      visibleMessageIds: visibleMessages.map(message => message.id),
+      visibleMessageIds: [message.id],
+      visibleMessage: message,
+      committedAt: state.options.committedAt ?? state.options.event.createdAt,
       payloadSummary: state.payloadSummary,
-      roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-      parsedRoleModelDecisionSnapshot:
-        optionsForReply.parsedRoleModelDecisionSnapshot,
-      commitValidation,
-      ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
-    });
-  } catch (error: unknown) {
-    rollbackFailedConversationCommit(state, turn, error);
-    throw error;
+      ...evidence,
+    },
+    state.options.session.character,
+  );
+  const record = conversationMessageForRawEvent(rawEvent);
+
+  if (record === undefined) {
+    throw new TypeError('Visible message commit lost its message.');
   }
 
-  state.userConversationMessage = visibleMessages[0];
-  state.committedVisibleMessages.push(...visibleMessages);
-  appendTrace(state, 'visible_reply_committed');
-  return turn;
-}
+  appendCommittedMessage(state.options.session, message);
 
-function appendConversationTurn(
-  state: RuntimeTurnState,
-  turn: CharacterTurnResult,
-): readonly [ConversationLogRecord, ConversationLogRecord] {
-  const committedAt =
-    state.options.committedAt ?? state.options.event.createdAt;
-  let userRecord: ConversationLogRecord | undefined;
-  let characterRecord: ConversationLogRecord;
-
-  try {
-    userRecord = state.options.logStore.appendConversationMessage(
-      {
-        ...turn.userMessage,
-        ...state.identity,
-        committedAt,
-      },
-      state.options.session.character,
-    );
-    characterRecord = state.options.logStore.appendConversationMessage(
-      {
-        ...turn.characterMessage,
-        ...state.identity,
-        committedAt,
-      },
-      state.options.session.character,
-    );
-  } catch (error: unknown) {
-    rollbackFailedConversationCommit(state, turn, error);
-    throw error;
+  if (message.role === 'character') {
+    await emitProgress(state, {kind: 'visible_reply', text: message.text});
   }
 
-  return Object.freeze([userRecord, characterRecord]);
-}
-
-function rollbackFailedConversationCommit(
-  state: RuntimeTurnState,
-  turn: CharacterTurnResult,
-  originalError: unknown,
-): void {
-  const cleanupErrors: unknown[] = [];
-
-  try {
-    state.options.logStore.removeConversationMessages([
-      turn.userMessage.id,
-      turn.characterMessage.id,
-    ]);
-  } catch (error: unknown) {
-    cleanupErrors.push(error);
-  }
-
-  try {
-    rollbackLastCharacterTurn(state.options.session, turn);
-  } catch (error: unknown) {
-    cleanupErrors.push(error);
-  }
-
-  if (cleanupErrors.length > 0) {
-    throw new IncompleteConversationRollbackError(cleanupErrors, originalError);
-  }
+  // Evidence bookkeeping describes the log, so it follows the write: a
+  // terminal event must never reference a record that failed to land.
+  state.options.logStore.persistPreparedRawEvent(
+    rawEvent,
+    state.options.session.character,
+  );
+  state.rawEventLogRecords.push(rawEvent);
+  state.committedVisibleMessages.push(record);
+  return record;
 }
 
 export function appendToolCallStarted(
@@ -364,7 +219,6 @@ export function appendToolCallStarted(
       optionsForTool.parsedRoleModelDecisionSnapshot,
     payloadSummary: state.payloadSummary,
   });
-  appendTrace(state, 'tool_call_started');
 }
 
 export function appendToolCallFinished(
@@ -392,7 +246,6 @@ export function appendToolCallFinished(
     payloadSummary: state.payloadSummary,
   });
   state.finishedToolCallIds.push(optionsForTool.callId);
-  appendTrace(state, 'tool_call_finished');
 }
 
 export async function completeRuntimeTurn(
@@ -407,8 +260,6 @@ export async function completeRuntimeTurn(
     effects: runtimeConfigEffects,
   });
 
-  await preparePluginFileStoreTransaction(state);
-  const turn = await commitTerminalVisibleReply(options);
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
     ...options.preCommitHealthResult.evidence,
@@ -417,12 +268,13 @@ export async function completeRuntimeTurn(
     ...options,
     terminalPluginEvidence,
     runtimeConfigEffects,
-    turn,
   });
-  const durability = await finalizeCompletedDurability(
-    state,
-    terminalAppend.terminalAppendFailure,
-  );
+  const durability = {
+    postCommitFailures:
+      terminalAppend.terminalAppendFailure === undefined
+        ? []
+        : [terminalAppend.terminalAppendFailure],
+  };
   const configEffectEvidence = reconcileCompletedRuntimeConfigEffects({
     pluginHost: options.pluginHost,
     effects: runtimeConfigEffects,
@@ -439,14 +291,9 @@ export async function completeRuntimeTurn(
   return Object.freeze({
     status: 'completed',
     event: state.event,
-    ...(turn === undefined ? {} : {turn}),
     conversationMessages: Object.freeze([...state.committedVisibleMessages]),
     rawEvent: terminalAppend.rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
-    traceEntries: Object.freeze([...state.traceEntries]),
-    ...(durability.pluginFileStoreRecoveryPending
-      ? {pluginFileStoreRecoveryPending: true}
-      : {}),
     ...(durability.postCommitFailures.length === 0
       ? {}
       : {
@@ -455,28 +302,10 @@ export async function completeRuntimeTurn(
   } satisfies LocalRuntimeUserMessageCompletedResult);
 }
 
-async function commitTerminalVisibleReply(
-  options: CompleteRuntimeTurnOptions,
-): Promise<CharacterTurnResult | undefined> {
-  if (options.visibleReplyText === undefined) {
-    return undefined;
-  }
-
-  return await appendVisibleReplyForDecision(options.state, {
-    runtimePluginEvidence: options.roleModelPluginEvidence,
-    final: true,
-    roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      options.roleModelResult.parsedDecisionSnapshot,
-    text: options.visibleReplyText,
-  });
-}
-
 function appendCompletedTerminalRawEvent(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
     readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
-    readonly turn: CharacterTurnResult | undefined;
   },
 ): {
   readonly rawEvent: RawEventLogRecord;
@@ -499,10 +328,15 @@ function createTerminalRawEventInput(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
     readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
-    readonly turn: CharacterTurnResult | undefined;
   },
 ): RawEventLogRecordInput {
   const {state} = options;
+  // Commit validation describes the terminal decision, not the turn's
+  // message history: a terminal round carrying only non-committed text
+  // has no accepted reply even when earlier rounds committed one.
+  const terminalVisibleReplyText = executionVisibleReplyTexts(
+    options.roleModelResult.decision,
+  ).at(-1);
 
   return {
     ...state.identity,
@@ -523,9 +357,13 @@ function createTerminalRawEventInput(
       sessionId: options.decisionContext.sessionId,
       result: {
         status: 'accepted',
-        ...(options.turn === undefined
+        ...(terminalVisibleReplyText === undefined
           ? {}
-          : {acceptedVisibleReplyText: options.turn.reply.text}),
+          : {
+              acceptedVisibleReplyText: normalizeCharacterAgentReply({
+                text: terminalVisibleReplyText,
+              }).text,
+            }),
       },
     }),
     ...runtimePluginEvidenceOption(options.terminalPluginEvidence),
@@ -547,17 +385,14 @@ function recoverCompletedTerminalRawEvent(
   readonly rawEvent: RawEventLogRecord;
   readonly terminalAppendFailure?: string;
 } {
-  const sessionPaths = state.options.logStore.localRuntimeSessionPaths;
-
-  if (sessionPaths === undefined) {
-    throw error;
-  }
-
   let durableTerminal: RawEventLogRecord | undefined;
 
   try {
-    durableTerminal = findValidatedTerminalRawEventForSession(
-      sessionPaths,
+    // A fresh validated read through the store's own gate: the failed
+    // append invalidated its cache, so this re-reads what actually
+    // landed and answers whether the terminal is among it.
+    durableTerminal = findRuntimeTurnTerminalRawEvent(
+      state.options.logStore.rawEvents(),
       state.identity,
     );
   } catch {
@@ -579,101 +414,6 @@ function recoverCompletedTerminalRawEvent(
     rawEvent: durableTerminal,
     terminalAppendFailure: runtimePostCommitFailureMessage(error),
   };
-}
-
-async function finalizeCompletedDurability(
-  state: RuntimeTurnState,
-  terminalAppendFailure: string | undefined,
-): Promise<{
-  readonly pluginFileStoreRecoveryPending: boolean;
-  readonly postCommitFailures: string[];
-}> {
-  const postCommitFailures =
-    terminalAppendFailure === undefined ? [] : [terminalAppendFailure];
-  let pluginFileStoreRecoveryPending = false;
-
-  try {
-    await finalizePluginFileStoreTransaction(state);
-  } catch (error: unknown) {
-    pluginFileStoreRecoveryPending = true;
-    postCommitFailures.push(runtimePostCommitFailureMessage(error));
-  }
-
-  try {
-    appendTrace(state, 'raw_event_log_appended');
-    appendTrace(state, 'runtime_turn_completed');
-  } catch (error: unknown) {
-    reconcileCompletedTerminalTrace(state, error, postCommitFailures);
-  }
-
-  return {pluginFileStoreRecoveryPending, postCommitFailures};
-}
-
-function reconcileCompletedTerminalTrace(
-  state: RuntimeTurnState,
-  originalError: unknown,
-  postCommitFailures: string[],
-): void {
-  try {
-    const terminalSteps = [
-      'raw_event_log_appended',
-      'runtime_turn_completed',
-    ] as const;
-    const persisted = [
-      ...state.options.logStore.readSessionEvidence().stored.traceEntries,
-    ];
-
-    for (const step of terminalSteps) {
-      if (!hasTerminalTraceEntry(state, persisted, step)) {
-        persisted.push(appendTrace(state, step));
-      }
-    }
-
-    for (const step of terminalSteps) {
-      restoreTerminalTraceEntry(state, persisted, step);
-    }
-  } catch (reconciliationError: unknown) {
-    postCommitFailures.push(
-      `${runtimePostCommitFailureMessage(originalError)} ` +
-        `Trace reconciliation failed: ${runtimePostCommitFailureMessage(reconciliationError)}`,
-    );
-  }
-}
-
-function hasTerminalTraceEntry(
-  state: RuntimeTurnState,
-  entries: readonly RuntimeTraceEntry[],
-  step: RuntimeTraceStepName,
-): boolean {
-  return entries.some(
-    entry =>
-      entry.eventId === state.identity.eventId &&
-      entry.traceId === state.identity.traceId &&
-      entry.step === step,
-  );
-}
-
-function restoreTerminalTraceEntry(
-  state: RuntimeTurnState,
-  persisted: readonly RuntimeTraceEntry[],
-  step: RuntimeTraceStepName,
-): void {
-  if (state.traceEntries.some(entry => entry.step === step)) {
-    return;
-  }
-
-  const storedEntry = persisted.find(
-    entry =>
-      entry.eventId === state.identity.eventId &&
-      entry.traceId === state.identity.traceId &&
-      entry.step === step,
-  );
-
-  if (storedEntry === undefined) {
-    throw new Error(`Completed runtime trace is missing ${step}.`);
-  }
-
-  state.traceEntries.push(storedEntry);
 }
 
 async function recordAfterTurnCommitted(
@@ -805,12 +545,4 @@ function shouldRecordAfterTurnCommittedEvent(afterCommitResult: {
     afterCommitResult.status === 'completed_with_failures' ||
     afterCommitResult.evidence.length > 0
   );
-}
-
-function createFixedReplyAgent(replyText: string): CharacterAgent {
-  return Object.freeze({
-    reply(): CharacterAgentReply {
-      return {text: replyText};
-    },
-  } satisfies CharacterAgent);
 }

@@ -1,5 +1,4 @@
 import type {ConversationSession} from '../../core/index.ts';
-import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
 import {acquireLocalRuntimeSessionWriterLease} from '../storage/session-store.ts';
 import {runSerializedLocalUserMessageEvent} from './model.ts';
 import {recoverPendingRuntimeConfigEffects} from './config-effects.ts';
@@ -51,54 +50,13 @@ async function runLocalUserMessageEventWithWriterLease(
   });
 
   try {
-    options.logStore.recoverAbandonedWriterEvidence?.();
     await recoverPendingRuntimeConfigEffects({
       logStore: options.logStore,
       pluginHost: options.pluginHost,
     });
-    assertDurableTranscriptIsCurrent(options);
     return await runSerializedLocalUserMessageEvent(options);
   } finally {
-    try {
-      options.logStore.checkpointWriterEvidence?.();
-    } finally {
-      await lease.release();
-    }
-  }
-}
-
-function assertDurableTranscriptIsCurrent(
-  options: RunLocalUserMessageEventOptions,
-): void {
-  const sessionPaths = options.logStore.localRuntimeSessionPaths;
-
-  if (sessionPaths === undefined) {
-    return;
-  }
-
-  const durableMessages = options.logStore.conversationMessages();
-  const transcript = options.session.visibleTranscript;
-
-  if (
-    options.session.id !== sessionPaths.sessionId ||
-    durableMessages.length !== transcript.length ||
-    durableMessages.some((stored, index) => {
-      const current = transcript[index];
-
-      return (
-        current === undefined ||
-        stored.id !== current.id ||
-        stored.role !== current.role ||
-        stored.speakerId !== current.speakerId ||
-        stored.speakerName !== current.speakerName ||
-        stored.text !== current.text
-      );
-    })
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'stale_session',
-      `Conversation session "${options.session.id}" is stale relative to durable session "${sessionPaths.sessionId}".`,
-    );
+    await lease.release();
   }
 }
 

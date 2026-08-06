@@ -31,7 +31,6 @@ export {
   roleModelDecisionRejectionReasons,
   type RoleModelDecisionResult,
   roleModelDisallowedToolRejectionReason,
-  roleModelDuplicateToolCallRejectionReason,
   type RoleModelInputEnvelope,
   roleModelInvalidVisibleReplyRejectionReason,
   type RoleModelCharacterRef,
@@ -40,7 +39,6 @@ export {
   roleModelMalformedAdapterRawOutputDetails,
   roleModelMalformedOutputRejectionReason,
   roleModelMalformedToolCallRejectionReason,
-  roleModelMissingRequiredToolCallRejectionReason,
   type RoleModelOutputContract,
   type RoleModelPluginToolDefinition,
   roleModelPluginToolRejectedRejectionReason,
@@ -82,9 +80,6 @@ export {
 export {
   freezeProviderMetadata,
   freezeRoleModelProviderExchangeSnapshot,
-  freezeRuntimePluginJsonObject,
-  freezeRuntimePluginJsonValue,
-  isJsonRecord,
   parseRoleModelProviderExchangeSnapshot,
 } from './api/provider-exchange.ts';
 export {
@@ -101,10 +96,10 @@ export {
 export {
   type AcceptedRoleModelLoopResult,
   defaultRoleModelMaxToolRounds,
+  executionVisibleReplyTexts,
   type RejectedRoleModelLoopResult,
-  type RoleModelInterimVisibleReplyEvent,
-  type RoleModelLoopExecutionResult,
   type RoleModelLoopResult,
+  type RoleModelVisibleReplyEvent,
   type RoleModelLoopRound,
   type RoleModelPluginToolCallCompletedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
@@ -116,7 +111,7 @@ export {
 } from './loop/loop.ts';
 export {
   getRequiredVisibleReplyText,
-  getVisibleReplyToolCall,
+  visibleReplyToolCalls,
   parseRoleModelDecision,
   parseRoleModelExecutionDecision,
 } from './loop/decision-parser.ts';

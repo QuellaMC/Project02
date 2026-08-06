@@ -60,7 +60,6 @@ import {
   isRuntimePluginCredentialKey,
   optionalOneOf,
   optionalPlainString,
-  redactRuntimePluginText,
   reject,
   requireBooleanRecordField,
   requirePlainNonEmptyRecordString,
@@ -313,7 +312,7 @@ export function createRuntimePluginEvidenceSnapshot(
       runtimePluginEvidenceStatusValues,
       'status',
     ),
-    summary: redactRuntimePluginText(summary),
+    summary: summary,
     ...(policyOutcome === undefined ? {} : {policyOutcome}),
     ...(sourceReferences === undefined
       ? {}
@@ -321,7 +320,7 @@ export function createRuntimePluginEvidenceSnapshot(
     redactionLabels: freezeRedactedStrings(redactionLabels),
     ...(configFingerprint === undefined
       ? {}
-      : {configFingerprint: redactRuntimePluginText(configFingerprint)}),
+      : {configFingerprint: configFingerprint}),
   } satisfies RuntimePluginEvidenceSnapshot);
 }
 
@@ -356,9 +355,7 @@ export function createRuntimePluginHealthSnapshot(
       requirePlainNonEmptyRecordString(options, 'checkedAt'),
       'Plugin health checkedAt',
     ),
-    summary: redactRuntimePluginText(
-      requirePlainNonEmptyRecordString(options, 'summary'),
-    ),
+    summary: requirePlainNonEmptyRecordString(options, 'summary'),
     redactionLabels: freezeRedactedStrings(redactionLabels),
   } satisfies RuntimePluginHealthSnapshot);
 }
@@ -545,12 +542,8 @@ export function createRuntimePluginToolCallResultSnapshot(
   if (boundedValue['status'] === 'rejected') {
     return Object.freeze({
       status: 'rejected',
-      reason: redactRuntimePluginText(
-        requirePlainNonEmptyRecordString(boundedValue, 'reason'),
-      ),
-      message: redactRuntimePluginText(
-        requirePlainNonEmptyRecordString(boundedValue, 'message'),
-      ),
+      reason: requirePlainNonEmptyRecordString(boundedValue, 'reason'),
+      message: requirePlainNonEmptyRecordString(boundedValue, 'message'),
       evidence: Object.freeze(
         evidenceValues.map(createRuntimePluginEvidenceSnapshot),
       ),
@@ -647,7 +640,7 @@ export function createRuntimePluginListingSnapshot(
     grantedAccess: access.grantedAccess,
     ...(configFingerprint === undefined
       ? {}
-      : {configFingerprint: redactRuntimePluginText(configFingerprint)}),
+      : {configFingerprint: configFingerprint}),
     ...(healthStatus === undefined ? {} : {healthStatus}),
   } satisfies RuntimePluginListingSnapshot);
 }

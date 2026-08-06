@@ -4,10 +4,7 @@ import {
   type RuntimeEventType,
   type VisibleMessage,
 } from '../../core/index.ts';
-import type {
-  ModelToolCallLimit,
-  ModelToolInputContract,
-} from '../../role-model/api/index.ts';
+import type {ModelToolInputContract} from '../../role-model/api/index.ts';
 import type {
   JsonBoundaryObject,
   JsonBoundaryValue,
@@ -16,11 +13,11 @@ import type {
   runtimePluginContractVersion,
   RuntimePluginAccessMap,
   RuntimePluginAccessSnapshot,
-  RuntimePluginAfterTurnCommittedFailureBehavior,
   RuntimePluginBeforeRoleModelFailureBehavior,
   RuntimePluginConfigScope,
   RuntimePluginConfigValueType,
-  RuntimePluginConfirmationRequirement,
+  RuntimePluginToolAnnotations,
+  RuntimePluginToolConcurrency,
   RuntimePluginContextItemKind,
   RuntimePluginDeclaration,
   RuntimePluginEvidenceKind,
@@ -30,10 +27,8 @@ import type {
   RuntimePluginHealthStatus,
   RuntimePluginKind,
   RuntimePluginPolicyOutcome,
-  RuntimePluginSideEffectLevel,
   RuntimePluginSourceKind,
   RuntimePluginToolValidationOwner,
-  RuntimePluginTrustLevel,
 } from './contract.ts';
 
 export type RuntimePluginJsonValue = JsonBoundaryValue;
@@ -78,16 +73,11 @@ export type RuntimePluginConfigMetadata = {
 };
 
 export type RuntimePluginRuntimePolicy = {
-  readonly requiredForTurn: boolean;
-  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
-  readonly confirmation: RuntimePluginConfirmationRequirement;
   readonly timeoutMs: number;
-  readonly sourceReferencesRequired: boolean;
   readonly redactionLabels: readonly string[];
   readonly failureBehavior: {
     readonly beforeRoleModelCall: RuntimePluginBeforeRoleModelFailureBehavior;
     readonly handleToolCall: RuntimePluginHandleToolCallFailureBehavior;
-    readonly afterTurnCommitted: RuntimePluginAfterTurnCommittedFailureBehavior;
     readonly health: RuntimePluginHealthFailureBehavior;
   };
 };
@@ -107,7 +97,8 @@ export type RuntimePluginManifest = {
   readonly compatibility: RuntimePluginCompatibilityMetadata;
   readonly declaredPlugins: readonly RuntimePluginDeclaration[];
   readonly config: RuntimePluginConfigMetadata;
-  readonly localTrustLevel: RuntimePluginTrustLevel;
+  /** Shipped with Project02, rather than installed by the user. */
+  readonly firstParty: boolean;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activation: RuntimePluginActivationMetadata;
   readonly requestedAccess: RuntimePluginAccessMap;
@@ -116,14 +107,13 @@ export type RuntimePluginManifest = {
 export type RuntimePluginProvidedTool = {
   readonly name: string;
   readonly description: string;
-  readonly requiredForUserTurn: boolean;
-  /** Absent means unlimited: tools are only call-limited when they declare one. */
-  readonly callLimit?: ModelToolCallLimit;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  readonly sideEffectLevel: RuntimePluginSideEffectLevel;
+  /** Advisory only, for whoever enables the plugin. Never read at runtime. */
+  readonly annotations?: RuntimePluginToolAnnotations;
+  /** Absent means exclusive: a tool overlaps only when it says so. */
+  readonly concurrency?: RuntimePluginToolConcurrency;
   readonly requiresConfirmation: boolean;
-  readonly sourceReferencesRequired: boolean;
 };
 
 export type RuntimePluginSourceReference = {

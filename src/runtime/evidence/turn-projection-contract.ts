@@ -4,24 +4,16 @@
  * produces them lives in `turn-projection.ts`.
  */
 import type {ConversationLogRecord, RuntimeTurnStatus} from './records.ts';
-import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginAccessMap,
+  RuntimePluginToolAnnotations,
+} from '../../plugins/api/index.ts';
 
 export type InspectTurnEvidence = {
   readonly eventId: string;
   readonly traceId: string;
   readonly status: RuntimeTurnStatus;
   readonly steps: readonly string[];
-  readonly derivedSteps: readonly {
-    readonly step: string;
-    readonly source: 'terminal_raw_event';
-    readonly reason: 'missing_persisted_trace_entry';
-    readonly rawEventAnchor: {
-      readonly eventId: string;
-      readonly traceId: string;
-      readonly createdAt: string;
-      readonly kind: 'runtime_turn_completed' | 'runtime_turn_rejected';
-    };
-  }[];
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
   readonly toolEvents: readonly InspectToolCallEvent[];
@@ -120,7 +112,7 @@ export type InspectPluginListing = {
   readonly displayName: string;
   readonly version: string;
   readonly kind: string;
-  readonly localTrustLevel: string;
+  readonly firstParty: boolean;
   readonly installed: boolean;
   readonly registered: boolean;
   readonly enabled: boolean;
@@ -137,9 +129,15 @@ export type InspectPluginListing = {
 export type InspectPluginToolListing = {
   readonly name: string;
   readonly validationOwner: string;
-  readonly sideEffectLevel: string;
   readonly requiresConfirmation: boolean;
-  readonly sourceReferencesRequired: boolean;
+  /**
+   * What the tool said about itself, so an audit can tell a read-only
+   * tool from one that deletes or reaches the network. Absent when the
+   * tool declared nothing — which is itself the answer, and different
+   * from declaring the call harmless.
+   */
+  readonly annotations?: RuntimePluginToolAnnotations;
+  readonly concurrency?: string;
 };
 
 export type InspectPluginContextItem = {

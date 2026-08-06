@@ -12,6 +12,33 @@ The model proposes. The runtime, tests, and policy commit.
 
 ---
 
+## 0. The Greenfield Principle
+
+**Every line of code and documentation should read as if it had been written
+correctly the first time.** This governs every other section here, and applies
+to source, tests, docs, and this file.
+
+1. **No patching.** Trace a break to its cause and fix it there. Do not stack
+   special cases, copy logic and tweak it, or add a flag to route around the
+   problem. Tearing something down and rewriting it is in scope.
+2. **Code explains itself.** Names carry the *what*. Comments carry *why*, and
+   rules that cannot be inferred from the code. No commented-out code.
+3. **No residue.** No backup copies, orphaned files, or dead code. When a
+   mechanism goes, its tests, fixtures, and docs go with it.
+4. **Deployment parity.** Deployed and local source stay byte-identical.
+
+Before changing code, ask *"if I were writing this for the first time, how
+would I write it?"* — not *"how do I graft this onto what is here?"* Two
+corollaries: a business rule is defined in exactly one place, and all state
+changes pass through the same entry point, so a competing second source never
+appears.
+
+Document only what is high-value, stable, and not discoverable by reading the
+code. When tempted by "good enough for now", prefer the rewrite over leaving a
+landmine.
+
+---
+
 ## 1. Orientation
 
 Top-level modules under `src/` carry a `README.md` stating what that module

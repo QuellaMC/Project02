@@ -1,4 +1,5 @@
 import {readFlagValue} from '../shared/flags.ts';
+import {writeJson} from '../shared/output.ts';
 import type {CharacterProfile} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
@@ -88,11 +89,10 @@ type InspectSessionOutput = {
     readonly runtimeConfig: 'current_at_inspection';
     readonly activation: 'current_at_inspection';
     readonly storedSessionEvidence: 'stored_history';
-    readonly derivedTraceEvidence: 'derived_not_persisted';
+    readonly traceEvidence: 'derived_from_event_log';
   };
   readonly counts: {
     readonly traceEntries: number;
-    readonly derivedTraceEntries: number;
     readonly rawEvents: number;
     readonly conversationMessages: number;
   };
@@ -345,8 +345,8 @@ async function writeSessionEvidence(
     characterId: runtimeLocation.characterScope.characterId,
     boundCharacter,
   });
-  const evidence = logStore.readSessionEvidence();
-  const {traceEntries, rawEvents, conversationMessages} = evidence.stored;
+  const {rawEvents, conversationMessages} = logStore.readSessionEvidence();
+  const traceEntries = logStore.traceEntries();
 
   writeJson(stdout, {
     runtimeConfig: createRuntimeConfigInspectShape(
@@ -361,25 +361,19 @@ async function writeSessionEvidence(
       runtimeConfig: 'current_at_inspection',
       activation: 'current_at_inspection',
       storedSessionEvidence: 'stored_history',
-      derivedTraceEvidence: 'derived_not_persisted',
+      traceEvidence: 'derived_from_event_log',
     }),
     counts: {
       traceEntries: traceEntries.length,
-      derivedTraceEntries: evidence.derived.traceEntries.length,
       rawEvents: rawEvents.length,
       conversationMessages: conversationMessages.length,
     },
     turns: createTurnEvidence({
       conversationMessages,
-      derivedTraceEntries: evidence.derived.traceEntries,
       rawEvents,
       traceEntries,
     }),
   } satisfies InspectSessionOutput);
-}
-
-function writeJson(stdout: NodeJS.WritableStream, value: unknown): void {
-  stdout.write(`${JSON.stringify(value, null, 2)}\n`);
 }
 
 if (isMainModule(import.meta.url)) {

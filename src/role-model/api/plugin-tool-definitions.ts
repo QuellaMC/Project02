@@ -1,7 +1,6 @@
 import {
   createRuntimePluginProvidedTool,
   firstPartyModelToolsPluginId,
-  isApprovalGatedRuntimePluginTool,
   type RuntimePluginProvidedTool,
 } from '../../plugins/api/index.ts';
 import {
@@ -27,13 +26,11 @@ export function createDefaultRoleModelPluginToolDefinitions(): readonly RoleMode
         pluginId: firstPartyModelToolsPluginId,
         name: definition.name,
         description: definition.description,
-        requiredForUserTurn: definition.requiredForUserTurn,
-        callLimit: definition.callLimit,
         inputContract: definition.inputContract,
         validationOwner: 'built_in_model_tools',
-        sideEffectLevel: 'none',
+        annotations: {readOnlyHint: true},
+        concurrency: 'shared',
         requiresConfirmation: false,
-        sourceReferencesRequired: false,
       } satisfies RoleModelPluginToolDefinition),
     ),
   );
@@ -91,10 +88,7 @@ function assertBuiltInRoleModelToolPolicy(
   if (
     pluginId !== firstPartyModelToolsPluginId ||
     providedTool.validationOwner !== 'built_in_model_tools' ||
-    providedTool.sideEffectLevel !== 'none' ||
-    providedTool.requiresConfirmation ||
-    providedTool.callLimit?.scope !== 'model_response' ||
-    providedTool.callLimit.maxCalls !== 1
+    providedTool.requiresConfirmation
   ) {
     throw new TypeError(
       `Plugin tool "${providedTool.name}" must be provided by ${firstPartyModelToolsPluginId}.`,
@@ -111,34 +105,10 @@ function assertHostRoleModelToolPolicy(
     );
   }
 
-  if (
-    providedTool.callLimit !== undefined &&
-    providedTool.callLimit.scope !== 'user_turn'
-  ) {
-    throw new TypeError(
-      `Plugin tool "${providedTool.name}" may only declare a user_turn call limit.`,
-    );
-  }
-
-  const approvalGatedRuntimeConfigWrite =
-    isApprovalGatedRuntimePluginTool(providedTool);
-
-  if (providedTool.requiresConfirmation && !approvalGatedRuntimeConfigWrite) {
-    throw new TypeError(
-      `Plugin tool "${providedTool.name}" requires confirmation and cannot be model-facing in CT-03.`,
-    );
-  }
-
-  if (
-    providedTool.sideEffectLevel !== 'none' &&
-    providedTool.sideEffectLevel !== 'runtime_read' &&
-    providedTool.sideEffectLevel !== 'local_memory_write' &&
-    !approvalGatedRuntimeConfigWrite
-  ) {
-    throw new TypeError(
-      `Plugin tool "${providedTool.name}" must be read-only or local-memory-only for CT-03.`,
-    );
-  }
+  // A tool that declares requiresConfirmation is model-facing and
+  // prompts the user before it runs; the runtime no longer refuses to
+  // expose it. What a plugin may do is decided when the user enables it,
+  // as with a local MCP server they chose to run.
 }
 
 export function modelToolDefinitionsForPluginToolDefinitions(

@@ -45,9 +45,9 @@ import {
   renameSync,
   rmSync,
   statSync,
+  truncateSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
   type BigIntStats,
   type Dirent,
   type Stats,
@@ -67,6 +67,8 @@ import {
   type FileHandle,
 } from 'node:fs/promises';
 
+import {isNodeErrorWithCode} from './node-error.ts';
+
 export type {BigIntStats, Dirent, FileHandle, Stats};
 
 /** `node:fs` flag constants, for callers that pass their own open flags. */
@@ -84,6 +86,42 @@ export function readFileBytesSync(path: string): Buffer {
 
 export async function readTextFile(path: string): Promise<string> {
   return readFile(path, 'utf8');
+}
+
+/**
+ * The file's last byte, or `undefined` when it is absent or empty.
+ *
+ * Appenders read this to tell a complete log from one a crash interrupted
+ * mid-record, which is a question about one byte rather than a reason to
+ * read a session's whole history into memory on every append.
+ */
+export function readFinalByteSync(path: string): number | undefined {
+  let handle: number;
+
+  try {
+    handle = openSync(path, 'r');
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return undefined;
+    }
+
+    throw error;
+  }
+
+  try {
+    const size = fstatSync(handle).size;
+
+    if (size === 0) {
+      return undefined;
+    }
+
+    const buffer = Buffer.alloc(1);
+
+    readSync(handle, buffer, 0, 1, size - 1);
+    return buffer[0];
+  } finally {
+    closeSync(handle);
+  }
 }
 
 // --- Inspecting ----------------------------------------------------------
@@ -173,6 +211,15 @@ export function appendTextFileSync(
   mode: number,
 ): void {
   appendFileSync(path, text, {encoding: 'utf8', mode});
+}
+
+/**
+ * Cut a file back to `length` bytes. Append-only logs use this to drop a
+ * trailing record a crash left unfinished, which is the one edit an
+ * append-only file makes to what is already on disk.
+ */
+export function truncateFileSync(path: string, length: number): void {
+  truncateSync(path, length);
 }
 
 /**
@@ -328,19 +375,6 @@ export function writeToFileSync(
   content: string | Uint8Array,
 ): void {
   writeFileSync(fileDescriptor, content);
-}
-
-/**
- * One write syscall's worth of text, returning how much of it landed.
- * `writeToFileSync` above loops until the whole content is written; this
- * is the single call, for a caller appending to a descriptor it opened
- * itself and flushes explicitly.
- */
-export function writeTextToFileSync(
-  fileDescriptor: number,
-  text: string,
-): number {
-  return writeSync(fileDescriptor, text);
 }
 
 export function readBytesFromFileSync(

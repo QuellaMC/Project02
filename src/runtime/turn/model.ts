@@ -1,7 +1,3 @@
-import {
-  CharacterReplyValidationError,
-  normalizeCharacterAgentReply,
-} from '../../core/index.ts';
 import {buildUserTurnDecisionContext} from '../../role-model/index.ts';
 import {
   createRuntimePluginContext,
@@ -21,32 +17,28 @@ import {
   createRejectedRoleModelDecisionResult,
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
-  type RoleModelDecisionRejection,
 } from '../../role-model/index.ts';
 import {
-  createRoleModelAdapterFromCharacterAgent,
   runRoleModelLoop,
   type RoleModelAdapter,
-  type RoleModelLoopExecutionResult,
-  type RoleModelInterimVisibleReplyEvent,
   type RoleModelLoopResult,
   type RoleModelPluginToolCallCompletedEvent,
   type RoleModelPluginToolCallStartedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
   type RoleModelPluginToolRoutingEvidence,
+  type RoleModelVisibleReplyEvent,
 } from '../../role-model/index.ts';
 import {
   appendToolCallFinished,
   appendToolCallStarted,
   appendVisibleReplyForDecision,
-  beginPluginFileStoreTransaction,
+  commitUserMessage,
   completeRuntimeTurn,
   emitProgress,
   initializeRuntimeTurnEvidence,
   visibleMessageIdsForTurnOption,
 } from './commit.ts';
 import {
-  roleModelIOSnapshotSessionId,
   type LocalRuntimeUserMessageRejectedResult,
   type LocalRuntimeUserMessageResult,
   type RoleModelRawEvidence,
@@ -59,12 +51,11 @@ import {
   appendRejectedResult,
   appendRoleModelRejectedResult,
   combineRuntimePluginEvidence,
-  createInvalidVisibleReplyRejection,
   createRejectedCommitValidationSnapshot,
   handleRuntimeTurnFailure,
   healthResultRejectionMessage,
   healthResultRejectsTurn,
-} from './rollback.ts';
+} from './rejection.ts';
 
 type PreparedRuntimeTurn = {
   readonly decisionContext: DecisionContext;
@@ -83,17 +74,12 @@ type PrepareRuntimeTurnResult =
 type RunRuntimeModelResult =
   | {
       readonly status: 'completed';
-      readonly result: RoleModelLoopExecutionResult;
+      readonly result: RoleModelLoopResult;
     }
   | {
       readonly status: 'rejected';
       readonly result: LocalRuntimeUserMessageRejectedResult;
     };
-
-type InvalidInterimVisibleReply = {
-  rejection: RoleModelDecisionRejection | undefined;
-  evidence: RoleModelRawEvidence | undefined;
-};
 
 export async function runSerializedLocalUserMessageEvent(
   options: RunLocalUserMessageEventOptions,
@@ -120,7 +106,6 @@ async function runPreparedLocalRuntimeTurn(
       rawKind: 'input_validation_rejected',
       rawReason: state.normalizedEventResult.message,
       reason: 'input_validation_rejected',
-      traceStep: 'input_validation_rejected',
     });
   }
 
@@ -146,15 +131,19 @@ async function runPreparedLocalRuntimeTurn(
 async function prepareRuntimeTurn(
   state: RuntimeTurnState,
 ): Promise<PrepareRuntimeTurnResult> {
+  // Context first, then commit: recentVisibleMessages means "the
+  // conversation before this turn", while the current user message rides
+  // the event payload. Committing after the context build keeps that
+  // meaning without excluding the just-said message by filtering.
   const decisionContext = buildUserTurnDecisionContext({
     session: state.options.session,
-    ...(state.options.characterTurnOptions?.recentMessageLimit === undefined
+    ...(state.options.recentMessageLimit === undefined
       ? {}
-      : {
-          recentMessageLimit:
-            state.options.characterTurnOptions.recentMessageLimit,
-        }),
+      : {recentMessageLimit: state.options.recentMessageLimit}),
   });
+
+  await commitUserMessage(state);
+
   const runtimePluginContext = createRuntimePluginContext({
     ...state.identity,
     sessionId: decisionContext.sessionId,
@@ -166,7 +155,6 @@ async function prepareRuntimeTurn(
 
   state.runtimePluginContextForTurn = runtimePluginContext;
   state.runtimePluginHostForTurn = pluginHost;
-  beginPluginFileStoreTransaction(state, pluginHost);
   const beforeRoleModelCallResult =
     await pluginHost.beforeRoleModelCall(runtimePluginContext);
 
@@ -180,7 +168,10 @@ async function prepareRuntimeTurn(
         rawReason: beforeRoleModelCallResult.message,
         reason: beforeRoleModelCallResult.reason,
         runtimePluginContext,
-        traceStep: runtimePluginBeforeRoleModelCallRejectionReason,
+        // The user message committed before this gate; the terminal
+        // event must reference it or later full-evidence reads rebuild
+        // a prior conversation that is missing a durable message.
+        ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
       }),
     };
   }
@@ -200,10 +191,6 @@ async function runRuntimeModel(
   state: RuntimeTurnState,
   prepared: PreparedRuntimeTurn,
 ): Promise<RunRuntimeModelResult> {
-  const invalidInterim: InvalidInterimVisibleReply = {
-    rejection: undefined,
-    evidence: undefined,
-  };
   const roleModelDecisionContext = createDecisionContext({
     sessionId: prepared.decisionContext.sessionId,
     characterSnapshot: prepared.decisionContext.characterSnapshot,
@@ -211,55 +198,38 @@ async function runRuntimeModel(
     runtimeNotes: prepared.decisionContext.runtimeNotes,
     pluginContextItems: prepared.beforeRoleModelCallResult.contextItems,
   });
+  const result = await runRoleModelLoop({
+    event: state.event,
+    decisionContext: roleModelDecisionContext,
+    ...(state.options.maxToolRounds === undefined
+      ? {}
+      : {maxToolRounds: state.options.maxToolRounds}),
+    pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
+    pluginToolHost: prepared.pluginHost,
+    preparedConfigEffectsByToolCallId: state.preparedConfigEffectsByToolCallId,
+    runtimePluginContext: prepared.runtimePluginContext,
+    ...(state.options.characterPersonaSections === undefined
+      ? {}
+      : {personaSections: state.options.characterPersonaSections}),
+    ...(state.options.characterRef === undefined
+      ? {}
+      : {characterRef: state.options.characterRef}),
+    onPluginToolCallStarted(event) {
+      recordPluginToolCallStarted(state, event);
+    },
+    async onPluginToolCallCompleted(event) {
+      await recordPluginToolCallCompleted(state, event);
+    },
+    async onPluginToolCallsRequested(event) {
+      await recordPluginToolCallsRequested(state, event);
+    },
+    async onVisibleReply(event) {
+      await commitVisibleReply(state, prepared, event);
+    },
+    ...roleModelLoopAdapterOption(state.options),
+  });
 
-  try {
-    const result = await runRoleModelLoop({
-      event: state.event,
-      decisionContext: roleModelDecisionContext,
-      ...(state.options.maxToolRounds === undefined
-        ? {}
-        : {maxToolRounds: state.options.maxToolRounds}),
-      pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
-      pluginToolHost: prepared.pluginHost,
-      preparedConfigEffectsByToolCallId:
-        state.preparedConfigEffectsByToolCallId,
-      runtimePluginContext: prepared.runtimePluginContext,
-      ...(state.options.characterPersonaSections === undefined
-        ? {}
-        : {personaSections: state.options.characterPersonaSections}),
-      ...(state.options.characterRef === undefined
-        ? {}
-        : {characterRef: state.options.characterRef}),
-      onPluginToolCallStarted(event) {
-        recordPluginToolCallStarted(state, event);
-      },
-      async onPluginToolCallCompleted(event) {
-        await recordPluginToolCallCompleted(state, event);
-      },
-      async onPluginToolCallsRequested(event) {
-        await recordPluginToolCallsRequested(state, event);
-      },
-      async onInterimVisibleReply(event) {
-        await recordInterimVisibleReply(state, prepared, invalidInterim, event);
-      },
-      ...roleModelLoopAdapterOption(state.options),
-    });
-
-    return {status: 'completed', result};
-  } catch (error: unknown) {
-    const rejection = await rejectInvalidInterimVisibleReply(
-      state,
-      prepared,
-      invalidInterim,
-      error,
-    );
-
-    if (rejection !== undefined) {
-      return {status: 'rejected', result: rejection};
-    }
-
-    throw error;
-  }
+  return {status: 'completed', result};
 }
 
 function recordPluginToolCallStarted(
@@ -323,81 +293,25 @@ async function recordPluginToolCallsRequested(
   });
 }
 
-async function recordInterimVisibleReply(
+async function commitVisibleReply(
   state: RuntimeTurnState,
   prepared: PreparedRuntimeTurn,
-  invalidInterim: InvalidInterimVisibleReply,
-  event: RoleModelInterimVisibleReplyEvent,
+  event: RoleModelVisibleReplyEvent,
 ): Promise<void> {
-  try {
-    normalizeCharacterAgentReply({text: event.text});
-  } catch (error: unknown) {
-    if (error instanceof CharacterReplyValidationError) {
-      const rejection = createInvalidVisibleReplyRejection(error);
-
-      invalidInterim.rejection = rejection;
-      invalidInterim.evidence = {
-        roleModelIOSnapshot: event.ioSnapshot,
-        parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,
-        commitValidation: createRejectedCommitValidationSnapshot({
-          identity: state.identity,
-          rejection,
-          sessionId: roleModelIOSnapshotSessionId(event.ioSnapshot),
-        }),
-      };
-    }
-
-    throw error;
-  }
-
   await appendVisibleReplyForDecision(state, {
     runtimePluginEvidence: prepared.beforeRoleModelCallResult.evidence,
-    final: false,
     roleModelIOSnapshot: event.ioSnapshot,
     parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,
+    round: event.round,
     text: event.text,
   });
-}
-
-async function rejectInvalidInterimVisibleReply(
-  state: RuntimeTurnState,
-  prepared: PreparedRuntimeTurn,
-  invalidInterim: InvalidInterimVisibleReply,
-  error: unknown,
-): Promise<LocalRuntimeUserMessageRejectedResult | undefined> {
-  if (
-    !(error instanceof CharacterReplyValidationError) ||
-    invalidInterim.rejection === undefined ||
-    invalidInterim.evidence === undefined
-  ) {
-    return undefined;
-  }
-
-  const pluginEvidence = combineRuntimePluginEvidence(
-    prepared.beforeRoleModelCallResult.evidence,
-    pluginToolEvidenceFromRouting(state.finishedPluginToolResults),
-  );
-  const toolInvocations = pluginToolInvocationsFromRouting(
-    state.finishedPluginToolResults,
-  );
-
-  return await appendRoleModelRejectedResult(
-    state,
-    invalidInterim.rejection,
-    invalidInterim.evidence,
-    pluginEvidence,
-    prepared.beforeRoleModelCallResult.contextItems,
-    toolInvocations,
-    prepared.runtimePluginContext,
-  );
 }
 
 async function validateAndCommitRuntimeModelResult(
   state: RuntimeTurnState,
   prepared: PreparedRuntimeTurn,
-  roleModelExecutionResult: RoleModelLoopExecutionResult,
+  roleModelResult: RoleModelLoopResult,
 ): Promise<LocalRuntimeUserMessageResult> {
-  const roleModelResult = roleModelExecutionResult.publicResult;
   const roleModelEvidence = {
     roleModelIOSnapshot: roleModelResult.ioSnapshot,
     parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
@@ -410,38 +324,15 @@ async function validateAndCommitRuntimeModelResult(
     roleModelResult.pluginToolResults,
   );
 
-  if (roleModelExecutionResult.status === 'rejected') {
+  if (roleModelResult.status === 'rejected') {
     return await rejectRoleModelResult({
       state,
       prepared,
-      roleModelResult: roleModelExecutionResult.publicResult,
+      roleModelResult,
       roleModelEvidence,
       roleModelPluginEvidence,
       roleModelPluginToolInvocations,
     });
-  }
-
-  const acceptedRoleModelResult = roleModelExecutionResult.publicResult;
-  const visibleReplyText = roleModelExecutionResult.visibleReplyText;
-  const visibleReplyRejection = validateVisibleReplyText(visibleReplyText);
-
-  if (visibleReplyRejection !== undefined) {
-    return await appendRoleModelRejectedResult(
-      state,
-      visibleReplyRejection,
-      {
-        ...roleModelEvidence,
-        commitValidation: createRejectedCommitValidationSnapshot({
-          identity: state.identity,
-          rejection: visibleReplyRejection,
-          sessionId: prepared.decisionContext.sessionId,
-        }),
-      },
-      roleModelPluginEvidence,
-      prepared.beforeRoleModelCallResult.contextItems,
-      roleModelPluginToolInvocations,
-      prepared.runtimePluginContext,
-    );
   }
 
   const preCommitHealthResult = await prepared.pluginHost.health(
@@ -469,11 +360,10 @@ async function validateAndCommitRuntimeModelResult(
     decisionContext: prepared.decisionContext,
     pluginHost: prepared.pluginHost,
     contextItems: prepared.beforeRoleModelCallResult.contextItems,
-    roleModelResult: acceptedRoleModelResult,
+    roleModelResult,
     roleModelPluginEvidence,
     roleModelPluginToolInvocations,
     preCommitHealthResult,
-    visibleReplyText,
   });
 }
 
@@ -501,25 +391,6 @@ async function rejectRoleModelResult(options: {
     options.roleModelPluginToolInvocations,
     prepared.runtimePluginContext,
   );
-}
-
-function validateVisibleReplyText(
-  visibleReplyText: string | undefined,
-): RoleModelDecisionRejection | undefined {
-  if (visibleReplyText === undefined) {
-    return undefined;
-  }
-
-  try {
-    normalizeCharacterAgentReply({text: visibleReplyText});
-    return undefined;
-  } catch (error: unknown) {
-    if (error instanceof CharacterReplyValidationError) {
-      return createInvalidVisibleReplyRejection(error);
-    }
-
-    throw error;
-  }
 }
 
 async function rejectPreCommitHealth(options: {
@@ -558,7 +429,6 @@ async function rejectPreCommitHealth(options: {
     rawReason: roleModelCommitValidationFailureRejectionReason,
     reason: runtimePluginHealthRejectionReason,
     runtimePluginContext: options.prepared.runtimePluginContext,
-    traceStep: 'commit_validation_rejected',
     ...visibleMessageIdsForTurnOption(options.state.committedVisibleMessages),
   });
 }
@@ -566,15 +436,9 @@ async function rejectPreCommitHealth(options: {
 function roleModelLoopAdapterOption(options: RunLocalUserMessageEventOptions): {
   readonly adapter?: RoleModelAdapter;
 } {
-  if (options.roleModelAdapter !== undefined) {
-    return {adapter: options.roleModelAdapter};
-  }
-
-  if (options.agent !== undefined) {
-    return {adapter: createRoleModelAdapterFromCharacterAgent(options.agent)};
-  }
-
-  return {};
+  return options.roleModelAdapter === undefined
+    ? {}
+    : {adapter: options.roleModelAdapter};
 }
 
 function createPluginHostForTurn(state: RuntimeTurnState): RuntimePluginHost {

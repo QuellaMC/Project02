@@ -29,13 +29,8 @@ export {
   type RawEventLogRecordKind,
   type RoleModelCommitValidationResult,
   type RoleModelCommitValidationSnapshot,
-  type RuntimeDerivedSessionEvidence,
-  type RuntimeDerivedTraceEntry,
-  type RuntimeLogStore,
-  type RuntimeSessionEvidenceSnapshot,
-  type RuntimeStoredSessionEvidence,
   type RuntimeTraceEntry,
-  type RuntimeTraceEntryInput,
   type RuntimeTraceStepName,
   type RuntimeTurnStatus,
 } from './evidence/records.ts';
+export type {RuntimeLogStore} from './evidence/contract.ts';

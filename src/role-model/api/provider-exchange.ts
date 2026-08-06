@@ -1,3 +1,4 @@
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {
   freezeRoleModelChatMessage,
   type RoleModelChatCompletionTool,
@@ -6,7 +7,6 @@ import {
 } from './chat-wire.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {isModelToolJsonSchemaType} from './model-tools.ts';
-import {redactRuntimePluginText} from '../../plugins/api/index.ts';
 import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import type {
   RoleModelProviderExchangeSnapshot,
@@ -442,16 +442,14 @@ export function freezeProviderMetadata(
 
   return Object.freeze({
     provider: metadata.provider,
-    ...(metadata.model === undefined
-      ? {}
-      : {model: redactRuntimePluginText(metadata.model)}),
+    ...(metadata.model === undefined ? {} : {model: metadata.model}),
     ...(metadata.request === undefined
       ? {}
       : {
           request: Object.freeze({
             ...(metadata.request.endpoint === undefined
               ? {}
-              : {endpoint: redactRuntimePluginText(metadata.request.endpoint)}),
+              : {endpoint: metadata.request.endpoint}),
             ...(messageCount === undefined ? {} : {messageCount}),
             stream: false,
           }),
@@ -467,8 +465,8 @@ export function freezeProviderMetadata(
       ? {}
       : {
           error: Object.freeze({
-            code: redactRuntimePluginText(metadata.error.code),
-            message: redactRuntimePluginText(metadata.error.message),
+            code: metadata.error.code,
+            message: metadata.error.message,
           }),
         }),
   } satisfies RoleModelProviderMetadata);
@@ -482,7 +480,7 @@ function finiteProviderMetadataNumber(value: number, field: string): number {
   return value;
 }
 
-export function freezeRuntimePluginJsonObject(
+function freezeRuntimePluginJsonObject(
   value: Readonly<Record<string, unknown>>,
 ): Readonly<Record<string, RuntimePluginJsonValue>> {
   const snapshot: Record<string, RuntimePluginJsonValue> = {};
@@ -494,9 +492,7 @@ export function freezeRuntimePluginJsonObject(
   return Object.freeze(snapshot);
 }
 
-export function freezeRuntimePluginJsonValue(
-  value: unknown,
-): RuntimePluginJsonValue {
+function freezeRuntimePluginJsonValue(value: unknown): RuntimePluginJsonValue {
   if (
     value === null ||
     typeof value === 'string' ||
@@ -517,10 +513,4 @@ export function freezeRuntimePluginJsonValue(
   throw new TypeError(
     'Role-model tool observation values must be JSON-compatible.',
   );
-}
-
-export function isJsonRecord(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

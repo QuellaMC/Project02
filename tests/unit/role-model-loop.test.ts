@@ -27,7 +27,7 @@ import {
   memoryRecallToolDefinition,
   memorySearchToolDefinition,
   parseTestJson,
-  requiredMemorySearchToolDefinition,
+  toolWithConcurrency,
   visibleDotReplyToolDefinition,
   withVisibleReplyTool,
 } from '../support/role-model-loop-fixtures.ts';
@@ -40,6 +40,7 @@ describe('role-model loop routing and policy', () => {
 
       await expect(
         runRoleModelLoop({
+          onVisibleReply: () => {},
           event: createTestEvent('hello', 'evt_invalid_max_tool_rounds'),
           decisionContext: createTestDecisionContext(),
           pluginToolDefinitions: [],
@@ -111,7 +112,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_explicit_empty_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -138,7 +140,8 @@ describe('role-model loop routing and policy', () => {
 
   it('derives requested tool names for a replayable live adapter rejection', async () => {
     const details = 'Decision requested disallowed tool visible_reply.';
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_live_replayable_rejection'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -188,7 +191,8 @@ describe('role-model loop routing and policy', () => {
   });
 
   it('accepts terminal content as non-committed text when visible_reply is unavailable', async () => {
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_no_visible_terminal_text'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -216,6 +220,227 @@ describe('role-model loop routing and policy', () => {
     });
   });
 
+  it('overlaps shared tool calls and keeps observations in call order', async () => {
+    const events: string[] = [];
+    const searchTool = toolWithConcurrency(
+      memorySearchToolDefinition,
+      'shared',
+    );
+    const recallTool = toolWithConcurrency(
+      memoryRecallToolDefinition,
+      'shared',
+    );
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        events.push(`start:${call.toolName}`);
+        await Promise.resolve();
+        await Promise.resolve();
+        events.push(`end:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('search memory', 'evt_shared_tool_overlap'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(searchTool, recallTool),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_shared_tool_overlap'),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'memory.search', input: {query: 'first'}},
+              {name: 'memory.recall', input: {query: 'second'}},
+            ],
+          },
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'done'}},
+            ],
+          },
+        ],
+        () => undefined,
+      ),
+    });
+
+    expect(result.status).toBe('accepted');
+    // Both shared calls are in flight together.
+    expect(events.indexOf('start:memory.recall')).toBeLessThan(
+      events.indexOf('end:memory.search'),
+    );
+    // Observations follow the model's call order regardless of which
+    // call finished first.
+    expect(
+      result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
+    ).toEqual(['memory.search', 'memory.recall']);
+  });
+
+  it('reports a finished tool call before its slower sibling settles', async () => {
+    // A tool's write is durable when its call returns, so a crash between
+    // that and the report would leave recovery a started call and no
+    // record of the effect. Waiting for the batch widens that window for
+    // every call but the slowest.
+    const events: string[] = [];
+    const fastTool = toolWithConcurrency(memorySearchToolDefinition, 'shared');
+    const slowTool = toolWithConcurrency(memoryRecallToolDefinition, 'shared');
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        if (call.toolName === 'memory.recall') {
+          for (let tick = 0; tick < 8; tick += 1) {
+            await Promise.resolve();
+          }
+        }
+
+        events.push(`settled:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('search memory', 'evt_completion_timing'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(slowTool, fastTool),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_completion_timing'),
+      onPluginToolCallCompleted: event => {
+        events.push(`reported:${event.toolName}`);
+      },
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'memory.recall', input: {query: 'slow'}},
+              {name: 'memory.search', input: {query: 'fast'}},
+            ],
+          },
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'done'}},
+            ],
+          },
+        ],
+        () => undefined,
+      ),
+    });
+
+    expect(result.status).toBe('accepted');
+    // The fast call is reported while the slow one is still running,
+    // even though the model listed the slow one first.
+    expect(events.indexOf('reported:memory.search')).toBeLessThan(
+      events.indexOf('settled:memory.recall'),
+    );
+    // Observations still follow the model's call order.
+    expect(
+      result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
+    ).toEqual(['memory.recall', 'memory.search']);
+  });
+
+  it('lets every call finish before a failed report propagates', async () => {
+    const events: string[] = [];
+    const fastTool = toolWithConcurrency(memorySearchToolDefinition, 'shared');
+    const slowTool = toolWithConcurrency(memoryRecallToolDefinition, 'shared');
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        if (call.toolName === 'memory.recall') {
+          await new Promise(resolve => {
+            setTimeout(resolve, 25);
+          });
+        }
+
+        events.push(`settled:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    await expect(
+      runRoleModelLoop({
+        onVisibleReply: () => {},
+        event: createTestEvent('search memory', 'evt_report_failure'),
+        decisionContext: createTestDecisionContext(),
+        pluginToolDefinitions: withVisibleReplyTool(fastTool, slowTool),
+        pluginToolHost,
+        runtimePluginContext: createTestPluginContext('evt_report_failure'),
+        onPluginToolCallCompleted: event => {
+          if (event.toolName === 'memory.search') {
+            throw new Error('could not append finish evidence');
+          }
+        },
+        adapter: createSequencedAdapter(
+          [
+            {
+              toolCalls: [
+                {name: 'memory.search', input: {query: 'fast'}},
+                {name: 'memory.recall', input: {query: 'slow'}},
+              ],
+            },
+          ],
+          () => undefined,
+        ),
+      }),
+    ).rejects.toThrow(/could not append finish evidence/iu);
+
+    // The slow sibling completed before the failure surfaced, so no tool
+    // call outlives the turn that owns it.
+    expect(events).toContain('settled:memory.recall');
+  });
+
+  it('runs an exclusive tool call alone within its batch', async () => {
+    const events: string[] = [];
+    const searchTool = toolWithConcurrency(
+      memorySearchToolDefinition,
+      'shared',
+    );
+    const recallTool = toolWithConcurrency(
+      memoryRecallToolDefinition,
+      'exclusive',
+    );
+    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
+      async handleToolCall(call) {
+        events.push(`start:${call.toolName}`);
+        await Promise.resolve();
+        await Promise.resolve();
+        events.push(`end:${call.toolName}`);
+        return createAcceptedToolCallResult();
+      },
+    });
+
+    await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('mixed batch', 'evt_exclusive_tool_alone'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(searchTool, recallTool),
+      pluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_exclusive_tool_alone'),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: 'memory.search', input: {query: 'first'}},
+              {name: 'memory.recall', input: {query: 'second'}},
+            ],
+          },
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'done'}},
+            ],
+          },
+        ],
+        () => undefined,
+      ),
+    });
+
+    // The exclusive call waits for the shared call to finish.
+    expect(events).toEqual([
+      'start:memory.search',
+      'end:memory.search',
+      'start:memory.recall',
+      'end:memory.recall',
+    ]);
+  });
+
   it('does not route a defined plugin tool omitted from allowedTools', async () => {
     let handledCalls = 0;
     const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
@@ -225,7 +450,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_disallowed_memory_search'),
       decisionContext: createTestDecisionContext(),
       allowedTools: [visibleReplyModelToolName],
@@ -329,7 +555,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_native_argument_mismatch'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -426,7 +653,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_provider_name_mapping'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -554,7 +782,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent(
         'use colliding tools',
         'evt_provider_name_collision',
@@ -612,7 +841,7 @@ describe('role-model loop routing and policy', () => {
       status: 'accepted',
       toolName: visibleReplyModelToolName,
       output: {
-        kind: 'interim_visible_reply',
+        kind: 'visible_reply_delivered',
       },
     });
   });
@@ -750,7 +979,8 @@ describe('role-model loop routing and policy', () => {
         },
       });
 
-      const {publicResult: result} = await runRoleModelLoop({
+      const result = await runRoleModelLoop({
+        onVisibleReply: () => {},
         event: createTestEvent('use tools', 'evt_native_history_mismatch'),
         decisionContext: createTestDecisionContext(),
         adapter,
@@ -817,7 +1047,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -852,6 +1083,7 @@ describe('role-model loop routing and policy', () => {
   it('routes executable tools through the immutable definition owner', async () => {
     const routedPluginIds: string[] = [];
     const options = {
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_definition_owned_routing'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -887,7 +1119,7 @@ describe('role-model loop routing and policy', () => {
       ),
     };
 
-    const {publicResult: result} = await runRoleModelLoop(options);
+    const result = await runRoleModelLoop(options);
 
     expect(result.status).toBe('accepted');
     expect(routedPluginIds).toEqual(['memory.search.fixture']);
@@ -921,7 +1153,8 @@ describe('role-model loop routing and policy', () => {
       () => undefined,
     );
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent('search memory', 'evt_missing_plugin_tool_host'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -980,7 +1213,8 @@ describe('role-model loop routing and policy', () => {
         },
       });
 
-      const {publicResult: result} = await runRoleModelLoop({
+      const result = await runRoleModelLoop({
+        onVisibleReply: () => {},
         event: createTestEvent(
           'search memory',
           'evt_replayed_tool_call',
@@ -1011,73 +1245,6 @@ describe('role-model loop routing and policy', () => {
       'evt_replayed_tool_call.trace_retry_second.round-1.1.memory.search',
     );
     expect(firstCallId).not.toBe(secondCallId);
-  });
-
-  it('requires a successful required plugin tool result before final output', async () => {
-    let invocations = 0;
-    const adapter = createSequencedAdapter(
-      [
-        {
-          toolCalls: [
-            {
-              name: 'memory.search',
-              input: {
-                query: 'Mira',
-              },
-            },
-          ],
-        },
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {
-                text: 'continued after required tool failed',
-              },
-            },
-          ],
-        },
-      ],
-      () => {
-        invocations += 1;
-      },
-    );
-    const pluginToolHost: RoleModelPluginToolHost = Object.freeze({
-      handleToolCall(call, context) {
-        return createRejectedToolCallResult({
-          call,
-          context,
-          evidenceStatus: 'degraded',
-          policyOutcome: 'optional_degraded',
-        });
-      },
-    });
-
-    const {publicResult: result} = await runRoleModelLoop({
-      event: createTestEvent('search memory', 'evt_required_plugin_tool'),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: withVisibleReplyTool(
-        requiredMemorySearchToolDefinition,
-      ),
-      pluginToolHost,
-      runtimePluginContext: createTestPluginContext('evt_required_plugin_tool'),
-      maxToolRounds: 2,
-    });
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: 'missing_required_tool_call',
-      },
-    });
-    expect(invocations).toBe(3);
-    expect(result.pluginToolResults[0]?.result.evidence).toMatchObject([
-      {
-        status: 'degraded',
-        policyOutcome: 'optional_degraded',
-      },
-    ]);
   });
 
   it('continues after handler failures with rejected evidence', async () => {
@@ -1128,7 +1295,8 @@ describe('role-model loop routing and policy', () => {
       },
     });
 
-    const {publicResult: result} = await runRoleModelLoop({
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
       event: createTestEvent(
         'search memory',
         'evt_handler_rejected_plugin_tool',

@@ -31,7 +31,10 @@ import {
   type PackageCaptureRejectionReason,
   type PlannedPackageFile,
 } from '../../shared/package-capture.ts';
-import type {PackageDirectorySnapshot} from '../../shared/package-metadata.ts';
+import {
+  compareText,
+  type PackageDirectorySnapshot,
+} from '../../shared/package-metadata.ts';
 import {maxRuntimePluginPackageMetadataBytes} from '../api/package-descriptor.ts';
 import type {RuntimePluginPackageProvenance} from './contract.ts';
 
@@ -512,8 +515,4 @@ function artifactError(
   reason: RuntimePluginPackageArtifactError['reason'],
 ): RuntimePluginPackageArtifactError {
   return new RuntimePluginPackageArtifactError({path, reason});
-}
-
-function compareText(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

@@ -2,7 +2,6 @@ import {readFlagValue} from '../shared/flags.ts';
 import {createInterface} from 'node:readline';
 
 import {
-  type CharacterAgent,
   type CharacterProfile,
   type ConversationSession,
   createConversationSession,
@@ -28,6 +27,7 @@ import {
   type ChatTraceSummary,
   createRuntimeLogStore,
   createTraceSummary,
+  deriveRuntimeTraceEntries,
   sameTraceIdentity,
   type TraceIdentity,
 } from '../../runtime/evidence/index.ts';
@@ -96,6 +96,7 @@ import {
   runBestEffortPluginShutdown,
 } from '../../plugins/host/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
+import {writeJson} from '../shared/output.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -103,7 +104,6 @@ type ChatCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly traceMode?: boolean;
-  readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost?: RuntimePluginHost;
   readonly session?: ConversationSession;
@@ -134,7 +134,6 @@ type ChatCliArgs = {
 
 type CompletedChatRuntimeTurn = {
   readonly status: 'completed';
-  readonly characterReplyText?: string;
   readonly nonCommittedTopLevelText?: string;
   readonly traceSummary: ChatTraceSummary;
 };
@@ -314,7 +313,7 @@ function writeTerminalToolConfirmationRequest(
 ): void {
   stdout.write('\nPlugin config update requires your approval.\n');
   stdout.write(`${request.summary}\n`);
-  stdout.write(`${JSON.stringify(request.preview, null, 2)}\n`);
+  writeJson(stdout, request.preview);
   stdout.write('Approve this one exact change? [y/N] ');
 }
 
@@ -675,7 +674,6 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
       : configuredLogStore;
 
   try {
-    activeLogStore.recoverAbandonedWriterEvidence?.();
     return await runChatCliWithActiveWriter({
       ...options,
       logStore: activeLogStore,
@@ -803,9 +801,6 @@ async function handleChatInputLine(options: {
       session: options.session,
       logStore: options.logStore,
       line: options.line,
-      ...(options.options.agent === undefined
-        ? {}
-        : {agent: options.options.agent}),
       ...(options.options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.options.roleModelAdapter}),
@@ -856,11 +851,6 @@ function writeChatRuntimeResult(options: {
   readonly showNonCommittedTopLevelText: boolean;
 }): void {
   if (options.result.status === 'completed') {
-    if (options.result.characterReplyText !== undefined) {
-      options.options.stdout.write(
-        `${options.session.character.displayName}: ${options.result.characterReplyText}\n`,
-      );
-    }
     if (
       options.showNonCommittedTopLevelText &&
       options.result.nonCommittedTopLevelText !== undefined
@@ -921,10 +911,6 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
     normalizedCurrentUserMessage: exitCommand,
   };
 
-  options.logStore.appendTrace({
-    ...identity,
-    step: 'runtime_event_received',
-  });
   options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_event_received',
@@ -947,14 +933,6 @@ async function endChatSession(options: EndChatSessionOptions): Promise<void> {
       health: [],
     }),
   });
-  options.logStore.appendTrace({
-    ...identity,
-    step: 'raw_event_log_appended',
-  });
-  options.logStore.appendTrace({
-    ...identity,
-    step: 'runtime_turn_completed',
-  });
 }
 
 function shouldRecordSessionEndResult(
@@ -976,7 +954,6 @@ type HandleUserMessageThroughRuntimeOptions = {
   readonly session: ConversationSession;
   readonly logStore: RuntimeLogStore;
   readonly line: string;
-  readonly agent?: CharacterAgent;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
@@ -1000,7 +977,6 @@ async function handleUserMessageThroughRuntime(
         session: options.session,
         logStore: options.logStore,
         rawInput: options.line,
-        ...(options.agent === undefined ? {} : {agent: options.agent}),
         ...(options.roleModelAdapter === undefined
           ? {}
           : {roleModelAdapter: options.roleModelAdapter}),
@@ -1022,14 +998,16 @@ async function handleUserMessageThroughRuntime(
         throw error;
       }
 
-      const evidence = options.logStore.readSessionEvidence().stored;
+      const evidence = options.logStore.readSessionEvidence();
 
       return mapUnexpectedRuntimeFailureResult(
         identity,
-        evidence.traceEntries.filter(entry =>
-          sameTraceIdentity(entry, identity),
+        options.logStore
+          .traceEntries()
+          .filter(traceEntry => sameTraceIdentity(traceEntry, identity)),
+        evidence.rawEvents.filter(rawEvent =>
+          sameTraceIdentity(rawEvent, identity),
         ),
-        evidence.rawEvents.filter(event => sameTraceIdentity(event, identity)),
       );
     }
   } catch (error: unknown) {
@@ -1052,18 +1030,13 @@ function mapRuntimeResult(
   result: LocalRuntimeUserMessageResult,
 ): ChatRuntimeTurn {
   if (result.status === 'completed') {
-    const turn = result.turn;
-
     return {
       status: 'completed',
-      ...(turn === undefined
-        ? {}
-        : {characterReplyText: turn.characterMessage.text}),
       ...nonCommittedTopLevelTextOption(result.rawEvent),
       traceSummary: createTraceSummary(
         result.event,
         'completed',
-        result.traceEntries,
+        deriveRuntimeTraceEntries(result.rawEventLogRecords),
         undefined,
         result.rawEvent,
         result.rawEventLogRecords,
@@ -1082,7 +1055,7 @@ function mapRuntimeResult(
     traceSummary: createTraceSummary(
       result.event,
       'rejected',
-      result.traceEntries,
+      deriveRuntimeTraceEntries(result.rawEventLogRecords),
       result.message,
       result.rawEvent,
       result.rawEventLogRecords,
@@ -1096,10 +1069,7 @@ function writeRuntimeProgress(
   progressEvent: LocalRuntimeTurnProgressEvent,
 ): void {
   if (progressEvent.kind === 'visible_reply') {
-    if (!progressEvent.final) {
-      stdout.write(`${session.character.displayName}: ${progressEvent.text}\n`);
-    }
-
+    stdout.write(`${session.character.displayName}: ${progressEvent.text}\n`);
     return;
   }
 
@@ -1172,9 +1142,10 @@ function mapInputRejectionResult(
     traceSummary: createTraceSummary(
       result.identity,
       'rejected',
-      result.traceEntries,
+      deriveRuntimeTraceEntries(result.rawEventLogRecords),
       result.message,
       result.rawEvent,
+      result.rawEventLogRecords,
     ),
   };
 }

@@ -1,9 +1,5 @@
 import {statPathSync} from '../../shared/file-system.ts';
 import {basename} from 'node:path';
-import {
-  CompleteJsonLinesError,
-  splitCompleteJsonLines,
-} from '../storage/json-lines.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {
   LocalRuntimeStorageContractError,
@@ -12,35 +8,51 @@ import {
 import {cleanupAbandonedAtomicReplacementsIn} from '../storage/atomic-file.ts';
 import {
   readOptionalStoreText,
+  readStoreJsonLines,
   storeWriteFailed,
 } from '../storage/store-file.ts';
-import {decodeConversationLogRecord} from '../storage/conversation-codec.ts';
 import {decodeRawEventLogRecord} from '../storage/raw-event-codec.ts';
-import {decodeRuntimeTraceEntry} from '../storage/trace-codec.ts';
+import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 import type {
-  CachedRuntimeSessionEvidence,
-  DurableRuntimeSessionEvidence,
-  MutableDurableRuntimeSessionEvidence,
   RuntimeEvidenceFileStamp,
   RuntimeEvidenceFileStamps,
 } from './contract.ts';
 
-export function createMutableDurableRuntimeSessionEvidence(
-  evidence: DurableRuntimeSessionEvidence,
-): MutableDurableRuntimeSessionEvidence {
-  return {
-    traceEntries: [...evidence.traceEntries],
-    rawEvents: [...evidence.rawEvents],
-    conversationMessages: [...evidence.conversationMessages],
-  };
+/** The message a commit event carries, or undefined for any other event. */
+export function conversationMessageForRawEvent(
+  rawEvent: RawEventLogRecord,
+): ConversationLogRecord | undefined {
+  if (
+    rawEvent.kind !== 'visible_message_committed' ||
+    rawEvent.visibleMessage === undefined ||
+    rawEvent.committedAt === undefined
+  ) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    eventId: rawEvent.eventId,
+    traceId: rawEvent.traceId,
+    createdAt: rawEvent.createdAt,
+    committedAt: rawEvent.committedAt,
+    ...rawEvent.visibleMessage,
+  } satisfies ConversationLogRecord);
 }
 
-export function readCoherentRuntimeSessionEvidence(
+/**
+ * The file's decoded records under a stable stamp — codec-valid lines,
+ * not yet a validated session. The caller replays them through the
+ * transition machine; only what replays is evidence.
+ */
+export function readCoherentRuntimeSessionRecords(
   paths: LocalRuntimeSessionPaths,
   onEvidenceFileRead:
     | ((event: {readonly filePath: string; readonly attempt: number}) => void)
     | undefined,
-): CachedRuntimeSessionEvidence {
+): {
+  readonly stamps: RuntimeEvidenceFileStamps;
+  readonly rawEvents: readonly RawEventLogRecord[];
+} {
   for (let attempt = 0; attempt < 2; attempt += 1) {
     const before = readRuntimeEvidenceFileStamps(paths);
     const contents = readRuntimeEvidenceFileContents(
@@ -55,25 +67,14 @@ export function readCoherentRuntimeSessionEvidence(
       continue;
     }
 
-    const evidence = createMutableDurableRuntimeSessionEvidence({
-      traceEntries: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.tracePath,
-        content: contents.trace,
-        decodeLine: decodeRuntimeTraceEntry,
-      }),
+    return {
+      stamps: after,
       rawEvents: decodeRuntimeEvidenceJsonLines({
         filePath: paths.rawEventsPath,
         content: contents.rawEvents,
         decodeLine: decodeRawEventLogRecord,
       }),
-      conversationMessages: decodeRuntimeEvidenceJsonLines({
-        filePath: paths.conversationPath,
-        content: contents.conversation,
-        decodeLine: decodeConversationLogRecord,
-      }),
-    });
-
-    return {stamps: after, evidence};
+    };
   }
 
   throw new LocalRuntimeStorageContractError(
@@ -90,26 +91,12 @@ function readRuntimeEvidenceFileContents(
     | ((event: {readonly filePath: string; readonly attempt: number}) => void)
     | undefined,
 ): {
-  readonly trace: string | undefined;
   readonly rawEvents: string | undefined;
-  readonly conversation: string | undefined;
 } {
   return Object.freeze({
-    trace: readStampedRuntimeEvidenceFile(
-      paths.tracePath,
-      stamps.trace,
-      attempt,
-      onEvidenceFileRead,
-    ),
     rawEvents: readStampedRuntimeEvidenceFile(
       paths.rawEventsPath,
       stamps.rawEvents,
-      attempt,
-      onEvidenceFileRead,
-    ),
-    conversation: readStampedRuntimeEvidenceFile(
-      paths.conversationPath,
-      stamps.conversation,
       attempt,
       onEvidenceFileRead,
     ),
@@ -138,6 +125,12 @@ function readStampedRuntimeEvidenceFile(
   return content;
 }
 
+/**
+ * The file's committed records. A record a crash left unfinished is
+ * skipped, so an interrupted write costs its own record rather than the
+ * session around it; a committed record that is damaged fails the read
+ * as a store contract error naming the file.
+ */
 function decodeRuntimeEvidenceJsonLines<T>(options: {
   readonly filePath: string;
   readonly content: string | undefined;
@@ -147,34 +140,18 @@ function decodeRuntimeEvidenceJsonLines<T>(options: {
     return Object.freeze([]);
   }
 
-  try {
-    return Object.freeze(
-      splitCompleteJsonLines(options.content).map(options.decodeLine),
-    );
-  } catch (error: unknown) {
-    if (error instanceof CompleteJsonLinesError) {
-      throw new LocalRuntimeStorageContractError(
-        error.reason === 'missing_terminal_newline'
-          ? 'partial_write'
-          : 'malformed_record',
-        error.reason === 'missing_terminal_newline'
-          ? `Local runtime log file ended without a complete JSONL record: ${options.filePath}.`
-          : `Local runtime log file contains a blank JSONL record: ${options.filePath}.`,
-        {cause: error},
-      );
-    }
-
-    throw error;
-  }
+  return Object.freeze(
+    readStoreJsonLines(options.filePath, options.content).map(
+      options.decodeLine,
+    ),
+  );
 }
 
 export function readRuntimeEvidenceFileStamps(
   paths: LocalRuntimeSessionPaths,
 ): RuntimeEvidenceFileStamps {
   return Object.freeze({
-    trace: readRuntimeEvidenceFileStamp(paths.tracePath),
     rawEvents: readRuntimeEvidenceFileStamp(paths.rawEventsPath),
-    conversation: readRuntimeEvidenceFileStamp(paths.conversationPath),
   });
 }
 
@@ -209,11 +186,7 @@ export function sameRuntimeEvidenceFileStamps(
   left: RuntimeEvidenceFileStamps,
   right: RuntimeEvidenceFileStamps,
 ): boolean {
-  return (
-    sameRuntimeEvidenceFileStamp(left.trace, right.trace) &&
-    sameRuntimeEvidenceFileStamp(left.rawEvents, right.rawEvents) &&
-    sameRuntimeEvidenceFileStamp(left.conversation, right.conversation)
-  );
+  return sameRuntimeEvidenceFileStamp(left.rawEvents, right.rawEvents);
 }
 
 function sameRuntimeEvidenceFileStamp(
@@ -238,9 +211,7 @@ export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(
 ): void {
   try {
     cleanupAbandonedAtomicReplacementsIn(paths.sessionRoot, [
-      basename(paths.tracePath),
       basename(paths.rawEventsPath),
-      basename(paths.conversationPath),
     ]);
   } catch (error: unknown) {
     throw storeWriteFailed(paths.sessionRoot, error);

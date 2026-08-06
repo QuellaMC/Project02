@@ -1,9 +1,6 @@
 import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
 import type {InMemoryRuntimePluginFileStoreOptions} from '../../../plugins/index.ts';
-import type {
-  InMemoryPluginStoreState,
-  StagedPluginFileStoreOperation,
-} from './contracts.ts';
+import type {InMemoryPluginStoreState} from './contracts.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,
@@ -114,55 +111,4 @@ function pluginStoreStateForKey(
   }
 
   return state;
-}
-
-export function inMemoryPluginFileStoreContent(
-  state: InMemoryPluginStoreState,
-  path: string,
-): string | undefined {
-  const value = state.files.get(path);
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (state.pathModes.get(path) === 'jsonl') {
-    if (!isJsonArray(value)) {
-      throw new TypeError('Plugin JSONL path already stores non-array JSON.');
-    }
-
-    return value.map(line => `${JSON.stringify(line)}\n`).join('');
-  }
-
-  return `${JSON.stringify(value)}\n`;
-}
-
-export function applyInMemoryPluginFileStoreOperation(
-  state: InMemoryPluginStoreState,
-  operation: Pick<StagedPluginFileStoreOperation, 'kind' | 'path' | 'value'>,
-): void {
-  if (operation.kind === 'write_json') {
-    assertJsonPathMode(state.pathModes.get(operation.path));
-    state.files.set(operation.path, operation.value);
-    state.pathModes.set(operation.path, 'json');
-    state.revision += 1;
-    return;
-  }
-
-  assertJsonlPathMode(state.pathModes.get(operation.path));
-  const current = state.files.get(operation.path);
-
-  if (current === undefined) {
-    state.files.set(operation.path, Object.freeze([operation.value]));
-  } else if (isJsonArray(current)) {
-    state.files.set(
-      operation.path,
-      Object.freeze([...current, operation.value]),
-    );
-  } else {
-    throw new TypeError('Plugin JSONL path already stores non-array JSON.');
-  }
-
-  state.pathModes.set(operation.path, 'jsonl');
-  state.revision += 1;
 }

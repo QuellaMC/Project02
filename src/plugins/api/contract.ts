@@ -28,12 +28,6 @@ export const runtimePluginDeclarationValues = [
   'plugin_discovery',
 ] as const;
 
-export const runtimePluginTrustLevelValues = [
-  'first_party',
-  'trusted_adapter',
-  'test_fixture',
-] as const;
-
 export const runtimePluginAccessNameValues = [
   'file_store',
   'turn_context',
@@ -46,13 +40,14 @@ export const runtimePluginAccessLevelValues = [
   'write',
 ] as const;
 
-export const runtimePluginSideEffectLevelValues = [
-  'none',
-  'runtime_read',
-  'runtime_config_write',
-  'local_memory_write',
-  'external_read',
-  'external_write',
+/**
+ * How a tool call may overlap others in the same model batch. Scheduling
+ * only, separate from the annotation hints: a read-only tool can still
+ * need exclusivity, and a writing one against isolated state may not.
+ */
+export const runtimePluginToolConcurrencyValues = [
+  'shared',
+  'exclusive',
 ] as const;
 
 export const beforeRoleModelFailureBehaviorValues = [
@@ -65,13 +60,7 @@ export const handleToolCallFailureBehaviorValues = [
   'degrade',
 ] as const;
 
-export const afterTurnCommittedFailureBehaviorValues = ['log_failure'] as const;
 export const healthFailureBehaviorValues = ['degrade', 'reject_turn'] as const;
-export const confirmationRequirementValues = [
-  'not_required',
-  'required',
-] as const;
-
 export const runtimePluginContextItemKindValues = [
   'memory',
   'resource',
@@ -150,8 +139,6 @@ export const runtimePluginConfigScopeValues = [
 export type RuntimePluginKind = (typeof runtimePluginKindValues)[number];
 export type RuntimePluginDeclaration =
   (typeof runtimePluginDeclarationValues)[number];
-export type RuntimePluginTrustLevel =
-  (typeof runtimePluginTrustLevelValues)[number];
 export type RuntimePluginAccessName =
   (typeof runtimePluginAccessNameValues)[number];
 export type RuntimePluginAccessLevel =
@@ -163,18 +150,29 @@ export type RuntimePluginAccessSnapshot = {
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly grantedAccess: RuntimePluginAccessMap;
 };
-export type RuntimePluginSideEffectLevel =
-  (typeof runtimePluginSideEffectLevelValues)[number];
+export type RuntimePluginToolConcurrency =
+  (typeof runtimePluginToolConcurrencyValues)[number];
+
+/**
+ * Advisory description of a tool, in the shape MCP clients use, so the
+ * person enabling a plugin can judge it before they enable it.
+ *
+ * Nothing in the runtime reads these. Enabling a plugin is the trust
+ * decision, and a hint the plugin wrote about itself cannot be the thing
+ * that constrains it — so an absent hint withholds nothing, and a
+ * `readOnlyHint` does not stop a tool from writing.
+ */
+export type RuntimePluginToolAnnotations = {
+  readonly readOnlyHint?: boolean;
+  readonly destructiveHint?: boolean;
+  readonly openWorldHint?: boolean;
+};
 export type RuntimePluginBeforeRoleModelFailureBehavior =
   (typeof beforeRoleModelFailureBehaviorValues)[number];
 export type RuntimePluginHandleToolCallFailureBehavior =
   (typeof handleToolCallFailureBehaviorValues)[number];
-export type RuntimePluginAfterTurnCommittedFailureBehavior =
-  (typeof afterTurnCommittedFailureBehaviorValues)[number];
 export type RuntimePluginHealthFailureBehavior =
   (typeof healthFailureBehaviorValues)[number];
-export type RuntimePluginConfirmationRequirement =
-  (typeof confirmationRequirementValues)[number];
 export type RuntimePluginContextItemKind =
   (typeof runtimePluginContextItemKindValues)[number];
 export type RuntimePluginSourceKind =

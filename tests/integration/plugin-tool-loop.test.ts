@@ -30,7 +30,6 @@ import {
   createSequencedAdapter,
   createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
-  transactionIdentityFromContext,
 } from '../support/plugin-tool-loop-fixtures.ts';
 
 describe('plugin-driven Character State tool loop', () => {
@@ -276,78 +275,6 @@ describe('plugin-driven Character State tool loop', () => {
     ]);
   });
 
-  it('counts invalid character_state.patch attempts against its turn limit', async () => {
-    const {session, logStore, pluginStore} =
-      await createDurableCharacterStateHarness(
-        'session-plugin-patch-invalid-retry',
-      );
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: 'character_state.patch',
-            input: {
-              activity: 'reflecting',
-            },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            name: 'character_state.patch',
-            input: {
-              currentActivity: 'reflecting',
-            },
-          },
-        ],
-      },
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {
-              text: 'state corrected',
-            },
-          },
-        ],
-      },
-    ]);
-
-    const result = await runLocalUserMessageEvent({
-      event: createTestEvent('correct state', 'evt_plugin_patch_invalid_retry'),
-      session,
-      logStore,
-      roleModelAdapter: adapter,
-    });
-    const toolFinishedEvents = logStore
-      .rawEvents()
-      .filter(event => event.kind === 'tool_call_finished');
-
-    expect(result.status).toBe('completed');
-    expect(toolFinishedEvents).toHaveLength(2);
-    expect(toolFinishedEvents[0]).toMatchObject({
-      dispatchedToHost: true,
-      toolName: 'character_state.patch',
-      toolResult: {
-        status: 'rejected',
-        reason: 'invalid_input',
-      },
-    });
-    expect(toolFinishedEvents[1]).toMatchObject({
-      dispatchedToHost: false,
-      toolName: 'character_state.patch',
-      toolResult: {
-        status: 'rejected',
-        reason: 'tool_call_limit_reached',
-      },
-    });
-    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
-    const checkpoint = pluginStore.readJson('checkpoint.json');
-    expect(checkpoint).toMatchObject({eventCount: 0});
-    expect(JSON.stringify(checkpoint)).not.toContain('reflecting');
-  });
-
   it('replays a durably stored turn that recovered through decision-error feedback', async () => {
     const sessionId = 'session-feedback-replay';
     const {session, logStore, storeRoot} =
@@ -452,7 +379,7 @@ describe('plugin-driven Character State tool loop', () => {
     });
   });
 
-  it('discards staged character_state.patch when a later commit validation rejects the turn', async () => {
+  it('keeps a completed character_state.patch when the turn is later rejected', async () => {
     const {session, logStore, pluginStore} =
       await createDurableCharacterStateHarness('session-plugin-patch-rejected');
     const adapter = createSequencedAdapter([
@@ -483,18 +410,26 @@ describe('plugin-driven Character State tool loop', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
+      // No feedback budget left after the tool round: the empty reply
+      // must reject the turn rather than earn a correction round.
+      maxToolRounds: 1,
     });
 
     expect(result).toMatchObject({
       status: 'rejected',
       reason: 'invalid_visible_reply',
     });
-    expect(logStore.conversationMessages()).toEqual([]);
-    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
-    expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
+    expect(
+      logStore.conversationMessages().map(message => message.role),
+    ).toEqual(['user']);
+    // The tool ran and reported success to the model, which reasoned on
+    // it for the rest of the turn. Whatever happened is history: a later
+    // rejection stops further work, it does not rewrite the record.
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(pluginStore.readJson('checkpoint.json')).toBeDefined();
   });
 
-  it('discards staged character_state.patch when precommit plugin health rejects', async () => {
+  it('keeps a completed character_state.patch when precommit plugin health rejects', async () => {
     const sessionId = 'session-plugin-patch-health-rejected';
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
@@ -568,8 +503,10 @@ describe('plugin-driven Character State tool loop', () => {
       status: 'rejected',
       reason: 'plugin_health_rejected',
     });
-    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(0);
-    expect(pluginStore.readJson('checkpoint.json')).toBeUndefined();
+    // The tool already ran and reported success; a health rejection
+    // stops further work rather than erasing what happened.
+    expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
+    expect(pluginStore.readJson('checkpoint.json')).toBeDefined();
   });
 
   it('commits accepted character_state.patch once for repeated tool call identity', async () => {
@@ -625,14 +562,9 @@ describe('plugin-driven Character State tool loop', () => {
     });
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      pluginHost.beginFileStoreTransaction?.();
       const result = await pluginHost.handleToolCall(call, context);
 
       expect(result.status).toBe('accepted');
-      const prepared = await pluginHost.prepareFileStoreTransaction?.(
-        transactionIdentityFromContext(context),
-      );
-      await prepared?.finalize();
     }
 
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
@@ -717,32 +649,15 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
       pluginId: characterStatePluginId,
     });
-
-    pluginHost.beginFileStoreTransaction?.();
     const originalResult = await pluginHost.handleToolCall(
       originalCall,
       context,
     );
-    const originalPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(context),
-    );
-    await originalPrepared?.finalize();
-    pluginHost.beginFileStoreTransaction?.();
     await pluginHost.handleToolCall(interveningCall, interveningContext);
-    const interveningPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(interveningContext),
-    );
-    await interveningPrepared?.finalize();
-    pluginHost.beginFileStoreTransaction?.();
     const replayedResult = await pluginHost.handleToolCall(
       originalCall,
       context,
     );
-    const replayPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(context),
-    );
-    await replayPrepared?.finalize();
-    pluginHost.beginFileStoreTransaction?.();
     const conflictingResult = await pluginHost.handleToolCall(
       {
         ...originalCall,
@@ -752,10 +667,6 @@ describe('plugin-driven Character State tool loop', () => {
       },
       context,
     );
-    const conflictingPrepared = await pluginHost.prepareFileStoreTransaction?.(
-      transactionIdentityFromContext(context),
-    );
-    await conflictingPrepared?.finalize();
 
     expect(originalResult).toMatchObject({
       status: 'accepted',
