@@ -490,7 +490,7 @@ describe('NVIDIA role-model provider', () => {
     ).toBe(true);
     expect(
       tools.find(tool => tool.function.name === visibleReplyModelToolName)
-        ?.function.parameters.properties['text'],
+        ?.function.parameters.properties?.['text'],
     ).toMatchObject({
       type: 'string',
       description: 'The reply text to show to the user.',

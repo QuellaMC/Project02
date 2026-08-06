@@ -6,7 +6,6 @@ import {
   type RoleModelProviderToolNameMapping,
 } from './chat-wire.ts';
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
-import {isModelToolJsonSchemaType} from './model-tools.ts';
 import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import type {
   RoleModelProviderExchangeSnapshot,
@@ -268,82 +267,13 @@ function isRoleModelProviderExchangeTool(
     isJsonRecord(toolFunction) &&
     typeof toolFunction['name'] === 'string' &&
     typeof toolFunction['description'] === 'string' &&
-    isRoleModelObjectJsonSchema(toolFunction['parameters']) &&
+    // The parameters are evidence of what the provider was shown, and
+    // they were rendered from a contract the manifest gate had already
+    // judged; re-judging the schema here would be a second gate for the
+    // same rule. The exchange only needs it to be a JSON object.
+    isJsonRecord(toolFunction['parameters']) &&
     (toolFunction['strict'] === undefined || toolFunction['strict'] === true)
   );
-}
-
-function isRoleModelObjectJsonSchema(value: unknown): boolean {
-  return (
-    isRoleModelJsonSchema(value) &&
-    value['type'] === 'object' &&
-    isJsonRecord(value['properties']) &&
-    isStringArray(value['required']) &&
-    typeof value['additionalProperties'] === 'boolean'
-  );
-}
-
-function isRoleModelJsonSchema(
-  value: unknown,
-  depth = 0,
-): value is Readonly<Record<string, unknown>> {
-  if (!isJsonRecord(value) || depth > 64) {
-    return false;
-  }
-
-  const type = value['type'];
-  const properties = value['properties'];
-  const required = value['required'];
-
-  return (
-    isRoleModelJsonSchemaTypeDeclaration(type) &&
-    isOptionalString(value['description']) &&
-    (value['enum'] === undefined || isStringArray(value['enum'])) &&
-    isRoleModelJsonSchemaProperties(properties, depth) &&
-    areRoleModelJsonSchemaRequiredNamesValid(properties, required) &&
-    (value['additionalProperties'] === undefined ||
-      typeof value['additionalProperties'] === 'boolean') &&
-    isOptionalRoleModelJsonSchema(value['items'], depth)
-  );
-}
-
-function isRoleModelJsonSchemaTypeDeclaration(value: unknown): boolean {
-  return (
-    value === undefined ||
-    isModelToolJsonSchemaType(value) ||
-    (Array.isArray(value) && value.every(isModelToolJsonSchemaType))
-  );
-}
-
-function isRoleModelJsonSchemaProperties(
-  value: unknown,
-  depth: number,
-): boolean {
-  return (
-    value === undefined ||
-    (isJsonRecord(value) &&
-      Object.values(value).every(property =>
-        isRoleModelJsonSchema(property, depth + 1),
-      ))
-  );
-}
-
-function areRoleModelJsonSchemaRequiredNamesValid(
-  properties: unknown,
-  required: unknown,
-): boolean {
-  return (
-    required === undefined ||
-    (isStringArray(required) &&
-      new Set(required).size === required.length &&
-      required.every(
-        name => isJsonRecord(properties) && Object.hasOwn(properties, name),
-      ))
-  );
-}
-
-function isOptionalRoleModelJsonSchema(value: unknown, depth: number): boolean {
-  return value === undefined || isRoleModelJsonSchema(value, depth + 1);
 }
 
 function isRoleModelProviderToolNameMapping(value: unknown): boolean {
@@ -367,10 +297,6 @@ function isRoleModelProviderExchangeOutputNormalization(
 
 function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
-}
-
-function isStringArray(value: unknown): value is readonly string[] {
-  return Array.isArray(value) && value.every(item => typeof item === 'string');
 }
 
 function isOptionalRuntimePluginJsonValue(value: unknown): boolean {

@@ -282,11 +282,7 @@ function parseModelToolCall(options: {
   }
 
   if (name === visibleReplyModelToolName) {
-    return parseVisibleReplyToolCallInput(
-      input,
-      options.index,
-      options.boundary,
-    );
+    return parseVisibleReplyToolCallInput(input, options.index);
   }
 
   // The plugin's own contract is checked by the host; here the call only
@@ -313,7 +309,6 @@ function parseModelToolCall(options: {
 function parseVisibleReplyToolCallInput(
   input: Readonly<Record<string, unknown>>,
   index: number,
-  boundary: RoleModelDecisionBoundary,
 ): ParsedToolCallResult {
   const text = input['text'];
 
@@ -347,10 +342,7 @@ function parseVisibleReplyToolCallInput(
 
   return {
     status: 'accepted',
-    toolCall:
-      boundary === 'execution'
-        ? createExecutionVisibleReplyModelToolCall(scrubbedText.text)
-        : createVisibleReplyModelToolCall(scrubbedText.text),
+    toolCall: createVisibleReplyModelToolCall(scrubbedText.text),
   };
 }
 
@@ -368,20 +360,11 @@ function createExecutionRoleModelDecisionResult(
   } satisfies AcceptedRoleModelDecisionResult);
 }
 
-function createExecutionVisibleReplyModelToolCall(
-  text: string,
-): VisibleReplyModelToolCall {
-  return Object.freeze({
-    name: visibleReplyModelToolName,
-    input: Object.freeze({text}),
-  } satisfies VisibleReplyModelToolCall);
-}
-
 function freezeExecutionModelToolCall(call: ModelToolCall): ModelToolCall {
   if (call.name === visibleReplyModelToolName) {
     const text = call.input['text'];
 
-    return createExecutionVisibleReplyModelToolCall(
+    return createVisibleReplyModelToolCall(
       typeof text === 'string' ? text : '',
     );
   }
