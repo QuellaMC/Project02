@@ -17,6 +17,7 @@ import {
   createDegradableMemorySearchPlugin,
   createExplicitlyEnabledRuntimePluginHost,
   createFileStoreAvailabilityProbePlugin,
+  createInputSnapshotProbePlugin,
   createMemorySearchPlugin,
   createPluginHostTestFileStore,
   createReadOnlyBeforeRoleModelFileStoreProbePlugin,
@@ -619,6 +620,49 @@ describe('runtime plugin host access and lifecycle', () => {
       status: 'rejected',
       policyOutcome: 'handler_rejected',
     });
+  });
+
+  it('names the expected type in plugin-host-owned input rejections', async () => {
+    const plugin = createMemorySearchPlugin();
+    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.search',
+        input: {query: 5},
+      },
+      testPluginContext(),
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'invalid_input',
+      message: 'memory.search input field "query" must be string.',
+    });
+  });
+
+  it('dispatches the validated JSON snapshot, not the proposed input', async () => {
+    let received: Readonly<Record<string, unknown>> | undefined;
+    const plugin = createInputSnapshotProbePlugin(input => {
+      received = input;
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
+
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: plugin.manifest.id,
+        toolName: 'memory.score',
+        input: {score: Number.POSITIVE_INFINITY},
+      },
+      testPluginContext(),
+    );
+
+    expect(result.status).toBe('accepted');
+    expect(received).toEqual({score: null});
+    expect(Object.isFrozen(received)).toBe(true);
   });
 
   it('honors optional degrade policy for plugin-host-owned invalid input', async () => {

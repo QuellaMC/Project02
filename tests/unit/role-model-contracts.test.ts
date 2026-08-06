@@ -12,6 +12,7 @@ import {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
+  roleModelMalformedToolCallRejectionReason,
   type RoleModelPluginToolDefinition,
   roleModelTerminalEmptyOutputRejectionDetails,
   roleModelUnsupportedEffectRejectionReason,
@@ -372,6 +373,35 @@ describe('role-model contracts', () => {
         toolObservations,
       }),
     ).toBe(true);
+  });
+
+  it('rejects a tool input the JSON boundary cannot carry as a malformed call', () => {
+    // The boundary's refusal feeds back as the model's correction note
+    // instead of escaping the parser as a runtime failure.
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [
+          {
+            name: 'memory.capture',
+            input: Object.fromEntries(
+              Array.from({length: 257}, (_value, index) => [
+                `field${String(index)}`,
+                index,
+              ]),
+            ),
+          },
+        ],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedToolCallRejectionReason,
+        details:
+          'Model tool "memory.capture" input exceeds the JSON container entry limit.',
+      },
+    });
   });
 
   it('rejects top-level text when tool calls are present', () => {

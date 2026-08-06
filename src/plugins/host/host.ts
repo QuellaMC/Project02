@@ -977,6 +977,13 @@ type ResolvedRuntimePluginToolExecution = {
   readonly access: ReturnType<typeof runtimePluginAccessForPlugin>;
   readonly failureDegrades: boolean;
   readonly approvalGatedTool: boolean;
+  /**
+   * The call the hook executes. For a host-validated tool its input is
+   * the snapshot validation accepted, so the plugin receives exactly
+   * what was validated and what the log records — on every path into
+   * the host, not only the model loop's.
+   */
+  readonly call: RuntimePluginToolCall;
 };
 
 type RuntimePluginToolExecutionResolution =
@@ -1003,6 +1010,7 @@ async function runHandleToolCall(
     access,
     failureDegrades,
     approvalGatedTool,
+    call,
   } = resolution;
   const executionScope = createPluginHookExecutionScope(plugin.manifest);
   const hookContext = createPluginHookContext({
@@ -1029,7 +1037,7 @@ async function runHandleToolCall(
           plugin,
           providedTool,
           context: hookContext.context,
-          value: await hook(options.call, hookContext.context),
+          value: await hook(call, hookContext.context),
           deadlineAt,
         }),
     });
@@ -1050,7 +1058,7 @@ async function runHandleToolCall(
     return await confirmPreparedRuntimePluginToolResult({
       plugin,
       providedTool,
-      call: options.call,
+      call,
       context: options.context,
       result,
       confirmationHandler: options.toolConfirmationHandler,
@@ -1062,7 +1070,7 @@ async function runHandleToolCall(
   } catch (error: unknown) {
     if (error instanceof PluginHookTimeoutError) {
       return createRejectedToolCallResult({
-        call: options.call,
+        call,
         context: options.context,
         reason: 'handler_timeout',
         message: error.message,
@@ -1072,7 +1080,7 @@ async function runHandleToolCall(
     }
 
     return createRejectedToolCallResult({
-      call: options.call,
+      call,
       context: options.context,
       reason: 'handler_failed',
       message: errorMessage(error),
@@ -1269,6 +1277,13 @@ function resolveRuntimePluginToolHandler(options: {
     access,
     failureDegrades,
     approvalGatedTool,
+    call:
+      inputValidation === undefined
+        ? options.options.call
+        : Object.freeze({
+            ...options.options.call,
+            input: inputValidation.input,
+          } satisfies RuntimePluginToolCall),
   } satisfies ResolvedRuntimePluginToolExecution);
 }
 

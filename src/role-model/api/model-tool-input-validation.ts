@@ -9,15 +9,24 @@
  * whether the value survives the JSON boundary, and how a failure is
  * phrased, because rejection details are fed back to the model as its
  * correction note.
+ *
+ * The accepted input is the JSON boundary snapshot of the proposal, not
+ * the proposal itself: normalized, bounded, and frozen. Callers execute
+ * that snapshot, so what a plugin receives is what validation accepted
+ * and what the log records, on every path into the seam.
  */
 import {Ajv, type ErrorObject, type ValidateFunction} from 'ajv';
-import {isJsonRecord} from '../../shared/json-boundary.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  isJsonRecord,
+  type JsonBoundaryObject,
+} from '../../shared/json-boundary.ts';
 import {type ModelToolInputContract} from './model-tools.ts';
 
 export type ModelToolInputValidationResult =
   | {
       readonly status: 'accepted';
-      readonly input: Readonly<Record<string, unknown>>;
+      readonly input: JsonBoundaryObject;
     }
   | {
       readonly status: 'rejected';
@@ -26,8 +35,15 @@ export type ModelToolInputValidationResult =
 
 // Schemas reach Ajv already meta-validated by the plugin manifest gate,
 // which enforces a narrower keyword set than Ajv's strict mode would.
-// Union types are part of that set.
-const ajv = new Ajv({allErrors: true, strict: false, allowUnionTypes: true});
+// Union types are part of that set. Own-property iteration keeps a
+// declared field named after an Object.prototype member — "toString",
+// "constructor" — from being satisfied by the inherited value.
+const ajv = new Ajv({
+  allErrors: true,
+  strict: false,
+  allowUnionTypes: true,
+  ownProperties: true,
+});
 
 // Contracts are frozen and long-lived, so one compile per contract lasts
 // the session rather than one per tool call.
@@ -42,12 +58,24 @@ export function validateModelToolInputAgainstContract(options: {
   readonly inputContract: ModelToolInputContract;
 }): ModelToolInputValidationResult {
   const validate = compiledContractValidator(options.inputContract);
+  let input: JsonBoundaryObject;
 
-  if (!validate(options.input)) {
+  try {
+    input = createJsonBoundaryObjectSnapshot(options.input, {
+      field: `Model tool "${options.toolName}" input`,
+    });
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      return rejectModelToolInput(error.message);
+    }
+
+    throw error;
+  }
+
+  if (!validate(input)) {
     return rejectModelToolInput(
       modelToolInputRejectionDetails({
         toolName: options.toolName,
-        input: options.input,
         errors: validate.errors ?? [],
       }),
     );
@@ -55,7 +83,7 @@ export function validateModelToolInputAgainstContract(options: {
 
   return Object.freeze({
     status: 'accepted',
-    input: freezeJsonRecord(options.input),
+    input,
   } satisfies ModelToolInputValidationResult);
 }
 
@@ -68,9 +96,10 @@ function compiledContractValidator(
     return compiled;
   }
 
-  // Ajv annotates the schema object it is given, and a contract is
-  // frozen, so it compiles from a structural copy.
-  const validate = ajv.compile(structuredClone(inputContract));
+  // Compiled from the frozen contract itself: Ajv reads the schema
+  // without mutating it, so a defensive copy would only split the
+  // compile cache key from the contract the runtime holds.
+  const validate = ajv.compile(inputContract);
   compiledContracts.set(inputContract, validate);
   return validate;
 }
@@ -83,7 +112,6 @@ function compiledContractValidator(
  */
 function modelToolInputRejectionDetails(options: {
   readonly toolName: string;
-  readonly input: Readonly<Record<string, unknown>>;
   readonly errors: readonly ErrorObject[];
 }): string {
   const missing = options.errors.find(error => error.keyword === 'required');
@@ -128,7 +156,7 @@ function describeExpectation(error: ErrorObject): string {
   }
 
   if (error.keyword === 'type') {
-    return `must be ${schemaTypeNames(error).join(' or ')}`;
+    return `must be ${expectedTypeNames(error).join(' or ')}`;
   }
 
   return error.message ?? 'is not valid';
@@ -158,14 +186,17 @@ function enumValues(error: ErrorObject): readonly string[] {
   return Array.isArray(allowed) ? allowed.map(value => String(value)) : [];
 }
 
-function schemaTypeNames(error: ErrorObject): readonly string[] {
-  const schema: unknown = error.schema;
+// A type failure's expectation lives in params.type — a name or an array
+// of names for a union — not on the error's absent schema member.
+function expectedTypeNames(error: ErrorObject): readonly string[] {
+  const params: unknown = error.params;
+  const expected = isJsonRecord(params) ? params['type'] : undefined;
 
-  if (Array.isArray(schema)) {
-    return schema.map(value => String(value));
+  if (Array.isArray(expected)) {
+    return expected.map(value => String(value));
   }
 
-  return typeof schema === 'string' ? [schema] : ['valid'];
+  return typeof expected === 'string' ? [expected] : ['valid'];
 }
 
 /**
@@ -199,28 +230,4 @@ function rejectModelToolInput(details: string): ModelToolInputValidationResult {
     status: 'rejected',
     details,
   } satisfies ModelToolInputValidationResult);
-}
-
-function freezeJsonRecord(
-  record: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, unknown>> {
-  const snapshot: Record<string, unknown> = {};
-
-  for (const [key, value] of Object.entries(record)) {
-    snapshot[key] = freezeJsonValue(value);
-  }
-
-  return Object.freeze(snapshot);
-}
-
-function freezeJsonValue(value: unknown): unknown {
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeJsonValue));
-  }
-
-  if (isJsonRecord(value)) {
-    return freezeJsonRecord(value);
-  }
-
-  return value;
 }

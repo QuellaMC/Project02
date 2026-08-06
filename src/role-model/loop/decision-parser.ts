@@ -290,14 +290,24 @@ function parseModelToolCall(options: {
   }
 
   // The plugin's own contract is checked by the host; here the call only
-  // has to cross the JSON boundary, which the freeze below does.
-  return {
-    status: 'accepted',
-    toolCall:
-      options.boundary === 'execution'
-        ? freezeExecutionModelToolCall({name, input})
-        : freezeModelToolCall({name, input}),
-  };
+  // has to cross the JSON boundary, which the freeze below does. The
+  // boundary's refusal is the model's correction note: a proposal it
+  // cannot carry is a malformed tool call, not a runtime failure.
+  try {
+    return {
+      status: 'accepted',
+      toolCall:
+        options.boundary === 'execution'
+          ? freezeExecutionModelToolCall({name, input})
+          : freezeModelToolCall({name, input}),
+    };
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      return rejectToolCall(error.message);
+    }
+
+    throw error;
+  }
 }
 
 function parseVisibleReplyToolCallInput(
