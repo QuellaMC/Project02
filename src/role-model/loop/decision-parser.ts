@@ -295,8 +295,9 @@ function parseModelToolCall(options: {
     input,
     inputContract: {
       type: 'object',
-      fields: [],
-      additionalFields: true,
+      properties: {},
+      required: [],
+      additionalProperties: true,
     },
   });
 

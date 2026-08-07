@@ -122,8 +122,9 @@ type NvidiaProviderErrorCode =
 
 const nvidiaNativeToolArgumentsContract = Object.freeze({
   type: 'object',
-  fields: Object.freeze([]),
-  additionalFields: true,
+  properties: Object.freeze({}),
+  required: Object.freeze([]),
+  additionalProperties: true,
 } satisfies ModelToolInputContract);
 const terminalNvidiaFinishReasons = Object.freeze(['stop', 'tool_calls']);
 

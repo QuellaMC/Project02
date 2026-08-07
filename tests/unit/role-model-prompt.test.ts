@@ -275,8 +275,9 @@ describe('role-model prompt rendering', () => {
       description: 'List installed runtime plugins.',
       inputContract: {
         type: 'object',
-        fields: [],
-        additionalFields: false,
+        properties: {},
+        required: [],
+        additionalProperties: false,
       },
       validationOwner: 'plugin_host',
       requiresConfirmation: false,
@@ -314,7 +315,7 @@ describe('role-model prompt rendering', () => {
 
     expect(tool?.function.strict).toBe(true);
     expect(tool?.function.parameters).toEqual(
-      nestedSchemaToolDefinition.inputContract.jsonSchema,
+      nestedSchemaToolDefinition.inputContract,
     );
     expect(
       tool?.function.parameters.properties['memory']?.properties?.['note']
@@ -336,7 +337,7 @@ describe('role-model prompt rendering', () => {
     );
 
     expect(tool?.function.parameters).toEqual(
-      openUnionSchemaToolDefinition.inputContract.jsonSchema,
+      openUnionSchemaToolDefinition.inputContract,
     );
     expect(tool?.function).not.toHaveProperty('strict');
   });
@@ -420,32 +421,27 @@ const nestedSchemaToolDefinition = Object.freeze({
   description: 'Capture a nested memory object.',
   inputContract: {
     type: 'object',
-    fields: [],
-    additionalFields: false,
-    jsonSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: ['memory'],
-      properties: {
-        memory: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['text'],
-          properties: {
-            text: {
+    additionalProperties: false,
+    required: ['memory'],
+    properties: {
+      memory: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['text'],
+        properties: {
+          text: {
+            type: 'string',
+            description: 'Memory text.',
+          },
+          tags: {
+            type: 'array',
+            items: {
               type: 'string',
-              description: 'Memory text.',
             },
-            tags: {
-              type: 'array',
-              items: {
-                type: 'string',
-              },
-            },
-            note: {
-              type: ['string', 'null'],
-              description: 'Optional nested note.',
-            },
+          },
+          note: {
+            type: ['string', 'null'],
+            description: 'Optional nested note.',
           },
         },
       },
@@ -461,25 +457,20 @@ const openUnionSchemaToolDefinition = Object.freeze({
   description: 'Accept nullable object and array unions.',
   inputContract: {
     type: 'object',
-    fields: [],
-    additionalFields: false,
-    jsonSchema: {
-      type: 'object',
-      additionalProperties: false,
-      required: [],
-      properties: {
-        value: {
+    additionalProperties: false,
+    required: [],
+    properties: {
+      value: {
+        type: ['object', 'null'],
+        additionalProperties: true,
+        properties: {},
+      },
+      entries: {
+        type: ['array', 'null'],
+        items: {
           type: ['object', 'null'],
           additionalProperties: true,
           properties: {},
-        },
-        entries: {
-          type: ['array', 'null'],
-          items: {
-            type: ['object', 'null'],
-            additionalProperties: true,
-            properties: {},
-          },
         },
       },
     },

@@ -15,7 +15,11 @@ export const defaultLocalRuntimeSessionId = 'local-session';
 // derived from it, trace.jsonl is no longer written or read, and a
 // trailing turn a crash left without its terminal event is an incomplete
 // state the reader surfaces, not damage. v5 stores fail closed.
-export const localRuntimeStorageSchemaVersion = 6;
+// v7: a tool's input contract is JSON Schema. Persisted plugin tool
+// definitions carry properties/required/additionalProperties where v6
+// carried a fields list, and a v6 record would decode as a malformed
+// contract rather than an older one, so v6 stores fail closed.
+export const localRuntimeStorageSchemaVersion = 7;
 
 export type LocalRuntimeReadableStorageSchemaVersion =
   typeof localRuntimeStorageSchemaVersion;

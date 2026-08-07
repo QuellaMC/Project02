@@ -54,44 +54,40 @@ const characterStateIdempotencyRecordVersion = 1;
 
 const characterStatePatchInputContract = Object.freeze({
   type: 'object',
-  fields: Object.freeze([
-    Object.freeze({
-      name: 'mood',
+  properties: Object.freeze({
+    mood: Object.freeze({
+      type: 'string',
       description:
         "The character's internal current mood; assistant-owned, model-only, and not the user's mood.",
-      required: false,
-      allowedValues: characterMoodValues,
+      enum: characterMoodValues,
     }),
-    Object.freeze({
-      name: 'energy',
+    energy: Object.freeze({
+      type: 'string',
       description:
         "The character's internal current energy; assistant-owned, model-only, and not the user's energy.",
-      required: false,
-      allowedValues: characterEnergyValues,
+      enum: characterEnergyValues,
     }),
-    Object.freeze({
-      name: 'attention',
+    attention: Object.freeze({
+      type: 'string',
       description:
         "The character's internal current attention; assistant-owned and model-only.",
-      required: false,
-      allowedValues: characterAttentionValues,
+      enum: characterAttentionValues,
     }),
-    Object.freeze({
-      name: 'currentActivity',
+    currentActivity: Object.freeze({
+      type: 'string',
       description:
         "The character's internal current activity; assistant-owned and model-only.",
-      required: false,
-      allowedValues: characterCurrentActivityValues,
+      enum: characterCurrentActivityValues,
     }),
-    Object.freeze({
-      name: 'socialOrientation',
+    socialOrientation: Object.freeze({
+      type: 'string',
       description:
         "The character's internal current social orientation; assistant-owned and model-only.",
-      required: false,
-      allowedValues: characterSocialOrientationValues,
+      enum: characterSocialOrientationValues,
     }),
-  ]),
-  additionalFields: false,
+  }),
+  required: Object.freeze([]),
+  additionalProperties: false,
 } satisfies ModelToolInputContract);
 
 export function createCharacterStatePluginManifest(): RuntimePluginManifest {

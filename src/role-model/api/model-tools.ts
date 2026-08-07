@@ -5,25 +5,6 @@ export const visibleReplyModelToolName = 'visible_reply';
 export type VisibleReplyModelToolName = typeof visibleReplyModelToolName;
 export type BuiltInModelToolName = VisibleReplyModelToolName;
 
-export const modelToolInputFieldValueTypes = Object.freeze([
-  'string',
-  'number',
-  'boolean',
-  'object',
-  'array',
-] as const);
-
-export type ModelToolInputFieldValueType =
-  (typeof modelToolInputFieldValueTypes)[number];
-
-export type ModelToolInputField = {
-  readonly name: string;
-  readonly description: string;
-  readonly required: boolean;
-  readonly valueType?: ModelToolInputFieldValueType;
-  readonly allowedValues?: readonly string[];
-};
-
 export const modelToolJsonSchemaTypeValues = Object.freeze([
   'string',
   'number',
@@ -55,18 +36,16 @@ export type ModelToolJsonSchema = {
   readonly items?: ModelToolJsonSchema;
 };
 
-export type ModelToolObjectJsonSchema = ModelToolJsonSchema & {
+/**
+ * A tool's input shape, and the only way to declare one. It is JSON
+ * Schema because that is what providers consume and what a plugin author
+ * already knows how to write — nesting included.
+ */
+export type ModelToolInputContract = ModelToolJsonSchema & {
   readonly type: 'object';
   readonly properties: Readonly<Record<string, ModelToolJsonSchema>>;
   readonly required: readonly string[];
   readonly additionalProperties: boolean;
-};
-
-export type ModelToolInputContract = {
-  readonly type: 'object';
-  readonly fields: readonly ModelToolInputField[];
-  readonly additionalFields: boolean;
-  readonly jsonSchema?: ModelToolObjectJsonSchema;
 };
 
 export type ModelToolDefinition = {
@@ -107,15 +86,14 @@ export const builtInModelToolDefinitions = Object.freeze([
     description: 'Send a user-visible reply message from you.',
     inputContract: {
       type: 'object',
-      fields: [
-        {
-          name: 'text',
+      properties: {
+        text: {
+          type: 'string',
           description: 'The reply text to show to the user.',
-          required: true,
-          valueType: 'string',
         },
-      ],
-      additionalFields: false,
+      },
+      required: ['text'],
+      additionalProperties: false,
     },
   }),
 ] satisfies readonly BuiltInModelToolDefinition[]);
@@ -191,32 +169,17 @@ function createBuiltInModelToolDefinition(options: {
   } satisfies BuiltInModelToolDefinition);
 }
 
-function freezeModelToolInputContract(
+export function freezeModelToolInputContract(
   inputContract: ModelToolInputContract,
 ): ModelToolInputContract {
+  const frozen = freezeModelToolJsonSchema(inputContract);
+
   return Object.freeze({
-    type: inputContract.type,
-    fields: Object.freeze(
-      inputContract.fields.map(field =>
-        Object.freeze({
-          name: field.name,
-          description: field.description,
-          required: field.required,
-          ...(field.valueType === undefined
-            ? {}
-            : {valueType: field.valueType}),
-          ...(field.allowedValues === undefined
-            ? {}
-            : {allowedValues: Object.freeze([...field.allowedValues])}),
-        } satisfies ModelToolInputField),
-      ),
-    ),
-    additionalFields: inputContract.additionalFields,
-    ...(inputContract.jsonSchema === undefined
-      ? {}
-      : {
-          jsonSchema: freezeModelToolObjectJsonSchema(inputContract.jsonSchema),
-        }),
+    ...frozen,
+    type: 'object',
+    properties: frozen.properties ?? Object.freeze({}),
+    required: frozen.required ?? Object.freeze([]),
+    additionalProperties: inputContract.additionalProperties,
   } satisfies ModelToolInputContract);
 }
 
@@ -224,12 +187,6 @@ export function isModelToolJsonSchemaTypeArray(
   value: NonNullable<ModelToolJsonSchema['type']>,
 ): value is readonly ModelToolJsonSchemaType[] {
   return Array.isArray(value);
-}
-
-function freezeModelToolObjectJsonSchema(
-  schema: ModelToolObjectJsonSchema,
-): ModelToolObjectJsonSchema {
-  return freezeModelToolJsonSchema(schema) as ModelToolObjectJsonSchema;
 }
 
 function freezeModelToolJsonSchema(

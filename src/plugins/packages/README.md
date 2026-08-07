@@ -57,6 +57,38 @@ returns a `RuntimePlugin`. It runs when the configured host is constructed
 at session start. The returned plugin's manifest must equal the discovered
 one — build it from `input.manifest`, never a second copy.
 
+## Tool input contracts
+
+A tool declares `inputContract` as a JSON Schema object, and that one
+declaration is what the provider is shown, what a proposed call is
+validated against, and what is persisted with the turn.
+
+```ts
+inputContract: {
+  type: 'object',
+  properties: {
+    text: {type: 'string', description: 'Memory text.'},
+    tags: {type: 'array', items: {type: 'string'}},
+  },
+  required: ['text'],
+  additionalProperties: false,
+}
+```
+
+`type`, `properties`, `required`, and `additionalProperties` are required
+at the root; a contract missing any of them is not renderable as a
+provider tool. Nested objects and arrays are validated to the same depth
+they are declared.
+
+The supported keywords are `type`, `description`, `enum`, `properties`,
+`required`, `additionalProperties`, and `items`. Anything else —
+`oneOf`, `pattern`, `minLength` — is rejected at manifest validation with
+the path that carried it, rather than silently ignored on the wire.
+
+`additionalProperties: false` at every level is also what qualifies a
+tool for provider strict mode, so prefer it unless a tool genuinely takes
+open-ended input.
+
 ## Config fields
 
 Declared in `manifest.config.fields`; the same declarations drive runtime

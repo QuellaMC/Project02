@@ -510,7 +510,7 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(
       decodedRecord.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions.find(
         definition => definition.name === 'memory.capture',
-      )?.inputContract.jsonSchema,
+      )?.inputContract,
     ).toEqual(jsonSchema);
   });
 
@@ -2416,12 +2416,7 @@ function storedRecordWithPluginToolJsonSchema(
     pluginId: 'memory.fixture',
     name: 'memory.capture',
     description: 'Capture a memory.',
-    inputContract: {
-      type: 'object',
-      fields: [],
-      additionalFields: false,
-      jsonSchema,
-    },
+    inputContract: jsonSchema,
     validationOwner: 'plugin_host',
     requiresConfirmation: false,
   });
@@ -2477,15 +2472,11 @@ function patchCompletedEvent(sessionId: string): object {
             description: 'Say one message to the user.',
             inputContract: {
               type: 'object',
-              fields: [
-                {
-                  name: 'text',
-                  description: 'The message text.',
-                  required: true,
-                  valueType: 'string',
-                },
-              ],
-              additionalFields: false,
+              properties: {
+                text: {type: 'string', description: 'The message text.'},
+              },
+              required: ['text'],
+              additionalProperties: false,
             },
             validationOwner: 'built_in_model_tools',
             annotations: {readOnlyHint: true},
@@ -2498,8 +2489,9 @@ function patchCompletedEvent(sessionId: string): object {
             description: "Patch the character's internal state.",
             inputContract: {
               type: 'object',
-              fields: [],
-              additionalFields: true,
+              properties: {},
+              required: [],
+              additionalProperties: true,
             },
             validationOwner: 'plugin_host',
             concurrency: 'exclusive',

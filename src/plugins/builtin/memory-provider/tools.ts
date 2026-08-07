@@ -6,15 +6,11 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
     description: 'Search configured memory for relevant context.',
     inputContract: {
       type: 'object',
-      fields: [
-        {
-          name: 'query',
-          description: 'Search query.',
-          required: true,
-          valueType: 'string',
-        },
-      ],
-      additionalFields: false,
+      properties: {
+        query: {type: 'string', description: 'Search query.'},
+      },
+      required: ['query'],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     annotations: {readOnlyHint: true},
@@ -29,15 +25,11 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
     description: 'Add a bounded memory item.',
     inputContract: {
       type: 'object',
-      fields: [
-        {
-          name: 'text',
-          description: 'Memory text.',
-          required: true,
-          valueType: 'string',
-        },
-      ],
-      additionalFields: false,
+      properties: {
+        text: {type: 'string', description: 'Memory text.'},
+      },
+      required: ['text'],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     annotations: {readOnlyHint: false},

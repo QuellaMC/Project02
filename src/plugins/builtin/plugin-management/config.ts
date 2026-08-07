@@ -30,15 +30,14 @@ export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
       'Inspect one installed plugin config using manifest metadata and redacted authored and effective values. Secret values are never returned.',
     inputContract: {
       type: 'object',
-      fields: [
-        {
-          name: 'pluginId',
+      properties: {
+        pluginId: {
+          type: 'string',
           description: 'Exact installed plugin id to inspect.',
-          required: true,
-          valueType: 'string',
         },
-      ],
-      additionalFields: false,
+      },
+      required: ['pluginId'],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     annotations: {readOnlyHint: true},

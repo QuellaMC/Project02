@@ -24,14 +24,10 @@ import {
   type RuntimePluginToolCallResult,
   type RuntimePluginToolValidationOwner,
   type RuntimePluginContext,
+  requiredModelToolInputContract,
 } from '../../../src/plugins/api/index.ts';
 import {createFirstPartyModelToolsPlugin} from '../../../src/plugins/builtin/model-tools/index.ts';
-import {
-  type ModelToolInputContract,
-  type ModelToolInputField,
-  type ModelToolInputFieldValueType,
-  modelToolInputFieldValueTypes,
-} from '../../../src/role-model/index.ts';
+import {type ModelToolInputContract} from '../../../src/role-model/index.ts';
 import {isModelFacingRuntimePluginTool} from '../../../src/plugins/api/tool-classification.ts';
 
 type JsonRecord = Readonly<Record<string, unknown>>;
@@ -987,65 +983,25 @@ function createConfigField(options: {
   };
 }
 
+// External adapter proofs already describe their tools as JSON Schema,
+// which is now exactly what a tool's input contract is. Only the three
+// members a contract must carry are filled in when a proof omits them.
 function inputContractFromSchema(schema: JsonRecord): ModelToolInputContract {
-  const properties = optionalRecord(schema['properties'], 'schema.properties');
-  const required = new Set(
-    optionalStringArray(schema['required'], 'schema.required'),
-  );
-  const fields =
-    properties === undefined
-      ? []
-      : Object.entries(properties).map(([name, value]) =>
-          inputFieldFromSchemaProperty({
-            name,
-            property: requiredRecord(value, `schema.properties.${name}`),
-            required: required.has(name),
-          }),
-        );
-
-  return {
+  const validated = requiredModelToolInputContract({
+    ...schema,
     type: 'object',
-    fields: Object.freeze(fields),
-    additionalFields: schema['additionalProperties'] !== false,
-  };
-}
+    properties: optionalRecord(schema['properties'], 'schema.properties') ?? {},
+    required: optionalStringArray(schema['required'], 'schema.required'),
+    additionalProperties: schema['additionalProperties'] !== false,
+  });
 
-function inputFieldFromSchemaProperty(options: {
-  readonly name: string;
-  readonly property: JsonRecord;
-  readonly required: boolean;
-}): ModelToolInputField {
-  const allowedValues = optionalStringArray(
-    options.property['enum'],
-    `schema.properties.${options.name}.enum`,
-  );
-  const valueType = modelToolInputFieldValueTypeFromSchema(
-    options.property['type'],
-  );
-
-  return {
-    name: options.name,
-    description:
-      optionalString(
-        options.property['description'],
-        `schema.properties.${options.name}.description`,
-      ) ?? `Input field ${options.name}.`,
-    required: options.required,
-    ...(valueType === undefined ? {} : {valueType}),
-    ...(allowedValues.length === 0
-      ? {}
-      : {allowedValues: Object.freeze([...allowedValues])}),
-  };
-}
-
-function modelToolInputFieldValueTypeFromSchema(
-  value: unknown,
-): ModelToolInputFieldValueType | undefined {
-  if (typeof value !== 'string') {
-    return undefined;
+  if (validated.status === 'rejected') {
+    throw new TypeError(
+      `Adapter proof tool schema is not a usable input contract: ${validated.details}`,
+    );
   }
 
-  return modelToolInputFieldValueTypes.find(candidate => candidate === value);
+  return validated.value;
 }
 
 function createMemoryContextItem(options: {

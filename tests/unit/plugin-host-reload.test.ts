@@ -237,7 +237,12 @@ describe('runtime plugin host live config reload', () => {
         {
           name: 'reload.style.extra',
           description: 'Tool the original never advertised.',
-          inputContract: {type: 'object', fields: [], additionalFields: false},
+          inputContract: {
+            type: 'object',
+            properties: {},
+            required: [],
+            additionalProperties: false,
+          },
           validationOwner: 'plugin_host',
           requiresConfirmation: false,
         },
