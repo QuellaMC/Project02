@@ -1,4 +1,4 @@
-import type {ModelToolJsonSchema} from './model-tools.ts';
+import type {ModelToolInputContract} from './model-tools.ts';
 
 export type RoleModelSystemChatMessage = {
   readonly role: 'system';
@@ -43,31 +43,17 @@ export type RoleModelChatToolCall = {
   };
 };
 
+// The rendered parameters are the tool's input contract itself — there
+// is no wire-side schema vocabulary for the contract to be translated
+// into, and so nothing for the two to disagree about.
 export type RoleModelChatCompletionTool = {
   readonly type: 'function';
   readonly function: {
     readonly name: string;
     readonly description: string;
-    readonly parameters: RoleModelObjectJsonSchema;
+    readonly parameters: ModelToolInputContract;
     readonly strict?: true;
   };
-};
-
-export type RoleModelObjectJsonSchema = {
-  readonly type: 'object';
-  readonly properties: Readonly<Record<string, RoleModelJsonSchema>>;
-  readonly required: readonly string[];
-  readonly additionalProperties: boolean;
-};
-
-export type RoleModelJsonSchema = {
-  readonly type?: ModelToolJsonSchema['type'];
-  readonly description?: string;
-  readonly enum?: readonly string[];
-  readonly properties?: Readonly<Record<string, RoleModelJsonSchema>>;
-  readonly required?: readonly string[];
-  readonly additionalProperties?: boolean;
-  readonly items?: RoleModelJsonSchema;
 };
 
 export type RoleModelProviderToolNameMapping = {

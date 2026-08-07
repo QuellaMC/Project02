@@ -315,7 +315,7 @@ describe('role-model loop evidence and boundary validation', () => {
     ['NaN', Number.NaN],
     ['Infinity', Number.POSITIVE_INFINITY],
   ])(
-    'rejects non-finite %s accepted plugin tool output from custom hosts',
+    'normalizes non-finite %s in accepted plugin tool output from custom hosts',
     async (label, outputValue) => {
       let invocations = 0;
       let handledCalls = 0;
@@ -380,9 +380,8 @@ describe('role-model loop evidence and boundary validation', () => {
       expect(result.pluginToolResults[0]).toMatchObject({
         callId: `${eventId}.trace_${eventId}.round-1.1.memory.search`,
         result: {
-          status: 'rejected',
-          reason: 'invalid_tool_output',
-          message: 'Plugin tool output must be finite JSON.',
+          status: 'accepted',
+          output: {score: null},
         },
       });
       expect(result.rounds).toHaveLength(2);
@@ -781,7 +780,7 @@ describe('role-model loop evidence and boundary validation', () => {
     ).toBe(true);
   });
 
-  it('rejects non-finite provider request metadata before snapshots can serialize it', async () => {
+  it('drops a non-finite provider request count from the snapshot', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_request'),
@@ -798,18 +797,12 @@ describe('role-model loop evidence and boundary validation', () => {
       ),
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: 'providerMetadata.request.messageCount must be finite JSON.',
-      },
-    });
-    expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
+    expect(result.ioSnapshot.providerMetadata?.request).not.toHaveProperty(
+      'messageCount',
+    );
   });
 
-  it('rejects non-finite provider response metadata before snapshots can serialize it', async () => {
+  it('drops a non-finite provider response status from the snapshot', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_response'),
@@ -825,15 +818,9 @@ describe('role-model loop evidence and boundary validation', () => {
       ),
     });
 
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: 'providerMetadata.response.status must be finite JSON.',
-      },
-    });
-    expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot).not.toHaveProperty('providerMetadata');
+    expect(result.ioSnapshot.providerMetadata?.response).not.toHaveProperty(
+      'status',
+    );
   });
 
   it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
@@ -887,120 +874,6 @@ describe('role-model loop evidence and boundary validation', () => {
     });
     expect(result.ioSnapshot.rawOutputText).toBe('');
     expect(result.ioSnapshot).not.toHaveProperty('providerExchange');
-  });
-
-  it.each([
-    ['an absent required property', ['ghost']],
-    ['duplicate required properties', ['text', 'text']],
-  ])(
-    'rejects provider exchange tool schemas with %s',
-    async (_case, required) => {
-      const result = await runRoleModelLoop({
-        onVisibleReply: () => {},
-        event: createTestEvent('hello', `evt_bad_schema_${required.join('_')}`),
-        decisionContext: createTestDecisionContext(),
-        pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-        adapter: Object.freeze({
-          invoke(_inputEnvelope, invocation) {
-            const renderedTools = invocation.turnContext.tools.map(
-              (tool, index) =>
-                index === 0
-                  ? Object.freeze({
-                      type: 'function' as const,
-                      function: Object.freeze({
-                        ...tool.function,
-                        parameters: Object.freeze({
-                          ...tool.function.parameters,
-                          required: Object.freeze([...required]),
-                        }),
-                      }),
-                    })
-                  : tool,
-            );
-            const providerExchange: RoleModelProviderExchangeSnapshot = {
-              provider: {name: 'local'},
-              capabilities: defaultRoleModelProviderCapabilities,
-              reasoning: {mode: 'none', params: {}},
-              renderedMessages: invocation.turnContext.messages,
-              renderedTools,
-              toolNameMappings: [],
-              requestBody: {},
-              nativeToolResultMessages: [],
-            };
-
-            return {
-              rawOutputText: JSON.stringify({
-                toolCalls: [{name: 'visible_reply', input: {text: 'hello'}}],
-              }),
-              providerExchange,
-            };
-          },
-        } satisfies RoleModelAdapter),
-      });
-
-      expect(result).toMatchObject({
-        status: 'rejected',
-        rejection: {
-          reason: roleModelMalformedOutputRejectionReason,
-          details: 'Role-model adapter provider exchange is malformed.',
-        },
-      });
-      expect(result.ioSnapshot).not.toHaveProperty('providerExchange');
-    },
-  );
-
-  it('accepts a nested provider schema with an empty required array', async () => {
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('hello', 'evt_valid_nested_empty_required'),
-      decisionContext: createTestDecisionContext(),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-      adapter: Object.freeze({
-        invoke(_inputEnvelope, invocation) {
-          const renderedTools = invocation.turnContext.tools.map(
-            (tool, index) =>
-              index === 0
-                ? Object.freeze({
-                    type: 'function' as const,
-                    function: Object.freeze({
-                      ...tool.function,
-                      parameters: Object.freeze({
-                        ...tool.function.parameters,
-                        properties: Object.freeze({
-                          ...tool.function.parameters.properties,
-                          optionalObject: Object.freeze({
-                            type: 'object' as const,
-                            required: Object.freeze([]),
-                          }),
-                        }),
-                      }),
-                    }),
-                  })
-                : tool,
-          );
-          const providerExchange: RoleModelProviderExchangeSnapshot = {
-            provider: {name: 'local'},
-            capabilities: defaultRoleModelProviderCapabilities,
-            reasoning: {mode: 'none', params: {}},
-            renderedMessages: invocation.turnContext.messages,
-            renderedTools,
-            toolNameMappings: [],
-            requestBody: {},
-            nativeToolResultMessages: [],
-          };
-
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [{name: 'visible_reply', input: {text: 'hello'}}],
-            }),
-            providerExchange,
-          };
-        },
-      } satisfies RoleModelAdapter),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(result.ioSnapshot.providerExchange).toBeDefined();
   });
 });
 

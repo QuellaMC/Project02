@@ -46,16 +46,25 @@ describe('shared JSON boundary', () => {
     );
   });
 
-  it('rejects cycles, non-finite numbers, and values beyond exact limits', () => {
+  it('normalizes a non-finite number to the null JSON writes for it', () => {
+    expect(
+      createJsonBoundarySnapshot({value: Number.NaN}, {field: 'result'}),
+    ).toEqual({value: null});
+    expect(
+      createJsonBoundarySnapshot(
+        {value: Number.POSITIVE_INFINITY},
+        {field: 'result'},
+      ),
+    ).toEqual({value: null});
+  });
+
+  it('rejects cycles and values beyond exact limits', () => {
     const cyclic: Record<string, unknown> = {};
     cyclic['self'] = cyclic;
 
     expect(() => createJsonBoundarySnapshot(cyclic, {field: 'result'})).toThrow(
       'result.self must not contain cycles',
     );
-    expect(() =>
-      createJsonBoundarySnapshot({value: Number.NaN}, {field: 'result'}),
-    ).toThrow('result.value must be finite JSON');
     expect(() =>
       createJsonBoundarySnapshot(
         'x'.repeat(defaultJsonBoundaryLimits.maxStringBytes + 1),

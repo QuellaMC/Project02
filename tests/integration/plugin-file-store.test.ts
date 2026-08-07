@@ -417,7 +417,7 @@ describe('runtime plugin file store', () => {
     expectProtoKeyValue(durable.readJsonl('events.jsonl')[0]);
   });
 
-  it('rejects non-finite plugin file values before writing', () => {
+  it('writes a non-finite plugin file value as the null JSON stores for it', () => {
     const memory = createRuntimePluginFileStore({
       sessionId: 'session-finite-json',
       sessionIdentity: {},
@@ -427,11 +427,10 @@ describe('runtime plugin file store', () => {
       score: Number.POSITIVE_INFINITY,
     };
 
-    expect(() => {
-      memory.writeJsonAtomic('value.json', nonFiniteMemoryValue);
-    }).toThrow(/finite JSON/iu);
-    expect(memory.readJson('value.json')).toBeUndefined();
-    expect(memory.revision()).toBe(0);
+    memory.writeJsonAtomic('value.json', nonFiniteMemoryValue);
+
+    expect(memory.readJson('value.json')).toEqual({score: null});
+    expect(memory.revision()).toBe(1);
 
     const durable = createRuntimePluginFileStore({
       storeRoot: createTempRoot(),
@@ -442,11 +441,10 @@ describe('runtime plugin file store', () => {
       score: Number.NaN,
     };
 
-    expect(() => {
-      durable.appendJsonl('events.jsonl', nonFiniteDurableValue);
-    }).toThrow(/finite JSON/iu);
-    expect(durable.readJsonl('events.jsonl')).toEqual([]);
-    expect(durable.revision()).toBe(0);
+    durable.appendJsonl('events.jsonl', nonFiniteDurableValue);
+
+    expect(durable.readJsonl('events.jsonl')).toEqual([{score: null}]);
+    expect(durable.revision()).toBe(1);
   });
 
   it('applies the shared JSON boundary limits to plugin file values', () => {

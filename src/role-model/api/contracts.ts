@@ -171,10 +171,6 @@ export const roleModelAdapterProviderExchangeMalformedDetails =
   'Role-model adapter provider exchange is malformed.';
 export const roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails =
   'Role-model adapter native tool-call argument errors are malformed.';
-export const roleModelAdapterProviderRequestMessageCountNonFiniteDetails =
-  'providerMetadata.request.messageCount must be finite JSON.';
-export const roleModelAdapterProviderResponseStatusNonFiniteDetails =
-  'providerMetadata.response.status must be finite JSON.';
 export const roleModelAdapterRejectionNotReplayableDetails =
   'Adapter rejection must be replayable from rawOutputText.';
 export const roleModelTerminalEmptyOutputRejectionDetails =
@@ -184,8 +180,6 @@ export const roleModelMalformedAdapterRawOutputDetails = Object.freeze([
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelAdapterProviderExchangeMalformedDetails,
   roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-  roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
-  roleModelAdapterProviderResponseStatusNonFiniteDetails,
   roleModelAdapterRejectionNotReplayableDetails,
 ] as const);
 

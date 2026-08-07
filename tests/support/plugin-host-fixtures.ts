@@ -184,6 +184,43 @@ export function createMemorySearchPluginWithInvocationProbe(
   );
 }
 
+export function createInputSnapshotProbePlugin(
+  capture: (input: RuntimePluginJsonObject) => void,
+): RuntimePlugin {
+  const pluginId = 'memory.input-snapshot-probe.fixture';
+
+  return createRuntimePlugin({
+    manifest: memorySearchPluginManifest(pluginId),
+    providedTools: [
+      {
+        name: 'memory.score',
+        description: 'Record a score.',
+        inputContract: {
+          type: 'object',
+          properties: {
+            score: {type: ['number', 'null'], description: 'Score value.'},
+          },
+          required: ['score'],
+          additionalProperties: false,
+        },
+        validationOwner: 'plugin_host',
+        requiresConfirmation: false,
+      },
+    ],
+    lifecycleHooks: {
+      handleToolCall(call, context) {
+        capture(call.input);
+
+        return createAcceptedMemorySearchResult({
+          pluginId,
+          query: 'score',
+          context,
+        });
+      },
+    },
+  });
+}
+
 export function createTurnContextCapturePlugin(options: {
   readonly pluginId: string;
   readonly requestedAccess: RuntimePlugin['manifest']['requestedAccess'];

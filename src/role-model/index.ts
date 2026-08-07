@@ -18,8 +18,6 @@ export {
   type RejectedRoleModelDecisionResult,
   roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
   roleModelAdapterProviderExchangeMalformedDetails,
-  roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
-  roleModelAdapterProviderResponseStatusNonFiniteDetails,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelCommitValidationFailureRejectionReason,

@@ -75,15 +75,25 @@ inputContract: {
 }
 ```
 
-`type`, `properties`, `required`, and `additionalProperties` are required
-at the root; a contract missing any of them is not renderable as a
-provider tool. Nested objects and arrays are validated to the same depth
-they are declared.
+The root must declare `type: 'object'` — a tool takes named arguments,
+and that root is what a provider renders. Everything else is ordinary
+JSON Schema with JSON Schema's meaning: `pattern`, `minLength`, `oneOf`,
+and the rest are welcome, and the same Ajv that admits a contract at
+manifest validation enforces it against every proposed input. A schema
+Ajv cannot compile — an unknown keyword, a duplicate `required` name —
+is rejected at manifest validation with the compile reason, rather than
+silently ignored on the wire.
 
-The supported keywords are `type`, `description`, `enum`, `properties`,
-`required`, `additionalProperties`, and `items`. Anything else —
-`oneOf`, `pattern`, `minLength` — is rejected at manifest validation with
-the path that carried it, rather than silently ignored on the wire.
+A contract is one self-contained document. Recursion and reuse spell
+themselves with `$defs` and `#/`-relative `$ref`s, which compile and
+enforce as written; a registry identity — an absolute `$id` referred
+back to by URI — has nothing to resolve against in a runtime that
+registers no schemas, and fails at the gate with the resolution error.
+
+The one deliberate keyword exclusion is `format`: no format registry
+ships, so a `format` constraint would be a promise nothing enforces, and
+the gate rejects it the same way — loudly, with the compile reason.
+Express the constraint as a `pattern`, which is enforced.
 
 `additionalProperties: false` at every level is also what qualifies a
 tool for provider strict mode, so prefer it unless a tool genuinely takes

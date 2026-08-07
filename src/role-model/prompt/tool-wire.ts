@@ -1,40 +1,37 @@
 /**
- * Tool wire conversion for the role-model prompt: turns runtime model
- * tool definitions into provider chat-completion tools (including the
- * ModelTool -> provider JSON-schema conversion and the strict-mode
- * check) and maps runtime tool names to provider-safe names and back.
+ * Tool wire for the role-model prompt: turns runtime model tool
+ * definitions into provider chat-completion tools (the contract renders
+ * as-is; strict mode is a per-tool eligibility check) and maps runtime
+ * tool names to provider-safe names and back.
  */
 import {
-  freezeModelToolJsonSchemaType,
   isModelToolJsonSchemaTypeArray,
   type ModelToolDefinition,
-  type ModelToolInputContract,
   type ModelToolJsonSchema,
   type ModelToolJsonSchemaType,
 } from '../api/model-tools.ts';
 import type {
   RoleModelChatCompletionTool,
-  RoleModelJsonSchema,
-  RoleModelObjectJsonSchema,
   RoleModelProviderToolNameMapping,
 } from '../api/chat-wire.ts';
+import {isJsonRecord} from '../../shared/json-boundary.ts';
 
 export function modelToolDefinitionToChatTool(
   definition: ModelToolDefinition,
   options: {readonly strict?: boolean} = {},
 ): RoleModelChatCompletionTool {
-  const parameters = modelToolInputContractToJsonSchema(
-    definition.inputContract,
-  );
   const strict =
-    options.strict === true && jsonSchemaSupportsStrictTools(parameters);
+    options.strict === true &&
+    jsonSchemaSupportsStrictTools(definition.inputContract);
 
   return Object.freeze({
     type: 'function',
     function: Object.freeze({
       name: definition.name,
       description: definition.description,
-      parameters,
+      // The contract is already a frozen JSON value; rendering it is
+      // showing it, not translating it.
+      parameters: definition.inputContract,
       ...(strict ? {strict: true} : {}),
     }),
   } satisfies RoleModelChatCompletionTool);
@@ -98,64 +95,36 @@ function roleModelProviderSafeToolName(runtimeName: string): string {
   return `tool_${safeName}`;
 }
 
-function modelToolInputContractToJsonSchema(
-  contract: ModelToolInputContract,
-): RoleModelObjectJsonSchema {
-  const converted = modelToolJsonSchemaToRoleModelSchema(contract);
+// The keyword shapes this eligibility rule can vouch for. A contract may
+// use anything Ajv compiles; strict mode is only ever claimed for
+// schemas made of these, because a keyword the rule cannot see through —
+// a combinator hiding an open object, a constraint the provider's strict
+// grammar refuses — must cost the strict flag, never the request.
+const strictEligibleKeywords = new Set([
+  'type',
+  'description',
+  'enum',
+  'properties',
+  'required',
+  'additionalProperties',
+  'items',
+]);
 
-  return Object.freeze({
-    type: 'object',
-    properties: Object.freeze(converted.properties ?? {}),
-    required: Object.freeze(converted.required ?? []),
-    additionalProperties: converted.additionalProperties ?? false,
-  } satisfies RoleModelObjectJsonSchema);
-}
+function jsonSchemaSupportsStrictTools(schema: ModelToolJsonSchema): boolean {
+  // A JSON manifest may carry a boolean subschema, which is legal JSON
+  // Schema the walk cannot see through — same rule as any other opaque
+  // shape: it costs the strict flag.
+  if (!isJsonRecord(schema)) {
+    return false;
+  }
 
-function modelToolJsonSchemaToRoleModelSchema(
-  schema: ModelToolJsonSchema,
-): RoleModelJsonSchema {
-  const schemaType = freezeRoleModelJsonSchemaType(schema.type);
+  if (
+    !Object.keys(schema).every(keyword => strictEligibleKeywords.has(keyword))
+  ) {
+    return false;
+  }
 
-  return Object.freeze({
-    ...(schemaType === undefined ? {} : {type: schemaType}),
-    ...(schema.description === undefined
-      ? {}
-      : {description: schema.description}),
-    ...(schema.enum === undefined
-      ? {}
-      : {enum: Object.freeze([...schema.enum])}),
-    ...(schema.properties === undefined
-      ? {}
-      : {
-          properties: Object.freeze(
-            Object.fromEntries(
-              Object.entries(schema.properties).map(([key, value]) => [
-                key,
-                modelToolJsonSchemaToRoleModelSchema(value),
-              ]),
-            ),
-          ),
-        }),
-    ...(schema.required === undefined
-      ? {}
-      : {required: Object.freeze([...schema.required])}),
-    ...(schema.additionalProperties === undefined
-      ? {}
-      : {additionalProperties: schema.additionalProperties}),
-    ...(schema.items === undefined
-      ? {}
-      : {items: modelToolJsonSchemaToRoleModelSchema(schema.items)}),
-  } satisfies RoleModelJsonSchema);
-}
-
-function freezeRoleModelJsonSchemaType(
-  type: ModelToolJsonSchema['type'],
-): ModelToolJsonSchema['type'] {
-  return type === undefined ? undefined : freezeModelToolJsonSchemaType(type);
-}
-
-function jsonSchemaSupportsStrictTools(schema: RoleModelJsonSchema): boolean {
-  const schemaTypes = roleModelJsonSchemaTypes(schema.type);
+  const schemaTypes = modelToolJsonSchemaTypes(schema.type);
 
   if (schemaTypes.includes('object')) {
     if (schema.additionalProperties !== false) {
@@ -182,8 +151,8 @@ function jsonSchemaSupportsStrictTools(schema: RoleModelJsonSchema): boolean {
   return true;
 }
 
-function roleModelJsonSchemaTypes(
-  type: RoleModelJsonSchema['type'],
+function modelToolJsonSchemaTypes(
+  type: ModelToolJsonSchema['type'],
 ): readonly ModelToolJsonSchemaType[] {
   if (type === undefined) {
     return Object.freeze([]);

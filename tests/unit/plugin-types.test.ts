@@ -386,62 +386,56 @@ describe('runtime plugin model-facing tool policy', () => {
     ).toThrow(`declares retired field "${field}"`);
   });
 
-  it('rejects unsupported root JSON Schema keywords with their field path', () => {
-    expect(() =>
-      createRuntimePluginProvidedToolWithJsonSchema({
-        type: 'object',
-        properties: {},
-        required: [],
-        additionalProperties: false,
-        oneOf: [],
-      }),
-    ).toThrow('Model tool inputContract.oneOf is not supported.');
+  it('accepts the JSON Schema vocabulary the old field walker refused', () => {
+    // minLength, pattern, oneOf, allOf-composed required, and
+    // $defs-recursive references are ordinary JSON Schema; the same Ajv
+    // that admits them here enforces them against every input, so
+    // accepting them is a capability, not a leniency.
+    const jsonSchema = {
+      type: 'object',
+      properties: {
+        name: {type: 'string', minLength: 1, pattern: '^[a-z]+$'},
+        count: {type: 'integer', minimum: 0},
+        pick: {oneOf: [{type: 'string'}, {type: 'number'}]},
+        tree: {$ref: '#/$defs/node'},
+      },
+      allOf: [{type: 'object', required: ['name']}],
+      additionalProperties: false,
+      $defs: {
+        node: {
+          type: 'object',
+          properties: {
+            value: {type: 'string'},
+            children: {type: 'array', items: {$ref: '#/$defs/node'}},
+          },
+          required: ['value'],
+          additionalProperties: false,
+        },
+      },
+    };
+
+    const tool = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
+
+    expect(tool.inputContract).toEqual(jsonSchema);
   });
 
-  it('rejects unsupported property JSON Schema keywords with their field path', () => {
-    expect(() =>
-      createRuntimePluginProvidedToolWithJsonSchema({
-        type: 'object',
-        properties: {
-          profile: {
-            type: 'object',
-            properties: {
-              name: {
-                type: 'string',
-                minLength: 1,
-              },
-            },
-            required: ['name'],
-            additionalProperties: false,
-          },
-        },
-        required: ['profile'],
-        additionalProperties: false,
-      }),
-    ).toThrow(
-      'Model tool inputContract.properties.profile.properties.name.minLength is not supported.',
-    );
-  });
+  it('constructs a tool with an $id-carrying contract repeatedly', () => {
+    // The storage codec re-derives the tool for every decoded record, so
+    // one schema must compile once per session, never register globally,
+    // and never collide with itself.
+    const jsonSchema = {
+      $id: 'https://project02.test/schemas/memory-search.json',
+      type: 'object',
+      properties: {query: {type: 'string'}},
+      required: ['query'],
+      additionalProperties: false,
+    };
 
-  it('rejects unsupported item JSON Schema keywords with their field path', () => {
-    expect(() =>
-      createRuntimePluginProvidedToolWithJsonSchema({
-        type: 'object',
-        properties: {
-          aliases: {
-            type: 'array',
-            items: {
-              type: 'string',
-              pattern: '^[a-z]+$',
-            },
-          },
-        },
-        required: ['aliases'],
-        additionalProperties: false,
-      }),
-    ).toThrow(
-      'Model tool inputContract.properties.aliases.items.pattern is not supported.',
-    );
+    const first = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
+    const second = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
+
+    expect(first.inputContract).toEqual(jsonSchema);
+    expect(second.inputContract).toEqual(jsonSchema);
   });
 
   it('preserves supported JSON Schema keywords and union types', () => {
@@ -486,54 +480,45 @@ describe('runtime plugin model-facing tool policy', () => {
     };
     const schema =
       createRuntimePluginProvidedToolWithJsonSchema(jsonSchema).inputContract;
+    const properties = schema.properties ?? {};
 
-    expect(Object.hasOwn(schema.properties, '__proto__')).toBe(true);
-    expect(Object.getPrototypeOf(schema.properties)).toBe(Object.prototype);
+    expect(Object.hasOwn(properties, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(properties)).toBe(Object.prototype);
   });
 
   it.each([
     [
-      'duplicate required names',
+      'a misspelled keyword',
+      {
+        type: 'object',
+        properties: {note: {type: 'string'}},
+        requred: ['note'],
+        additionalProperties: false,
+      },
+      'unknown keyword: "requred"',
+    ],
+    [
+      'a duplicate required name',
       {
         type: 'object',
         properties: {note: {type: 'string'}},
         required: ['note', 'note'],
         additionalProperties: false,
       },
-      'required must not contain duplicates',
+      'must NOT have duplicate items',
     ],
     [
-      'required names absent from properties',
-      {
-        type: 'object',
-        properties: {note: {type: 'string'}},
-        required: ['missing'],
-        additionalProperties: false,
-      },
-      'required includes "missing" outside properties',
-    ],
-    [
-      'required names inherited from Object.prototype',
-      {
-        type: 'object',
-        properties: {},
-        required: ['toString'],
-        additionalProperties: false,
-      },
-      'required includes "toString" outside properties',
-    ],
-    [
-      'duplicate union types',
+      'a duplicate union type',
       {
         type: 'object',
         properties: {note: {type: ['string', 'string']}},
         required: ['note'],
         additionalProperties: false,
       },
-      'properties.note.type must not contain duplicates',
+      'schema is invalid',
     ],
     [
-      'object keywords on non-object types',
+      'object keywords on a non-object type',
       {
         type: 'object',
         properties: {
@@ -542,13 +527,52 @@ describe('runtime plugin model-facing tool policy', () => {
         required: ['note'],
         additionalProperties: false,
       },
-      'properties.note uses object keywords without object type',
+      'missing type "object" for keyword "properties"',
     ],
-  ])('rejects %s recursively', (_case, schema, message) => {
-    expect(() => createRuntimePluginProvidedToolWithJsonSchema(schema)).toThrow(
-      message,
-    );
-  });
+    [
+      'an asynchronous schema',
+      {
+        $async: true,
+        type: 'object',
+        properties: {note: {type: 'string'}},
+        required: ['note'],
+        additionalProperties: false,
+      },
+      'asynchronous schemas ($async) cannot gate tool dispatch',
+    ],
+    [
+      'a format constraint no registry enforces',
+      {
+        type: 'object',
+        properties: {email: {type: 'string', format: 'email'}},
+        required: ['email'],
+        additionalProperties: false,
+      },
+      'unknown format "email"',
+    ],
+    [
+      'a registry identity the self-contained contract cannot resolve',
+      {
+        $id: 'https://example.test/tree',
+        type: 'object',
+        properties: {next: {$ref: 'https://example.test/tree'}},
+        additionalProperties: false,
+      },
+      "can't resolve reference",
+    ],
+  ])(
+    'rejects %s as invalid JSON Schema with the compile reason',
+    (_case, schema, message) => {
+      // One rule decides validity — the compile — so an author mistake
+      // is a named rejection, never a silently unenforced constraint.
+      expect(() =>
+        createRuntimePluginProvidedToolWithJsonSchema(schema),
+      ).toThrow(message);
+      expect(() =>
+        createRuntimePluginProvidedToolWithJsonSchema(schema),
+      ).toThrow('is not valid JSON Schema');
+    },
+  );
 
   it('rejects model-facing tools without requestedAccess.model_input write', () => {
     expect(() =>
