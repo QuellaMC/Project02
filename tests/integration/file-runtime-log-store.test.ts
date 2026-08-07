@@ -317,7 +317,7 @@ describe('file runtime log store plugin tool event validation', () => {
   it('validates full session evidence before returning an exact terminal identity', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-validated-terminal-lookup';
-    const eventIdentity = identity('evt_legacy_schema1_patch');
+    const eventIdentity = identity('evt_patch_completed');
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
@@ -337,9 +337,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    writeJsonLines(paths.rawEventsPath, [
-      legacySchema1PatchCompletedEvent(sessionId),
-    ]);
+    writeJsonLines(paths.rawEventsPath, [patchCompletedEvent(sessionId)]);
 
     // The lookup takes a validated store read, so an invalid log fails
     // at the read rather than yielding a terminal.
@@ -368,7 +366,7 @@ describe('file runtime log store plugin tool event validation', () => {
         kind: 'runtime_event_received',
         eventType: 'USER_MESSAGE',
       },
-      legacySchema1PatchCompletedEvent(sessionId),
+      patchCompletedEvent(sessionId),
     ]);
 
     expect(
@@ -423,7 +421,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects malformed persisted provider exchange evidence with the storage contract error', () => {
     const malformedRecord: unknown = structuredClone(
-      legacySchema1PatchCompletedEvent('malformed-provider-exchange'),
+      patchCompletedEvent('malformed-provider-exchange'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -444,7 +442,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a persisted characterRef that disagrees with the decision context', () => {
     const tamperedRecord: unknown = structuredClone(
-      legacySchema1PatchCompletedEvent('tampered-character-ref'),
+      patchCompletedEvent('tampered-character-ref'),
     );
     const roleModelIOSnapshot = isTestRecord(tamperedRecord)
       ? tamperedRecord['roleModelIOSnapshot']
@@ -467,22 +465,28 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow('characterRef id must match the decision-context character');
   });
 
-  it('normalizes missing legacy requested tool names from replayable raw evidence', async () => {
-    const storedRecord = await persistedDisallowedToolRejectionRecord(
-      'legacy-missing-requested-tool-names',
+  it('rejects an envelope that persisted no plugin tool definitions', () => {
+    const malformedRecord: unknown = structuredClone(
+      patchCompletedEvent('absent-plugin-tool-definitions'),
     );
-    const storedDecisionResult = rejectedDecisionResultRecord(storedRecord);
+    const roleModelIOSnapshot = isTestRecord(malformedRecord)
+      ? malformedRecord['roleModelIOSnapshot']
+      : undefined;
+    const inputEnvelope = isTestRecord(roleModelIOSnapshot)
+      ? roleModelIOSnapshot['inputEnvelope']
+      : undefined;
 
-    Reflect.deleteProperty(storedDecisionResult, 'requestedToolNames');
+    if (!isTestRecord(inputEnvelope)) {
+      throw new Error('Expected role-model input envelope fixture.');
+    }
 
-    const decodedRecord = decodeRawEventLogRecord(JSON.stringify(storedRecord));
+    // Every envelope the runtime writes carries this array, so an absent
+    // one is damage rather than an older record to reconstruct from.
+    Reflect.deleteProperty(inputEnvelope, 'pluginToolDefinitions');
 
-    expect(decodedRecord.parsedRoleModelDecisionSnapshot?.result).toMatchObject(
-      {
-        status: 'rejected',
-        requestedToolNames: ['memory.unknown'],
-      },
-    );
+    expect(() =>
+      decodeRawEventLogRecord(JSON.stringify(malformedRecord)),
+    ).toThrow(LocalRuntimeStorageContractError);
   });
 
   it('rejects present requested tool names that disagree with raw evidence', async () => {
@@ -658,7 +662,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects duplicate persisted allowed tools with the storage contract error', () => {
     const malformedRecord: unknown = structuredClone(
-      legacySchema1PatchCompletedEvent('duplicate-persisted-allowed-tools'),
+      patchCompletedEvent('duplicate-persisted-allowed-tools'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -680,93 +684,6 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(() =>
       decodeRawEventLogRecord(JSON.stringify(malformedRecord)),
     ).toThrow(LocalRuntimeStorageContractError);
-  });
-
-  it('decodes legacy schema 1 role-model snapshots with character_state.patch as a former built-in allowed tool', async () => {
-    const storeRoot = createStoreRoot();
-    const sessionId = 'legacy-schema-1-role-model';
-    await createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-    writeFileSync(
-      createLocalRuntimeStorageLayout({storeRoot}).schemaPath,
-      `${JSON.stringify({
-        schemaVersion: 6,
-        scope: 'character-data',
-        characterId: 'mira',
-        createdAt: '2026-06-15T00:00:00.000Z',
-      })}\n`,
-      'utf8',
-    );
-
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      characterId: testCharacterProfile.id,
-      boundCharacter: testCharacterProfile,
-    });
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    mkdirSync(paths.sessionRoot, {recursive: true});
-    writeJsonLines(paths.rawEventsPath, [
-      {
-        ...identity('evt_legacy_schema1_patch'),
-        kind: 'runtime_event_received',
-        eventType: 'USER_MESSAGE',
-      },
-      {
-        ...identity('evt_legacy_schema1_patch'),
-        kind: 'runtime_event_normalized',
-        eventType: 'USER_MESSAGE',
-        payloadSummary: {
-          rawInput: 'remember the mood',
-          normalizedCurrentUserMessage: 'remember the mood',
-        },
-      },
-      legacySchema1PatchCompletedEvent(sessionId),
-    ]);
-
-    const completed = logStore
-      .rawEvents()
-      .find(event => event.kind === 'runtime_turn_completed');
-
-    expect(completed?.roleModelIOSnapshot?.inputEnvelope.allowedTools).toEqual([
-      visibleReplyModelToolName,
-      characterStatePatchModelToolName,
-    ]);
-    expect(
-      completed?.roleModelIOSnapshot?.inputEnvelope.pluginToolDefinitions,
-    ).toMatchObject([
-      {
-        pluginId: firstPartyModelToolsPluginId,
-        name: visibleReplyModelToolName,
-      },
-      {
-        pluginId: 'character-state',
-        name: characterStatePatchModelToolName,
-      },
-    ]);
-    expect(completed?.parsedRoleModelDecisionSnapshot?.result).toMatchObject({
-      status: 'accepted',
-      decision: {
-        toolCalls: [
-          {
-            name: characterStatePatchModelToolName,
-            input: {
-              mood: 'curious',
-            },
-          },
-        ],
-      },
-    });
   });
 
   it('persists multi-line visible conversation records', async () => {
@@ -2472,9 +2389,7 @@ function storedRecordWithPluginToolJsonSchema(
 ): object {
   const storedRecord: unknown = structuredClone(
     decodeRawEventLogRecord(
-      JSON.stringify(
-        legacySchema1PatchCompletedEvent('persisted-plugin-tool-schema'),
-      ),
+      JSON.stringify(patchCompletedEvent('persisted-plugin-tool-schema')),
     ),
   );
 
@@ -2515,8 +2430,8 @@ function storedRecordWithPluginToolJsonSchema(
   return storedRecord;
 }
 
-function legacySchema1PatchCompletedEvent(sessionId: string): object {
-  const eventIdentity = identity('evt_legacy_schema1_patch');
+function patchCompletedEvent(sessionId: string): object {
+  const eventIdentity = identity('evt_patch_completed');
   const rawOutputText = JSON.stringify({
     toolCalls: [
       {
@@ -2555,10 +2470,46 @@ function legacySchema1PatchCompletedEvent(sessionId: string): object {
           visibleReplyModelToolName,
           characterStatePatchModelToolName,
         ],
+        pluginToolDefinitions: [
+          {
+            pluginId: firstPartyModelToolsPluginId,
+            name: visibleReplyModelToolName,
+            description: 'Say one message to the user.',
+            inputContract: {
+              type: 'object',
+              fields: [
+                {
+                  name: 'text',
+                  description: 'The message text.',
+                  required: true,
+                  valueType: 'string',
+                },
+              ],
+              additionalFields: false,
+            },
+            validationOwner: 'built_in_model_tools',
+            annotations: {readOnlyHint: true},
+            concurrency: 'shared',
+            requiresConfirmation: false,
+          },
+          {
+            pluginId: 'character-state',
+            name: characterStatePatchModelToolName,
+            description: "Patch the character's internal state.",
+            inputContract: {
+              type: 'object',
+              fields: [],
+              additionalFields: true,
+            },
+            validationOwner: 'plugin_host',
+            concurrency: 'exclusive',
+            requiresConfirmation: false,
+          },
+        ],
         toolObservations: [],
         outputContract: {
           version: roleModelDecisionContractVersion,
-          text: 'legacy schema 1 output contract text',
+          text: 'patch completed output contract text',
         },
       },
       rawOutputText,
