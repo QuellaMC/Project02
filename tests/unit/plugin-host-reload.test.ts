@@ -36,7 +36,6 @@ function reloadFixtureManifest(): RuntimePluginManifest {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test',
     },
     declaredPlugins: ['before_role_model_call', 'on_session_end'],
     config: {

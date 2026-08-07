@@ -134,8 +134,6 @@ export function createRuntimePluginManagementPluginManifest() {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02',
-      externalContract: 'runtime_plugin_management',
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {

@@ -24,7 +24,6 @@ export function requiredSecretPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -125,7 +124,6 @@ export function firstPartyPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {

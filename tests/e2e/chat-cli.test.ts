@@ -2279,7 +2279,6 @@ function createChatConfigurablePlugin(): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['tool_provider'],
       config: {
@@ -2352,7 +2351,6 @@ function createSessionEndPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins,
       config: {
@@ -2421,7 +2419,6 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {
@@ -2479,7 +2476,6 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {

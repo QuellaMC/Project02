@@ -219,7 +219,6 @@ function dottedConfigManifest(): RuntimePluginManifest {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02',
     },
     declaredPlugins: [],
     config: {

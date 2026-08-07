@@ -701,7 +701,6 @@ describe('runtime plugin config metadata', () => {
         contractVersion: runtimePluginContractVersion,
         compatibility: {
           hostContractVersions: [runtimePluginContractVersion],
-          sourceSystem: 'test',
         },
         declaredPlugins: ['plugin_discovery'],
         config: {
@@ -718,7 +717,6 @@ describe('runtime plugin config metadata', () => {
               agentMutable: true,
               reloadRequired: true,
               redactionLabels: [],
-              configFingerprint: 'declared-backend-v1',
             },
             {
               name: 'apiKey',
@@ -756,7 +754,6 @@ describe('runtime plugin config metadata', () => {
       allowedValues: ['local', 'cloud'],
       agentMutable: true,
       reloadRequired: true,
-      configFingerprint: 'declared-backend-v1',
     });
     expect(JSON.stringify(plugin.manifest)).not.toContain('resolvedConfig');
     expect(JSON.stringify(plugin.manifest)).not.toContain('MEMORY_API_KEY=');
@@ -798,7 +795,6 @@ function runtimePluginManifestFixture(
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test',
     },
     declaredPlugins: ['plugin_discovery'],
     config: {

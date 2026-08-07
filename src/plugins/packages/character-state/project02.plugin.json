@@ -10,9 +10,7 @@
     "description": "First-party assistant-owned Character State context and patch tool for the active character's internal state.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "compatibility": {
-      "hostContractVersions": ["mvp-008.runtime_plugin.v2"],
-      "sourceSystem": "project02",
-      "externalContract": "character_state_plugin"
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
     },
     "declaredPlugins": [
       "tool_provider",

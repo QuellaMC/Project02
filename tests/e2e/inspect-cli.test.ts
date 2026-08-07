@@ -1478,7 +1478,6 @@ function createInspectFixturePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -1570,7 +1569,6 @@ function createInspectSessionEndFixturePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {

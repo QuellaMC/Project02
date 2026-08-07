@@ -434,46 +434,9 @@ function requiredCompatibilityMetadata(
     );
   }
 
-  const sourceSystem = optionalString(value['sourceSystem'], 'sourceSystem');
-  const sourceVersion = optionalString(value['sourceVersion'], 'sourceVersion');
-  const externalContract = optionalString(
-    value['externalContract'],
-    'externalContract',
-  );
-  const notes =
-    value['notes'] === undefined
-      ? accept(undefined)
-      : requiredStringArray(value['notes'], 'notes');
-
-  if (
-    sourceSystem.status === 'rejected' ||
-    sourceVersion.status === 'rejected' ||
-    externalContract.status === 'rejected' ||
-    notes.status === 'rejected'
-  ) {
-    return firstRejected([
-      sourceSystem,
-      sourceVersion,
-      externalContract,
-      notes,
-    ]);
-  }
-
   return accept(
     Object.freeze({
       hostContractVersions: hostContractVersions.value,
-      ...(sourceSystem.value === undefined
-        ? {}
-        : {sourceSystem: sourceSystem.value}),
-      ...(sourceVersion.value === undefined
-        ? {}
-        : {sourceVersion: sourceVersion.value}),
-      ...(externalContract.value === undefined
-        ? {}
-        : {externalContract: externalContract.value}),
-      ...(notes.value === undefined
-        ? {}
-        : {notes: Object.freeze(notes.value.map(value => value))}),
     } satisfies RuntimePluginCompatibilityMetadata),
   );
 }
@@ -583,11 +546,6 @@ function requiredConfigField(
     value['redactionLabels'],
     'redactionLabels',
   );
-  const configFingerprint = optionalString(
-    value['configFingerprint'],
-    'configFingerprint',
-  );
-
   if (name.status === 'rejected') return name;
   if (description.status === 'rejected') return description;
   if (required.status === 'rejected') return required;
@@ -599,7 +557,6 @@ function requiredConfigField(
   if (agentMutable.status === 'rejected') return agentMutable;
   if (reloadRequired.status === 'rejected') return reloadRequired;
   if (redactionLabels.status === 'rejected') return redactionLabels;
-  if (configFingerprint.status === 'rejected') return configFingerprint;
 
   if (secret.value && agentMutable.value === true) {
     return reject(
@@ -620,7 +577,6 @@ function requiredConfigField(
     agentMutable: agentMutable.value,
     reloadRequired: reloadRequired.value,
     redactionLabels: redactionLabels.value,
-    configFingerprint: configFingerprint.value,
   });
 }
 
@@ -636,7 +592,6 @@ function acceptRuntimePluginConfigField(options: {
   readonly agentMutable: boolean | undefined;
   readonly reloadRequired: boolean | undefined;
   readonly redactionLabels: readonly string[];
-  readonly configFingerprint: string | undefined;
 }): RuntimePluginValidationResult<RuntimePluginConfigField> {
   return accept(
     Object.freeze({
@@ -663,9 +618,6 @@ function acceptRuntimePluginConfigField(options: {
         ? {}
         : {reloadRequired: options.reloadRequired}),
       redactionLabels: freezeRedactedStrings(options.redactionLabels),
-      ...(options.configFingerprint === undefined
-        ? {}
-        : {configFingerprint: options.configFingerprint}),
     } satisfies RuntimePluginConfigField),
   );
 }

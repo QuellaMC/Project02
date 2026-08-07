@@ -272,7 +272,6 @@ export function createHealthRejectingPlugin() {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['health'],
       config: {
@@ -327,7 +326,6 @@ export function createHandleFileStoreWritePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins:
         healthRejectsWhenValue === undefined
@@ -466,7 +464,6 @@ export function createAfterTurnCommittedProbeHost(
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test',
           },
           declaredPlugins: ['after_turn_committed'],
           config: {
@@ -541,7 +538,6 @@ export function createPluginStoreRevisionFixtureHost() {
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test',
           },
           declaredPlugins: ['tool_provider', 'handle_tool_call'],
           config: {

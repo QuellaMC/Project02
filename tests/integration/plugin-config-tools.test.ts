@@ -2262,7 +2262,6 @@ function arbitraryConfigPluginManifest(id: string) {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test',
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {scope: 'global_with_character_overrides', fields: []},
@@ -2293,7 +2292,6 @@ function configurablePluginManifest(
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test',
     },
     declaredPlugins: ['tool_provider'],
     config: {

@@ -2574,7 +2574,6 @@ function createBeforeCallRejectingPluginHost() {
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test',
           },
           declaredPlugins: ['before_role_model_call'],
           config: {
@@ -2631,7 +2630,6 @@ function createHealthRejectingPluginHost(options?: {
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test',
           },
           declaredPlugins: ['health'],
           config: {

@@ -1261,7 +1261,6 @@ export function memorySearchPluginManifest(id: string) {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test',
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {

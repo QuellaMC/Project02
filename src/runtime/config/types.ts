@@ -16,7 +16,6 @@ export function isRuntimeControlEnvVarName(name: string): boolean {
 
 export type RuntimeConfigSecretRef = {
   readonly $env: string;
-  readonly description?: string;
 };
 
 export type RuntimeConfigValue =

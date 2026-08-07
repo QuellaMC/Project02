@@ -48,8 +48,6 @@ export function createFirstPartyModelToolsPluginManifest(): RuntimePluginManifes
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02',
-      externalContract: 'built_in_model_tools',
     },
     declaredPlugins: ['tool_provider'],
     config: {

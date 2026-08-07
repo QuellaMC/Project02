@@ -52,10 +52,7 @@ const project02RuntimeConfigFields = Object.freeze([
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
 const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
-const runtimeConfigSecretRefFields = Object.freeze([
-  secretEnvMarkerField,
-  'description',
-]);
+const runtimeConfigSecretRefFields = Object.freeze([secretEnvMarkerField]);
 const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
   plaintextSecretMarkerField,
   allowPlaintextSecretMarkerField,
@@ -800,9 +797,7 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
     return (
       hasOnlyFields(value, runtimeConfigSecretRefFields) &&
       typeof value[secretEnvMarkerField] === 'string' &&
-      value[secretEnvMarkerField].trim().length > 0 &&
-      (value['description'] === undefined ||
-        typeof value['description'] === 'string')
+      value[secretEnvMarkerField].trim().length > 0
     );
   }
 

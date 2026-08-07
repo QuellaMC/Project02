@@ -237,7 +237,6 @@ describe('runtime config loader validation', () => {
           config: {
             apiKey: {
               $env: 'PROJECT02_TEST_API_KEY',
-              description: 'test key',
               unexpected: 'not supported',
             },
           },
@@ -257,16 +256,13 @@ describe('runtime config loader validation', () => {
     );
   });
 
-  it('accepts env secret refs with an optional description', () => {
+  it('accepts env secret refs', () => {
     const result = validateProject02RuntimeConfig({
       version: runtimeConfigVersion,
       plugins: {
         foo: {
           config: {
-            apiKey: {
-              $env: 'PROJECT02_TEST_API_KEY',
-              description: 'test key',
-            },
+            apiKey: {$env: 'PROJECT02_TEST_API_KEY'},
           },
         },
       },
@@ -275,7 +271,6 @@ describe('runtime config loader validation', () => {
     expect(result.diagnostics).toEqual([]);
     expect(result.config?.plugins?.['foo']?.config?.['apiKey']).toEqual({
       $env: 'PROJECT02_TEST_API_KEY',
-      description: 'test key',
     });
   });
 

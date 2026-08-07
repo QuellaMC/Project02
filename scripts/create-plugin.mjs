@@ -234,7 +234,6 @@ function descriptorTemplate({id, displayName}) {
       contractVersion: 'mvp-008.runtime_plugin.v2',
       compatibility: {
         hostContractVersions: ['mvp-008.runtime_plugin.v2'],
-        sourceSystem: 'project02',
       },
       declaredPlugins: ['before_role_model_call'],
       config: {

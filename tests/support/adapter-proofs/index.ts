@@ -32,19 +32,8 @@ import {isModelFacingRuntimePluginTool} from '../../../src/plugins/api/tool-clas
 
 type JsonRecord = Readonly<Record<string, unknown>>;
 
-export type RuntimePluginAdapterCompatibilityDisposition =
-  'mapped' | 'ignored_with_evidence' | 'future_extension';
-
-export type RuntimePluginAdapterCompatibilityNote = {
-  readonly sourceSystem: string;
-  readonly fieldPath: string;
-  readonly disposition: RuntimePluginAdapterCompatibilityDisposition;
-  readonly evidence: string;
-};
-
 export type RuntimePluginAdapterMapping = {
   readonly plugin: RuntimePlugin;
-  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
 };
 
 export function mapOpenClawMemoryPluginFixture(
@@ -55,17 +44,6 @@ export function mapOpenClawMemoryPluginFixture(
   const toolNames = requiredStringArray(contracts['tools'], 'contracts.tools');
   const configSchema = requiredRecord(fixture['configSchema'], 'configSchema');
   const toolMetadata = optionalRecord(fixture['toolMetadata'], 'toolMetadata');
-  const packageMetadata = optionalRecord(fixture['package'], 'package');
-  const packageOpenClaw = optionalNestedRecord(
-    packageMetadata,
-    'openclaw',
-    'package.openclaw',
-  );
-  const packageCompat = optionalNestedRecord(
-    packageOpenClaw,
-    'compat',
-    'package.openclaw.compat',
-  );
   const activation = requiredRecord(fixture['activation'], 'activation');
   const manifestId = 'openclaw.memory_core.fixture';
   const providedTools = toolNames.map(toolName =>
@@ -78,37 +56,12 @@ export function mapOpenClawMemoryPluginFixture(
       validationOwner: 'adapter',
     }),
   );
-  const notes = [
-    createCompatibilityNote({
-      sourceSystem: 'openclaw',
-      fieldPath: 'contracts.tools',
-      disposition: 'mapped',
-      evidence:
-        'OpenClaw declared tool names were normalized into local providedTools.',
-    }),
-    createCompatibilityNote({
-      sourceSystem: 'openclaw',
-      fieldPath: 'configSchema.properties',
-      disposition: 'mapped',
-      evidence:
-        'OpenClaw JSON-schema-like config fields were normalized into local config metadata.',
-    }),
-    ...unsupportedNotesFromFixture(fixture, 'openclaw'),
-  ];
   const manifest = createOpenClawManifest({
     fixture,
     manifestId,
     providedTools,
     configFields: configFieldsFromSchema(configSchema),
     activationReasons: activationReasonsFromOpenClawActivation(activation),
-    sourceVersion:
-      optionalString(
-        packageCompat?.['pluginApi'],
-        'package.openclaw.compat.pluginApi',
-      ) ??
-      optionalString(fixture['version'], 'version') ??
-      'fixture',
-    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -150,7 +103,7 @@ export function mapOpenClawMemoryPluginFixture(
     },
   });
 
-  return freezeMapping({plugin, compatibilityNotes: notes});
+  return Object.freeze({plugin});
 }
 
 export function mapTencentDbMemoryGatewayFixture(
@@ -186,39 +139,15 @@ export function mapTencentDbMemoryGatewayFixture(
       maxCalls: 2,
     }),
   ];
-  const notes = [
-    createCompatibilityNote({
-      sourceSystem: 'TencentDB-Agent-Memory',
-      fieldPath: 'endpoints.recall',
-      disposition: 'mapped',
-      evidence: 'POST /recall fixture response maps to beforeRoleModelCall.',
-    }),
-    createCompatibilityNote({
-      sourceSystem: 'TencentDB-Agent-Memory',
-      fieldPath: 'endpoints.capture',
-      disposition: 'mapped',
-      evidence: 'POST /capture fixture response maps to afterTurnCommitted.',
-    }),
-    createCompatibilityNote({
-      sourceSystem: 'TencentDB-Agent-Memory',
-      fieldPath: 'endpoints.sessionEnd',
-      disposition: 'mapped',
-      evidence: 'POST /session/end fixture response maps to onSessionEnd.',
-    }),
-    ...unsupportedNotesFromFixture(fixture, 'TencentDB-Agent-Memory'),
-  ];
   const manifest = createMemoryGatewayManifest({
     id: manifestId,
     displayName: 'TencentDB Agent Memory gateway fixture',
-    sourceSystem: 'TencentDB-Agent-Memory',
-    sourceVersion: optionalString(fixture['version'], 'version') ?? 'fixture',
-    externalContract: 'tdai-gateway-http',
+    version: optionalString(fixture['version'], 'version') ?? 'fixture',
     description:
       'Fixture adapter for TencentDB-Agent-Memory gateway recall, capture, search, session, and health contracts.',
     providedTools,
     configFields: configFieldsFromConfigRecord(config),
     configFingerprint: 'fixture-redacted-tdai-gateway',
-    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -341,7 +270,7 @@ export function mapTencentDbMemoryGatewayFixture(
     },
   });
 
-  return freezeMapping({plugin, compatibilityNotes: notes});
+  return Object.freeze({plugin});
 }
 
 export function mapHermesMemoryProviderFixture(
@@ -363,28 +292,6 @@ export function mapHermesMemoryProviderFixture(
   const config = requiredRecord(fixture['config'], 'config');
   const degradation = requiredRecord(fixture['degradation'], 'degradation');
   const manifestId = 'hermes.memory_tencentdb.fixture';
-  const notes = [
-    createCompatibilityNote({
-      sourceSystem: 'hermes',
-      fieldPath: 'behavior.prefetch',
-      disposition: 'mapped',
-      evidence: 'Hermes prefetch maps to beforeRoleModelCall recall context.',
-    }),
-    createCompatibilityNote({
-      sourceSystem: 'hermes',
-      fieldPath: 'behavior.sync',
-      disposition: 'mapped',
-      evidence: 'Hermes sync maps to afterTurnCommitted capture.',
-    }),
-    createCompatibilityNote({
-      sourceSystem: 'hermes',
-      fieldPath: 'degradation',
-      disposition: 'mapped',
-      evidence:
-        'Circuit-breaker and back-pressure metadata map into compatibility notes and health summary.',
-    }),
-    ...unsupportedNotesFromFixture(fixture, 'hermes'),
-  ];
   const providedTools = searchTools.map(tool =>
     createProvidedToolFromSchema({
       name: requiredString(tool['name'], 'behavior.searchTools.name'),
@@ -404,15 +311,12 @@ export function mapHermesMemoryProviderFixture(
     displayName:
       optionalString(fixture['displayName'], 'displayName') ??
       'Hermes memory provider fixture',
-    sourceSystem: 'hermes',
-    sourceVersion: optionalString(fixture['version'], 'version') ?? 'fixture',
-    externalContract: 'hermes-memory-provider',
+    version: optionalString(fixture['version'], 'version') ?? 'fixture',
     description:
       'Fixture adapter for Hermes memory provider prefetch, sync, search, session, health, and degradation metadata.',
     providedTools,
     configFields: configFieldsFromConfigRecord(config),
     configFingerprint: 'fixture-redacted-hermes-provider',
-    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -530,7 +434,7 @@ export function mapHermesMemoryProviderFixture(
     },
   });
 
-  return freezeMapping({plugin, compatibilityNotes: notes});
+  return Object.freeze({plugin});
 }
 
 export function mapMcpToolsResourcesFixture(
@@ -545,22 +449,6 @@ export function mapMcpToolsResourcesFixture(
   const tools = recordsArray(fixture['tools'], 'tools');
   const resources = recordsArray(fixture['resources'], 'resources');
   const manifestId = 'mcp.tools_resources.fixture';
-  const notes = [
-    createCompatibilityNote({
-      sourceSystem: 'model-context-protocol',
-      fieldPath: 'tools',
-      disposition: 'mapped',
-      evidence: 'MCP tool declarations map to local providedTools.',
-    }),
-    createCompatibilityNote({
-      sourceSystem: 'model-context-protocol',
-      fieldPath: 'resources',
-      disposition: 'mapped',
-      evidence:
-        'MCP resource declarations map to beforeRoleModelCall context resources.',
-    }),
-    ...unsupportedNotesFromFixture(fixture, 'model-context-protocol'),
-  ];
   const providedTools = tools.map(tool =>
     createProvidedToolFromSchema({
       name: requiredString(tool['name'], 'tools.name'),
@@ -580,9 +468,6 @@ export function mapMcpToolsResourcesFixture(
     kind: 'bridge_adapter',
     description:
       'Fixture adapter for MCP 2025-06-18 tools and resources mapped into the local plugin contract.',
-    sourceSystem: 'model-context-protocol',
-    sourceVersion: protocolVersion,
-    externalContract: 'mcp-tools-resources',
     declaredPlugins: [
       'tool_provider',
       'handle_tool_call',
@@ -602,7 +487,6 @@ export function mapMcpToolsResourcesFixture(
       timeoutMs: 1000,
     }),
     activationReasons: ['mcp_fixture_mapping'],
-    compatibilityNotes: notes,
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -705,22 +589,11 @@ export function mapMcpToolsResourcesFixture(
     },
   });
 
-  return freezeMapping({plugin, compatibilityNotes: notes});
+  return Object.freeze({plugin});
 }
 
 export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
-  const plugin = createFirstPartyModelToolsPlugin();
-  const notes = [
-    createCompatibilityNote({
-      sourceSystem: 'project02',
-      fieldPath: 'builtInModelToolDefinitionsForUserTurn',
-      disposition: 'mapped',
-      evidence:
-        'First-party built-in tools are represented through RuntimePlugin without changing validationOwner or input contracts.',
-    }),
-  ];
-
-  return freezeMapping({plugin, compatibilityNotes: notes});
+  return Object.freeze({plugin: createFirstPartyModelToolsPlugin()});
 }
 
 function createOpenClawManifest(options: {
@@ -729,8 +602,6 @@ function createOpenClawManifest(options: {
   readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly configFields: readonly RuntimePluginConfigField[];
   readonly activationReasons: readonly string[];
-  readonly sourceVersion: string;
-  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
 }): RuntimePluginManifest {
   return createRuntimePluginManifestForAdapter({
     id: options.manifestId,
@@ -744,9 +615,6 @@ function createOpenClawManifest(options: {
     description:
       optionalString(options.fixture['description'], 'description') ??
       'OpenClaw memory plugin fixture mapped into the local plugin contract.',
-    sourceSystem: 'openclaw',
-    sourceVersion: options.sourceVersion,
-    externalContract: 'openclaw.plugin.json',
     declaredPlugins: ['tool_provider', 'handle_tool_call', 'health'],
     providedTools: options.providedTools,
     configFields: options.configFields,
@@ -754,31 +622,24 @@ function createOpenClawManifest(options: {
       timeoutMs: 1000,
     }),
     activationReasons: options.activationReasons,
-    compatibilityNotes: options.compatibilityNotes,
   });
 }
 
 function createMemoryGatewayManifest(options: {
   readonly id: string;
   readonly displayName: string;
-  readonly sourceSystem: string;
-  readonly sourceVersion: string;
-  readonly externalContract: string;
+  readonly version: string;
   readonly description: string;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly configFields: readonly RuntimePluginConfigField[];
   readonly configFingerprint: string;
-  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
 }): RuntimePluginManifest {
   return createRuntimePluginManifestForAdapter({
     id: options.id,
     displayName: options.displayName,
-    version: options.sourceVersion,
+    version: options.version,
     kind: 'memory_provider',
     description: options.description,
-    sourceSystem: options.sourceSystem,
-    sourceVersion: options.sourceVersion,
-    externalContract: options.externalContract,
     declaredPlugins: [
       'before_role_model_call',
       'tool_provider',
@@ -795,7 +656,6 @@ function createMemoryGatewayManifest(options: {
       redactionLabels: ['secret'],
     }),
     activationReasons: ['memory_fixture_mapping'],
-    compatibilityNotes: options.compatibilityNotes,
   });
 }
 
@@ -805,16 +665,12 @@ function createRuntimePluginManifestForAdapter(options: {
   readonly version: string;
   readonly kind: RuntimePluginManifest['kind'];
   readonly description: string;
-  readonly sourceSystem: string;
-  readonly sourceVersion: string;
-  readonly externalContract: string;
   readonly declaredPlugins: readonly RuntimePluginDeclaration[];
   readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly configFields: readonly RuntimePluginConfigField[];
   readonly configFingerprint?: string;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activationReasons: readonly string[];
-  readonly compatibilityNotes: readonly RuntimePluginAdapterCompatibilityNote[];
 }): RuntimePluginManifest {
   const manifest = {
     id: options.id,
@@ -825,12 +681,6 @@ function createRuntimePluginManifestForAdapter(options: {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: options.sourceSystem,
-      sourceVersion: options.sourceVersion,
-      externalContract: options.externalContract,
-      notes: options.compatibilityNotes.map(
-        note => `${note.disposition}:${note.fieldPath}:${note.evidence}`,
-      ),
     },
     declaredPlugins: options.declaredPlugins,
     config: {
@@ -1351,69 +1201,6 @@ function degradationSummary(degradation: JsonRecord): string {
         );
 
   return `circuit breaker threshold ${failureThreshold}, pause ${pauseMs}ms, max in-flight sync ${maxInFlight}`;
-}
-
-function createCompatibilityNote(
-  options: RuntimePluginAdapterCompatibilityNote,
-): RuntimePluginAdapterCompatibilityNote {
-  return Object.freeze({
-    sourceSystem: options.sourceSystem,
-    fieldPath: options.fieldPath,
-    disposition: options.disposition,
-    evidence: options.evidence,
-  });
-}
-
-function unsupportedNotesFromFixture(
-  fixture: JsonRecord,
-  sourceSystem: string,
-): readonly RuntimePluginAdapterCompatibilityNote[] {
-  const unsupportedFields = recordsArray(
-    fixture['unsupportedFields'],
-    'unsupportedFields',
-  );
-
-  return Object.freeze(
-    unsupportedFields.map(field =>
-      createCompatibilityNote({
-        sourceSystem,
-        fieldPath: requiredString(
-          field['fieldPath'],
-          'unsupportedFields.fieldPath',
-        ),
-        disposition: compatibilityDispositionFromString(
-          requiredString(field['disposition'], 'unsupportedFields.disposition'),
-        ),
-        evidence: requiredString(
-          field['evidence'],
-          'unsupportedFields.evidence',
-        ),
-      }),
-    ),
-  );
-}
-
-function compatibilityDispositionFromString(
-  value: string,
-): RuntimePluginAdapterCompatibilityDisposition {
-  if (
-    value === 'mapped' ||
-    value === 'ignored_with_evidence' ||
-    value === 'future_extension'
-  ) {
-    return value;
-  }
-
-  throw new TypeError(`Unsupported compatibility disposition "${value}".`);
-}
-
-function freezeMapping(
-  mapping: RuntimePluginAdapterMapping,
-): RuntimePluginAdapterMapping {
-  return Object.freeze({
-    plugin: mapping.plugin,
-    compatibilityNotes: Object.freeze([...mapping.compatibilityNotes]),
-  });
 }
 
 function jsonObjectFromRecord(record: JsonRecord): RuntimePluginJsonObject {

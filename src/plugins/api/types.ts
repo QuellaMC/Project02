@@ -44,10 +44,6 @@ export type RuntimePluginFileStore = {
 
 export type RuntimePluginCompatibilityMetadata = {
   readonly hostContractVersions: readonly string[];
-  readonly sourceSystem?: string;
-  readonly sourceVersion?: string;
-  readonly externalContract?: string;
-  readonly notes?: readonly string[];
 };
 
 export type RuntimePluginConfigField = {
@@ -62,7 +58,6 @@ export type RuntimePluginConfigField = {
   readonly agentMutable?: boolean;
   readonly reloadRequired?: boolean;
   readonly redactionLabels: readonly string[];
-  readonly configFingerprint?: string;
 };
 
 export type RuntimePluginConfigMetadata = {
