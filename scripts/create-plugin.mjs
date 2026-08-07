@@ -29,41 +29,53 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   }
 
   const packageRoot = join(packagesRoot, id);
-  const source = readFileSync(bundledPath, 'utf8');
 
-  if (existsSync(packageRoot)) {
-    assertOwnScaffold({id, packageRoot});
-    if (source.includes(`'../packages/${id}/index.ts'`)) {
-      throw new Error(
-        `Plugin package directory already exists: ${packageRoot}`,
-      );
+  // One scaffold at a time per registry: check, create, and register must
+  // not interleave, or a colliding loser leaves files it can never register.
+  return withBundledRegistryLock(bundledPath, () => {
+    const source = readFileSync(bundledPath, 'utf8');
+    const registered = source.includes(`'../packages/${id}/index.ts'`);
+    const packageRootExists = existsSync(packageRoot);
+
+    if (packageRootExists) {
+      assertOwnScaffold({id, packageRoot});
+      if (registered) {
+        throw new Error(
+          `Plugin package directory already exists: ${packageRoot}`,
+        );
+      }
     }
-  } else {
-    assertBundledRegistrationNamesAvailable({id, source});
-    mkdirSync(packageRoot, {recursive: true});
-  }
+    if (!registered) {
+      assertBundledRegistrationNamesAvailable({id, source});
+    }
+    if (!packageRootExists) {
+      mkdirSync(packageRoot, {recursive: true});
+    }
 
-  const displayName = displayNameFromProject02Identifier(id);
+    const displayName = displayNameFromProject02Identifier(id);
 
-  writeMissingScaffoldFile(
-    join(packageRoot, 'project02.plugin.json'),
-    `${JSON.stringify(descriptorTemplate({id, displayName}), null, 2)}\n`,
-  );
-  writeMissingScaffoldFile(
-    join(packageRoot, 'package.json'),
-    `${JSON.stringify({type: 'module'}, null, 2)}\n`,
-  );
-  writeMissingScaffoldFile(
-    join(packageRoot, 'index.ts'),
-    "export {createProject02Plugin} from './plugin.ts';\n",
-  );
-  writeMissingScaffoldFile(
-    join(packageRoot, 'plugin.ts'),
-    pluginModuleTemplate(id),
-  );
-  registerBundledRuntimePluginFactory({id, bundledPath});
+    writeMissingScaffoldFile(
+      join(packageRoot, 'project02.plugin.json'),
+      `${JSON.stringify(descriptorTemplate({id, displayName}), null, 2)}\n`,
+    );
+    writeMissingScaffoldFile(
+      join(packageRoot, 'package.json'),
+      `${JSON.stringify({type: 'module'}, null, 2)}\n`,
+    );
+    writeMissingScaffoldFile(
+      join(packageRoot, 'index.ts'),
+      "export {createProject02Plugin} from './plugin.ts';\n",
+    );
+    writeMissingScaffoldFile(
+      join(packageRoot, 'plugin.ts'),
+      pluginModuleTemplate(id),
+    );
+    if (!registered) {
+      registerBundledRuntimePluginFactory({id, bundledPath, source});
+    }
 
-  return {packageRoot};
+    return {packageRoot};
+  });
 }
 
 // A rerun heals a crashed scaffold; an existing file is never overwritten.
@@ -97,29 +109,7 @@ function assertOwnScaffold({id, packageRoot}) {
   }
 }
 
-// Ids that differ only in separators derive one registration name; emitting
-// the second would break bundled.ts for both packages.
-function assertBundledRegistrationNamesAvailable({id, source}) {
-  if (source.includes(`'../packages/${id}/index.ts'`)) {
-    return;
-  }
-
-  const constantPrefix = identifierConstantPrefix(id);
-
-  for (const name of [
-    `create${capitalize(constantPrefix)}Plugin`,
-    `${constantPrefix}PluginId`,
-  ]) {
-    if (new RegExp(`\\b${name}\\b`, 'u').test(source)) {
-      throw new Error(
-        `Plugin id "${id}" derives the registration name "${name}", which bundled.ts already uses for another package. Pick an id that differs in letters or digits, not only in separators.`,
-      );
-    }
-  }
-}
-
-/** A package the host cannot import statically never loads at runtime. */
-function registerBundledRuntimePluginFactory({id, bundledPath}) {
+function withBundledRegistryLock(bundledPath, transaction) {
   let lease;
 
   try {
@@ -137,41 +127,56 @@ function registerBundledRuntimePluginFactory({id, bundledPath}) {
     throw error;
   }
   try {
-    const source = readFileSync(bundledPath, 'utf8');
-
-    if (source.includes(`'../packages/${id}/index.ts'`)) {
-      return;
-    }
-    assertBundledRegistrationNamesAvailable({id, source});
-
-    const constantPrefix = identifierConstantPrefix(id);
-    const factoryAlias = `create${capitalize(constantPrefix)}Plugin`;
-    const idConstant = `${constantPrefix}PluginId`;
-    const lines = source.split('\n');
-    const importLines = [
-      `import {createProject02Plugin as ${factoryAlias}} from '../packages/${id}/index.ts';`,
-      `import {${idConstant}} from '../packages/${id}/plugin.ts';`,
-    ];
-    const entryLines = [
-      '  [',
-      `    ${idConstant},`,
-      '    Object.freeze({',
-      "      entryRelativePath: 'index.ts',",
-      `      factory: ${factoryAlias},`,
-      '    }),',
-      '  ],',
-    ];
-
-    lines.splice(bundledMapEntryIndex(lines, idConstant), 0, ...entryLines);
-    lines.splice(bundledImportIndex(lines, id), 0, ...importLines);
-    atomicReplaceFileSync({
-      targetPath: bundledPath,
-      content: lines.join('\n'),
-      mode: 0o644,
-    });
+    return transaction();
   } finally {
     lease.release();
   }
+}
+
+// Ids that differ only in separators derive one registration name; emitting
+// the second would break bundled.ts for both packages.
+function assertBundledRegistrationNamesAvailable({id, source}) {
+  const constantPrefix = identifierConstantPrefix(id);
+
+  for (const name of [
+    `create${capitalize(constantPrefix)}Plugin`,
+    `${constantPrefix}PluginId`,
+  ]) {
+    if (new RegExp(`\\b${name}\\b`, 'u').test(source)) {
+      throw new Error(
+        `Plugin id "${id}" derives the registration name "${name}", which bundled.ts already uses for another package. Pick an id that differs in letters or digits, not only in separators.`,
+      );
+    }
+  }
+}
+
+/** A package the host cannot import statically never loads at runtime. */
+function registerBundledRuntimePluginFactory({id, bundledPath, source}) {
+  const constantPrefix = identifierConstantPrefix(id);
+  const factoryAlias = `create${capitalize(constantPrefix)}Plugin`;
+  const idConstant = `${constantPrefix}PluginId`;
+  const lines = source.split('\n');
+  const importLines = [
+    `import {createProject02Plugin as ${factoryAlias}} from '../packages/${id}/index.ts';`,
+    `import {${idConstant}} from '../packages/${id}/plugin.ts';`,
+  ];
+  const entryLines = [
+    '  [',
+    `    ${idConstant},`,
+    '    Object.freeze({',
+    "      entryRelativePath: 'index.ts',",
+    `      factory: ${factoryAlias},`,
+    '    }),',
+    '  ],',
+  ];
+
+  lines.splice(bundledMapEntryIndex(lines, idConstant), 0, ...entryLines);
+  lines.splice(bundledImportIndex(lines, id), 0, ...importLines);
+  atomicReplaceFileSync({
+    targetPath: bundledPath,
+    content: lines.join('\n'),
+    mode: 0o644,
+  });
 }
 
 function bundledImportIndex(lines, id) {

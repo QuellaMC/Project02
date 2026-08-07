@@ -1,6 +1,7 @@
 import {
   copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
@@ -304,6 +305,22 @@ describe('plugin package descriptor schema parity', () => {
       }),
     ).toThrow('derives the registration name "createDemoConfigPlugin"');
     expect(existsSync(join(packagesRoot, 'demo.config'))).toBe(false);
+    expect(readFileSync(bundledPath, 'utf8')).toBe(bundledBefore);
+
+    // A leftover colliding scaffold must keep failing, never register.
+    mkdirSync(join(packagesRoot, 'demo.config'));
+    writeFileSync(
+      join(packagesRoot, 'demo.config', 'project02.plugin.json'),
+      `${JSON.stringify({manifest: {id: 'demo.config'}})}\n`,
+      'utf8',
+    );
+    expect(() =>
+      scaffoldRuntimePluginPackage({
+        id: 'demo.config',
+        packagesRoot,
+        bundledPath,
+      }),
+    ).toThrow('derives the registration name "createDemoConfigPlugin"');
     expect(readFileSync(bundledPath, 'utf8')).toBe(bundledBefore);
   });
 
