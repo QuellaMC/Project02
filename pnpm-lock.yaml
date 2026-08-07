@@ -7,6 +7,10 @@ settings:
 importers:
 
   .:
+    dependencies:
+      ajv:
+        specifier: ^8.20.0
+        version: 8.20.0
     devDependencies:
       '@eslint/js':
         specifier: ^10.0.1
@@ -17,9 +21,6 @@ importers:
       '@vitest/coverage-v8':
         specifier: 4.1.7
         version: 4.1.7(vitest@4.1.7)
-      ajv:
-        specifier: ^8.20.0
-        version: 8.20.0
       dependency-cruiser:
         specifier: ^18.1.0
         version: 18.1.0

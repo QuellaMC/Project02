@@ -13,11 +13,8 @@ export {
   freezeModelToolCall,
   freezeModelToolCalls,
   freezeModelToolDefinition,
-  freezeModelToolJsonSchemaType,
   isBuiltInModelToolName,
-  isModelToolJsonSchemaType,
   isModelToolJsonSchemaTypeArray,
-  modelToolJsonSchemaTypeValues,
   userTurnBuiltInModelToolNames,
   visibleReplyModelToolName,
   type BuiltInModelToolCall,
@@ -34,7 +31,9 @@ export {
   type VisibleReplyToolInput,
 } from './model-tools.ts';
 export {
+  compileModelToolInputContract,
   validateModelToolInputAgainstContract,
+  type ModelToolInputContractCompilation,
   type ModelToolInputValidationResult,
 } from './model-tool-input-validation.ts';
 export {
@@ -53,8 +52,6 @@ export {
   type RoleModelChatMessage,
   type RoleModelChatToolCall,
   type RoleModelDeveloperChatMessage,
-  type RoleModelJsonSchema,
-  type RoleModelObjectJsonSchema,
   type RoleModelProviderCapabilities,
   type RoleModelProviderToolNameMapping,
   type RoleModelSystemChatMessage,

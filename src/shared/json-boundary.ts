@@ -122,8 +122,12 @@ function normalizeJsonBoundaryValue(
   }
 
   if (typeof value === 'number') {
+    // JSON has no NaN or Infinity, and JSON.stringify writes null for
+    // both. Normalizing here rather than throwing keeps the boundary
+    // total: what a caller holds after crossing it is what the log will
+    // hold, so the two can never disagree.
     if (!Number.isFinite(value)) {
-      throw new TypeError(`${field} must be finite JSON.`);
+      return null;
     }
 
     return redactCredentialValue ? '[redacted]' : value;

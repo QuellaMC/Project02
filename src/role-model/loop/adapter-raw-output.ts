@@ -1,7 +1,5 @@
 import {
   roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-  roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
-  roleModelAdapterProviderResponseStatusNonFiniteDetails,
   roleModelAdapterRejectionNotReplayableDetails,
   roleModelAdapterProviderExchangeMalformedDetails,
   roleModelAdapterRawOutputMissingTextRejectionDetails,
@@ -339,14 +337,6 @@ function optionalProviderMetadata(value: unknown):
   const response = optionalProviderResponseMetadata(value['response']);
   const error = optionalProviderErrorMetadata(value['error']);
 
-  if (request?.status === 'rejected') {
-    return request;
-  }
-
-  if (response?.status === 'rejected') {
-    return response;
-  }
-
   return Object.freeze({
     status: 'accepted',
     providerMetadata: Object.freeze({
@@ -371,10 +361,6 @@ function optionalProviderRequestMetadata(value: unknown):
       readonly status: 'accepted';
       readonly request: ProviderRequestMetadata;
     }
-  | {
-      readonly status: 'rejected';
-      readonly details: typeof roleModelAdapterProviderRequestMessageCountNonFiniteDetails;
-    }
   | undefined {
   if (!isJsonRecord(value)) {
     return undefined;
@@ -382,13 +368,6 @@ function optionalProviderRequestMetadata(value: unknown):
 
   const endpoint = value['endpoint'];
   const messageCount = value['messageCount'];
-
-  if (typeof messageCount === 'number' && !Number.isFinite(messageCount)) {
-    return Object.freeze({
-      status: 'rejected',
-      details: roleModelAdapterProviderRequestMessageCountNonFiniteDetails,
-    });
-  }
 
   return Object.freeze({
     status: 'accepted',
@@ -405,23 +384,12 @@ function optionalProviderResponseMetadata(value: unknown):
       readonly status: 'accepted';
       readonly response: ProviderResponseMetadata;
     }
-  | {
-      readonly status: 'rejected';
-      readonly details: typeof roleModelAdapterProviderResponseStatusNonFiniteDetails;
-    }
   | undefined {
   if (!isJsonRecord(value)) {
     return undefined;
   }
 
   const status = value['status'];
-
-  if (typeof status === 'number' && !Number.isFinite(status)) {
-    return Object.freeze({
-      status: 'rejected',
-      details: roleModelAdapterProviderResponseStatusNonFiniteDetails,
-    });
-  }
 
   return Object.freeze({
     status: 'accepted',

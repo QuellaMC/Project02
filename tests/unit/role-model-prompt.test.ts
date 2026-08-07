@@ -318,7 +318,7 @@ describe('role-model prompt rendering', () => {
       nestedSchemaToolDefinition.inputContract,
     );
     expect(
-      tool?.function.parameters.properties['memory']?.properties?.['note']
+      tool?.function.parameters.properties?.['memory']?.properties?.['note']
         ?.type,
     ).toEqual(['string', 'null']);
   });
@@ -338,6 +338,25 @@ describe('role-model prompt rendering', () => {
 
     expect(tool?.function.parameters).toEqual(
       openUnionSchemaToolDefinition.inputContract,
+    );
+    expect(tool?.function).not.toHaveProperty('strict');
+  });
+
+  it('does not claim strict for keywords the eligibility rule cannot vouch for', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-role-model-combinator-schema',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: [combinatorSchemaToolDefinition],
+    });
+    const tool = renderRoleModelTurnContext(inputEnvelope).tools.find(
+      candidate => candidate.function.name === 'memory.pick',
+    );
+
+    expect(tool?.function.parameters).toEqual(
+      combinatorSchemaToolDefinition.inputContract,
     );
     expect(tool?.function).not.toHaveProperty('strict');
   });
@@ -472,6 +491,27 @@ const openUnionSchemaToolDefinition = Object.freeze({
           additionalProperties: true,
           properties: {},
         },
+      },
+    },
+  },
+  validationOwner: 'plugin_host',
+  requiresConfirmation: false,
+} satisfies RoleModelPluginToolDefinition);
+
+// A combinator can hide an open object from the strict eligibility
+// walk, so any keyword outside the vouched-for set costs the strict
+// flag — even when, as here, every branch happens to be closed.
+const combinatorSchemaToolDefinition = Object.freeze({
+  pluginId: 'memory.fixture',
+  name: 'memory.pick',
+  description: 'Accept one of two closed shapes.',
+  inputContract: {
+    type: 'object',
+    additionalProperties: false,
+    required: ['pick'],
+    properties: {
+      pick: {
+        oneOf: [{type: 'string'}, {type: 'number'}],
       },
     },
   },

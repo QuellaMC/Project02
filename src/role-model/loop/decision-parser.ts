@@ -9,7 +9,6 @@ import {
   type ModelToolCall,
   type VisibleReplyModelToolCall,
 } from '../api/model-tools.ts';
-import {validateModelToolInputAgainstContract} from '../api/model-tool-input-validation.ts';
 import {
   isRoleModelToolNameSyntax,
   roleModelAllowedToolNames,
@@ -283,47 +282,33 @@ function parseModelToolCall(options: {
   }
 
   if (name === visibleReplyModelToolName) {
-    return parseVisibleReplyToolCallInput(
-      input,
-      options.index,
-      options.boundary,
-    );
+    return parseVisibleReplyToolCallInput(input, options.index);
   }
 
-  const jsonInputValidation = validateModelToolInputAgainstContract({
-    toolName: name,
-    input,
-    inputContract: {
-      type: 'object',
-      properties: {},
-      required: [],
-      additionalProperties: true,
-    },
-  });
+  // The plugin's own contract is checked by the host; here the call only
+  // has to cross the JSON boundary, which the freeze below does. The
+  // boundary's refusal is the model's correction note: a proposal it
+  // cannot carry is a malformed tool call, not a runtime failure.
+  try {
+    return {
+      status: 'accepted',
+      toolCall:
+        options.boundary === 'execution'
+          ? freezeExecutionModelToolCall({name, input})
+          : freezeModelToolCall({name, input}),
+    };
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      return rejectToolCall(error.message);
+    }
 
-  if (jsonInputValidation.status === 'rejected') {
-    return rejectToolCall(jsonInputValidation.details);
+    throw error;
   }
-
-  return {
-    status: 'accepted',
-    toolCall:
-      options.boundary === 'execution'
-        ? freezeExecutionModelToolCall({
-            name,
-            input: jsonInputValidation.input,
-          })
-        : freezeModelToolCall({
-            name,
-            input: jsonInputValidation.input,
-          }),
-  };
 }
 
 function parseVisibleReplyToolCallInput(
   input: Readonly<Record<string, unknown>>,
   index: number,
-  boundary: RoleModelDecisionBoundary,
 ): ParsedToolCallResult {
   const text = input['text'];
 
@@ -357,10 +342,7 @@ function parseVisibleReplyToolCallInput(
 
   return {
     status: 'accepted',
-    toolCall:
-      boundary === 'execution'
-        ? createExecutionVisibleReplyModelToolCall(scrubbedText.text)
-        : createVisibleReplyModelToolCall(scrubbedText.text),
+    toolCall: createVisibleReplyModelToolCall(scrubbedText.text),
   };
 }
 
@@ -378,20 +360,11 @@ function createExecutionRoleModelDecisionResult(
   } satisfies AcceptedRoleModelDecisionResult);
 }
 
-function createExecutionVisibleReplyModelToolCall(
-  text: string,
-): VisibleReplyModelToolCall {
-  return Object.freeze({
-    name: visibleReplyModelToolName,
-    input: Object.freeze({text}),
-  } satisfies VisibleReplyModelToolCall);
-}
-
 function freezeExecutionModelToolCall(call: ModelToolCall): ModelToolCall {
   if (call.name === visibleReplyModelToolName) {
     const text = call.input['text'];
 
-    return createExecutionVisibleReplyModelToolCall(
+    return createVisibleReplyModelToolCall(
       typeof text === 'string' ? text : '',
     );
   }

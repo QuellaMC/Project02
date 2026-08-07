@@ -5,47 +5,35 @@ export const visibleReplyModelToolName = 'visible_reply';
 export type VisibleReplyModelToolName = typeof visibleReplyModelToolName;
 export type BuiltInModelToolName = VisibleReplyModelToolName;
 
-export const modelToolJsonSchemaTypeValues = Object.freeze([
-  'string',
-  'number',
-  'boolean',
-  'object',
-  'array',
-  'null',
-] as const);
-
 export type ModelToolJsonSchemaType =
-  (typeof modelToolJsonSchemaTypeValues)[number];
+  'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
 
-export function isModelToolJsonSchemaType(
-  value: unknown,
-): value is ModelToolJsonSchemaType {
-  return (
-    typeof value === 'string' &&
-    modelToolJsonSchemaTypeValues.some(allowedValue => allowedValue === value)
-  );
-}
-
+/**
+ * A JSON Schema as a tool contract carries it. The named members are the
+ * vocabulary first-party contracts use and give an author completion;
+ * the index signature admits the rest of JSON Schema, because validity
+ * is Ajv's judgment at the manifest gate, not this type's.
+ */
 export type ModelToolJsonSchema = {
+  readonly [keyword: string]: unknown;
   readonly type?: ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[];
   readonly description?: string;
-  readonly enum?: readonly string[];
+  readonly enum?: readonly unknown[];
   readonly properties?: Readonly<Record<string, ModelToolJsonSchema>>;
   readonly required?: readonly string[];
-  readonly additionalProperties?: boolean;
+  readonly additionalProperties?: boolean | ModelToolJsonSchema;
   readonly items?: ModelToolJsonSchema;
 };
 
 /**
  * A tool's input shape, and the only way to declare one. It is JSON
- * Schema because that is what providers consume and what a plugin author
- * already knows how to write — nesting included.
+ * Schema because that is what providers consume, what Ajv enforces, and
+ * what a plugin author already knows how to write — nesting included.
+ * The root is an object schema because a tool takes named arguments;
+ * everything else means exactly what JSON Schema says it means.
  */
 export type ModelToolInputContract = ModelToolJsonSchema & {
   readonly type: 'object';
-  readonly properties: Readonly<Record<string, ModelToolJsonSchema>>;
-  readonly required: readonly string[];
-  readonly additionalProperties: boolean;
 };
 
 export type ModelToolDefinition = {
@@ -169,67 +157,20 @@ function createBuiltInModelToolDefinition(options: {
   } satisfies BuiltInModelToolDefinition);
 }
 
+// The contract is a JSON value, so the JSON boundary is its one deep
+// freeze; a keyword-by-keyword copy would silently drop any keyword it
+// did not know. The snapshot is a faithful JSON projection of a value
+// the type system already checked, which is what the cast states.
 function freezeModelToolInputContract(
   inputContract: ModelToolInputContract,
 ): ModelToolInputContract {
-  const frozen = freezeModelToolJsonSchema(inputContract);
-
-  return Object.freeze({
-    ...frozen,
-    type: 'object',
-    properties: frozen.properties ?? Object.freeze({}),
-    required: frozen.required ?? Object.freeze([]),
-    additionalProperties: inputContract.additionalProperties,
-  } satisfies ModelToolInputContract);
+  return createJsonBoundaryObjectSnapshot(inputContract, {
+    field: 'Model tool inputContract',
+  }) as ModelToolInputContract;
 }
 
 export function isModelToolJsonSchemaTypeArray(
   value: NonNullable<ModelToolJsonSchema['type']>,
 ): value is readonly ModelToolJsonSchemaType[] {
   return Array.isArray(value);
-}
-
-function freezeModelToolJsonSchema(
-  schema: ModelToolJsonSchema,
-): ModelToolJsonSchema {
-  return Object.freeze({
-    ...(schema.type === undefined
-      ? {}
-      : {
-          type: freezeModelToolJsonSchemaType(schema.type),
-        }),
-    ...(schema.description === undefined
-      ? {}
-      : {description: schema.description}),
-    ...(schema.enum === undefined
-      ? {}
-      : {enum: Object.freeze([...schema.enum])}),
-    ...(schema.properties === undefined
-      ? {}
-      : {
-          properties: Object.freeze(
-            Object.fromEntries(
-              Object.entries(schema.properties).map(([key, value]) => [
-                key,
-                freezeModelToolJsonSchema(value),
-              ]),
-            ),
-          ),
-        }),
-    ...(schema.required === undefined
-      ? {}
-      : {required: Object.freeze([...schema.required])}),
-    ...(schema.additionalProperties === undefined
-      ? {}
-      : {additionalProperties: schema.additionalProperties}),
-    ...(schema.items === undefined
-      ? {}
-      : {items: freezeModelToolJsonSchema(schema.items)}),
-  } satisfies ModelToolJsonSchema);
-}
-
-export function freezeModelToolJsonSchemaType(
-  type: NonNullable<ModelToolJsonSchema['type']>,
-): NonNullable<ModelToolJsonSchema['type']> {
-  return isModelToolJsonSchemaTypeArray(type) ? Object.freeze([...type]) : type;
 }
