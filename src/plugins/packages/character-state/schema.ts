@@ -1,4 +1,5 @@
 import {isJsonRecord} from '../../../shared/json-boundary.ts';
+import {isOneOf} from '../../../shared/one-of.ts';
 
 const characterRuntimeStateVersion = 'mvp-006.character_state.v1';
 
@@ -354,55 +355,33 @@ function parseCharacterStateFieldPatch(
   field: keyof LivingStateCurrent,
   value: string,
 ): CharacterStatePatch | undefined {
-  if (field === 'mood' && isCharacterMood(value)) {
+  if (field === 'mood' && isOneOf(value, characterMoodValues)) {
     return {mood: value};
   }
 
-  if (field === 'energy' && isCharacterEnergy(value)) {
+  if (field === 'energy' && isOneOf(value, characterEnergyValues)) {
     return {energy: value};
   }
 
-  if (field === 'attention' && isCharacterAttention(value)) {
+  if (field === 'attention' && isOneOf(value, characterAttentionValues)) {
     return {attention: value};
   }
 
-  if (field === 'currentActivity' && isCharacterCurrentActivity(value)) {
+  if (
+    field === 'currentActivity' &&
+    isOneOf(value, characterCurrentActivityValues)
+  ) {
     return {currentActivity: value};
   }
 
-  if (field === 'socialOrientation' && isCharacterSocialOrientation(value)) {
+  if (
+    field === 'socialOrientation' &&
+    isOneOf(value, characterSocialOrientationValues)
+  ) {
     return {socialOrientation: value};
   }
 
   return undefined;
-}
-
-function isCharacterMood(value: string): value is CharacterMood {
-  return characterMoodValues.includes(value as CharacterMood);
-}
-
-function isCharacterEnergy(value: string): value is CharacterEnergy {
-  return characterEnergyValues.includes(value as CharacterEnergy);
-}
-
-function isCharacterAttention(value: string): value is CharacterAttention {
-  return characterAttentionValues.includes(value as CharacterAttention);
-}
-
-function isCharacterCurrentActivity(
-  value: string,
-): value is CharacterCurrentActivity {
-  return characterCurrentActivityValues.includes(
-    value as CharacterCurrentActivity,
-  );
-}
-
-function isCharacterSocialOrientation(
-  value: string,
-): value is CharacterSocialOrientation {
-  return characterSocialOrientationValues.includes(
-    value as CharacterSocialOrientation,
-  );
 }
 
 function freezeCharacterStatePatch(
@@ -569,8 +548,8 @@ function requiredEnumValue<const T extends string>(
 ): T {
   const value = record[field];
 
-  if (typeof value === 'string' && allowedValues.includes(value as T)) {
-    return value as T;
+  if (isOneOf(value, allowedValues)) {
+    return value;
   }
 
   fail(`characterState.current.${field}`);
