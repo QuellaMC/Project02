@@ -247,6 +247,39 @@ describe('plugin package descriptor schema parity', () => {
     ).toThrow('Runtime plugin package descriptor could not be read.');
   });
 
+  it('completes registration when rerun over its own unregistered scaffold', () => {
+    const packagesRoot = mkdtempSync(
+      join(tmpdir(), 'project02-plugin-scaffold-resume-'),
+    );
+    const bundledPath = join(packagesRoot, 'bundled.ts');
+    const pristineBundled = readFileSync(
+      fileURLToPath(
+        new URL('../../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
+      'utf8',
+    );
+
+    writeFileSync(bundledPath, pristineBundled, 'utf8');
+    scaffoldRuntimePluginPackage({
+      id: 'sample.resume-check',
+      packagesRoot,
+      bundledPath,
+    });
+    // A crash or lost concurrent update leaves the files without the entry.
+    writeFileSync(bundledPath, pristineBundled, 'utf8');
+
+    const {packageRoot} = scaffoldRuntimePluginPackage({
+      id: 'sample.resume-check',
+      packagesRoot,
+      bundledPath,
+    });
+
+    expect(readFileSync(bundledPath, 'utf8')).toContain(
+      "'../packages/sample.resume-check/index.ts'",
+    );
+    expect(existsSync(join(packageRoot, 'plugin.ts'))).toBe(true);
+  });
+
   it('refuses a scaffold whose id collides with an existing registration name', () => {
     const packagesRoot = mkdtempSync(
       join(tmpdir(), 'project02-plugin-scaffold-collision-'),
