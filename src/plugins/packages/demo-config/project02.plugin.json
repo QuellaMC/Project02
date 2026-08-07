@@ -10,15 +10,11 @@
     "description": "Bundled demo plugin whose reply-style settings exist to exercise the runtime plugin config tools end to end.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "compatibility": {
-      "hostContractVersions": [
-        "mvp-008.runtime_plugin.v2"
-      ],
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"],
       "sourceSystem": "project02",
       "externalContract": "demo_config_plugin"
     },
-    "declaredPlugins": [
-      "before_role_model_call"
-    ],
+    "declaredPlugins": ["before_role_model_call"],
     "config": {
       "scope": "global_with_character_overrides",
       "fields": [
@@ -28,13 +24,7 @@
           "required": false,
           "secret": false,
           "valueType": "string",
-          "allowedValues": [
-            "neutral",
-            "warm",
-            "formal",
-            "playful",
-            "pirate"
-          ],
+          "allowedValues": ["neutral", "warm", "formal", "playful", "pirate"],
           "agentMutable": true,
           "redactionLabels": [],
           "reloadRequired": false
@@ -81,9 +71,7 @@
     },
     "activation": {
       "defaultEnabled": false,
-      "reasons": [
-        "bundled_demo_config"
-      ]
+      "reasons": ["bundled_demo_config"]
     },
     "requestedAccess": {
       "model_input": "write"

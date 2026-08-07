@@ -29,8 +29,8 @@ export default {
       from: {},
       to: {
         circular: true,
-        via: { dependencyTypesNot: ['type-only'] }
-      }
+        via: {dependencyTypesNot: ['type-only']},
+      },
     },
     {
       name: 'no-cycles-strict',
@@ -40,7 +40,7 @@ export default {
         'and block module extraction). Baselined.',
       severity: 'error',
       from: {},
-      to: { circular: true }
+      to: {circular: true},
     },
     {
       name: 'core-is-pure',
@@ -49,8 +49,8 @@ export default {
         'only, never runtime, cli, role-model providers, or concrete ' +
         'plugins. Green (zero baseline entries).',
       severity: 'error',
-      from: { path: '^src/core/' },
-      to: { path: '^src/', pathNot: ['^src/core/', '^src/shared/'] }
+      from: {path: '^src/core/'},
+      to: {path: '^src/', pathNot: ['^src/core/', '^src/shared/']},
     },
     {
       name: 'shared-is-leaf',
@@ -58,8 +58,8 @@ export default {
         'Rule 2b — src/shared is a leaf: generic utilities only, no imports ' +
         'from any other src module. Green (zero baseline entries).',
       severity: 'error',
-      from: { path: '^src/shared/' },
-      to: { path: '^src/', pathNot: ['^src/shared/'] }
+      from: {path: '^src/shared/'},
+      to: {path: '^src/', pathNot: ['^src/shared/']},
     },
     {
       name: 'fs-only-in-file-system-seam',
@@ -70,8 +70,8 @@ export default {
         'Green with no exemptions: a violation here means a second ' +
         'filesystem boundary is growing.',
       severity: 'error',
-      from: { path: '^src/', pathNot: ['^src/shared/file-system\\.ts$'] },
-      to: { path: '^fs(/promises)?$', dependencyTypes: ['core'] }
+      from: {path: '^src/', pathNot: ['^src/shared/file-system\\.ts$']},
+      to: {path: '^fs(/promises)?$', dependencyTypes: ['core']},
     },
     {
       name: 'contracts-no-impl-value-deps',
@@ -84,16 +84,16 @@ export default {
         'files, chat-wire (provider wire types + their freeze invariants), ' +
         'core, and shared. Baselined.',
       severity: 'error',
-      from: { path: '(^|/)(contracts?|[^/]*-contract)\\.ts$' },
+      from: {path: '(^|/)(contracts?|[^/]*-contract)\\.ts$'},
       to: {
         path: '^src/',
         pathNot: [
           '(^|/)(contracts?|[^/]*-contract|types|plugin-types|chat-wire)\\.ts$',
           '^src/shared/',
-          '^src/core/'
+          '^src/core/',
         ],
-        dependencyTypesNot: ['type-only']
-      }
+        dependencyTypesNot: ['type-only'],
+      },
     },
     {
       name: 'characters-is-data-only',
@@ -103,11 +103,11 @@ export default {
         'plugins, role-model, app, or cli. Keeps character definitions ' +
         'provider- and runtime-independent. Green (zero baseline entries).',
       severity: 'error',
-      from: { path: '^src/characters/' },
+      from: {path: '^src/characters/'},
       to: {
         path: '^src/',
-        pathNot: ['^src/characters/', '^src/core/', '^src/shared/']
-      }
+        pathNot: ['^src/characters/', '^src/core/', '^src/shared/'],
+      },
     },
     {
       name: 'nothing-imports-app',
@@ -118,9 +118,9 @@ export default {
       severity: 'error',
       from: {
         path: '^src/',
-        pathNot: ['^src/app/', '^src/cli/', '^src/index\\.ts$']
+        pathNot: ['^src/app/', '^src/cli/', '^src/index\\.ts$'],
       },
-      to: { path: '^src/app/' }
+      to: {path: '^src/app/'},
     },
     {
       name: 'nothing-imports-cli',
@@ -128,8 +128,8 @@ export default {
         'Rule 4 — src/cli is a pure composition shell; no production code ' +
         'may import it. Green (zero baseline entries).',
       severity: 'error',
-      from: { path: '^src/', pathNot: ['^src/cli/'] },
-      to: { path: '^src/cli/' }
+      from: {path: '^src/', pathNot: ['^src/cli/']},
+      to: {path: '^src/cli/'},
     },
     {
       name: 'runtime-plugins-value-via-api',
@@ -140,12 +140,12 @@ export default {
         'package behavior are out of bounds for runtime. Green (zero ' +
         'baseline entries).',
       severity: 'error',
-      from: { path: '^src/runtime/' },
+      from: {path: '^src/runtime/'},
       to: {
         path: '^src/plugins/',
         pathNot: ['^src/plugins/api/index\\.ts$'],
-        dependencyTypesNot: ['type-only']
-      }
+        dependencyTypesNot: ['type-only'],
+      },
     },
     {
       name: 'runtime-plugins-via-barrels',
@@ -155,25 +155,22 @@ export default {
         'types live behind the main barrel until the 3e host split). ' +
         'Green (zero baseline entries).',
       severity: 'error',
-      from: { path: '^src/runtime/' },
+      from: {path: '^src/runtime/'},
       to: {
         path: '^src/plugins/',
-        pathNot: [
-          '^src/plugins/api/index\\.ts$',
-          '^src/plugins/index\\.ts$'
-        ]
-      }
+        pathNot: ['^src/plugins/api/index\\.ts$', '^src/plugins/index\\.ts$'],
+      },
     },
     {
       name: 'no-deep-cross-module-imports',
       comment:
         'Rule 5 — an import that crosses a top-level module boundary must ' +
-        'land on that module\'s public index.ts (first- or second-level), ' +
+        "land on that module's public index.ts (first- or second-level), " +
         'the root barrel, or a src/shared file. Intra-module deep imports ' +
         'stay free. Baselined until every module grows its barrel (Slice 3 ' +
         'of the migration plan), then ratcheted to zero.',
       severity: 'error',
-      from: { path: '^src/([^/]+)/' },
+      from: {path: '^src/([^/]+)/'},
       to: {
         path: '^src/',
         pathNot: [
@@ -181,17 +178,17 @@ export default {
           '^src/[^/]+/index\\.ts$',
           '^src/[^/]+/[^/]+/index\\.ts$',
           '^src/index\\.ts$',
-          '^src/shared/[^/]+\\.ts$'
-        ]
-      }
-    }
+          '^src/shared/[^/]+\\.ts$',
+        ],
+      },
+    },
   ],
   options: {
-    doNotFollow: { path: 'node_modules' },
-    tsConfig: { fileName: 'tsconfig.json' },
+    doNotFollow: {path: 'node_modules'},
+    tsConfig: {fileName: 'tsconfig.json'},
     // Make `import type` edges visible so rules can distinguish type-only
     // from value dependencies (verbatimModuleSyntax erases them at runtime).
     tsPreCompilationDeps: true,
-    enhancedResolveOptions: { extensions: ['.ts'] }
-  }
+    enhancedResolveOptions: {extensions: ['.ts']},
+  },
 };
