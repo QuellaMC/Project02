@@ -43,9 +43,6 @@ export type ConversationSessionOptions = {
   readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
-export type RestoredVisibleTranscriptValidationOptions =
-  ConversationSessionOptions;
-
 export const defaultRecentVisibleMessageLimit = 8;
 
 // The id is permanent; only the display name is configurable.
@@ -154,8 +151,8 @@ export function createConversationSession(
   return frozenSession;
 }
 
-export function validateRestoredVisibleTranscript(
-  options: RestoredVisibleTranscriptValidationOptions,
+function validateRestoredVisibleTranscript(
+  options: ConversationSessionOptions,
 ): readonly VisibleMessage[] {
   const sessionId = options.id ?? defaultSessionId;
   const character = freezeCharacterProfile(options.character);
@@ -174,7 +171,7 @@ export function validateRestoredVisibleTranscript(
 }
 
 /** Counted from the last ID, not the length: a failed write leaves a gap. */
-export function nextMessageNumber(session: ConversationSession): number {
+function nextMessageNumber(session: ConversationSession): number {
   const transcript = getMutableTranscript(session);
   const lastMessage = transcript.at(-1);
 
@@ -448,7 +445,7 @@ function validateRestoredSpeaker(options: {
   );
 }
 
-export function createMessageIdForSessionId(
+function createMessageIdForSessionId(
   sessionId: string,
   messageNumber: number,
 ): string {

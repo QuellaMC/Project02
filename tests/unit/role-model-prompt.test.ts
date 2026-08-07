@@ -156,28 +156,6 @@ describe('role-model prompt rendering', () => {
     );
   });
 
-  it('omits CharacterDecision JSON instructions for native tools but keeps JSON fallback available', () => {
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: createUserMessageRuntimeEvent('hello', testIdentity()),
-      decisionContext: createDecisionContext({
-        sessionId: 'session-role-model-native-prompt',
-        characterSnapshot: testCharacterProfile,
-      }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-    });
-    const nativeMessages = renderRoleModelTurnContext(inputEnvelope).messages;
-    const fallbackMessages = renderRoleModelTurnContext(inputEnvelope, {
-      outputMode: 'json_fallback',
-    }).messages;
-
-    expect(
-      nativeMessages.map(message => message.content).join('\n'),
-    ).not.toContain('CharacterDecision JSON');
-    expect(
-      fallbackMessages.map(message => message.content).join('\n'),
-    ).toContain('CharacterDecision JSON');
-  });
-
   it('tells native-tool models to use multiple calls and finalize after interim replies', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent(

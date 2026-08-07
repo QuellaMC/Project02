@@ -96,7 +96,6 @@
           "items": {
             "enum": [
               "tool_provider",
-              "context_provider",
               "before_role_model_call",
               "handle_tool_call",
               "after_turn_committed",

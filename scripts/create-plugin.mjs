@@ -1,6 +1,6 @@
 // The stamped descriptor must satisfy schemas/project02.plugin.schema.json
 // and the runtime validator.
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {
@@ -8,7 +8,7 @@ import {
   isProject02Identifier,
 } from '../src/shared/identifier.ts';
 
-export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
+export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   if (!isProject02Identifier(id)) {
     throw new Error(
       `Plugin id "${id}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`,
@@ -44,8 +44,86 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
     pluginModuleTemplate(id),
     'utf8',
   );
+  registerBundledRuntimePluginFactory({id, bundledPath});
 
   return {packageRoot};
+}
+
+/** A package the host cannot import statically never loads at runtime. */
+function registerBundledRuntimePluginFactory({id, bundledPath}) {
+  const source = readFileSync(bundledPath, 'utf8');
+
+  if (source.includes(`'../packages/${id}/index.ts'`)) {
+    return;
+  }
+
+  const constantPrefix = identifierConstantPrefix(id);
+  const factoryAlias = `create${capitalize(constantPrefix)}Plugin`;
+  const idConstant = `${constantPrefix}PluginId`;
+  const lines = source.split('\n');
+  const importLines = [
+    `import {createProject02Plugin as ${factoryAlias}} from '../packages/${id}/index.ts';`,
+    `import {${idConstant}} from '../packages/${id}/plugin.ts';`,
+  ];
+  const entryLines = [
+    '  [',
+    `    ${idConstant},`,
+    '    Object.freeze({',
+    "      entryRelativePath: 'index.ts',",
+    `      factory: ${factoryAlias},`,
+    '    }),',
+    '  ],',
+  ];
+
+  lines.splice(bundledMapEntryIndex(lines, idConstant), 0, ...entryLines);
+  lines.splice(bundledImportIndex(lines, id), 0, ...importLines);
+  writeFileSync(bundledPath, lines.join('\n'), 'utf8');
+}
+
+function bundledImportIndex(lines, id) {
+  const packageImport = /from '\.\.\/packages\/(?<packageId>[^/]+)\//u;
+  let lastImport = 0;
+
+  for (const [index, line] of lines.entries()) {
+    const packageId = packageImport.exec(line)?.groups?.packageId;
+
+    if (packageId !== undefined && packageId > id) {
+      return index;
+    }
+
+    if (line.startsWith('import ')) {
+      lastImport = index + 1;
+    }
+  }
+
+  return lastImport;
+}
+
+function bundledMapEntryIndex(lines, idConstant) {
+  const mapEnd = lines.findIndex(line => line === ']);');
+
+  for (let index = 0; index < mapEnd; index += 1) {
+    const entryId =
+      lines[index] === '  [' ? lines[index + 1]?.trim() : undefined;
+
+    if (entryId !== undefined && entryId > `${idConstant},`) {
+      return index;
+    }
+  }
+
+  return mapEnd;
+}
+
+function capitalize(value) {
+  return `${value[0].toUpperCase()}${value.slice(1)}`;
+}
+
+function identifierConstantPrefix(id) {
+  return id
+    .split(/[._-]/u)
+    .filter(part => part.length > 0)
+    .map((part, index) => (index === 0 ? part : capitalize(part)))
+    .join('');
 }
 
 function descriptorTemplate({id, displayName}) {
@@ -100,13 +178,7 @@ function descriptorTemplate({id, displayName}) {
 }
 
 function pluginModuleTemplate(id) {
-  const constantPrefix = id
-    .split(/[._-]/u)
-    .filter(part => part.length > 0)
-    .map((part, index) =>
-      index === 0 ? part : part[0].toUpperCase() + part.slice(1),
-    )
-    .join('');
+  const constantPrefix = identifierConstantPrefix(id);
 
   return `import {createRuntimePlugin} from '../../api/constructors.ts';
 import {createRuntimePluginContextItem} from '../../api/manifest-validation.ts';
@@ -126,7 +198,7 @@ const ${constantPrefix}PluginDescriptorUrl = new URL(
   import.meta.url,
 );
 
-export function create${constantPrefix[0].toUpperCase()}${constantPrefix.slice(1)}PluginManifest(): RuntimePluginManifest {
+export function create${capitalize(constantPrefix)}PluginManifest(): RuntimePluginManifest {
   return readRuntimePluginPackageDescriptor({
     descriptorUrl: ${constantPrefix}PluginDescriptorUrl,
     expectedEntry: './index.ts',
@@ -197,9 +269,13 @@ if (invokedDirectly) {
       packagesRoot: fileURLToPath(
         new URL('../src/plugins/packages/', import.meta.url),
       ),
+      bundledPath: fileURLToPath(
+        new URL('../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
     });
 
     console.log(`Created ${packageRoot}`);
+    console.log('Registered it in src/plugins/package-loader/bundled.ts');
     console.log('Next steps:');
     console.log('  1. Edit the manifest and plugin behavior.');
     console.log('  2. pnpm check');

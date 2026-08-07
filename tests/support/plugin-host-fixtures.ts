@@ -8,7 +8,6 @@ import {
   createRuntimePluginContext,
   createRuntimePluginContextItem,
   createRuntimePluginEvidenceSnapshot,
-  createRuntimePluginHealthSnapshot,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
   runtimePluginContractVersion,
@@ -872,39 +871,6 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
   });
 }
 
-export function createRetainedBeforeRoleModelFileStorePlugin(
-  retainFileStore: (fileStore: RuntimePluginFileStore) => void,
-): RuntimePlugin {
-  const pluginId = 'memory.retained-before.fixture';
-  const manifest = memorySearchPluginManifest(pluginId);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-      },
-      declaredPlugins: ['before_role_model_call'],
-      requestedAccess: {file_store: 'write'},
-    },
-    providedTools: [],
-    lifecycleHooks: {
-      beforeRoleModelCall(context) {
-        writeDuringHookAndRetainFileStore({
-          context,
-          path: 'during-before.json',
-          retainFileStore,
-        });
-
-        return {
-          contextItems: [],
-          evidence: [],
-        };
-      },
-    },
-  });
-}
-
 export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   const pluginId = 'memory.read-only-file-store.fixture';
 
@@ -1078,42 +1044,6 @@ export function createStagedAppendFileStorePlugin(): RuntimePlugin {
           pluginId,
           query,
           context,
-        });
-      },
-    },
-  });
-}
-
-export function createRetainedHealthFileStorePlugin(
-  retainFileStore: (fileStore: RuntimePluginFileStore) => void,
-): RuntimePlugin {
-  const pluginId = 'memory.retained-health.fixture';
-  const manifest = memorySearchPluginManifest(pluginId);
-
-  return createRuntimePlugin({
-    manifest: {
-      ...manifest,
-      runtimePolicy: {
-        ...manifest.runtimePolicy,
-      },
-      declaredPlugins: ['health'],
-      requestedAccess: {file_store: 'write'},
-    },
-    providedTools: [],
-    lifecycleHooks: {
-      health(context) {
-        writeDuringHookAndRetainFileStore({
-          context,
-          path: 'during-health.json',
-          retainFileStore,
-        });
-
-        return createRuntimePluginHealthSnapshot({
-          pluginId,
-          status: 'ok',
-          checkedAt: context.timestamp,
-          summary: 'Health check completed.',
-          redactionLabels: [],
         });
       },
     },

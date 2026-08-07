@@ -111,7 +111,6 @@ async function stageProject02FieldChange(
       await ensureConsoleCommitTarget({
         runtimeLocation: snapshot.runtimeLocation,
         scope: snapshot.scope,
-        ...(context.env === undefined ? {} : {env: context.env}),
       });
       const target = resolveRuntimeConfigScopeTarget({
         runtimeLocation: snapshot.runtimeLocation,

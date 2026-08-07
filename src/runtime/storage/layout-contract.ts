@@ -6,25 +6,18 @@ import {isOneOf} from '../../shared/one-of.ts';
 
 export const defaultProject02HomeRoot = '.project02';
 
-export const defaultLocalRuntimeSessionId = 'local-session';
+const defaultLocalRuntimeSessionId = 'local-session';
 
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
-export const localRuntimeStorageSchemaVersion = 7;
-
-export type LocalRuntimeReadableStorageSchemaVersion =
-  typeof localRuntimeStorageSchemaVersion;
-
-export const localRuntimeReadableStorageSchemaVersions: readonly LocalRuntimeReadableStorageSchemaVersion[] =
-  Object.freeze([localRuntimeStorageSchemaVersion]);
+export const localRuntimeStorageSchemaVersion = 8;
 
 const localRuntimeStorageScopeValues = Object.freeze([
   'home',
   'character-data',
 ] as const);
 
-export type LocalRuntimeStorageScope =
-  (typeof localRuntimeStorageScopeValues)[number];
+type LocalRuntimeStorageScope = (typeof localRuntimeStorageScopeValues)[number];
 
 export type LocalRuntimeStorageContractErrorCode =
   | 'character_identity_mismatch'
@@ -116,13 +109,13 @@ export type LocalRuntimePluginPathsOptions = LocalRuntimeSessionPathsOptions & {
 };
 
 export type LocalRuntimeHomeStorageSchemaMarker = {
-  readonly schemaVersion: LocalRuntimeReadableStorageSchemaVersion;
+  readonly schemaVersion: typeof localRuntimeStorageSchemaVersion;
   readonly scope: 'home';
   readonly createdAt: string;
 };
 
 export type LocalRuntimeCharacterDataStorageSchemaMarker = {
-  readonly schemaVersion: LocalRuntimeReadableStorageSchemaVersion;
+  readonly schemaVersion: typeof localRuntimeStorageSchemaVersion;
   readonly scope: 'character-data';
   readonly characterId: string;
   readonly createdAt: string;
@@ -317,7 +310,7 @@ export function normalizeLocalRuntimeSessionId(
   return normalizedSessionId;
 }
 
-export function normalizeLocalRuntimePluginId(pluginId: string): string {
+function normalizeLocalRuntimePluginId(pluginId: string): string {
   const normalizedPluginId = pluginId.trim();
 
   if (!isProject02Identifier(normalizedPluginId)) {
@@ -405,7 +398,7 @@ export function decodeStorageSchemaMarker(
     throwMalformedSchemaMarker('schemaVersion');
   }
 
-  if (!isLocalRuntimeReadableStorageSchemaVersion(schemaVersion)) {
+  if (schemaVersion !== localRuntimeStorageSchemaVersion) {
     throw new LocalRuntimeStorageContractError(
       'unsupported_schema_version',
       `This store uses storage schema version ${String(schemaVersion)}, but this ` +
@@ -470,14 +463,6 @@ function requiredCharacterPackageVersion(value: string): string {
   }
 
   return value;
-}
-
-function isLocalRuntimeReadableStorageSchemaVersion(
-  schemaVersion: number,
-): schemaVersion is LocalRuntimeReadableStorageSchemaVersion {
-  return localRuntimeReadableStorageSchemaVersions.some(
-    readableVersion => readableVersion === schemaVersion,
-  );
 }
 
 function normalizeRootPath(root: string | undefined, label: string): string {

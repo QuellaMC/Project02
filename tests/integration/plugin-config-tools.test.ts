@@ -27,7 +27,6 @@ import {
 } from '../../src/plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
-  loadProject02RuntimeConfig,
   prepareRuntimeConfigControlOperation,
   inspectRuntimePluginConfig,
   resolveRuntimeConfigScopeTarget,
@@ -37,6 +36,7 @@ import {
   runtimePluginConfigControlStateForTest,
   writeRuntimeConfig,
   runtimeLocationForTest,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
@@ -1526,7 +1526,7 @@ describe('host-owned runtime plugin management tools', () => {
       value: 'warm',
       expectedFingerprint: before.fingerprint,
     });
-    const loaded = loadProject02RuntimeConfig({configPath, storeRoot});
+    const loaded = loadRuntimeConfigForTest({configPath, storeRoot});
 
     expect(mutableManifest.id).toBe(mutatedPluginId);
     expect(previewTarget).toBe(originalPluginId);
@@ -1633,40 +1633,6 @@ describe('host-owned runtime plugin management tools', () => {
     expect(plugins.some(plugin => plugin['id'] === 'test.retargeted')).toBe(
       false,
     );
-  });
-
-  it('lists an installed cold manifest as disabled without activation metadata', async () => {
-    const manifest = configurablePluginManifest();
-    const host = createRuntimePluginHost({
-      pluginInventoryState: {
-        pluginManifests: [manifest],
-      },
-    });
-
-    const result = await host.handleToolCall(
-      {
-        ...testIdentity(),
-        pluginId: runtimePluginId,
-        toolName: runtimePluginListToolName,
-        input: {scope: 'all'},
-      },
-      testContext(),
-    );
-
-    expect(result.status).toBe('accepted');
-    if (result.status !== 'accepted') {
-      return;
-    }
-
-    expect(
-      pluginDiscoveryPluginSummaries(result.output).find(
-        plugin => plugin['id'] === manifest.id,
-      ),
-    ).toMatchObject({
-      id: manifest.id,
-      enabled: false,
-      activationStatus: 'disabled',
-    });
   });
 
   it('rejects an approved update when the authored fingerprint drifts during approval', async () => {

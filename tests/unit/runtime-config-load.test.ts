@@ -3,13 +3,15 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {
-  loadProject02RuntimeConfig,
-  maxProject02RuntimeConfigBytes,
   runtimeConfigVersion,
   validateProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
+import {loadRuntimeConfigForTest} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {defaultJsonBoundaryLimits} from '../../src/shared/json-boundary.ts';
+
+// The loader's own byte ceiling, restated so a change to it fails here too.
+const runtimeConfigSizeLimitBytes = 256 * 1_024;
 
 describe('runtime config loader validation', () => {
   it('rejects an oversized valid JSON file with a limit diagnostic before parsing', () => {
@@ -22,12 +24,12 @@ describe('runtime config loader validation', () => {
       configPath,
       JSON.stringify({
         version: runtimeConfigVersion,
-        padding: 'x'.repeat(maxProject02RuntimeConfigBytes),
+        padding: 'x'.repeat(runtimeConfigSizeLimitBytes),
       }),
       'utf8',
     );
 
-    const result = loadProject02RuntimeConfig({configPath});
+    const result = loadRuntimeConfigForTest({configPath});
 
     expect(result.config).toBeUndefined();
     expect(result.diagnostics).toEqual([
@@ -62,7 +64,7 @@ describe('runtime config loader validation', () => {
       'utf8',
     );
 
-    const result = loadProject02RuntimeConfig({configPath});
+    const result = loadRuntimeConfigForTest({configPath});
 
     expect(result.config).toBeUndefined();
     expect(result.diagnostics).toEqual([
@@ -88,16 +90,16 @@ describe('runtime config loader validation', () => {
       'utf8',
     );
 
-    expect(loadProject02RuntimeConfig({configPath: root}).diagnostics).toEqual([
+    expect(loadRuntimeConfigForTest({configPath: root}).diagnostics).toEqual([
       expect.objectContaining({code: 'runtime_config_read_failed'}),
     ]);
     expect(
-      loadProject02RuntimeConfig({configPath: malformedPath}).diagnostics,
+      loadRuntimeConfigForTest({configPath: malformedPath}).diagnostics,
     ).toEqual([
       expect.objectContaining({code: 'runtime_config_malformed_json'}),
     ]);
     expect(
-      loadProject02RuntimeConfig({configPath: invalidSchemaPath}).diagnostics,
+      loadRuntimeConfigForTest({configPath: invalidSchemaPath}).diagnostics,
     ).toEqual([
       expect.objectContaining({code: 'runtime_config_version_unsupported'}),
     ]);
@@ -123,7 +125,7 @@ describe('runtime config loader validation', () => {
 
     writeFileSync(configPath, JSON.stringify(document), 'utf8');
 
-    const result = loadProject02RuntimeConfig({configPath});
+    const result = loadRuntimeConfigForTest({configPath});
 
     expect(result.config).toBeUndefined();
     expect(result.authoredDocument).toEqual(document);
@@ -187,12 +189,12 @@ describe('runtime config loader validation', () => {
 
     expect(Buffer.byteLength(source, 'utf8')).toBeGreaterThan(64 * 1_024);
     expect(Buffer.byteLength(source, 'utf8')).toBeLessThan(
-      maxProject02RuntimeConfigBytes,
+      runtimeConfigSizeLimitBytes,
     );
     writeFileSync(configPath, source, 'utf8');
 
     const validated = validateProject02RuntimeConfig(document);
-    const loaded = loadProject02RuntimeConfig({configPath});
+    const loaded = loadRuntimeConfigForTest({configPath});
 
     expect(validated.diagnostics).toEqual([]);
     expect(loaded.diagnostics).toEqual([]);

@@ -16,15 +16,21 @@ import {
   type ResolvedRuntimeConfigField,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigDiagnosticPluginMetadata,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigSource,
   type RuntimeConfigSecretRef,
   type RuntimeConfigValue,
 } from './types.ts';
 import {
   createJsonBoundarySnapshot,
+  isJsonRecord,
   ownJsonRecordValue,
 } from '../../shared/json-boundary.ts';
-import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
+import {
+  nestedSecretMarkerPath,
+  plaintextSecretMarkerField,
+  secretEnvMarkerField,
+} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {runtimeConfigValueMatchesField} from './schema.ts';
 import {runtimePluginScopeDiagnostics} from './plugin-scope.ts';
@@ -34,15 +40,14 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
   readonly env?: NodeJS.ProcessEnv;
-  readonly allowPlaintextSecrets?: boolean;
   readonly validateInactivePluginConfigs?: boolean;
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
-  readonly authoredScope?: 'global' | 'character';
+  readonly authoredScope?: RuntimeConfigFieldScope;
   /** Set after per-layer validation; the merged document loses origins. */
   readonly skipPluginScopeValidation?: boolean;
 };
 
-export type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
+type ResolveEffectiveProject02RuntimeConfigOptions = Omit<
   ResolveProject02RuntimeConfigOptions,
   'loadedConfig'
 > & {
@@ -56,10 +61,9 @@ export type ResolveRuntimePluginConfigsOptions = {
   readonly config: Project02RuntimeConfig | undefined;
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly env?: NodeJS.ProcessEnv;
-  readonly allowPlaintextSecrets?: boolean;
   readonly validateInactivePluginConfigs?: boolean;
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
-  readonly authoredScope?: 'global' | 'character';
+  readonly authoredScope?: RuntimeConfigFieldScope;
   readonly skipPluginScopeValidation?: boolean;
 };
 
@@ -92,7 +96,6 @@ export function resolveRuntimePluginConfigs(
       config: options.config,
       manifest,
       env,
-      allowPlaintextSecrets: options.allowPlaintextSecrets === true,
       validateInactivePluginConfigs:
         options.validateInactivePluginConfigs === true,
       defaultEnabled:
@@ -143,7 +146,6 @@ export function resolveEffectiveProject02RuntimeConfig(
     config,
     pluginManifests: options.pluginManifests ?? [],
     ...(options.env === undefined ? {} : {env: options.env}),
-    allowPlaintextSecrets: options.allowPlaintextSecrets === true,
     validateInactivePluginConfigs:
       options.validateInactivePluginConfigs === true,
     ...(options.defaultEnabledPluginIds === undefined
@@ -197,20 +199,6 @@ export function diagnosticsHaveErrors(
   return diagnostics.some(diagnostic => diagnostic.severity === 'error');
 }
 
-export function pluginHasConfigErrors(options: {
-  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
-  readonly pluginId: string;
-}): boolean {
-  return options.diagnostics.some(
-    diagnostic =>
-      diagnostic.severity === 'error' &&
-      runtimeConfigDiagnosticMatchesPluginConfig({
-        diagnostic,
-        pluginId: options.pluginId,
-      }),
-  );
-}
-
 export function runtimeConfigDiagnosticMatchesPlugin(options: {
   readonly diagnostic: RuntimeConfigDiagnostic;
   readonly pluginId: string;
@@ -221,22 +209,10 @@ export function runtimeConfigDiagnosticMatchesPlugin(options: {
   );
 }
 
-function runtimeConfigDiagnosticMatchesPluginConfig(options: {
-  readonly diagnostic: RuntimeConfigDiagnostic;
-  readonly pluginId: string;
-}): boolean {
-  return (
-    options.diagnostic.scope === 'plugin' &&
-    options.diagnostic.pluginId === options.pluginId &&
-    options.diagnostic.pluginConfigField !== undefined
-  );
-}
-
 function resolvePluginConfig(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly manifest: RuntimePluginManifest;
   readonly env: NodeJS.ProcessEnv;
-  readonly allowPlaintextSecrets: boolean;
   readonly validateInactivePluginConfigs: boolean;
   readonly defaultEnabled: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
@@ -283,7 +259,6 @@ function resolvePluginConfigField(options: {
   readonly field: RuntimePluginConfigField;
   readonly rawValue: RuntimeConfigValue | undefined;
   readonly env: NodeJS.ProcessEnv;
-  readonly allowPlaintextSecrets: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
@@ -369,7 +344,6 @@ function resolveSecretField(options: {
   readonly field: RuntimePluginConfigField;
   readonly rawValue: RuntimeConfigValue | undefined;
   readonly env: NodeJS.ProcessEnv;
-  readonly allowPlaintextSecrets: boolean;
   readonly diagnostics: RuntimeConfigDiagnostic[];
   readonly path: string;
   readonly validateConfig: boolean;
@@ -427,7 +401,7 @@ function resolveSecretField(options: {
   }
 
   if (isPlaintextSecretOverride(options.rawValue)) {
-    if (!options.allowPlaintextSecrets && options.validateConfig) {
+    if (options.validateConfig) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
@@ -442,10 +416,7 @@ function resolveSecretField(options: {
     return fieldResult({
       field: options.field,
       source: 'plaintext_override',
-      resolved: options.allowPlaintextSecrets,
-      ...(options.allowPlaintextSecrets
-        ? {value: options.rawValue.$plaintextSecret}
-        : {}),
+      resolved: false,
     });
   }
 
@@ -615,27 +586,16 @@ function isSecretRef(
   value: RuntimeConfigValue | undefined,
 ): value is RuntimeConfigSecretRef {
   return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    '$env' in value &&
-    typeof value.$env === 'string'
+    isJsonRecord(value) &&
+    secretEnvMarkerField in value &&
+    typeof value[secretEnvMarkerField] === 'string'
   );
 }
 
 function isPlaintextSecretOverride(
   value: RuntimeConfigValue | undefined,
-): value is {
-  readonly $plaintextSecret: string;
-  readonly allowPlaintextSecret: true;
-  readonly justification: string;
-} {
-  return (
-    typeof value === 'object' &&
-    value !== null &&
-    !Array.isArray(value) &&
-    '$plaintextSecret' in value
-  );
+): boolean {
+  return isJsonRecord(value) && plaintextSecretMarkerField in value;
 }
 
 function effectiveFingerprintInput(options: {

@@ -10,7 +10,6 @@ import {
   type RoleModelPluginToolDefinition,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
-  type RoleModelToolObservation,
   type RejectedRoleModelDecisionResult,
 } from '../api/contracts.ts';
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
@@ -25,7 +24,7 @@ import type {
 } from '../api/chat-wire.ts';
 import {type RoleModelAllowedToolName} from '../api/tool-names.ts';
 
-export type RoleModelAdapterRawOutputValidationResult =
+type RoleModelAdapterRawOutputValidationResult =
   | {
       readonly status: 'accepted';
       readonly rawOutputText: string;
@@ -46,7 +45,6 @@ export function validateRoleModelAdapterRawOutput(
   rawOutput: unknown,
   allowedTools: readonly RoleModelAllowedToolName[],
   pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
-  toolObservations: readonly RoleModelToolObservation[],
 ): RoleModelAdapterRawOutputValidationResult {
   if (!isJsonRecord(rawOutput)) {
     return createMalformedAdapterRawOutputResult();
@@ -110,7 +108,6 @@ export function validateRoleModelAdapterRawOutput(
       ),
       allowedTools,
       pluginToolDefinitions,
-      toolObservations,
     });
 
     if (decisionResult === undefined) {
@@ -328,7 +325,7 @@ function optionalProviderMetadata(value: unknown):
 
   const provider = value['provider'];
 
-  if (provider !== 'local' && provider !== 'nvidia') {
+  if (provider !== 'nvidia') {
     return Object.freeze({status: 'accepted'});
   }
 

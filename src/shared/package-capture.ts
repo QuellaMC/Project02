@@ -27,14 +27,14 @@ import {
   resolveContainedPath,
 } from './real-path.ts';
 
-export type CapturedPackageFile = {
+type CapturedPackageFile = {
   readonly absolutePath: string;
   readonly relativePath: string;
   readonly source: Buffer;
   readonly type: 'file';
 };
 
-export type CapturedPackageArtifact = {
+type CapturedPackageArtifact = {
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly directories: ReadonlySet<string>;
   readonly files: ReadonlyMap<string, CapturedPackageFile>;
@@ -53,7 +53,7 @@ export type PlannedPackageFile = {
   readonly type: 'file';
 };
 
-export type PlannedPackageCapture = {
+type PlannedPackageCapture = {
   readonly packageDirectory: PackageDirectorySnapshot;
   readonly directories: ReadonlySet<string>;
   readonly files: ReadonlyMap<string, PlannedPackageFile>;
@@ -167,35 +167,6 @@ export function plannedPackageFileReadPath(options: {
     packageDirectory: options.packageDirectory,
     path: options.file.absolutePath,
   })?.readPath;
-}
-
-export function capturePackageDirectoryArtifact(
-  options: PackageCaptureLimits,
-): CapturedPackageArtifact {
-  const planned = planPackageDirectoryCapture(options);
-  const files = new Map<string, CapturedPackageFile>();
-
-  for (const [relativePath, file] of planned.files) {
-    files.set(
-      relativePath,
-      Object.freeze({
-        absolutePath: file.absolutePath,
-        relativePath,
-        source: readPlannedPackageFile({
-          packageDirectory: planned.packageDirectory,
-          file,
-        }),
-        type: 'file',
-      } satisfies CapturedPackageFile),
-    );
-  }
-  assertBoundPackage(options.packageDirectory);
-
-  return Object.freeze({
-    packageDirectory: planned.packageDirectory,
-    directories: planned.directories,
-    files,
-  } satisfies CapturedPackageArtifact);
 }
 
 function requiredCaptureLimits(options: PackageCaptureLimits): {

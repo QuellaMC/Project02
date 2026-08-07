@@ -133,7 +133,7 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
 
 export function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
-  onInvoke: () => void,
+  onInvoke?: () => void,
 ): RoleModelAdapter {
   let index = 0;
 
@@ -146,7 +146,7 @@ export function createSequencedAdapter(
       }
 
       index += 1;
-      onInvoke();
+      onInvoke?.();
 
       return {
         rawOutputText: JSON.stringify(decision),

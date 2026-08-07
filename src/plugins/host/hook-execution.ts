@@ -1,4 +1,5 @@
 import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
+import type {RuntimePluginLifecycleHookName} from '../api/index.ts';
 import type {RuntimePluginManifest} from '../api/types.ts';
 
 export class PluginHookTimeoutError extends Error {
@@ -82,13 +83,7 @@ export async function withPluginHookTimeout<T>(options: {
 export function snapshotPluginHookResult(options: {
   readonly pluginId: string;
   readonly policyManifest: RuntimePluginManifest;
-  readonly hookName:
-    | 'afterTurnCommitted'
-    | 'beforeRoleModelCall'
-    | 'handleToolCall'
-    | 'health'
-    | 'onSessionEnd'
-    | 'onShutdown';
+  readonly hookName: RuntimePluginLifecycleHookName;
   readonly value: unknown;
   readonly deadlineAt: number;
 }): unknown {

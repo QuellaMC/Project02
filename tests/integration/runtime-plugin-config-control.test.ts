@@ -6,7 +6,6 @@ import {describe, expect, it} from 'vitest';
 import {
   applyRuntimeConfigControlOperation,
   createLayeredRuntimeConfigFingerprint,
-  defaultRuntimeConfigPath,
   prepareRuntimeConfigControlOperation,
   RuntimeConfigConflictError,
   runtimeConfigEnvVarName,
@@ -21,13 +20,16 @@ import {
   createRuntimePlugin,
   type RuntimePluginManifest,
 } from '../../src/plugins/index.ts';
-import {ensureCharacterDataMarker} from '../../src/runtime/storage/index.ts';
+import {
+  createProject02HomeLayout,
+  ensureCharacterDataMarker,
+} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   writeRuntimeConfig,
   runtimeLocationForTest,
 } from '../support/runtime-config.ts';
-import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 
 const fixturePluginId = 'config.control.fixture';
 const fixtureSecretEnvVar = 'PROJECT02_FIXTURE_API_KEY';
@@ -664,7 +666,7 @@ describe('runtime plugin config control', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -814,7 +816,9 @@ describe('runtime plugin config control', () => {
   it('bootstraps a missing config through the same inspected fingerprint', () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-bootstrap-');
     const canonicalStoreRoot = realpathSync.native(storeRoot);
-    const configPath = defaultRuntimeConfigPath(storeRoot);
+    const configPath = createProject02HomeLayout({
+      homeRoot: storeRoot,
+    }).configPath;
     const manifest = configControlManifest();
     const inspected = inspectRuntimePluginConfig({
       targetScope: 'global',

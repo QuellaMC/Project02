@@ -9,7 +9,7 @@ import {
   normalizeLocalRuntimeSessionId,
 } from '../../runtime/storage/index.ts';
 import {
-  isLocalRuntimeTerminalError,
+  isCliTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
@@ -18,7 +18,6 @@ import {
 } from '../shared/startup-outcome.ts';
 import {
   createRuntimeConfigInspectShape,
-  RuntimeEnvFileError,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigDiagnostic,
   type RuntimeConfigInspectShape,
@@ -29,11 +28,10 @@ import {
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
 import {
-  emptyRuntimeStoreCliState,
   parseRuntimeStoreFlag,
-  RuntimeLocationCliUsageError,
-  type RuntimeStoreCliState,
+  type RuntimeLocationCliState,
 } from '../shared/runtime-location-flags.ts';
+import {CliUsageError} from '../shared/usage-error.ts';
 import {
   createTurnEvidence,
   type InspectTurnEvidence,
@@ -43,13 +41,6 @@ import {
   type InspectConfiguredPlugin,
 } from '../../runtime/config/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
-
-class InspectCliUsageError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'InspectCliUsageError';
-  }
-}
 
 type InspectCliOptions = {
   readonly stdout: NodeJS.WritableStream;
@@ -104,17 +95,13 @@ export async function runInspectCliFromArgs(
   options: InspectCliOptions,
 ): Promise<number> {
   try {
-    const explicitEnv =
-      options.env === undefined || options.env === process.env
-        ? undefined
-        : options.env;
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
     // Inspect reports on a store and never creates one; no consent gate.
     const startup = resolveRuntimeCliStartup({
       stage: 'report',
       location: parsedArgs,
-      ...(explicitEnv === undefined ? {} : {env: explicitEnv}),
+      ...(options.env === undefined ? {} : {env: options.env}),
       ...(options.factories === undefined
         ? {}
         : {factories: options.factories}),
@@ -122,9 +109,7 @@ export async function runInspectCliFromArgs(
     const interpreted = interpretRuntimeCliStartup(startup);
 
     if (interpreted.outcome === 'rejected') {
-      throw new InspectCliUsageError(
-        formatRejectedRuntimeCliStartup(interpreted),
-      );
+      throw new CliUsageError(formatRejectedRuntimeCliStartup(interpreted));
     }
 
     // Warnings go to stderr: the stdout JSON contract stays intact.
@@ -152,12 +137,7 @@ export async function runInspectCliFromArgs(
     );
     return 0;
   } catch (error: unknown) {
-    if (
-      error instanceof InspectCliUsageError ||
-      error instanceof RuntimeLocationCliUsageError ||
-      error instanceof RuntimeEnvFileError ||
-      isLocalRuntimeTerminalError(error)
-    ) {
+    if (isCliTerminalError(error)) {
       options.stderr.write(`Error: ${formatCliTerminalErrorMessage(error)}\n`);
       return 1;
     }
@@ -167,7 +147,7 @@ export async function runInspectCliFromArgs(
 }
 
 function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
-  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
+  let location: RuntimeLocationCliState = {};
   let sessionsMode = false;
   let sessionId: string | undefined;
 
@@ -182,9 +162,9 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       continue;
     }
 
-    // Accepting a flag that would do nothing is worse than refusing it.
+    // Saying why the flag does not apply beats an unknown-option report.
     if (arg === '--init') {
-      throw new InspectCliUsageError(
+      throw new CliUsageError(
         'inspect never creates a store, so --init does not apply. ' +
           'Run chat or runtime-config with --init to create one.',
       );
@@ -193,18 +173,18 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: store,
+      location,
     });
 
     if (storeResult.status === 'matched') {
-      store = storeResult.state;
+      location = storeResult.location;
       index = storeResult.nextIndex;
       continue;
     }
 
     if (arg === '--sessions') {
       if (sessionsMode) {
-        throw new InspectCliUsageError('--sessions can only be provided once.');
+        throw new CliUsageError('--sessions can only be provided once.');
       }
 
       sessionsMode = true;
@@ -213,29 +193,20 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
 
     if (arg === '--session') {
       if (sessionId !== undefined) {
-        throw new InspectCliUsageError('--session can only be provided once.');
+        throw new CliUsageError('--session can only be provided once.');
       }
 
-      sessionId = readFlagValue(
-        args,
-        index,
-        '--session',
-        message => new InspectCliUsageError(message),
-      );
+      sessionId = readFlagValue(args, index, '--session');
       index += 1;
       continue;
     }
 
-    throw new InspectCliUsageError(`Unknown inspect option: ${arg}.`);
+    throw new CliUsageError(`Unknown inspect option: ${arg}.`);
   }
 
   if (sessionsMode && sessionId !== undefined) {
-    throw new InspectCliUsageError(
-      'Use either --sessions or --session, not both.',
-    );
+    throw new CliUsageError('Use either --sessions or --session, not both.');
   }
-
-  const {location} = store;
 
   if (sessionsMode) {
     return {
@@ -253,7 +224,7 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   }
 
   if (sessionId === undefined) {
-    throw new InspectCliUsageError('Use --sessions or --session <session-id>.');
+    throw new CliUsageError('Use --sessions or --session <session-id>.');
   }
 
   return {

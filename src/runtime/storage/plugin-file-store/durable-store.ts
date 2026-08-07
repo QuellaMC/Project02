@@ -28,7 +28,7 @@ import {
   recoverDirectDurablePluginFileStoreMutationLocked,
 } from './wal.ts';
 
-export type DurableRuntimePluginFileStoreDependencies = {
+type DurableRuntimePluginFileStoreDependencies = {
   readonly faultInjector?: DurablePluginFileStoreFaultInjector;
 };
 

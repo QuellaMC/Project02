@@ -53,7 +53,6 @@ export function runtimePluginTurnEvidenceOption(options: {
       kind: 'runtime_plugin_turn_evidence_snapshot',
       contractVersion: runtimePluginContractVersion,
       plugins: registry.plugins.map(registration => {
-        const enabled = enabledPluginIds.has(registration.manifest.id);
         const healthStatus = healthStatuses.get(registration.manifest.id);
 
         return {
@@ -61,10 +60,7 @@ export function runtimePluginTurnEvidenceOption(options: {
           manifest: registration.manifest,
           providedTools: registration.providedTools,
           registeredLifecycleHooks: registration.registeredLifecycleHooks,
-          installed: true,
-          registered: true,
-          enabled,
-          availableForTurn: enabled,
+          enabled: enabledPluginIds.has(registration.manifest.id),
           redactionLabels: registration.manifest.runtimePolicy.redactionLabels,
           requestedAccess: registration.requestedAccess,
           grantedAccess: registration.grantedAccess,

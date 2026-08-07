@@ -1,13 +1,17 @@
 import {describe, expect, it} from 'vitest';
 import {
   createRuntimePluginHost,
-  runRuntimePluginSessionEndHooks,
+  runRuntimePluginSessionEndHooksForTargets,
 } from '../../src/plugins/host/index.ts';
+import {runtimePluginLifecycleTargets} from '../../src/plugins/host/instance-lifecycle.ts';
 import {
   createRuntimePluginRegistrySnapshot,
   type RuntimePluginFileStore,
 } from '../../src/plugins/api/index.ts';
-import {runtimePluginAccessForPlugin} from '../../src/plugins/policy/access-control.ts';
+import {
+  resolveRuntimePluginAccessForPlugins,
+  runtimePluginAccessForPlugin,
+} from '../../src/plugins/policy/access-control.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin,
@@ -22,9 +26,7 @@ import {
   createPluginHostTestFileStore,
   createReadOnlyBeforeRoleModelFileStoreProbePlugin,
   createReadOnlyFileStoreProbePlugin,
-  createRetainedBeforeRoleModelFileStorePlugin,
   createRetainedHandleToolCallFileStorePlugin,
-  createRetainedHealthFileStorePlugin,
   createSessionEndFileStoreProbePlugin,
   createStagedAppendFileStorePlugin,
   expectRetainedFileStoreWriteBlocked,
@@ -106,15 +108,21 @@ describe('runtime plugin host access and lifecycle', () => {
       },
     });
 
-    await expect(
-      runRuntimePluginSessionEndHooks({
-        plugins: [deniedPlugin, grantedPlugin],
+    const plugins = [deniedPlugin, grantedPlugin];
+    const runSessionEnd = async (): Promise<unknown> =>
+      await runRuntimePluginSessionEndHooksForTargets({
+        targets: runtimePluginLifecycleTargets(plugins),
+        accessByPluginId: resolveRuntimePluginAccessForPlugins({
+          plugins,
+          enabledPluginIds: plugins.map(plugin => plugin.manifest.id),
+        }),
         context: testPluginContext(),
         hookOptions: {
           allowFileStoreWrites: true,
         },
-      }),
-    ).rejects.toThrow(
+      });
+
+    await expect(runSessionEnd()).rejects.toThrow(
       /Duplicate plugin id "memory\.duplicate-session-end\.fixture" is not allowed/iu,
     );
     expect(invokedPlugins).toEqual([]);
@@ -199,25 +207,6 @@ describe('runtime plugin host access and lifecycle', () => {
     ).resolves.toMatchObject({
       status: 'rejected',
       reason: 'plugin_not_enabled',
-    });
-  });
-
-  it('injects fileStore for an explicitly enabled non-built-in plugin that declares it', async () => {
-    const plugin = createFileStoreAvailabilityProbePlugin({
-      pluginId: 'memory.file-store-allowed.fixture',
-      requestedAccess: {file_store: 'read', model_input: 'write'},
-    });
-    const host = createExplicitlyEnabledRuntimePluginHost({
-      plugins: [plugin],
-    });
-
-    const result = await callFileStoreAvailabilityProbe(host, plugin);
-
-    expect(result).toMatchObject({
-      status: 'accepted',
-      output: {
-        fileStoreAvailable: true,
-      },
     });
   });
 
@@ -387,32 +376,6 @@ describe('runtime plugin host access and lifecycle', () => {
     expect(fileStore.revision()).toBe(1);
   });
 
-  it('blocks retained fileStore writes after beforeRoleModelCall completes', async () => {
-    let retainedFileStore: RuntimePluginFileStore | undefined;
-    const sessionIdentity = {};
-    const plugin = createRetainedBeforeRoleModelFileStorePlugin(fileStore => {
-      retainedFileStore = fileStore;
-    });
-    const host = createExplicitlyEnabledRuntimePluginHost({
-      plugins: [plugin],
-      sessionIdentity,
-    });
-
-    const result = await host.beforeRoleModelCall(testPluginContext());
-
-    expect(result.status).toBe('completed');
-    expectRetainedFileStoreWriteBlocked(retainedFileStore, 'after-before.json');
-
-    const fileStore = createPluginHostTestFileStore({
-      pluginId: plugin.manifest.id,
-      sessionIdentity,
-    });
-
-    expect(fileStore.readJson('during-before.json')).toEqual({value: 'during'});
-    expect(fileStore.readJson('after-before.json')).toBeUndefined();
-    expect(fileStore.revision()).toBe(1);
-  });
-
   it('writes during handleToolCall and blocks retained fileStore writes after completion', async () => {
     let retainedFileStore: RuntimePluginFileStore | undefined;
     const sessionIdentity = {};
@@ -564,36 +527,6 @@ describe('runtime plugin host access and lifecycle', () => {
       },
     ]);
     expect(fileStore.revision()).toBe(2);
-  });
-
-  it('blocks retained fileStore writes after health completes', async () => {
-    let retainedFileStore: RuntimePluginFileStore | undefined;
-    const sessionIdentity = {};
-    const plugin = createRetainedHealthFileStorePlugin(fileStore => {
-      retainedFileStore = fileStore;
-    });
-    const host = createExplicitlyEnabledRuntimePluginHost({
-      plugins: [plugin],
-      sessionIdentity,
-    });
-
-    const result = await host.health(testPluginContext());
-
-    expect(result.snapshots).toHaveLength(1);
-    expect(result.snapshots[0]).toMatchObject({
-      pluginId: plugin.manifest.id,
-      status: 'ok',
-    });
-    expectRetainedFileStoreWriteBlocked(retainedFileStore, 'after-health.json');
-
-    const fileStore = createPluginHostTestFileStore({
-      pluginId: plugin.manifest.id,
-      sessionIdentity,
-    });
-
-    expect(fileStore.readJson('during-health.json')).toEqual({value: 'during'});
-    expect(fileStore.readJson('after-health.json')).toBeUndefined();
-    expect(fileStore.revision()).toBe(1);
   });
 
   it('rejects plugin-host-owned invalid input before invoking the handler', async () => {

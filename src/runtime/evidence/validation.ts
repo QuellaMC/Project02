@@ -513,7 +513,6 @@ export function assertIncrementalConversationAppend(options: {
     roleModelCharacter: expectedCharacter,
     conversationCharacter: options.state.conversationCharacter,
     boundCharacter: options.state.boundCharacter,
-    allowUnanchoredCustomCharacter: false,
   });
 
   const speakerIsValid =
@@ -753,7 +752,6 @@ function assertIncrementalCharacterEvidence(
       roleModelCharacter: state.roleModelCharacter ?? candidate,
       conversationCharacter: state.conversationCharacter,
       boundCharacter: state.boundCharacter,
-      allowUnanchoredCustomCharacter: false,
     });
   }
 }
@@ -767,7 +765,6 @@ export function durableRuntimeSessionCharacterProfile(
       messages: evidence.conversationMessages,
       rawEvents: evidence.rawEvents,
       boundCharacter,
-      allowUnanchoredCustomCharacter: false,
     }) ?? boundCharacter
   );
 }

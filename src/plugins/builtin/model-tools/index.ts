@@ -20,7 +20,6 @@ const firstPartyModelToolsProvidedTools = Object.freeze(
       description: definition.description,
       inputContract: definition.inputContract,
       validationOwner: 'built_in_model_tools',
-      annotations: {readOnlyHint: true},
       concurrency: 'shared',
       requiresConfirmation: false,
     } satisfies RuntimePluginProvidedTool),

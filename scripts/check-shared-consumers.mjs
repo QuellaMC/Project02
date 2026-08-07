@@ -1,10 +1,14 @@
-// Gate rule 6: a shared file needs a reviewed consumers.json entry naming
-// at least two consumer modules.
+// Gate rule 6: a shared file needs a reviewed consumers.json entry naming at
+// least two consumer modules, and naming only modules that import it.
+// Intra-shared imports are plumbing, not consumption: `shared` is never a
+// consumer, and a file other src/shared files import is exempt from the
+// minimum because its consumers reach it through them.
 import {readFileSync, readdirSync} from 'node:fs';
 import {basename, dirname, join, relative, resolve} from 'node:path';
 
 const SRC_DIRECTORY = 'src';
 const SHARED_DIRECTORY = 'src/shared';
+const SHARED_MODULE = 'shared';
 const MANIFEST_FILE = 'src/shared/consumers.json';
 const MINIMUM_APPROVED_MODULES = 2;
 
@@ -47,12 +51,25 @@ function importedSharedFileNames(source, filePath) {
   return names;
 }
 
+function collectSharedImports() {
+  const imports = [];
+  for (const filePath of listTypeScriptFiles(SRC_DIRECTORY)) {
+    const importingModule = moduleOf(filePath);
+    const source = readFileSync(filePath, 'utf8');
+    for (const name of importedSharedFileNames(source, filePath)) {
+      imports.push({filePath, importingModule, name});
+    }
+  }
+  return imports;
+}
+
 function main() {
   /** @type {Record<string, string[]>} */
   const manifest = JSON.parse(readFileSync(MANIFEST_FILE, 'utf8'));
   const sharedFiles = readdirSync(SHARED_DIRECTORY).filter(name =>
     name.endsWith('.ts'),
   );
+  const imports = collectSharedImports();
   const failures = [];
 
   for (const name of sharedFiles) {
@@ -63,12 +80,35 @@ function main() {
           'shared additions need approved consumers (name at least ' +
           `${MINIMUM_APPROVED_MODULES} consumer modules).`,
       );
-    } else if (approved.length < MINIMUM_APPROVED_MODULES) {
+      continue;
+    }
+
+    const importsOfFile = imports.filter(record => record.name === name);
+    const consumerModules = new Set(
+      importsOfFile
+        .filter(record => record.importingModule !== SHARED_MODULE)
+        .map(record => record.importingModule),
+    );
+    const reachedThroughShared = importsOfFile.some(
+      record => record.importingModule === SHARED_MODULE,
+    );
+
+    if (approved.length < MINIMUM_APPROVED_MODULES && !reachedThroughShared) {
       failures.push(
         `${MANIFEST_FILE} entry for ${name} names ${approved.length} ` +
           `consumer module(s); at least ${MINIMUM_APPROVED_MODULES} are ` +
           'required — a single-consumer utility belongs inside its consumer.',
       );
+    }
+
+    for (const approvedModule of approved) {
+      if (!consumerModules.has(approvedModule)) {
+        failures.push(
+          `${MANIFEST_FILE} entry for ${name} names '${approvedModule}', ` +
+            `which is not a consumer of ${SHARED_DIRECTORY}/${name}; drop it ` +
+            'so the entry names who actually imports the file.',
+        );
+      }
     }
   }
 
@@ -81,22 +121,18 @@ function main() {
     }
   }
 
-  for (const filePath of listTypeScriptFiles(SRC_DIRECTORY)) {
-    const consumerModule = moduleOf(filePath);
-    if (consumerModule === 'shared') {
+  for (const record of imports) {
+    if (record.importingModule === SHARED_MODULE) {
       continue;
     }
-    const source = readFileSync(filePath, 'utf8');
-    for (const name of importedSharedFileNames(source, filePath)) {
-      const approved = manifest[name] ?? [];
-      if (!approved.includes(consumerModule)) {
-        failures.push(
-          `${filePath} (module '${consumerModule}') imports shared/${name} ` +
-            `but is not an approved consumer (approved: ` +
-            `${approved.join(', ') || 'none'}). Extend the entry in ` +
-            `${MANIFEST_FILE} in a reviewed diff, or move the code.`,
-        );
-      }
+    const approved = manifest[record.name] ?? [];
+    if (!approved.includes(record.importingModule)) {
+      failures.push(
+        `${record.filePath} (module '${record.importingModule}') imports ` +
+          `shared/${record.name} but is not an approved consumer (approved: ` +
+          `${approved.join(', ') || 'none'}). Extend the entry in ` +
+          `${MANIFEST_FILE} in a reviewed diff, or move the code.`,
+      );
     }
   }
 

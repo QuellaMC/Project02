@@ -2,9 +2,8 @@ import type {createConfiguredProject02PluginHostFromPlan} from '../../src/app/in
 import {
   createMemoryProviderRuntimePlugin,
   createRuntimePlugin,
-  hostScopedFirstPartyRuntimePluginIds,
-  runtimePluginContractVersion,
 } from '../../src/plugins/index.ts';
+import {requiredSecretPlugin} from './runtime-config-activation-fixtures.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
 import {ensureCharacterDataDir} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from './temp-root.ts';
@@ -29,52 +28,6 @@ export async function createInitializedTestStoreRoot(
   prefix = 'project02-test-',
 ): Promise<string> {
   return initializeTestStore(createTestTempRoot(prefix));
-}
-
-export function requiredSecretPlugin(id = 'memory.required') {
-  return createRuntimePlugin({
-    manifest: {
-      id,
-      displayName: 'Required Memory',
-      version: '1.0.0',
-      kind: 'memory_provider',
-      description: 'Test plugin with required secret config.',
-      contractVersion: runtimePluginContractVersion,
-      compatibility: {
-        hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
-      },
-      declaredPlugins: ['plugin_discovery'],
-      config: {
-        scope: 'global_with_character_overrides',
-        fields: [
-          {
-            name: 'apiKey',
-            description: 'API key.',
-            required: true,
-            secret: true,
-            valueType: 'secret',
-            redactionLabels: ['secret'],
-          },
-        ],
-      },
-      firstParty: false,
-      runtimePolicy: {
-        timeoutMs: 1000,
-        redactionLabels: [],
-        failureBehavior: {
-          beforeRoleModelCall: 'degrade',
-          handleToolCall: 'degrade',
-          health: 'degrade',
-        },
-      },
-      activation: {
-        defaultEnabled: true,
-        reasons: ['test_required_secret'],
-      },
-      requestedAccess: {},
-    },
-  });
 }
 
 export function requiredSecretPluginWithManifestEnvVar(
@@ -264,14 +217,4 @@ export function activationPluginById(
   pluginId: string,
 ): ActivationPluginSnapshot | undefined {
   return plugins.find(plugin => plugin.pluginId === pluginId);
-}
-
-export function nonHostScopedActivationPlugins(
-  plugins: readonly ActivationPluginSnapshot[],
-): readonly ActivationPluginSnapshot[] {
-  const hostScopedPluginIds = new Set(hostScopedFirstPartyRuntimePluginIds);
-
-  return Object.freeze(
-    plugins.filter(plugin => !hostScopedPluginIds.has(plugin.pluginId)),
-  );
 }

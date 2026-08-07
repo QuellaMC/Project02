@@ -9,6 +9,8 @@ import {
   removePathSync,
   type Dirent,
 } from '../../../shared/file-system.ts';
+import {isJsonRecord} from '../../../shared/json-boundary.ts';
+import {filesystemMetadataIdentity} from '../../../shared/package-metadata.ts';
 import {
   canonicalPath,
   describeRealEntry,
@@ -39,7 +41,6 @@ import {
   durablePathModesFileName,
   durableRevisionFileName,
   isMissingFileError,
-  isPlainObject,
   isRuntimePluginFileStorePathMode,
   normalizeRuntimePluginFileStorePath,
   parseRuntimePluginJsonlContent,
@@ -54,7 +55,7 @@ const durablePathModeCache = new Map<
   }
 >();
 
-export type DurablePluginFileStoreOperation = {
+type DurablePluginFileStoreOperation = {
   readonly pluginId?: string;
   readonly path: string;
   readonly kind: 'append_jsonl' | 'write_json';
@@ -342,7 +343,7 @@ function readDurablePathModesFile(
   try {
     const parsed = JSON.parse(readTextFileSync(modesPath)) as unknown;
 
-    if (!isPlainObject(parsed)) {
+    if (!isJsonRecord(parsed)) {
       throw new TypeError('Plugin file store path modes are malformed.');
     }
 
@@ -389,10 +390,8 @@ export function writeDurablePathModes(
 
 function durablePathModesFileStamp(root: string): string {
   try {
-    const stat = lstatPathSync(join(root, durablePathModesFileName));
-
-    return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(
-      ':',
+    return filesystemMetadataIdentity(
+      lstatPathSync(join(root, durablePathModesFileName)),
     );
   } catch (error: unknown) {
     if (isMissingFileError(error)) {

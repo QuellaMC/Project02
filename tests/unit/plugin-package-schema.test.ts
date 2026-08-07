@@ -1,4 +1,5 @@
 import {
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -7,7 +8,7 @@ import {
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import {Ajv} from 'ajv';
 import {describe, expect, it} from 'vitest';
@@ -250,9 +251,19 @@ describe('plugin package descriptor schema parity', () => {
     const packagesRoot = mkdtempSync(
       join(tmpdir(), 'project02-plugin-scaffold-'),
     );
+    const bundledPath = join(packagesRoot, 'bundled.ts');
+
+    copyFileSync(
+      fileURLToPath(
+        new URL('../../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
+      bundledPath,
+    );
+
     const {packageRoot} = scaffoldRuntimePluginPackage({
       id: 'sample.scaffold-check',
       packagesRoot,
+      bundledPath,
     });
     const descriptor = JSON.parse(
       readFileSync(join(packageRoot, 'project02.plugin.json'), 'utf8'),
@@ -268,11 +279,29 @@ describe('plugin package descriptor schema parity', () => {
     for (const file of ['package.json', 'index.ts', 'plugin.ts']) {
       expect(existsSync(join(packageRoot, file))).toBe(true);
     }
+
+    // A package the host never imports statically cannot load at runtime.
+    const bundled = readFileSync(bundledPath, 'utf8');
+
+    expect(bundled).toContain(
+      "import {createProject02Plugin as createSampleScaffoldCheckPlugin} from '../packages/sample.scaffold-check/index.ts';",
+    );
+    expect(bundled).toContain(
+      '      factory: createSampleScaffoldCheckPlugin,',
+    );
     expect(() =>
-      scaffoldRuntimePluginPackage({id: 'sample.scaffold-check', packagesRoot}),
+      scaffoldRuntimePluginPackage({
+        id: 'sample.scaffold-check',
+        packagesRoot,
+        bundledPath,
+      }),
     ).toThrow('already exists');
     expect(() =>
-      scaffoldRuntimePluginPackage({id: '9-bad-id', packagesRoot}),
+      scaffoldRuntimePluginPackage({
+        id: '9-bad-id',
+        packagesRoot,
+        bundledPath,
+      }),
     ).toThrow('must start with a letter');
   });
 });

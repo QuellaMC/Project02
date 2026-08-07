@@ -7,7 +7,6 @@ import {
   createConfiguredProject02PluginHostFromPlan,
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
-import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
   runtimePluginId,
@@ -22,6 +21,7 @@ import {
 import {
   writeRuntimeConfig,
   runtimeConfigSnapshotForTest,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
@@ -30,7 +30,6 @@ import {
   firstPartyPlugin,
   modelFacingMemorySearchPlugin,
   modelFacingPluginListCollisionPlugin,
-  nonHostScopedActivationPlugins,
   parseActivationOutput,
   pluginWithAdditionalConfigField,
   requiredSecretPlugin,
@@ -206,286 +205,11 @@ describe('runtime config activation checks and construction', () => {
     );
   });
 
-  it('fails check for duplicate manifest ids without constructing factories', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-duplicate-manifest-check-',
-    );
-    const envVar = 'PROJECT02_DUPLICATE_MANIFEST_CHECK_SECRET_3448711003';
-    const firstPlugin = requiredSecretPlugin('memory.duplicate');
-    const secondPlugin = requiredSecretPlugin('memory.duplicate');
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'memory.duplicate': {
-          enabled: true,
-          config: {
-            apiKey: {$env: envVar},
-          },
-        },
-      },
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        env: {
-          [envVar]: 'duplicate-manifest-secret',
-        },
-        factories: {
-          'memory.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'duplicate manifest check must not construct factories',
-              );
-            },
-          },
-          'memory.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'duplicate manifest check must not construct factories',
-              );
-            },
-          },
-        },
-      },
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: 'plugins.memory.duplicate',
-          pluginId: 'memory.duplicate',
-        }),
-      ]),
-    );
-    expect(
-      output.plugins
-        .filter(plugin => plugin.enabled)
-        .map(plugin => plugin.pluginId),
-    ).toEqual([runtimePluginId]);
-    expect(stdout).not.toContain('duplicate-manifest-secret');
-  });
-
-  it('keeps unreferenced default-disabled duplicate manifest ids passing check', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-duplicate-default-disabled-',
-    );
-    const firstPlugin = firstPartyPlugin('optional.duplicate', {
-      defaultEnabled: false,
-    });
-    const secondPlugin = firstPartyPlugin('optional.duplicate', {
-      defaultEnabled: false,
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'optional.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'inactive duplicate manifest check must not construct factories',
-              );
-            },
-          },
-          'optional.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'inactive duplicate manifest check must not construct factories',
-              );
-            },
-          },
-        },
-      },
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
-      'runtime_config_duplicate_plugin_manifest_id',
-    );
-    expect(
-      enabledNonHostScopedActivationPlugins(output)
-        .filter(plugin => plugin.pluginId === 'optional.duplicate')
-        .map(plugin => plugin.pluginId),
-    ).toEqual([]);
-    expect(
-      nonHostScopedActivationPlugins(output)
-        .filter(plugin => plugin.pluginId === 'optional.duplicate')
-        .map(plugin => plugin.activationStatus),
-    ).toEqual(['disabled', 'disabled']);
-  });
-
-  it('fails check for mixed default-enabled duplicate manifest ids', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-duplicate-mixed-default-',
-    );
-    const firstPlugin = firstPartyPlugin('mixed.duplicate');
-    const secondPlugin = firstPartyPlugin('mixed.duplicate', {
-      defaultEnabled: false,
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'mixed.duplicate': {
-          enabled: true,
-        },
-      },
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'mixed.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'mixed default duplicate manifest check must not construct factories',
-              );
-            },
-          },
-          'mixed.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'mixed default duplicate manifest check must not construct factories',
-              );
-            },
-          },
-        },
-      },
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: 'plugins.mixed.duplicate',
-          pluginId: 'mixed.duplicate',
-        }),
-      ]),
-    );
-    expect(
-      output.plugins
-        .filter(plugin => plugin.enabled)
-        .map(plugin => plugin.pluginId),
-    ).toEqual([runtimePluginId]);
-  });
-
-  it('keeps explicitly disabled duplicate manifest ids passing check', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-duplicate-disabled-',
-    );
-    const firstPlugin = firstPartyPlugin('disabled.duplicate');
-    const secondPlugin = firstPartyPlugin('disabled.duplicate');
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'disabled.duplicate': {
-          enabled: false,
-        },
-      },
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'disabled.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'disabled duplicate manifest check must not construct factories',
-              );
-            },
-          },
-          'disabled.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'disabled duplicate manifest check must not construct factories',
-              );
-            },
-          },
-        },
-      },
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(0);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
-      'runtime_config_duplicate_plugin_manifest_id',
-    );
-    expect(
-      enabledNonHostScopedActivationPlugins(output)
-        .filter(plugin => plugin.pluginId === 'disabled.duplicate')
-        .map(plugin => plugin.pluginId),
-    ).toEqual([]);
-    expect(
-      nonHostScopedActivationPlugins(output)
-        .filter(plugin => plugin.pluginId === 'disabled.duplicate')
-        .map(plugin => plugin.activationStatus),
-    ).toEqual(['disabled', 'disabled']);
-  });
-
-  it('keeps unselected duplicate memory providers passing check', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-duplicate-memory-unselected-',
-    );
+  it('keeps unselected memory providers passing check', async () => {
+    const storeRoot = createTestTempRoot('project02-config-memory-unselected-');
     const envVar = 'PROJECT02_SELECTED_MEMORY_DUPLICATE_SECRET_3450063170';
     const selectedPlugin = requiredSecretPlugin('memory.selected');
-    const firstUnselectedPlugin = requiredSecretPlugin('memory.unselected');
-    const secondUnselectedPlugin = requiredSecretPlugin('memory.unselected');
+    const unselectedPlugin = requiredSecretPlugin('memory.unselected');
     let stdout = '';
     let factoryCalls = 0;
 
@@ -521,21 +245,12 @@ describe('runtime config activation checks and construction', () => {
               );
             },
           },
-          'memory.unselected.primary': {
-            manifest: firstUnselectedPlugin.manifest,
+          'memory.unselected': {
+            manifest: unselectedPlugin.manifest,
             create() {
               factoryCalls += 1;
               throw new Error(
-                'unselected duplicate manifest check must not construct factories',
-              );
-            },
-          },
-          'memory.unselected.secondary': {
-            manifest: secondUnselectedPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'unselected duplicate manifest check must not construct factories',
+                'unselected memory provider check must not construct factories',
               );
             },
           },
@@ -546,9 +261,6 @@ describe('runtime config activation checks and construction', () => {
 
     expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
-      'runtime_config_duplicate_plugin_manifest_id',
-    );
     expect(
       enabledNonHostScopedActivationPlugins(output).filter(plugin =>
         plugin.pluginId.startsWith('memory.'),
@@ -562,79 +274,10 @@ describe('runtime config activation checks and construction', () => {
       output.plugins
         .filter(plugin => plugin.pluginId === 'memory.unselected')
         .map(plugin => plugin.activationStatus),
-    ).toEqual(['disabled', 'disabled']);
+    ).toEqual(['disabled']);
   });
 
-  it('fails check for config-enabled default-disabled duplicate manifest ids', async () => {
-    const storeRoot = createTestTempRoot('project02-config-duplicate-enabled-');
-    const firstPlugin = firstPartyPlugin('selected.duplicate', {
-      defaultEnabled: false,
-    });
-    const secondPlugin = firstPartyPlugin('selected.duplicate', {
-      defaultEnabled: false,
-    });
-    let stdout = '';
-    let factoryCalls = 0;
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        'selected.duplicate': {
-          enabled: true,
-        },
-      },
-    });
-
-    const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'check'],
-      {
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        factories: {
-          'selected.duplicate.primary': {
-            manifest: firstPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'active duplicate manifest check must not construct factories',
-              );
-            },
-          },
-          'selected.duplicate.secondary': {
-            manifest: secondPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              throw new Error(
-                'active duplicate manifest check must not construct factories',
-              );
-            },
-          },
-        },
-      },
-    );
-    const output = parseActivationOutput(stdout);
-
-    expect(exitCode).toBe(1);
-    expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: 'plugins.selected.duplicate',
-          pluginId: 'selected.duplicate',
-        }),
-      ]),
-    );
-    expect(
-      output.plugins
-        .filter(plugin => plugin.enabled)
-        .map(plugin => plugin.pluginId),
-    ).toEqual([runtimePluginId]);
-  });
-
-  it('fails check for manifest ids reserved by the host management plugin', async () => {
+  it('keeps a factory claiming the host management id out of the catalog', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-reserved-management-id-',
     );
@@ -670,25 +313,17 @@ describe('runtime config activation checks and construction', () => {
     );
     const output = parseActivationOutput(stdout);
 
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(0);
-    expect(output.activationDiagnostics).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          severity: 'error',
-          code: 'runtime_config_duplicate_plugin_manifest_id',
-          path: `plugins.${runtimePluginId}`,
-          pluginId: runtimePluginId,
-        }),
-      ]),
-    );
-    expect(output.plugins).toContainEqual(
+    expect(
+      output.plugins.filter(plugin => plugin.pluginId === runtimePluginId),
+    ).toEqual([
       expect.objectContaining({
         pluginId: runtimePluginId,
-        activationStatus: 'blocked',
-        enabled: false,
+        activationStatus: 'active',
+        enabled: true,
       }),
-    );
+    ]);
   });
 
   it('rejects manifest-backed factories that return a different same-id manifest', async () => {
@@ -716,7 +351,7 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
-    const loadedConfig = loadProject02RuntimeConfig({configPath});
+    const loadedConfig = loadRuntimeConfigForTest({configPath});
 
     await initializeCharacterDataForHost(storeRoot);
 
@@ -729,20 +364,20 @@ describe('runtime config activation checks and construction', () => {
             env: {
               [envVar]: 'same-id-different-manifest-secret',
             },
+            factories: {
+              [cleanupPlugin.manifest.id]: {
+                manifest: cleanupPlugin.manifest,
+                create: () => cleanupPlugin,
+              },
+              'memory.contract': {
+                manifest: declaredPlugin.manifest,
+                create: () => returnedPlugin,
+              },
+            },
           }),
 
           env: {
             [envVar]: 'same-id-different-manifest-secret',
-          },
-          factories: {
-            [cleanupPlugin.manifest.id]: {
-              manifest: cleanupPlugin.manifest,
-              create: () => cleanupPlugin,
-            },
-            'memory.contract': {
-              manifest: declaredPlugin.manifest,
-              create: () => returnedPlugin,
-            },
           },
         }),
       }),
@@ -779,15 +414,15 @@ describe('runtime config activation checks and construction', () => {
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
           ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            loadedConfig: loadRuntimeConfigForTest({configPath}),
             storeRoot,
-          }),
-          factories: {
-            [catalogPlugin.manifest.id]: {
-              manifest: catalogPlugin.manifest,
-              create: () => driftedCandidate,
+            factories: {
+              [catalogPlugin.manifest.id]: {
+                manifest: catalogPlugin.manifest,
+                create: () => driftedCandidate,
+              },
             },
-          },
+          }),
         }),
       }),
     ).rejects.toThrow(
@@ -824,7 +459,7 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
-    const loadedConfig = loadProject02RuntimeConfig({configPath});
+    const loadedConfig = loadRuntimeConfigForTest({configPath});
 
     await initializeCharacterDataForHost(storeRoot);
 
@@ -834,20 +469,19 @@ describe('runtime config activation checks and construction', () => {
           ...runtimeConfigSnapshotForTest({
             loadedConfig: loadedConfig,
             storeRoot: storeRoot,
-          }),
-
-          factories: {
-            [cleanupPlugin.manifest.id]: {
-              manifest: cleanupPlugin.manifest,
-              create: () => cleanupPlugin,
-            },
-            [failingPlugin.manifest.id]: {
-              manifest: failingPlugin.manifest,
-              create: () => {
-                throw new Error('later manifest-backed factory failed');
+            factories: {
+              [cleanupPlugin.manifest.id]: {
+                manifest: cleanupPlugin.manifest,
+                create: () => cleanupPlugin,
+              },
+              [failingPlugin.manifest.id]: {
+                manifest: failingPlugin.manifest,
+                create: () => {
+                  throw new Error('later manifest-backed factory failed');
+                },
               },
             },
-          },
+          }),
         }),
         sessionId,
       }),
@@ -913,22 +547,21 @@ describe('runtime config activation checks and construction', () => {
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
           ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            loadedConfig: loadRuntimeConfigForTest({configPath}),
             storeRoot: storeRoot,
-          }),
-
-          factories: {
-            [cleanupPlugin.manifest.id]: {
-              manifest: cleanupPlugin.manifest,
-              create: () => cleanupPlugin,
-            },
-            [failingPlugin.manifest.id]: {
-              manifest: failingPlugin.manifest,
-              create: () => {
-                throw new Error('later manifest-backed factory failed');
+            factories: {
+              [cleanupPlugin.manifest.id]: {
+                manifest: cleanupPlugin.manifest,
+                create: () => cleanupPlugin,
+              },
+              [failingPlugin.manifest.id]: {
+                manifest: failingPlugin.manifest,
+                create: () => {
+                  throw new Error('later manifest-backed factory failed');
+                },
               },
             },
-          },
+          }),
         }),
       }),
     ).rejects.toThrow('later manifest-backed factory failed');
@@ -991,32 +624,31 @@ describe('runtime config activation checks and construction', () => {
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
           ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            loadedConfig: loadRuntimeConfigForTest({configPath}),
             storeRoot: storeRoot,
+            factories: {
+              [cleanupPlugin.manifest.id]: {
+                manifest: cleanupPlugin.manifest,
+                create: input => {
+                  createRuntimePluginFileStore({
+                    storeRoot: input.storeRoot,
+                    sessionId,
+                    pluginId: cleanupPlugin.manifest.id,
+                  }).writeJsonAtomic('state.json', {
+                    value: 'durable construction state',
+                  });
+
+                  return cleanupPlugin;
+                },
+              },
+              [failingPlugin.manifest.id]: {
+                manifest: failingPlugin.manifest,
+                create: () => {
+                  throw new Error('later manifest-backed factory failed');
+                },
+              },
+            },
           }),
-
-          factories: {
-            [cleanupPlugin.manifest.id]: {
-              manifest: cleanupPlugin.manifest,
-              create: input => {
-                createRuntimePluginFileStore({
-                  storeRoot: input.storeRoot,
-                  sessionId,
-                  pluginId: cleanupPlugin.manifest.id,
-                }).writeJsonAtomic('state.json', {
-                  value: 'durable construction state',
-                });
-
-                return cleanupPlugin;
-              },
-            },
-            [failingPlugin.manifest.id]: {
-              manifest: failingPlugin.manifest,
-              create: () => {
-                throw new Error('later manifest-backed factory failed');
-              },
-            },
-          },
         }),
         sessionId,
       }),
@@ -1061,30 +693,29 @@ describe('runtime config activation checks and construction', () => {
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadProject02RuntimeConfig({
+          loadedConfig: loadRuntimeConfigForTest({
             configPath,
             storeRoot: invalidStoreRoot,
           }),
+          factories: {
+            [cleanupPlugin.manifest.id]: {
+              manifest: cleanupPlugin.manifest,
+              create: () => {
+                factoryCalls += 1;
+                return cleanupPlugin;
+              },
+            },
+            [failingPlugin.manifest.id]: {
+              manifest: failingPlugin.manifest,
+              create: () => {
+                factoryCalls += 1;
+                throw new Error(
+                  'later manifest-backed factory failed with unusable store',
+                );
+              },
+            },
+          },
         }),
-
-        factories: {
-          [cleanupPlugin.manifest.id]: {
-            manifest: cleanupPlugin.manifest,
-            create: () => {
-              factoryCalls += 1;
-              return cleanupPlugin;
-            },
-          },
-          [failingPlugin.manifest.id]: {
-            manifest: failingPlugin.manifest,
-            create: () => {
-              factoryCalls += 1;
-              throw new Error(
-                'later manifest-backed factory failed with unusable store',
-              );
-            },
-          },
-        },
       }),
     ).toThrow('Could not inspect local runtime storage schema marker');
 
@@ -1143,24 +774,23 @@ describe('runtime config activation checks and construction', () => {
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
           ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            loadedConfig: loadRuntimeConfigForTest({configPath}),
             storeRoot: storeRoot,
+            factories: {
+              [cleanupPlugin.manifest.id]: {
+                manifest: cleanupPlugin.manifest,
+                create: () => cleanupPlugin,
+              },
+              [firstToolPlugin.manifest.id]: {
+                manifest: firstToolPlugin.manifest,
+                create: () => firstToolPlugin,
+              },
+              [secondToolPlugin.manifest.id]: {
+                manifest: secondToolPlugin.manifest,
+                create: () => secondToolPlugin,
+              },
+            },
           }),
-
-          factories: {
-            [cleanupPlugin.manifest.id]: {
-              manifest: cleanupPlugin.manifest,
-              create: () => cleanupPlugin,
-            },
-            [firstToolPlugin.manifest.id]: {
-              manifest: firstToolPlugin.manifest,
-              create: () => firstToolPlugin,
-            },
-            [secondToolPlugin.manifest.id]: {
-              manifest: secondToolPlugin.manifest,
-              create: () => secondToolPlugin,
-            },
-          },
         }),
       }),
     ).rejects.toThrow(/declared more than once/iu);
@@ -1213,16 +843,15 @@ describe('runtime config activation checks and construction', () => {
       createConfiguredProject02PluginHostFromPlan({
         activationPlan: prepareConfiguredProject02PluginActivation({
           ...runtimeConfigSnapshotForTest({
-            loadedConfig: loadProject02RuntimeConfig({configPath}),
+            loadedConfig: loadRuntimeConfigForTest({configPath}),
             storeRoot: storeRoot,
-          }),
-
-          factories: {
-            [collisionPlugin.manifest.id]: {
-              manifest: collisionPlugin.manifest,
-              create: () => collisionPlugin,
+            factories: {
+              [collisionPlugin.manifest.id]: {
+                manifest: collisionPlugin.manifest,
+                create: () => collisionPlugin,
+              },
             },
-          },
+          }),
         }),
       }),
     ).rejects.toThrow(
@@ -1255,7 +884,7 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
-    const loadedConfig = loadProject02RuntimeConfig({configPath});
+    const loadedConfig = loadRuntimeConfigForTest({configPath});
     await initializeCharacterDataForHost(storeRoot);
 
     const configured = await createConfiguredProject02PluginHostFromPlan({
@@ -1266,20 +895,20 @@ describe('runtime config activation checks and construction', () => {
           env: {
             [envVar]: 'same-id-matching-manifest-secret',
           },
+          factories: {
+            'memory.contract': {
+              manifest: plugin.manifest,
+              create: () => {
+                factoryCalls += 1;
+
+                return plugin;
+              },
+            },
+          },
         }),
 
         env: {
           [envVar]: 'same-id-matching-manifest-secret',
-        },
-        factories: {
-          'memory.contract': {
-            manifest: plugin.manifest,
-            create: () => {
-              factoryCalls += 1;
-
-              return plugin;
-            },
-          },
         },
       }),
     });

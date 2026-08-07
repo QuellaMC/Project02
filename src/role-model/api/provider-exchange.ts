@@ -1,12 +1,13 @@
-import {isJsonRecord} from '../../shared/json-boundary.ts';
+import {
+  createJsonBoundarySnapshot,
+  isJsonRecord,
+} from '../../shared/json-boundary.ts';
 import {
   freezeRoleModelChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,
   type RoleModelProviderToolNameMapping,
 } from './chat-wire.ts';
-import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
-import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import type {
   RoleModelProviderExchangeSnapshot,
   RoleModelProviderMetadata,
@@ -15,26 +16,27 @@ import type {
 export function parseRoleModelProviderExchangeSnapshot(
   value: unknown,
 ): RoleModelProviderExchangeSnapshot | undefined {
-  if (!isRoleModelProviderExchangeSnapshot(value)) {
+  try {
+    return freezeRoleModelProviderExchangeSnapshot(value);
+  } catch {
     return undefined;
   }
-
-  return freezeRoleModelProviderExchangeSnapshot(value);
 }
 
 export function freezeRoleModelProviderExchangeSnapshot(
-  snapshot: RoleModelProviderExchangeSnapshot,
+  value: unknown,
 ): RoleModelProviderExchangeSnapshot {
-  const boundedSnapshot = createJsonBoundarySnapshot(snapshot, {
+  // Normalization runs first, so the shape check below judges JSON leaves only.
+  const boundedValue = createJsonBoundarySnapshot(value, {
     field: 'Role-model provider exchange',
     redact: true,
   });
 
-  if (!isRoleModelProviderExchangeSnapshot(boundedSnapshot)) {
+  if (!isRoleModelProviderExchangeSnapshot(boundedValue)) {
     throw new TypeError('Role-model provider exchange is malformed.');
   }
 
-  snapshot = boundedSnapshot;
+  const snapshot: RoleModelProviderExchangeSnapshot = boundedValue;
 
   return Object.freeze({
     provider: Object.freeze({
@@ -49,7 +51,7 @@ export function freezeRoleModelProviderExchangeSnapshot(
     capabilities: Object.freeze({...snapshot.capabilities}),
     reasoning: Object.freeze({
       mode: snapshot.reasoning.mode,
-      params: freezeRuntimePluginJsonValue(snapshot.reasoning.params),
+      params: snapshot.reasoning.params,
     }),
     renderedMessages: Object.freeze(
       snapshot.renderedMessages.map(freezeRoleModelChatMessage),
@@ -65,26 +67,11 @@ export function freezeRoleModelProviderExchangeSnapshot(
         } satisfies RoleModelProviderToolNameMapping),
       ),
     ),
-    ...(snapshot.toolChoice === undefined
-      ? {}
-      : {toolChoice: freezeRuntimePluginJsonValue(snapshot.toolChoice)}),
-    ...(snapshot.parallelToolCalls === undefined
-      ? {}
-      : {parallelToolCalls: snapshot.parallelToolCalls}),
-    requestBody: freezeRuntimePluginJsonValue(snapshot.requestBody),
-    ...(snapshot.rawFinishReason === undefined
-      ? {}
-      : {
-          rawFinishReason: freezeRuntimePluginJsonValue(
-            snapshot.rawFinishReason,
-          ),
-        }),
+    requestBody: snapshot.requestBody,
     ...(snapshot.finishReason === undefined
       ? {}
       : {finishReason: snapshot.finishReason}),
-    ...(snapshot.usage === undefined
-      ? {}
-      : {usage: freezeRuntimePluginJsonValue(snapshot.usage)}),
+    ...(snapshot.usage === undefined ? {} : {usage: snapshot.usage}),
     ...(snapshot.nativeAssistantMessage === undefined
       ? {}
       : {
@@ -95,9 +82,6 @@ export function freezeRoleModelProviderExchangeSnapshot(
     nativeToolResultMessages: Object.freeze(
       snapshot.nativeToolResultMessages.map(freezeRoleModelChatMessage),
     ),
-    ...(snapshot.responseBody === undefined
-      ? {}
-      : {responseBody: freezeRuntimePluginJsonValue(snapshot.responseBody)}),
     ...(snapshot.outputNormalization === undefined
       ? {}
       : {
@@ -140,7 +124,7 @@ function isRequiredRoleModelProviderExchangeSnapshot(
     renderedTools.every(isRoleModelProviderExchangeTool) &&
     Array.isArray(toolNameMappings) &&
     toolNameMappings.every(isRoleModelProviderToolNameMapping) &&
-    isRuntimePluginJsonValue(value['requestBody']) &&
+    value['requestBody'] !== undefined &&
     Array.isArray(nativeToolResultMessages) &&
     nativeToolResultMessages.every(isRoleModelProviderExchangeChatMessage)
   );
@@ -150,17 +134,11 @@ function isOptionalRoleModelProviderExchangeSnapshot(
   value: Readonly<Record<string, unknown>>,
 ): boolean {
   return (
-    isOptionalRuntimePluginJsonValue(value['toolChoice']) &&
-    (value['parallelToolCalls'] === undefined ||
-      typeof value['parallelToolCalls'] === 'boolean') &&
-    isOptionalRuntimePluginJsonValue(value['rawFinishReason']) &&
     isOptionalString(value['finishReason']) &&
-    isOptionalRuntimePluginJsonValue(value['usage']) &&
     (value['nativeAssistantMessage'] === undefined ||
       isRoleModelProviderExchangeChatMessage(
         value['nativeAssistantMessage'],
       )) &&
-    isOptionalRuntimePluginJsonValue(value['responseBody']) &&
     (value['outputNormalization'] === undefined ||
       isRoleModelProviderExchangeOutputNormalization(
         value['outputNormalization'],
@@ -174,7 +152,7 @@ function isRoleModelProviderExchangeProvider(value: unknown): boolean {
   }
 
   return (
-    (value['name'] === 'local' || value['name'] === 'nvidia') &&
+    value['name'] === 'nvidia' &&
     isOptionalString(value['model']) &&
     isOptionalString(value['endpoint'])
   );
@@ -203,8 +181,8 @@ function isRoleModelProviderCapabilities(value: unknown): boolean {
 function isRoleModelProviderExchangeReasoning(value: unknown): boolean {
   return (
     isJsonRecord(value) &&
-    (value['mode'] === 'none' || value['mode'] === 'enabled') &&
-    isRuntimePluginJsonValue(value['params'])
+    value['mode'] === 'enabled' &&
+    value['params'] !== undefined
   );
 }
 
@@ -296,39 +274,6 @@ function isOptionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
 }
 
-function isOptionalRuntimePluginJsonValue(value: unknown): boolean {
-  return value === undefined || isRuntimePluginJsonValue(value);
-}
-
-function isRuntimePluginJsonValue(value: unknown, depth = 0): boolean {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'boolean'
-  ) {
-    return true;
-  }
-
-  if (typeof value === 'number') {
-    return Number.isFinite(value);
-  }
-
-  if (depth > 64) {
-    return false;
-  }
-
-  if (Array.isArray(value)) {
-    return value.every(item => isRuntimePluginJsonValue(item, depth + 1));
-  }
-
-  return (
-    isJsonRecord(value) &&
-    Object.values(value).every(item =>
-      isRuntimePluginJsonValue(item, depth + 1),
-    )
-  );
-}
-
 function freezeProviderExchangeTool(
   tool: RoleModelChatCompletionTool,
 ): RoleModelChatCompletionTool {
@@ -337,9 +282,7 @@ function freezeProviderExchangeTool(
     function: Object.freeze({
       name: tool.function.name,
       description: tool.function.description,
-      parameters: freezeRuntimePluginJsonValue(
-        tool.function.parameters,
-      ) as RoleModelChatCompletionTool['function']['parameters'],
+      parameters: tool.function.parameters,
       ...(tool.function.strict === undefined ? {} : {strict: true}),
     }),
   } satisfies RoleModelChatCompletionTool);
@@ -388,39 +331,4 @@ export function freezeProviderMetadata(
           }),
         }),
   } satisfies RoleModelProviderMetadata);
-}
-
-function freezeRuntimePluginJsonObject(
-  value: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, RuntimePluginJsonValue>> {
-  const snapshot: Record<string, RuntimePluginJsonValue> = {};
-
-  for (const [key, item] of Object.entries(value)) {
-    snapshot[key] = freezeRuntimePluginJsonValue(item);
-  }
-
-  return Object.freeze(snapshot);
-}
-
-function freezeRuntimePluginJsonValue(value: unknown): RuntimePluginJsonValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
-
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeRuntimePluginJsonValue));
-  }
-
-  if (isJsonRecord(value)) {
-    return freezeRuntimePluginJsonObject(value);
-  }
-
-  throw new TypeError(
-    'Role-model tool observation values must be JSON-compatible.',
-  );
 }

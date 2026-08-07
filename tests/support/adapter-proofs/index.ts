@@ -586,7 +586,6 @@ export function mapMcpToolsResourcesFixture(
     declaredPlugins: [
       'tool_provider',
       'handle_tool_call',
-      'context_provider',
       'before_role_model_call',
       'health',
     ],
@@ -781,7 +780,6 @@ function createMemoryGatewayManifest(options: {
     sourceVersion: options.sourceVersion,
     externalContract: options.externalContract,
     declaredPlugins: [
-      'context_provider',
       'before_role_model_call',
       'tool_provider',
       'handle_tool_call',
@@ -864,8 +862,8 @@ function adapterRequestedAccess(options: {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): RuntimePluginAccessMap {
-  const hasModelFacingPluginHostTool = options.providedTools.some(tool =>
-    isModelFacingRuntimePluginTool({manifest: options.manifest, tool}),
+  const hasModelFacingPluginHostTool = options.providedTools.some(
+    isModelFacingRuntimePluginTool,
   );
 
   return Object.freeze({

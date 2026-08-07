@@ -2,6 +2,8 @@
  * Detection ignores the marker field's value type, so a malformed marker is
  * still recognized and rejected rather than passing as plain data.
  */
+import {compareText} from './package-metadata.ts';
+
 export const secretEnvMarkerField = '$env';
 export const plaintextSecretMarkerField = '$plaintextSecret';
 export const allowPlaintextSecretMarkerField = 'allowPlaintextSecret';
@@ -15,7 +17,7 @@ export function valueIsSecretMarker(value: unknown): boolean {
   );
 }
 
-export type NestedSecretMarkerPathOptions = {
+type NestedSecretMarkerPathOptions = {
   readonly rejectPlaintextAllowanceMarker?: boolean;
 };
 
@@ -54,7 +56,7 @@ export function nestedSecretMarkerPath(
   }
 
   const entries = Object.entries(value).sort(([left], [right]) =>
-    left.localeCompare(right),
+    compareText(left, right),
   );
 
   for (const [key, entry] of entries) {

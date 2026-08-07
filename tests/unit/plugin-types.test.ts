@@ -612,9 +612,6 @@ describe('runtime plugin model-facing tool policy', () => {
   });
 
   it('offers a confirm-gated tool to the model instead of hiding it', () => {
-    const manifest = createRuntimePluginManifest(
-      runtimePluginManifestFixture({}),
-    );
     const tool = createRuntimePluginProvidedTool(
       runtimePluginProvidedToolFixture({
         name: 'settings.arbitrary.update',
@@ -624,8 +621,8 @@ describe('runtime plugin model-facing tool policy', () => {
 
     // Enabling the plugin is the trust decision; a declared class withholds
     // nothing from the model.
-    expect(isApprovalGatedRuntimePluginTool({manifest, tool})).toBe(true);
-    expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
+    expect(isApprovalGatedRuntimePluginTool(tool)).toBe(true);
+    expect(isModelFacingRuntimePluginTool(tool)).toBe(true);
   });
 
   it('requires model_input write for a plugin that provides model tools', () => {
@@ -681,16 +678,12 @@ describe('runtime plugin model-facing tool policy', () => {
       isFirstPartyBuiltInModelTool({
         plugin: firstPartyPlugin,
         tool: firstPartyTool,
-        isHostOwnedFirstPartyModelToolsPlugin: plugin =>
-          plugin === firstPartyPlugin,
       }),
     ).toBe(true);
     expect(
       isFirstPartyBuiltInModelTool({
         plugin: copiedPlugin,
         tool: firstPartyTool,
-        isHostOwnedFirstPartyModelToolsPlugin: plugin =>
-          plugin === firstPartyPlugin,
       }),
     ).toBe(false);
   });

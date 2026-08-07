@@ -19,7 +19,7 @@ export type NvidiaFetchClient = (
   request: NvidiaFetchRequest,
 ) => Promise<NvidiaFetchResponse>;
 
-export type NvidiaRequestDeadline = {
+type NvidiaRequestDeadline = {
   readonly signal: AbortSignal;
   readonly wait: <T>(operation: Promise<T>) => Promise<T>;
   readonly dispose: () => void;
@@ -107,7 +107,7 @@ export function createNvidiaRequestDeadline(
   });
 }
 
-export type NvidiaTransportResult =
+type NvidiaTransportResult =
   | {
       readonly status: 'accepted';
       readonly httpStatus: number;

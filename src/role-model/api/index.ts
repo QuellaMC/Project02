@@ -40,7 +40,6 @@ export {
 } from './tool-names.ts';
 export {
   freezeRoleModelChatMessage,
-  freezeRoleModelChatToolCall,
   type RoleModelAssistantChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,

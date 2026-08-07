@@ -6,32 +6,27 @@ import type {
 } from './types.ts';
 
 /** Enabling is the trust decision: tools are not filtered by declared risk. */
-export function isModelFacingRuntimePluginTool(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly tool: RuntimePluginProvidedTool;
-}): boolean {
+export function isModelFacingRuntimePluginTool(
+  tool: RuntimePluginProvidedTool,
+): boolean {
   return (
-    !isBuiltInModelToolName(options.tool.name) &&
-    options.tool.validationOwner === 'plugin_host'
+    !isBuiltInModelToolName(tool.name) && tool.validationOwner === 'plugin_host'
   );
 }
 
 /** Gated tools stage an effect and apply nothing until the user approves. */
-export function isApprovalGatedRuntimePluginTool(options: {
-  readonly manifest: RuntimePluginManifest;
-  readonly tool: RuntimePluginProvidedTool;
-}): boolean {
-  return (
-    isModelFacingRuntimePluginTool(options) && options.tool.requiresConfirmation
-  );
+export function isApprovalGatedRuntimePluginTool(
+  tool: RuntimePluginProvidedTool,
+): boolean {
+  return isModelFacingRuntimePluginTool(tool) && tool.requiresConfirmation;
 }
 
 export function validateRuntimePluginModelFacingToolAccess(options: {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
 }): void {
-  const hasModelFacingTool = options.providedTools.some(tool =>
-    isModelFacingRuntimePluginTool({manifest: options.manifest, tool}),
+  const hasModelFacingTool = options.providedTools.some(
+    isModelFacingRuntimePluginTool,
   );
 
   if (

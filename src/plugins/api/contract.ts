@@ -18,7 +18,6 @@ export const runtimePluginKindValues = [
 
 export const runtimePluginDeclarationValues = [
   'tool_provider',
-  'context_provider',
   'before_role_model_call',
   'handle_tool_call',
   'after_turn_committed',
@@ -40,7 +39,7 @@ export const runtimePluginAccessLevelValues = [
   'write',
 ] as const;
 
-/** Scheduling only: independent of the read-only and destructive hints. */
+/** Scheduling only: whether the runtime may overlap two calls of a tool. */
 export const runtimePluginToolConcurrencyValues = [
   'shared',
   'exclusive',
@@ -148,13 +147,6 @@ export type RuntimePluginAccessSnapshot = {
 };
 export type RuntimePluginToolConcurrency =
   (typeof runtimePluginToolConcurrencyValues)[number];
-
-/** Advisory only: nothing in the runtime constrains a tool by these hints. */
-export type RuntimePluginToolAnnotations = {
-  readonly readOnlyHint?: boolean;
-  readonly destructiveHint?: boolean;
-  readonly openWorldHint?: boolean;
-};
 export type RuntimePluginBeforeRoleModelFailureBehavior =
   (typeof beforeRoleModelFailureBehaviorValues)[number];
 export type RuntimePluginHandleToolCallFailureBehavior =

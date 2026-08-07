@@ -19,15 +19,7 @@ export type MutableDurableRuntimeSessionEvidence = {
 };
 
 export type RuntimeEvidenceFileStamp =
-  | {readonly exists: false}
-  | {
-      readonly exists: true;
-      readonly device: bigint;
-      readonly inode: bigint;
-      readonly size: bigint;
-      readonly modifiedAtNanoseconds: bigint;
-      readonly changedAtNanoseconds: bigint;
-    };
+  {readonly exists: false} | {readonly exists: true; readonly identity: string};
 
 export type RuntimeEvidenceFileStamps = {
   readonly rawEvents: RuntimeEvidenceFileStamp;

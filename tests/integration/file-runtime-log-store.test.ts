@@ -5,11 +5,11 @@ import {describe, expect, it} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
 
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
-  createFileRuntimeLogStore,
   durableRuntimeSessionCharacterProfile,
-} from '../../src/runtime/storage/file-runtime-log-store.ts';
-import {findRuntimeTurnTerminalRawEvent} from '../../src/runtime/evidence/validation.ts';
+  findRuntimeTurnTerminalRawEvent,
+} from '../../src/runtime/evidence/validation.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
@@ -793,9 +793,6 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: character.id,
       conversationLogReader: {
-        readConversationMessages() {
-          return durableStore.readSessionEvidence().conversationMessages;
-        },
         readConversationEvidence() {
           const evidence = durableStore.readSessionEvidence();
 
@@ -2452,7 +2449,6 @@ function patchCompletedEvent(sessionId: string): object {
               additionalProperties: false,
             },
             validationOwner: 'built_in_model_tools',
-            annotations: {readOnlyHint: true},
             concurrency: 'shared',
             requiresConfirmation: false,
           },
@@ -2533,11 +2529,11 @@ function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
     invoke(_inputEnvelope, invocation) {
       const providerExchange: RoleModelProviderExchangeSnapshot = {
         provider: {
-          name: 'local',
+          name: 'nvidia',
         },
         capabilities: defaultRoleModelProviderCapabilities,
         reasoning: {
-          mode: 'none',
+          mode: 'enabled',
           params: {},
         },
         renderedMessages: invocation.turnContext.messages,

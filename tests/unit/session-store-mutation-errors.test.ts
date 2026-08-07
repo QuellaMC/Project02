@@ -29,12 +29,12 @@ describe('local runtime session catalog mutation failures', () => {
 
       return {
         ...actual,
-        async atomicReplaceFile(options: AtomicReplaceFileOptions) {
+        atomicReplaceFileSync(options: AtomicReplaceFileOptions) {
           if (options.targetPath.endsWith('sessions.jsonl')) {
             throw new Error('catalog replacement denied');
           }
 
-          await actual.atomicReplaceFile(options);
+          actual.atomicReplaceFileSync(options);
         },
       };
     });

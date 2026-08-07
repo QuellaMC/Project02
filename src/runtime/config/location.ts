@@ -12,12 +12,12 @@ import {
 } from '../storage/home.ts';
 import {
   canonicalRuntimeConfigHomeRoot,
+  canonicalRuntimeConfigLocationPath,
   loadSelectedProject02RuntimeConfig,
   requireSelectedLoadedProject02RuntimeConfigSnapshot,
   RuntimeConfigLocationError,
   selectProject02RuntimeConfigLocation,
 } from './load.ts';
-import {canonicalRuntimeConfigMutationPath} from './mutate.ts';
 import {
   runtimeConfigEnvVarName,
   type Project02RuntimeConfig,
@@ -117,7 +117,7 @@ type CharacterRuntimeConfigLocation = {
 type ScopedRuntimeConfigLocation =
   GlobalRuntimeConfigLocation | CharacterRuntimeConfigLocation;
 
-export function resolveProject02ConfigLocation(options: {
+function resolveProject02ConfigLocation(options: {
   readonly loadedConfig: SelectedLoadedProject02RuntimeConfig;
 }): ResolvedProject02ConfigLocation {
   const loadedConfig = requireSelectedLoadedProject02RuntimeConfigSnapshot(
@@ -399,7 +399,7 @@ export function resolveRuntimeConfigScopeTarget(
     runtimeLocation,
     env,
     configPath: runtimeLocation.overlayPath,
-    canonicalConfigPath: canonicalRuntimeConfigMutationPath(
+    canonicalConfigPath: canonicalRuntimeConfigLocationPath(
       runtimeLocation.overlayPath,
     ),
   });

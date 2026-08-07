@@ -6,10 +6,8 @@ import {
   type SpeakerIdentity,
 } from '../../core/index.ts';
 import type {RuntimeLogStore} from '../evidence/contract.ts';
-import {
-  createFileRuntimeLogStore,
-  durableRuntimeSessionCharacterProfile,
-} from './file-runtime-log-store.ts';
+import {durableRuntimeSessionCharacterProfile} from '../evidence/validation.ts';
+import {createFileRuntimeLogStore} from './file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError,
@@ -106,13 +104,6 @@ export async function createDurableChatRuntime(
     return Object.freeze({
       session: await sessionStore.rehydrateConversationSession(sessionId, {
         conversationLogReader: {
-          readConversationMessages() {
-            return readDurableConversationEvidence(
-              logStore,
-              character,
-              boundUserSpeaker,
-            ).messages;
-          },
           readConversationEvidence() {
             return readDurableConversationEvidence(
               logStore,
@@ -174,7 +165,7 @@ async function selectOrCreateDefaultSession(
   await sessionStore.selectSession(sessionId);
 }
 
-export function isMissingDefaultSessionStore(error: unknown): boolean {
+function isMissingDefaultSessionStore(error: unknown): boolean {
   return (
     (error instanceof LocalRuntimeStorageContractError &&
       error.code === 'missing_file') ||

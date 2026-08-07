@@ -1,5 +1,5 @@
 import {describeRealEntry} from '../../shared/real-path.ts';
-import {atomicReplaceFile} from './atomic-file.ts';
+import {atomicReplaceFileSync} from './atomic-file.ts';
 import {
   decodeStorageSchemaMarker,
   encodeStorageSchemaMarker,
@@ -11,17 +11,17 @@ import {readStoreText} from './store-file.ts';
 
 const storageSchemaMarkerLockResourceKey = 'storage-schema';
 
-export type StorageSchemaMarkerLocation = {
+type StorageSchemaMarkerLocation = {
   readonly schemaPath: string;
   readonly locksRoot: string;
 };
 
-export type EnsureStorageSchemaMarkerResult = {
+type EnsureStorageSchemaMarkerResult = {
   readonly marker: LocalRuntimeStorageSchemaMarker;
   readonly created: boolean;
 };
 
-export type UpdateStorageSchemaMarkerResult = {
+type UpdateStorageSchemaMarkerResult = {
   readonly marker: LocalRuntimeStorageSchemaMarker;
   readonly changed: boolean;
 };
@@ -81,7 +81,7 @@ export async function ensureStorageSchemaMarker(
 
     await assertAdoptable();
 
-    await atomicReplaceFile({
+    atomicReplaceFileSync({
       targetPath: location.schemaPath,
       content: `${encodeStorageSchemaMarker(proposedMarker)}\n`,
     });
@@ -132,7 +132,7 @@ export async function updateStorageSchemaMarker(
 
     await assertAdoptable();
 
-    await atomicReplaceFile({
+    atomicReplaceFileSync({
       targetPath: location.schemaPath,
       content: `${encodeStorageSchemaMarker(next)}\n`,
     });

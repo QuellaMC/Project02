@@ -9,8 +9,6 @@ import {
   type FileRuntimeLogStoreStateOptions,
 } from './file-runtime-log-store-state.ts';
 
-export {durableRuntimeSessionCharacterProfile} from '../evidence/validation.ts';
-
 export type CreateFileRuntimeLogStoreOptions = FileRuntimeLogStoreStateOptions;
 
 export function createFileRuntimeLogStore(

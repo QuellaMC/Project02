@@ -35,7 +35,7 @@ import {
   type RuntimePluginConfigControlHostState,
 } from './state.ts';
 
-export type CreateRuntimePluginManagementPluginOptions = {
+type CreateRuntimePluginManagementPluginOptions = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
 };

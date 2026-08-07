@@ -7,12 +7,10 @@ import {
   roleModelPluginToolRejectedRejectionReason,
   roleModelProviderErrorRejectionReason,
   roleModelTerminalEmptyOutputRejectionDetails,
-  roleModelUnknownToolRejectionReason,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionResult,
   type RoleModelPluginToolDefinition,
   type RoleModelProviderMetadata,
-  type RoleModelToolObservation,
 } from '../api/contracts.ts';
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
 import {type RoleModelAllowedToolName} from '../api/tool-names.ts';
@@ -25,7 +23,6 @@ export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
   readonly allowedTools?: readonly RoleModelAllowedToolName[] | undefined;
   readonly pluginToolDefinitions?:
     readonly RoleModelPluginToolDefinition[] | undefined;
-  readonly toolObservations?: readonly RoleModelToolObservation[] | undefined;
 }): boolean {
   const parsedRawOutputDecision = parseRoleModelDecision(
     options.rawOutputText,
@@ -64,7 +61,6 @@ export function normalizeReplayableRejectedRoleModelDecisionResult(options: {
   readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
-  readonly toolObservations?: readonly RoleModelToolObservation[];
 }): RejectedRoleModelDecisionResult | undefined {
   // Fill names first: a nameless rejection may still be replayable as-is.
   if (options.decisionResult.requestedToolNames === undefined) {
@@ -85,9 +81,6 @@ export function normalizeReplayableRejectedRoleModelDecisionResult(options: {
     ...(options.pluginToolDefinitions === undefined
       ? {}
       : {pluginToolDefinitions: options.pluginToolDefinitions}),
-    ...(options.toolObservations === undefined
-      ? {}
-      : {toolObservations: options.toolObservations}),
   })
     ? options.decisionResult
     : undefined;
@@ -99,7 +92,6 @@ function fillRequestedToolNamesFromRawOutput(options: {
   readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
-  readonly toolObservations?: readonly RoleModelToolObservation[];
 }): RejectedRoleModelDecisionResult | undefined {
   const canonicalResult = parseRoleModelDecision(
     options.rawOutputText,
@@ -139,9 +131,6 @@ function fillRequestedToolNamesFromRawOutput(options: {
     ...(options.pluginToolDefinitions === undefined
       ? {}
       : {pluginToolDefinitions: options.pluginToolDefinitions}),
-    ...(options.toolObservations === undefined
-      ? {}
-      : {toolObservations: options.toolObservations}),
   })
     ? normalizedResult
     : undefined;
@@ -153,7 +142,6 @@ const loopSynthesizedRejectionReasons: readonly string[] = Object.freeze([
   roleModelPluginToolRejectedRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,
   roleModelDisallowedToolRejectionReason,
-  roleModelUnknownToolRejectionReason,
 ]);
 
 function isRoleModelLoopSynthesizedRejectionEvidence(options: {

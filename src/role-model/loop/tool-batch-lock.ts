@@ -4,7 +4,7 @@
  */
 export type ToolBatchLockMode = 'shared' | 'exclusive';
 
-export type ToolBatchLock = {
+type ToolBatchLock = {
   run<T>(mode: ToolBatchLockMode, operation: () => Promise<T>): Promise<T>;
 };
 

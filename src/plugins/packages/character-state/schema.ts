@@ -31,15 +31,14 @@ export const characterSocialOrientationValues = Object.freeze([
   'reserved',
 ] as const);
 
-export type CharacterMood = (typeof characterMoodValues)[number];
-export type CharacterEnergy = (typeof characterEnergyValues)[number];
-export type CharacterAttention = (typeof characterAttentionValues)[number];
-export type CharacterCurrentActivity =
-  (typeof characterCurrentActivityValues)[number];
-export type CharacterSocialOrientation =
+type CharacterMood = (typeof characterMoodValues)[number];
+type CharacterEnergy = (typeof characterEnergyValues)[number];
+type CharacterAttention = (typeof characterAttentionValues)[number];
+type CharacterCurrentActivity = (typeof characterCurrentActivityValues)[number];
+type CharacterSocialOrientation =
   (typeof characterSocialOrientationValues)[number];
 
-export type LivingStateCurrent = {
+type LivingStateCurrent = {
   readonly mood: CharacterMood;
   readonly energy: CharacterEnergy;
   readonly attention: CharacterAttention;
@@ -47,7 +46,7 @@ export type LivingStateCurrent = {
   readonly socialOrientation: CharacterSocialOrientation;
 };
 
-export type LivingStateBrief = {
+type LivingStateBrief = {
   readonly text: string;
   readonly current: LivingStateCurrent;
 };
@@ -57,17 +56,17 @@ export type CharacterRuntimeState = {
   readonly current: LivingStateCurrent;
 };
 
-export type CharacterStatePatch = Partial<LivingStateCurrent>;
+type CharacterStatePatch = Partial<LivingStateCurrent>;
 
-export type CharacterStatePatchRejectionReason =
+type CharacterStatePatchRejectionReason =
   'malformed_state_patch' | 'unsupported_state_field' | 'invalid_state_value';
 
-export type CharacterStatePatchRejection = {
+type CharacterStatePatchRejection = {
   readonly reason: CharacterStatePatchRejectionReason;
   readonly details: string;
 };
 
-export type CharacterStateAppliedChange = {
+type CharacterStateAppliedChange = {
   readonly field: keyof LivingStateCurrent;
   readonly before: string;
   readonly after: string;
@@ -81,14 +80,14 @@ export type AcceptedCharacterStatePatchResult = {
   readonly appliedChanges: readonly CharacterStateAppliedChange[];
 };
 
-export type RejectedCharacterStatePatchResult = {
+type RejectedCharacterStatePatchResult = {
   readonly status: 'rejected';
   readonly patchInput: Readonly<Record<string, unknown>>;
   readonly before: CharacterRuntimeState;
   readonly rejection: CharacterStatePatchRejection;
 };
 
-export type CharacterStatePatchResult =
+type CharacterStatePatchResult =
   AcceptedCharacterStatePatchResult | RejectedCharacterStatePatchResult;
 
 export function createDefaultCharacterRuntimeState(): CharacterRuntimeState {

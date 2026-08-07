@@ -10,7 +10,6 @@ export type BuildUserTurnDecisionContextOptions = {
   readonly session: ConversationSession;
   readonly runtimeNotes?: readonly string[];
   readonly pluginContextItems?: readonly RuntimePluginContextItem[];
-  readonly recentMessageLimit?: number;
 };
 
 export function buildUserTurnDecisionContext(
@@ -21,7 +20,6 @@ export function buildUserTurnDecisionContext(
     characterSnapshot: options.session.character,
     recentVisibleMessages: selectRecentVisibleMessages(
       options.session.visibleTranscript,
-      options.recentMessageLimit,
     ),
     runtimeNotes: options.runtimeNotes ?? [],
     pluginContextItems: options.pluginContextItems ?? [],

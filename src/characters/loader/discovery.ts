@@ -123,10 +123,10 @@ export function discoverCharacterPackages(options: {
     const sourceDiagnostics: CharacterPackageDiagnostic[] = [];
 
     for (const candidate of scan.candidates) {
-      const packageRoot = join(source.root, candidate.name);
+      const packageRoot = join(source.root, candidate);
       const packageDirectory = snapshotPackageDirectoryFromSource({
         sourceDirectory,
-        packageName: candidate.name,
+        packageName: candidate,
       });
 
       if (packageDirectory === undefined) {

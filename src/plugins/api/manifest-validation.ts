@@ -14,7 +14,6 @@ import {
   runtimePluginDeclarationValues,
   runtimePluginKindValues,
   runtimePluginToolConcurrencyValues,
-  type RuntimePluginToolAnnotations,
   runtimePluginToolValidationOwnerValues,
   type RuntimePluginAccessMap,
   type RuntimePluginConfigValueType,
@@ -206,7 +205,6 @@ export function validateRuntimePluginProvidedTool(
   );
   const inputContract = requiredModelToolInputContract(value['inputContract']);
   const validationOwner = value['validationOwner'];
-  const annotations = optionalToolAnnotations(value['annotations']);
   const concurrency = value['concurrency'];
   const requiresConfirmation = requiredBoolean(
     value['requiresConfirmation'],
@@ -234,10 +232,6 @@ export function validateRuntimePluginProvidedTool(
     );
   }
 
-  if (annotations.status === 'rejected') {
-    return annotations;
-  }
-
   if (
     concurrency !== undefined &&
     !isOneOf(concurrency, runtimePluginToolConcurrencyValues)
@@ -254,9 +248,6 @@ export function validateRuntimePluginProvidedTool(
       description: description.value,
       inputContract: inputContract.value,
       validationOwner,
-      ...(annotations.value === undefined
-        ? {}
-        : {annotations: annotations.value}),
       ...(concurrency === undefined ? {} : {concurrency}),
       requiresConfirmation: requiresConfirmation.value,
     } satisfies RuntimePluginProvidedTool),
@@ -732,8 +723,7 @@ function requiredRuntimePolicy(
 
 /** Ignoring a retired field would silently reverse its author's intent. */
 const retiredProvidedToolFields = Object.freeze({
-  sideEffectLevel:
-    'use annotations (readOnlyHint, destructiveHint, openWorldHint)',
+  sideEffectLevel: 'no longer supported; remove it',
   requiredForUserTurn: 'no longer supported; remove it',
   callLimit: 'no longer supported; remove it',
 });
@@ -751,47 +741,6 @@ function retiredToolDeclaration(
   }
 
   return undefined;
-}
-
-function optionalToolAnnotations(
-  value: unknown,
-): RuntimePluginValidationResult<RuntimePluginToolAnnotations | undefined> {
-  if (value === undefined) {
-    return accept(undefined);
-  }
-
-  if (!isRecord(value)) {
-    return reject(
-      'malformed_tool_definition',
-      'Plugin provided tool annotations must be an object.',
-    );
-  }
-
-  const record = value;
-  const hints: Record<string, boolean> = {};
-
-  for (const hint of [
-    'readOnlyHint',
-    'destructiveHint',
-    'openWorldHint',
-  ] as const) {
-    const hintValue = record[hint];
-
-    if (hintValue === undefined) {
-      continue;
-    }
-
-    if (typeof hintValue !== 'boolean') {
-      return reject(
-        'malformed_tool_definition',
-        `Plugin provided tool annotation "${hint}" must be a boolean.`,
-      );
-    }
-
-    hints[hint] = hintValue;
-  }
-
-  return accept(Object.freeze(hints) as RuntimePluginToolAnnotations);
 }
 
 function requiredFailureBehavior(

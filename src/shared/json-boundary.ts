@@ -37,12 +37,11 @@ export const defaultJsonBoundaryLimits = Object.freeze({
   maxTotalStringBytes: 64 * 1_024,
 } satisfies JsonBoundaryLimits);
 
-export type CreateJsonBoundarySnapshotOptions = {
+type CreateJsonBoundarySnapshotOptions = {
   readonly field: string;
   readonly redact?: boolean;
   readonly limits?: JsonBoundaryLimits;
   readonly deadlineAt?: number | undefined;
-  readonly now?: () => number;
 };
 
 type JsonBoundaryState = {
@@ -50,10 +49,7 @@ type JsonBoundaryState = {
   totalStringBytes: number;
   readonly activeContainers: WeakSet<object>;
   readonly options: Required<
-    Pick<
-      CreateJsonBoundarySnapshotOptions,
-      'field' | 'redact' | 'limits' | 'now'
-    >
+    Pick<CreateJsonBoundarySnapshotOptions, 'field' | 'redact' | 'limits'>
   > &
     Pick<CreateJsonBoundarySnapshotOptions, 'deadlineAt'>;
 };
@@ -70,7 +66,6 @@ export function createJsonBoundarySnapshot(
       field: options.field,
       redact: options.redact ?? false,
       limits: options.limits ?? defaultJsonBoundaryLimits,
-      now: options.now ?? Date.now,
       ...(options.deadlineAt === undefined
         ? {}
         : {deadlineAt: options.deadlineAt}),
@@ -131,11 +126,6 @@ function normalizeJsonBoundaryValue(
     return redactCredentialValue ? '[redacted]' : value;
   }
 
-  if (redactCredentialValue) {
-    measureRedactedCredentialValue(value, field, depth, state);
-    return '[redacted]';
-  }
-
   if (Array.isArray(value)) {
     assertContainerCanBeVisited(value, field, state);
     if (value.length > state.options.limits.maxEntriesPerContainer) {
@@ -144,7 +134,7 @@ function normalizeJsonBoundaryValue(
 
     state.activeContainers.add(value);
     try {
-      return Object.freeze(
+      const items = Object.freeze(
         value.map((item, index) =>
           normalizeJsonBoundaryValue(
             item,
@@ -154,6 +144,8 @@ function normalizeJsonBoundaryValue(
           ),
         ),
       );
+
+      return redactCredentialValue ? '[redacted]' : items;
     } finally {
       state.activeContainers.delete(value);
     }
@@ -168,7 +160,7 @@ function normalizeJsonBoundaryValue(
 
     state.activeContainers.add(value);
     try {
-      return Object.freeze(
+      const record = Object.freeze(
         Object.fromEntries(
           entries.map(([entryKey, item]) => {
             accountJsonBoundaryString(entryKey, `${field} object key`, state);
@@ -185,65 +177,11 @@ function normalizeJsonBoundaryValue(
           }),
         ),
       );
+
+      return redactCredentialValue ? '[redacted]' : record;
     } finally {
       state.activeContainers.delete(value);
     }
-  }
-
-  throw new TypeError(`${field} must be JSON serializable.`);
-}
-
-function measureRedactedCredentialValue(
-  value: unknown,
-  field: string,
-  depth: number,
-  state: JsonBoundaryState,
-): void {
-  if (Array.isArray(value)) {
-    assertContainerCanBeVisited(value, field, state);
-    if (value.length > state.options.limits.maxEntriesPerContainer) {
-      throw new TypeError(`${field} exceeds the JSON container entry limit.`);
-    }
-
-    state.activeContainers.add(value);
-    try {
-      value.forEach((item, index) => {
-        normalizeJsonBoundaryValue(
-          item,
-          `${field}[${String(index)}]`,
-          depth + 1,
-          state,
-        );
-      });
-    } finally {
-      state.activeContainers.delete(value);
-    }
-    return;
-  }
-
-  if (isJsonRecord(value)) {
-    assertContainerCanBeVisited(value, field, state);
-    const entries = Object.entries(value);
-    if (entries.length > state.options.limits.maxEntriesPerContainer) {
-      throw new TypeError(`${field} exceeds the JSON container entry limit.`);
-    }
-
-    state.activeContainers.add(value);
-    try {
-      for (const [entryKey, item] of entries) {
-        accountJsonBoundaryString(entryKey, `${field} object key`, state);
-        normalizeJsonBoundaryValue(
-          item,
-          `${field}.${entryKey}`,
-          depth + 1,
-          state,
-          entryKey,
-        );
-      }
-    } finally {
-      state.activeContainers.delete(value);
-    }
-    return;
   }
 
   throw new TypeError(`${field} must be JSON serializable.`);
@@ -286,7 +224,7 @@ function assertBoundaryProgress(
   if (
     state.options.deadlineAt !== undefined &&
     (state.nodeCount === 1 || state.nodeCount % 32 === 0) &&
-    state.options.now() >= state.options.deadlineAt
+    Date.now() >= state.options.deadlineAt
   ) {
     throw new TypeError(`${state.options.field} JSON normalization timed out.`);
   }

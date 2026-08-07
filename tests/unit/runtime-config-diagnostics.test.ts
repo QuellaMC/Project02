@@ -3,7 +3,6 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {
-  pluginHasConfigErrors,
   runtimeConfigVersion,
   runtimeConfigDiagnosticIsReadinessFailure,
   runtimeConfigDiagnosticMatchesPlugin,
@@ -56,108 +55,6 @@ function codedDiagnostic(code: string): RuntimeConfigDiagnostic {
 }
 
 describe('runtime config diagnostic plugin matching', () => {
-  it('matches config errors by exact plugin id and config boundary', () => {
-    const siblingProviderDiagnostics: readonly RuntimeConfigDiagnostic[] = [
-      diagnostic(
-        'error',
-        'plugins.memory.recall.config.backend',
-        'memory.recall',
-        'backend',
-      ),
-      diagnostic(
-        'error',
-        'plugins.memory.configuration.backend',
-        'memory.configuration',
-        'backend',
-      ),
-      diagnostic(
-        'warning',
-        'plugins.memory.config.backend',
-        'memory',
-        'backend',
-      ),
-    ];
-
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: siblingProviderDiagnostics,
-        pluginId: 'memory',
-      }),
-    ).toBe(false);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: siblingProviderDiagnostics,
-        pluginId: 'memory.recall',
-      }),
-    ).toBe(true);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [
-          diagnostic(
-            'error',
-            'plugins.memory.config.backend',
-            'memory',
-            'backend',
-          ),
-        ],
-        pluginId: 'memory',
-      }),
-    ).toBe(true);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [
-          diagnostic(
-            'error',
-            'plugins.memory.config.api.config.key',
-            'memory',
-            'api.config.key',
-          ),
-        ],
-        pluginId: 'memory',
-      }),
-    ).toBe(true);
-  });
-
-  it('uses diagnostic metadata to disambiguate plugin ids and dotted config fields', () => {
-    const dottedFieldDiagnostic = diagnostic(
-      'error',
-      'plugins.memory.config.api.config.key',
-      'memory',
-      'api.config.key',
-    );
-    const dottedPluginDiagnostic = diagnostic(
-      'error',
-      'plugins.memory.config.config.backend',
-      'memory.config',
-      'backend',
-    );
-
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [dottedFieldDiagnostic],
-        pluginId: 'memory',
-      }),
-    ).toBe(true);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [dottedFieldDiagnostic],
-        pluginId: 'memory.config.api',
-      }),
-    ).toBe(false);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [dottedPluginDiagnostic],
-        pluginId: 'memory',
-      }),
-    ).toBe(false);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [dottedPluginDiagnostic],
-        pluginId: 'memory.config',
-      }),
-    ).toBe(true);
-  });
-
   it('attributes generated unknown dotted-plugin diagnostics to the exact plugin id', () => {
     const configPath = join(
       createTestTempRoot('project02-runtime-config-diagnostics-'),
@@ -183,7 +80,6 @@ describe('runtime config diagnostic plugin matching', () => {
       effectiveConfig: loadedConfig,
       resolvedConfig,
       pluginManifests: [],
-      strictUnknownPlugins: true,
     });
     const unknownDiagnostic = activation.diagnostics.find(
       item => item.code === 'runtime_config_unknown_plugin',
@@ -216,12 +112,6 @@ describe('runtime config diagnostic plugin matching', () => {
     expect(
       runtimeConfigDiagnosticMatchesPlugin({
         diagnostic: globalDiagnostic,
-        pluginId: 'memory',
-      }),
-    ).toBe(false);
-    expect(
-      pluginHasConfigErrors({
-        diagnostics: [globalDiagnostic],
         pluginId: 'memory',
       }),
     ).toBe(false);
