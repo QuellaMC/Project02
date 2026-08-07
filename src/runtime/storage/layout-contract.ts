@@ -2,6 +2,7 @@ import {isJsonRecord as isRecord} from '../../shared/json-boundary.ts';
 import {basename, dirname, join} from 'node:path';
 import {assertCanonicalRuntimeTimestamp} from '../../core/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
+import {isOneOf} from '../../shared/one-of.ts';
 
 export const defaultProject02HomeRoot = '.project02';
 
@@ -404,14 +405,11 @@ export function createLocalRuntimeStorageSchemaMarker(
 }
 
 function requiredStorageScope(value: unknown): LocalRuntimeStorageScope {
-  if (
-    typeof value !== 'string' ||
-    !localRuntimeStorageScopeValues.some(scope => scope === value)
-  ) {
+  if (!isOneOf(value, localRuntimeStorageScopeValues)) {
     throwMalformedSchemaMarker('scope');
   }
 
-  return value as LocalRuntimeStorageScope;
+  return value;
 }
 
 export function encodeStorageSchemaMarker(

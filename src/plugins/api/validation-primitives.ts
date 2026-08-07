@@ -1,3 +1,6 @@
+import {isOneOf} from '../../shared/one-of.ts';
+
+export {isOneOf};
 import {
   isJsonRecord as isRecord,
   ownJsonRecordValue,
@@ -298,16 +301,6 @@ export function reject(
     reason,
     details,
   } satisfies RuntimePluginValidationResult<never>);
-}
-
-export function isOneOf<T extends string>(
-  value: unknown,
-  allowedValues: readonly T[],
-): value is T {
-  return (
-    typeof value === 'string' &&
-    allowedValues.some(allowedValue => allowedValue === value)
-  );
 }
 
 export function requiredOneOf<T extends string>(

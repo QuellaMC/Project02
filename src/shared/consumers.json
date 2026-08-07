@@ -11,6 +11,7 @@
     "runtime"
   ],
   "node-error.ts": ["characters", "plugins", "runtime"],
+  "one-of.ts": ["plugins", "role-model", "runtime"],
   "package-capture.ts": ["characters", "plugins"],
   "package-metadata.ts": ["characters", "plugins"],
   "real-path.ts": ["characters", "plugins", "runtime"],
