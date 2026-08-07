@@ -267,9 +267,19 @@ function rejectWithReason(
     readonly details: string;
   },
 ): RejectedRoleModelLoopResult {
+  // The round was parsed and accepted before this gate refused it, so the
+  // names the model asked for are already in hand. Recording them here is
+  // what keeps them out of the read path: nothing downstream has to
+  // recover them by re-parsing the raw output.
   const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
     gate.reason,
     gate.details,
+    {
+      requestedToolNames:
+        options.invokedRound.decisionResult.decision.toolCalls.map(
+          call => call.name,
+        ),
+    },
   );
   const rejectedParsedDecisionSnapshot = createParsedRoleModelDecisionSnapshot({
     ...options.identity,

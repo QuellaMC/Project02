@@ -190,6 +190,37 @@ describe('role-model loop routing and policy', () => {
     ).toBe(true);
   });
 
+  it('records the requested tool names when a gate refuses an accepted round', async () => {
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('hello', 'evt_gate_refused_round'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      adapter: Object.freeze({
+        invoke() {
+          // Parses and is allowed; the loop's own gate refuses it for the
+          // blank reply text, so the names live only in this round.
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [
+                {name: visibleReplyModelToolName, input: {text: '   '}},
+              ],
+            }),
+          };
+        },
+      } satisfies RoleModelAdapter),
+    });
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {reason: 'invalid_visible_reply'},
+      decisionResult: {
+        status: 'rejected',
+        requestedToolNames: [visibleReplyModelToolName],
+      },
+    });
+  });
+
   it('accepts terminal content as non-committed text when visible_reply is unavailable', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},

@@ -135,11 +135,11 @@ export default tseslint.config(
   {
     files: ['src/runtime/storage/raw-event-codec.ts'],
     rules: {
-      // Ratcheted down after moving the commit-event message decoder onto
-      // the same codec-primitives.ts seam as the visible-message decoder.
+      // Ratcheted down after retiring the schema 1 reconstruction paths;
+      // only version 6 stores are readable, so nothing reaches them.
       'max-lines': [
         'error',
-        {max: 1677, skipBlankLines: true, skipComments: true},
+        {max: 1598, skipBlankLines: true, skipComments: true},
       ],
     },
   },
