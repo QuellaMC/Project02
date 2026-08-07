@@ -16,8 +16,8 @@
  * naming at least two consumers — the "approved consumers" gate from
  * docs/plan/repo-structure-migration-2026-07-16.md, Slice 0.
  */
-import { readFileSync, readdirSync } from 'node:fs';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import {readFileSync, readdirSync} from 'node:fs';
+import {basename, dirname, join, relative, resolve} from 'node:path';
 
 const SRC_DIRECTORY = 'src';
 const SHARED_DIRECTORY = 'src/shared';
@@ -35,7 +35,7 @@ const IMPORT_SPECIFIER_PATTERN =
  */
 function listTypeScriptFiles(directory) {
   const files = [];
-  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+  for (const entry of readdirSync(directory, {withFileTypes: true})) {
     const entryPath = join(directory, entry.name);
     if (entry.isDirectory()) {
       files.push(...listTypeScriptFiles(entryPath));
@@ -83,8 +83,8 @@ function importedSharedFileNames(source, filePath) {
 function main() {
   /** @type {Record<string, string[]>} */
   const manifest = JSON.parse(readFileSync(MANIFEST_FILE, 'utf8'));
-  const sharedFiles = readdirSync(SHARED_DIRECTORY).filter((name) =>
-    name.endsWith('.ts')
+  const sharedFiles = readdirSync(SHARED_DIRECTORY).filter(name =>
+    name.endsWith('.ts'),
   );
   const failures = [];
 
@@ -94,13 +94,13 @@ function main() {
       failures.push(
         `${SHARED_DIRECTORY}/${name} has no entry in ${MANIFEST_FILE}; ` +
           'shared additions need approved consumers (name at least ' +
-          `${MINIMUM_APPROVED_MODULES} consumer modules).`
+          `${MINIMUM_APPROVED_MODULES} consumer modules).`,
       );
     } else if (approved.length < MINIMUM_APPROVED_MODULES) {
       failures.push(
         `${MANIFEST_FILE} entry for ${name} names ${approved.length} ` +
           `consumer module(s); at least ${MINIMUM_APPROVED_MODULES} are ` +
-          'required — a single-consumer utility belongs inside its consumer.'
+          'required — a single-consumer utility belongs inside its consumer.',
       );
     }
   }
@@ -109,7 +109,7 @@ function main() {
     if (!sharedFiles.includes(name)) {
       failures.push(
         `${MANIFEST_FILE} entry for ${name} is stale: ` +
-          `${SHARED_DIRECTORY}/${name} does not exist.`
+          `${SHARED_DIRECTORY}/${name} does not exist.`,
       );
     }
   }
@@ -127,7 +127,7 @@ function main() {
           `${filePath} (module '${consumerModule}') imports shared/${name} ` +
             `but is not an approved consumer (approved: ` +
             `${approved.join(', ') || 'none'}). Extend the entry in ` +
-            `${MANIFEST_FILE} in a reviewed diff, or move the code.`
+            `${MANIFEST_FILE} in a reviewed diff, or move the code.`,
         );
       }
     }
@@ -142,7 +142,7 @@ function main() {
   }
   process.stdout.write(
     `shared-consumers: ${sharedFiles.length} shared file(s) verified ` +
-      'against approved consumers.\n'
+      'against approved consumers.\n',
   );
 }
 

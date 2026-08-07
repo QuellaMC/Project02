@@ -13,9 +13,9 @@
  * gate; any new violating edge does. Regenerate the baseline (shrink only)
  * with `pnpm arch:baseline` in the same PR that removes violations.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
-import { cruise } from 'dependency-cruiser';
+import {cruise} from 'dependency-cruiser';
 import extractDepcruiseConfig from 'dependency-cruiser/config-utl/extract-depcruise-config';
 import extractTsConfig from 'dependency-cruiser/config-utl/extract-ts-config';
 
@@ -34,18 +34,18 @@ async function main() {
   /** @type {import('dependency-cruiser').ICruiseOptions} */
   const cruiseOptions = {
     ...config.options,
-    ruleSet: { forbidden: config.forbidden ?? [] },
+    ruleSet: {forbidden: config.forbidden ?? []},
     validate: true,
-    outputType: baselineMode ? 'baseline' : 'err'
+    outputType: baselineMode ? 'baseline' : 'err',
   };
   if (!baselineMode && existsSync(KNOWN_VIOLATIONS_FILE)) {
     cruiseOptions.knownViolations = JSON.parse(
-      readFileSync(KNOWN_VIOLATIONS_FILE, 'utf8')
+      readFileSync(KNOWN_VIOLATIONS_FILE, 'utf8'),
     );
   }
 
   const result = await cruise(CRUISE_SCOPE, cruiseOptions, undefined, {
-    tsConfig
+    tsConfig,
   });
 
   if (baselineMode) {
@@ -53,7 +53,7 @@ async function main() {
     writeFileSync(KNOWN_VIOLATIONS_FILE, `${String(result.output)}\n`);
     process.stdout.write(
       `arch:baseline wrote ${violations.length} known violation(s) to ` +
-        `${KNOWN_VIOLATIONS_FILE}\n`
+        `${KNOWN_VIOLATIONS_FILE}\n`,
     );
     return 0;
   }
@@ -63,11 +63,11 @@ async function main() {
 }
 
 main().then(
-  (exitCode) => {
+  exitCode => {
     process.exitCode = exitCode;
   },
-  (error) => {
+  error => {
     console.error(error);
     process.exitCode = 1;
-  }
+  },
 );
