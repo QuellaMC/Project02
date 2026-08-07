@@ -27,14 +27,11 @@ export const memorySearchToolDefinition = Object.freeze({
   description: 'Search memory.',
   inputContract: {
     type: 'object',
-    fields: [
-      {
-        name: 'query',
-        description: 'Search query.',
-        required: true,
-      },
-    ],
-    additionalFields: false,
+    properties: {
+      query: {type: 'string', description: 'Search query.'},
+    },
+    required: ['query'],
+    additionalProperties: false,
   },
   validationOwner: 'plugin_host',
   requiresConfirmation: false,
@@ -112,14 +109,11 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
         description: 'Search memory.',
         inputContract: {
           type: 'object',
-          fields: [
-            {
-              name: 'query',
-              description: 'Search query.',
-              required: true,
-            },
-          ],
-          additionalFields: false,
+          properties: {
+            query: {type: 'string', description: 'Search query.'},
+          },
+          required: ['query'],
+          additionalProperties: false,
         },
         validationOwner: 'plugin_host',
         requiresConfirmation: false,

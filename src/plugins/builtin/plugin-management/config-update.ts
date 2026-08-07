@@ -46,41 +46,32 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
       'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. Committed changes apply by the next turn when the host can live-reload the plugin (reported per update as appliesTo), otherwise at a later host construction.',
     inputContract: {
       type: 'object',
-      fields: [
-        {
-          name: 'pluginId',
+      properties: {
+        pluginId: {
+          type: 'string',
           description: 'Exact installed plugin id to update.',
-          required: true,
-          valueType: 'string',
         },
-        {
-          name: 'fieldName',
+        fieldName: {
+          type: 'string',
           description: 'Exact manifest-declared config field name.',
-          required: true,
-          valueType: 'string',
         },
-        {
-          name: 'operation',
+        operation: {
+          type: 'string',
           description: 'Apply exactly one set or unset operation.',
-          required: true,
-          valueType: 'string',
-          allowedValues: ['set', 'unset'],
+          enum: ['set', 'unset'],
         },
-        {
-          name: 'value',
+        value: {
           description:
             "New JSON value. Required for set and unavailable for unset. Must match the target field's declared valueType and allowedValues as returned by runtime.plugin.config (e.g. a plain string for a string field, not a JSON-encoded array).",
-          required: false,
         },
-        {
-          name: 'expectedFingerprint',
+        expectedFingerprint: {
+          type: 'string',
           description:
             'Authored config fingerprint returned by runtime.plugin.config.',
-          required: true,
-          valueType: 'string',
         },
-      ],
-      additionalFields: false,
+      },
+      required: ['pluginId', 'fieldName', 'operation', 'expectedFingerprint'],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     annotations: {readOnlyHint: false, destructiveHint: true},

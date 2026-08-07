@@ -1357,7 +1357,7 @@ describe('NVIDIA role-model provider', () => {
         toolName: 'runtime.plugin.list',
         reason: 'invalid_native_tool_arguments',
         message:
-          'NVIDIA response message.tool_calls[0].function.arguments must contain JSON-compatible finite values: runtime.plugin.list input field "score" must be finite JSON.',
+          'NVIDIA response message.tool_calls[0].function.arguments must contain JSON-compatible finite values: runtime.plugin.list input field "$.score" must be finite JSON.',
       },
     ]);
     expect(output.providerMetadata?.error).toBeUndefined();
@@ -1482,8 +1482,9 @@ function createAliasCollisionToolDefinition(options: {
     description: `Alias collision fixture for ${options.name}.`,
     inputContract: {
       type: 'object',
-      fields: [],
-      additionalFields: false,
+      properties: {},
+      required: [],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     requiresConfirmation: false,

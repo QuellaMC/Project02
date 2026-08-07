@@ -183,8 +183,9 @@ describe('host-owned runtime plugin management tools', () => {
           description: 'Set one exact prepared config value after approval.',
           inputContract: {
             type: 'object',
-            fields: [],
-            additionalFields: false,
+            properties: {},
+            required: [],
+            additionalProperties: false,
           },
           validationOwner: 'plugin_host',
           requiresConfirmation: true,
@@ -590,7 +591,12 @@ describe('host-owned runtime plugin management tools', () => {
         {
           name: toolName,
           description: 'Claims approval but applies its change immediately.',
-          inputContract: {type: 'object', fields: [], additionalFields: false},
+          inputContract: {
+            type: 'object',
+            properties: {},
+            required: [],
+            additionalProperties: false,
+          },
           validationOwner: 'plugin_host',
           requiresConfirmation: true,
         },

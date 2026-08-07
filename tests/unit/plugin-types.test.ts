@@ -395,7 +395,7 @@ describe('runtime plugin model-facing tool policy', () => {
         additionalProperties: false,
         oneOf: [],
       }),
-    ).toThrow('Model tool inputContract.jsonSchema.oneOf is not supported.');
+    ).toThrow('Model tool inputContract.oneOf is not supported.');
   });
 
   it('rejects unsupported property JSON Schema keywords with their field path', () => {
@@ -419,7 +419,7 @@ describe('runtime plugin model-facing tool policy', () => {
         additionalProperties: false,
       }),
     ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.profile.properties.name.minLength is not supported.',
+      'Model tool inputContract.properties.profile.properties.name.minLength is not supported.',
     );
   });
 
@@ -440,7 +440,7 @@ describe('runtime plugin model-facing tool policy', () => {
         additionalProperties: false,
       }),
     ).toThrow(
-      'Model tool inputContract.jsonSchema.properties.aliases.items.pattern is not supported.',
+      'Model tool inputContract.properties.aliases.items.pattern is not supported.',
     );
   });
 
@@ -474,7 +474,7 @@ describe('runtime plugin model-facing tool policy', () => {
 
     const tool = createRuntimePluginProvidedToolWithJsonSchema(jsonSchema);
 
-    expect(tool.inputContract.jsonSchema).toEqual(jsonSchema);
+    expect(tool.inputContract).toEqual(jsonSchema);
   });
 
   it('preserves an explicitly declared __proto__ property as data', () => {
@@ -485,14 +485,10 @@ describe('runtime plugin model-facing tool policy', () => {
       additionalProperties: false,
     };
     const schema =
-      createRuntimePluginProvidedToolWithJsonSchema(jsonSchema).inputContract
-        .jsonSchema;
+      createRuntimePluginProvidedToolWithJsonSchema(jsonSchema).inputContract;
 
-    expect(schema?.properties === undefined).toBe(false);
-    expect(Object.hasOwn(schema?.properties ?? {}, '__proto__')).toBe(true);
-    expect(Object.getPrototypeOf(schema?.properties ?? {})).toBe(
-      Object.prototype,
-    );
+    expect(Object.hasOwn(schema.properties, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(schema.properties)).toBe(Object.prototype);
   });
 
   it.each([
@@ -504,7 +500,7 @@ describe('runtime plugin model-facing tool policy', () => {
         required: ['note', 'note'],
         additionalProperties: false,
       },
-      'jsonSchema.required must not contain duplicates',
+      'required must not contain duplicates',
     ],
     [
       'required names absent from properties',
@@ -514,7 +510,7 @@ describe('runtime plugin model-facing tool policy', () => {
         required: ['missing'],
         additionalProperties: false,
       },
-      'jsonSchema.required includes "missing" outside properties',
+      'required includes "missing" outside properties',
     ],
     [
       'required names inherited from Object.prototype',
@@ -524,7 +520,7 @@ describe('runtime plugin model-facing tool policy', () => {
         required: ['toString'],
         additionalProperties: false,
       },
-      'jsonSchema.required includes "toString" outside properties',
+      'required includes "toString" outside properties',
     ],
     [
       'duplicate union types',
@@ -534,7 +530,7 @@ describe('runtime plugin model-facing tool policy', () => {
         required: ['note'],
         additionalProperties: false,
       },
-      'jsonSchema.properties.note.type must not contain duplicates',
+      'properties.note.type must not contain duplicates',
     ],
     [
       'object keywords on non-object types',
@@ -546,7 +542,7 @@ describe('runtime plugin model-facing tool policy', () => {
         required: ['note'],
         additionalProperties: false,
       },
-      'jsonSchema.properties.note uses object keywords without object type',
+      'properties.note uses object keywords without object type',
     ],
   ])('rejects %s recursively', (_case, schema, message) => {
     expect(() => createRuntimePluginProvidedToolWithJsonSchema(schema)).toThrow(
@@ -824,14 +820,7 @@ function runtimePluginManifestFixture(
 
 function createRuntimePluginProvidedToolWithJsonSchema(jsonSchema: unknown) {
   return createRuntimePluginProvidedTool(
-    runtimePluginProvidedToolFixture({
-      inputContract: {
-        type: 'object',
-        fields: [],
-        additionalFields: false,
-        jsonSchema,
-      },
-    }),
+    runtimePluginProvidedToolFixture({inputContract: jsonSchema}),
   );
 }
 
@@ -843,8 +832,9 @@ function runtimePluginProvidedToolFixture(
     description: 'Search memory.',
     inputContract: {
       type: 'object',
-      fields: [],
-      additionalFields: false,
+      properties: {},
+      required: [],
+      additionalProperties: false,
     },
     validationOwner: 'plugin_host',
     requiresConfirmation: false,
