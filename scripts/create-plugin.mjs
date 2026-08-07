@@ -1,19 +1,19 @@
 // The stamped descriptor must satisfy schemas/project02.plugin.schema.json
 // and the runtime validator.
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  rmdirSync,
-  writeFileSync,
-} from 'node:fs';
+import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {
   displayNameFromProject02Identifier,
   isProject02Identifier,
 } from '../src/shared/identifier.ts';
+import {canonicalPath} from '../src/shared/real-path.ts';
 import {atomicReplaceFileSync} from '../src/runtime/storage/atomic-file.ts';
+import {
+  acquireLocalRuntimeMutationLockSync,
+  LocalRuntimeMutationLockBusyError,
+} from '../src/runtime/storage/mutation-lock.ts';
 
 export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   if (!isProject02Identifier(id)) {
@@ -111,15 +111,21 @@ function assertBundledRegistrationNamesAvailable({id, source}) {
 
 /** A package the host cannot import statically never loads at runtime. */
 function registerBundledRuntimePluginFactory({id, bundledPath}) {
-  const lockPath = `${bundledPath}.lock`;
+  let lease;
 
   try {
-    mkdirSync(lockPath);
+    lease = acquireLocalRuntimeMutationLockSync({
+      locksRoot: join(tmpdir(), 'project02-scaffold-locks'),
+      resourceKey: `bundled-registry:${canonicalPath(bundledPath)}`,
+    });
   } catch (error) {
-    throw new Error(
-      `Another scaffold is updating the bundled registry; retry when it finishes, or remove ${lockPath} if a previous run crashed.`,
-      {cause: error},
-    );
+    if (error instanceof LocalRuntimeMutationLockBusyError) {
+      throw new Error(
+        'Another scaffold is updating the bundled registry; retry when it finishes.',
+        {cause: error},
+      );
+    }
+    throw error;
   }
   try {
     const source = readFileSync(bundledPath, 'utf8');
@@ -155,7 +161,7 @@ function registerBundledRuntimePluginFactory({id, bundledPath}) {
       mode: 0o644,
     });
   } finally {
-    rmdirSync(lockPath);
+    lease.release();
   }
 }
 
