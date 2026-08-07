@@ -61,7 +61,7 @@ export function runtimePluginAccessForPluginId(options: {
   return access;
 }
 
-export function resolveRuntimePluginAccessForPlugin(options: {
+function resolveRuntimePluginAccessForPlugin(options: {
   readonly plugin: RuntimePlugin;
   readonly enabled: boolean;
 }): RuntimePluginAccessSnapshot {
@@ -100,9 +100,7 @@ export function runtimePluginGrantsAccess(options: {
   );
 }
 
-export function runtimePluginAccessRank(
-  access: RuntimePluginAccessLevel,
-): number {
+function runtimePluginAccessRank(access: RuntimePluginAccessLevel): number {
   switch (access) {
     case 'none':
       return 0;
@@ -113,7 +111,7 @@ export function runtimePluginAccessRank(
   }
 }
 
-export function normalizeRuntimePluginAccessLevel(
+function normalizeRuntimePluginAccessLevel(
   value: unknown,
   field = 'access level',
 ): RuntimePluginAccessLevel {

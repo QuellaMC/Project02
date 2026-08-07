@@ -318,7 +318,7 @@ export function createRejectedCommitValidationSnapshot(options: {
   });
 }
 
-export function createInvalidVisibleReplyRejection(
+function createInvalidVisibleReplyRejection(
   error: CharacterReplyValidationError,
 ): RoleModelDecisionRejection {
   return createRejectedRoleModelDecisionResult(

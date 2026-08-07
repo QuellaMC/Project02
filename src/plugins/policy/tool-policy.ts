@@ -119,7 +119,7 @@ export function discoverableCurrentTurnPluginTools(options: {
  * `isModelFacingRuntimePluginTool` excludes built-in names and
  * `isFirstPartyBuiltInModelTool` requires one.
  */
-export function isDiscoverableCurrentTurnTool(options: {
+function isDiscoverableCurrentTurnTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;
   readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
@@ -154,8 +154,6 @@ export function isFirstPartyBuiltInModelTool(options: {
   );
 }
 
-export function toolRequiresConfirmation(
-  tool: RuntimePluginProvidedTool,
-): boolean {
+function toolRequiresConfirmation(tool: RuntimePluginProvidedTool): boolean {
   return tool.requiresConfirmation;
 }

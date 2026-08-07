@@ -45,9 +45,9 @@ export type RuntimePluginToolConfirmationHandler = (
   | RuntimePluginToolConfirmationDecision
   | Promise<RuntimePluginToolConfirmationDecision>;
 
-export const runtimePluginToolApprovalTimeoutMs = 5 * 60_000;
+const runtimePluginToolApprovalTimeoutMs = 5 * 60_000;
 
-export async function requestRuntimePluginToolConfirmation(
+async function requestRuntimePluginToolConfirmation(
   handler: RuntimePluginToolConfirmationHandler,
   request: RuntimePluginToolConfirmationRequest,
   timeoutMs = runtimePluginToolApprovalTimeoutMs,

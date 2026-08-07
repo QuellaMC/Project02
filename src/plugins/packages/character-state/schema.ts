@@ -1,6 +1,6 @@
 import {isJsonRecord} from '../../../shared/json-boundary.ts';
 
-export const characterRuntimeStateVersion = 'mvp-006.character_state.v1';
+const characterRuntimeStateVersion = 'mvp-006.character_state.v1';
 
 export const characterMoodValues = Object.freeze([
   'steady',
@@ -192,7 +192,7 @@ export function decodeCharacterRuntimeState(
   });
 }
 
-export function freezeCharacterRuntimeState(
+function freezeCharacterRuntimeState(
   state: CharacterRuntimeState,
 ): CharacterRuntimeState {
   return createCharacterRuntimeState(state.current);

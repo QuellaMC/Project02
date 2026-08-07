@@ -103,7 +103,7 @@ export function createPluginHookContext<
   });
 }
 
-export const scrubbedRuntimePluginCurrentUserMessage = '';
+const scrubbedRuntimePluginCurrentUserMessage = '';
 
 function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
   context: Omit<TContext, 'fileStore'>,

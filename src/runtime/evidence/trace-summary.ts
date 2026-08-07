@@ -60,7 +60,7 @@ export function createTraceSummary(
   } satisfies ChatTraceSummary);
 }
 
-export function traceProviderSummaryOption(
+function traceProviderSummaryOption(
   rawEvent: RawEventLogRecord | undefined,
   rawEvents: readonly RawEventLogRecord[] | undefined,
 ): {readonly provider?: ChatTraceProviderSummary} {
@@ -94,7 +94,7 @@ export function traceProviderSummaryOption(
   };
 }
 
-export function traceToolCallSummaryOption(
+function traceToolCallSummaryOption(
   terminalRawEvent: RawEventLogRecord | undefined,
   rawEvents: readonly RawEventLogRecord[] | undefined,
 ): {
@@ -131,7 +131,7 @@ export function traceToolCallSummaryOption(
   };
 }
 
-export function hasTraceToolCallEvidence(
+function hasTraceToolCallEvidence(
   terminalRawEvent: RawEventLogRecord | undefined,
   turnRawEvents: readonly RawEventLogRecord[],
 ): boolean {
@@ -145,7 +145,7 @@ export function hasTraceToolCallEvidence(
   );
 }
 
-export function requestedToolCallNames(
+function requestedToolCallNames(
   turnRawEvents: readonly RawEventLogRecord[],
 ): string[] {
   const requestedToolCalls: string[] = [];
@@ -188,7 +188,7 @@ export function requestedToolCallNames(
   return requestedToolCalls;
 }
 
-export function executedToolCallNames(
+function executedToolCallNames(
   turnRawEvents: readonly RawEventLogRecord[],
 ): string[] {
   const executedToolCalls: string[] = [];
@@ -220,7 +220,7 @@ export function executedToolCallNames(
   return executedToolCalls;
 }
 
-export function requestedDecisionEvidenceKey(
+function requestedDecisionEvidenceKey(
   event: RawEventLogRecord,
 ): string | undefined {
   const roleModelIOSnapshot = event.roleModelIOSnapshot;

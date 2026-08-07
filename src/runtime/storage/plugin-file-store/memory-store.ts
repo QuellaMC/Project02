@@ -79,7 +79,7 @@ export function createInMemoryRuntimePluginFileStore(
   } satisfies RuntimePluginFileStore);
 }
 
-export function inMemoryPluginStoreState(
+function inMemoryPluginStoreState(
   options: InMemoryRuntimePluginFileStoreOptions,
 ): InMemoryPluginStoreState {
   const key = `${options.sessionId}\u0000${options.pluginId}`;

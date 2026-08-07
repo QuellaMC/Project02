@@ -18,7 +18,7 @@ export function durableCharacterProfile(options: {
   });
 }
 
-export function recordedRoleModelCharacterProfile(
+function recordedRoleModelCharacterProfile(
   rawEvents: readonly RawEventLogRecord[],
 ): CharacterProfile | undefined {
   let recordedCharacter: CharacterProfile | undefined;
@@ -46,7 +46,7 @@ export function recordedRoleModelCharacterProfile(
   return recordedCharacter;
 }
 
-export function recordedConversationCharacterProfile(
+function recordedConversationCharacterProfile(
   messages: readonly ConversationLogRecord[],
 ): CharacterProfile | undefined {
   let messageCharacter: CharacterProfile | undefined;

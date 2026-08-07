@@ -69,9 +69,7 @@ export function redactResolvedRuntimeConfigField(
 }
 
 // Config-typed view over the one shared secret-marker owner.
-export function runtimeConfigValueIsSecretMarker(
-  value: RuntimeConfigValue,
-): boolean {
+function runtimeConfigValueIsSecretMarker(value: RuntimeConfigValue): boolean {
   return valueIsSecretMarker(value);
 }
 

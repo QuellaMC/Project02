@@ -74,7 +74,7 @@ export function requiredSourceReferences(
   return accept(Object.freeze(references));
 }
 
-export function requiredSourceReference(
+function requiredSourceReference(
   value: unknown,
 ): RuntimePluginValidationResult<RuntimePluginSourceReference> {
   if (!isRecord(value)) {
@@ -403,7 +403,7 @@ export function requirePlainNonEmptyRecordString(
   );
 }
 
-export function requirePlainNonEmptyStringFromUnknown(
+function requirePlainNonEmptyStringFromUnknown(
   value: unknown,
   field: string,
 ): string {

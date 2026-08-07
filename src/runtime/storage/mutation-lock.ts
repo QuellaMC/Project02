@@ -31,8 +31,8 @@ import {
 
 export type {LocalRuntimeMutationLockTarget} from './mutation-lock-target.ts';
 
-export const defaultLocalRuntimeMutationLockWaitTimeoutMs = 10_000;
-export const defaultLocalRuntimeMutationLockIncompleteGraceMs = 30_000;
+const defaultLocalRuntimeMutationLockWaitTimeoutMs = 10_000;
+const defaultLocalRuntimeMutationLockIncompleteGraceMs = 30_000;
 
 type LocalRuntimeMutationLockBusyCode = Extract<
   LocalRuntimeStorageContractErrorCode,

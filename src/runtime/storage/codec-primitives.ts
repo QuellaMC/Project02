@@ -138,7 +138,7 @@ function requiredCommittedDecisionRound(value: unknown): number {
   return value;
 }
 
-export function requiredVisibleMessageRole(value: unknown): VisibleMessageRole {
+function requiredVisibleMessageRole(value: unknown): VisibleMessageRole {
   if (isOneOf(value, visibleMessageRoleValues)) {
     return value;
   }
