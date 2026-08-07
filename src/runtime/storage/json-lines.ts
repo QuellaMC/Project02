@@ -37,7 +37,7 @@ export function readUndamagedJsonLines(content: string): readonly string[] {
  * The framing alone, for readers that tolerate a damaged record instead of
  * failing the whole file.
  */
-export function committedJsonLines(content: string): readonly string[] {
+function committedJsonLines(content: string): readonly string[] {
   if (content.length === 0) {
     return Object.freeze([]);
   }

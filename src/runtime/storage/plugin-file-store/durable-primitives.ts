@@ -93,7 +93,7 @@ export function withDurablePluginStoreMutation<T>(
   );
 }
 
-export function withDurablePluginStoreMutations<T>(
+function withDurablePluginStoreMutations<T>(
   options: {
     readonly resourceKeys?: readonly string[];
     readonly storeRoot: string;

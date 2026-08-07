@@ -290,9 +290,7 @@ export function formatCurrentValue(
     : `(unset; default: ${defaultValueSummary})`;
 }
 
-export function formatPreviewValue(
-  value: RuntimeConfigValue | undefined,
-): string {
+function formatPreviewValue(value: RuntimeConfigValue | undefined): string {
   return value === undefined ? '(unset)' : JSON.stringify(value);
 }
 

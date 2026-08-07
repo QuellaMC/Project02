@@ -444,7 +444,7 @@ function reconcileRuntimeConfigEffect(options: {
   return evidence;
 }
 
-export function reconciledRuntimeConfigEffectIds(
+function reconciledRuntimeConfigEffectIds(
   rawEvents: readonly RawEventLogRecord[],
   statuses: readonly ('accepted' | 'rejected')[] = ['accepted', 'rejected'],
 ): Set<string> {
@@ -483,7 +483,7 @@ export function runtimePostCommitFailureMessage(error: unknown): string {
   return 'Runtime post-commit work failed.';
 }
 
-export function closeConflictedPreparedRuntimePluginConfigEffect(options: {
+function closeConflictedPreparedRuntimePluginConfigEffect(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly reason: string;
 }): RuntimePluginEvidenceSnapshot {

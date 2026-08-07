@@ -27,7 +27,7 @@ export type LocalRuntimeReadableStorageSchemaVersion =
 export const localRuntimeReadableStorageSchemaVersions: readonly LocalRuntimeReadableStorageSchemaVersion[] =
   Object.freeze([localRuntimeStorageSchemaVersion]);
 
-export const localRuntimeStorageScopeValues = Object.freeze([
+const localRuntimeStorageScopeValues = Object.freeze([
   'home',
   'character-data',
 ] as const);
