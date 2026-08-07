@@ -247,6 +247,31 @@ describe('plugin package descriptor schema parity', () => {
     ).toThrow('Runtime plugin package descriptor could not be read.');
   });
 
+  it('refuses a scaffold whose id collides with an existing registration name', () => {
+    const packagesRoot = mkdtempSync(
+      join(tmpdir(), 'project02-plugin-scaffold-collision-'),
+    );
+    const bundledPath = join(packagesRoot, 'bundled.ts');
+
+    copyFileSync(
+      fileURLToPath(
+        new URL('../../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
+      bundledPath,
+    );
+    const bundledBefore = readFileSync(bundledPath, 'utf8');
+
+    expect(() =>
+      scaffoldRuntimePluginPackage({
+        id: 'demo.config',
+        packagesRoot,
+        bundledPath,
+      }),
+    ).toThrow('derives the registration name "createDemoConfigPlugin"');
+    expect(existsSync(join(packagesRoot, 'demo.config'))).toBe(false);
+    expect(readFileSync(bundledPath, 'utf8')).toBe(bundledBefore);
+  });
+
   it('stamps a scaffold whose descriptor passes both validators', () => {
     const packagesRoot = mkdtempSync(
       join(tmpdir(), 'project02-plugin-scaffold-'),

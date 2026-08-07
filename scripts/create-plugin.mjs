@@ -20,6 +20,7 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   if (existsSync(packageRoot)) {
     throw new Error(`Plugin package directory already exists: ${packageRoot}`);
   }
+  assertBundledRegistrationNamesAvailable({id, bundledPath});
 
   const displayName = displayNameFromProject02Identifier(id);
 
@@ -47,6 +48,29 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   registerBundledRuntimePluginFactory({id, bundledPath});
 
   return {packageRoot};
+}
+
+// Ids that differ only in separators derive one registration name; emitting
+// the second would break bundled.ts for both packages.
+function assertBundledRegistrationNamesAvailable({id, bundledPath}) {
+  const source = readFileSync(bundledPath, 'utf8');
+
+  if (source.includes(`'../packages/${id}/index.ts'`)) {
+    return;
+  }
+
+  const constantPrefix = identifierConstantPrefix(id);
+
+  for (const name of [
+    `create${capitalize(constantPrefix)}Plugin`,
+    `${constantPrefix}PluginId`,
+  ]) {
+    if (new RegExp(`\\b${name}\\b`, 'u').test(source)) {
+      throw new Error(
+        `Plugin id "${id}" derives the registration name "${name}", which bundled.ts already uses for another package. Pick an id that differs in letters or digits, not only in separators.`,
+      );
+    }
+  }
 }
 
 /** A package the host cannot import statically never loads at runtime. */
