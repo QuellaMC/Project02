@@ -49,14 +49,9 @@ function formatLocalRuntimeStorageContractError(
   }
 }
 
-/**
- * Single owner of the CLI fatal-error formatting shape (S-13): known CLI
- * errors surface their message; terminal store errors get the
- * user-facing formatter. The two sets are disjoint.
- */
+/** Single owner of the CLI fatal-error formatting shape. */
 export function formatCliTerminalErrorMessage(error: Error): string {
-  // Read the fallback before narrowing: the terminal error classes add no
-  // structural members, so the negated branch would otherwise be `never`.
+  // Read before narrowing: the negated branch would otherwise be `never`.
   const fallbackMessage = error.message;
 
   return isLocalRuntimeTerminalError(error)

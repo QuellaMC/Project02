@@ -21,13 +21,10 @@ describe('tool batch execution lock', () => {
       run('readC', 'shared'),
     ]);
 
-    // The two leading shared calls overlap: both start before either ends.
     expect(events.indexOf('start:readB')).toBeLessThan(
       events.indexOf('end:readA'),
     );
 
-    // The exclusive call holds the batch alone: nothing is in flight when
-    // it starts, and nothing starts before it finishes.
     const writeStart = events.indexOf('start:write');
     const writeEnd = events.indexOf('end:write');
 
@@ -60,8 +57,6 @@ describe('tool batch execution lock', () => {
     releaseFirst();
     await Promise.all([first, exclusive, late]);
 
-    // Head-of-line order: the queued exclusive call is not starved by a
-    // shared call that arrived after it.
     expect(events).toEqual([
       'start:first',
       'end:first',

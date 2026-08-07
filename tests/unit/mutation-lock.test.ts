@@ -147,8 +147,7 @@ describe('local runtime mutation locks', () => {
     const locksRoot = await createTempLocksRoot();
     const waitTimeoutMs = 200;
     // Targets are acquired in hashed-path order, so ask for that order rather
-    // than assuming it: the point of the test is that the SECOND resource
-    // acquired still gets a full budget.
+    // than assuming it.
     const probe = await acquireLocalRuntimeMutationLocks({
       targets: ['a-first', 'b-second'].map(resourceKey => ({
         locksRoot,
@@ -166,8 +165,8 @@ describe('local runtime mutation locks', () => {
       throw new Error('Expected two canonical lock targets.');
     }
 
-    // Hold the first for most of one budget so the wait is spent legitimately
-    // queueing on a healthy resource, then release the second just after.
+    // The first is held for most of one budget, so the wait is spent queueing
+    // on a healthy resource.
     const first = await acquireLocalRuntimeMutationLock({
       locksRoot,
       resourceKey: firstKey,
@@ -186,9 +185,8 @@ describe('local runtime mutation locks', () => {
       void second.release();
     }, waitTimeoutMs * 1.5);
 
-    // A pooled budget would have been exhausted by queueing on the first
-    // target and would reject the second on its first contended attempt, even
-    // though that resource is healthy and about to be released.
+    // A pooled budget, spent on the first target, would reject the second on
+    // its first contended attempt.
     const lease = await acquireLocalRuntimeMutationLocks({
       targets: ['a-first', 'b-second'].map(resourceKey => ({
         locksRoot,
@@ -714,10 +712,8 @@ describe('local runtime mutation locks', () => {
       string,
       unknown
     >;
-    // Publish a fresh nonce under the same live pid, which is what a contender
-    // sees when the queue hands the lock to the next waiter. The lock itself
-    // stays held the whole time, so acquisition keeps failing and only the
-    // observed hand-offs can extend the wait.
+    // A fresh nonce under the same live pid is what a contender sees when the
+    // queue hands the lock on; the lock itself stays held throughout.
     const handOffs = (async () => {
       for (let index = 0; index < handOffCount; index += 1) {
         await delay(waitTimeoutMs / 2);
@@ -730,8 +726,7 @@ describe('local runtime mutation locks', () => {
     })();
     const startedAt = Date.now();
 
-    // A total-time budget would reject at `waitTimeoutMs` regardless of the
-    // hand-offs; a stall budget only gives up once they stop.
+    // A stall budget gives up only once the hand-offs stop.
     await expect(
       acquireLocalRuntimeMutationLock({...target, waitTimeoutMs}),
     ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
@@ -746,8 +741,7 @@ describe('local runtime mutation locks', () => {
   it('rejects a contender once the holder stops making progress', async () => {
     const locksRoot = await createTempLocksRoot();
     const target = {locksRoot, resourceKey: 'stalled-holder'};
-    // Held for the whole wait and never released, so the owner nonce never
-    // changes: a stall budget still has to give up here.
+    // Never released, so the owner nonce never changes.
     const holder = await acquireLocalRuntimeMutationLock({
       ...target,
       waitTimeoutMs: 0,

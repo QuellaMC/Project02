@@ -990,9 +990,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
   readonly visibleReplyAvailable: boolean;
 }): NvidiaRawOutputTextResult {
   if (options.toolCalls.length === 0) {
-    // Empty content is model behavior, not a transport fault: normalize it to
-    // the canonical empty decision so the loop's terminal-empty gate can
-    // return a correction note instead of failing the turn.
+    // Empty content is model behavior, not a transport fault.
     if (options.content === null || options.content.length === 0) {
       return Object.freeze({
         status: 'accepted',
@@ -1054,9 +1052,7 @@ function createRawOutputTextFromNvidiaMessage(options: {
     });
 
     if (parsedArgs.status === 'rejected') {
-      // Empty text (not an empty object): the decision parser requires
-      // input.text to be a string, and the blank-reply gate is what turns
-      // this into a correction note the model can act on.
+      // Empty text, not an empty object: the parser requires a string.
       if (runtimeToolName === visibleReplyModelToolName) {
         toolCalls.push({
           name: visibleReplyModelToolName,

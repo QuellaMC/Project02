@@ -1,7 +1,6 @@
 /**
- * Mechanical filesystem boundary shared by character and plugin package
- * discovery. Callers retain ownership of source policy, diagnostics,
- * descriptor parsing, and package identity.
+ * Filesystem mechanics for package discovery. Callers retain ownership of
+ * source policy, diagnostics, descriptor parsing, and package identity.
  */
 import {
   listDirectoryEntriesSync,
@@ -56,15 +55,8 @@ export function snapshotPackageDirectory(
 }
 
 /**
- * Snapshots a package *source root*, where an intentional link is allowed.
- *
- * The home ownership guard accepts a linked `plugins`/`characters` root so an
- * operator can install a package collection from elsewhere. Rejecting one here
- * would turn that approved layout into the globally blocking
- * `package_source_unavailable`, so even the bundled default package would fail
- * to load. Individual packages inside the source stay strict: they resolve
- * through `snapshotPackageDirectoryFromSource`, which snapshots the real path
- * and rejects a link there.
+ * A source root may itself be a link, so an operator can install a package
+ * collection from elsewhere. Individual packages inside it stay strict.
  */
 export function snapshotPackageSourceDirectory(
   sourceRoot: string,
@@ -77,9 +69,8 @@ function snapshotDirectory(
   options: {readonly followRootLink: boolean},
 ): PackageDirectorySnapshot | undefined {
   const normalizedRoot = resolve(packageRoot);
-  // Following pins the identity of the directory a linked root names, which is
-  // the state the rest of discovery reads. Not following reports a link as
-  // neither a directory nor equal to itself, which is the strict rejection.
+  // Not following reports a link as neither a directory nor equal to itself,
+  // which is how the strict mode rejects one.
   const statRoot = options.followRootLink ? statPathSync : lstatPathSync;
 
   try {
@@ -193,14 +184,8 @@ export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
 }
 
 /**
- * Whether a descriptor's `"$schema"` is usable as one.
- *
- * Both package descriptors allow the key and ignore its value, so it
- * reaches no other validator — which left the code accepting shapes the
- * published editor schemas reject, and an authoring mistake surfacing
- * only in whichever tool the author was not using. The value is an
- * editor's pointer to a schema document, so a string is the whole rule;
- * absent stays fine, because referencing the schema is optional.
+ * No other validator sees `"$schema"`, and it is only an editor's pointer to
+ * a schema document, so a string is the whole rule.
  */
 export function packageDescriptorSchemaRefIsValid(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
@@ -260,11 +245,8 @@ export function readBoundedPackageJsonFile(options: {
 }): BoundedPackageJsonReadResult {
   let path: string;
 
-  // A package reading its own descriptor has a `file:` URL, not a path.
-  // Converting here rather than accepting URLs through the filesystem seam
-  // keeps every path in this codebase a string by the time it reaches the
-  // disk, and a URL that names no file is unreadable — the same answer the
-  // stat below would have given.
+  // A package reading its own descriptor has a `file:` URL, and the
+  // filesystem seam takes only strings.
   try {
     path =
       typeof options.path === 'string'
@@ -277,8 +259,7 @@ export function readBoundedPackageJsonFile(options: {
   let metadataStat: BigIntStats;
 
   // Stat through links: what matters is that the path names a regular file
-  // small enough to read, not how it was spelled. A dangling link stats as
-  // unreadable, which is what it is.
+  // small enough to read, not how it was spelled.
   try {
     metadataStat = statPathSync(path);
   } catch {
@@ -409,9 +390,8 @@ function rejectedPackageJson(
 }
 
 /**
- * Deterministic code-point order for package listings and diagnostics —
- * deliberately locale-independent so two machines order the same bytes
- * the same way.
+ * Code-point order, deliberately locale-independent so two machines order
+ * the same bytes the same way.
  */
 export function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;

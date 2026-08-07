@@ -201,8 +201,8 @@ export function assertRegularFile(path: string, label: string): void {
   const entry = describeRealEntry(path);
 
   if (entry.kind === 'absent' || entry.kind === 'unreadable') {
-    // `readOptionalRegularFile` reads "not there yet" off the error code, so
-    // the original has to reach it rather than a message written over it.
+    // `readOptionalRegularFile` reads "not there yet" off the error code,
+    // so the original must reach it intact.
     throw entry.error;
   }
   if (entry.kind !== 'file') {
@@ -584,7 +584,6 @@ function assertDurableJsonlPathMode(options: {
   }
 }
 
-/** Records when the content is JSONL, undefined when it is not. */
 function readOptionalJsonlRecords(
   content: string,
 ): readonly RuntimePluginJsonValue[] | undefined {

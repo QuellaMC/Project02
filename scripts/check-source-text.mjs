@@ -1,18 +1,5 @@
-/**
- * Source files must stay searchable text.
- *
- * A raw control byte in a tracked file makes grep and ripgrep classify it
- * as binary and silently skip it, so repository-wide searches — the
- * reuse-before-building workflow this project depends on — omit that
- * file's symbols without any visible failure. Formatting, linting, and
- * typechecking all accept such a file, which is exactly how one shipped:
- * a NUL delimiter written as the character itself instead of its
- * escape hid 2,300 lines of validation code from search.
- *
- * This gate rejects raw control bytes (everything below 0x20 except tab,
- * newline, and carriage return) in tracked source text. Control
- * characters that belong in program values are spelled as escapes.
- */
+// A raw control byte makes grep classify a file as binary and skip it, so
+// its symbols disappear from repository-wide search.
 import {execFileSync} from 'node:child_process';
 import {existsSync, readFileSync} from 'node:fs';
 
@@ -23,8 +10,7 @@ const trackedFiles = execFileSync('git', ['ls-files', '-z'], {
 })
   .split('\0')
   .filter(path => path !== '' && TEXT_FILE_PATTERN.test(path))
-  // A file deleted from the working tree but still in the index has no
-  // content to scan; mid-deletion is an ordinary state to run checks in.
+  // The index still lists files already deleted from the working tree.
   .filter(path => existsSync(path));
 
 const violations = [];

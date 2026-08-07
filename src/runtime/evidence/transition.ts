@@ -25,10 +25,8 @@ export type RuntimeEvidenceTransitionMachine = {
     expectedCharacter?: CharacterProfile,
   ): RawEventLogRecord;
   /**
-   * Re-runs the append checks a prepared record passed when it was
-   * prepared, against the machine's current state. A caller that appends
-   * between preparing and committing invalidates what prepare proved, so
-   * a durable store asserts this again before its bytes land.
+   * A caller that appends between preparing and committing invalidates what
+   * prepare proved, so a durable store asserts again before its bytes land.
    */
   assertRawEventAppend(
     record: RawEventLogRecord,
@@ -41,11 +39,8 @@ export type RuntimeEvidenceTransitionMachine = {
 };
 
 /**
- * The one gate, applied to a stored log: a log is valid iff it replays
- * record by record through the same assert-then-apply a live append
- * runs. A log a crash cut short replays fewer records — that is the
- * crash contract — while a record no valid append could have produced
- * fails exactly as it would have failed to append.
+ * A stored log is valid iff it replays through the same assert-then-apply a
+ * live append runs; a log a crash cut short replays fewer records.
  */
 export function replayRuntimeEvidence(options: {
   readonly rawEvents: readonly RawEventLogRecord[];
@@ -135,9 +130,8 @@ export function createRuntimeEvidenceTransitionMachine(options: {
       assertStoredRawEventAppend(record, expectedCharacter);
     },
     commitRawEventAppend(record, expectedCharacter) {
-      // Committing asserts again: apply mutates shared evidence, so a
-      // record no valid append could produce must never enter it, however
-      // long ago it was prepared.
+      // Apply mutates shared evidence, so assert again however long ago the
+      // record was prepared.
       assertStoredRawEventAppend(record, expectedCharacter);
       options.evidence.rawEvents.push(record);
       applyIncrementalRawEventAppend({

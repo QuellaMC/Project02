@@ -1,8 +1,3 @@
-/**
- * Public API of src/app — the composition root. It wires runtime config,
- * plugin activation, and host construction together; nothing below it
- * (runtime, plugins, role-model, core, shared) may import it.
- */
 export {
   classifyRuntimePluginCatalogDiscovery,
   createConfiguredProject02PluginHostFromPlan,

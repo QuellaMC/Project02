@@ -101,10 +101,7 @@ describe('project02 character activation', () => {
       throw new Error('Expected failed activation.');
     }
 
-    // Attributing this only to the folder would drop it into the
-    // unrelated-package warnings and leave the operator with "nova was
-    // not found; install it" — advice that cannot work, because nova is
-    // installed and only the folder name is wrong.
+    // Blaming the folder alone would advise installing nova, which is installed.
     expect(
       activation.messages.some(message =>
         message.includes('package_id_mismatch'),

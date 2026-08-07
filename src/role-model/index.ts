@@ -1,9 +1,6 @@
 /**
- * Public API of src/role-model.
- *
  * Cross-module imports of role-model land here (arch:check rule 5).
- * plugins/api files must NOT import this barrel (cycle) — they use the
- * plugin-independent role-model/api/index.ts instead.
+ * plugins/api files must import role-model/api/index.ts instead: cycle.
  */
 export {
   type AcceptedRoleModelDecisionResult,

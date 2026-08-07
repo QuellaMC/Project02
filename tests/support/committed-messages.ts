@@ -6,10 +6,6 @@ import {
   type VisibleMessage,
 } from '../../src/core/index.ts';
 
-// Building a message and committing it are separate in the runtime, because
-// only a durable message joins the session. A test that wants a transcript
-// wants both, so the pair lives here rather than in each suite that needs it.
-
 export function appendUserMessage(
   session: ConversationSession,
   text: string | undefined,

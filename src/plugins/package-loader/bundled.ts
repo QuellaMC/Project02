@@ -27,12 +27,7 @@ const bundledRuntimePluginFactories = new Map<
   ],
 ]);
 
-/**
- * Bundled packages are part of the host executable, so their factories must
- * stay in the host module graph. Filesystem discovery authenticates the
- * bundled root and validates its descriptor; this registry binds that
- * captured descriptor to the factory compiled into the same executable.
- */
+/** Bundled factories must stay in the host module graph, so they are static. */
 export function bundledRuntimePluginFactory(options: {
   readonly pluginId: string;
   readonly entryRelativePath: string;

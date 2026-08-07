@@ -19,10 +19,8 @@ describe('store initialization against a concurrent config author', () => {
     const homeRoot = join(createTestTempRoot(), 'home');
     const layout = createProject02HomeLayout({homeRoot});
 
-    // Stand where the competing author stands: holding the config file's
-    // lock, mid-write. Initialization must not decide "absent" from a
-    // look taken outside this lock, because the answer is only stable
-    // inside it.
+    // A competing author, mid-write: whether the config is absent is only
+    // stable inside this lock.
     const authorLock = await acquireLocalRuntimeMutationLock({
       locksRoot: layout.locksRoot,
       resourceKey: `runtime-control-file:${layout.configPath}`,
@@ -30,16 +28,13 @@ describe('store initialization against a concurrent config author', () => {
 
     const initialization = ensureInitializedProject02Store({homeRoot});
 
-    // Let initialization get as far as it can while the lock is held. If
-    // it writes without taking the lock, it overwrites the bytes below.
+    // Initialization writing without the lock would overwrite the bytes below.
     await new Promise(resolve => setTimeout(resolve, 50));
     writeFileSync(layout.configPath, authoredConfig, {mode: 0o600});
     await authorLock.release();
 
     await initialization;
 
-    // The operator's document is theirs to keep. Losing it here is
-    // silent: no error, no diagnostic, just different bytes on disk.
     expect(readFileSync(layout.configPath, 'utf8')).toBe(authoredConfig);
   });
 

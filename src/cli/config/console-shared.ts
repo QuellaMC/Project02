@@ -1,8 +1,3 @@
-/**
- * Shared plumbing of the runtime config console: option/context/
- * snapshot types, the staged-change preview/commit protocol, and the
- * prompt, parse, format, and output helpers both sections use.
- */
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
   assertResolvedProject02HomeAdoptable,
@@ -25,7 +20,6 @@ import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {ensureCharacterDataDir} from '../../runtime/storage/index.ts';
 import type {CliPromptAdapter} from '../shared/prompt.ts';
 
-/** The console asks its questions through the shared CLI adapter. */
 export type RuntimeConfigConsolePromptAdapter = CliPromptAdapter;
 
 export type RuntimeConfigConsoleOptions = {
@@ -70,13 +64,7 @@ export type StagedRuntimeConfigChange = {
   commit(): void | Promise<void>;
 };
 
-/**
- * Commit-time preparation of a console write: guards and the identity
- * marker land only when the user actually saves, so a read-only console
- * session never creates durable state. Global admission belongs to the
- * target-bound control transaction; scoped commits additionally re-validate
- * the layers and initialize the activated character directory.
- */
+/** Called only at commit time, so a read-only session creates nothing. */
 export async function ensureConsoleCommitTarget(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly scope: 'global' | 'character';
@@ -331,7 +319,6 @@ export function runtimeConfigSecretSetCommandPrefix(options: {
   }`;
 }
 
-/** Console-facing name for the shared quoting helper. */
 export const shellQuoteConsoleCommandArgument = shellQuoteCommandArgument;
 
 export function writeLine(stdout: NodeJS.WritableStream, value: string): void {

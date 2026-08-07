@@ -41,10 +41,6 @@ export function createPluginHookContext<
     requiredAccess: 'read',
   });
   const sessionId = options.sessionId ?? options.context.sessionId;
-  // The granted access decides. The retired sideEffectLevel enum gated
-  // this too, so a plugin the user had already granted file_store write
-  // could still be refused for declaring the "wrong" effect level —
-  // two permission systems answering one question.
   const allowWrites =
     runtimePluginGrantsAccess({
       access: options.access,
@@ -86,7 +82,7 @@ export function createPluginHookContext<
   })
     ? contextWithoutInheritedFileStore
     : scrubRuntimePluginTurnContext(contextWithoutInheritedFileStore);
-  // Preserve the hook context subtype while making fileStore injection entirely host-controlled.
+  // The cast preserves the hook context subtype; fileStore stays host-injected.
   const context = Object.freeze({
     ...contextWithScrubbedTurn,
     pluginId,
@@ -108,7 +104,7 @@ const scrubbedRuntimePluginCurrentUserMessage = '';
 function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
   context: Omit<TContext, 'fileStore'>,
 ): Omit<TContext, 'fileStore'> {
-  // Empty currentUserMessage intentionally represents no turn_context.read grant.
+  // Empty currentUserMessage represents no turn_context.read grant.
   const baseContext = {
     ...context,
     currentUserMessage: scrubbedRuntimePluginCurrentUserMessage,
@@ -118,7 +114,6 @@ function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
     const committedTurn = (context as RuntimePluginAfterTurnCommittedContext)
       .committedTurn;
 
-    // Empty visible turn arrays intentionally represent no turn_context.read grant.
     return Object.freeze({
       ...baseContext,
       committedTurn: Object.freeze({

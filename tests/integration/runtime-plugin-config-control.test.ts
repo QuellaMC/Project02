@@ -660,8 +660,7 @@ describe('runtime plugin config control', () => {
 
     expect(before.pluginId).toBe('operator.rebind-inspect');
 
-    // Rebound after the fact: model-visible config must not come from
-    // a store the runtime would refuse.
+    // Rebound after the fact, to a store the runtime would refuse.
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({

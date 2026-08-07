@@ -55,7 +55,6 @@ function activationWithEnabled(
   };
 }
 
-/** Seeds a home whose operator character declares a plugins block. */
 function homeWithCharacter(options: {
   readonly characterId: string;
   readonly version?: string;
@@ -146,8 +145,7 @@ describe('character plugin enforcement', () => {
       storeRoot: '/tmp/My Home',
     });
 
-    // Unquoted, --store would consume only "/tmp/My" and the pasted command
-    // would leave the character blocked.
+    // Unquoted, --store would consume only "/tmp/My".
     expect(diagnostics[0]?.message).toContain(
       "runtime-config --store '/tmp/My Home' --character 'seeded' plugin enable 'disabled-required'",
     );
@@ -407,8 +405,8 @@ describe('first-selection materialization through startup', () => {
       plugins: {required: ['demo-config']},
     });
 
-    // Operator writes the overlay before ever selecting the character
-    // (the CLI verb marks the data dir first, then mutates).
+    // The CLI verb marks the data dir first, then mutates, so an overlay can
+    // exist before the character was ever selected.
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'seeded')},
       characterId: 'seeded',
@@ -488,8 +486,7 @@ describe('first-selection materialization through startup', () => {
       diagnostic => diagnostic.code === 'character_required_plugin_disabled',
     );
 
-    // The recovery command names the selected home so it edits the
-    // right store, shell-quoted so it survives a copy-paste.
+    // The recovery command is shell-quoted so it survives a copy-paste.
     expect(disabled?.message).toContain(
       `--store '${realpathSync.native(homeRoot)}' `,
     );
@@ -744,8 +741,7 @@ describe('materialization ordering for pre-existing overlays', () => {
     });
 
     expect(startup.status).toBe('config_invalid');
-    // The invalid overlay was read before materialization: no home
-    // home marker or character data marker.
+    // The invalid overlay was read before materialization.
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
   });

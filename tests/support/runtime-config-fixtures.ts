@@ -9,11 +9,8 @@ import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts
 import {ensureCharacterDataDir} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from './temp-root.ts';
 
-/**
- * Marks the character's data directory initialized so a host can be
- * constructed directly: host construction asserts the initializer ran
- * and never creates durable character state itself.
- */
+// Host construction asserts the initializer ran and never creates durable
+// character state itself.
 export async function initializeCharacterDataForHost(
   storeRoot: string,
   characterId = 'mira',
@@ -21,32 +18,13 @@ export async function initializeCharacterDataForHost(
   await ensureCharacterDataDir({homeRoot: storeRoot, characterId});
 }
 
-/**
- * Creates a Project02 store at the given path and returns it.
- *
- * The CLIs refuse to create a store the operator never asked for, so a
- * test exercising anything past that gate has to arrange one — the same
- * way a test needing a config file writes one. Use this wherever the
- * store's existence is setup rather than the subject; a test about the
- * gate itself wants a bare `createTestTempRoot`.
- *
- * It runs the same initializer the CLIs run, so the arranged store is
- * the store the product makes — marker, character-data root, and global
- * config together. A test that arranged less would be exercising a
- * state no command can produce. What a rejected run must still not
- * leave is `character-data/<id>/`, an `.env`, or an edited document.
- *
- * Takes a path rather than making one because the home a run selects is
- * not always a root a test named: `--config` points at a file, and the
- * home it resolves is `<cwd>/.project02` unless the document says
- * otherwise. Those tests arrange that path directly.
- */
+// Use this where the store's existence is setup; a test about the store-consent
+// gate itself wants a bare `createTestTempRoot`.
 export async function initializeTestStore(homeRoot: string): Promise<string> {
   await ensureInitializedProject02Store({homeRoot});
   return homeRoot;
 }
 
-/** A fresh temp root that is already a Project02 store. */
 export async function createInitializedTestStoreRoot(
   prefix = 'project02-test-',
 ): Promise<string> {
@@ -244,11 +222,6 @@ export function restoreProcessEnvValue(
   process.env[name] = value;
 }
 
-/**
- * Runs body with process.env entries and (optionally) the working directory
- * overridden, restoring both afterwards even when body throws. An undefined
- * env value unsets that variable for the duration.
- */
 export async function withScopedProcessEnv<T>(
   options: {
     readonly env: Readonly<Record<string, string | undefined>>;

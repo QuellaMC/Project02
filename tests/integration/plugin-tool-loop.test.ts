@@ -410,8 +410,7 @@ describe('plugin-driven Character State tool loop', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      // No feedback budget left after the tool round: the empty reply
-      // must reject the turn rather than earn a correction round.
+      // No feedback budget left after the tool round.
       maxToolRounds: 1,
     });
 
@@ -422,9 +421,7 @@ describe('plugin-driven Character State tool loop', () => {
     expect(
       logStore.conversationMessages().map(message => message.role),
     ).toEqual(['user']);
-    // The tool ran and reported success to the model, which reasoned on
-    // it for the rest of the turn. Whatever happened is history: a later
-    // rejection stops further work, it does not rewrite the record.
+    // A later rejection stops further work; it does not rewrite the record.
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(pluginStore.readJson('checkpoint.json')).toBeDefined();
   });
@@ -503,8 +500,7 @@ describe('plugin-driven Character State tool loop', () => {
       status: 'rejected',
       reason: 'plugin_health_rejected',
     });
-    // The tool already ran and reported success; a health rejection
-    // stops further work rather than erasing what happened.
+    // A health rejection stops further work; it does not erase what happened.
     expect(pluginStore.readJsonl('events.jsonl')).toHaveLength(1);
     expect(pluginStore.readJson('checkpoint.json')).toBeDefined();
   });

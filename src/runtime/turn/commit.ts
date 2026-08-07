@@ -150,9 +150,8 @@ export async function appendVisibleReplyForDecision(
 }
 
 /**
- * Saying something is what makes it real, so the message enters the
- * session and reaches the user before it reaches disk. A storage failure
- * after that point is reported, never un-said: the conversation happened.
+ * The message reaches the user before it reaches disk; a storage failure
+ * after that point is reported, never un-said.
  */
 async function commitVisibleMessage(
   state: RuntimeTurnState,
@@ -332,8 +331,7 @@ function createTerminalRawEventInput(
 ): RawEventLogRecordInput {
   const {state} = options;
   // Commit validation describes the terminal decision, not the turn's
-  // message history: a terminal round carrying only non-committed text
-  // has no accepted reply even when earlier rounds committed one.
+  // history: a terminal round with only non-committed text has no reply.
   const terminalVisibleReplyText = executionVisibleReplyTexts(
     options.roleModelResult.decision,
   ).at(-1);
@@ -388,9 +386,8 @@ function recoverCompletedTerminalRawEvent(
   let durableTerminal: RawEventLogRecord | undefined;
 
   try {
-    // A fresh validated read through the store's own gate: the failed
-    // append invalidated its cache, so this re-reads what actually
-    // landed and answers whether the terminal is among it.
+    // The failed append invalidated the store's cache, so this re-reads
+    // what actually landed.
     durableTerminal = findRuntimeTurnTerminalRawEvent(
       state.options.logStore.rawEvents(),
       state.identity,
@@ -450,9 +447,8 @@ async function recordAfterTurnCommitted(
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
   }
 
-  // Live reloads run only after the committing turn's own after-commit
-  // hooks, so the instance that served this turn finalizes its state and
-  // the swapped instance starts serving strictly at the next turn.
+  // Reloads run after this turn's own after-commit hooks, so a swapped
+  // instance starts serving strictly at the next turn.
   const configReload = await applyCompletedRuntimeConfigReloads({
     pluginHost: options.pluginHost,
     effects: runtimeConfigEffects,

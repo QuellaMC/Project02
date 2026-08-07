@@ -17,11 +17,7 @@ export type RuntimePluginFactoryFunction = (
 ) => Promise<RuntimePlugin> | RuntimePlugin;
 
 export type RuntimePluginPackageLoadOptions = {
-  /**
-   * Receives a fully constructed candidate when package acceptance rejects it.
-   * The caller can then route the candidate through its ordinary lifecycle
-   * cleanup without weakening the package loader's manifest boundary.
-   */
+  /** A rejected candidate still exists, so the caller can tear it down. */
   readonly retainRejectedCandidate?: (plugin: RuntimePlugin) => void;
 };
 

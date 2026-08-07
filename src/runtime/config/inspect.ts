@@ -260,8 +260,7 @@ type ConfiguredPluginActivationView = {
   };
 };
 
-// Structural view of the app-layer activation result: runtime/config must
-// not import src/app, and the join only needs these fields.
+// Structural because runtime/config must not import src/app.
 export function inspectConfiguredPlugins(
   runtimeConfig: ConfiguredPluginActivationView,
 ): readonly InspectConfiguredPlugin[] {

@@ -1,11 +1,4 @@
-/**
- * Single owner of the project02.character.json descriptor shape: the pure
- * parser the character loader uses at discovery. Character packages are
- * data-only — a descriptor and nothing else — so unlike plugin packages
- * there is no entry module and no factory contract. "$schema" is allowed
- * so descriptors can reference the editor schema in schemas/; its value
- * is checked for shape and otherwise unused.
- */
+/** "$schema" lets a descriptor point at the editor schema; it is unused. */
 import {
   characterLength,
   freezeCharacterProfile,
@@ -30,10 +23,7 @@ export const characterPackageDescriptorFileName = 'project02.character.json';
 export const maxCharacterPersonaSections = 16;
 export const maxCharacterPersonaSectionLength = 4000;
 
-// Bounded per component: the version is copied into `characterRef.version` on
-// every role-model I/O snapshot and persisted in raw evidence, so an unbounded
-// digit count would let one package field add kilobytes to every turn. Nine
-// digits per component is far beyond any real semantic version.
+// Bounded because the version is copied into every I/O snapshot and persisted.
 const characterVersionPattern = /^\d{1,9}\.\d{1,9}\.\d{1,9}$/u;
 
 export const maxCharacterPluginExpectations = 32;
@@ -59,13 +49,7 @@ export type CharacterMeta = {
   readonly version: string;
 };
 
-/**
- * Plugins a character declares: required ids block activation when
- * missing or disabled, recommended ids only warn, and config carries
- * package-authored defaults for the character overlay. Shape-only here
- * — whether a plugin id or field exists is judged by the app layer
- * against the installed catalog.
- */
+/** Shape only: the app layer judges these against the installed catalog. */
 export type CharacterPluginExpectations = {
   readonly required: readonly string[];
   readonly recommended: readonly string[];
@@ -220,9 +204,6 @@ function parseCharacterIdentity(value: unknown): CharacterIdentityParseResult {
 
   const displayName = value['displayName'];
 
-  // Shared with the user speaker: both are stamped into `speakerName`, and both
-  // are interpolated before a colon in chat output, so a multiline name
-  // would let an accepted package forge extra lines.
   if (!isValidSpeakerDisplayName(displayName)) {
     return rejectedDescriptor(
       'invalid_identity',
@@ -284,9 +265,6 @@ function parseCharacterPersona(value: unknown): CharacterPersonaParseResult {
     if (
       typeof section !== 'string' ||
       section.trim().length === 0 ||
-      // Code points, matching the published schema's `maxLength`. Counting
-      // UTF-16 units would reject an editor-valid package whose sections use
-      // astral characters at half the documented length.
       characterLength(section) > maxCharacterPersonaSectionLength
     ) {
       return rejectedDescriptor(

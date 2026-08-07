@@ -110,11 +110,7 @@ export async function runInspectCliFromArgs(
         : options.env;
     const parsedArgs = parseInspectCliArgs(args);
     validateInspectCliArgs(parsedArgs);
-    // Inspect reports on a store; it has no business making one. The
-    // report stage runs every decision an activation runs and describes
-    // what it would produce, so there is nothing to ask consent for and
-    // nothing to refuse: reading a store the operator has not set up
-    // yet tells them exactly that, and leaves the path empty.
+    // Inspect reports on a store and never creates one; no consent gate.
     const startup = resolveRuntimeCliStartup({
       stage: 'report',
       location: parsedArgs,
@@ -131,10 +127,7 @@ export async function runInspectCliFromArgs(
       );
     }
 
-    // A broken unrelated character package leaves the selected one
-    // usable. Reporting healthy state without saying so would give the
-    // operator no indication the installed package needs fixing, so the
-    // warnings go to stderr and leave the stdout JSON contract intact.
+    // Warnings go to stderr: the stdout JSON contract stays intact.
     for (const warning of interpreted.warnings) {
       options.stderr.write(`Warning: ${warning}\n`);
     }
@@ -189,9 +182,7 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       continue;
     }
 
-    // Rejected rather than ignored: inspect creates nothing, so a flag
-    // asking it to would be accepted and do nothing, which is worse
-    // than being told it does not apply here.
+    // Accepting a flag that would do nothing is worse than refusing it.
     if (arg === '--init') {
       throw new InspectCliUsageError(
         'inspect never creates a store, so --init does not apply. ' +
@@ -328,17 +319,8 @@ async function writeSessionEvidence(
     characterId: runtimeLocation.characterScope.characterId,
   });
   const session = await sessionStore.readSession(args.sessionId);
-  // boundCharacter is passed for a wrong-answer check, not a security
-  // one: there is no attacker in a local app. It catches a session whose
-  // evidence names a different character than the directory it sits in —
-  // reachable by a bug in our own write path, an interrupted migration,
-  // or a home folder synced between machines. Unchecked, inspect would
-  // print another character's transcript as if it were this one, and the
-  // operator would have no way to tell.
-  //
-  // No boundUserSpeaker, though: the user speaker id is the same constant
-  // for every record in a single-user app, so binding it would compare
-  // that constant to itself.
+  // boundCharacter catches a session naming a different character than
+  // its directory; the user speaker id is one constant, so it is not bound.
   const logStore = createFileRuntimeLogStore({
     ...storage,
     sessionId: session.sessionId,

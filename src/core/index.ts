@@ -1,8 +1,4 @@
-/**
- * Public API of src/core.
- *
- * Cross-module imports of core must land here (arch:check rule 5).
- */
+/** Cross-module imports of core must land here (arch:check rule 5). */
 export {
   freezeCharacterProfile,
   visibleMessageRoleValues,

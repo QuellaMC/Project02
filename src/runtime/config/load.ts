@@ -174,11 +174,7 @@ function registerSelectedLoadedProject02RuntimeConfigSnapshot(
   return snapshot;
 }
 
-/**
- * Location resolution accepts only the exact snapshot produced by the loader.
- * A structural clone can preserve strings while discarding the physical
- * selection event that gave those strings their authority.
- */
+/** Only the loader's exact snapshot: a clone loses the selection event. */
 export function requireSelectedLoadedProject02RuntimeConfigSnapshot(
   value: unknown,
 ): SelectedLoadedProject02RuntimeConfig {
@@ -230,12 +226,7 @@ function snapshotAuthoredRuntimeConfigDocument(value: unknown):
   }
 }
 
-/**
- * Reads and parses one runtime config document (size caps + JSON parse),
- * shared by the global loader and the character overlay loader. Existence
- * checks stay with the callers: an absent file means different things to
- * each of them.
- */
+/** Existence checks stay with callers: absence means different things. */
 export function readProject02RuntimeConfigDocument(path: string):
   | {readonly status: 'accepted'; readonly value: unknown}
   | {

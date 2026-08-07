@@ -90,9 +90,7 @@ describe('runtime plugin host catalog and routing', () => {
   });
 
   it('requires one configControl binding at construction', () => {
-    // The binding is required by the type, so this state is only
-    // reachable from untyped callers; the cast exists to exercise that
-    // runtime backstop.
+    // The type requires the binding, so only an untyped caller reaches this.
     const controlLessState = {
       pluginManifests: [],
     } as unknown as RuntimePluginConfigControlHostState;

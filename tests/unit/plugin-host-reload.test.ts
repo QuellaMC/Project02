@@ -342,8 +342,6 @@ describe('runtime plugin host live config reload', () => {
 
     expect(result?.outcome).toBe('live_applied');
     expect(seenFingerprints).toEqual(['sha256:final']);
-    // The evidence must describe the authored file the reload verified,
-    // which is the final effect's fingerprint, not the intermediate one.
     expect(result?.evidence).toMatchObject({
       configFingerprint: 'sha256:final',
     });
@@ -376,8 +374,7 @@ describe('runtime plugin host live config reload', () => {
     expect(result?.evidence?.summary).toContain('hook');
     expect(await contextText(host)).toBe('v1');
 
-    // The declined rebuild may hold factory-allocated resources, so terminal
-    // lifecycle hooks must still reach it even though it never served.
+    // The declined rebuild may hold factory-allocated resources.
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     expect(sessionEndLog.sort()).toEqual(['declined-rebuild', 'v1']);
   });
@@ -396,8 +393,8 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    // A turn that also updated ANOTHER plugin leaves the authored file at
-    // the whole turn's final fingerprint, not this group's last effect.
+    // A turn that also updated another plugin leaves the file at the turn's
+    // final fingerprint, past this group's last effect.
     const result = await host.reloadPluginForCommittedConfig?.(
       [toneEffect('tone', 'effect-tone-1', 'sha256:intermediate')],
       {turnResultFingerprint: 'sha256:turn-final'},
@@ -461,8 +458,7 @@ describe('runtime plugin host live config reload', () => {
     expect(second?.outcome).toBe('live_applied');
     expect(await contextText(host)).toBe('v1');
 
-    // v1 went live → retired → live again (config-keyed factory cache); it
-    // must not keep its retired slot or terminal hooks would run it twice.
+    // A config-keyed factory cache took v1 live, retired, then live again.
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     expect(sessionEndLog.sort()).toEqual(['v1', 'v2']);
   });
@@ -497,8 +493,8 @@ describe('runtime plugin host live config reload', () => {
     const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
 
     expect(result?.outcome).toBe('deferred');
-    // The candidate never becomes live, but construction still transfers
-    // teardown ownership to the host.
+    // Construction transfers teardown ownership even for a candidate that
+    // never goes live.
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     expect(sessionEndLog).toEqual(['drifted', 'v1']);
   });
@@ -538,8 +534,7 @@ describe('runtime plugin host live config reload', () => {
 
     expect(result?.outcome).toBe('live_applied');
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
-    // Retired instances run BEFORE the live one so the live instance's
-    // terminal writes land last and win.
+    // Retired instances run first so the live one's terminal writes land last.
     expect(sessionEndLog).toEqual(['v1', 'v2']);
   });
 
@@ -592,9 +587,8 @@ describe('runtime plugin host live config reload', () => {
     expect(host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:after')).toBe(
       true,
     );
-    // The swap supersedes the construction fingerprint for this plugin: a
-    // later update that RESTORES the startup config must not read as
-    // already-current while the newer instance is the one serving.
+    // Restoring the startup config must not read as already-current while the
+    // newer instance is the one serving.
     expect(
       host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:construction'),
     ).toBe(false);
@@ -611,8 +605,8 @@ describe('runtime plugin host live config reload', () => {
         reloader: {
           reload: (_pluginId, reloadOptions) =>
             new Promise(resolve => {
-              // A late factory still transfers teardown ownership the moment
-              // it produces the candidate, not through the settled result.
+              // Ownership transfers when the candidate is produced, not through
+              // the settled result.
               settleLate = plugin => {
                 reloadOptions.retainCandidate(plugin);
                 resolve({status: 'rebuilt', plugin});
@@ -660,8 +654,8 @@ describe('runtime plugin host live config reload', () => {
         reloader: {
           reload: (_pluginId, reloadOptions) =>
             new Promise(resolve => {
-              // A late factory still transfers teardown ownership the moment
-              // it produces the candidate, not through the settled result.
+              // Ownership transfers when the candidate is produced, not through
+              // the settled result.
               settleLate = plugin => {
                 reloadOptions.retainCandidate(plugin);
                 resolve({status: 'rebuilt', plugin});
@@ -696,9 +690,8 @@ describe('runtime plugin host live config reload', () => {
       const host = reloadHost({
         initial: terminalReloadFixturePlugin('v1', terminalLog),
         reloader: {
-          // Never settles and never produces a candidate. The reload race
-          // abandons this promise without cancelling it, so it stays tracked
-          // for the rest of the process.
+          // The race abandons this promise without cancelling it, so it stays
+          // tracked for the rest of the process.
           reload: () => new Promise(() => undefined),
         },
       });
@@ -709,15 +702,13 @@ describe('runtime plugin host live config reload', () => {
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
       expect((await resultPromise)?.outcome).toBe('failed');
 
-      // Terminal dispatch is the one phase that must always finish. Without a
-      // bound this never resolves and the session can never shut down.
+      // Terminal dispatch is the one phase that must always finish, so without
+      // a bound the session can never shut down.
       const shutdown = host.shutdown(testPluginContext());
 
       await vi.advanceTimersByTimeAsync(runtimePluginQuiesceTimeoutMs);
       await shutdown;
 
-      // Giving up on the stuck reload must not skip teardown for the instance
-      // the host already owns.
       expect(terminalLog).toEqual(['v1:shutdown']);
     } finally {
       vi.useRealTimers();
@@ -756,10 +747,8 @@ describe('runtime plugin host live config reload', () => {
       await shutdown;
       expect(terminalLog).toEqual(['v1:shutdown']);
 
-      // The abandoned factory was never cancelled, so it can still produce an
-      // instance. Nothing will read the retired list again, so this candidate
-      // must be torn down on arrival rather than filed away holding whatever
-      // its factory opened.
+      // The abandoned factory was never cancelled, and nothing reads the retired
+      // list again, so this candidate must be torn down on arrival.
       settleLate?.(terminalReloadFixturePlugin('late', terminalLog));
       await vi.runAllTimersAsync();
 

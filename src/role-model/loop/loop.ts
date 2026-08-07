@@ -93,9 +93,9 @@ export type RunRoleModelLoopOptions = {
     event: RoleModelPluginToolCallsRequestedEvent,
   ) => Promise<void> | void;
   /**
-   * Every visible reply of an accepted round, interim or terminal.
-   * Required, because an undelivered reply is user-facing text lost. A
-   * rejected round delivers nothing: it commits no part of itself.
+   * Fires for interim and terminal replies alike; required because an
+   * undelivered reply is user-facing text lost. A rejected round delivers
+   * nothing.
    */
   readonly onVisibleReply: (
     event: RoleModelVisibleReplyEvent,
@@ -172,8 +172,7 @@ export const defaultRoleModelMaxToolRounds = 99;
 export async function runRoleModelLoop(
   options: RunRoleModelLoopOptions,
 ): Promise<RoleModelLoopResult> {
-  // The snapshot constructor enforces this too, but rejecting up front
-  // keeps a contradictory ref from reaching the provider at all.
+  // Checked again by the snapshot constructor; this keeps a bad ref off the wire.
   if (options.characterRef !== undefined) {
     assertRoleModelCharacterRefMatchesCharacter(
       options.characterRef,
@@ -222,8 +221,7 @@ export async function runRoleModelLoop(
 
     if (terminalResult !== undefined) {
       if (terminalResult.status === 'accepted') {
-        // From the execution decision, not the evidence snapshot, which
-        // may hold a redacted projection of the text.
+        // From the execution decision: the evidence snapshot may be redacted.
         await deliverVisibleReply({
           options,
           round,
@@ -864,10 +862,8 @@ async function routeExecutableToolCalls(options: {
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
   readonly priorToolObservations: readonly RoleModelToolObservation[];
 }): Promise<PluginToolRoutingResult> {
-  // Admission runs in call order because it appends the tool_call_started
-  // record for each call, and those must land in the order the model asked
-  // so the terminal event's toolCallIds match. Execution then runs
-  // concurrently under the batch lock, with results reassembled by slot.
+  // Admission runs in call order: tool_call_started records must land in
+  // the order the model asked so the terminal event's toolCallIds match.
   const results: (RoleModelPluginToolRoutingEvidence | undefined)[] = [];
   const admitted: {
     readonly slot: number;
@@ -1022,20 +1018,15 @@ async function routeExecutableToolCalls(options: {
     });
   }
 
-  // One failing call never cancels its siblings: the model receives the
-  // complete result set and decides what to do next.
   const lock = createToolBatchLock();
 
-  // Settled, not all: a failing report must not leave siblings running
-  // past the turn that owns them, so every call finishes before the
-  // first failure propagates.
+  // Settled, not all: no call outruns the turn, and no failure cancels a sibling.
   const settled = await Promise.allSettled(
     admitted.map(async entry => {
       results[entry.slot] = await report(await lock.run(entry.mode, entry.run));
     }),
   );
-  // Every cause, not the first: concurrent calls fail for independent
-  // reasons, and a turn that lost two records must not report one.
+  // Every cause, not the first: concurrent calls fail independently.
   const failures = settled.flatMap((outcome): unknown[] =>
     outcome.status === 'rejected' ? [outcome.reason] : [],
   );
@@ -1056,10 +1047,6 @@ async function routeExecutableToolCalls(options: {
   );
 }
 
-/**
- * The provider rejected this call's arguments before it could run, so it
- * is answered from the error rather than dispatched.
- */
 function nativeToolCallArgumentRejection(options: {
   readonly callId: string;
   readonly call: RuntimePluginToolCall;
@@ -1090,11 +1077,7 @@ function nativeToolCallArgumentRejection(options: {
   });
 }
 
-/**
- * Reports a call as soon as it settles rather than when the batch does:
- * a tool's write is durable when its call returns, so a crash in that
- * window would leave a started call and no record of the effect.
- */
+// Reported when the call settles, not the batch: its write is already durable.
 function createSettledToolCallReporter(options: {
   readonly round: number;
   readonly onPluginToolCallCompleted?: (
@@ -1189,14 +1172,8 @@ function findPluginToolDefinition(
   return definitions.find(definition => definition.name === toolName);
 }
 
-/**
- * One proposed tool call, two views. The routed view is what hooks,
- * rejections, and evidence carry, so credential-shaped input values are
- * redacted before anything records or displays them. The execution view
- * is what the plugin runs on and keeps the real values — redacting it
- * would execute the tool against "[redacted]" placeholders. Both are
- * built from one identity here so the views cannot drift apart.
- */
+// The routed view is redacted because hooks, rejections, and evidence carry
+// it; the execution view keeps real values or the tool runs on placeholders.
 function createRuntimePluginToolCallViews(options: {
   readonly callId: string;
   readonly identity: RuntimeEventIdentity;

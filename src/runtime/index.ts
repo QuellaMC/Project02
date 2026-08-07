@@ -1,11 +1,6 @@
 /**
- * Public API of src/runtime.
- *
- * Cross-module imports of runtime land here or on the submodule barrels
- * (config/, storage/, evidence/, turn/ each expose their own index.ts —
- * arch:check rule 5 accepts both levels). This barrel carries the
- * root-level surface: the local turn entrypoint and the evidence record
- * contract.
+ * Cross-module imports of runtime land here or on the submodule barrels;
+ * arch:check rule 5 accepts both levels.
  */
 export {
   recordLocalUserMessageInputRejection,

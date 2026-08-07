@@ -17,9 +17,7 @@ import {freezeModelToolDefinition} from './model-tools.ts';
 import type {RoleModelAllowedToolName} from './tool-names.ts';
 
 export function createDefaultRoleModelPluginToolDefinitions(): readonly RoleModelPluginToolDefinition[] {
-  // Derived from the built-in tool definitions directly; the first-party
-  // model-tools package derives its provided tools from the same source,
-  // so both sides stay in lockstep without importing an implementation.
+  // Same source as the first-party model-tools package, so both stay in lockstep.
   return Object.freeze(
     builtInModelToolDefinitionsForUserTurn().map(definition =>
       Object.freeze({
@@ -105,10 +103,7 @@ function assertHostRoleModelToolPolicy(
     );
   }
 
-  // A tool that declares requiresConfirmation is model-facing and
-  // prompts the user before it runs; the runtime no longer refuses to
-  // expose it. What a plugin may do is decided when the user enables it,
-  // as with a local MCP server they chose to run.
+  // requiresConfirmation is allowed: the tool prompts the user before it runs.
 }
 
 export function modelToolDefinitionsForPluginToolDefinitions(

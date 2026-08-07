@@ -40,11 +40,7 @@ export const runtimePluginAccessLevelValues = [
   'write',
 ] as const;
 
-/**
- * How a tool call may overlap others in the same model batch. Scheduling
- * only, separate from the annotation hints: a read-only tool can still
- * need exclusivity, and a writing one against isolated state may not.
- */
+/** Scheduling only: independent of the read-only and destructive hints. */
 export const runtimePluginToolConcurrencyValues = [
   'shared',
   'exclusive',
@@ -153,15 +149,7 @@ export type RuntimePluginAccessSnapshot = {
 export type RuntimePluginToolConcurrency =
   (typeof runtimePluginToolConcurrencyValues)[number];
 
-/**
- * Advisory description of a tool, in the shape MCP clients use, so the
- * person enabling a plugin can judge it before they enable it.
- *
- * Nothing in the runtime reads these. Enabling a plugin is the trust
- * decision, and a hint the plugin wrote about itself cannot be the thing
- * that constrains it — so an absent hint withholds nothing, and a
- * `readOnlyHint` does not stop a tool from writing.
- */
+/** Advisory only: nothing in the runtime constrains a tool by these hints. */
 export type RuntimePluginToolAnnotations = {
   readonly readOnlyHint?: boolean;
   readonly destructiveHint?: boolean;
@@ -192,9 +180,7 @@ export type RuntimePluginConfigValueType =
 export type RuntimePluginConfigScope =
   (typeof runtimePluginConfigScopeValues)[number];
 
-// Reason code recorded in raw-event evidence when a plugin's
-// before-role-model hook rejects the turn. Contract vocabulary: the
-// runtime's turn model and codecs match on it.
+// Contract vocabulary: the runtime's turn model and codecs match on it.
 export const runtimePluginBeforeRoleModelCallRejectionReason =
   'plugin_before_role_model_call_rejected';
 

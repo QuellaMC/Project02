@@ -1,9 +1,6 @@
 /**
- * Project02 home initialization: the shared root that owns the global
- * config, secrets, installed plugin/character packages, and the
- * per-character data directories. Exactly one home marker guards it; the
- * per-character data dirs carry their own 'character-data' markers via
- * the session store's initialization path.
+ * One home marker guards the shared root; the per-character data dirs
+ * carry their own markers.
  */
 import {
   listDirectoryEntriesSync,
@@ -34,12 +31,8 @@ export type EnsureInitializedProject02HomeOptions =
   };
 
 /**
- * Marks a home and lays out the storage it owns.
- *
- * This is the storage half of a store. The other half is the global
- * config document, whose shape belongs to `runtime/config` — see
- * `ensureInitializedProject02Store` there, which is what CLIs call and
- * what makes a store whole in one act.
+ * The storage half of a store; `ensureInitializedProject02Store` in
+ * `runtime/config` is the whole one, and what CLIs call.
  */
 export async function ensureInitializedProject02Home(
   options: EnsureInitializedProject02HomeOptions = {},
@@ -72,26 +65,8 @@ export async function ensureInitializedProject02Home(
 }
 
 /**
- * Whether a run here would conjure a home out of nothing — the one
- * question a caller asking consent to create a store needs answered,
- * and a different one from `assertProject02HomeAdoptable`'s "would the
- * runtime accept this directory", which accepts exactly the empty
- * directory consent is about.
- *
- * Nothing at all means nothing at all: absent, or present and empty.
- * A directory holding anything else is not a fresh spot this run would
- * take over, and the two ways that happens both belong to guards that
- * can say more than a prompt could. Project02's own entries — an
- * authored `config.json`, installed packages, existing character data,
- * the marker itself — say the operator already put this store here,
- * whether or not a runtime ever marked it; the initializer adopts it.
- * Foreign entries say it is someone else's, and offering to create a
- * store over them would replace a precise refusal with an offer that
- * could not be honored.
- *
- * Read-only, and quiet about a root it cannot list: something is
- * there, so it answers `false` and leaves the reporting to the reader
- * that opens it.
+ * Whether a run here would create a home out of nothing: the root is
+ * absent, or present and empty.
  */
 export function project02HomeCreationIsNew(
   options: Project02HomeLayoutOptions = {},
@@ -101,20 +76,11 @@ export function project02HomeCreationIsNew(
   try {
     return listDirectoryEntriesSync(layout.homeRoot).length === 0;
   } catch (error: unknown) {
-    // Absent is the one case that is genuinely new. Anything else —
-    // a file where the home should be, a directory that cannot be
-    // read — is something the caller must not offer to overwrite.
     return isNodeErrorWithCode(error, 'ENOENT');
   }
 }
 
-/**
- * Read-only twin of the initializer's refusals: a marker-less home
- * holding foreign entries, or a marker naming another scope, is
- * rejected without creating anything. Global config writes use this
- * before authoring settings into a directory the runtime would refuse
- * to adopt.
- */
+/** Applies the initializer's refusals without creating anything. */
 export function assertProject02HomeAdoptable(
   options: Project02HomeLayoutOptions = {},
 ): Promise<void> {
@@ -123,11 +89,6 @@ export function assertProject02HomeAdoptable(
   });
 }
 
-/**
- * Synchronous ownership admission for synchronous control transactions.
- * The async public entry delegates here so every writer applies exactly the
- * same home rules before creating locks or files.
- */
 export function assertProject02HomeAdoptableSync(
   options: Project02HomeLayoutOptions = {},
 ): void {
@@ -147,9 +108,8 @@ export function assertProject02HomeAdoptableSync(
 
   assertProject02HomeMarker(layout, marker);
 
-  // An initialized home is only usable if character data can actually
-  // live in it — and if its own control entries are real: a symlinked
-  // lock root or config file would route writes outside the home.
+  // A symlinked data root, lock root, or config file would route this
+  // home's writes outside it.
   assertRealCharacterDataRootIfPresent(layout);
   assertRealHomeControlEntries(layout);
 }
@@ -166,11 +126,6 @@ function assertProject02HomeMarker(
   }
 }
 
-/**
- * Character data must live inside the home: a symlinked data root
- * would put identity markers and session history outside the home this
- * guard just validated.
- */
 async function ensureRealCharacterDataRoot(
   layout: Project02HomeLayout,
 ): Promise<void> {
@@ -181,13 +136,7 @@ async function ensureRealCharacterDataRoot(
   }
 }
 
-/**
- * The shared env file must live inside the home before a mutation
- * writes secrets through it. Kept separate from the adoptability
- * assert: startup error precedence gives env-independent activation
- * errors priority over env-file problems, so only the mutation guards
- * call this.
- */
+/** Only mutation guards call this; activation errors outrank env-file ones. */
 export function assertRealHomeEnvFile(
   options: Project02HomeLayoutOptions = {},
 ): Promise<void> {
@@ -226,12 +175,6 @@ function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
   }
 }
 
-/**
- * True when something is at the path but is not the kind the home requires.
- * An absent entry is not a violation — these are control paths the runtime
- * creates on demand — and neither is one that cannot be inspected: the reader
- * that actually opens it reports that far more precisely than this guard.
- */
 function isPresentButNot(
   entry: RealEntry,
   kind: 'file' | 'directory',
@@ -293,8 +236,7 @@ function project02HomeHasForeignContent(layout: Project02HomeLayout): boolean {
       continue;
     }
 
-    // A concurrent initializer's half-written control file is not
-    // foreign content; its rename lands before that sibling proceeds.
+    // A concurrent initializer's half-written control file is not foreign.
     if (
       entry.isFile() &&
       isLiveAtomicReplacementForAnyTarget(entry.name, [
@@ -312,14 +254,6 @@ function project02HomeHasForeignContent(layout: Project02HomeLayout): boolean {
   return false;
 }
 
-// Entries a Project02 home may contain: the global config and secrets,
-// the home lock root, installed plugin and character packages, the
-// per-character data root, and the home marker itself. The directory
-// roots are type-checked — a regular file called character-data is
-// foreign, since adopting it would only defer to a raw mkdir failure.
-// The file entries stay name-based: their readers (config loader, env
-// reader, marker decode) report a wrong type far more precisely than
-// this guard could.
 function isProject02HomeControlEntry(
   layout: Project02HomeLayout,
   entry: Dirent,
@@ -330,9 +264,7 @@ function isProject02HomeControlEntry(
     entryPath === layout.characterDataRoot ||
     entryPath === layout.locksRoot
   ) {
-    // Never symlinks: a linked data root would carry character state
-    // outside the home, and a linked lock root would coordinate this
-    // home's writes through foreign control state.
+    // A linked data or lock root would carry this home's state outside it.
     return entry.isDirectory();
   }
 
@@ -345,8 +277,7 @@ function isProject02HomeControlEntry(
   }
 
   if (entryPath === layout.configPath) {
-    // Authored global config must live inside the home: mutations
-    // canonicalize through links and would rewrite the target.
+    // Mutations canonicalize through links and would rewrite the target.
     return entry.isFile();
   }
 

@@ -13,12 +13,8 @@ export function createRuntimeConfigFingerprint(
 }
 
 /**
- * Authored-config fingerprint across both layers: the global document
- * plus the active character's overlay document (null when the overlay
- * file is absent — deliberately distinct from an empty document). The
- * envelope also makes a layered fingerprint of a global document differ
- * from that document's per-file fingerprint, so a layered currency gate
- * can never be satisfied with a single-file value.
+ * A null overlay means an absent file, distinct from an empty document.
+ * The layer envelope keeps this value off any single-file fingerprint.
  */
 export function createLayeredRuntimeConfigFingerprint(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;

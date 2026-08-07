@@ -16,13 +16,6 @@ export type RuntimePluginFactoryDefinition =
 export const defaultRuntimePluginHostServiceEntries =
   defaultRuntimePluginHostServiceCatalogEntries();
 
-/**
- * The one catalog composition: host services, discovered packages, and
- * factory overrides layered into one entry map with one
- * default-enablement derivation. Factory overrides replace discovered
- * entries of the same id, and their manifests then decide default
- * enablement for those ids.
- */
 export function composeRuntimePluginCatalog(options: {
   readonly discoveredPackages?: readonly DiscoveredRuntimePluginPackage[];
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;

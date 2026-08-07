@@ -730,20 +730,7 @@ function requiredRuntimePolicy(
   );
 }
 
-/**
- * Tool annotations are advisory and every field is optional, so an
- * absent block is valid; a present one must still be well formed, since
- * a malformed hint would silently read as "unknown" and change whether
- * the user is asked.
- */
-/**
- * Fields a tool may no longer declare, and what to write instead.
- *
- * Ignoring one would silently reverse what its author asked for: a tool
- * marked `external_write` was withheld from the model, and dropping the
- * field on the floor hands it over. Refusing to load says so once, to the
- * person who can fix the manifest.
- */
+/** Ignoring a retired field would silently reverse its author's intent. */
 const retiredProvidedToolFields = Object.freeze({
   sideEffectLevel:
     'use annotations (readOnlyHint, destructiveHint, openWorldHint)',

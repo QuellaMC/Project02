@@ -1,21 +1,13 @@
 /**
- * Single owner of the store flags every CLI accepts: which store to use
- * (`--store`, `--config`, `--character`) and whether the operator has
- * already agreed to create one (`--init`). They are parsed together
- * because they are answered together — `--init` says yes to creating a
- * store at exactly the location these other flags select.
+ * Single owner of the store flags every CLI accepts: `--init` is parsed
+ * with them because it consents to the location the others select.
  */
 export type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
 import {readFlagValue} from './flags.ts';
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 
-/**
- * Store selection plus the consent that governs creating it. Kept
- * separate from `RuntimeLocationCliState`, which the runtime owns and
- * which describes only where config lives: consent is a CLI concern and
- * has no meaning to the config resolver.
- */
+/** Consent is a CLI concern, kept out of the runtime's location type. */
 export type RuntimeStoreCliState = {
   readonly location: RuntimeLocationCliState;
   readonly init: boolean;
@@ -99,8 +91,7 @@ export function parseRuntimeStoreFlag(options: {
 
     return {
       status: 'matched',
-      // A bare flag consumes no value, so the caller's loop must not
-      // skip the next argument the way the value flags make it.
+      // A bare flag consumes no value, so the caller's loop must not skip.
       nextIndex: options.index,
       state: {location, init: true},
     };
@@ -111,22 +102,7 @@ export function parseRuntimeStoreFlag(options: {
   };
 }
 
-/**
- * Rejects a `--character` value that is not shaped like a character id.
- *
- * The other flags on this surface already refuse a malformed value here
- * — `--store` through the home layout, `--session` through the session
- * id — and `--character` was the one that did not, so a value like
- * `../bad` reached package discovery and came back as "was not found".
- * That answer is wrong twice over: it describes a search that could
- * never have succeeded, and it arrives after a store has been selected
- * on its behalf. A name the runtime cannot spell is a usage error, and
- * usage errors belong to the parser.
- *
- * The shape is the identifier contract itself, not a copy of it, so a
- * `--character` value the CLI accepts is exactly one the character-data
- * directory and the `project02.character` config field would accept.
- */
+/** Package discovery would otherwise report a malformed id as "not found". */
 function requireCharacterIdShape(value: string): string {
   if (!isProject02Identifier(value.trim())) {
     throw new RuntimeLocationCliUsageError(

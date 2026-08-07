@@ -1,10 +1,4 @@
-/**
- * The manifest gate for a tool's input contract. A contract is valid
- * when it is a JSON object schema that Ajv compiles — the same Ajv, in
- * the same configuration, that enforces the contract against every
- * proposed input. There is no keyword list of this module's own to
- * drift from what the engine actually supports.
- */
+/** The same Ajv that enforces a contract is the one that accepts it here. */
 import {
   compileModelToolInputContract,
   type ModelToolInputContract,
@@ -23,9 +17,7 @@ export function requiredModelToolInputContract(
     );
   }
 
-  // A tool takes named arguments, so its contract is always an object
-  // schema — that root is what a provider renders. Everything below the
-  // root means what JSON Schema says it means.
+  // A tool takes named arguments, so the root a provider renders is an object.
   if (value['type'] !== 'object') {
     return reject(
       'malformed_tool_definition',
@@ -36,9 +28,7 @@ export function requiredModelToolInputContract(
   let contract: ModelToolInputContract;
 
   try {
-    // The snapshot is the contract: deep-frozen, bounded, and known to
-    // round-trip through the store as written. The cast states that a
-    // JSON projection of an object schema is still that schema.
+    // The cast: a JSON projection of an object schema is still that schema.
     contract = createJsonBoundaryObjectSnapshot(value, {
       field: 'Model tool inputContract',
     }) as ModelToolInputContract;

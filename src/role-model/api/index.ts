@@ -1,10 +1,4 @@
-/**
- * Plugin-independent contract surface of role-model: the model-tool and
- * chat-wire vocabulary. This is the ONLY role-model barrel plugins/api
- * files may import — anything more would put the plugin contract on an
- * import cycle (plugins/api/types imports this barrel). Everything else
- * exports through the top-level role-model/index.ts.
- */
+/** The only role-model barrel plugins/api may import: anything more cycles. */
 export {
   builtInModelToolDefinitions,
   builtInModelToolDefinitionsForUserTurn,

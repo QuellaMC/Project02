@@ -1,12 +1,4 @@
-/**
- * Public API of the plugin contract layer (src/plugins/api).
- *
- * This is the only plugins surface the runtime may depend on
- * (arch:check rule `runtime-plugins-value-via-api`): data shapes,
- * contract constants, validating constructors, and pure predicates.
- * Host, policy, and package behavior live outside api and must never
- * be imported from runtime.
- */
+/** runtime-plugins-value-via-api: runtime imports plugins only through here. */
 export {
   beforeRoleModelFailureBehaviorValues,
   characterStatePatchModelToolName,
@@ -142,11 +134,7 @@ export {
   type RuntimePluginPackageDescriptorIssue,
   type RuntimePluginPackageDescriptorParseResult,
 } from './package-descriptor.ts';
-// factory.ts is deliberately NOT re-exported here: it type-imports
-// runtime/config (resolved plugin config shapes), so exposing it through
-// this barrel would put the barrel on a runtime->api->runtime cycle.
-// Its consumers (package-loader, the composition root) reach it via
-// plugins/index.ts or intra-module paths.
+// factory.ts stays out: re-exporting it would cycle runtime->api->runtime.
 export {
   createPluginContextEvidence,
   createPluginToolEvidence,

@@ -113,13 +113,8 @@ export function cleanupAbandonedAtomicReplacementFilesSync(
 }
 
 /**
- * Remove abandoned atomic replacements for several targets sharing one
- * directory. Session evidence keeps three log files side by side, so
- * scanning once for all of them beats three passes over the same entries.
- *
- * A missing directory is nothing to clean, not a failure. Files that
- * vanish mid-scan are equally fine — another process finishing the same
- * cleanup is the expected race, not an error.
+ * A missing directory, or a file that vanishes mid-scan, is another
+ * process finishing the same cleanup rather than a failure.
  */
 export function cleanupAbandonedAtomicReplacementsIn(
   directory: string,
@@ -206,12 +201,6 @@ export function isAbandonedAtomicReplacementFile(fileName: string): boolean {
   return identity !== undefined && !processIsAlive(identity.ownerPid);
 }
 
-/**
- * True when an entry is an in-flight atomic replacement for one of the
- * given control files. Directory-initialization guards use this so a
- * sibling process mid-write never reads as foreign content; abandoned
- * replacements (dead owner) stay foreign.
- */
 export function isLiveAtomicReplacementForAnyTarget(
   fileName: string,
   targetPaths: readonly string[],

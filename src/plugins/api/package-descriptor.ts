@@ -1,10 +1,4 @@
-/**
- * Single owner of the project02.plugin.json descriptor shape: the pure
- * parser used by package-loader discovery and the file reader packages
- * use to self-read their manifest. "$schema" is allowed so descriptors
- * can reference the editor schema in schemas/; its value is checked for
- * shape and otherwise unused.
- */
+/** Single owner of the descriptor shape; "$schema" is allowed but unused. */
 import {extname} from 'node:path';
 
 import {
@@ -124,11 +118,7 @@ export function parseRuntimePluginPackageDescriptor(
   });
 }
 
-/**
- * Package self-read: packages call this from their plugin module to
- * recover their validated manifest from the descriptor next to them,
- * so the descriptor stays the single authored source of the manifest.
- */
+/** Package self-read, so the descriptor stays the manifest's one source. */
 export function readRuntimePluginPackageDescriptor(options: {
   readonly descriptorUrl: URL;
   readonly expectedEntry?: string;

@@ -8,18 +8,8 @@ export const defaultProject02HomeRoot = '.project02';
 
 export const defaultLocalRuntimeSessionId = 'local-session';
 
-// v5: the conversation log became per-message (commit-as-emitted) — role is
-// a recorded fact, turns may hold any number of visible messages, and each
-// message anchors to its own visible_message_committed raw event. v4 stores
-// were written under the strict user/character pair rule and fail closed.
-// v6: raw-events.jsonl became the one session log. The turn trace is
-// derived from it, trace.jsonl is no longer written or read, and a
-// trailing turn a crash left without its terminal event is an incomplete
-// state the reader surfaces, not damage. v5 stores fail closed.
-// v7: a tool's input contract is JSON Schema. Persisted plugin tool
-// definitions carry properties/required/additionalProperties where v6
-// carried a fields list, and a v6 record would decode as a malformed
-// contract rather than an older one, so v6 stores fail closed.
+// Bumped whenever a persisted shape changes; only stores written at this
+// exact version are readable, and older ones fail closed by version.
 export const localRuntimeStorageSchemaVersion = 7;
 
 export type LocalRuntimeReadableStorageSchemaVersion =
@@ -66,9 +56,8 @@ export class LocalRuntimeStorageContractError extends Error {
   }
 }
 
-// The shared home: global config, secrets, installed packages, and the
-// per-character data directories. Exactly one lock family lives here
-// (runtime-control-file:* for the global config/.env writes).
+// Exactly one lock family lives here: runtime-control-file:* for the
+// global config and .env writes.
 export type Project02HomeLayout = {
   readonly homeRoot: string;
   readonly configPath: string;
@@ -80,10 +69,8 @@ export type Project02HomeLayout = {
   readonly characterDataRoot: string;
 };
 
-// One character's data directory under <home>/character-data/<id>:
-// sessions, plugin state, the character-scoped config overlay, and one
-// identity-bearing schema marker. Deliberately has no envPath or package roots so shared
-// concerns cannot be derived from a data root by accident.
+// Deliberately has no envPath or package roots, so shared concerns cannot
+// be derived from a data root by accident.
 export type LocalRuntimeStorageLayout = {
   readonly storeRoot: string;
   readonly configPath: string;
@@ -115,12 +102,7 @@ export type Project02HomeLayoutOptions = {
 };
 
 export type LocalRuntimeStorageLayoutOptions = {
-  /**
-   * The character DATA directory this store lives in. Required at the
-   * type level since the home/character-data split: there is no
-   * meaningful default — a caller must always know which character's
-   * directory it operates on.
-   */
+  /** The character data directory this store lives in; there is no default. */
   readonly storeRoot: string;
 };
 
@@ -189,9 +171,8 @@ const locksDirectoryName = '.locks';
 
 const pluginsDirectoryName = 'plugins';
 
-// Same directory name as the characters loader's operator root
-// (src/characters/loader/discovery.ts); the loader cannot import runtime,
-// so the one-word literal is deliberately duplicated there.
+// Deliberately duplicated in src/characters/loader/discovery.ts, which
+// cannot import runtime.
 const charactersDirectoryName = 'characters';
 
 export const characterDataDirectoryName = 'character-data';
@@ -220,11 +201,7 @@ export function createProject02HomeLayout(
   } satisfies Project02HomeLayout);
 }
 
-/**
- * Inverse of characterDataDirPath: the home a character-data directory
- * belongs to. Throws when the path is not shaped like one, so callers
- * cannot silently treat an arbitrary directory as a data dir.
- */
+/** Throws when the path is not shaped like a character-data directory. */
 export function homeRootForCharacterDataDir(dataRoot: string): string {
   const parent = dirname(dataRoot);
 

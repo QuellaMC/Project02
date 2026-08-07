@@ -120,12 +120,8 @@ export type NvidiaTransportResult =
     };
 
 /**
- * Runs the HTTP exchange with bounded, deadline-aware retries for
- * transport-class failures only (network throws, HTTP 408/429/5xx).
- * Retries share the request deadline and never extend it; anything
- * model-shaped or non-transient surfaces after at most
- * retryDelaysMs.length + 1 attempts. Failures here never enter the
- * conversation - the loop sees only the final outcome.
+ * Retries only transport-class failures (network throws, HTTP 408/429/5xx).
+ * Retries share the request deadline and never extend it.
  */
 export async function performNvidiaTransportRequest(options: {
   readonly fetchClient: NvidiaFetchClient;

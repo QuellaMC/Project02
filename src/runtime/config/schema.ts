@@ -19,14 +19,7 @@ export type Project02ConfigFieldDefinition = RuntimePluginConfigField & {
   readonly agentMutable: false;
   readonly reloadRequired: boolean;
   readonly scopes: readonly RuntimeConfigFieldScope[];
-  /**
-   * Narrows `valueType` where the field's real rule is stricter.
-   *
-   * Declared with the field so every authoring path -- load, mutate, scoped
-   * control -- accepts exactly what the consuming boundary accepts. A field
-   * whose value must satisfy a downstream contract states that here rather
-   * than letting each caller re-derive it.
-   */
+  /** Narrows `valueType` where the field's real rule is stricter. */
   readonly acceptsValue?: (value: RuntimeConfigValue) => boolean;
 };
 
@@ -125,12 +118,8 @@ const project02ConfigFieldDefinitions = Object.freeze([
     secret: false,
     valueType: 'string',
     defaultValueSummary: 'You',
-    // The session stamps this onto every user message, so authoring must
-    // accept exactly what `createUserSpeaker` accepts. Otherwise the config
-    // validates here and chat throws later, after the plugin host
-    // is already built. Checked against the trimmed value because resolution
-    // trims before constructing the speaker; a newline or an over-length name
-    // is what trimming cannot repair.
+    // Must accept exactly what `createUserSpeaker` accepts, or chat throws
+    // later. Trimmed because resolution trims before constructing the speaker.
     acceptsValue: value =>
       typeof value === 'string' && isValidSpeakerDisplayName(value.trim()),
     redactionLabels: Object.freeze([]),
@@ -210,11 +199,6 @@ export function project02RuntimeConfigValueMatchesField(
   );
 }
 
-/**
- * Model-facing companion to runtimeConfigValueMatchesField: names the
- * expected type or allowed values and the received value kind so a rejected
- * config update can be corrected without guessing.
- */
 export function runtimeConfigFieldValueMismatchMessage(
   field: RuntimePluginConfigField,
   value: RuntimeConfigValue,

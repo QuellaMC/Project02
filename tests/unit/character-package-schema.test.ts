@@ -84,30 +84,22 @@ describe('character package descriptor schema parity', () => {
       },
     });
 
-    // Discovery folds character ids case-insensitively, so on a
-    // case-sensitive filesystem a differently-cased sibling is a package
-    // mkdir would accept and discovery would then reject as a duplicate
-    // — taking the original down with it. The scaffold refuses under the
-    // same fold discovery judges by, and names the directory in the way.
+    // Discovery folds character ids case-insensitively, so on a case-sensitive
+    // filesystem this sibling would later be rejected as a duplicate.
     expect(() =>
       scaffoldCharacterPackage({id: 'TEST.Scaffold-Char', packagesRoot}),
     ).toThrow(`already exists: ${packageRoot}`);
 
-    // And it leaves nothing behind when it refuses. A claim kept for an
-    // id that was never stamped would make the next attempt report a
-    // package that does not exist.
+    // A claim kept for an id that was never stamped would make the next attempt
+    // report a package that does not exist.
     expect(readdirSync(packagesRoot)).toEqual(['test.scaffold-char']);
 
-    // The same id twice is refused by the claim itself rather than by a
-    // scan that ran before it, which is what makes two concurrent runs
-    // safe: exactly one gets the directory.
     expect(() =>
       scaffoldCharacterPackage({id: 'test.scaffold-char', packagesRoot}),
     ).toThrow(`already exists: ${packageRoot}`);
 
-    // The loser must not overwrite the winner's descriptor. `mkdir` with
-    // `recursive: true` reports success on a directory it did not
-    // create, so this is the failure an exclusive create rules out.
+    // `mkdir` with `recursive: true` reports success on a directory it did not
+    // create, so only an exclusive create keeps the winner's descriptor.
     expect(
       JSON.parse(
         readFileSync(join(packageRoot, 'project02.character.json'), 'utf8'),
@@ -156,8 +148,7 @@ describe('character package descriptor schema parity', () => {
     ['identity.displayName', 'displayName'],
   ])('measures the %s bound in code points, like the schema', (_label, key) => {
     // A schema `maxLength` counts code points; `String.length` counts UTF-16
-    // units, so astral characters count twice and an editor-valid package
-    // would be rejected at activation for half its documented length.
+    // units, so astral characters count twice.
     const astral = '😀';
     const descriptor =
       key === 'system'
@@ -183,8 +174,6 @@ describe('character package descriptor schema parity', () => {
     expect(typeof descriptor['$schema']).toBe('string');
     expect(parseCharacterPackageDescriptor(descriptor).status).toBe('accepted');
 
-    // Referencing the editor schema is optional, so an absent key stays
-    // acceptable to both validators.
     const withoutSchemaRef = {...descriptor};
 
     delete withoutSchemaRef['$schema'];
@@ -371,9 +360,7 @@ describe('character package descriptor schema parity', () => {
       'a non-string $schema reference',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
-        // The key is allowed and ignored, so nothing else validates it;
-        // without its own guard the code accepted a shape this schema
-        // rejects, and the mistake surfaced only in the other tool.
+        // The key is allowed and ignored, so only its own guard validates it.
         $schema: 42,
       }),
     ],
@@ -453,8 +440,7 @@ describe('character package descriptor schema parity', () => {
       'a multiline display name',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
-        // Chat prints `<name>: <text>`, so a newline here would let an
-        // accepted package forge extra terminal lines.
+        // Chat prints `<name>: <text>`, so a newline forges terminal lines.
         identity: {
           ...(descriptor['identity'] as Record<string, unknown>),
           displayName: 'Mira\nError: failed',
@@ -465,8 +451,7 @@ describe('character package descriptor schema parity', () => {
       'an over-length meta version component',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
-        // The version is copied into every turn's `characterRef`, so digits are
-        // bounded per component rather than left open.
+        // The version is copied into every turn's `characterRef`.
         meta: {version: `1.0.${'9'.repeat(10)}`},
       }),
     ],

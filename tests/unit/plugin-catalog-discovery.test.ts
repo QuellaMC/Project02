@@ -19,8 +19,7 @@ describe('runtime plugin catalog discovery classification', () => {
     const storeRoot = createTestTempRoot('project02-catalog-discovery-');
     const packageRoot = join(storeRoot, 'plugins', 'broken.pkg');
 
-    // An operator package whose manifest fails validation: discovery
-    // records the raw diagnostic once; severity is a per-layer verdict.
+    // A manifest that fails validation; severity is a per-layer verdict.
     mkdirSync(packageRoot, {recursive: true});
     writeFileSync(
       join(packageRoot, 'project02.plugin.json'),
@@ -49,8 +48,6 @@ describe('runtime plugin catalog discovery classification', () => {
       }),
     });
 
-    // Same immutable discovery underneath: entries and defaults are
-    // shared, only the diagnostic severities differ per layer view.
     expect(dormant.catalogEntries).toBe(discovery.catalogEntries);
     expect(enabled.catalogEntries).toBe(discovery.catalogEntries);
     expect(

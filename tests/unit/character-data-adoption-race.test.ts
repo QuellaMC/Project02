@@ -10,11 +10,8 @@ const siblingInitializer = vi.hoisted(() => ({
   commit: undefined as (() => void) | undefined,
 }));
 
-// The window this suite is about lives between two reads inside one
-// guard, so it cannot be arranged from outside: any state written up
-// front is seen by the marker read, which returns before the directory
-// listing that misjudges it. Interposing on the listing is what puts a
-// sibling's commit exactly in between.
+// The race window is between the guard's marker read and its directory
+// listing, so only interposing on the listing lands a sibling commit inside it.
 vi.mock('../../src/shared/file-system.ts', async importOriginal => {
   const original = await importOriginal<typeof ProjectFileSystem>();
 
@@ -51,11 +48,8 @@ describe('character data adoption during a concurrent first run', () => {
     mkdirSync(dataRoot, {recursive: true});
     siblingInitializer.dataRoot = dataRoot;
     siblingInitializer.commit = () => {
-      // One of twelve racing processes wins: it marks the directory and
-      // lays out the storage it owns. A loser already past its own
-      // marker read then lists a directory full of entries its
-      // allowlist does not name, and used to refuse the directory it
-      // shares — the failure CI saw as one missing rejection in twelve.
+      // The winner of a twelve-way first run, whose layout a loser past its own
+      // marker read used to refuse as unallowlisted entries.
       mkdirSync(join(dataRoot, 'sessions'), {recursive: true});
       writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
       writeFileSync(
@@ -84,8 +78,7 @@ describe('character data adoption during a concurrent first run', () => {
     mkdirSync(dataRoot, {recursive: true});
     siblingInitializer.dataRoot = dataRoot;
     siblingInitializer.commit = () => {
-      // Same interleaving, no marker: a copied or truncated tree. The
-      // confirming re-read must not soften the refusal into adoption.
+      // Same interleaving without a marker: a copied or truncated tree.
       mkdirSync(join(dataRoot, 'sessions'), {recursive: true});
       writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
     };

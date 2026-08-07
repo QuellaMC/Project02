@@ -1,8 +1,3 @@
-/**
- * Discovery phase of the runtime plugin package loader: scans package
- * sources, validates descriptors and entry paths, applies the identity
- * policy, and hands accepted packages a load closure.
- */
 import {basename, isAbsolute, join, relative, resolve, sep} from 'node:path';
 
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -53,14 +48,7 @@ type DiscoveredRuntimePluginPackageCandidate = {
   readonly descriptorPath: string;
 };
 
-/**
- * The metadata files as descriptor parsing needs them, independent of whether
- * they were read eagerly or are read on demand.
- *
- * The bundled path captures two named files up front; the operator path holds
- * a walk it reads from. Both answer the same two questions, so descriptor
- * parsing does not need to know which it has.
- */
+/** One shape for both paths: eagerly captured files and an on-demand walk. */
 type RuntimePluginPackageMetadataSource = {
   readonly directories: ReadonlySet<string>;
   readonly readFile: (relativePath: string) => Buffer | undefined;
@@ -310,13 +298,7 @@ function readRuntimePluginPackageSnapshot(options: {
   } satisfies RuntimePluginPackageSnapshot);
 }
 
-/**
- * Reads the operator package's metadata from its walk.
- *
- * A metadata file that no longer matches the walk reads as absent, which the
- * descriptor parser already reports as unreadable — the same outcome as a
- * package whose metadata could not be captured at all.
- */
+/** Metadata that no longer matches the walk reads as absent. */
 function plannedArtifactMetadataSource(
   artifact: RuntimePluginPackageArtifact,
 ): RuntimePluginPackageMetadataSource {

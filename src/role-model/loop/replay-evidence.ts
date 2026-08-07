@@ -66,9 +66,7 @@ export function normalizeReplayableRejectedRoleModelDecisionResult(options: {
   readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
   readonly toolObservations?: readonly RoleModelToolObservation[];
 }): RejectedRoleModelDecisionResult | undefined {
-  // Fill missing requested tool names from the raw output first: a stored
-  // rejection without names may already be replayable as-is, but the decoded
-  // snapshot should still carry the names the raw output proves.
+  // Fill names first: a nameless rejection may still be replayable as-is.
   if (options.decisionResult.requestedToolNames === undefined) {
     const normalized = fillRequestedToolNamesFromRawOutput(options);
 
@@ -149,14 +147,8 @@ function fillRequestedToolNamesFromRawOutput(options: {
     : undefined;
 }
 
-/**
- * Rejections synthesized above the parser (loop policy: exceeded tool
- * rounds, blank visible_reply) or produced by stricter historical parsers
- * (disallowed/unknown tools, cross-round duplicate limits) legitimately
- * pair a rejected stored snapshot with raw output that re-parses as
- * accepted. They stay replayable, provided any recorded requested tool
- * names still agree with the raw output.
- */
+// These legitimately pair a rejected snapshot with raw output that re-parses
+// as accepted: they are synthesized above the parser, or by stricter old ones.
 const loopSynthesizedRejectionReasons: readonly string[] = Object.freeze([
   roleModelPluginToolRejectedRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,

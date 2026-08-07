@@ -1,10 +1,4 @@
-/**
- * Composition-root implementation of the runtime plugin reloader: after a
- * committed config effect, re-resolves config from the plan's location and
- * re-runs the package factory for one plugin id. The host must not import
- * config resolution or the catalog, so this capability is injected at
- * host construction (same inversion as fileStore and config control).
- */
+/** The host must not import config resolution, so this is injected. */
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {
   createRuntimeConfigAuthoredSnapshot,
@@ -25,8 +19,7 @@ import {
 } from '../plugins/index.ts';
 import type {ResolvedProject02RuntimeConfig} from '../runtime/config/index.ts';
 
-// Structural slice of PreparedProject02PluginActivationPlan: naming the
-// plan type here would put app/activation and this file on a cycle.
+// Importing the plan type here would cycle with app/activation.
 export function createConfiguredRuntimePluginReloader(options: {
   readonly activationPlan: {
     readonly catalogEntries: Readonly<
@@ -60,19 +53,14 @@ export function createConfiguredRuntimePluginReloader(options: {
         };
       }
 
-      // Both authored files back the currency gate: the global config
-      // and, when the plan carries a character scope, that character's
-      // overlay. Re-read together so an overlay edit between approval
-      // and rebuild declines exactly like a global edit.
+      // Re-read together so an overlay edit declines like a global one.
       const loadAuthoredState = () => {
         const loaded = loadProject02RuntimeConfigForLocation(runtimeLocation);
 
         return {
           loaded,
           runtimeLocation,
-          // A running host owns one activated character location. Config
-          // edits that change the future home or default character take
-          // effect only when a fresh host is constructed.
+          // A home or character change takes effect only in a fresh host.
           overlay: readCharacterOverlayForScope(runtimeLocation.characterScope)
             .overlay,
         };
@@ -104,10 +92,7 @@ export function createConfiguredRuntimePluginReloader(options: {
         env: pluginConfigControl.configControl.target.env,
       });
 
-      // Mirror the update tool's inspection scope: only global diagnostics
-      // or errors for THIS plugin block its rebuild. Another plugin's bad
-      // config must not strand a valid live target whose update was already
-      // promised for the next turn.
+      // Another plugin's bad config must not strand this rebuild.
       const blockingDiagnostics = freshResolvedConfig.diagnostics.filter(
         diagnostic =>
           diagnostic.scope === 'global' ||
@@ -138,16 +123,10 @@ export function createConfiguredRuntimePluginReloader(options: {
         {retainRejectedCandidate: reloadOptions.retainCandidate},
       );
 
-      // The host's retirement lifecycle becomes the sole owner as soon as a
-      // package-accepted factory result exists. Any later authored-state read
-      // may fail; a successful swap explicitly makes it live again. Package
-      // rejection transfers its candidate through the load options above.
+      // Hand ownership over now, so a later failure cannot leak the plugin.
       reloadOptions.retainCandidate(plugin);
 
-      // The factory await is a real window: another writer may have moved
-      // the authored config while it ran, and swapping in an instance built
-      // from the older snapshot would silently serve stale config. Re-check
-      // after the load, exactly like the pre-load check.
+      // Another writer may have moved the config during the factory await.
       if (
         authoredFingerprintOf(loadAuthoredState()) !==
         reloadOptions.expectedFingerprint

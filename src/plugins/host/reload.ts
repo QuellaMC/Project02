@@ -1,11 +1,4 @@
-/**
- * Live-apply seam for committed plugin config effects: after an approved
- * update commits, fields that declared reloadRequired: false get their
- * plugin instance rebuilt by the composition-root reloader and swapped
- * into the running host, so the next turn reflects the change. Reload
- * problems never fail a committed turn; they surface as degraded or
- * failed evidence and the old instance keeps serving.
- */
+/** Reload problems never fail a committed turn; the old instance stays live. */
 import {
   createRuntimePluginEvidenceSnapshot,
   registeredRuntimePluginLifecycleHooks,
@@ -25,22 +18,14 @@ export type RuntimePluginReloadResult =
   | {readonly status: 'declined'; readonly reason: string}
   | {readonly status: 'failed'; readonly message: string};
 
-/**
- * Injected by the composition root (the host must not import config
- * resolution or the package catalog): rebuilds one plugin instance from
- * freshly resolved config, declines ids it cannot rebuild.
- */
+/** Injected: the host cannot import config resolution or package catalog. */
 export type RuntimePluginReloader = {
   reload(
     pluginId: string,
     options: {
-      /** Authored-config fingerprint the approved effect produced; the reloader declines when the file has moved past it. */
+      /** The reloader declines when the authored file has moved past this. */
       readonly expectedFingerprint: string;
-      /**
-       * Transfers every factory result to the host under the expected catalog
-       * identity before the reloader performs any operation that may fail. A
-       * successful swap removes the now-live instance from retirement.
-       */
+      /** Hands the factory result to the host before anything that can fail. */
       readonly retainCandidate: (plugin: RuntimePlugin) => void;
     },
   ): Promise<RuntimePluginReloadResult>;
@@ -59,33 +44,23 @@ export type RuntimeEventIdentitySlice = {
 };
 
 export type ConfirmedRuntimePluginConfigUpdateLog = {
-  /** Records a settled tool result; only accepted results carrying a prepared effect count. */
   readonly note: (result: {
     readonly status: string;
     readonly preparedConfigEffect?: PreparedRuntimePluginConfigEffect;
   }) => void;
-  /** True when the given turn already confirmed a session-scoped update for the plugin. */
   readonly sessionScopedConfirmed: (
     identity: RuntimeEventIdentitySlice,
     pluginId: string,
   ) => boolean;
 };
 
-/**
- * Turn-scoped record of CONFIRMED config updates, kept by the host at its
- * tool-dispatch choke point. The update tool's appliesTo promise reads this
- * instead of reconstructing turn state at prepare time, so the promise and
- * the commit-time reload policy see the same effects: results that later
- * fail user confirmation never register, and the record is scoped by the
- * full runtime identity (eventId, traceId, createdAt), not event id alone.
- */
+/** One record so the appliesTo promise and commit-time reload policy agree. */
 export function createConfirmedRuntimePluginConfigUpdateLog(options: {
   readonly pluginManifests: readonly RuntimePluginManifest[];
 }): ConfirmedRuntimePluginConfigUpdateLog {
   let turnKey: string | undefined;
   const sessionScopedPluginIds = new Set<string>();
-  // Newline separator: identity components are single-line ids and an ISO
-  // timestamp, so a newline cannot appear inside any component.
+  // Identity components are single-line, so a newline cannot collide.
   const keyOf = (identity: RuntimeEventIdentitySlice): string =>
     [identity.eventId, identity.traceId, identity.createdAt].join('\n');
 
@@ -126,25 +101,17 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
-  /** Retains an instance under the catalog identity that authorized its construction. */
   readonly retirePlugin: (
     plugin: RuntimePlugin,
     catalogPluginId: string,
   ) => void;
   /** Keeps terminal dispatch behind every accepted reload ownership transfer. */
   readonly trackReloadWork: <T>(work: Promise<T>) => Promise<T>;
-  /** Records that this host swapped the plugin to an instance built from the fingerprinted config. */
   readonly recordLiveAppliedFingerprint: (
     pluginId: string,
     configFingerprint: string,
   ) => void;
-  /**
-   * Authored-config fingerprint after ALL of the turn's accepted effects,
-   * across plugins. A turn that updates several plugins leaves the file at
-   * the whole turn's final fingerprint, so each per-plugin group must verify
-   * against that one, not its own last effect. Defaults to this group's
-   * final effect for single-group callers.
-   */
+  /** Multi-plugin turns verify against the whole turn's final fingerprint. */
   readonly turnResultFingerprint?: string;
 }): Promise<RuntimePluginConfigReloadHostResult> {
   const [firstEffect] = options.effects;
@@ -163,9 +130,7 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
 
   const finalEffect =
     options.effects[options.effects.length - 1] ?? firstEffect;
-  // Effects arrive in apply order, so a lone group leaves the authored file
-  // at its own last effect; multi-plugin turns supply the whole turn's final
-  // fingerprint instead.
+  // Effects arrive in apply order, so the last one is this group's result.
   const authoredResultFingerprint =
     options.turnResultFingerprint ?? finalEffect.resultFingerprint;
   const manifest = options.pluginConfigControl?.pluginManifests.find(
@@ -177,8 +142,7 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   );
 
   if (liveFieldNames.length === 0) {
-    // Entirely session-scoped: the documented norm, no evidence needed —
-    // the update tool already reported appliesTo: future_host_construction.
+    // No evidence: the update tool already reported future_host_construction.
     return {outcome: 'not_eligible'};
   }
 
@@ -291,14 +255,7 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
 
 export const runtimePluginReloadTimeoutMs = 10_000;
 
-/**
- * Bounds the reloader like every other plugin dispatch: a factory that never
- * settles must not block the per-session turn queue after the turn is
- * already durable. Candidate ownership is transferred by the reloader at the
- * instant a valid factory result exists, independently of whether this timeout
- * race has already settled. The instance owner tracks that raw construction,
- * so terminal dispatch cannot overtake a late result.
- */
+/** A factory that never settles must not block the turn queue after commit. */
 async function settleReloadWithinTimeout(
   pending: Promise<RuntimePluginReloadResult>,
 ): Promise<RuntimePluginReloadResult> {
@@ -346,12 +303,7 @@ function groupFieldEligibility(
   return {liveFieldNames, sessionScopedFieldSeen};
 }
 
-/**
- * The runtime surface advertised at construction stays frozen across a swap:
- * manifest, provided tools, AND which lifecycle hooks are registered — a
- * rebuild that drops handleToolCall would strand advertised tools, and one
- * that adds hooks would dispatch behavior the host never advertised.
- */
+/** A swap must not strand advertised tools or add unadvertised behavior. */
 function rebuiltPluginChangesFrozenSurface(
   previous: RuntimePlugin,
   rebuilt: RuntimePlugin,
@@ -387,7 +339,6 @@ function reloadEvidence(
   effects: readonly PreparedRuntimePluginConfigEffect[],
   status: 'accepted' | 'degraded' | 'failed',
   summary: string,
-  /** Authored fingerprint the reload verified (or deferred on): the turn's final state. */
   configFingerprint: string,
 ): RuntimePluginEvidenceSnapshot {
   const [firstEffect] = effects;

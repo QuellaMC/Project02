@@ -296,10 +296,6 @@ describe('runtime log store', () => {
   });
 
   it('anchors a custom first user speaker when the store binds none', () => {
-    // A direct-runtime store may omit boundUserSpeaker while the
-    // session carries a custom display name: the first user record
-    // anchors the speaker (the id is never negotiable), and later
-    // records must match the anchor.
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
     });
@@ -349,8 +345,6 @@ describe('runtime log store', () => {
       committedAt: '2026-06-04T00:00:02.000Z',
     });
 
-    // The anchor holds across turns: the next turn's user row must still
-    // carry the anchored name.
     store.appendRawEvent({
       ...secondTurnIdentity,
       kind: 'runtime_event_received',
@@ -375,12 +369,8 @@ describe('runtime log store', () => {
   });
 
   it('refuses an anchoring user name a later read would reject', () => {
-    // The anchoring name is judged by the rule every speaker name is
-    // judged by, not merely "non-empty". A multiline or overlong name
-    // used to append, and the next read of the session ran it through
-    // createUserSpeaker and threw — leaving durable evidence that could
-    // never be opened again. Refusing the write is the only outcome
-    // that does not strand the session.
+    // An anchoring name that only `createUserSpeaker` rejects strands the
+    // session: the evidence appends, and the next read of it throws.
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
     });
@@ -409,9 +399,8 @@ describe('runtime log store', () => {
       ).toThrow('speaker metadata is malformed');
     }
 
-    // Nothing landed: message 1 is still the slot a user record may
-    // take. Had a refused record been appended, the store would now
-    // require message 2 and the character role.
+    // Had a refusal landed, the store would now require message 2 and the
+    // character role.
     expect(
       store.appendRawEvent({
         ...identity,
@@ -431,11 +420,8 @@ describe('runtime log store', () => {
   });
 
   it('refuses a supplied character the store binding disagrees with', () => {
-    // The binding is a fact about the store, not a default the caller
-    // outranks. A supplied character used to win outright, and with no
-    // recorded evidence yet to compare against, `nova` messages landed
-    // in a `mira`-bound store; the refusal arrived on the terminal raw
-    // event, after the appends were durable.
+    // With no recorded evidence to compare against yet, a supplied character
+    // used to win, and the refusal arrived only after the appends were durable.
     const store = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
     });
@@ -467,9 +453,7 @@ describe('runtime log store', () => {
       'Durable character evidence must match the store-bound character',
     );
 
-    // Nothing landed, and only the timing changed: message 1 is still
-    // free, the bound character still appends, and a renamed character
-    // stays appendable because the binding is compared by id.
+    // A renamed character stays appendable: the binding is compared by id.
     expect(
       store.appendRawEvent(
         {
@@ -501,8 +485,7 @@ describe('runtime log store', () => {
       kind: 'runtime_event_received',
       eventType: 'USER_MESSAGE',
     });
-    // The binding pins the id only — a display name is a per-session
-    // historical fact, so a renamed binding keeps old sessions valid.
+    // The binding pins the id only; a display name is a per-session fact.
     expect(() =>
       store.appendRawEvent({
         ...identity,
@@ -544,8 +527,7 @@ describe('runtime log store', () => {
       committedAt: '2026-06-04T00:00:02.000Z',
     });
 
-    // Once recorded, the session's user speaker wins over later intent:
-    // one user speaker per session, mirroring the character rule.
+    // One user speaker per session: once recorded it outranks later intent.
     store.appendRawEvent({
       ...secondTurnIdentity,
       kind: 'runtime_event_received',

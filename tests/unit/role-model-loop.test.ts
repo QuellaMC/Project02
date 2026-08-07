@@ -198,8 +198,7 @@ describe('role-model loop routing and policy', () => {
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
       adapter: Object.freeze({
         invoke() {
-          // Parses and is allowed; the loop's own gate refuses it for the
-          // blank reply text, so the names live only in this round.
+          // Parses and is allowed; only the loop's gate refuses the blank text.
           return {
             rawOutputText: JSON.stringify({
               toolCalls: [
@@ -297,22 +296,18 @@ describe('role-model loop routing and policy', () => {
     });
 
     expect(result.status).toBe('accepted');
-    // Both shared calls are in flight together.
     expect(events.indexOf('start:memory.recall')).toBeLessThan(
       events.indexOf('end:memory.search'),
     );
-    // Observations follow the model's call order regardless of which
-    // call finished first.
+    // Observations follow the model's call order, not completion order.
     expect(
       result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
     ).toEqual(['memory.search', 'memory.recall']);
   });
 
   it('reports a finished tool call before its slower sibling settles', async () => {
-    // A tool's write is durable when its call returns, so a crash between
-    // that and the report would leave recovery a started call and no
-    // record of the effect. Waiting for the batch widens that window for
-    // every call but the slowest.
+    // A tool's write is durable when its call returns, so waiting for the batch
+    // widens the crash window between the effect and its record.
     const events: string[] = [];
     const fastTool = toolWithConcurrency(memorySearchToolDefinition, 'shared');
     const slowTool = toolWithConcurrency(memoryRecallToolDefinition, 'shared');
@@ -358,12 +353,9 @@ describe('role-model loop routing and policy', () => {
     });
 
     expect(result.status).toBe('accepted');
-    // The fast call is reported while the slow one is still running,
-    // even though the model listed the slow one first.
     expect(events.indexOf('reported:memory.search')).toBeLessThan(
       events.indexOf('settled:memory.recall'),
     );
-    // Observations still follow the model's call order.
     expect(
       result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
     ).toEqual(['memory.recall', 'memory.search']);
@@ -413,8 +405,7 @@ describe('role-model loop routing and policy', () => {
       }),
     ).rejects.toThrow(/could not append finish evidence/iu);
 
-    // The slow sibling completed before the failure surfaced, so no tool
-    // call outlives the turn that owns it.
+    // No tool call outlives the turn that owns it.
     expect(events).toContain('settled:memory.recall');
   });
 
@@ -463,7 +454,6 @@ describe('role-model loop routing and policy', () => {
       ),
     });
 
-    // The exclusive call waits for the shared call to finish.
     expect(events).toEqual([
       'start:memory.search',
       'end:memory.search',

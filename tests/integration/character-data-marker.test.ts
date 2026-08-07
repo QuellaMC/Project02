@@ -67,9 +67,7 @@ describe('character data marker', () => {
       now: () => '2026-07-23T00:00:00.000Z',
     });
 
-    // The overlay committed against the real directory; the directory is
-    // then swapped for a link to an outside copy carrying a matching
-    // marker. Recording the version must not rewrite that outside marker.
+    // The outside copy carries a matching marker, so only the link is wrong.
     cpSync(dataRoot, join(elsewhere, 'mira'), {recursive: true});
     rmSync(dataRoot, {recursive: true});
     symlinkSync(join(elsewhere, 'mira'), dataRoot);
@@ -90,10 +88,8 @@ describe('character data marker', () => {
 
   it('initializes from a padded character ID without leaving a rejected home', async () => {
     const homeRoot = createTestTempRoot('project02-character-padded-');
-    // The path helper and marker constructor both normalize, so carrying the
-    // raw ID to the post-write verification compared the marker against a value
-    // that never reached storage -- and only after the home marker and data
-    // directory had been created.
+    // The path helper and marker constructor both normalize, so a raw ID
+    // carried to the post-write verification never matches what was stored.
     const dataRoot = await ensureCharacterDataDir({
       homeRoot,
       characterId: '  mira  ',
@@ -115,8 +111,7 @@ describe('character data marker', () => {
   it('rejects an invalid character ID with a character-specific code', async () => {
     const homeRoot = createTestTempRoot('project02-character-invalid-');
 
-    // Character selection failures must not report themselves as plugin ID
-    // failures; callers branching on the code would misclassify them.
+    // Callers branch on the code, so a plugin ID failure would misclassify.
     await expect(
       ensureCharacterDataDir({homeRoot, characterId: '9-not-valid'}),
     ).rejects.toMatchObject({code: 'invalid_character_id'});

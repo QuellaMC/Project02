@@ -103,10 +103,8 @@ export function validateDurableCharacterProfiles(options: {
   if (
     derivedCharacter !== undefined &&
     options.boundCharacter !== undefined &&
-    // Bound id only: display names are per-session historical facts, so a
-    // renamed character's old sessions stay readable under the same id.
-    // Anchoring does not exempt foreign evidence: a session copied in from
-    // another character's store must not open under this character boundary.
+    // Bound id only: display names are per-session historical facts. A
+    // session copied in from another character's store is still refused.
     derivedCharacter.id !== options.boundCharacter.id &&
     !options.allowUnanchoredCustomCharacter
   ) {

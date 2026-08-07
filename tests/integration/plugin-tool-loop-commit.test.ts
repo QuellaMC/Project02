@@ -319,9 +319,8 @@ async function createLiveReloadLoopFixture(
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
       sessionIdentity: session,
-      // Mirrors the configured composition root: the host records which
-      // authored config its instances were built from, so recovery can skip
-      // rebuilds the running host already reflects.
+      // Mirrors the configured composition root, so recovery can skip rebuilds
+      // the running host already reflects.
       constructionConfigFingerprint: inspectRuntimePluginConfig({
         targetScope: 'global',
         runtimeLocation: runtimeLocationForTest({
@@ -458,9 +457,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
       throw new Error('Expected text-only turn to complete.');
     }
 
-    // The user's message is history the moment it is accepted, even when
-    // the model folds its answer into non-committed text: nothing the
-    // user said disappears because the turn produced no visible reply.
+    // The user's message is history the moment it is accepted, even when the
+    // turn produces no visible reply.
     expect(
       logStore.conversationMessages().map(message => message.role),
     ).toEqual(['user']);
@@ -516,9 +514,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
       roleModelAdapter: adapter,
     });
 
-    // The terminal decision has no visible_reply, so commit validation
-    // carries no accepted reply text even though an earlier round
-    // committed an interim message; the turn stays a valid completion.
+    // The terminal decision has no visible_reply, so commit validation carries
+    // no accepted reply text despite the earlier interim message.
     expect(result.status).toBe('completed');
     expect(
       logStore.conversationMessages().map(message => message.text),
@@ -1460,8 +1457,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(live.authoredTone()).toBe('warm');
     expect(live.reloaderCalls()).toBe(1);
 
-    // A restarted host is built from the already-updated config; replaying
-    // the pending effect must not rebuild and retire its fresh instance.
+    // A restarted host is built from the already-updated config.
     const restartedHost = live.createPluginHost();
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_already_applied_followup'),
@@ -1498,9 +1494,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
       message: 'after-turn raw event append failed',
       logStore: live.logStore,
     });
-    // Two same-plugin live updates prepared against the SAME fingerprint:
-    // the first applies at commit, the second conflict-closes, so the file
-    // (and the live-applied instance) end at the first effect's result.
+    // Two live updates prepared against the same fingerprint: the first applies
+    // at commit and the second conflict-closes.
     const staleSecondInput = {...live.updateInput, value: 'sharp'};
     const crashResult = await runLocalUserMessageEvent({
       event: createTestEvent('update tone twice', 'evt_accepted_final'),
@@ -1529,9 +1524,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(live.authoredTone()).toBe('warm');
     expect(live.reloaderCalls()).toBe(1);
 
-    // A restarted host is built from the file at the last ACCEPTED effect's
-    // fingerprint; recovery must recognize that currency even though the
-    // terminal event's raw tail is the conflicted effect.
+    // The restarted host is built at the last accepted effect's fingerprint,
+    // while the terminal event's raw tail is the conflicted one.
     const restartedHost = live.createPluginHost();
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_accepted_final_followup'),
@@ -1576,8 +1570,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
     if (crashResult.status !== 'completed') {
       throw new Error('Expected the marker-losing turn to complete.');
     }
-    // The reload failed AND the marker append died, so no reload decision
-    // is durable and the same process keeps serving the stale instance.
+    // The reload failed and the marker append died, so no reload decision is
+    // durable and this process keeps serving the stale instance.
     expect(crashResult.postCommitFailures?.join(' ')).toContain(
       'factory exploded',
     );
@@ -1594,9 +1588,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(followupResult.status).toBe('completed');
     expect(live.capturedContexts[0]).toContain('tone:cool');
 
-    // Recovery must NOT skip: the running host is not current for the
-    // committed config, so the reload is re-attempted and its outcome is
-    // finally recorded durably.
+    // The running host is not current for the committed config, so recovery
+    // re-attempts the reload rather than skipping it.
     const recoveryEvent = live.logStore
       .rawEvents()
       .find(
@@ -1619,9 +1612,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const live = await createLiveReloadLoopFixture('prior-accepted', {
       withSessionScopedNote: true,
     });
-    // Turn 1: the session-scoped no-op reconciles fine, the live field hits
-    // a transient (non-conflict) error, so the marker records ONE effect as
-    // reconciled and leaves the live one pending.
+    // Turn 1: a transient, non-conflict error on the live field leaves one
+    // effect reconciled and the other pending.
     const baseHost = live.pluginHost;
     const flakyHost = Object.freeze({
       ...baseHost,
@@ -1671,9 +1663,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(crashResult.postCommitFailures?.join(' ')).toContain('io hiccup');
     expect(live.authoredTone()).toBe('cool');
 
-    // Turn 2: recovery replays the live field, but its reload group must
-    // still contain the previously reconciled session-scoped effect — the
-    // commit path would have deferred this mixed group.
+    // Turn 2: the replayed group still contains the previously reconciled
+    // session-scoped effect, which the commit path would have deferred.
     const recoveryHost = live.createPluginHost();
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_prior_accepted_followup'),
@@ -1740,9 +1731,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
     expect(crashResult.status).toBe('completed');
 
-    // Turn 2's recovery replays the note effect fine but hits a transient
-    // error on the tone effect: the pass must complete the turn, keep the
-    // note's evidence durable, and leave only the tone effect pending.
+    // Turn 2: recovery replays the note effect but hits a transient error on
+    // the tone effect.
     const baseRecoveryHost = live.createPluginHost();
     const flakyRecoveryHost = Object.freeze({
       ...baseRecoveryHost,
@@ -1793,8 +1783,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       ),
     ).toHaveLength(1);
 
-    // Turn 3 retries the pending tone effect on a healthy host; the group
-    // still includes the previously reconciled note, so it defers as mixed.
+    // Turn 3: the retry group still includes the reconciled note, so it defers.
     const thirdResult = await runLocalUserMessageEvent({
       event: createTestEvent('once more', 'evt_partial_recovery_third'),
       session: live.session,
@@ -1822,8 +1811,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const live = await createLiveReloadLoopFixture('mixed-recovery', {
       withSessionScopedNote: true,
     });
-    // Crash the turn between the terminal event append and reconciliation so
-    // both effects stay pending; recovery must then replay them as ONE group.
+    // Crashing between the terminal append and reconciliation leaves both
+    // effects pending.
     const crashingHost = Object.freeze({
       ...live.pluginHost,
       reconcileConfigEffect() {
@@ -1886,8 +1875,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
 
     expect(followupResult.status).toBe('completed');
-    // Recovery replayed the authored changes but must NOT live-apply them:
-    // the commit path would have deferred this mixed group, so the follow-up
+    // The commit path would have deferred this mixed group, so the follow-up
     // turn still serves the instance built from the pre-update config.
     expect(live.authoredTone()).toBe('warm');
     expect(live.capturedContexts[0]).toContain('tone:cool');
@@ -2152,8 +2140,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
       pluginHost: interruptedHost,
     });
 
-    // Forge the pending instruction: the effect on the terminal now names
-    // a result the approved tool call never produced.
+    // The forged effect on the terminal names a result the approved tool call
+    // never produced.
     const paths = logStore.localRuntimeSessionPaths;
 
     if (paths === undefined) {
@@ -2191,10 +2179,8 @@ describe('plugin-driven tool loop commit and rollback', () => {
       characterId: testCharacterProfile.id,
     });
 
-    // A pending effect the approved tool call never produced is not a
-    // state the writer can record, so the tampered log fails closed at
-    // the read — before any turn could carry the instruction forward —
-    // and nothing writes config.
+    // The tampered log fails closed at the read, before a turn could carry the
+    // instruction forward.
     expect(() => reopenedLogStore.conversationMessages()).toThrow(
       /missing matching approved config-update tool evidence/iu,
     );
