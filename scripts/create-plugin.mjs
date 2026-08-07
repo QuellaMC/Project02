@@ -1,6 +1,12 @@
 // The stamped descriptor must satisfy schemas/project02.plugin.schema.json
 // and the runtime validator.
-import {existsSync, mkdirSync, readFileSync, writeFileSync} from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  writeFileSync,
+} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -23,47 +29,56 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   }
 
   const packageRoot = join(packagesRoot, id);
+  const source = readFileSync(bundledPath, 'utf8');
 
   if (existsSync(packageRoot)) {
-    resumeRuntimePluginScaffold({id, packageRoot, bundledPath});
-    return {packageRoot};
+    assertOwnScaffold({id, packageRoot});
+    if (source.includes(`'../packages/${id}/index.ts'`)) {
+      throw new Error(
+        `Plugin package directory already exists: ${packageRoot}`,
+      );
+    }
+  } else {
+    assertBundledRegistrationNamesAvailable({id, source});
+    mkdirSync(packageRoot, {recursive: true});
   }
-  assertBundledRegistrationNamesAvailable({
-    id,
-    source: readFileSync(bundledPath, 'utf8'),
-  });
 
   const displayName = displayNameFromProject02Identifier(id);
 
-  mkdirSync(packageRoot, {recursive: true});
-  writeFileSync(
+  writeMissingScaffoldFile(
     join(packageRoot, 'project02.plugin.json'),
     `${JSON.stringify(descriptorTemplate({id, displayName}), null, 2)}\n`,
-    'utf8',
   );
-  writeFileSync(
+  writeMissingScaffoldFile(
     join(packageRoot, 'package.json'),
     `${JSON.stringify({type: 'module'}, null, 2)}\n`,
-    'utf8',
   );
-  writeFileSync(
+  writeMissingScaffoldFile(
     join(packageRoot, 'index.ts'),
     "export {createProject02Plugin} from './plugin.ts';\n",
-    'utf8',
   );
-  writeFileSync(
+  writeMissingScaffoldFile(
     join(packageRoot, 'plugin.ts'),
     pluginModuleTemplate(id),
-    'utf8',
   );
   registerBundledRuntimePluginFactory({id, bundledPath});
 
   return {packageRoot};
 }
 
-// A crash or a lost concurrent update can leave the package files without
-// their registration; completing it is the only rerun that changes anything.
-function resumeRuntimePluginScaffold({id, packageRoot, bundledPath}) {
+// A rerun heals a crashed scaffold; an existing file is never overwritten.
+function writeMissingScaffoldFile(path, content) {
+  if (!existsSync(path)) {
+    writeFileSync(path, content, 'utf8');
+  }
+}
+
+// Only an empty directory or this id's own descriptor may be completed.
+function assertOwnScaffold({id, packageRoot}) {
+  if (readdirSync(packageRoot).length === 0) {
+    return;
+  }
+
   let descriptorId;
 
   try {
@@ -80,12 +95,6 @@ function resumeRuntimePluginScaffold({id, packageRoot, bundledPath}) {
       `Plugin package directory already exists and is not a scaffold of "${id}": ${packageRoot}`,
     );
   }
-  if (
-    readFileSync(bundledPath, 'utf8').includes(`'../packages/${id}/index.ts'`)
-  ) {
-    throw new Error(`Plugin package directory already exists: ${packageRoot}`);
-  }
-  registerBundledRuntimePluginFactory({id, bundledPath});
 }
 
 // Ids that differ only in separators derive one registration name; emitting

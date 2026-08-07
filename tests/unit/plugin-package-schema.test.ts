@@ -4,6 +4,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -265,8 +266,9 @@ describe('plugin package descriptor schema parity', () => {
       packagesRoot,
       bundledPath,
     });
-    // A crash or lost concurrent update leaves the files without the entry.
+    // A crash can leave the descriptor without its siblings or its entry.
     writeFileSync(bundledPath, pristineBundled, 'utf8');
+    rmSync(join(packagesRoot, 'sample.resume-check', 'plugin.ts'));
 
     const {packageRoot} = scaffoldRuntimePluginPackage({
       id: 'sample.resume-check',
