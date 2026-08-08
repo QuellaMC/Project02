@@ -93,6 +93,7 @@ export async function handleSessionHistorySearchToolCall(options: {
     sessionLimit,
     ...(sessionId === undefined ? {} : {sessionId}),
     excludeSessionId: options.context.sessionId,
+    signal: options.context.signal,
   });
   const output = createSessionHistorySearchOutput({result, query});
 

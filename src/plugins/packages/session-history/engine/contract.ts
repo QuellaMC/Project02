@@ -34,17 +34,23 @@ export type SessionIndexSearchOptions = {
   /** Ignored when `sessionId` targets a session explicitly. */
   readonly excludeSessionId?: string;
   readonly sessionLimit: number;
+  /** Stops the catch-up between slices; use the hook context's signal. */
+  readonly signal?: AbortSignal;
 };
 
 export type SessionIndexReadAroundOptions = {
   readonly sessionId: string;
   readonly anchorMessageId?: string;
   readonly window: number;
+  /** Stops the catch-up between slices; use the hook context's signal. */
+  readonly signal?: AbortSignal;
 };
 
 export type SessionIndexWarmUpOptions = {
   /** Catch up one session only; unknown sessions are a quiet no-op. */
   readonly sessionId?: string;
+  /** Stops the catch-up between slices; use the hook context's signal. */
+  readonly signal?: AbortSignal;
 };
 
 /**
@@ -65,7 +71,7 @@ export type SessionHistoryEngine = {
 };
 
 export type SessionHistoryEngineErrorCode =
-  'engine_closed' | 'session_not_found' | 'message_not_found';
+  'engine_closed' | 'aborted' | 'session_not_found' | 'message_not_found';
 
 export class SessionHistoryEngineError extends Error {
   readonly code: SessionHistoryEngineErrorCode;

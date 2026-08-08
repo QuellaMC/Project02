@@ -332,6 +332,62 @@ describe('session history engine', () => {
     ).toBe(1);
     second.close();
   });
+
+  it('ingests past a record larger than one catch-up slice', async () => {
+    const storeRoot = createStoreRoot();
+
+    // The first user message alone exceeds the 2 MiB slice cap, so a
+    // capped read finds no newline; ingestion must still consume it and
+    // reach the exchange behind it.
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'oversized',
+      exchanges: [
+        [
+          `please archive this dump: ${'x'.repeat(3 * 1024 * 1024)}`,
+          'Archived.',
+        ],
+        ['and what was the codename?', 'The codename was halcyon-otter.'],
+      ],
+    });
+
+    const engine = createEngine(storeRoot);
+    const result = await engine.search({
+      query: 'halcyon-otter',
+      sessionLimit: 1,
+    });
+
+    expect(result.totalSessionsWithHits).toBe(1);
+    expect(result.sessions[0]?.sessionId).toBe('oversized');
+    expect(result.damagedRecordCount).toBe(0);
+    engine.close();
+  });
+
+  it('stops catch-up when the caller aborts', async () => {
+    const storeRoot = createStoreRoot();
+
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'cold',
+      exchanges: [['hello there', 'hi']],
+    });
+
+    const engine = createEngine(storeRoot);
+    const aborted = AbortSignal.abort();
+
+    await expect(
+      engine.search({query: 'hello', sessionLimit: 1, signal: aborted}),
+    ).rejects.toThrow(expect.objectContaining({code: 'aborted'}));
+
+    // Aborted warm-up ends quietly, and the next live query catches up.
+    await engine.warmUp({signal: aborted});
+
+    expect(
+      (await engine.search({query: 'hello', sessionLimit: 1}))
+        .totalSessionsWithHits,
+    ).toBe(1);
+    engine.close();
+  });
 });
 
 function createStoreRoot(): string {

@@ -83,6 +83,7 @@ export async function handleSessionHistoryReadToolCall(options: {
     sessionId,
     window,
     ...(anchorMessageId === undefined ? {} : {anchorMessageId}),
+    signal: options.context.signal,
   });
   const output = createSessionHistoryReadOutput({conversation, sessionId});
 

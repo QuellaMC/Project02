@@ -189,7 +189,10 @@ function createSessionHistoryPluginFromManifest(
         }
 
         try {
-          await activeEngine.warmUp({sessionId: context.sessionId});
+          await activeEngine.warmUp({
+            sessionId: context.sessionId,
+            signal: context.signal,
+          });
         } catch {
           // Advisory catch-up: the next query surfaces real failures.
           return {
@@ -251,7 +254,7 @@ function sessionHistoryRejection(
   if (error instanceof SessionHistoryEngineError) {
     return {
       reason:
-        error.code === 'engine_closed'
+        error.code === 'engine_closed' || error.code === 'aborted'
           ? 'session_history_read_failed'
           : error.code,
       message: error.message,

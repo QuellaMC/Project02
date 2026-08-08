@@ -67,6 +67,12 @@ export function createSessionHistoryEngine(options: {
       `Session history engine for character "${feed.characterId}" is closed.`,
     );
 
+  const abortedError = (): SessionHistoryEngineError =>
+    new SessionHistoryEngineError(
+      'aborted',
+      'Session history catch-up stopped: the calling hook was aborted.',
+    );
+
   const openedDatabase = (): BetterSQLite3Database => {
     if (closed) {
       throw engineClosedError();
@@ -102,9 +108,11 @@ export function createSessionHistoryEngine(options: {
   };
 
   // The one catch-up loop behind every query and warm-up: slice by
-  // slice, yielding between slices, stopping when the engine closes.
+  // slice, yielding between slices, stopping when the engine closes or
+  // the caller's hook scope is aborted.
   const caughtUpView = async (
     sessionFilter: string | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<{
     readonly database: BetterSQLite3Database;
     readonly catalog: RuntimePluginSessionHistoryListing;
@@ -122,12 +130,28 @@ export function createSessionHistoryEngine(options: {
           throw engineClosedError();
         }
 
-        const advanced = ingestSessionSlice({
+        if (signal?.aborted) {
+          throw abortedError();
+        }
+
+        let advanced = ingestSessionSlice({
           database,
           feed,
           sessionId: session.sessionId,
           maxBytes: catchUpSliceMaxBytes,
         });
+
+        if (!advanced) {
+          // One committed record can exceed the slice cap, leaving the
+          // capped read without a newline; retry uncapped so it cannot
+          // stall the session forever. When the session is simply caught
+          // up the retry is a cheap size check.
+          advanced = ingestSessionSlice({
+            database,
+            feed,
+            sessionId: session.sessionId,
+          });
+        }
 
         if (!advanced) {
           break;
@@ -145,12 +169,13 @@ export function createSessionHistoryEngine(options: {
 
     async warmUp(warmUpOptions: SessionIndexWarmUpOptions = {}): Promise<void> {
       try {
-        await caughtUpView(warmUpOptions.sessionId);
+        await caughtUpView(warmUpOptions.sessionId, warmUpOptions.signal);
       } catch (error: unknown) {
-        // Closing mid-warm-up is a normal shutdown, not a failure.
+        // Closing or aborting mid-warm-up ends advisory work, not a
+        // failure.
         if (
           error instanceof SessionHistoryEngineError &&
-          error.code === 'engine_closed'
+          (error.code === 'engine_closed' || error.code === 'aborted')
         ) {
           return;
         }
@@ -162,7 +187,10 @@ export function createSessionHistoryEngine(options: {
     async search(
       searchOptions: SessionIndexSearchOptions,
     ): Promise<SessionIndexSearchResult> {
-      const {database, catalog} = await caughtUpView(searchOptions.sessionId);
+      const {database, catalog} = await caughtUpView(
+        searchOptions.sessionId,
+        searchOptions.signal,
+      );
       const requestedSessionId =
         searchOptions.sessionId === undefined
           ? undefined
@@ -191,7 +219,10 @@ export function createSessionHistoryEngine(options: {
     async readAround(
       readOptions: SessionIndexReadAroundOptions,
     ): Promise<SessionIndexConversationWindow> {
-      const {database, catalog} = await caughtUpView(readOptions.sessionId);
+      const {database, catalog} = await caughtUpView(
+        readOptions.sessionId,
+        readOptions.signal,
+      );
       const sessionId = requiredKnownSessionId(catalog, readOptions.sessionId);
       const rows = readAroundSessionIndex({
         database,
