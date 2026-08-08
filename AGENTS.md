@@ -12,17 +12,24 @@ The model proposes. The runtime, tests, and policy commit.
 
 ---
 
-## 0. The Greenfield Principle
+## 0. Simplicity and the Greenfield Principle
+
+**Simplicity is the ultimate sophistication.** Simple can be harder than
+complex: you have to work hard to get your thinking clean to make it simple.
+Complexity that remains is thinking that stopped early.
 
 **Every line of code and documentation should read as if it had been written
-correctly the first time.** This governs every other section here, and applies
-to source, tests, docs, and this file.
+correctly the first time.** The two principles share top rank. They govern
+every other section here and apply to source, tests, docs, and this file.
 
 1. **No patching.** Trace a break to its cause and fix it there. Do not stack
    special cases, copy logic and tweak it, or add a flag to route around the
    problem. Tearing something down and rewriting it is in scope.
-2. **Code explains itself.** Names carry the *what*. Comments carry *why*, and
-   rules that cannot be inferred from the code. No commented-out code.
+2. **Code explains itself.** Names carry the *what*. A comment carries a *why*
+   or a rule that cannot be inferred from the code, and it is clear, simple,
+   and rare. Explanatory comments that narrate the code misguide more than
+   they help: delete them, or rewrite the code that needed them. No
+   commented-out code.
 3. **No residue.** No backup copies, orphaned files, or dead code. When a
    mechanism goes, its tests, fixtures, and docs go with it.
 4. **Deployment parity.** Deployed and local source stay byte-identical.
