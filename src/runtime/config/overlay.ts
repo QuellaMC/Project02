@@ -151,7 +151,7 @@ function loadedOverlay(options: {
  * Invalid bytes fingerprint distinctly, not as one sentinel, so an edit to a
  * broken overlay stays visible. The wrapper stops a collision with a config.
  */
-export function characterOverlayFingerprintLayer(
+function characterOverlayFingerprintLayer(
   overlay: LoadedProject02CharacterOverlayConfig,
 ): Project02RuntimeConfig | RuntimeConfigValue | null {
   if (overlay.source === 'none') {

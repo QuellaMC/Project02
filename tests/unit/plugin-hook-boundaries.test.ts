@@ -22,7 +22,6 @@ describe('runtime plugin hook result boundaries', () => {
         contractVersion: runtimePluginContractVersion,
         compatibility: {
           hostContractVersions: [runtimePluginContractVersion],
-          sourceSystem: 'test',
         },
         declaredPlugins: ['before_role_model_call'],
         config: {scope: 'global_with_character_overrides', fields: []},

@@ -8,6 +8,9 @@ import {
   createRoleModelInputEnvelope,
   renderRoleModelTurnContext,
   type RoleModelAssistantChatMessage,
+  type RoleModelChatCompletionTool,
+  type RoleModelChatMessage,
+  type RoleModelInputEnvelope,
   type RoleModelPluginToolDefinition,
   roleModelProviderErrorRejectionReason,
   visibleReplyModelToolName,
@@ -18,8 +21,6 @@ import {
   defaultNvidiaRoleModelRequestTimeoutMs,
   defaultNvidiaRoleModelReasoningBudget,
   nvidiaModelEnvName,
-  renderNvidiaMessages,
-  renderNvidiaTools,
   type NvidiaFetchClient,
 } from '../../src/role-model/providers/nvidia.ts';
 import {
@@ -428,10 +429,10 @@ describe('NVIDIA role-model provider', () => {
     expect(serializedExchange).not.toContain(nestedCredentialSentinel);
   });
 
-  it('renders OpenAI-compatible messages and native tools', () => {
-    const inputEnvelope = createNvidiaTestInputEnvelope();
-    const messages = renderNvidiaMessages(inputEnvelope);
-    const tools = renderNvidiaTools(inputEnvelope);
+  it('renders OpenAI-compatible messages and native tools', async () => {
+    const {messages, tools = []} = await captureNvidiaRequest(
+      createNvidiaTestInputEnvelope(),
+    );
 
     expect(messages.map(message => message.role)).toEqual([
       'system',
@@ -517,7 +518,7 @@ describe('NVIDIA role-model provider', () => {
     ).toBe(true);
   });
 
-  it('uses canonical provider-safe names for every runtime plugin management tool', () => {
+  it('uses canonical provider-safe names for every runtime plugin management tool', async () => {
     const pluginHost = createRuntimePluginHost({
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         control: testRuntimePluginConfigControlCapability,
@@ -529,10 +530,9 @@ describe('NVIDIA role-model provider', () => {
       'hello',
       pluginHost.pluginToolDefinitions(),
     );
+    const {tools = []} = await captureNvidiaRequest(inputEnvelope);
 
-    expect(
-      renderNvidiaTools(inputEnvelope).map(tool => tool.function.name),
-    ).toEqual([
+    expect(tools.map(tool => tool.function.name)).toEqual([
       visibleReplyModelToolName,
       'runtime_plugin_list',
       'runtime_plugin_config',
@@ -634,8 +634,7 @@ describe('NVIDIA role-model provider', () => {
     });
   });
 
-  it('preserves provider aliases in prior assistant tool-call history', () => {
-    const inputEnvelope = createNvidiaAliasCollisionInputEnvelope();
+  it('preserves provider aliases in prior assistant tool-call history', async () => {
     const priorAssistantMessage = Object.freeze({
       role: 'assistant',
       content: null,
@@ -666,11 +665,10 @@ describe('NVIDIA role-model provider', () => {
         },
       ]),
     } satisfies RoleModelAssistantChatMessage);
-    const messages = renderNvidiaMessages(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope, {
-        additionalMessages: [priorAssistantMessage],
-      }),
-    });
+    const {messages} = await captureNvidiaRequest(
+      createNvidiaAliasCollisionInputEnvelope(),
+      [priorAssistantMessage],
+    );
     const assistantHistoryMessage = messages.find(
       (message): message is RoleModelAssistantChatMessage =>
         message.role === 'assistant' && message.tool_calls !== undefined,
@@ -766,6 +764,7 @@ describe('NVIDIA role-model provider', () => {
         },
       },
     });
+    expect(output.providerExchange?.finishReason).toBe('stop');
     expect(output.providerExchange?.outputNormalization).toEqual({
       source: 'terminal_assistant_content',
       committed: false,
@@ -817,125 +816,6 @@ describe('NVIDIA role-model provider', () => {
       source: 'terminal_assistant_content',
       committed: false,
     });
-  });
-
-  it('uses explicit no-thinking NVIDIA params when requested', async () => {
-    let capturedBody: unknown;
-    const fetchClient: NvidiaFetchClient = (_url, request) => {
-      capturedBody = JSON.parse(request.body);
-
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'No-thinking mode reply.',
-                },
-              },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    };
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'secret',
-      fetchClient,
-      thinkingMode: {
-        mode: 'none',
-      },
-    });
-    const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
-
-    expect(capturedBody).toMatchObject({
-      chat_template_kwargs: {
-        enable_thinking: false,
-      },
-    });
-    expect(
-      (capturedBody as {readonly reasoning_budget?: unknown}).reasoning_budget,
-    ).toBeUndefined();
-    expect(output.providerExchange?.reasoning).toEqual({
-      mode: 'none',
-      params: {
-        chat_template_kwargs: {
-          enable_thinking: false,
-        },
-      },
-    });
-  });
-
-  it('uses consistent thinking-enabled NVIDIA params and provider exchange evidence', async () => {
-    let capturedBody: unknown;
-    const fetchClient: NvidiaFetchClient = (_url, request) => {
-      capturedBody = JSON.parse(request.body);
-
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'Thinking mode reply.',
-                },
-              },
-            ],
-            usage: {
-              total_tokens: 42,
-            },
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    };
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'secret',
-      fetchClient,
-      thinkingMode: {
-        mode: 'enabled',
-        reasoningBudgetTokens: 2048,
-      },
-    });
-    const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
-
-    expect(capturedBody).toMatchObject({
-      reasoning_budget: 2048,
-      chat_template_kwargs: {
-        enable_thinking: true,
-      },
-    });
-    expect(output.providerExchange?.reasoning).toEqual({
-      mode: 'enabled',
-      params: {
-        reasoning_budget: 2048,
-        chat_template_kwargs: {
-          enable_thinking: true,
-        },
-      },
-    });
-    expect(output.providerExchange?.usage).toEqual({
-      total_tokens: 42,
-    });
-    expect(output.providerExchange?.finishReason).toBe('stop');
   });
 
   it('scrubs leaked think blocks before visible_reply normalization', async () => {
@@ -1357,6 +1237,34 @@ describe('NVIDIA role-model provider', () => {
     expect(output.providerMetadata?.response?.status).toBe(200);
   });
 });
+
+type CapturedNvidiaRequest = {
+  readonly messages: readonly RoleModelChatMessage[];
+  readonly tools?: readonly RoleModelChatCompletionTool[];
+};
+
+async function captureNvidiaRequest(
+  inputEnvelope: RoleModelInputEnvelope,
+  additionalMessages: readonly RoleModelChatMessage[] = [],
+): Promise<CapturedNvidiaRequest> {
+  let capturedBody: unknown;
+  const adapter = createNvidiaRoleModelProviderAdapter({
+    apiKey: 'secret',
+    fetchClient: (_url, request) => {
+      capturedBody = JSON.parse(request.body);
+
+      return Promise.resolve(successfulReplyResponse('captured'));
+    },
+  });
+
+  await adapter.invoke(inputEnvelope, {
+    turnContext: renderRoleModelTurnContext(inputEnvelope, {
+      additionalMessages,
+    }),
+  });
+
+  return capturedBody as CapturedNvidiaRequest;
+}
 
 function createNvidiaTestInputEnvelope(
   userMessage = 'hello',

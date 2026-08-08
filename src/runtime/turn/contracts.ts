@@ -50,11 +50,9 @@ export type RunLocalUserMessageEventOptions = {
   readonly rawInput?: string;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly maxToolRounds?: number;
-  readonly recentMessageLimit?: number;
   readonly pluginHost: RuntimePluginHost;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
-  readonly committedAt?: string;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;
@@ -146,7 +144,6 @@ export type RuntimeTurnState = {
   readonly event: UserMessageRuntimeEvent;
   readonly payloadSummary: RawEventLogPayloadSummary;
   runtimePluginContextForTurn: RuntimePluginContext | undefined;
-  runtimePluginHostForTurn: RuntimePluginHost | undefined;
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
   readonly startedPluginToolCalls: Map<string, RuntimePluginToolCall>;

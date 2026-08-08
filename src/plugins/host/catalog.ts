@@ -19,12 +19,12 @@ import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import type {RuntimePlugin, RuntimePluginManifest} from '../api/types.ts';
 import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 
-export type RuntimePluginHostServiceBootstrapInput = {
+type RuntimePluginHostServiceBootstrapInput = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
 };
 
-export type RuntimePluginHostServiceCatalogEntry = {
+type RuntimePluginHostServiceCatalogEntry = {
   readonly catalogKind: 'host_service';
   readonly manifest: RuntimePluginManifest;
   readonly bootstrap: (

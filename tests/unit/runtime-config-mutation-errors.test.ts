@@ -53,20 +53,21 @@ describe('runtime config mutation error handling', () => {
     const {
       applyRuntimeConfigControlOperation,
       bindProject02CharacterRuntimeLocation,
-      loadProject02RuntimeConfig,
-      resolveProject02ConfigLocation,
+      loadProject02RuntimeConfigWithLocation,
       resolveRuntimeConfigScopeTarget,
       RuntimeConfigMutationError,
     } = await import('../../src/runtime/config/index.ts');
     const {requiredSecretPlugin} =
-      await import('../support/runtime-config-fixtures.ts');
+      await import('../support/runtime-config-activation-fixtures.ts');
     const plugin = requiredSecretPlugin('memory');
 
     let thrown: unknown;
 
     try {
-      const loadedConfig = loadProject02RuntimeConfig({storeRoot, env: {}});
-      const configLocation = resolveProject02ConfigLocation({loadedConfig});
+      const {configLocation} = loadProject02RuntimeConfigWithLocation({
+        selection: {storeRoot},
+        env: {},
+      });
       const runtimeLocation = bindProject02CharacterRuntimeLocation({
         configLocation,
         characterId: 'mira',

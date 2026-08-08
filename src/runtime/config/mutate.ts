@@ -38,16 +38,13 @@ import {
 } from './types.ts';
 import {validateProject02RuntimeConfig} from './load.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
-import {
-  canonicalRuntimeConfigPath,
-  RuntimeConfigPathResolutionError,
-} from './path.ts';
+import {canonicalRuntimeConfigPath} from './path.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
   type Project02ConfigFieldDefinition,
+  project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinition,
   project02RuntimeConfigFieldDefinitions,
-  project02RuntimeConfigValueMatchesField,
 } from './schema.ts';
 
 export type RuntimeConfigMutationResult = {
@@ -267,17 +264,24 @@ export type AuthoredRuntimeConfigLayer = {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-/** Blocks only when there are no authored bytes to edit; absence does not. */
+/**
+ * The one blocking rule for an authored layer: an error other than a missing
+ * file. `authoredBytesUnblock` says whether readable bytes make it editable
+ * anyway — true for the layer being written, false for a layer merely read.
+ */
 export function blockingRuntimeConfigLayerDiagnostic(
   layer: AuthoredRuntimeConfigLayer,
+  authoredBytesUnblock = true,
 ): RuntimeConfigDiagnostic | undefined {
-  return layer.authoredDocument === undefined
-    ? layer.diagnostics.find(
-        diagnostic =>
-          diagnostic.severity === 'error' &&
-          diagnostic.code !== 'runtime_config_missing',
-      )
-    : undefined;
+  if (authoredBytesUnblock && layer.authoredDocument !== undefined) {
+    return undefined;
+  }
+
+  return layer.diagnostics.find(
+    diagnostic =>
+      diagnostic.severity === 'error' &&
+      diagnostic.code !== 'runtime_config_missing',
+  );
 }
 
 export function createRuntimeConfigAuthoredSnapshot(
@@ -373,24 +377,7 @@ export function getRedactedRuntimeConfigValueAtPath(
   path: string,
 ): RuntimeConfigValue | undefined {
   const parts = parseConfigPath(path);
-  const value = getRuntimeConfigValueForParts(config, path, parts);
 
-  if (value === undefined) {
-    return undefined;
-  }
-
-  const key = redactionKeyForRuntimeConfigPath(config, path, parts);
-
-  return key === undefined
-    ? redactRuntimeConfigValue(value)
-    : redactRuntimeConfigValue(value, {key});
-}
-
-function getRuntimeConfigValueForParts(
-  config: Project02RuntimeConfig | undefined,
-  _path: string,
-  parts: readonly string[],
-): RuntimeConfigValue | undefined {
   if (parts[0] === 'plugins') {
     throw new TypeError(
       'Plugin config values are not available through generic runtime config get.',
@@ -402,32 +389,33 @@ function getRuntimeConfigValueForParts(
   }
 
   if (parts.length === 1) {
-    const [field] = parts;
-
-    return rootConfigValue(config, field);
+    return redactedConfigValueForKey(
+      rootConfigValue(config, parts[0]),
+      parts[0],
+    );
   }
 
   if (parts[0] === 'project02' && parts.length === 2) {
-    return project02ConfigValue(config, parts[1]);
+    return redactedConfigValueForKey(
+      project02ConfigValue(config, parts[1]),
+      parts[1],
+    );
   }
 
   return undefined;
 }
 
-function redactionKeyForRuntimeConfigPath(
-  _config: Project02RuntimeConfig | undefined,
-  _path: string,
-  parts: readonly string[],
-): string | undefined {
-  if (parts.length === 1) {
-    return parts[0];
+function redactedConfigValueForKey(
+  value: RuntimeConfigValue | undefined,
+  key: string | undefined,
+): RuntimeConfigValue | undefined {
+  if (value === undefined) {
+    return undefined;
   }
 
-  if (parts[0] === 'project02' && parts.length === 2) {
-    return parts[1];
-  }
-
-  return undefined;
+  return key === undefined
+    ? redactRuntimeConfigValue(value)
+    : redactRuntimeConfigValue(value, {key});
 }
 
 function rootConfigValue(
@@ -695,10 +683,7 @@ function setProject02ConfigField(
   value: RuntimeConfigValue,
   path: string,
 ): JsonBoundaryObject {
-  if (
-    !project02RuntimeConfigValueMatchesField(value, field) ||
-    (typeof value === 'string' && value.trim().length === 0)
-  ) {
+  if (!project02RuntimeConfigFieldAcceptsValue(value, field)) {
     throw new TypeError(`${field.invalidValueMessage} Path: ${path}.`);
   }
 
@@ -1026,16 +1011,12 @@ function writeTextAtomic(path: string, value: string, mode: number): void {
   });
 }
 
+/** Preparing, locking, and committing a write are mutation boundaries. */
 export function canonicalRuntimeConfigMutationPath(path: string): string {
-  try {
-    return canonicalRuntimeConfigPath(path);
-  } catch (error: unknown) {
-    if (error instanceof RuntimeConfigPathResolutionError) {
-      throw new RuntimeConfigMutationError(error.message, {cause: error});
-    }
-
-    throw error;
-  }
+  return canonicalRuntimeConfigPath(
+    path,
+    cause => new RuntimeConfigMutationError(cause.message, {cause}),
+  );
 }
 
 function mutationFileAccessError(

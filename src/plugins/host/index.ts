@@ -1,15 +1,11 @@
 /** The runtime consumes host TYPES only, via this barrel or plugins/index.ts. */
 export {
   createRuntimePluginHost,
-  runRuntimePluginSessionEndHooks,
   runRuntimePluginSessionEndHooksForTargets,
-  runRuntimePluginShutdownHooks,
   runRuntimePluginShutdownHooksForTargets,
   runtimePluginId,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
-  type RuntimePluginBeforeRoleModelCallHostResult,
-  type RuntimePluginBeforeRoleModelCallRejectedResult,
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,

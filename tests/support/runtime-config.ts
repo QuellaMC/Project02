@@ -11,8 +11,14 @@ import {
   type LoadedProject02RuntimeConfig,
   type ResolvedProject02RuntimeLocation,
   type RuntimeConfigCharacterScope,
+  type SelectedLoadedProject02RuntimeConfig,
 } from '../../src/runtime/config/index.ts';
 import {canonicalRuntimeConfigPath} from '../../src/runtime/config/path.ts';
+import type {RuntimePluginCatalogSnapshot} from '../../src/app/activation.ts';
+import {
+  composeRuntimePluginCatalog,
+  type RuntimePluginFactoryDefinition,
+} from '../../src/app/plugin-catalog.ts';
 import {homeRootForCharacterDataDir} from '../../src/runtime/storage/index.ts';
 import {
   createRuntimePluginConfigControlBinding,
@@ -180,17 +186,50 @@ function selectedRuntimeLocationInputsForTest(
       };
 }
 
+/** The loaded half of the one production load; the other half is the location. */
+export function loadRuntimeConfigForTest(
+  options: {
+    readonly configPath?: string;
+    readonly storeRoot?: string;
+    readonly env?: NodeJS.ProcessEnv;
+  } = {},
+): SelectedLoadedProject02RuntimeConfig {
+  const {env, ...selection} = options;
+
+  return loadProject02RuntimeConfigWithLocation({
+    selection,
+    ...(env === undefined ? {} : {env}),
+  }).loadedConfig;
+}
+
 export function runtimeConfigSnapshotForTest(
   options: TestRuntimeLocationOptions & {
     readonly loadedConfig: LoadedProject02RuntimeConfig;
+    /** Supplied factories stand in for the whole installed catalog. */
+    readonly factories?: Readonly<
+      Record<string, RuntimePluginFactoryDefinition>
+    >;
   },
 ): Readonly<{
   loadedConfig: LoadedProject02RuntimeConfig;
   runtimeLocation: ResolvedProject02RuntimeLocation;
+  catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }> {
+  const runtimeLocation = runtimeLocationForTest(options);
+
   return Object.freeze({
     loadedConfig: options.loadedConfig,
-    runtimeLocation: runtimeLocationForTest(options),
+    runtimeLocation,
+    ...(options.factories === undefined
+      ? {}
+      : {
+          catalogSnapshot: Object.freeze({
+            storeRoot: runtimeLocation.homeRoot,
+            ...composeRuntimePluginCatalog({factories: options.factories}),
+            packageProvenanceByPluginId: Object.freeze({}),
+            diagnostics: Object.freeze([]),
+          } satisfies RuntimePluginCatalogSnapshot),
+        }),
   });
 }
 

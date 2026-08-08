@@ -2,20 +2,36 @@ import {
   runtimeConfigDiagnosticAttribution,
   type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
-import type {RuntimeCliStartupResult} from '../../app/index.ts';
+import type {
+  Project02CharacterActivation,
+  RuntimeCliStartupResult,
+} from '../../app/index.ts';
 
-export type RejectedRuntimeCliStartup = {
+type RejectedRuntimeCliStartup = {
   readonly outcome: 'rejected';
   readonly diagnostic: RuntimeConfigDiagnostic | undefined;
   readonly fallbackReason: string;
 };
 
 /** Warnings ride here so a surface reading only the plan cannot drop them. */
-export type UsableRuntimeCliStartup<TStartup> = {
+type UsableRuntimeCliStartup<TStartup> = {
   readonly outcome: 'usable';
   readonly startup: TStartup;
   readonly warnings: readonly string[];
 };
+
+const characterActivationFailed = 'Character activation failed.';
+
+/** The one wording every CLI reports an unbound character with. */
+export function characterActivationFailureMessage(startup: {
+  readonly characterActivation: Project02CharacterActivation;
+}): string {
+  const {characterActivation} = startup;
+
+  return characterActivation.status === 'failed'
+    ? (characterActivation.messages[0] ?? characterActivationFailed)
+    : characterActivationFailed;
+}
 
 /**
  * The one reading of a startup result for an operator-facing surface.
@@ -33,13 +49,7 @@ export function interpretRuntimeCliStartup<
       }
     > {
   if (startup.status === 'character_invalid') {
-    return rejected(
-      undefined,
-      startup.characterActivation.status === 'failed'
-        ? (startup.characterActivation.messages[0] ??
-            'Character activation failed.')
-        : 'Character activation failed.',
-    );
+    return rejected(undefined, characterActivationFailureMessage(startup));
   }
 
   if (startup.status === 'config_invalid') {
@@ -53,7 +63,7 @@ export function interpretRuntimeCliStartup<
 
   // A resolved startup carries a resolved character; this narrows the type.
   if (characterActivation.status !== 'resolved') {
-    return rejected(undefined, 'Character activation failed.');
+    return rejected(undefined, characterActivationFailureMessage(startup));
   }
 
   return Object.freeze({

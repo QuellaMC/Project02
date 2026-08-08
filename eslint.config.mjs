@@ -60,7 +60,7 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        {max: 1895, skipBlankLines: true, skipComments: true},
+        {max: 1764, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -69,7 +69,7 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        {max: 1198, skipBlankLines: true, skipComments: true},
+        {max: 1101, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -78,25 +78,7 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        {max: 1500, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
-    files: ['src/role-model/providers/nvidia.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1159, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
-    files: ['src/app/activation.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1182, skipBlankLines: true, skipComments: true},
+        {max: 1123, skipBlankLines: true, skipComments: true},
       ],
     },
   },
@@ -106,15 +88,6 @@ export default tseslint.config(
       'max-lines': [
         'error',
         {max: 1598, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
-    files: ['src/runtime/storage/session-store.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1038, skipBlankLines: true, skipComments: true},
       ],
     },
   },

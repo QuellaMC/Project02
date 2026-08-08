@@ -327,22 +327,6 @@ describe('role-model contracts', () => {
         requiresConfirmation: false,
       },
     ] satisfies readonly RoleModelPluginToolDefinition[];
-    const toolObservations = [
-      {
-        round: 1,
-        pluginId: 'memory',
-        toolName: requiredToolName,
-        input: {
-          query: 'Mira',
-        },
-        result: {
-          status: 'accepted',
-          output: {
-            summary: 'Mira likes concise replies.',
-          },
-        },
-      },
-    ] as const;
     const allowedTools = [visibleReplyModelToolName, requiredToolName];
     const rawOutputText = JSON.stringify({
       toolCalls: [
@@ -370,7 +354,6 @@ describe('role-model contracts', () => {
         decisionResult,
         allowedTools,
         pluginToolDefinitions,
-        toolObservations,
       }),
     ).toBe(true);
   });
@@ -464,13 +447,11 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('rejects the removed legacy action decision shape', () => {
+  it('rejects a decision carrying unsupported top-level fields', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
-        action: {
-          type: visibleReplyModelToolName,
-          text: 'hello',
-        },
+        toolCalls: [{name: visibleReplyModelToolName, input: {text: 'hello'}}],
+        sideEffect: 'write a file',
       }),
     );
 
@@ -478,6 +459,7 @@ describe('role-model contracts', () => {
       status: 'rejected',
       rejection: {
         reason: roleModelUnsupportedEffectRejectionReason,
+        details: 'Decision includes unsupported fields: sideEffect.',
       },
     });
   });

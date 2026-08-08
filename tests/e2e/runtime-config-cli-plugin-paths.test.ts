@@ -6,10 +6,8 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
-import {
-  createInitializedTestStoreRoot,
-  requiredSecretPlugin,
-} from '../support/runtime-config-fixtures.ts';
+import {createInitializedTestStoreRoot} from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 
 const installedSecretPlugin = requiredSecretPlugin('mem0-local');
 const installedSecretFactories = Object.freeze({

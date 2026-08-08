@@ -90,7 +90,7 @@ async function runConfigMutationChild(options: {
   const script = [
     "import { existsSync } from 'node:fs';",
     "const { applyRuntimeConfigControlOperation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
-    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
+    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-activation-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
     'const { configLocation } = loadProject02RuntimeConfigWithLocation({ selection: { storeRoot: process.argv[1] }, env: {} });',
@@ -117,7 +117,7 @@ async function runSecretMutationChild(options: {
   const script = [
     "import { existsSync } from 'node:fs';",
     "const { applyRuntimeConfigControlOperation, bindProject02CharacterRuntimeLocation, loadProject02RuntimeConfigWithLocation, resolveRuntimeConfigScopeTarget } = await import('./src/runtime/config/index.ts');",
-    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-fixtures.ts');",
+    "const { requiredSecretPlugin } = await import('./tests/support/runtime-config-activation-fixtures.ts');",
     'const sleep = new Int32Array(new SharedArrayBuffer(4));',
     'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
     'const env = { [process.argv[5]]: process.argv[6] };',

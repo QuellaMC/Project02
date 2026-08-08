@@ -12,31 +12,33 @@ import {describe, expect, it} from 'vitest';
 
 import {
   bindProject02CharacterRuntimeLocation,
-  defaultRuntimeConfigPath,
-  loadProject02RuntimeConfig,
   loadProject02RuntimeConfigForLocation,
   loadProject02RuntimeConfigWithLocation,
-  resolveProject02ConfigLocation,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
 import {
   characterDataDirPath,
+  createProject02HomeLayout,
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
+import {loadRuntimeConfigForTest} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('selected config and activated runtime locations', () => {
   it('keeps an explicitly selected home authoritative when its config is absent', () => {
     const homeRoot = createTestTempRoot('project02-location-absent-');
     const physicalHomeRoot = realpathSync.native(homeRoot);
-    const loadedConfig = loadProject02RuntimeConfig({storeRoot: homeRoot});
+    const {loadedConfig, configLocation} =
+      loadProject02RuntimeConfigWithLocation({
+        selection: {storeRoot: homeRoot},
+      });
 
-    expect(resolveProject02ConfigLocation({loadedConfig})).toEqual({
+    expect(configLocation).toEqual({
       selectedConfig: {
         source: 'default',
-        path: defaultRuntimeConfigPath(homeRoot),
+        path: createProject02HomeLayout({homeRoot: homeRoot}).configPath,
         canonicalPath: loadedConfig.selectedConfig.canonicalPath,
         owner: {kind: 'home', homeRoot: physicalHomeRoot},
       },
@@ -46,14 +48,14 @@ describe('selected config and activated runtime locations', () => {
 
   it('retains absent custom-home selection provenance across exported APIs', () => {
     const homeRoot = createTestTempRoot('project02-location-exported-absent-');
-    const loadedConfig = loadProject02RuntimeConfig({storeRoot: homeRoot});
-
-    const configLocation = resolveProject02ConfigLocation({loadedConfig});
+    const {configLocation} = loadProject02RuntimeConfigWithLocation({
+      selection: {storeRoot: homeRoot},
+    });
     const reloaded = loadProject02RuntimeConfigForLocation(configLocation);
 
     expect(configLocation.selectedConfig.source).toBe('default');
     expect(configLocation.selectedConfig.path).toBe(
-      defaultRuntimeConfigPath(homeRoot),
+      createProject02HomeLayout({homeRoot: homeRoot}).configPath,
     );
     expect(reloaded.source).toBe('none');
     expect(reloaded.diagnostics).toEqual([]);
@@ -110,7 +112,7 @@ describe('selected config and activated runtime locations', () => {
     await ensureInitializedProject02Home({homeRoot});
 
     expect(() =>
-      loadProject02RuntimeConfig({configPath: nestedPath, env: {}}),
+      loadRuntimeConfigForTest({configPath: nestedPath, env: {}}),
     ).toThrow('inside a character-data directory');
   });
 
@@ -128,7 +130,7 @@ describe('selected config and activated runtime locations', () => {
       'utf8',
     );
 
-    const loadedConfig = loadProject02RuntimeConfig({configPath, env: {}});
+    const loadedConfig = loadRuntimeConfigForTest({configPath, env: {}});
 
     expect(loadedConfig.diagnostics).toEqual([]);
     expect(loadedConfig.selectedConfig.owner).toEqual({kind: 'standalone'});
@@ -150,8 +152,11 @@ describe('selected config and activated runtime locations', () => {
       })}\n`,
       'utf8',
     );
-    const loadedConfig = loadProject02RuntimeConfig({configPath, env: {}});
-    const configLocation = resolveProject02ConfigLocation({loadedConfig});
+    const {loadedConfig, configLocation} =
+      loadProject02RuntimeConfigWithLocation({
+        selection: {configPath},
+        env: {},
+      });
     const physicalAuthoredHome = realpathSync.native(authoredHome);
 
     const location = bindProject02CharacterRuntimeLocation({
@@ -178,7 +183,9 @@ describe('selected config and activated runtime locations', () => {
     const runtimeHome = createTestTempRoot(
       'project02-location-explicit-runtime-home-',
     );
-    const configPath = defaultRuntimeConfigPath(selectedHome);
+    const configPath = createProject02HomeLayout({
+      homeRoot: selectedHome,
+    }).configPath;
 
     writeFileSync(
       configPath,
@@ -331,7 +338,9 @@ describe('selected config and activated runtime locations', () => {
   it('binds a default-source config alias to its selected home', () => {
     const homeRoot = createTestTempRoot('project02-location-default-alias-');
     const targetPath = join(homeRoot, 'Config.json');
-    const selectedPath = defaultRuntimeConfigPath(homeRoot);
+    const selectedPath = createProject02HomeLayout({
+      homeRoot: homeRoot,
+    }).configPath;
 
     writeFileSync(
       targetPath,
@@ -342,7 +351,7 @@ describe('selected config and activated runtime locations', () => {
       symlinkSync(targetPath, selectedPath);
     }
 
-    const loadedConfig = loadProject02RuntimeConfig({
+    const loadedConfig = loadRuntimeConfigForTest({
       storeRoot: homeRoot,
       env: {},
     });
@@ -361,7 +370,9 @@ describe('selected config and activated runtime locations', () => {
     const homeRoot = createTestTempRoot(
       'project02-location-explicit-default-name-',
     );
-    const selectedPath = defaultRuntimeConfigPath(homeRoot);
+    const selectedPath = createProject02HomeLayout({
+      homeRoot: homeRoot,
+    }).configPath;
 
     writeFileSync(
       selectedPath,
@@ -369,7 +380,7 @@ describe('selected config and activated runtime locations', () => {
       'utf8',
     );
 
-    const loadedConfig = loadProject02RuntimeConfig({
+    const loadedConfig = loadRuntimeConfigForTest({
       configPath: selectedPath,
       env: {},
     });
@@ -380,9 +391,11 @@ describe('selected config and activated runtime locations', () => {
 
   it('keeps an env-selected missing default-named config standalone', () => {
     const homeRoot = createTestTempRoot('project02-location-env-default-name-');
-    const selectedPath = defaultRuntimeConfigPath(homeRoot);
+    const selectedPath = createProject02HomeLayout({
+      homeRoot: homeRoot,
+    }).configPath;
 
-    const loadedConfig = loadProject02RuntimeConfig({
+    const loadedConfig = loadRuntimeConfigForTest({
       env: {[runtimeConfigEnvVarName]: selectedPath},
     });
 
@@ -410,7 +423,10 @@ describe('selected config and activated runtime locations', () => {
       env: {},
     });
 
-    symlinkSync(targetPath, defaultRuntimeConfigPath(root));
+    symlinkSync(
+      targetPath,
+      createProject02HomeLayout({homeRoot: root}).configPath,
+    );
 
     expect(
       loadProject02RuntimeConfigForLocation(snapshot.configLocation).config
@@ -425,47 +441,34 @@ describe('selected config and activated runtime locations', () => {
     const homeRoot = createTestTempRoot('project02-location-env-');
     const configPath = join(homeRoot, 'selected.json');
 
-    const loadedConfig = loadProject02RuntimeConfig({
+    const {configLocation: location} = loadProject02RuntimeConfigWithLocation({
       env: {[runtimeConfigEnvVarName]: configPath},
     });
-    const location = resolveProject02ConfigLocation({loadedConfig});
 
     expect(location.selectedConfig.source).toBe('env');
     expect(location.selectedConfig.path).toBe(configPath);
   });
 
-  it('accepts only the exact selected snapshot returned by the loader', () => {
+  it('hands back a frozen selection the loader itself minted', () => {
     const selectedHome = createTestTempRoot(
       'project02-location-selected-snapshot-',
     );
-    const selected = loadProject02RuntimeConfig({
-      storeRoot: selectedHome,
-      env: {},
-    });
-    const location = resolveProject02ConfigLocation({loadedConfig: selected});
+    const {loadedConfig, configLocation} =
+      loadProject02RuntimeConfigWithLocation({
+        selection: {storeRoot: selectedHome},
+        env: {},
+      });
 
-    expect(location.selectedConfig).toEqual({
+    expect(configLocation.selectedConfig).toEqual({
       source: 'default',
-      path: defaultRuntimeConfigPath(selectedHome),
-      canonicalPath: selected.selectedConfig.canonicalPath,
+      path: createProject02HomeLayout({homeRoot: selectedHome}).configPath,
+      canonicalPath: loadedConfig.selectedConfig.canonicalPath,
       owner: {
         kind: 'home',
         homeRoot: realpathSync.native(selectedHome),
       },
     });
-    expect(Object.isFrozen(location.selectedConfig)).toBe(true);
-
-    expect(() =>
-      resolveProject02ConfigLocation({
-        loadedConfig: {
-          ...selected,
-          selectedConfig: {
-            ...selected.selectedConfig,
-            owner: {...selected.selectedConfig.owner},
-          },
-        },
-      }),
-    ).toThrow('selected snapshot returned by the runtime config loader');
+    expect(Object.isFrozen(configLocation.selectedConfig)).toBe(true);
   });
 
   it('does not let a legitimate location mint a foreign mutation target', () => {
@@ -475,8 +478,9 @@ describe('selected config and activated runtime locations', () => {
     const secondHome = createTestTempRoot(
       'project02-location-target-authority-b-',
     );
-    const loadedConfig = loadProject02RuntimeConfig({storeRoot: firstHome});
-    const location = resolveProject02ConfigLocation({loadedConfig});
+    const {configLocation: location} = loadProject02RuntimeConfigWithLocation({
+      selection: {storeRoot: firstHome},
+    });
 
     expect(() =>
       resolveRuntimeConfigScopeTarget({
@@ -491,8 +495,9 @@ describe('selected config and activated runtime locations', () => {
 
   it('uses one normalized character identity for scope and storage', () => {
     const homeRoot = createTestTempRoot('project02-location-character-id-');
-    const loadedConfig = loadProject02RuntimeConfig({storeRoot: homeRoot});
-    const configLocation = resolveProject02ConfigLocation({loadedConfig});
+    const {configLocation} = loadProject02RuntimeConfigWithLocation({
+      selection: {storeRoot: homeRoot},
+    });
     const runtimeLocation = bindProject02CharacterRuntimeLocation({
       configLocation,
       characterId: ' mira ',
@@ -510,7 +515,7 @@ describe('selected config and activated runtime locations', () => {
     );
 
     writeFileSync(
-      defaultRuntimeConfigPath(homeRoot),
+      createProject02HomeLayout({homeRoot: homeRoot}).configPath,
       `${JSON.stringify({
         version: runtimeConfigVersion,
         project02: {character: '../bad'},
@@ -530,7 +535,7 @@ describe('selected config and activated runtime locations', () => {
       }),
     );
     expect(snapshot.configLocation.selectedConfig.path).toBe(
-      defaultRuntimeConfigPath(homeRoot),
+      createProject02HomeLayout({homeRoot: homeRoot}).configPath,
     );
     expect(snapshot.configLocation).not.toHaveProperty('characterScope');
   });

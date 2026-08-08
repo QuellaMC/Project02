@@ -1,3 +1,4 @@
+import type {RuntimeEventIdentity} from '../../../core/index.ts';
 import {
   runtimePluginId,
   runtimePluginListToolName,
@@ -7,9 +8,11 @@ import {
   runtimePluginAccessForPlugin,
   type RuntimePluginAccessMapByPluginId,
 } from '../../policy/access-control.ts';
-import {isFirstPartyModelToolsPlugin} from '../model-tools/index.ts';
 import {discoverableCurrentTurnPluginTools} from '../../policy/tool-policy.ts';
-import {createRuntimePluginEvidenceSnapshot} from '../../api/constructors.ts';
+import {
+  createRuntimePluginEvidenceSnapshot,
+  registeredRuntimePluginLifecycleHooks,
+} from '../../api/constructors.ts';
 import type {
   RuntimePlugin,
   RuntimePluginContext,
@@ -42,11 +45,7 @@ export type RuntimePluginListHostState = () => {
   readonly confirmationAvailable: boolean;
   readonly liveReloadAvailable?: boolean;
   readonly sessionScopedConfigUpdateConfirmed?: (
-    identity: {
-      readonly eventId: string;
-      readonly traceId: string;
-      readonly createdAt: string;
-    },
+    identity: RuntimeEventIdentity,
     pluginId: string,
   ) => boolean;
 };
@@ -74,7 +73,6 @@ export function createRuntimePluginListTool(): RuntimePluginProvidedTool {
       additionalProperties: false,
     },
     validationOwner: 'plugin_host',
-    annotations: {readOnlyHint: true},
     concurrency: 'shared',
     requiresConfirmation: false,
   };
@@ -211,7 +209,6 @@ export function createRuntimePluginListSummary(options: {
     plugin: options.plugin,
     access: options.access,
     confirmationAvailable: options.confirmationAvailable,
-    isHostOwnedFirstPartyModelToolsPlugin: isFirstPartyModelToolsPlugin,
   });
   const safeTools = discoverableTools
     .slice(0, runtimePluginListMaxToolsPerPlugin)
@@ -228,16 +225,15 @@ export function createRuntimePluginListSummary(options: {
       options.plugin.manifest.description,
     ),
     enabled: options.enabled,
-    availableForTurn: options.enabled,
     activationStatus:
       options.activationStatus ?? (options.enabled ? 'active' : 'disabled'),
     requestedAccess: options.access.requestedAccess,
     grantedAccess: options.enabled
       ? options.access.grantedAccess
       : Object.freeze({}),
-    registeredLifecycleHooks: Object.freeze(
-      registeredLifecycleHookNames(options.plugin),
-    ),
+    registeredLifecycleHooks: Object.freeze([
+      ...registeredRuntimePluginLifecycleHooks(options.plugin),
+    ]),
     providedTools: Object.freeze(safeTools),
     toolsTruncated:
       discoverableTools.length > runtimePluginListMaxToolsPerPlugin,
@@ -255,7 +251,6 @@ function createColdRuntimePluginListSummary(options: {
     kind: options.manifest.kind,
     description: boundedRuntimePluginListText(options.manifest.description),
     enabled: false,
-    availableForTurn: false,
     activationStatus:
       options.activationStatus === 'active'
         ? 'disabled'
@@ -285,7 +280,6 @@ function createRuntimePluginListToolSummary(
   return Object.freeze({
     name: boundedRuntimePluginListText(tool.name),
     description: boundedRuntimePluginListText(tool.description),
-    ...(tool.annotations === undefined ? {} : {annotations: tool.annotations}),
     ...(tool.concurrency === undefined ? {} : {concurrency: tool.concurrency}),
     requiresConfirmation: tool.requiresConfirmation,
     validationOwner: tool.validationOwner,
@@ -296,38 +290,6 @@ function runtimePluginListIncludesDisabled(
   input: Readonly<Record<string, RuntimePluginJsonValue>>,
 ): boolean {
   return input['includeDisabled'] === true || input['scope'] === 'all';
-}
-
-function registeredLifecycleHookNames(
-  plugin: RuntimePlugin,
-): readonly string[] {
-  const hooks: string[] = [];
-
-  if (plugin.lifecycleHooks.beforeRoleModelCall !== undefined) {
-    hooks.push('beforeRoleModelCall');
-  }
-
-  if (plugin.lifecycleHooks.handleToolCall !== undefined) {
-    hooks.push('handleToolCall');
-  }
-
-  if (plugin.lifecycleHooks.afterTurnCommitted !== undefined) {
-    hooks.push('afterTurnCommitted');
-  }
-
-  if (plugin.lifecycleHooks.onSessionEnd !== undefined) {
-    hooks.push('onSessionEnd');
-  }
-
-  if (plugin.lifecycleHooks.onShutdown !== undefined) {
-    hooks.push('onShutdown');
-  }
-
-  if (plugin.lifecycleHooks.health !== undefined) {
-    hooks.push('health');
-  }
-
-  return Object.freeze(hooks);
 }
 
 function boundedRuntimePluginListText(value: string): string {

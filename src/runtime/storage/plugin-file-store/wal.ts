@@ -39,7 +39,7 @@ import {
   writeDurablePluginFileStoreJournal,
 } from './wal-codec.ts';
 
-export type DurablePluginFileStoreFaultPoint = 'after_content_persisted';
+type DurablePluginFileStoreFaultPoint = 'after_content_persisted';
 
 export type DurablePluginFileStoreFaultInjector = (
   point: DurablePluginFileStoreFaultPoint,

@@ -1,11 +1,8 @@
+import type {RuntimeEventIdentity} from '../../core/index.ts';
 import type {RuntimePlugin, RuntimePluginContext} from './types.ts';
 
 export function runtimeIdentityMatchesContext(
-  identity: {
-    readonly eventId: string;
-    readonly traceId: string;
-    readonly createdAt: string;
-  },
+  identity: RuntimeEventIdentity,
   context: RuntimePluginContext,
 ): boolean {
   return (

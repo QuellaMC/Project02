@@ -39,7 +39,7 @@ export async function ensureInitializedProject02Home(
 ): Promise<Project02HomeLayout> {
   const layout = createProject02HomeLayout(options);
 
-  await assertProject02HomeAdoptable(options);
+  assertProject02HomeAdoptableSync(options);
 
   const marker = readStorageSchemaMarker(layout);
 
@@ -51,8 +51,8 @@ export async function ensureInitializedProject02Home(
         scope: 'home',
         createdAt: (options.now ?? defaultHomeClock)(),
       }),
-      async () => {
-        await assertProject02HomeAdoptable(options);
+      () => {
+        assertProject02HomeAdoptableSync(options);
       },
     );
     assertProject02HomeMarker(layout, result.marker);
@@ -81,14 +81,6 @@ export function project02HomeCreationIsNew(
 }
 
 /** Applies the initializer's refusals without creating anything. */
-export function assertProject02HomeAdoptable(
-  options: Project02HomeLayoutOptions = {},
-): Promise<void> {
-  return Promise.resolve().then(() => {
-    assertProject02HomeAdoptableSync(options);
-  });
-}
-
 export function assertProject02HomeAdoptableSync(
   options: Project02HomeLayoutOptions = {},
 ): void {
@@ -137,14 +129,6 @@ async function ensureRealCharacterDataRoot(
 }
 
 /** Only mutation guards call this; activation errors outrank env-file ones. */
-export function assertRealHomeEnvFile(
-  options: Project02HomeLayoutOptions = {},
-): Promise<void> {
-  return Promise.resolve().then(() => {
-    assertRealHomeEnvFileSync(options);
-  });
-}
-
 export function assertRealHomeEnvFileSync(
   options: Project02HomeLayoutOptions = {},
 ): void {

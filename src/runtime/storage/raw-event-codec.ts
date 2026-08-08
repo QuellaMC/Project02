@@ -90,6 +90,10 @@ import {
   type RuntimeTurnStatus,
 } from '../evidence/records.ts';
 import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot,
+} from '../../shared/json-boundary.ts';
+import {
   isOneOf,
   optionalCommittedMessage,
   requiredNormalizedVisibleMessageText,
@@ -657,15 +661,9 @@ function optionalRuntimePluginEvidenceSnapshots(
 function optionalRuntimePluginJsonObject(
   value: unknown,
 ): RuntimePluginJsonObject | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('toolInput');
-  }
-
-  return freezeJsonRecord(value);
+  return value === undefined
+    ? undefined
+    : requiredBoundedJsonObject(value, 'toolInput');
 }
 
 function optionalRuntimePluginToolCallResult(
@@ -1002,8 +1000,6 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
       allowedTools: options.roleModelIOSnapshot.inputEnvelope.allowedTools,
       pluginToolDefinitions:
         options.roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
-      toolObservations:
-        options.roleModelIOSnapshot.inputEnvelope.toolObservations,
     })
   ) {
     return;
@@ -1418,19 +1414,16 @@ function optionalRoleModelToolObservations(
       throwMalformedRecord('toolObservations');
     }
 
-    const input = item['input'];
-
-    if (!isRecord(input)) {
-      throwMalformedRecord('toolObservations.input');
-    }
-
     try {
       observations.push(
         createRoleModelToolObservation({
           round: requiredRecordNumber(item, 'round', 'malformed_record'),
           pluginId: requiredRecordString(item, 'pluginId', 'malformed_record'),
           toolName: requiredRecordString(item, 'toolName', 'malformed_record'),
-          input: freezeJsonRecord(input),
+          input: requiredBoundedJsonObject(
+            item['input'],
+            'toolObservations.input',
+          ),
           result: requiredRoleModelToolObservationResult(item['result']),
         }),
       );
@@ -1458,7 +1451,10 @@ function requiredRoleModelToolObservationResult(
   if (status === 'accepted') {
     return Object.freeze({
       status: 'accepted',
-      output: freezeJsonValue(value['output']),
+      output: requiredBoundedJsonValue(
+        value['output'],
+        'toolObservations.result.output',
+      ),
     } satisfies RoleModelToolObservation['result']);
   }
 
@@ -1525,7 +1521,7 @@ function optionalRoleModelProviderMetadataOption(value: unknown): {
 
   const provider = requiredRecordString(value, 'provider', 'malformed_record');
 
-  if (provider !== 'local' && provider !== 'nvidia') {
+  if (provider !== 'nvidia') {
     throwMalformedRecord('providerMetadata.provider');
   }
 
@@ -1727,41 +1723,42 @@ function requiredModelToolCall(value: unknown): ModelToolCall {
 
   return Object.freeze({
     name,
-    input: freezeJsonRecord(input),
+    input: requiredBoundedJsonObject(input, 'decision.toolCalls.input'),
   } satisfies PluginModelToolCall);
 }
 
-function freezeJsonRecord(
-  record: Readonly<Record<string, unknown>>,
-): Readonly<Record<string, RuntimePluginJsonValue>> {
-  const snapshot: Record<string, RuntimePluginJsonValue> = {};
+/**
+ * Stored JSON is corruption-controlled input, so every decoded value passes
+ * the same depth, node, entry, and byte limits a live tool call would.
+ */
+function requiredBoundedJsonObject(
+  value: unknown,
+  field: string,
+): RuntimePluginJsonObject {
+  try {
+    return createJsonBoundaryObjectSnapshot(value, {field});
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord(field);
+    }
 
-  for (const [key, value] of Object.entries(record)) {
-    snapshot[key] = freezeJsonValue(value);
+    throw error;
   }
-
-  return Object.freeze(snapshot);
 }
 
-function freezeJsonValue(value: unknown): RuntimePluginJsonValue {
-  if (
-    value === null ||
-    typeof value === 'string' ||
-    typeof value === 'number' ||
-    typeof value === 'boolean'
-  ) {
-    return value;
-  }
+function requiredBoundedJsonValue(
+  value: unknown,
+  field: string,
+): RuntimePluginJsonValue {
+  try {
+    return createJsonBoundarySnapshot(value, {field});
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord(field);
+    }
 
-  if (Array.isArray(value)) {
-    return Object.freeze(value.map(freezeJsonValue));
+    throw error;
   }
-
-  if (isRecord(value)) {
-    return freezeJsonRecord(value);
-  }
-
-  throwMalformedRecord('decision.toolCalls.input');
 }
 
 function requiredRoleModelCommitValidationResult(

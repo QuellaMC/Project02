@@ -500,35 +500,6 @@ describe('chat CLI trace summary', () => {
 });
 
 describe('chat CLI character selection', () => {
-  // Storage staying clean is startup-seam behavior, covered in
-  // tests/unit/runtime-config-overlay.test.ts.
-  it('maps an invalid explicit character to a usage error', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-invalid-character-');
-    let stderr = '';
-
-    const exitCode = await runChatCliFromArgs(
-      [
-        '--store',
-        storeRoot,
-        '--character',
-        '../bad',
-        '--new-session',
-        'invalid-character',
-      ],
-      {
-        stdin: Readable.from([]),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        pluginHost: createRuntimePluginHost({plugins: []}),
-      },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('--character must start with a letter');
-  });
-
   it('speaks as an operator-installed character selected by config', async () => {
     const storeRoot = createTestTempRoot('project02-chat-character-swap-');
     let stdout = '';
@@ -1441,112 +1412,6 @@ describe('chat CLI plugin lifecycle', () => {
     }
   });
 
-  it('uses an injected plugin config confirmation handler without consuming chat input', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-chat-plugin-config-injected-',
-    );
-    const sessionId = 'plugin-config-injected-session';
-    const configurablePlugin = createChatConfigurablePlugin();
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    await materializeChatCharacterConfig({
-      storeRoot,
-      configPath,
-      plugin: configurablePlugin,
-    });
-    const before = inspectRuntimePluginConfig({
-      targetScope: 'character',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest: configurablePlugin.manifest,
-      pluginManifests: [configurablePlugin.manifest],
-    });
-    let adapterRound = 0;
-    let confirmationCalls = 0;
-    let stdout = '';
-
-    const exitCode = await runChatCliFromArgs(
-      [
-        '--provider',
-        'local',
-        '--store',
-        storeRoot,
-        '--config',
-        configPath,
-        '--new-session',
-        sessionId,
-      ],
-      {
-        stdin: Readable.from(['change the plugin tone\n', '/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        toolConfirmationHandler(request) {
-          confirmationCalls += 1;
-          expect(request.preview).toMatchObject({
-            targetPluginId: configurablePlugin.manifest.id,
-            fieldName: 'tone',
-            operation: 'set',
-          });
-          return {status: 'denied'};
-        },
-        factories: {
-          [configurablePlugin.manifest.id]: {
-            manifest: configurablePlugin.manifest,
-            create: () => configurablePlugin,
-          },
-        },
-        roleModelAdapter: {
-          invoke() {
-            adapterRound += 1;
-
-            return {
-              rawOutputText: JSON.stringify({
-                toolCalls:
-                  adapterRound === 1
-                    ? [
-                        {
-                          name: runtimePluginConfigUpdateToolName,
-                          input: {
-                            pluginId: configurablePlugin.manifest.id,
-                            fieldName: 'tone',
-                            operation: 'set',
-                            value: 'warm',
-                            expectedFingerprint: before.fingerprint,
-                          },
-                        },
-                      ]
-                    : [
-                        {
-                          name: 'visible_reply',
-                          input: {text: 'Plugin tone was not changed.'},
-                        },
-                      ],
-              }),
-            };
-          },
-        },
-      },
-    );
-    const after = inspectRuntimePluginConfig({
-      targetScope: 'character',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest: configurablePlugin.manifest,
-      pluginManifests: [configurablePlugin.manifest],
-    });
-
-    expect(exitCode).toBe(0);
-    expect(adapterRound).toBe(2);
-    expect(confirmationCalls).toBe(1);
-    expect(stdout).not.toContain('Approve this one exact change?');
-    expect(after.fingerprint).toBe(before.fingerprint);
-  });
-
   it('returns chat input ownership after a terminal config approval times out', async () => {
     vi.useFakeTimers({
       toFake: ['setTimeout', 'clearTimeout', 'Date'],
@@ -2414,7 +2279,6 @@ function createChatConfigurablePlugin(): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['tool_provider'],
       config: {
@@ -2487,7 +2351,6 @@ function createSessionEndPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins,
       config: {
@@ -2556,7 +2419,6 @@ function createFailingSessionEndPlugin(): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {
@@ -2614,7 +2476,6 @@ function createRequiredConfigPlugin(pluginId: string): RuntimePlugin {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {

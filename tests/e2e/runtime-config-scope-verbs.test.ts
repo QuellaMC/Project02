@@ -23,7 +23,7 @@ import {
   ensureInitializedProject02Home,
   requireCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
-import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -119,7 +119,7 @@ describe('runtime-config --character verbs', () => {
       characterId: 'mira',
     });
     expect(marker).toMatchObject({
-      schemaVersion: 7,
+      schemaVersion: 8,
       scope: 'character-data',
       characterId: 'mira',
       materializedCharacterPackageVersion: '1.1.0',
@@ -662,7 +662,7 @@ describe('runtime-config --character verbs', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',

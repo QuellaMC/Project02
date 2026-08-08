@@ -22,7 +22,7 @@ type CollectedPluginPromptContext = {
   readonly contextItem: CollectedPluginContextItem;
 };
 
-export type BoundedPluginPromptContextResult =
+type BoundedPluginPromptContextResult =
   | {
       readonly status: 'completed';
       readonly contextItems: readonly RuntimePluginContextItem[];

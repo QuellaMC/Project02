@@ -16,7 +16,6 @@ import type {
   RuntimePluginBeforeRoleModelFailureBehavior,
   RuntimePluginConfigScope,
   RuntimePluginConfigValueType,
-  RuntimePluginToolAnnotations,
   RuntimePluginToolConcurrency,
   RuntimePluginContextItemKind,
   RuntimePluginDeclaration,
@@ -45,10 +44,6 @@ export type RuntimePluginFileStore = {
 
 export type RuntimePluginCompatibilityMetadata = {
   readonly hostContractVersions: readonly string[];
-  readonly sourceSystem?: string;
-  readonly sourceVersion?: string;
-  readonly externalContract?: string;
-  readonly notes?: readonly string[];
 };
 
 export type RuntimePluginConfigField = {
@@ -63,7 +58,6 @@ export type RuntimePluginConfigField = {
   readonly agentMutable?: boolean;
   readonly reloadRequired?: boolean;
   readonly redactionLabels: readonly string[];
-  readonly configFingerprint?: string;
 };
 
 export type RuntimePluginConfigMetadata = {
@@ -108,7 +102,6 @@ export type RuntimePluginProvidedTool = {
   readonly description: string;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  readonly annotations?: RuntimePluginToolAnnotations;
   /** Absent means exclusive: a tool overlaps only when it says so. */
   readonly concurrency?: RuntimePluginToolConcurrency;
   readonly requiresConfirmation: boolean;
@@ -162,10 +155,7 @@ export type RuntimePluginListingSnapshot = RuntimePluginAccessSnapshot & {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
   readonly registeredLifecycleHooks: readonly RuntimePluginDeclaration[];
-  readonly installed: boolean;
-  readonly registered: boolean;
   readonly enabled: boolean;
-  readonly availableForTurn: boolean;
   readonly redactionLabels: readonly string[];
   readonly configFingerprint?: string;
   readonly healthStatus?: RuntimePluginHealthStatus;

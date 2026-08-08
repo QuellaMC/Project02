@@ -5,7 +5,7 @@ export const runtimeConfigVersion = 'project02.config.v2';
 export const runtimeConfigEnvVarName = 'PROJECT02_RUNTIME_CONFIG';
 export const roleModelProviderEnvVarName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 export const project02RoleModelProviderValues = ['local', 'nvidia'] as const;
-export const runtimeControlEnvVarNames: readonly string[] = Object.freeze([
+const runtimeControlEnvVarNames: readonly string[] = Object.freeze([
   runtimeConfigEnvVarName,
   roleModelProviderEnvVarName,
 ]);
@@ -16,17 +16,6 @@ export function isRuntimeControlEnvVarName(name: string): boolean {
 
 export type RuntimeConfigSecretRef = {
   readonly $env: string;
-  readonly description?: string;
-};
-
-export type RuntimeConfigPlaintextSecretOverride = {
-  readonly $plaintextSecret: string;
-  readonly allowPlaintextSecret: true;
-  readonly justification: string;
-};
-
-export type RuntimeConfigObject = {
-  readonly [key: string]: RuntimeConfigValue;
 };
 
 export type RuntimeConfigValue =
@@ -35,11 +24,15 @@ export type RuntimeConfigValue =
   | boolean
   | null
   | RuntimeConfigSecretRef
-  | RuntimeConfigPlaintextSecretOverride
+  | {
+      readonly $plaintextSecret: string;
+      readonly allowPlaintextSecret: true;
+      readonly justification: string;
+    }
   | readonly RuntimeConfigValue[]
-  | RuntimeConfigObject;
+  | {readonly [key: string]: RuntimeConfigValue};
 
-export type Project02RoleModelProvider =
+type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
 export const defaultProject02CharacterId = 'mira';
@@ -90,7 +83,7 @@ export type SelectedProject02RuntimeConfigLocation = {
   /** Overridable for the effective runtime; never re-derived after load. */
   readonly runtimeHomeRoot?: string;
 };
-export type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
+type RuntimeConfigDiagnosticSeverity = 'warning' | 'error';
 
 export type RuntimeConfigFieldScope = 'global' | 'character';
 
@@ -156,8 +149,8 @@ export type SelectedLoadedProject02RuntimeConfig =
     readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
   };
 
-export type RuntimeConfigFieldSource =
-  'config' | 'default' | 'missing' | 'plaintext_override' | `env:${string}`;
+type RuntimeConfigFieldSource =
+  'config' | 'missing' | 'plaintext_override' | `env:${string}`;
 
 /** Distinct from RuntimeConfigFieldSource, which says how a field resolves. */
 export type RuntimeConfigEffectiveSource = 'default' | RuntimeConfigFieldScope;
@@ -170,21 +163,14 @@ export type ResolvedRuntimeConfigField = {
   readonly value?: RuntimeConfigValue;
 };
 
-export type RedactedRuntimeConfigField = {
-  readonly name: string;
-  readonly secret: boolean;
-  readonly source: RuntimeConfigFieldSource;
-  readonly resolved: boolean;
-  readonly value?: RuntimeConfigValue;
-};
+/** Same shape; the alias marks which side of the redaction boundary it is. */
+export type RedactedRuntimeConfigField = ResolvedRuntimeConfigField;
 
 export type ResolvedPluginRuntimeConfig = Readonly<
   Record<string, ResolvedRuntimeConfigField>
 >;
 
-export type RedactedPluginRuntimeConfig = Readonly<
-  Record<string, RedactedRuntimeConfigField>
->;
+export type RedactedPluginRuntimeConfig = ResolvedPluginRuntimeConfig;
 
 export type ResolvedProject02RuntimeConfig = {
   readonly source: RuntimeConfigSource;

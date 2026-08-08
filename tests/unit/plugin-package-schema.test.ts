@@ -1,13 +1,16 @@
 import {
+  copyFileSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath, pathToFileURL} from 'node:url';
 
 import {Ajv} from 'ajv';
 import {describe, expect, it} from 'vitest';
@@ -246,13 +249,98 @@ describe('plugin package descriptor schema parity', () => {
     ).toThrow('Runtime plugin package descriptor could not be read.');
   });
 
+  it('completes registration when rerun over its own unregistered scaffold', () => {
+    const packagesRoot = mkdtempSync(
+      join(tmpdir(), 'project02-plugin-scaffold-resume-'),
+    );
+    const bundledPath = join(packagesRoot, 'bundled.ts');
+    const pristineBundled = readFileSync(
+      fileURLToPath(
+        new URL('../../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
+      'utf8',
+    );
+
+    writeFileSync(bundledPath, pristineBundled, 'utf8');
+    scaffoldRuntimePluginPackage({
+      id: 'sample.resume-check',
+      packagesRoot,
+      bundledPath,
+    });
+    // A crash can leave the descriptor without its siblings or its entry.
+    writeFileSync(bundledPath, pristineBundled, 'utf8');
+    rmSync(join(packagesRoot, 'sample.resume-check', 'plugin.ts'));
+
+    const {packageRoot} = scaffoldRuntimePluginPackage({
+      id: 'sample.resume-check',
+      packagesRoot,
+      bundledPath,
+    });
+
+    expect(readFileSync(bundledPath, 'utf8')).toContain(
+      "'../packages/sample.resume-check/index.ts'",
+    );
+    expect(existsSync(join(packageRoot, 'plugin.ts'))).toBe(true);
+  });
+
+  it('refuses a scaffold whose id collides with an existing registration name', () => {
+    const packagesRoot = mkdtempSync(
+      join(tmpdir(), 'project02-plugin-scaffold-collision-'),
+    );
+    const bundledPath = join(packagesRoot, 'bundled.ts');
+
+    copyFileSync(
+      fileURLToPath(
+        new URL('../../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
+      bundledPath,
+    );
+    const bundledBefore = readFileSync(bundledPath, 'utf8');
+
+    expect(() =>
+      scaffoldRuntimePluginPackage({
+        id: 'demo.config',
+        packagesRoot,
+        bundledPath,
+      }),
+    ).toThrow('derives the registration name "createDemoConfigPlugin"');
+    expect(existsSync(join(packagesRoot, 'demo.config'))).toBe(false);
+    expect(readFileSync(bundledPath, 'utf8')).toBe(bundledBefore);
+
+    // A leftover colliding scaffold must keep failing, never register.
+    mkdirSync(join(packagesRoot, 'demo.config'));
+    writeFileSync(
+      join(packagesRoot, 'demo.config', 'project02.plugin.json'),
+      `${JSON.stringify({manifest: {id: 'demo.config'}})}\n`,
+      'utf8',
+    );
+    expect(() =>
+      scaffoldRuntimePluginPackage({
+        id: 'demo.config',
+        packagesRoot,
+        bundledPath,
+      }),
+    ).toThrow('derives the registration name "createDemoConfigPlugin"');
+    expect(readFileSync(bundledPath, 'utf8')).toBe(bundledBefore);
+  });
+
   it('stamps a scaffold whose descriptor passes both validators', () => {
     const packagesRoot = mkdtempSync(
       join(tmpdir(), 'project02-plugin-scaffold-'),
     );
+    const bundledPath = join(packagesRoot, 'bundled.ts');
+
+    copyFileSync(
+      fileURLToPath(
+        new URL('../../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
+      bundledPath,
+    );
+
     const {packageRoot} = scaffoldRuntimePluginPackage({
       id: 'sample.scaffold-check',
       packagesRoot,
+      bundledPath,
     });
     const descriptor = JSON.parse(
       readFileSync(join(packageRoot, 'project02.plugin.json'), 'utf8'),
@@ -268,11 +356,29 @@ describe('plugin package descriptor schema parity', () => {
     for (const file of ['package.json', 'index.ts', 'plugin.ts']) {
       expect(existsSync(join(packageRoot, file))).toBe(true);
     }
+
+    // A package the host never imports statically cannot load at runtime.
+    const bundled = readFileSync(bundledPath, 'utf8');
+
+    expect(bundled).toContain(
+      "import {createProject02Plugin as createSampleScaffoldCheckPlugin} from '../packages/sample.scaffold-check/index.ts';",
+    );
+    expect(bundled).toContain(
+      '      factory: createSampleScaffoldCheckPlugin,',
+    );
     expect(() =>
-      scaffoldRuntimePluginPackage({id: 'sample.scaffold-check', packagesRoot}),
+      scaffoldRuntimePluginPackage({
+        id: 'sample.scaffold-check',
+        packagesRoot,
+        bundledPath,
+      }),
     ).toThrow('already exists');
     expect(() =>
-      scaffoldRuntimePluginPackage({id: '9-bad-id', packagesRoot}),
+      scaffoldRuntimePluginPackage({
+        id: '9-bad-id',
+        packagesRoot,
+        bundledPath,
+      }),
     ).toThrow('must start with a letter');
   });
 });

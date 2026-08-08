@@ -112,6 +112,7 @@ describe('character plugin enforcement', () => {
       characterId: 'seeded',
       activation: activationWithEnabled(['ok-plugin']),
       installedPluginIds: new Set(['disabled-required', 'ok-plugin']),
+      storeRoot: '/tmp/home',
     });
 
     expect(diagnostics).toMatchObject([
@@ -132,7 +133,7 @@ describe('character plugin enforcement', () => {
       },
     ]);
     expect(diagnostics[1]?.message).toContain(
-      "runtime-config --character 'seeded' plugin enable 'disabled-required'",
+      "runtime-config --store '/tmp/home' --character 'seeded' plugin enable 'disabled-required'",
     );
   });
 
@@ -193,7 +194,7 @@ describe('first-selection materialization through startup', () => {
         ),
       ),
     ).toMatchObject({
-      schemaVersion: 7,
+      schemaVersion: 8,
       materializedCharacterPackageVersion: '1.0.0',
     });
   });

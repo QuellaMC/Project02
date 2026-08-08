@@ -25,7 +25,6 @@ import {
   captureRuntimePluginPackageArtifact,
 } from '../../src/plugins/package-loader/artifact.ts';
 import {
-  capturePackageDirectoryArtifact,
   PackageCaptureError,
   planPackageDirectoryCapture,
   readPlannedPackageFile,
@@ -175,7 +174,7 @@ describe('runtime plugin package loader', () => {
     }
 
     expect(() =>
-      capturePackageDirectoryArtifact({
+      planPackageDirectoryCapture({
         packageDirectory,
         maxFiles: 10,
         maxBytes: 1_024,
@@ -206,7 +205,7 @@ describe('runtime plugin package loader', () => {
     }
 
     expect(() =>
-      capturePackageDirectoryArtifact({
+      planPackageDirectoryCapture({
         packageDirectory,
         maxFiles: 4,
         maxBytes: 1_024,
@@ -272,7 +271,7 @@ describe('runtime plugin package loader', () => {
     }
 
     expect(() =>
-      capturePackageDirectoryArtifact({
+      planPackageDirectoryCapture({
         packageDirectory,
         maxFiles: 2_048,
         maxBytes: 1_024,

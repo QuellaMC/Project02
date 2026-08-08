@@ -443,10 +443,7 @@ function pluginListings(
         version: plugin.manifest.version,
         kind: plugin.manifest.kind,
         firstParty: plugin.manifest.firstParty,
-        installed: plugin.installed,
-        registered: plugin.registered,
         enabled: plugin.enabled,
-        availableForTurn: plugin.availableForTurn,
         requestedAccess: plugin.requestedAccess,
         grantedAccess: plugin.grantedAccess,
         providedTools: Object.freeze(
@@ -455,11 +452,6 @@ function pluginListings(
               name: tool.name,
               validationOwner: tool.validationOwner,
               requiresConfirmation: tool.requiresConfirmation,
-              // Carried through rather than summarized: an audit needs
-              // what the tool declared, including having declared nothing.
-              ...(tool.annotations === undefined
-                ? {}
-                : {annotations: tool.annotations}),
               ...(tool.concurrency === undefined
                 ? {}
                 : {concurrency: tool.concurrency}),

@@ -18,7 +18,6 @@ export {
   OneLineMessageValidationError,
   VisibleMessageTextValidationError,
   type OneLineMessageValidationReason,
-  type VisibleMessageTextValidationReason,
 } from './message/validation.ts';
 export {
   assertCanonicalRuntimeTimestamp,
@@ -29,18 +28,14 @@ export {
   runtimeEventIdentityKey,
   runtimeEventTypeValues,
   type RuntimeEventIdentity,
-  type RuntimeEventIdentityOptions,
   type RuntimeEventType,
   type UserMessageRuntimeEvent,
-  type UserMessageRuntimeEventPayload,
 } from './message/event.ts';
 export {
   appendCommittedMessage,
   createCharacterMessage,
-  createMessageIdForSessionId,
   createUserMessage,
   messageNumberFromId,
-  nextMessageNumber,
   sessionIdFromMessageId,
   CharacterInputError,
   CharacterReplyValidationError,
@@ -53,11 +48,6 @@ export {
   selectRecentVisibleMessages,
   validateCharacterAgentReply,
   validateConversationParticipants,
-  validateRestoredVisibleTranscript,
   type CharacterAgent,
-  type CharacterAgentInput,
-  type CharacterAgentReply,
   type ConversationSession,
-  type ConversationSessionOptions,
-  type RestoredVisibleTranscriptValidationOptions,
 } from './conversation/session.ts';

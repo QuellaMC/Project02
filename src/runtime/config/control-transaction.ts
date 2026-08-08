@@ -66,14 +66,14 @@ export type RuntimeConfigControlSnapshot = {
   readonly characterOverlay?: RuntimeConfigCharacterOverlaySnapshot;
 };
 
-export type RuntimeConfigControlTransactionPreparation<T> = {
+type RuntimeConfigControlTransactionPreparation<T> = {
   readonly preparedCandidate: PreparedRuntimeConfigMutationCandidate;
   readonly commit: boolean;
   readonly operation?: RuntimeConfigMutationOperation;
   readonly context: T;
 };
 
-export type RuntimeConfigControlTransactionResult<T> = {
+type RuntimeConfigControlTransactionResult<T> = {
   readonly result: RuntimeConfigMutationResult;
   readonly context: T;
 };
@@ -267,13 +267,13 @@ export function verifyRuntimeConfigControlExpectation(
   }
 }
 
+/** The home config is only read here, so its bytes cannot unblock it. */
 export function assertGlobalConfigLoadableForCharacterScope(
   loadedConfig: LoadedProject02RuntimeConfig,
 ): void {
-  const blockingDiagnostic = loadedConfig.diagnostics.find(
-    diagnostic =>
-      diagnostic.severity === 'error' &&
-      diagnostic.code !== 'runtime_config_missing',
+  const blockingDiagnostic = blockingRuntimeConfigLayerDiagnostic(
+    loadedConfig,
+    false,
   );
 
   if (blockingDiagnostic !== undefined) {

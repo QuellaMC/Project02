@@ -6,10 +6,8 @@ import {describe, expect, it} from 'vitest';
 import {
   canonicalPath,
   describeRealEntry,
-  describeRealEntryAsync,
   firstUnacceptableComponent,
   pathComponentChain,
-  pathIsAtOrBelow,
   PathResolutionError,
   relativePathIfContained,
   resolveContainedPath,
@@ -55,21 +53,6 @@ describe('describeRealEntry', () => {
 
     expect(entry.kind).toBe('unreadable');
     expect(entry).toMatchObject({error: {code: 'ENOTDIR'}});
-  });
-
-  it('classifies the same way whether asked synchronously or not', async () => {
-    const root = createTestTempRoot('project02-real-path-');
-
-    writeFileSync(join(root, 'file.txt'), 'contents\n', 'utf8');
-    symlinkSync(join(root, 'file.txt'), join(root, 'link'));
-
-    for (const name of ['file.txt', 'link', 'missing', '']) {
-      const path = join(root, name);
-
-      expect((await describeRealEntryAsync(path)).kind).toBe(
-        describeRealEntry(path).kind,
-      );
-    }
   });
 
   it('reports inode identity without rounding', () => {
@@ -143,12 +126,6 @@ describe('relativePathIfContained', () => {
     // A sibling whose name merely starts with the root's is not inside it.
     expect(relativePathIfContained('/a/b', '/a/bc')).toBeUndefined();
   });
-
-  it('answers pathIsAtOrBelow for the root itself and below', () => {
-    expect(pathIsAtOrBelow('/a/b', '/a/b')).toBe(true);
-    expect(pathIsAtOrBelow('/a/b/c', '/a/b')).toBe(true);
-    expect(pathIsAtOrBelow('/a', '/a/b')).toBe(false);
-  });
 });
 
 describe('resolveContainedPath', () => {
@@ -176,21 +153,6 @@ describe('resolveContainedPath', () => {
       status: 'escapes',
       canonicalPath: join(outside, 'file.txt'),
     });
-  });
-
-  it('reports a cyclic link as unresolvable', () => {
-    const root = createTestTempRoot('project02-real-path-');
-
-    symlinkSync(join(root, 'second'), join(root, 'first'));
-    symlinkSync(join(root, 'first'), join(root, 'second'));
-
-    expect(
-      resolveContainedPath({
-        root,
-        path: join(root, 'first'),
-        followDanglingLinks: true,
-      }),
-    ).toEqual({status: 'unresolvable'});
   });
 });
 

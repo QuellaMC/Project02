@@ -6,7 +6,6 @@
 import {basename, dirname, isAbsolute, relative, resolve, sep} from 'node:path';
 
 import {
-  lstatPath,
   lstatPathSync,
   nativeRealPathSync,
   readLinkTargetSync,
@@ -30,27 +29,13 @@ export type RealEntry =
   | {readonly kind: 'absent'; readonly error: unknown}
   | {readonly kind: 'unreadable'; readonly error: unknown};
 
-export type RealEntryKind = RealEntry['kind'];
+type RealEntryKind = RealEntry['kind'];
 
 export function describeRealEntry(path: string): RealEntry {
   let stats: BigIntStats;
 
   try {
     stats = lstatPathSync(path);
-  } catch (error: unknown) {
-    return isNodeErrorWithCode(error, 'ENOENT')
-      ? Object.freeze({kind: 'absent', error})
-      : Object.freeze({kind: 'unreadable', error});
-  }
-
-  return Object.freeze({kind: presentEntryKind(stats), stats});
-}
-
-export async function describeRealEntryAsync(path: string): Promise<RealEntry> {
-  let stats: BigIntStats;
-
-  try {
-    stats = await lstatPath(path);
   } catch (error: unknown) {
     return isNodeErrorWithCode(error, 'ENOENT')
       ? Object.freeze({kind: 'absent', error})
@@ -73,7 +58,7 @@ function presentEntryKind(
   return stats.isFile() ? 'file' : 'other';
 }
 
-export type CanonicalPathOptions = {
+type CanonicalPathOptions = {
   /**
    * Resolve a dangling link to the path it names instead of canonicalizing the
    * link's own location.
@@ -157,10 +142,6 @@ function canonicalMissingPath(
   );
 }
 
-export function pathIsAtOrBelow(path: string, root: string): boolean {
-  return relativePathIfContained(root, path) !== undefined;
-}
-
 /**
  * The `/`-separated path from `root` down to `path`; the empty string means
  * `path` is `root` itself. Both sides are compared as given, so a caller that
@@ -178,31 +159,19 @@ export function relativePathIfContained(
   return suffix.split(sep).join('/');
 }
 
-export type ContainedPathResult =
+type ContainedPathResult =
   | {
       readonly status: 'contained';
       readonly canonicalPath: string;
       readonly relativePath: string;
     }
-  | {readonly status: 'escapes'; readonly canonicalPath: string}
-  | {readonly status: 'unresolvable'};
+  | {readonly status: 'escapes'; readonly canonicalPath: string};
 
 export function resolveContainedPath(options: {
   readonly root: string;
   readonly path: string;
-  readonly followDanglingLinks?: boolean;
 }): ContainedPathResult {
-  let resolved: string;
-
-  try {
-    resolved = canonicalPath(options.path, {
-      ...(options.followDanglingLinks === undefined
-        ? {}
-        : {followDanglingLinks: options.followDanglingLinks}),
-    });
-  } catch {
-    return Object.freeze({status: 'unresolvable'});
-  }
+  const resolved = canonicalPath(options.path);
   const relativePath = relativePathIfContained(options.root, resolved);
 
   return relativePath === undefined
@@ -236,7 +205,7 @@ export function pathComponentChain(options: {
   return Object.freeze(chain);
 }
 
-export type UnacceptableComponent = {
+type UnacceptableComponent = {
   readonly path: string;
   readonly kind: Exclude<RealEntryKind, 'absent'>;
 };

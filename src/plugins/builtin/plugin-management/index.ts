@@ -35,7 +35,7 @@ import {
   type RuntimePluginConfigControlHostState,
 } from './state.ts';
 
-export type CreateRuntimePluginManagementPluginOptions = {
+type CreateRuntimePluginManagementPluginOptions = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
 };
@@ -134,8 +134,6 @@ export function createRuntimePluginManagementPluginManifest() {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02',
-      externalContract: 'runtime_plugin_management',
     },
     declaredPlugins: ['tool_provider', 'handle_tool_call'],
     config: {

@@ -19,7 +19,7 @@ export type ChatTraceSummary = {
 };
 
 export type ChatTraceProviderSummary = {
-  readonly name: 'local' | 'nvidia';
+  readonly name: 'nvidia';
   readonly model?: string;
   readonly responseStatus?: number;
   readonly errorCode?: string;

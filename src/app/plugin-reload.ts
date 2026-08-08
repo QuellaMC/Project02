@@ -17,8 +17,6 @@ import {
   type RuntimePluginReloader,
   type RuntimePluginReloadResult,
 } from '../plugins/index.ts';
-import type {ResolvedProject02RuntimeConfig} from '../runtime/config/index.ts';
-
 // Importing the plan type here would cycle with app/activation.
 export function createConfiguredRuntimePluginReloader(options: {
   readonly activationPlan: {
@@ -27,7 +25,6 @@ export function createConfiguredRuntimePluginReloader(options: {
     >;
     readonly pluginConfigControl: RuntimePluginConfigControlHostState;
     readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-    readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   };
 }): RuntimePluginReloader {
   const {catalogEntries, pluginConfigControl, runtimeLocation} =

@@ -1,53 +1,34 @@
 /**
- * Single owner of the store flags every CLI accepts: `--init` is parsed
- * with them because it consents to the location the others select.
+ * Single owner of the store flags every CLI accepts. `--init` is read on
+ * its own: it consents to creating a store, which inspect never does.
  */
 export type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
 import {readFlagValue} from './flags.ts';
+import {CliUsageError} from './usage-error.ts';
 import type {RuntimeLocationCliState} from '../../runtime/config/index.ts';
 
-/** Consent is a CLI concern, kept out of the runtime's location type. */
-export type RuntimeStoreCliState = {
-  readonly location: RuntimeLocationCliState;
-  readonly init: boolean;
-};
-
-export type RuntimeStoreFlagParseResult =
+type RuntimeStoreFlagParseResult =
   | {
       readonly status: 'matched';
       readonly nextIndex: number;
-      readonly state: RuntimeStoreCliState;
+      readonly location: RuntimeLocationCliState;
     }
   | {
       readonly status: 'unmatched';
     };
 
-export class RuntimeLocationCliUsageError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RuntimeLocationCliUsageError';
-  }
-}
-
-export const emptyRuntimeStoreCliState: RuntimeStoreCliState = Object.freeze({
-  location: Object.freeze({}),
-  init: false,
-});
-
 export function parseRuntimeStoreFlag(options: {
   readonly args: readonly string[];
   readonly index: number;
-  readonly state: RuntimeStoreCliState;
+  readonly location: RuntimeLocationCliState;
 }): RuntimeStoreFlagParseResult {
   const arg = options.args[options.index];
-  const {location} = options.state;
+  const {location} = options;
 
   if (arg === '--store') {
     if (location.storeRoot !== undefined) {
-      throw new RuntimeLocationCliUsageError(
-        '--store can only be provided once.',
-      );
+      throw new CliUsageError('--store can only be provided once.');
     }
 
     return matchedValueFlag(options, '--store', value => ({
@@ -58,9 +39,7 @@ export function parseRuntimeStoreFlag(options: {
 
   if (arg === '--config') {
     if (location.configPath !== undefined) {
-      throw new RuntimeLocationCliUsageError(
-        '--config can only be provided once.',
-      );
+      throw new CliUsageError('--config can only be provided once.');
     }
 
     return matchedValueFlag(options, '--config', value => ({
@@ -71,9 +50,7 @@ export function parseRuntimeStoreFlag(options: {
 
   if (arg === '--character') {
     if (location.character !== undefined) {
-      throw new RuntimeLocationCliUsageError(
-        '--character can only be provided once.',
-      );
+      throw new CliUsageError('--character can only be provided once.');
     }
 
     return matchedValueFlag(options, '--character', value => ({
@@ -82,30 +59,34 @@ export function parseRuntimeStoreFlag(options: {
     }));
   }
 
-  if (arg === '--init') {
-    if (options.state.init) {
-      throw new RuntimeLocationCliUsageError(
-        '--init can only be provided once.',
-      );
-    }
-
-    return {
-      status: 'matched',
-      // A bare flag consumes no value, so the caller's loop must not skip.
-      nextIndex: options.index,
-      state: {location, init: true},
-    };
-  }
-
   return {
     status: 'unmatched',
   };
 }
 
+/**
+ * Matches `--init`, the consent to create the store the flags above
+ * select, and rejects a repeat as the typo it is.
+ */
+export function matchesRuntimeStoreInitFlag(
+  arg: string,
+  init: boolean,
+): boolean {
+  if (arg !== '--init') {
+    return false;
+  }
+
+  if (init) {
+    throw new CliUsageError('--init can only be provided once.');
+  }
+
+  return true;
+}
+
 /** Package discovery would otherwise report a malformed id as "not found". */
 function requireCharacterIdShape(value: string): string {
   if (!isProject02Identifier(value.trim())) {
-    throw new RuntimeLocationCliUsageError(
+    throw new CliUsageError(
       '--character must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
     );
   }
@@ -117,7 +98,6 @@ function matchedValueFlag(
   options: {
     readonly args: readonly string[];
     readonly index: number;
-    readonly state: RuntimeStoreCliState;
   },
   flag: string,
   apply: (value: string) => RuntimeLocationCliState,
@@ -125,16 +105,6 @@ function matchedValueFlag(
   return {
     status: 'matched',
     nextIndex: options.index + 1,
-    state: {
-      location: apply(
-        readFlagValue(
-          options.args,
-          options.index,
-          flag,
-          message => new RuntimeLocationCliUsageError(message),
-        ),
-      ),
-      init: options.state.init,
-    },
+    location: apply(readFlagValue(options.args, options.index, flag)),
   };
 }

@@ -13,15 +13,15 @@ import {describe, expect, it} from 'vitest';
 import {
   applyRuntimeConfigControlOperation,
   bindProject02CharacterRuntimeLocation,
-  loadProject02RuntimeConfig,
-  resolveProject02ConfigLocation,
+  loadProject02RuntimeConfigWithLocation,
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigConflictError,
   RuntimeConfigLocationError,
 } from '../../src/runtime/config/index.ts';
 import {readRuntimeConfigControlSnapshot} from '../../src/runtime/config/control-transaction.ts';
 import {runtimeConfigVersion} from '../../src/runtime/config/types.ts';
-import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
+import {loadRuntimeConfigForTest} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 
@@ -37,7 +37,7 @@ describe('runtime config canonical path locking', () => {
     await ensureInitializedProject02Home({homeRoot: root});
 
     expect(() =>
-      loadProject02RuntimeConfig({
+      loadRuntimeConfigForTest({
         configPath: nestedConfigPath,
         env: {},
       }),
@@ -76,7 +76,7 @@ describe('runtime config canonical path locking', () => {
         symlinkSync(nestedConfigPath, outsideAlias);
       }
       expect(() =>
-        loadProject02RuntimeConfig({
+        loadRuntimeConfigForTest({
           configPath: selectedPath,
           env: {},
         }),
@@ -100,12 +100,12 @@ describe('runtime config canonical path locking', () => {
     writeFileSync(targetA, identicalConfig, 'utf8');
     writeFileSync(targetB, identicalConfig, 'utf8');
     symlinkSync(targetA, configAlias);
-    const loadedConfig = loadProject02RuntimeConfig({
-      configPath: configAlias,
+    const {configLocation} = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath: configAlias},
       env: {},
     });
     const runtimeLocation = bindProject02CharacterRuntimeLocation({
-      configLocation: resolveProject02ConfigLocation({loadedConfig}),
+      configLocation,
       characterId: 'mira',
     });
     const target = resolveRuntimeConfigScopeTarget({
@@ -133,14 +133,12 @@ describe('runtime config canonical path locking', () => {
     expect(readFileSync(targetB, 'utf8')).toBe(configBBefore);
     expect(existsSync(join(root, '.locks'))).toBe(false);
 
-    const freshLoadedConfig = loadProject02RuntimeConfig({
-      configPath: configAlias,
+    const fresh = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath: configAlias},
       env: {},
     });
     const freshRuntimeLocation = bindProject02CharacterRuntimeLocation({
-      configLocation: resolveProject02ConfigLocation({
-        loadedConfig: freshLoadedConfig,
-      }),
+      configLocation: fresh.configLocation,
       characterId: 'mira',
     });
 
@@ -188,12 +186,12 @@ describe('runtime config canonical path locking', () => {
       })}\n`,
       'utf8',
     );
-    const loadedConfig = loadProject02RuntimeConfig({
-      configPath,
+    const {configLocation} = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath},
       env: {},
     });
     const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: resolveProject02ConfigLocation({loadedConfig}),
+      runtimeLocation: configLocation,
       env: {},
       scope: 'global',
     });
@@ -232,12 +230,12 @@ describe('runtime config canonical path locking', () => {
 
     writeFileSync(configA, initialConfig, 'utf8');
     writeFileSync(configB, initialConfig, 'utf8');
-    const loadedConfig = loadProject02RuntimeConfig({
-      configPath: configA,
+    const {configLocation} = loadProject02RuntimeConfigWithLocation({
+      selection: {configPath: configA},
       env: {},
     });
     const runtimeLocation = bindProject02CharacterRuntimeLocation({
-      configLocation: resolveProject02ConfigLocation({loadedConfig}),
+      configLocation,
       characterId: 'mira',
     });
     const target = resolveRuntimeConfigScopeTarget({

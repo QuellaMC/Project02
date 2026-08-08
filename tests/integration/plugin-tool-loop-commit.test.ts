@@ -48,15 +48,16 @@ import {
   type RoleModelChatMessage,
   type RoleModelToolObservation,
 } from '../../src/role-model/index.ts';
-import {runLocalUserMessageEvent as runLocalUserMessageEventWithoutHost} from '../../src/runtime/turn/local.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createRawEventAppendFailingLogStore,
   createAfterTurnCommittedProbeHost,
-  createSequencedAdapter,
-  createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
+import {
+  createSequencedAdapter,
+  createTestEvent,
+} from '../support/role-model-loop-fixtures.ts';
 
 import {requiredDottedConfigPlugin} from '../support/runtime-config-fixtures.ts';
 
@@ -398,40 +399,6 @@ async function createLiveReloadLoopFixture(
 }
 
 describe('plugin-driven tool loop commit and rollback', () => {
-  it('requires a startup-injected host before recording turn evidence', async () => {
-    const session = createConversationSession({
-      character: testCharacterProfile,
-    });
-    const logStore = createRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-    });
-
-    await expect(
-      Reflect.apply(runLocalUserMessageEventWithoutHost, undefined, [
-        {
-          event: createTestEvent('hello', 'evt_missing_plugin_host'),
-          session,
-          logStore,
-          roleModelAdapter: createSequencedAdapter([
-            {
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {text: 'This turn must not run.'},
-                },
-              ],
-            },
-          ]),
-        },
-      ]),
-    ).rejects.toThrow(
-      'Local runtime turns require an explicitly configured plugin host.',
-    );
-    expect(logStore.traceEntries()).toEqual([]);
-    expect(logStore.rawEvents()).toEqual([]);
-    expect(logStore.conversationMessages()).toEqual([]);
-  });
-
   it('terminates on top-level text only without committing visible messages', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
@@ -1622,10 +1589,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
           throw new Error('io hiccup during reconcile');
         }
 
-        if (baseHost.reconcileConfigEffect === undefined) {
-          throw new Error('Expected config effect reconciliation support.');
-        }
-
         return baseHost.reconcileConfigEffect(effect);
       },
     } satisfies RuntimePluginHost);
@@ -1739,10 +1702,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
       reconcileConfigEffect(effect) {
         if (effect.fieldName === 'tone') {
           throw new Error('disk hiccup during recovery');
-        }
-
-        if (baseRecoveryHost.reconcileConfigEffect === undefined) {
-          throw new Error('Expected config effect reconciliation support.');
         }
 
         return baseRecoveryHost.reconcileConfigEffect(effect);
@@ -1950,10 +1909,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
             },
           });
           driftApplied = true;
-        }
-
-        if (baseHost.reconcileConfigEffect === undefined) {
-          throw new Error('Expected config effect reconciliation support.');
         }
 
         return baseHost.reconcileConfigEffect(effect);

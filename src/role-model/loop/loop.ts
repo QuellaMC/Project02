@@ -235,7 +235,7 @@ export async function runRoleModelLoop(
       return terminalResult;
     }
 
-    const pluginToolRouting = await routeRoleModelLoopToolCalls({
+    const pluginToolResults = await routeRoleModelLoopToolCalls({
       options,
       identity,
       invokedRound,
@@ -246,7 +246,7 @@ export async function runRoleModelLoop(
     recordRoleModelLoopToolRound({
       state,
       invokedRound,
-      pluginToolRouting,
+      pluginToolResults,
       round,
     });
   }
@@ -321,7 +321,6 @@ async function invokeRoleModelLoopRound(options: {
     rawOutput,
     inputEnvelope.allowedTools,
     inputEnvelope.pluginToolDefinitions,
-    inputEnvelope.toolObservations,
   );
   const ioSnapshot = createRoleModelIOSnapshot({
     ...options.identity,
@@ -401,7 +400,7 @@ async function routeRoleModelLoopToolCalls(options: {
   >;
   readonly round: number;
   readonly toolObservations: readonly RoleModelToolObservation[];
-}): Promise<PluginToolRoutingResult> {
+}): Promise<readonly RoleModelPluginToolRoutingEvidence[]> {
   await deliverVisibleReply({
     options: options.options,
     round: options.round,
@@ -416,7 +415,7 @@ async function routeRoleModelLoopToolCalls(options: {
     toolNames: options.invokedRound.executableToolCalls.map(call => call.name),
   });
 
-  const pluginToolRouting = await routeExecutableToolCalls({
+  return await routeExecutableToolCalls({
     toolCalls: options.invokedRound.executableToolCalls,
     identity: options.identity,
     inputEnvelope: options.invokedRound.inputEnvelope,
@@ -445,8 +444,6 @@ async function routeRoleModelLoopToolCalls(options: {
     nativeToolCallArgumentErrors:
       options.invokedRound.nativeToolCallArgumentErrors,
   });
-
-  return pluginToolRouting;
 }
 
 function recordRoleModelLoopToolRound(options: {
@@ -455,13 +452,13 @@ function recordRoleModelLoopToolRound(options: {
     InvokedRoleModelLoopRound,
     {status: 'accepted'}
   >;
-  readonly pluginToolRouting: PluginToolRoutingResult;
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly round: number;
 }): void {
-  options.state.allPluginToolResults.push(...options.pluginToolRouting.results);
+  options.state.allPluginToolResults.push(...options.pluginToolResults);
   options.state.rounds.push(
     createRoleModelLoopRound({
-      pluginToolResults: options.pluginToolRouting.results,
+      pluginToolResults: options.pluginToolResults,
       inputEnvelope: options.invokedRound.inputEnvelope,
       ioSnapshot: options.invokedRound.ioSnapshot,
       parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
@@ -471,13 +468,13 @@ function recordRoleModelLoopToolRound(options: {
   options.state.nativeAdditionalMessages = appendNativeToolRoundMessages({
     assistantMessage: options.invokedRound.nativeAssistantMessage,
     previousMessages: options.state.nativeAdditionalMessages,
-    results: options.pluginToolRouting.results,
+    results: options.pluginToolResults,
     toolNameMappings: options.invokedRound.toolNameMappings,
   });
   options.state.toolRounds += 1;
   options.state.toolObservations = Object.freeze([
     ...options.state.toolObservations,
-    ...options.pluginToolRouting.results.map(routing =>
+    ...options.pluginToolResults.map(routing =>
       createToolObservationFromRouting({round: options.round, routing}),
     ),
   ]);
@@ -492,11 +489,6 @@ function normalizeMaxToolRounds(value: number | undefined): number {
 
   return maxToolRounds;
 }
-
-type PluginToolRoutingResult = {
-  readonly status: 'accepted';
-  readonly results: readonly RoleModelPluginToolRoutingEvidence[];
-};
 
 function executableModelToolCalls(
   toolCalls: readonly ModelToolCall[],
@@ -861,7 +853,7 @@ async function routeExecutableToolCalls(options: {
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
   readonly priorToolObservations: readonly RoleModelToolObservation[];
-}): Promise<PluginToolRoutingResult> {
+}): Promise<readonly RoleModelPluginToolRoutingEvidence[]> {
   // Admission runs in call order: tool_call_started records must land in
   // the order the model asked so the terminal event's toolCallIds match.
   const results: (RoleModelPluginToolRoutingEvidence | undefined)[] = [];
@@ -1042,9 +1034,7 @@ async function routeExecutableToolCalls(options: {
     );
   }
 
-  return createAcceptedPluginToolRoutingResult(
-    results.filter(result => result !== undefined),
-  );
+  return Object.freeze(results.filter(result => result !== undefined));
 }
 
 function nativeToolCallArgumentRejection(options: {
@@ -1135,15 +1125,6 @@ function capturePreparedConfigEffect(options: {
   }
 
   options.effectsByToolCallId.set(toolCallId, effect);
-}
-
-function createAcceptedPluginToolRoutingResult(
-  results: readonly RoleModelPluginToolRoutingEvidence[],
-): PluginToolRoutingResult {
-  return Object.freeze({
-    status: 'accepted',
-    results: Object.freeze([...results]),
-  } satisfies PluginToolRoutingResult);
 }
 
 function normalizeRoutablePluginToolResult(options: {

@@ -75,24 +75,6 @@ describe('user-turn decision context builder', () => {
     ]);
   });
 
-  it('honors an explicit recent message limit without reordering selected messages', () => {
-    const session = createConversationSession({
-      character: testCharacterProfile,
-      id: 'session-limited',
-      visibleTranscript: createVisibleTranscriptSeed('session-limited', 3),
-    });
-
-    const context = buildUserTurnDecisionContext({
-      session,
-      recentMessageLimit: 2,
-    });
-
-    expect(context.recentVisibleMessages.map(message => message.id)).toEqual([
-      'session-limited:message-5',
-      'session-limited:message-6',
-    ]);
-  });
-
   it('does not accept or duplicate the current user message in the context output', () => {
     const session = createConversationSession({
       character: testCharacterProfile,

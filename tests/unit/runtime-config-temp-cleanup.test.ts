@@ -10,7 +10,7 @@ import {
 } from '../../src/runtime/config/index.ts';
 import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {requiredSecretPlugin} from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {runtimeLocationForTest} from '../support/runtime-config.ts';
 
 describe('runtime config atomic temporary-file cleanup', () => {

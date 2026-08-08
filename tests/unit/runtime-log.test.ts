@@ -7,7 +7,7 @@ import {
 } from '../../src/plugins/api/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import type {
-  ConversationLogRecordInput,
+  ConversationLogRecord,
   RawEventLogRecordInput,
 } from '../../src/runtime/evidence/records.ts';
 import type {RuntimePluginTurnEvidenceSnapshot} from '../../src/plugins/api/index.ts';
@@ -203,7 +203,7 @@ describe('runtime log store', () => {
 
   it('appends visible conversation records only through explicit committed-message inputs', () => {
     const store = createRuntimeLogStore({boundCharacter: testCharacterProfile});
-    const userMessage: ConversationLogRecordInput = {
+    const userMessage: ConversationLogRecord = {
       ...identity,
       id: 'local-session:message-1',
       role: 'user',
@@ -212,7 +212,7 @@ describe('runtime log store', () => {
       text: 'hello',
       committedAt: '2026-06-04T00:00:01.000Z',
     };
-    const characterMessage: ConversationLogRecordInput = {
+    const characterMessage: ConversationLogRecord = {
       ...identity,
       id: 'local-session:message-2',
       role: 'character',

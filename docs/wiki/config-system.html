@@ -37,6 +37,8 @@
   "version": "project02.config.v2",
   "project02": {
     "storeRoot": ".project02",
+    "character": "mira",
+    "userDisplayName": "You",
     "defaultMemoryProvider": "memory.example",
     "roleModelProvider": "local"
   },
@@ -54,7 +56,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, selected memory provider, and default role-model provider.</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, active character, user display name, selected memory provider, and default role-model provider.</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
       </tbody>
     </table>
@@ -168,13 +170,14 @@
     </p>
 
     <p>
-      Plugin entries are grouped by their existing catalog construction metadata. Entries with
-      <code>construction: "factory"</code>, plus factories without catalog metadata, appear under
-      <strong>Plugins</strong>. Entries with <code>construction: "host_scoped"</code> appear under
+      Plugin entries are grouped by their catalog kind. Entries with
+      <code>catalogKind: "package"</code> appear under <strong>Plugins</strong>; entries with
+      <code>catalogKind: "host_service"</code> appear under
       <strong>System services</strong>. The groups share one continuous numeric selection list,
       preserve stable plugin-ID ordering within each group, and omit empty headings. The default
-      catalog therefore shows <code>character-state</code> as a plugin and
-      <code>first_party.model_tools</code> plus <code>runtime.plugin</code> as system services.
+      catalog therefore shows <code>character-state</code> and <code>demo-config</code> as
+      plugins and <code>first_party.model_tools</code> plus <code>runtime.plugin</code> as
+      system services.
     </p>
 
     <h2>Runtime plugin management</h2>
@@ -204,7 +207,7 @@
       stay unavailable. Config inspection is added when valid config-control state exists; the update
       tool is added only when the configured host also has a confirmation handler. The host validates
       the proposal before prompting, shows a redacted exact preview, and accepts only a one-shot user
-      approval within the existing five-second deadline. Missing, denied, cancelled, timed-out, or
+      approval within the existing five-minute deadline. Missing, denied, cancelled, timed-out, or
       stale approval fails closed. The plugin manifest declares the maximum
       <code>runtime_config_write</code> capability, while list and config inspection retain their
       per-tool <code>runtime_read</code> classification and only config update requires confirmation.

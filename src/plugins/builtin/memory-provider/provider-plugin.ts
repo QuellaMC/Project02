@@ -36,8 +36,6 @@ export function createMemoryProviderRuntimePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
-        externalContract: 'project02_memory_provider',
       },
       declaredPlugins: memoryProviderDeclarations(provider),
       config: {

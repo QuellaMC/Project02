@@ -1,6 +1,7 @@
 import {dirname} from 'node:path';
 
 import {readTextFileSync} from '../../../shared/file-system.ts';
+import {isJsonRecord} from '../../../shared/json-boundary.ts';
 
 import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
 import {
@@ -13,7 +14,6 @@ import {
 } from './durable-primitives.ts';
 import {
   freezeRuntimePluginFileStoreJsonValue,
-  isPlainObject,
   normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
 
@@ -75,7 +75,7 @@ export function readDurablePluginFileStoreJournal(
     });
   }
 
-  if (!isPlainObject(value)) {
+  if (!isJsonRecord(value)) {
     throw new TypeError('Plugin fileStore transaction journal is malformed.');
   }
 
@@ -126,7 +126,7 @@ function isOwnerNonce(value: unknown): value is string {
 function decodeDurablePluginFileStoreJournalOperation(
   value: unknown,
 ): DurablePluginFileStoreJournalOperation {
-  if (!isPlainObject(value)) {
+  if (!isJsonRecord(value)) {
     throw new TypeError('Plugin fileStore transaction operation is malformed.');
   }
 

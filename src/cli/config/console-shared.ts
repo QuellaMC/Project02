@@ -1,7 +1,8 @@
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {
+  assertGlobalConfigLoadableForCharacterScope,
   assertResolvedProject02HomeAdoptable,
-  assertScopedGlobalLayerLoadable,
+  loadProject02RuntimeConfigForLocation,
   readCharacterOverlayForScope,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticAttribution,
@@ -15,12 +16,10 @@ import {
   type RuntimeConfigValue,
   type RuntimePluginConfigFieldInspectShape,
 } from '../../runtime/config/index.ts';
-import type {RuntimePluginFactoryDefinition} from '../../app/index.ts';
+import type {RuntimePluginCatalogSnapshot} from '../../app/index.ts';
 import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {ensureCharacterDataDir} from '../../runtime/storage/index.ts';
 import type {CliPromptAdapter} from '../shared/prompt.ts';
-
-export type RuntimeConfigConsolePromptAdapter = CliPromptAdapter;
 
 export type RuntimeConfigConsoleOptions = {
   readonly stdout: NodeJS.WritableStream;
@@ -34,12 +33,13 @@ export type RuntimeConfigConsoleOptions = {
   readonly scope: 'global' | 'character';
   /** Presentation-only CLI prefix captured before raw flags leave the edge. */
   readonly secretSetCommandPrefix: string;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly prompt?: RuntimeConfigConsolePromptAdapter;
+  /** The catalog the startup validated; the console must judge the same one. */
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
+  readonly prompt?: CliPromptAdapter;
 };
 
 export type RuntimeConfigConsoleContext = RuntimeConfigConsoleOptions & {
-  readonly prompt: RuntimeConfigConsolePromptAdapter;
+  readonly prompt: CliPromptAdapter;
 };
 
 export type RuntimeConfigConsoleSnapshot = {
@@ -68,17 +68,16 @@ export type StagedRuntimeConfigChange = {
 export async function ensureConsoleCommitTarget(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly scope: 'global' | 'character';
-  readonly env?: NodeJS.ProcessEnv;
 }): Promise<void> {
   if (options.scope === 'global') {
     return;
   }
 
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
-  assertScopedGlobalLayerLoadable({
-    runtimeLocation: options.runtimeLocation,
-    ...(options.env === undefined ? {} : {env: options.env}),
-  });
+  // Validates the global document before any durable state is created.
+  assertGlobalConfigLoadableForCharacterScope(
+    loadProject02RuntimeConfigForLocation(options.runtimeLocation),
+  );
 
   const overlay = readCharacterOverlayForScope(
     options.runtimeLocation.characterScope,
@@ -308,18 +307,16 @@ export function runtimeConfigSecretSetCommandPrefix(options: {
   const locationArgs = [
     ...(options.storeRoot === undefined
       ? []
-      : ['--store', shellQuoteConsoleCommandArgument(options.storeRoot)]),
+      : ['--store', shellQuoteCommandArgument(options.storeRoot)]),
     ...(options.configPath === undefined
       ? []
-      : ['--config', shellQuoteConsoleCommandArgument(options.configPath)]),
+      : ['--config', shellQuoteCommandArgument(options.configPath)]),
   ];
 
   return `pnpm runtime-config${
     locationArgs.length === 0 ? '' : ` ${locationArgs.join(' ')}`
   }`;
 }
-
-export const shellQuoteConsoleCommandArgument = shellQuoteCommandArgument;
 
 export function writeLine(stdout: NodeJS.WritableStream, value: string): void {
   stdout.write(`${value}\n`);

@@ -82,11 +82,7 @@
               "type": "array",
               "items": {"type": "string"},
               "contains": {"const": "mvp-008.runtime_plugin.v2"}
-            },
-            "sourceSystem": {"type": "string"},
-            "sourceVersion": {"type": "string"},
-            "externalContract": {"type": "string"},
-            "notes": {"$ref": "#/definitions/stringArray"}
+            }
           }
         },
         "declaredPlugins": {
@@ -96,7 +92,6 @@
           "items": {
             "enum": [
               "tool_provider",
-              "context_provider",
               "before_role_model_call",
               "handle_tool_call",
               "after_turn_committed",
@@ -233,8 +228,7 @@
           "type": "boolean",
           "description": "Whether a committed change to this field requires a runtime reload before taking effect."
         },
-        "redactionLabels": {"$ref": "#/definitions/stringArray"},
-        "configFingerprint": {"type": "string"}
+        "redactionLabels": {"$ref": "#/definitions/stringArray"}
       },
       "allOf": [
         {

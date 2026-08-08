@@ -6,7 +6,6 @@ export function durableCharacterProfile(options: {
   readonly messages: readonly ConversationLogRecord[];
   readonly rawEvents: readonly RawEventLogRecord[];
   readonly boundCharacter: CharacterProfile | undefined;
-  readonly allowUnanchoredCustomCharacter: boolean;
 }): CharacterProfile | undefined {
   return validateDurableCharacterProfiles({
     roleModelCharacter: recordedRoleModelCharacterProfile(options.rawEvents),
@@ -14,7 +13,6 @@ export function durableCharacterProfile(options: {
       options.messages,
     ),
     boundCharacter: options.boundCharacter,
-    allowUnanchoredCustomCharacter: options.allowUnanchoredCustomCharacter,
   });
 }
 
@@ -81,7 +79,6 @@ export function validateDurableCharacterProfiles(options: {
   readonly roleModelCharacter: CharacterProfile | undefined;
   readonly conversationCharacter: CharacterProfile | undefined;
   readonly boundCharacter: CharacterProfile | undefined;
-  readonly allowUnanchoredCustomCharacter: boolean;
 }): CharacterProfile | undefined {
   if (
     options.roleModelCharacter !== undefined &&
@@ -105,8 +102,7 @@ export function validateDurableCharacterProfiles(options: {
     options.boundCharacter !== undefined &&
     // Bound id only: display names are per-session historical facts. A
     // session copied in from another character's store is still refused.
-    derivedCharacter.id !== options.boundCharacter.id &&
-    !options.allowUnanchoredCustomCharacter
+    derivedCharacter.id !== options.boundCharacter.id
   ) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',

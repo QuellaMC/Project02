@@ -82,7 +82,6 @@ export function createRuntimeTurnState(
     event,
     payloadSummary,
     runtimePluginContextForTurn: undefined,
-    runtimePluginHostForTurn: undefined,
     terminalRawEventMayBeDurable: false,
     committedVisibleMessages: [],
     startedPluginToolCalls: new Map(),

@@ -235,16 +235,16 @@ const barrieredCharacterMutationScript = [
 
 const barrieredMutationLockBatchScript = [
   "import { existsSync } from 'node:fs';",
-  "const { acquireLocalRuntimeMutationLocks } = await import('./src/runtime/storage/mutation-lock.ts');",
+  "const { acquireLocalRuntimeMutationLocksSync } = await import('./src/runtime/storage/mutation-lock.ts');",
   'const sleep = new Int32Array(new SharedArrayBuffer(4));',
   'const targets = JSON.parse(process.argv[1]);',
   'while (!existsSync(process.argv[2])) Atomics.wait(sleep, 0, 0, 5);',
-  'const lease = await acquireLocalRuntimeMutationLocks({',
+  'const lease = acquireLocalRuntimeMutationLocksSync({',
   '  targets,',
   '  waitTimeoutMs: 5_000,',
   '});',
   'Atomics.wait(sleep, 0, 0, 100);',
-  'await lease.release();',
+  'lease.release();',
 ].join('\n');
 
 async function createLayeredHome(): Promise<{

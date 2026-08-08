@@ -84,12 +84,6 @@ export function isJsonArray(
   return Array.isArray(value);
 }
 
-export function isPlainObject(
-  value: unknown,
-): value is Readonly<Record<string, unknown>> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 export function isMissingFileError(error: unknown): boolean {
   return (
     isNodeErrorWithCode(error, 'ENOENT') ||

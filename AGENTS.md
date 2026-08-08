@@ -169,7 +169,8 @@ Architecture gates enforced by `pnpm arch:check`:
 
 - `src/core` is pure domain — it may import `core` and `shared` only.
 - `src/shared` is a leaf, and additions need a reviewed `consumers.json` entry
-  naming at least two consumer modules.
+  naming the modules that really import the file — at least two, unless the
+  file is internal plumbing other `src/shared` files import.
 - Cross-module imports land on barrels (`src/<module>/index.ts`), not deep paths.
 - Pre-existing violations live in `.dependency-cruiser-known-violations.json`,
   which may only shrink. Regenerate with `pnpm arch:baseline` in the same PR

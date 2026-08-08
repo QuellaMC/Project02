@@ -6,6 +6,7 @@ import {
   createRuntimeConfigInspectShape,
   diagnosticsHaveErrors,
   getRedactedRuntimeConfigValueAtPath,
+  inspectConfiguredPlugins,
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigDiagnosticAttribution,
@@ -29,25 +30,20 @@ import {
   type RuntimePluginCatalogEntry,
 } from '../../plugins/index.ts';
 import {
-  isLocalRuntimeTerminalError,
+  isCliTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
-import {RuntimeLocationCliUsageError} from '../shared/runtime-location-flags.ts';
 import {writeJson} from '../shared/output.ts';
-import {
-  assertProject02StoreConsent,
-  Project02StoreConsentError,
-} from '../shared/store-consent.ts';
-import {
-  runRuntimeConfigConsole,
-  type RuntimeConfigConsolePromptAdapter,
-} from './console.ts';
+import type {CliPromptAdapter} from '../shared/prompt.ts';
+import {characterActivationFailureMessage} from '../shared/startup-outcome.ts';
+import {assertProject02StoreConsent} from '../shared/store-consent.ts';
+import {CliUsageError} from '../shared/usage-error.ts';
+import {runRuntimeConfigConsole} from './console.ts';
 import {runtimeConfigSecretSetCommandPrefix} from './console-shared.ts';
 import {
   assertNoExtraArgs,
   parseRuntimeConfigCliArgs,
   parseRuntimeConfigCommand,
-  RuntimeConfigCliUsageError,
   runtimeConfigCwdDotEnvModeForCommand,
   type RuntimeConfigCliArgs,
   type RuntimeConfigCliParsedArgs,
@@ -60,7 +56,7 @@ type RuntimeConfigCliOptions = {
   readonly stdin?: NodeJS.ReadableStream;
   readonly env?: NodeJS.ProcessEnv;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly prompt?: RuntimeConfigConsolePromptAdapter;
+  readonly prompt?: CliPromptAdapter;
 };
 
 type RuntimeConfigCliMutationOperation = Extract<
@@ -81,15 +77,10 @@ export function runRuntimeConfigCliFromArgs(
     .then(async () => {
       const parsedArgs = parseRuntimeConfigCliArgs(args);
 
-      if (
-        parsedArgs.location.character !== undefined &&
-        parsedArgs.commandArgs[0] !== 'ui'
-      ) {
-        return runCharacterScopedRuntimeConfigCommand(parsedArgs, options);
-      }
-
       if (parsedArgs.commandArgs[0] !== 'ui') {
-        return runRuntimeConfigCliFromArgsSync(args, options);
+        return parsedArgs.location.character === undefined
+          ? await runGlobalRuntimeConfigCommand(parsedArgs, options)
+          : await runCharacterScopedRuntimeConfigCommand(parsedArgs, options);
       }
 
       assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
@@ -104,11 +95,7 @@ export function runRuntimeConfigCliFromArgs(
       });
 
       if (startup.status === 'character_invalid') {
-        throw new RuntimeConfigCliUsageError(
-          (startup.characterActivation.status === 'failed'
-            ? startup.characterActivation.messages[0]
-            : undefined) ?? 'Character activation failed.',
-        );
+        throw new CliUsageError(characterActivationFailureMessage(startup));
       }
 
       return await runRuntimeConfigConsole({
@@ -126,9 +113,7 @@ export function runRuntimeConfigCliFromArgs(
         secretSetCommandPrefix: runtimeConfigSecretSetCommandPrefix(
           parsedArgs.location,
         ),
-        ...(options.factories === undefined
-          ? {}
-          : {factories: options.factories}),
+        catalogSnapshot: startup.catalogSnapshot,
         ...(options.prompt === undefined ? {} : {prompt: options.prompt}),
       });
     })
@@ -159,41 +144,31 @@ function assertRuntimeConfigCliStoreConsent(
   });
 }
 
-async function runRuntimeConfigCliFromArgsSync(
-  args: readonly string[],
+async function runGlobalRuntimeConfigCommand(
+  parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
 ): Promise<number> {
-  try {
-    const parsedArgs = parseRuntimeConfigCliArgs(args);
+  if (parsedArgs.commandArgs[0] === 'check') {
+    return await runRuntimeConfigCheckCommand(parsedArgs, options);
+  }
 
-    if (parsedArgs.commandArgs[0] === 'check') {
-      return await runRuntimeConfigCheckCommand(parsedArgs, options);
-    }
+  const cwdDotEnv = runtimeConfigCwdDotEnvModeForCommand(
+    parsedArgs,
+    options.env ?? process.env,
+  );
 
-    const secretSetCommand =
-      parsedArgs.commandArgs[0] === 'secret' &&
-      parsedArgs.commandArgs[1] === 'set';
-    const cwdDotEnv = runtimeConfigCwdDotEnvModeForCommand(
-      parsedArgs,
-      options.env ?? process.env,
-    );
-
-    if (secretSetCommand) {
-      return await runRuntimePluginSecretSetCommand(
-        parsedArgs,
-        options,
-        cwdDotEnv,
-      );
-    }
-
-    return await runRuntimeConfigDocumentCommand(
+  if (
+    parsedArgs.commandArgs[0] === 'secret' &&
+    parsedArgs.commandArgs[1] === 'set'
+  ) {
+    return await runRuntimePluginSecretSetCommand(
       parsedArgs,
       options,
       cwdDotEnv,
     );
-  } catch (error: unknown) {
-    return handleRuntimeConfigCliError(error, options);
   }
+
+  return await runRuntimeConfigDocumentCommand(parsedArgs, options, cwdDotEnv);
 }
 
 async function runRuntimeConfigCheckCommand(
@@ -215,24 +190,26 @@ async function runRuntimeConfigCheckCommand(
   });
 
   if (startup.status === 'character_invalid') {
-    throw new RuntimeConfigCliUsageError(
-      (startup.characterActivation.status === 'failed'
-        ? startup.characterActivation.messages[0]
-        : undefined) ?? 'Character activation failed.',
-    );
+    throw new CliUsageError(characterActivationFailureMessage(startup));
   }
 
-  writeJson(options.stdout, {
+  return writeRuntimeConfigCheckResult(options.stdout, startup.activationPlan);
+}
+
+/** One plugin shape for `check` and `inspect`, so they cannot disagree. */
+function writeRuntimeConfigCheckResult(
+  stdout: NodeJS.WritableStream,
+  activationPlan: CharacterScopedRuntimeCliStartup['activationPlan'],
+): number {
+  writeJson(stdout, {
     runtimeConfig: createRuntimeConfigInspectShape(
-      startup.activationPlan.resolvedConfig,
+      activationPlan.resolvedConfig,
     ),
-    activationDiagnostics: startup.activationPlan.activation.diagnostics,
-    plugins: startup.activationPlan.activation.plugins,
+    activationDiagnostics: activationPlan.activation.diagnostics,
+    plugins: inspectConfiguredPlugins(activationPlan),
   });
 
-  return diagnosticsHaveErrors(startup.activationPlan.activation.diagnostics)
-    ? 1
-    : 0;
+  return diagnosticsHaveErrors(activationPlan.activation.diagnostics) ? 1 : 0;
 }
 
 async function runRuntimePluginSecretSetCommand(
@@ -264,11 +241,7 @@ async function runRuntimePluginSecretSetCommand(
   });
 
   if (startup.status === 'character_invalid') {
-    throw new RuntimeConfigCliUsageError(
-      (startup.characterActivation.status === 'failed'
-        ? startup.characterActivation.messages[0]
-        : undefined) ?? 'Character activation failed.',
-    );
+    throw new CliUsageError(characterActivationFailureMessage(startup));
   }
 
   const result = applyRuntimePluginSecretSetCommand({
@@ -405,11 +378,7 @@ async function runManifestAwarePluginActivation(options: {
   });
 
   if (startup.status === 'character_invalid') {
-    throw new RuntimeConfigCliUsageError(
-      (startup.characterActivation.status === 'failed'
-        ? startup.characterActivation.messages[0]
-        : undefined) ?? 'Character activation failed.',
-    );
+    throw new CliUsageError(characterActivationFailureMessage(startup));
   }
 
   const definition = installedRuntimePluginCatalogEntry(
@@ -418,7 +387,7 @@ async function runManifestAwarePluginActivation(options: {
   );
 
   if (definition === undefined) {
-    throw new RuntimeConfigCliUsageError(
+    throw new CliUsageError(
       `Plugin "${options.operation.pluginId}" is not installed.`,
     );
   }
@@ -475,11 +444,7 @@ async function runCharacterScopedRuntimeConfigCommand(
   });
 
   if (startup.status === 'character_invalid') {
-    throw new RuntimeConfigCliUsageError(
-      (startup.characterActivation.status === 'failed'
-        ? startup.characterActivation.messages[0]
-        : undefined) ?? 'Character activation failed.',
-    );
+    throw new CliUsageError(characterActivationFailureMessage(startup));
   }
 
   if (command.kind !== 'check') {
@@ -505,7 +470,7 @@ function assertCharacterScopedRawCommandAllowed(
 ): void {
   // Secret set reads env while parsing, so scope rejection comes first.
   if (commandArgs[0] === 'secret' && commandArgs[1] === 'set') {
-    throw new RuntimeConfigCliUsageError(
+    throw new CliUsageError(
       'Secrets are shared across characters; run the secret command ' +
         'without --character.',
     );
@@ -516,7 +481,7 @@ function assertCharacterScopedParsedCommandAllowed(
   command: RuntimeConfigCliArgs['command'],
 ): void {
   if (command.kind === 'env_path') {
-    throw new RuntimeConfigCliUsageError(
+    throw new CliUsageError(
       'The secrets env file is shared across characters; run env-path ' +
         'without --character.',
     );
@@ -554,16 +519,10 @@ function writeCharacterScopedRuntimeConfigResult(options: {
   const {command, startup, target} = options;
 
   if (command.kind === 'check') {
-    writeJson(options.stdout, {
-      runtimeConfig: createRuntimeConfigInspectShape(
-        startup.activationPlan.resolvedConfig,
-      ),
-      activationDiagnostics: startup.activationPlan.activation.diagnostics,
-      plugins: startup.activationPlan.activation.plugins,
-    });
-    return diagnosticsHaveErrors(startup.activationPlan.activation.diagnostics)
-      ? 1
-      : 0;
+    return writeRuntimeConfigCheckResult(
+      options.stdout,
+      startup.activationPlan,
+    );
   }
 
   if (command.kind === 'path') {
@@ -609,7 +568,7 @@ function assertScopedStartupConfigReadable(
   );
 
   if (blocking !== undefined) {
-    throw new RuntimeConfigCliUsageError(
+    throw new CliUsageError(
       `${runtimeConfigDiagnosticAttribution(blocking)}${blocking.message}`,
     );
   }
@@ -642,7 +601,7 @@ function writeCharacterScopedValue(options: {
   );
 
   if (overlayError !== undefined) {
-    throw new RuntimeConfigCliUsageError(
+    throw new CliUsageError(
       `${runtimeConfigDiagnosticAttribution(overlayError)}${overlayError.message}`,
     );
   }
@@ -709,7 +668,7 @@ function applyRuntimePluginSecretSetCommand(options: {
   );
 
   if (definition === undefined) {
-    throw new RuntimeConfigCliUsageError(
+    throw new CliUsageError(
       `Plugin "${options.operation.pluginId}" is not installed.`,
     );
   }
@@ -756,7 +715,7 @@ function assertRuntimeConfigLoaded(loaded: LoadedProject02RuntimeConfig): void {
     return;
   }
 
-  throw new RuntimeConfigCliUsageError(
+  throw new CliUsageError(
     loaded.diagnostics.find(diagnostic => diagnostic.severity === 'error')
       ?.message ?? 'Runtime config is invalid.',
   );
@@ -781,25 +740,21 @@ function assertRuntimeConfigLoadedForEnvPath(
     return;
   }
 
-  throw new RuntimeConfigCliUsageError(
+  throw new CliUsageError(
     errorDiagnostic?.message ?? 'Runtime config is invalid.',
   );
 }
 
+/**
+ * The mutation seam rejects an unwritable document with a TypeError carrying
+ * the operator's message ("Unsupported runtime config path", a field's
+ * invalid-value message), so this verb reports those too.
+ */
 function handleRuntimeConfigCliError(
   error: unknown,
   options: RuntimeConfigCliOptions,
 ): number {
-  if (
-    error instanceof RuntimeConfigCliUsageError ||
-    error instanceof RuntimeLocationCliUsageError ||
-    error instanceof Project02StoreConsentError ||
-    error instanceof RuntimeEnvFileError ||
-    error instanceof RuntimeConfigMutationError ||
-    error instanceof AggregateError ||
-    error instanceof TypeError ||
-    isLocalRuntimeTerminalError(error)
-  ) {
+  if (isCliTerminalError(error) || error instanceof TypeError) {
     options.stderr.write(`Error: ${formatCliTerminalErrorMessage(error)}\n`);
     return 1;
   }

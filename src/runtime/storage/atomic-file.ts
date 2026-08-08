@@ -1,18 +1,13 @@
 import {randomUUID} from 'node:crypto';
 import {basename, dirname, join} from 'node:path';
 import {
-  chmodPath,
   chmodPathSync,
   closeFileSync,
   flushFileSync,
   listDirectoryEntriesSync,
-  makeDirectory,
   makeDirectorySync,
-  openFile,
   openFileSync,
-  renamePath,
   renamePathSync,
-  unlinkPath,
   unlinkPathSync,
   writeToFileSync,
   type Dirent,
@@ -26,41 +21,6 @@ export type AtomicReplaceFileOptions = {
   readonly mode?: number;
   readonly createParent?: boolean;
 };
-
-export async function atomicReplaceFile(
-  options: AtomicReplaceFileOptions,
-): Promise<void> {
-  const targetDirectory = dirname(options.targetPath);
-  const temporaryPath = createAtomicReplacementPath(options.targetPath);
-  const mode = options.mode ?? 0o600;
-  let temporaryFileExists = false;
-
-  if (options.createParent !== false) {
-    await makeDirectory(targetDirectory, {recursive: true});
-  }
-
-  try {
-    const handle = await openFile(temporaryPath, 'wx', mode);
-    temporaryFileExists = true;
-
-    try {
-      await handle.writeFile(options.content);
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-
-    await chmodIfSupported(temporaryPath, mode);
-    await renamePath(temporaryPath, options.targetPath);
-    temporaryFileExists = false;
-    await chmodIfSupported(options.targetPath, mode);
-    await syncDirectoryIfSupported(targetDirectory);
-  } finally {
-    if (temporaryFileExists) {
-      await unlinkPath(temporaryPath).catch(() => {});
-    }
-  }
-}
 
 export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
   const targetDirectory = dirname(options.targetPath);
@@ -80,11 +40,11 @@ export function atomicReplaceFileSync(options: AtomicReplaceFileOptions): void {
     flushFileSync(fileDescriptor);
     closeFileSync(fileDescriptor);
     fileDescriptor = undefined;
-    chmodSyncIfSupported(temporaryPath, mode);
+    chmodIfSupported(temporaryPath, mode);
     renamePathSync(temporaryPath, options.targetPath);
     temporaryFileExists = false;
-    chmodSyncIfSupported(options.targetPath, mode);
-    syncDirectorySyncIfSupported(targetDirectory);
+    chmodIfSupported(options.targetPath, mode);
+    syncDirectoryIfSupported(targetDirectory);
   } finally {
     if (fileDescriptor !== undefined) {
       try {
@@ -212,15 +172,7 @@ export function isLiveAtomicReplacementForAnyTarget(
   );
 }
 
-async function chmodIfSupported(path: string, mode: number): Promise<void> {
-  try {
-    await chmodPath(path, mode);
-  } catch {
-    // Some filesystems do not support chmod.
-  }
-}
-
-function chmodSyncIfSupported(path: string, mode: number): void {
+function chmodIfSupported(path: string, mode: number): void {
   try {
     chmodPathSync(path, mode);
   } catch {
@@ -228,21 +180,7 @@ function chmodSyncIfSupported(path: string, mode: number): void {
   }
 }
 
-async function syncDirectoryIfSupported(path: string): Promise<void> {
-  try {
-    const handle = await openFile(path, 'r');
-
-    try {
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
-  } catch {
-    // Directory fsync is not available on every supported filesystem.
-  }
-}
-
-function syncDirectorySyncIfSupported(path: string): void {
+function syncDirectoryIfSupported(path: string): void {
   let fileDescriptor: number | undefined;
 
   try {

@@ -253,20 +253,6 @@ describe('local runtime session store', () => {
     );
   });
 
-  it('requires readConversationEvidence from readers at the type level', () => {
-    // This stops compiling if the method becomes optional again.
-    type MessagesOnlyReader = {
-      readConversationMessages: () => readonly [];
-    };
-    type MessagesOnlyReaderIsAccepted =
-      MessagesOnlyReader extends LocalRuntimeSessionConversationLogReader
-        ? true
-        : false;
-    const messagesOnlyReaderIsAccepted: MessagesOnlyReaderIsAccepted = false;
-
-    expect(messagesOnlyReaderIsAccepted).toBe(false);
-  });
-
   it('rehydrates persisted visible conversation messages in order through the CT-02 reader seam', async () => {
     const storeRoot = await createTempStoreRoot();
     const logStore = createRuntimeLogStore({
@@ -847,9 +833,6 @@ function createConversationLogReader(
   >,
 ): LocalRuntimeSessionConversationLogReader {
   return {
-    readConversationMessages(sessionId) {
-      return recordsBySessionId[sessionId] ?? [];
-    },
     readConversationEvidence(sessionId) {
       return {
         character: testCharacterProfile,

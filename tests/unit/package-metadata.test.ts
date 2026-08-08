@@ -31,7 +31,7 @@ describe('scanPackageSourceRoot', () => {
 
     expect(scanPackageSourceRoot(root)).toEqual({
       status: 'scanned',
-      candidates: [{name: 'alpha'}, {name: 'linked'}, {name: 'zeta'}],
+      candidates: ['alpha', 'linked', 'zeta'],
     });
   });
 

@@ -114,7 +114,6 @@ describe('role-model module smoke', () => {
       logStore,
       pluginHost: createRuntimePluginHost(),
       roleModelAdapter: createDeterministicLocalRoleModelAdapter(),
-      committedAt: '2026-06-16T00:00:01.000Z',
     });
 
     expect(result.status).toBe('completed');

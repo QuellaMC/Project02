@@ -9,11 +9,7 @@ import {
   createRuntimePluginContextItem,
   type RuntimePluginContextItem,
 } from '../../plugins/api/index.ts';
-import {
-  createVisibleReplyModelToolCall,
-  freezeModelToolCalls,
-  type ModelToolCall,
-} from './model-tools.ts';
+import {freezeModelToolCalls, type ModelToolCall} from './model-tools.ts';
 import {
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
@@ -123,12 +119,6 @@ export function createCharacterDecision(
     version: roleModelDecisionContractVersion,
     toolCalls,
   });
-}
-
-export function createVisibleReplyCharacterDecision(
-  text: string,
-): CharacterDecision {
-  return createCharacterDecision([createVisibleReplyModelToolCall(text)]);
 }
 
 export function createAcceptedRoleModelDecisionResult(

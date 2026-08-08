@@ -61,7 +61,6 @@ import {
   diagnosticsHaveErrors,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigDiagnosticLocation,
-  RuntimeEnvFileError,
   type RuntimeConfigDiagnostic,
 } from '../../runtime/config/index.ts';
 import type {
@@ -69,25 +68,23 @@ import type {
   RoleModelCharacterRef,
 } from '../../role-model/index.ts';
 import {
-  isLocalRuntimeTerminalError,
-  type LocalRuntimeTerminalError,
+  ChatCliStartupError,
+  isCliTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
 import {
-  emptyRuntimeStoreCliState,
+  matchesRuntimeStoreInitFlag,
   parseRuntimeStoreFlag,
-  RuntimeLocationCliUsageError,
-  type RuntimeStoreCliState,
+  type RuntimeLocationCliState,
 } from '../shared/runtime-location-flags.ts';
-import {
-  assertProject02StoreConsent,
-  Project02StoreConsentError,
-} from '../shared/store-consent.ts';
+import {CliUsageError} from '../shared/usage-error.ts';
+import {characterActivationFailureMessage} from '../shared/startup-outcome.ts';
+import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
+import {assertProject02StoreConsent} from '../shared/store-consent.ts';
 import {
   createSelectedRoleModelAdapter,
   parseProviderName,
   providerOption,
-  RoleModelProviderSelectionError,
   selectChatProvider,
   type ChatProviderName,
 } from '../../role-model/index.ts';
@@ -113,7 +110,6 @@ type ChatCliOptions = {
   readonly userDisplayName?: string;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
   readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
 };
 
@@ -174,20 +170,6 @@ const fatalFailurePluginCleanupMessage =
 const configuredPluginShutdownMessage =
   'chat configured plugin host lifetime ended';
 
-class ChatCliUsageError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ChatCliUsageError';
-  }
-}
-
-class ChatCliStartupError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'ChatCliStartupError';
-  }
-}
-
 function requiredChatCharacterProfile(
   characterProfile: CharacterProfile | undefined,
 ): CharacterProfile {
@@ -200,10 +182,9 @@ function requiredChatCharacterProfile(
   return characterProfile;
 }
 
-function createChatToolConfirmationBridge(
-  injectedHandler: RuntimePluginToolConfirmationHandler | undefined,
-): ChatToolConfirmationBridge {
-  let activeHandler = injectedHandler;
+/** Plugins hold the bridge from startup; the terminal handler arrives later. */
+function createChatToolConfirmationBridge(): ChatToolConfirmationBridge {
+  let activeHandler: RuntimePluginToolConfirmationHandler | undefined;
 
   return Object.freeze({
     handler(request, context) {
@@ -214,10 +195,6 @@ function createChatToolConfirmationBridge(
       return activeHandler(request, context);
     },
     installTerminalHandler(handler) {
-      if (injectedHandler !== undefined) {
-        return () => {};
-      }
-
       activeHandler = handler;
 
       return () => {
@@ -241,13 +218,9 @@ function createTerminalToolConfirmationHandler(options: {
       return {status: 'cancelled'};
     }
 
-    const answer = response.value.trim().toLowerCase();
-
-    if (answer === 'y' || answer === 'yes') {
-      return {status: 'approved'};
-    }
-
-    return {status: 'denied'};
+    return cliPromptAnswerIsYes(response.value)
+      ? {status: 'approved'}
+      : {status: 'denied'};
   };
 }
 
@@ -350,14 +323,7 @@ export async function runChatCliFromArgs(
     });
 
     if (startup.status === 'character_invalid') {
-      throw new ChatCliUsageError(
-        `Character activation failed: ${
-          startup.characterActivation.status === 'failed'
-            ? (startup.characterActivation.messages[0] ??
-              'no character resolved.')
-            : 'no character resolved.'
-        }`,
-      );
+      throw new CliUsageError(characterActivationFailureMessage(startup));
     }
 
     if (startup.status === 'config_invalid') {
@@ -366,7 +332,7 @@ export async function runChatCliFromArgs(
         startup.activationPlan.resolvedConfig.diagnostics,
         'Runtime config is invalid',
       );
-      throw new ChatCliUsageError('Runtime config is invalid.');
+      throw new CliUsageError('Runtime config is invalid.');
     }
 
     if (startup.status === 'activation_blocked_before_runtime_env') {
@@ -374,7 +340,7 @@ export async function runChatCliFromArgs(
         startup.activationPlan.activation.diagnostics,
         'Runtime config activation failed',
       );
-      throw new ChatCliUsageError('Runtime config activation failed.');
+      throw new CliUsageError('Runtime config activation failed.');
     }
 
     const runtimeEnv = startup.runtimeEnv;
@@ -408,16 +374,14 @@ export async function runChatCliFromArgs(
     const characterActivation = startup.characterActivation;
 
     if (characterActivation.status !== 'resolved') {
-      throw new ChatCliUsageError(
-        'Character activation failed: no character resolved.',
-      );
+      throw new CliUsageError(characterActivationFailureMessage(startup));
     }
     for (const warning of characterActivation.warnings) {
       options.stderr.write(`Warning: ${warning}\n`);
     }
     const toolConfirmationBridge =
       options.pluginHost === undefined
-        ? createChatToolConfirmationBridge(options.toolConfirmationHandler)
+        ? createChatToolConfirmationBridge()
         : undefined;
     const configuredHost =
       preparedActivationPlan === undefined
@@ -449,7 +413,7 @@ export async function runChatCliFromArgs(
         startup.activationPlan.resolvedConfig.project02.userDisplayName,
     });
   } catch (error: unknown) {
-    if (isFormattedTerminalError(error)) {
+    if (isCliTerminalError(error)) {
       options.stderr.write(`Error: ${formatCliTerminalErrorMessage(error)}\n`);
       return 1;
     }
@@ -626,7 +590,7 @@ function assertNoRuntimeConfigErrors(
   }
 
   const diagnostic = diagnostics.find(item => item.severity === 'error');
-  throw new ChatCliUsageError(
+  throw new CliUsageError(
     diagnostic === undefined
       ? messagePrefix
       : formatRuntimeConfigDiagnosticError(messagePrefix, diagnostic),
@@ -866,7 +830,7 @@ function writeChatInputError(
 ): void {
   stderr.write(
     `Error: ${
-      isFormattedTerminalError(error)
+      isCliTerminalError(error)
         ? formatCliTerminalErrorMessage(error)
         : chatFailedBeforeReplyMessage
     }\n`,
@@ -985,7 +949,7 @@ async function handleUserMessageThroughRuntime(
 
       return mapRuntimeResult(result);
     } catch (error: unknown) {
-      if (isFormattedTerminalError(error)) {
+      if (isCliTerminalError(error)) {
         throw error;
       }
 
@@ -1168,7 +1132,8 @@ function writeTraceSummary(
 function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let traceMode = false;
   let provider: ChatProviderName | undefined;
-  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
+  let location: RuntimeLocationCliState = {};
+  let init = false;
   let sessionId: string | undefined;
   let newSessionId: string | undefined;
 
@@ -1190,77 +1155,61 @@ function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
 
     if (arg === '--provider') {
       if (provider !== undefined) {
-        throw new ChatCliUsageError('--provider can only be provided once.');
+        throw new CliUsageError('--provider can only be provided once.');
       }
 
-      provider = parseProviderName(
-        readFlagValue(
-          args,
-          index,
-          '--provider',
-          message => new ChatCliUsageError(message),
-        ),
-      );
+      provider = parseProviderName(readFlagValue(args, index, '--provider'));
       index += 1;
+      continue;
+    }
+
+    if (matchesRuntimeStoreInitFlag(arg, init)) {
+      init = true;
       continue;
     }
 
     const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: store,
+      location,
     });
 
     if (storeResult.status === 'matched') {
-      store = storeResult.state;
+      location = storeResult.location;
       index = storeResult.nextIndex;
       continue;
     }
 
     if (arg === '--session') {
       if (sessionId !== undefined) {
-        throw new ChatCliUsageError('--session can only be provided once.');
+        throw new CliUsageError('--session can only be provided once.');
       }
 
-      sessionId = readFlagValue(
-        args,
-        index,
-        '--session',
-        message => new ChatCliUsageError(message),
-      );
+      sessionId = readFlagValue(args, index, '--session');
       index += 1;
       continue;
     }
 
     if (arg === '--new-session') {
       if (newSessionId !== undefined) {
-        throw new ChatCliUsageError('--new-session can only be provided once.');
+        throw new CliUsageError('--new-session can only be provided once.');
       }
 
-      newSessionId = readFlagValue(
-        args,
-        index,
-        '--new-session',
-        message => new ChatCliUsageError(message),
-      );
+      newSessionId = readFlagValue(args, index, '--new-session');
       index += 1;
       continue;
     }
 
-    throw new ChatCliUsageError(`Unknown chat option: ${arg}.`);
+    throw new CliUsageError(`Unknown chat option: ${arg}.`);
   }
 
   if (sessionId !== undefined && newSessionId !== undefined) {
-    throw new ChatCliUsageError(
-      'Use either --session or --new-session, not both.',
-    );
+    throw new CliUsageError('Use either --session or --new-session, not both.');
   }
-
-  const {location} = store;
 
   return {
     traceMode,
-    init: store.init,
+    init,
     ...providerOption(provider),
     ...(location.character === undefined
       ? {}
@@ -1288,27 +1237,6 @@ function validateDurableSessionArgs(args: ChatCliArgs): void {
   if (args.newSessionId !== undefined) {
     normalizeLocalRuntimeSessionId(args.newSessionId);
   }
-}
-
-function isFormattedTerminalError(
-  error: unknown,
-): error is
-  | ChatCliUsageError
-  | ChatCliStartupError
-  | Project02StoreConsentError
-  | RoleModelProviderSelectionError
-  | RuntimeLocationCliUsageError
-  | RuntimeEnvFileError
-  | LocalRuntimeTerminalError {
-  return (
-    error instanceof ChatCliUsageError ||
-    error instanceof ChatCliStartupError ||
-    error instanceof Project02StoreConsentError ||
-    error instanceof RoleModelProviderSelectionError ||
-    error instanceof RuntimeLocationCliUsageError ||
-    error instanceof RuntimeEnvFileError ||
-    isLocalRuntimeTerminalError(error)
-  );
 }
 
 if (isMainModule(import.meta.url)) {

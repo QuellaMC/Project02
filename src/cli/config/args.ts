@@ -1,10 +1,10 @@
 /** Pure parsing: no IO, and no runtime access beyond the supplied env. */
 import {
-  emptyRuntimeStoreCliState,
+  matchesRuntimeStoreInitFlag,
   parseRuntimeStoreFlag,
   type RuntimeLocationCliState,
-  type RuntimeStoreCliState,
 } from '../shared/runtime-location-flags.ts';
+import {CliUsageError} from '../shared/usage-error.ts';
 import type {
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
@@ -21,13 +21,6 @@ type RuntimeConfigCliMutationOperation = Extract<
       | 'default_memory_provider';
   }
 >;
-
-export class RuntimeConfigCliUsageError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RuntimeConfigCliUsageError';
-  }
-}
 
 export type RuntimeConfigCliArgs = {
   readonly location: RuntimeLocationCliState;
@@ -62,7 +55,8 @@ export type RuntimeConfigCliParsedArgs = {
 export function parseRuntimeConfigCliArgs(
   args: readonly string[],
 ): RuntimeConfigCliParsedArgs {
-  let store: RuntimeStoreCliState = emptyRuntimeStoreCliState;
+  let location: RuntimeLocationCliState = {};
+  let init = false;
   const commandArgs: string[] = [];
 
   for (let index = 0; index < args.length; index += 1) {
@@ -77,14 +71,19 @@ export function parseRuntimeConfigCliArgs(
       break;
     }
 
+    if (matchesRuntimeStoreInitFlag(arg, init)) {
+      init = true;
+      continue;
+    }
+
     const storeResult = parseRuntimeStoreFlag({
       args,
       index,
-      state: store,
+      location,
     });
 
     if (storeResult.status === 'matched') {
-      store = storeResult.state;
+      location = storeResult.location;
       index = storeResult.nextIndex;
       continue;
     }
@@ -94,8 +93,8 @@ export function parseRuntimeConfigCliArgs(
   }
 
   return {
-    location: store.location,
-    init: store.init,
+    location,
+    init,
     commandArgs,
   };
 }
@@ -254,7 +253,7 @@ export function parseRuntimeConfigCommand(
 
   if (command === 'secret' && args[1] === 'set') {
     if (env === undefined) {
-      throw new RuntimeConfigCliUsageError(
+      throw new CliUsageError(
         'secret set requires the runtime environment to read the secret from.',
       );
     }
@@ -270,7 +269,7 @@ export function parseRuntimeConfigCommand(
     );
 
     if (secretValue === undefined || secretValue.length === 0) {
-      throw new RuntimeConfigCliUsageError(
+      throw new CliUsageError(
         `Secret env var ${envVar} must be set before running secret set.`,
       );
     }
@@ -287,7 +286,7 @@ export function parseRuntimeConfigCommand(
     };
   }
 
-  throw new RuntimeConfigCliUsageError(
+  throw new CliUsageError(
     'Use ui, path, env-path, check, get, set, unset, plugin enable, plugin disable, default-memory-provider, or secret set.',
   );
 }
@@ -299,7 +298,7 @@ export function assertNoExtraArgs(
   message = `${commandName} does not accept extra arguments.`,
 ): void {
   if (args[lastAcceptedIndex + 1] !== undefined) {
-    throw new RuntimeConfigCliUsageError(message);
+    throw new CliUsageError(message);
   }
 }
 
@@ -319,7 +318,7 @@ function requiredArg(
   const value = args[index];
 
   if (value === undefined || value.trim().length === 0) {
-    throw new RuntimeConfigCliUsageError(message);
+    throw new CliUsageError(message);
   }
 
   return value;

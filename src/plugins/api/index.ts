@@ -43,7 +43,6 @@ export {
   type RuntimePluginHealthStatus,
   type RuntimePluginKind,
   type RuntimePluginPolicyOutcome,
-  type RuntimePluginToolAnnotations,
   type RuntimePluginToolConcurrency,
   type RuntimePluginSourceKind,
   type RuntimePluginToolValidationOwner,
@@ -92,13 +91,13 @@ export {
   createRuntimePluginContext,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
-  createRuntimePluginListingSnapshot,
   createRuntimePluginRegistrySnapshot,
   createRuntimePluginToolCallResultSnapshot,
   createRuntimePluginToolInvocationSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
   registeredRuntimePluginLifecycleHooks,
+  type RuntimePluginLifecycleHookName,
 } from './constructors.ts';
 export {
   createRuntimePluginContextItem,
@@ -106,7 +105,6 @@ export {
   createRuntimePluginProvidedTool,
   validateRuntimePluginContextItem,
   validateRuntimePluginManifest,
-  validateRuntimePluginProvidedTool,
 } from './manifest-validation.ts';
 export {isRuntimePluginCredentialKey} from './validation-primitives.ts';
 export {
@@ -128,11 +126,6 @@ export {
 export {
   parseRuntimePluginPackageDescriptor,
   readRuntimePluginPackageDescriptor,
-  runtimePluginPackageDescriptorFormat,
-  runtimePluginPackageEntryExtensions,
-  type ParsedRuntimePluginPackageDescriptor,
-  type RuntimePluginPackageDescriptorIssue,
-  type RuntimePluginPackageDescriptorParseResult,
 } from './package-descriptor.ts';
 // factory.ts stays out: re-exporting it would cycle runtime->api->runtime.
 export {
@@ -141,7 +134,6 @@ export {
 } from './evidence-helpers.ts';
 export {
   type CreateRuntimePluginFileStoreOptions,
-  type DurableRuntimePluginFileStoreOptions,
   type InMemoryRuntimePluginFileStoreOptions,
   type RuntimePluginFileStorePathMode,
   type RuntimePluginFileStoreProvider,
