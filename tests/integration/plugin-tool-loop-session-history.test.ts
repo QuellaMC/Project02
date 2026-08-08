@@ -229,4 +229,80 @@ describe('session history through the tool loop', () => {
     // model already sees never matches.
     expect(searchResults[1]).toMatchObject({totalSessionsWithHits: 0});
   });
+
+  it('never returns the model its own interim reply from the same turn', async () => {
+    const storeRoot = createTestTempRoot('project02-history-interim-');
+    const sessionId = 'local-session';
+
+    // An empty durable session: the whole turn, including the interim
+    // reply, commits into the store the search index reads.
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId,
+      exchanges: [],
+    });
+
+    const pluginHost = createDefaultProject02PluginHost({
+      sessionHistory: createLocalRuntimeSessionHistoryFeed({
+        storeRoot,
+        characterId: testCharacterProfile.id,
+      }),
+      pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId,
+        sessionHistoryPluginId,
+      ],
+    });
+    // The interim reply commits before the search in the same round; the
+    // search must not surface the words the model just said.
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {text: 'One moment, the secret phrase is glimmerwing.'},
+          },
+          {name: sessionHistorySearchToolName, input: {query: 'glimmerwing'}},
+        ],
+      },
+      {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'Nothing else came up.'}},
+        ],
+      },
+    ]);
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('what was that phrase?', 'evt_history_interim'),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
+      logStore: createFileRuntimeLogStore({
+        boundCharacter: testCharacterProfile,
+        characterId: testCharacterProfile.id,
+        storeRoot,
+        sessionId,
+      }),
+      roleModelAdapter: adapter,
+      pluginHost,
+    });
+
+    expect(result.status).toBe('completed');
+
+    const searchResults = readFileSync(
+      createLocalRuntimeSessionPaths({storeRoot, sessionId}).rawEventsPath,
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map(line => jsonRecord(JSON.parse(line)))
+      .filter(record => record['kind'] === 'tool_call_finished')
+      .map(record => jsonRecord(jsonRecord(record['toolResult'])['output']));
+
+    expect(searchResults).toEqual([
+      expect.objectContaining({totalSessionsWithHits: 0}),
+    ]);
+  });
 });

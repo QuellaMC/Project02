@@ -220,7 +220,13 @@ export type CreateRuntimePluginContextOptions = RuntimeEventIdentity & {
   readonly sessionId: string;
   readonly eventType: RuntimeEventType;
   readonly currentUserMessage: string;
-  readonly recentVisibleMessageIds?: readonly string[];
+  /**
+   * What the model sees can grow mid-turn (interim replies commit before
+   * executable tools route), so a live turn passes a thunk the context
+   * re-reads; a plain array stays fixed.
+   */
+  readonly recentVisibleMessageIds?:
+    readonly string[] | (() => readonly string[]);
   readonly character: CharacterProfile;
   readonly redactionLabels?: readonly string[];
   readonly deadlineAt?: number;
