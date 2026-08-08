@@ -19,7 +19,7 @@ import {
   characterEnergyValues,
   characterMoodValues,
   characterSocialOrientationValues,
-  characterRuntimeStatesEqual,
+  applyCharacterStatePatch,
   createDefaultCharacterRuntimeState,
   createLivingStateBrief,
   decodeAcceptedCharacterStatePatchResult,
@@ -370,21 +370,23 @@ function decodeCharacterStateEventLog(
     const event = decodeStoredCharacterStatePatchEvent(rawEvent);
     const identity = characterStatePatchIdentityKey(event);
 
+    // A crash between append and checkpoint replays the same event on
+    // retry; the duplicate is the same fact and folds to nothing.
     if (identities.has(identity)) {
-      throw new TypeError(
-        'Stored Character State plugin event identity is duplicated.',
-      );
-    }
-
-    if (!characterRuntimeStatesEqual(event.result.before, authoritativeState)) {
-      throw new TypeError(
-        'Stored Character State plugin event chain is discontinuous.',
-      );
+      continue;
     }
 
     identities.add(identity);
     decodedEvents.push(event);
-    authoritativeState = event.result.after;
+    // Append order is the serialization: each event folds as a field
+    // patch onto the running state, so two sessions patching the same
+    // character concurrently converge instead of failing a continuity
+    // check forever. Each event still records the before/after its
+    // writer saw.
+    authoritativeState = applyCharacterStatePatch(
+      authoritativeState,
+      event.result.patch,
+    );
   }
 
   return Object.freeze({

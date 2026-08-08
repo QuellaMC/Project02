@@ -56,7 +56,7 @@ export type CharacterRuntimeState = {
   readonly current: LivingStateCurrent;
 };
 
-type CharacterStatePatch = Partial<LivingStateCurrent>;
+export type CharacterStatePatch = Partial<LivingStateCurrent>;
 
 type CharacterStatePatchRejectionReason =
   'malformed_state_patch' | 'unsupported_state_field' | 'invalid_state_value';
@@ -133,10 +133,7 @@ export function planCharacterStatePatch(options: {
     } satisfies RejectedCharacterStatePatchResult);
   }
 
-  const after = createCharacterRuntimeState({
-    ...before.current,
-    ...parsedPatch.patch,
-  });
+  const after = applyCharacterStatePatch(before, parsedPatch.patch);
   const appliedChanges = createAppliedChanges(before.current, after.current);
 
   return Object.freeze({
@@ -198,7 +195,7 @@ function freezeCharacterRuntimeState(
   return createCharacterRuntimeState(state.current);
 }
 
-export function characterRuntimeStatesEqual(
+function characterRuntimeStatesEqual(
   left: CharacterRuntimeState,
   right: CharacterRuntimeState,
 ): boolean {
@@ -257,6 +254,14 @@ export function decodeAcceptedCharacterStatePatchResult(
     after,
     appliedChanges,
   } satisfies AcceptedCharacterStatePatchResult);
+}
+
+/** The one definition of applying a patch: field assignment onto current. */
+export function applyCharacterStatePatch(
+  state: CharacterRuntimeState,
+  patch: CharacterStatePatch,
+): CharacterRuntimeState {
+  return createCharacterRuntimeState({...state.current, ...patch});
 }
 
 function createCharacterRuntimeState(

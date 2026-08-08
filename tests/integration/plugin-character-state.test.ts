@@ -380,13 +380,15 @@ describe('Character State plugin', () => {
     );
   });
 
-  it('rejects a discontinuous authoritative event chain', () => {
+  it('converges interleaved event chains by folding patches in log order', () => {
     const {plugin, context, fileStore} = createCharacterStateHarness(
-      'session-character-state-discontinuous-log',
+      'session-character-state-interleaved-log',
     );
     const initial = createDefaultCharacterRuntimeState();
     const first = acceptedPatchResult(initial, {mood: 'curious'});
-    const discontinuous = acceptedPatchResult(initial, {mood: 'playful'});
+    // A second session that read the same initial state records a stale
+    // `before`; the fold applies its patch anyway, so both survive.
+    const interleaved = acceptedPatchResult(initial, {energy: 'high'});
 
     appendPatchEvent(fileStore, {
       identity: testIdentity(),
@@ -395,37 +397,22 @@ describe('Character State plugin', () => {
     });
     appendPatchEvent(fileStore, {
       identity: createRuntimeEventIdentity({
-        eventId: 'evt_character_state_discontinuous',
-        traceId: 'trace_character_state_discontinuous',
+        eventId: 'evt_character_state_interleaved',
+        traceId: 'trace_character_state_interleaved',
         createdAt: '2026-06-15T00:01:00.000Z',
       }),
-      input: {mood: 'playful'},
-      result: discontinuous,
+      input: {energy: 'high'},
+      result: interleaved,
     });
 
-    expect(() => plugin.lifecycleHooks.beforeRoleModelCall?.(context)).toThrow(
-      /Character State plugin event chain/iu,
-    );
-  });
+    const hookResult = plugin.lifecycleHooks.beforeRoleModelCall?.(context);
 
-  it('requires the first authoritative event to start from the default state', () => {
-    const {plugin, context, fileStore} = createCharacterStateHarness(
-      'session-character-state-invalid-first-before',
-    );
-    const nonDefault = acceptedPatchResult(
-      createDefaultCharacterRuntimeState(),
-      {mood: 'curious'},
-    ).after;
-    const first = acceptedPatchResult(nonDefault, {mood: 'playful'});
+    if (hookResult === undefined || hookResult instanceof Promise) {
+      throw new Error('Expected a synchronous Character State hook result.');
+    }
 
-    appendPatchEvent(fileStore, {
-      identity: testIdentity(),
-      input: {mood: 'playful'},
-      result: first,
-    });
-
-    expect(() => plugin.lifecycleHooks.beforeRoleModelCall?.(context)).toThrow(
-      /Character State plugin event chain/iu,
+    expect(hookResult.contextItems[0]?.text).toContain(
+      'mood=curious; energy=high',
     );
   });
 
@@ -469,7 +456,7 @@ describe('Character State plugin', () => {
     ).not.toThrow();
   });
 
-  it('rejects duplicate persisted idempotency identities', () => {
+  it('folds a replayed duplicate identity to its first occurrence', () => {
     const {plugin, context, fileStore} = createCharacterStateHarness(
       'session-character-state-duplicate-identity',
     );
@@ -484,15 +471,21 @@ describe('Character State plugin', () => {
       input: {mood: 'curious'},
       result: first,
     });
+    // A crash between append and checkpoint replays the identity; only
+    // the first occurrence counts.
     appendPatchEvent(fileStore, {
       identity,
       input: {mood: 'playful'},
       result: second,
     });
 
-    expect(() => plugin.lifecycleHooks.beforeRoleModelCall?.(context)).toThrow(
-      /Character State plugin event identity is duplicated/iu,
-    );
+    const hookResult = plugin.lifecycleHooks.beforeRoleModelCall?.(context);
+
+    if (hookResult === undefined || hookResult instanceof Promise) {
+      throw new Error('Expected a synchronous Character State hook result.');
+    }
+
+    expect(hookResult.contextItems[0]?.text).toContain('mood=curious');
   });
 
   it('validates the complete authoritative log before replaying an early duplicate', () => {
