@@ -11,6 +11,7 @@ import {
   isHostScopedFirstPartyRuntimePluginId,
   runtimePluginAccessSnapshot,
   runtimePluginId,
+  sessionHistoryPluginId,
   type RuntimePlugin,
   type RuntimePluginAccessMap,
   type RuntimePluginCatalogEntry,
@@ -415,6 +416,14 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       pluginConfigControl: activationPlan.pluginConfigControl,
       runtimeLocation: activationPlan.runtimeLocation,
     } satisfies Project02ConfiguredPluginHost);
+  }
+
+  if (
+    activationPlan.activation.enabledPluginIds.includes(sessionHistoryPluginId)
+  ) {
+    // Advisory pre-warm so the first search finds a warm view; a real
+    // failure resurfaces honestly on the first query instead.
+    void sessionIndex.warmUp().catch(() => undefined);
   }
 
   const instantiated = await instantiateRuntimePluginPackages({

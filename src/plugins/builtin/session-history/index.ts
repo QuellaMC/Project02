@@ -4,11 +4,16 @@ import {
   sessionHistoryReadToolName,
   sessionHistorySearchToolName,
 } from '../../api/contract.ts';
-import {createRuntimePlugin} from '../../api/constructors.ts';
+import {
+  createRuntimePlugin,
+  createRuntimePluginEvidenceSnapshot,
+} from '../../api/constructors.ts';
 import {createPluginToolEvidence} from '../../api/evidence-helpers.ts';
 import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {
   RuntimePlugin,
+  RuntimePluginAfterTurnCommittedContext,
+  RuntimePluginEvidenceSnapshot,
   RuntimePluginProvidedTool,
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
@@ -117,6 +122,47 @@ export function createSessionHistoryPlugin(
 
               return unavailableSessionHistoryTool(call.toolName);
             },
+            async afterTurnCommitted(context) {
+              if (context.character.id !== sessionIndex.characterId) {
+                return {
+                  status: 'completed',
+                  evidence: [
+                    afterTurnEvidence(
+                      context,
+                      'degraded',
+                      'Skipped indexing for a foreign character context.',
+                    ),
+                  ],
+                };
+              }
+
+              try {
+                await sessionIndex.warmUp({sessionId: context.sessionId});
+              } catch {
+                // Advisory catch-up: the next query surfaces real failures.
+                return {
+                  status: 'completed',
+                  evidence: [
+                    afterTurnEvidence(
+                      context,
+                      'degraded',
+                      'Session index catch-up failed; the next search retries.',
+                    ),
+                  ],
+                };
+              }
+
+              return {
+                status: 'completed',
+                evidence: [
+                  afterTurnEvidence(
+                    context,
+                    'accepted',
+                    'Caught the session index up to the committed turn.',
+                  ),
+                ],
+              };
+            },
             onShutdown() {
               sessionIndex.close();
               return {status: 'completed', evidence: []};
@@ -146,6 +192,7 @@ export function createSessionHistoryPluginManifest() {
       'tool_provider',
       'handle_tool_call',
       'before_role_model_call',
+      'after_turn_committed',
       'on_shutdown',
     ],
     config: {
@@ -183,6 +230,24 @@ function isLocalRuntimeStorageContractError(
     error.name === 'LocalRuntimeStorageContractError' &&
     typeof (error as {readonly code?: unknown}).code === 'string'
   );
+}
+
+function afterTurnEvidence(
+  context: RuntimePluginAfterTurnCommittedContext,
+  status: 'accepted' | 'degraded',
+  summary: string,
+): RuntimePluginEvidenceSnapshot {
+  return createRuntimePluginEvidenceSnapshot({
+    eventId: context.eventId,
+    traceId: context.traceId,
+    createdAt: context.timestamp,
+    kind: 'runtime_plugin_evidence_snapshot',
+    pluginId: sessionHistoryPluginId,
+    evidenceKind: 'after_turn_committed',
+    status,
+    summary,
+    redactionLabels: context.privacy.redactionLabels,
+  });
 }
 
 function unavailableSessionHistoryTool(
