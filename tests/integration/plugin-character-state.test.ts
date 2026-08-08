@@ -642,6 +642,9 @@ function createInstrumentedCharacterStateFileStore(
       revision() {
         return revision;
       },
+      withMutations(operation) {
+        return operation();
+      },
     } satisfies RuntimePluginFileStore),
     eventLogReadCount: () => eventLogReads,
     jsonPaths: () => Object.freeze([...jsonFiles.keys()]),

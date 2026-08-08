@@ -76,6 +76,11 @@ export function createInMemoryRuntimePluginFileStore(
     revision() {
       return state.revision;
     },
+    // One process owns an in-memory store, so the operation is already
+    // exclusive.
+    withMutations(operation) {
+      return operation();
+    },
   } satisfies RuntimePluginFileStore);
 }
 

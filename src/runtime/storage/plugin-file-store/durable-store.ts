@@ -70,7 +70,7 @@ export function createDurableRuntimePluginFileStore(
     });
   }
 
-  function readUnderLease<T>(operation: () => T): T {
+  function withStoreLease<T>(operation: () => T): T {
     return withDurablePluginStoreMutation(
       {storeRoot: durableOptions.storeRoot, root, ownerToken},
       () => {
@@ -82,7 +82,7 @@ export function createDurableRuntimePluginFileStore(
 
   // A write is durable when its call returns, so opening a store only
   // finishes a single interrupted write.
-  readUnderLease(() => {
+  withStoreLease(() => {
     assertSafeDurablePluginRoot(root);
     cleanupDurablePluginStoreAtomicTempFiles(root);
   });
@@ -92,7 +92,7 @@ export function createDurableRuntimePluginFileStore(
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      return readUnderLease(() => {
+      return withStoreLease(() => {
         assertSafeDurablePluginPath(root, safePath);
         assertDurableOperationPathMode({
           filePath,
@@ -117,7 +117,7 @@ export function createDurableRuntimePluginFileStore(
       const safePath = normalizeRuntimePluginFileStorePath(path);
       const filePath = join(root, safePath);
 
-      return readUnderLease(() => {
+      return withStoreLease(() => {
         assertSafeDurablePluginPath(root, safePath);
         assertDurableOperationPathMode({
           filePath,
@@ -171,10 +171,15 @@ export function createDurableRuntimePluginFileStore(
       });
     },
     revision() {
-      return readUnderLease(() => {
+      return withStoreLease(() => {
         assertSafeDurablePluginRoot(root);
         return readDurableRevision(root);
       });
+    },
+    // The lock re-enters for this store's owner token, so nested store
+    // calls inside the operation acquire nothing new.
+    withMutations(operation) {
+      return withStoreLease(operation);
     },
   } satisfies RuntimePluginFileStore);
 }
