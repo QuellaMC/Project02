@@ -17,10 +17,17 @@ export type OpenRuntimePluginDatabaseOptions = {
 
 /**
  * Opens databases inside one plugin's character-scoped data directory.
- * The composition root scopes it to the owning plugin before injection,
- * so a plugin cannot open another plugin's database. Requires the
- * plugin_database access declaration.
+ * The host scopes it to the calling plugin before injection, so a plugin
+ * cannot open another plugin's database. Requires the plugin_database
+ * access declaration.
  */
 export type RuntimePluginDatabaseOpener = (
   options: OpenRuntimePluginDatabaseOptions,
 ) => RuntimePluginDatabase;
+
+/** The composition root injects the engine, so the host never imports it. */
+export type RuntimePluginDatabaseProvider = {
+  readonly openPluginDatabase: (
+    options: OpenRuntimePluginDatabaseOptions & {readonly pluginId: string},
+  ) => RuntimePluginDatabase;
+};

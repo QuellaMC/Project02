@@ -1,8 +1,13 @@
 import {runtimePluginGrantsAccess} from '../policy/access-control.ts';
 import type {
+  RuntimePluginDatabaseOpener,
+  RuntimePluginDatabaseProvider,
+} from '../api/database-contract.ts';
+import type {
   RuntimePluginFileStoreProvider,
   RuntimePluginFileStoreScope,
 } from '../api/file-store-contract.ts';
+import type {RuntimePluginSessionHistoryFeed} from '../api/session-history-contract.ts';
 import type {
   RuntimePlugin,
   RuntimePluginAfterTurnCommittedContext,
@@ -32,7 +37,8 @@ type PluginHookFileStoreOptions = {
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
 };
 
-type InheritedFileStoreContextFields = 'fileStore' | 'characterFileStore';
+type InheritedCapabilityContextFields =
+  'fileStore' | 'characterFileStore' | 'sessionHistory' | 'pluginDatabase';
 
 export function createPluginHookContext<
   TContext extends RuntimePluginContext,
@@ -49,6 +55,9 @@ export function createPluginHookContext<
   readonly allowFileStoreWrites?: boolean | undefined;
   readonly createFileStore?:
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
+  readonly sessionHistory?: RuntimePluginSessionHistoryFeed | undefined;
+  readonly openPluginDatabase?:
+    RuntimePluginDatabaseProvider['openPluginDatabase'] | undefined;
 }): PluginHookContextScope<TContext> {
   const pluginId = options.pluginId ?? options.plugin.manifest.id;
   const fileStoreOptions: PluginHookFileStoreOptions = {
@@ -70,14 +79,20 @@ export function createPluginHookContext<
     'character_file_store',
     'character',
   );
+  const sessionHistory = grantedSessionHistoryFeed(options);
+  const pluginDatabase = grantedPluginDatabaseOpener(options, pluginId);
   const {
     fileStore: inheritedFileStore,
     characterFileStore: inheritedCharacterFileStore,
+    sessionHistory: inheritedSessionHistory,
+    pluginDatabase: inheritedPluginDatabase,
     ...contextWithoutInheritedFileStores
   } = options.context;
 
   void inheritedFileStore;
   void inheritedCharacterFileStore;
+  void inheritedSessionHistory;
+  void inheritedPluginDatabase;
 
   const contextWithScrubbedTurn = runtimePluginGrantsAccess({
     access: options.access,
@@ -97,6 +112,8 @@ export function createPluginHookContext<
     ...(characterFileStore === undefined
       ? {}
       : {characterFileStore: characterFileStore.fileStore}),
+    ...(sessionHistory === undefined ? {} : {sessionHistory}),
+    ...(pluginDatabase === undefined ? {} : {pluginDatabase}),
   }) as TContext;
 
   return Object.freeze({
@@ -151,11 +168,57 @@ function grantedRevocableRuntimePluginFileStore(
   return createRevocableRuntimePluginFileStore(baseFileStore, {allowWrites});
 }
 
+function grantedSessionHistoryFeed(options: {
+  readonly access: RuntimePluginAccessSnapshot;
+  readonly sessionHistory?: RuntimePluginSessionHistoryFeed | undefined;
+}): RuntimePluginSessionHistoryFeed | undefined {
+  if (
+    !runtimePluginGrantsAccess({
+      access: options.access,
+      accessName: 'session_history',
+      requiredAccess: 'read',
+    })
+  ) {
+    return undefined;
+  }
+
+  // A host without a feed (minimal test hosts) yields an absent
+  // capability; the plugin answers with its own unavailable rejection.
+  return options.sessionHistory;
+}
+
+function grantedPluginDatabaseOpener(
+  options: {
+    readonly access: RuntimePluginAccessSnapshot;
+    readonly openPluginDatabase?:
+      RuntimePluginDatabaseProvider['openPluginDatabase'] | undefined;
+  },
+  pluginId: string,
+): RuntimePluginDatabaseOpener | undefined {
+  if (
+    !runtimePluginGrantsAccess({
+      access: options.access,
+      accessName: 'plugin_database',
+      requiredAccess: 'write',
+    })
+  ) {
+    return undefined;
+  }
+
+  const openPluginDatabase = options.openPluginDatabase;
+
+  if (openPluginDatabase === undefined) {
+    return undefined;
+  }
+
+  return databaseOptions => openPluginDatabase({...databaseOptions, pluginId});
+}
+
 const scrubbedRuntimePluginCurrentUserMessage = '';
 
 function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
-  context: Omit<TContext, InheritedFileStoreContextFields>,
-): Omit<TContext, InheritedFileStoreContextFields> {
+  context: Omit<TContext, InheritedCapabilityContextFields>,
+): Omit<TContext, InheritedCapabilityContextFields> {
   // Empty currentUserMessage represents no turn_context.read grant.
   const baseContext = {
     ...context,
@@ -173,12 +236,12 @@ function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
         visibleMessageIds: Object.freeze([]),
         visibleMessages: Object.freeze([]),
       }),
-    }) as unknown as Omit<TContext, InheritedFileStoreContextFields>;
+    }) as unknown as Omit<TContext, InheritedCapabilityContextFields>;
   }
 
   return Object.freeze(baseContext) as unknown as Omit<
     TContext,
-    InheritedFileStoreContextFields
+    InheritedCapabilityContextFields
   >;
 }
 

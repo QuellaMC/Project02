@@ -20,7 +20,7 @@ import {
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   createLocalRuntimeSessionHistoryFeed,
-  createRuntimePluginDatabaseOpener,
+  createRuntimePluginDatabaseProvider,
 } from '../../src/runtime/storage/index.ts';
 import {runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent} from '../support/plugin-tool-loop-fixtures.ts';
 
@@ -44,10 +44,7 @@ describe('session history through the tool loop', () => {
         storeRoot,
         characterId: testCharacterProfile.id,
       }),
-      sessionHistoryDatabase: createRuntimePluginDatabaseOpener({
-        storeRoot,
-        pluginId: sessionHistoryPluginId,
-      }),
+      pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,

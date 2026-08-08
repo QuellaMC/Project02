@@ -1,7 +1,7 @@
 import {
   createLocalRuntimeSessionHistoryFeed,
   createProject02HomeLayout,
-  createRuntimePluginDatabaseOpener,
+  createRuntimePluginDatabaseProvider,
   LocalRuntimeStorageContractError,
   requireCharacterDataMarker,
 } from '../runtime/storage/index.ts';
@@ -12,7 +12,6 @@ import {
   isHostScopedFirstPartyRuntimePluginId,
   runtimePluginAccessSnapshot,
   runtimePluginId,
-  sessionHistoryPluginId,
   type RuntimePlugin,
   type RuntimePluginAccessMap,
   type RuntimePluginCatalogEntry,
@@ -386,25 +385,18 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
   assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
-  // Built only when their owner plugin is enabled: the feed and the
-  // database opener are the session-history plugin's declared
-  // capabilities, and its data lives in its own character-scoped
-  // directory. Enablement changes take effect at the next host
-  // construction.
-  const sessionHistoryCapabilities =
-    activationPlan.activation.enabledPluginIds.includes(sessionHistoryPluginId)
-      ? {
-          sessionHistory: createLocalRuntimeSessionHistoryFeed({
-            storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
-            characterId:
-              activationPlan.runtimeLocation.characterScope.characterId,
-          }),
-          sessionHistoryDatabase: createRuntimePluginDatabaseOpener({
-            storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
-            pluginId: sessionHistoryPluginId,
-          }),
-        }
-      : undefined;
+  // Declared-capability providers for every plugin the host may enable:
+  // hooks only run for enabled plugins and both providers are file-less
+  // until used, so enablement alone decides whether anything happens.
+  const capabilityProviders = {
+    sessionHistory: createLocalRuntimeSessionHistoryFeed({
+      storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
+      characterId: activationPlan.runtimeLocation.characterScope.characterId,
+    }),
+    pluginDatabase: createRuntimePluginDatabaseProvider({
+      storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
+    }),
+  };
 
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
@@ -418,7 +410,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
         ),
-        ...(sessionHistoryCapabilities ?? {}),
+        ...capabilityProviders,
         toolConfirmationHandler: options.toolConfirmationHandler,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -452,7 +444,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
-      ...(sessionHistoryCapabilities ?? {}),
+      ...capabilityProviders,
       toolConfirmationHandler: options.toolConfirmationHandler,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
