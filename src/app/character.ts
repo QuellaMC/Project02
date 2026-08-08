@@ -1,11 +1,4 @@
-/**
- * Composition-root character activation: resolves the runtime's one
- * character definition from the discovered character packages, selected
- * by the project02.character config field (default: the bundled
- * character). Diagnostics that concern other characters do not block
- * activation — they surface as warnings so a broken unrelated operator
- * package cannot take the runtime down.
- */
+/** A broken package for another character warns instead of blocking. */
 import {
   defaultCharacterPackageSources,
   discoverCharacterPackages,
@@ -101,15 +94,7 @@ export function prepareProject02CharacterActivation(
   });
 }
 
-/**
- * Whether a package diagnostic is about the character being activated.
- *
- * A package is selected by the id its descriptor declares, so a
- * diagnostic naming a different folder can still be the reason the
- * selected character is missing — a folder mismatch is exactly that
- * case. Matching either id is what turns "nova was not found; install
- * it" into the mismatch that says which folder to rename.
- */
+/** A mismatched folder still declares the selected character's id. */
 function diagnosticConcernsCharacter(
   diagnostic: CharacterPackageDiagnostic,
   characterId: string,

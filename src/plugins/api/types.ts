@@ -97,7 +97,6 @@ export type RuntimePluginManifest = {
   readonly compatibility: RuntimePluginCompatibilityMetadata;
   readonly declaredPlugins: readonly RuntimePluginDeclaration[];
   readonly config: RuntimePluginConfigMetadata;
-  /** Shipped with Project02, rather than installed by the user. */
   readonly firstParty: boolean;
   readonly runtimePolicy: RuntimePluginRuntimePolicy;
   readonly activation: RuntimePluginActivationMetadata;
@@ -109,7 +108,6 @@ export type RuntimePluginProvidedTool = {
   readonly description: string;
   readonly inputContract: ModelToolInputContract;
   readonly validationOwner: RuntimePluginToolValidationOwner;
-  /** Advisory only, for whoever enables the plugin. Never read at runtime. */
   readonly annotations?: RuntimePluginToolAnnotations;
   /** Absent means exclusive: a tool overlaps only when it says so. */
   readonly concurrency?: RuntimePluginToolConcurrency;

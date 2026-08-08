@@ -1,13 +1,3 @@
-/**
- * The turn trace, read off the event log.
- *
- * A trace entry is an event identity and a step name. Eleven of the
- * thirteen step names are the kind of the event that produced them, and
- * the other two mark boundaries the log already shows: a turn starts once
- * its input is normalized, and its records are appended before it ends.
- * Nothing here needs a file of its own — a second file could only repeat
- * this, or disagree with it.
- */
 import {runtimeEventIdentityKey} from '../../core/index.ts';
 import type {
   RawEventLogRecord,
@@ -17,7 +7,6 @@ import type {
 } from './records.ts';
 import {isTerminalRawEventLogRecordKind} from './records.ts';
 
-/** Event kinds that are their own trace step. */
 const traceStepByRawEventKind: Readonly<
   Partial<Record<RawEventLogRecordKind, RuntimeTraceStepName>>
 > = Object.freeze({

@@ -1,7 +1,3 @@
-/**
- * Public contract of the runtime plugin package loader: bundled package
- * root and the shapes a discovery run produces.
- */
 import {fileURLToPath} from 'node:url';
 
 import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';

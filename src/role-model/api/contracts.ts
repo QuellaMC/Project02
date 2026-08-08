@@ -237,9 +237,7 @@ export type RejectedRoleModelDecisionResult = {
 export type RoleModelDecisionResult =
   AcceptedRoleModelDecisionResult | RejectedRoleModelDecisionResult;
 
-// Provider-independent per-turn character identification: which character
-// definition (content revision included) produced this turn. Additive and
-// optional so records written before it decode unchanged.
+// Optional so records written before it decode unchanged.
 export type RoleModelCharacterRef = {
   readonly id: string;
   readonly version: string;

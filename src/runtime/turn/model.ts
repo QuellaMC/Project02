@@ -131,10 +131,8 @@ async function runPreparedLocalRuntimeTurn(
 async function prepareRuntimeTurn(
   state: RuntimeTurnState,
 ): Promise<PrepareRuntimeTurnResult> {
-  // Context first, then commit: recentVisibleMessages means "the
-  // conversation before this turn", while the current user message rides
-  // the event payload. Committing after the context build keeps that
-  // meaning without excluding the just-said message by filtering.
+  // Context first, then commit: recentVisibleMessages means the conversation
+  // before this turn, and the current user message rides the event payload.
   const decisionContext = buildUserTurnDecisionContext({
     session: state.options.session,
     ...(state.options.recentMessageLimit === undefined
@@ -168,9 +166,8 @@ async function prepareRuntimeTurn(
         rawReason: beforeRoleModelCallResult.message,
         reason: beforeRoleModelCallResult.reason,
         runtimePluginContext,
-        // The user message committed before this gate; the terminal
-        // event must reference it or later full-evidence reads rebuild
-        // a prior conversation that is missing a durable message.
+        // The terminal event must reference the already-committed user
+        // message, or later evidence reads rebuild a conversation missing it.
         ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
       }),
     };

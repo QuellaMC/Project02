@@ -152,8 +152,7 @@ describe('chat CLI trace summary', () => {
     const exitCode = await runChatCli({
       characterProfile: testCharacterProfile,
       pluginHost: createDefaultProject02PluginHost(),
-      // A whitespace-only line reaches the runtime and fails input
-      // validation before any model call.
+      // A whitespace-only line reaches the runtime and fails input validation.
       stdin: Readable.from(['   \n', '/exit\n']),
       stdout: collect(() => {}),
       stderr: collect(chunk => {
@@ -169,9 +168,6 @@ describe('chat CLI trace summary', () => {
 
     expect(exitCode).toBe(0);
 
-    // The rejection helper appends three records; the operator trace
-    // shows all of them, including the validation step that names why
-    // the turn ended.
     expect(JSON.parse(stderr.trim())).toMatchObject({
       status: 'rejected',
       steps: [
@@ -504,9 +500,8 @@ describe('chat CLI trace summary', () => {
 });
 
 describe('chat CLI character selection', () => {
-  // Storage staying clean is startup-seam behavior, asserted once in
-  // tests/unit/runtime-config-overlay.test.ts. This covers only the chat
-  // CLI's own job: routing character_invalid to an exit code and message.
+  // Storage staying clean is startup-seam behavior, covered in
+  // tests/unit/runtime-config-overlay.test.ts.
   it('maps an invalid explicit character to a usage error', async () => {
     const storeRoot = createTestTempRoot('project02-chat-invalid-character-');
     let stderr = '';
@@ -587,8 +582,7 @@ describe('chat CLI character selection', () => {
       'Local runtime session ID must use only letters, numbers, dots, ' +
         'underscores, or hyphens.',
     );
-    // Session args were validated before startup: no home marker and
-    // no character data directory were created.
+    // Session args were validated before startup.
     expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
     expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
   });
@@ -700,11 +694,8 @@ describe('chat CLI provider selection', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('must be either "local" or "nvidia"');
-    // The env is judged in the startup planning phase, so the value that
-    // makes this command unusable is reported before the run sets up the
-    // character. The store itself is arrangement — the operator already
-    // has one — so what a rejected run must not leave behind is the
-    // character data directory this command would have created.
+    // The env is judged during startup planning, before the run sets up the
+    // character; the store itself is arrangement.
     expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
   });
 
@@ -2165,9 +2156,8 @@ describe('chat CLI plugin lifecycle', () => {
     expect(stderr).toContain(
       'Configured plugin construction failed before creating a durable session.',
     );
-    // The unified schema marker owns the character-data directory before
-    // plugin factories may touch it; it is not evidence that a durable
-    // session was created.
+    // The marker owns the directory before plugin factories may touch it, so
+    // it is not evidence of a durable session.
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toMatchObject({

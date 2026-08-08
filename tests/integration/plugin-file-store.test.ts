@@ -280,8 +280,7 @@ describe('runtime plugin file store', () => {
       injected.appendJsonl('events.jsonl', {value: 2});
     }).toThrow(/injected path-mode persistence failure/iu);
 
-    // Rewritten while the journal was open, so neither recorded state
-    // matches.
+    // Rewritten while the journal was open, so neither state matches.
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     writeFileSync(
@@ -490,7 +489,6 @@ describe('runtime plugin file store', () => {
       pluginId,
     });
 
-    // The unfinished record never committed; earlier ones survive.
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}]);
   });
 
@@ -518,7 +516,6 @@ describe('runtime plugin file store', () => {
 
     store.appendJsonl('events.jsonl', {value: 2});
 
-    // A record of its own, not text spliced onto the fragment.
     expect(store.readJsonl('events.jsonl')).toEqual([{value: 1}, {value: 2}]);
   });
 
@@ -529,8 +526,8 @@ describe('runtime plugin file store', () => {
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, {recursive: true});
-    // Longer in bytes than code units, so a string offset would cut the
-    // committed record's newline off with the fragment.
+    // Longer in bytes than code units, so a string offset cuts the committed
+    // record's newline off with the fragment.
     writeFileSync(
       join(root, 'events.jsonl'),
       '{"text":"caf\u00e9"}\n{"tor',
@@ -564,9 +561,8 @@ describe('runtime plugin file store', () => {
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, {recursive: true});
-    // Complete JSON, no newline: the write did not finish, and the next
-    // append discards it. Reading it as committed would show recovery a
-    // record that then vanishes.
+    // Complete JSON, no newline: the write did not finish, so the next append
+    // discards it.
     writeFileSync(
       join(root, 'events.jsonl'),
       '{"value":1}\n{"value":2}',
@@ -595,8 +591,8 @@ describe('runtime plugin file store', () => {
     const root = pluginRoot(storeRoot, sessionId, pluginId);
 
     mkdirSync(root, {recursive: true});
-    // Committed records follow the bad line, so it was never an
-    // unfinished append — the writer truncates those before appending.
+    // Committed records follow the bad line, so it was never an unfinished
+    // append: the writer truncates those before appending.
     writeFileSync(
       join(root, 'events.jsonl'),
       '{"value":1}\n{"corrupt\n{"value":3}\n',
@@ -743,8 +739,7 @@ describe('runtime plugin file store', () => {
       pluginId: 'plugin.null-json-legacy',
     });
 
-    // Appending here would turn the document into a JSONL stream and make
-    // every later JSON read fail.
+    // Appending would turn the document into a JSONL stream.
     expect(() => {
       store.appendJsonl('mixed.json', {value: 'jsonl'});
     }).toThrow(/already stores JSON/iu);

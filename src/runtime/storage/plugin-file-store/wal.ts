@@ -89,8 +89,8 @@ export function applyRecoverableDurablePluginFileStoreOperation(options: {
 }
 
 /**
- * Reads the target file once and records what the write will turn it into, so
- * a crash between the journal and the write leaves enough to finish the job.
+ * Records what the write will turn the file into, so a crash between the
+ * journal and the write leaves enough to finish the job.
  */
 function planDurablePluginFileStoreOperation(options: {
   readonly root: string;
@@ -104,17 +104,16 @@ function planDurablePluginFileStoreOperation(options: {
 
   const filePath = join(options.root, options.path);
 
-  // Validate before touching anything: truncating a torn tail is a write,
-  // and an operation this gate rejects must not have already changed the
-  // file it was rejected for.
+  // Validate first: truncating a torn tail is itself a write, and a rejected
+  // operation must not have already changed the file.
   assertDurableOperationPathMode({
     filePath,
     mode: readDurablePathModes(options.root).get(options.path),
     operation: options,
   });
 
-  // Before the bytes this journal is planned against are read. A write
-  // replaces the file, so only an append can splice onto a torn tail.
+  // Must precede the read this journal is planned against; a write replaces
+  // the file, so only an append can splice onto a torn tail.
   if (options.kind === 'append_jsonl') {
     discardTornJsonLineTail(filePath);
   }

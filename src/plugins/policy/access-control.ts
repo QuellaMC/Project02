@@ -184,13 +184,7 @@ export function normalizeRuntimePluginAccessMap(
   return Object.freeze(accessMap);
 }
 
-/**
- * Fails host construction, not first invocation, when a plugin that was
- * actually granted file_store access has no provider to satisfy it. A
- * compatible internal default is not possible - the store engine lives in
- * runtime/storage and plugins must not import it - so the requirement is
- * surfaced loudly at the API boundary instead.
- */
+/** Fails at host construction, not first use; the engine has no default. */
 export function assertRuntimePluginFileStoreProviderPresent(options: {
   readonly enabledPlugins: readonly RuntimePlugin[];
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;

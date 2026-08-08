@@ -43,8 +43,7 @@ describe('runtime config console UI', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // The overlay went bad after the console opened: the save must
-    // fail before ensure writes either storage marker.
+    // The overlay went bad after the console opened.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'config.json'), '{not json\n');
 
@@ -79,8 +78,7 @@ describe('runtime config console UI', () => {
     });
     writeRuntimeConfig(overlayPath, {});
 
-    // The snapshot fingerprints the selected global document plus the
-    // overlay — the same pair the commit verifies.
+    // The snapshot fingerprints the same layer pair the commit verifies.
     const exitCode = await runRuntimeConfigCliFromArgs(
       [
         '--store',
@@ -975,12 +973,8 @@ function scriptedPrompt(
   });
 }
 
-/**
- * Selects a plugin by id instead of by hard-coded list position: reads
- * the rendered "N) Display Name (plugin-id)" line from the accumulated
- * console output at answer time, so adding a bundled package never
- * shifts these scripts.
- */
+// Reads the rendered "N) Display Name (plugin-id)" line at answer time, so
+// adding a bundled package never shifts these scripts.
 function selectPluginStep(
   readStdout: () => string,
   pluginId: string,

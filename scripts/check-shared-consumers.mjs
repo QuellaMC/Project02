@@ -1,21 +1,5 @@
-/**
- * Gate rule 6: additions to `src/shared` need approved consumers.
- *
- * `src/shared/consumers.json` maps each shared file to the top-level src
- * modules approved to import it. This script fails when:
- *
- * 1. a file exists in `src/shared` with no manifest entry (a shared
- *    addition without recorded approval),
- * 2. a manifest entry names fewer than two consumer modules (a
- *    single-consumer utility belongs inside its consumer, not in shared),
- * 3. a manifest entry points at a shared file that no longer exists
- *    (stale approval), or
- * 4. a module outside the approved set imports the shared file.
- *
- * Adding to shared therefore requires a reviewed diff to consumers.json
- * naming at least two consumers — the "approved consumers" gate from
- * docs/plan/repo-structure-migration-2026-07-16.md, Slice 0.
- */
+// Gate rule 6: a shared file needs a reviewed consumers.json entry naming
+// at least two consumer modules.
 import {readFileSync, readdirSync} from 'node:fs';
 import {basename, dirname, join, relative, resolve} from 'node:path';
 
@@ -27,12 +11,6 @@ const MINIMUM_APPROVED_MODULES = 2;
 const IMPORT_SPECIFIER_PATTERN =
   /(?:^|\n)\s*(?:import|export)\s[^;'"]*?from\s+['"]([^'"]+)['"]|(?:^|\n)\s*import\s+['"]([^'"]+)['"]/g;
 
-/**
- * Recursively lists TypeScript files under a directory.
- *
- * @param {string} directory
- * @return {string[]} paths relative to the repository root.
- */
 function listTypeScriptFiles(directory) {
   const files = [];
   for (const entry of readdirSync(directory, {withFileTypes: true})) {
@@ -46,24 +24,13 @@ function listTypeScriptFiles(directory) {
   return files;
 }
 
-/**
- * @param {string} filePath path relative to the repository root.
- * @return {string} the top-level src module ('runtime', 'cli', …), or
- *     'root' for files directly under src/.
- */
 function moduleOf(filePath) {
   const segments = relative(SRC_DIRECTORY, filePath).split('/');
   return segments.length === 1 ? 'root' : segments[0];
 }
 
-/**
- * @param {string} source TypeScript source text.
- * @param {string} filePath importing file, relative to the repository root.
- * @return {string[]} shared file names (e.g. 'json-boundary.ts') the
- *     source imports. Specifiers are resolved against the importing file
- *     so module-local `shared/` directories (e.g. cli/shared) don't
- *     false-positive.
- */
+// Specifiers resolve against the importing file so module-local `shared/`
+// directories (cli/shared) do not match.
 function importedSharedFileNames(source, filePath) {
   const names = [];
   const sharedRoot = resolve(SHARED_DIRECTORY);

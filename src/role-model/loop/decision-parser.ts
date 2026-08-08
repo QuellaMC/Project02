@@ -103,7 +103,6 @@ export function getRequiredVisibleReplyText(
   return visibleReply.input.text;
 }
 
-/** Every reply the decision asks to send, in the order it asked. */
 export function visibleReplyToolCalls(
   decision: CharacterDecision,
 ): readonly VisibleReplyModelToolCall[] {
@@ -285,10 +284,8 @@ function parseModelToolCall(options: {
     return parseVisibleReplyToolCallInput(input, options.index);
   }
 
-  // The plugin's own contract is checked by the host; here the call only
-  // has to cross the JSON boundary, which the freeze below does. The
-  // boundary's refusal is the model's correction note: a proposal it
-  // cannot carry is a malformed tool call, not a runtime failure.
+  // The plugin's contract is the host's check; here the call only has to cross
+  // the JSON boundary, and a refusal is a malformed tool call, not a failure.
   try {
     return {
       status: 'accepted',
@@ -391,11 +388,8 @@ function validateToolCallAvailability(options: {
   readonly toolCalls: readonly ModelToolCall[];
   readonly allowedTools: readonly RoleModelAllowedToolName[];
 }): RejectedRoleModelDecisionResult | undefined {
-  // Executable calls outside allowedTools are NOT a parse failure: tool
-  // routing rejects them pre-dispatch as tool_not_declared, which the model
-  // sees as a failed observation and can correct. Only visible_reply keeps a
-  // parse-level gate — it is commit semantics, not a routed tool, so an
-  // unavailable visible_reply has no downstream enforcement point.
+  // Only visible_reply is gated here: it is commit semantics, not a routed
+  // tool, so it has no downstream enforcement point. Routing rejects the rest.
   const disallowedVisibleReply = options.toolCalls.find(
     call =>
       call.name === visibleReplyModelToolName &&

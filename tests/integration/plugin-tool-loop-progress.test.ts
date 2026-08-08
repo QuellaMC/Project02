@@ -151,8 +151,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
       storeRoot,
       sessionId,
     });
-    // Every visible reply is history the moment the user sees it: the
-    // interim text commits durably before the tool round runs, in order.
+    // Every visible reply is history the moment the user sees it, so interim
+    // text commits before the tool round runs.
     expect(
       reloadedLogStore.conversationMessages().map(message => message.text),
     ).toEqual([
@@ -341,9 +341,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
     });
 
     expect(secondTurn.status).toBe('completed');
-    // The model's memory equals what the user saw: interim replies are
-    // part of the prior conversation it reads back, not lost progress
-    // text. The current user message rides the event payload instead.
+    // Interim replies are prior conversation the model reads back; the current
+    // user message rides the event payload instead.
     expect(observedRecentTexts).toEqual(['needs tool', 'checking', 'finished']);
   });
 
@@ -491,10 +490,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
       roleModelAdapter: adapter,
     });
 
-    // One gate for every round: an empty visible_reply is a correctable
-    // model error, so the loop burns a feedback round instead of rejecting
-    // the turn. Nothing invalid is shown or committed, the round's tools
-    // do not run, and the corrected second decision completes the turn.
+    // An empty visible_reply is a correctable model error, so the loop burns a
+    // feedback round instead of rejecting the turn.
     expect(result.status).toBe('completed');
     expect(
       logStore.conversationMessages().map(message => message.text),

@@ -25,10 +25,7 @@ export type PluginHookExecutionScope = {
   readonly deadlineAt: number;
 };
 
-/**
- * One explicit policy source owns every hook deadline. A rejected candidate
- * may supply executable hooks, but never its own timeout policy.
- */
+/** A rejected candidate may supply hooks, but never its own timeout policy. */
 export function createPluginHookExecutionScope(
   policyManifest: RuntimePluginManifest,
 ): PluginHookExecutionScope {

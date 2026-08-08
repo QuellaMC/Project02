@@ -202,8 +202,7 @@ describe('runtime config CLI mutation and storage', () => {
     const targetPath = join(outside, 'external.env');
     let stderr = '';
 
-    // A's config points the store at B: the secret would land in
-    // B/.env, so B's env file is the one that must be real.
+    // A's config points the store at B, so the secret would land in B/.env.
     writeRuntimeConfig(join(storeA, 'config.json'), {
       project02: {storeRoot: storeB},
       plugins: {
@@ -247,8 +246,7 @@ describe('runtime config CLI mutation and storage', () => {
     const envSelectedPath = join(elsewhere, 'selected.json');
     let stderr = '';
 
-    // With --store supplied the loader ignores the env var, so the
-    // selected home must still pass the guard.
+    // With --store supplied the loader ignores the env var.
     writeRuntimeConfig(envSelectedPath, {});
     writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
 
@@ -285,8 +283,7 @@ describe('runtime config CLI mutation and storage', () => {
     writeFileSync(targetPath, '');
     symlinkSync(targetPath, join(storeRoot, '.env'));
 
-    // The explicit config remains standalone; --store states which home owns
-    // secrets and other runtime data.
+    // --store states which home owns secrets and other runtime data.
     const exitCode = await runRuntimeConfigCliFromArgs(
       [
         '--config',
@@ -353,7 +350,6 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('Error:');
-    // The secret never lands outside the validated home.
     expect(readFileSync(targetPath, 'utf8')).toBe('');
   });
 
@@ -429,7 +425,6 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('Error:');
-    // Authored config never moves outside the validated home.
     expect(readFileSync(targetPath, 'utf8')).toBe(targetBefore);
   });
 
@@ -452,8 +447,6 @@ describe('runtime config CLI mutation and storage', () => {
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('Error:');
-    // The runtime would refuse this directory; authoritative settings
-    // must not be written into it.
     expect(existsSync(join(storeRoot, 'config.json'))).toBe(false);
   });
 
@@ -1281,8 +1274,8 @@ describe('runtime config CLI mutation and storage', () => {
         `cannot use reserved Project02 runtime control env var "${envVar}"`,
       );
       expect(existsSync(join(storeRoot, '.env'))).toBe(false);
-      // The store was arranged, so "created no secret files" is now the
-      // config document sitting exactly as the initializer left it.
+      // The store was arranged, so the document sits as the initializer
+      // left it.
       expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
     },
   );

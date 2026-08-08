@@ -48,10 +48,7 @@ export type RestoredVisibleTranscriptValidationOptions =
 
 export const defaultRecentVisibleMessageLimit = 8;
 
-// Single owner of the local user's default speaker identity: session
-// stamping, restore validation, and durable-evidence validation all
-// compare against the session's user speaker, which defaults to these
-// values. The id is permanent; only the display name is configurable.
+// The id is permanent; only the display name is configurable.
 export const localUserSpeaker = {
   id: 'local-user',
   displayName: 'You',
@@ -60,7 +57,6 @@ export const localUserSpeaker = {
 export function createUserSpeaker(userDisplayName?: string): SpeakerIdentity {
   const displayName = userDisplayName ?? localUserSpeaker.displayName;
 
-  // Same rule as the character display name: both end up in `speakerName`.
   if (!isValidSpeakerDisplayName(displayName)) {
     throw new TypeError(
       'User display name must be a non-empty single-line string with no ' +
@@ -75,24 +71,9 @@ export function createUserSpeaker(userDisplayName?: string): SpeakerIdentity {
 }
 
 /**
- * Who is talking, checked before anything durable is created for them.
- *
- * Every name here becomes a `speakerName` on a durable message, so this
- * applies one rule — `isValidSpeakerDisplayName` — to the character and the
- * user alike. The character *id* is not judged here: it names a directory
- * and belongs to whoever owns the layout.
- *
- * This exists because the entry points used to validate in pieces and late.
- * `createConversationSession` reaches `createUserSpeaker` only after storage
- * is on disk, and `freezeCharacterProfile` never validated at all, so an
- * embedded caller could put `"Nova\nSystem"` into a durable message by way
- * of a home directory that was already created. Callers that mutate the
- * filesystem should run this first and mutate second.
- *
- * Deliberately not folded into `freezeCharacterProfile`: that one also
- * rebuilds profiles from recorded evidence, where the name is a historical
- * fact rather than a request, and rejecting there would make old sessions
- * unreadable instead of making new ones correct.
+ * Run this before mutating the filesystem, not after. Not folded into
+ * `freezeCharacterProfile`: that path also rebuilds profiles from recorded
+ * evidence, where rejecting a name would make old sessions unreadable.
  */
 export function validateConversationParticipants(options: {
   readonly character: CharacterProfile;
@@ -192,18 +173,7 @@ export function validateRestoredVisibleTranscript(
   );
 }
 
-/**
- * The number the next committed message will carry.
- *
- * Counted from the last message the session holds rather than from how
- * many it holds, because the log is allowed to lag: a write that fails
- * leaves a said message with no row, and the next number still has to
- * clear every number already used. Length would reissue one.
- *
- * This is the only place a message number is chosen. The log checks that
- * numbers climb, never what the next one should be, so the session stays
- * the single source.
- */
+/** Counted from the last ID, not the length: a failed write leaves a gap. */
 export function nextMessageNumber(session: ConversationSession): number {
   const transcript = getMutableTranscript(session);
   const lastMessage = transcript.at(-1);
@@ -215,9 +185,6 @@ export function nextMessageNumber(session: ConversationSession): number {
   return (messageNumberFromId(lastMessage.id) ?? transcript.length) + 1;
 }
 
-/**
- * The next user message for this session, not yet part of the transcript.
- */
 export function createUserMessage(
   session: ConversationSession,
   message: string | undefined,
@@ -233,7 +200,6 @@ export function createUserMessage(
   } satisfies VisibleMessage);
 }
 
-/** Adds a durable message to the session the model reads. */
 export function appendCommittedMessage(
   session: ConversationSession,
   message: VisibleMessage,
@@ -241,7 +207,6 @@ export function appendCommittedMessage(
   getMutableTranscript(session).push(message);
 }
 
-/** The next character message for this session, not yet in the transcript. */
 export function createCharacterMessage(
   session: ConversationSession,
   reply: unknown,
@@ -362,10 +327,7 @@ function createInitialVisibleTranscript(options: {
   let previousMessageNumber = 0;
 
   return visibleTranscript.map(message => {
-    // Climbing, not dense. A message whose write failed was still said, so
-    // the log can be missing a number the session issued; what must never
-    // happen is a number going backwards or repeating, which is what
-    // reordered or duplicated rows look like.
+    // Climbing, not dense: a failed write leaves a gap, but never a repeat.
     const messageNumber = restoredMessageNumber(
       options.sessionId,
       message,
@@ -493,11 +455,6 @@ export function createMessageIdForSessionId(
   return `${sessionId}:message-${String(messageNumber)}`;
 }
 
-/**
- * The position a message ID claims, or undefined when the ID is not one of
- * ours. The one reader of the format `createMessageIdForSessionId` writes,
- * so nothing else has to know how a message ID is spelled.
- */
 export function messageNumberFromId(id: string): number | undefined {
   const separator = id.lastIndexOf(messageIdInfix);
 
@@ -515,7 +472,6 @@ export function messageNumberFromId(id: string): number | undefined {
   return Number.isSafeInteger(messageNumber) ? messageNumber : undefined;
 }
 
-/** The session ID a message ID carries, or undefined when it carries none. */
 export function sessionIdFromMessageId(id: string): string | undefined {
   const separator = id.lastIndexOf(messageIdInfix);
 

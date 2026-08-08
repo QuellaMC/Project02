@@ -1,11 +1,4 @@
-/**
- * Credential key classification: whether a field's *name* says its value
- * is a secret, so the whole value can be masked.
- *
- * Names only. Text is never scanned for things that look like secrets —
- * a guess that rewrites a user's own words gets it wrong in both
- * directions, and this runs on a machine the user already trusts.
- */
+/** Field names classify; value text is never scanned for secret-like shapes. */
 const credentialMetricKeys = new Set([
   'acceptedpredictiontokens',
   'inputtokens',

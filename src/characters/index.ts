@@ -1,11 +1,4 @@
-/**
- * Public API of src/characters.
- *
- * Cross-module imports of characters must land here (arch:check rule 5).
- * Character packages are data-only; this module owns the descriptor
- * contract, discovery, and the bundled default packages. It imports only
- * core and shared (arch:check characters-is-data-only).
- */
+/** Cross-module imports of characters land here (arch:check rule 5). */
 export {
   characterPackageDescriptorFileName,
   characterPackageDescriptorFormat,

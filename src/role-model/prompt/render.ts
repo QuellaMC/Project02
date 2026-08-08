@@ -165,8 +165,7 @@ function createSystemMessage(
   inputEnvelope: RoleModelInputEnvelope,
   personaSections: readonly string[] | undefined,
 ): RoleModelSystemChatMessage {
-  // Persona sections join as paragraphs; the runtime-owned protocol text
-  // always follows and is not overridable by character packages.
+  // Runtime-owned protocol text always follows; packages cannot override it.
   const personaText =
     personaSections === undefined || personaSections.length === 0
       ? `You are ${inputEnvelope.decisionContext.characterSnapshot.displayName}.`

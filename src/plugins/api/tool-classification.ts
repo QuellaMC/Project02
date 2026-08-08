@@ -5,12 +5,7 @@ import type {
   RuntimePluginProvidedTool,
 } from './types.ts';
 
-/**
- * Enabling the plugin is the trust decision, as with a local MCP server
- * the user chose to run, so tools are not filtered by declared risk. A
- * tool that needs asking says so per tool, and is withheld only when the
- * host has no way to ask.
- */
+/** Enabling is the trust decision: tools are not filtered by declared risk. */
 export function isModelFacingRuntimePluginTool(options: {
   readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;
@@ -21,12 +16,7 @@ export function isModelFacingRuntimePluginTool(options: {
   );
 }
 
-/**
- * A tool whose call stages a `preparedConfigEffect` for the user to
- * approve, applying nothing until they do. It cannot gate a tool that
- * acts when called — the prompt would come after the action — so one
- * that prepares nothing is rejected when its result is normalized.
- */
+/** Gated tools stage an effect and apply nothing until the user approves. */
 export function isApprovalGatedRuntimePluginTool(options: {
   readonly manifest: RuntimePluginManifest;
   readonly tool: RuntimePluginProvidedTool;

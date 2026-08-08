@@ -114,7 +114,6 @@ export type PreparedProject02PluginActivationPlan =
       Record<string, RuntimePluginCatalogEntry>
     >;
     readonly pluginConfigControl: RuntimePluginConfigControlHostState;
-    /** Fingerprint of the authored config this plan's plugins are built from. */
     readonly authoredConfigFingerprint: string;
   };
 
@@ -128,13 +127,7 @@ export type RuntimePluginCatalogSnapshot = {
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-/**
- * One immutable filesystem discovery, classified per config layer:
- * package scanning is config-free, so a startup discovers once and
- * re-classifies the same manifests against each layer state instead of
- * re-scanning — package defaults and final activation then always
- * judge one manifest snapshot.
- */
+/** Package scanning is config-free, so one scan is re-classified per layer. */
 export type RuntimePluginCatalogDiscovery = {
   readonly storeRoot: string;
   readonly catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>;
@@ -142,9 +135,7 @@ export type RuntimePluginCatalogDiscovery = {
   readonly packageProvenanceByPluginId: Readonly<
     Record<string, RuntimePluginPackageProvenance>
   >;
-  /** Raw package diagnostics awaiting per-layer severity classification. */
   readonly packageDiagnostics: readonly RuntimePluginPackageDiagnostic[];
-  /** Config-independent catalog errors (reserved system-service ids). */
   readonly reservedIdDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly discoveredPluginIds: ReadonlySet<string>;
 };
@@ -155,19 +146,10 @@ const selectedAsDefaultMemoryProviderReason =
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  /**
-   * Test or embedding overrides extend the discovered catalog instead of
-   * replacing it. Character-package requirements must keep seeing bundled
-   * and operator-installed plugins on every startup path.
-   */
+  /** Overrides extend the discovered catalog rather than replacing it. */
   readonly factoryOverrides?: Readonly<
     Record<string, RuntimePluginFactoryDefinition>
   >;
-  /**
-   * When present, package diagnostics are classified against the merged
-   * two-layer view: an overlay-enabled broken package is as much an
-   * error as a globally enabled one.
-   */
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
@@ -249,12 +231,7 @@ export function discoverRuntimePluginCatalog(options: {
   } satisfies RuntimePluginCatalogDiscovery);
 }
 
-/**
- * Severity classification of one discovery against one config layer
- * view: an overlay-enabled broken package is as much an error as a
- * globally enabled one, and the same discovery re-classifies cheaply
- * as the layer state changes.
- */
+/** An overlay-enabled broken package errors like a globally enabled one. */
 export function classifyRuntimePluginCatalogDiscovery(options: {
   readonly discovery: RuntimePluginCatalogDiscovery;
   readonly classificationConfig: EffectiveProject02RuntimeConfigSnapshot;
@@ -300,12 +277,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
 
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
 
-  // One character scope and one overlay snapshot feed the catalog
-  // classification, the layered resolve, the construction snapshot, and
-  // the control state, so every downstream site composes the same pair
-  // of documents — including direct callers that never went through
-  // startup. A supplied overlay is the scope authority: its character
-  // id may be a flag override the loaded config knows nothing about.
+  // The supplied overlay decides the scope: its id may be a flag override.
   const characterScope = options.runtimeLocation.characterScope;
   if (
     options.overlayConfig !== undefined &&
@@ -352,8 +324,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     pluginManifests,
     defaultEnabledPluginIds,
     resolvedConfig,
-    // The enablement ladder judges the merged view, so an overlay's
-    // explicit enabled rung carries the same weight as a global one.
+    // The enablement ladder judges the merged view, not just the global one.
     effectiveConfig: layeredConfig.effective,
     strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
@@ -441,16 +412,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   const {activationPlan} = options;
   const {catalogEntries} = activationPlan;
 
-  // Both guards are preconditions of the resolved location, not of the
-  // plugins built from it, so they run before any branch. Host
-  // construction is downstream of character initialization: it asserts
-  // the guarded initializer already ran (identity marker present and
-  // matching) and never creates durable character state itself — a
-  // direct caller on an uninitialized home used to get a partially
-  // initialized character with no package defaults and no diagnostics.
-  // An activation error does not lift that obligation: the error host
-  // is still a host, and returning one bound to no character marker is
-  // exactly what this boundary exists to prevent.
+  // An error host is still a host, so both guards precede that branch.
   assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
   assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
@@ -543,12 +505,6 @@ function assertCharacterRuntimeInitialized(
       error instanceof LocalRuntimeStorageContractError &&
       error.code === 'missing_file'
     ) {
-      // Both ways in are named because both audiences reach this: an
-      // embedded caller wants the exported initializer, an operator
-      // wants a command they can type. `--init` is part of that answer
-      // now — a CLI run against a store that does not exist stops at the
-      // consent gate instead of quietly making one, so "run any CLI
-      // startup" is only true once the operator has agreed to the store.
       throw new TypeError(
         `Character "${runtimeLocation.characterScope.characterId}" is not ` +
           'initialized in this home. Run a project02 CLI command against ' +
@@ -835,8 +791,7 @@ function isRuntimePluginInventoryRecoveryManifest(
   );
 }
 
-// Invalid-config hosts get inventory only: the config-control capability
-// deliberately does not survive into this state, so config tools stay off.
+// The config-control capability deliberately does not survive here.
 function runtimePluginInventoryStateForInvalidConfig(
   state: RuntimePluginConfigControlHostState,
 ): RuntimePluginInventoryHostState {

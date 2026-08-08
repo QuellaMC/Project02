@@ -339,8 +339,6 @@ describe('file runtime log store plugin tool event validation', () => {
 
     writeJsonLines(paths.rawEventsPath, [patchCompletedEvent(sessionId)]);
 
-    // The lookup takes a validated store read, so an invalid log fails
-    // at the read rather than yielding a terminal.
     expect(() => reopenStore(paths).rawEvents()).toThrow(
       LocalRuntimeStorageContractError,
     );
@@ -452,8 +450,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected role-model IO snapshot fixture.');
     }
 
-    // Two character identities in one snapshot: the package provenance
-    // claims nova while the turn was decided as the fixture character.
+    // Two identities in one snapshot: the provenance claims nova while the
+    // turn was decided as the fixture character.
     roleModelIOSnapshot['characterRef'] = {
       id: 'nova',
       version: '1.0.0',
@@ -480,8 +478,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected role-model input envelope fixture.');
     }
 
-    // Every envelope the runtime writes carries this array, so an absent
-    // one is damage rather than an older record to reconstruct from.
+    // Every envelope the runtime writes carries this array, so an absent one
+    // is damage, not an older record.
     Reflect.deleteProperty(inputEnvelope, 'pluginToolDefinitions');
 
     expect(() =>
@@ -802,8 +800,7 @@ describe('file runtime log store plugin tool event validation', () => {
           const evidence = durableStore.readSessionEvidence();
 
           return {
-            // The reader's bound character matches this store's custom
-            // character; a foreign bound profile is rejected by design.
+            // A foreign bound profile is rejected by design.
             character: durableRuntimeSessionCharacterProfile(
               evidence,
               character,
@@ -1021,8 +1018,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // Transcript reconstruction reads prior messages from terminal
-    // references, so a dropped id desyncs a later turn's context.
+    // Transcript reconstruction reads prior messages from terminal references.
     const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1105,8 +1101,8 @@ describe('file runtime log store plugin tool event validation', () => {
       );
     }
 
-    // Swap only the text, so IDs stay in sequence and each row still
-    // matches an accepted reply — only the order between them is wrong.
+    // Only the text moves, so IDs stay in sequence and each row still matches
+    // an accepted reply.
     const records = commits.map(
       line => JSON.parse(line) as Record<string, unknown>,
     );
@@ -1161,10 +1157,8 @@ describe('file runtime log store plugin tool event validation', () => {
       );
     }
 
-    // The ordering check keys on the decision round, so a forger who
-    // swaps texts and anchors while deleting the rounds must not slip
-    // past it: a character commit without its round is not a shape the
-    // writer produces.
+    // The ordering check keys on the decision round, and a character commit
+    // without its round is not a shape the writer produces.
     const records = commits.map(
       line => JSON.parse(line) as Record<string, unknown>,
     );
@@ -1221,10 +1215,8 @@ describe('file runtime log store plugin tool event validation', () => {
       );
     }
 
-    // Swap the round-2 and round-3 rows wholesale — text, anchors, and
-    // round travel together, so every round group stays internally
-    // consistent and only the order between rounds is wrong. IDs and
-    // committedAt stay in place, so nothing else can object first.
+    // Text, anchors, and round travel together while IDs and committedAt stay,
+    // so every group is internally consistent and nothing else objects first.
     const records = commits.map(
       line => JSON.parse(line) as Record<string, unknown>,
     );
@@ -1280,10 +1272,8 @@ describe('file runtime log store plugin tool event validation', () => {
       createSequencedVisibleReplyAdapter(['a reply']),
     );
 
-    // Evidence saying the model answered "hi" while the visible user row
-    // says "hello" is a transcript the user never saw. The forged record
-    // stays internally consistent — snapshot and summary agree — so only
-    // the cross-record rule can catch it.
+    // Snapshot and summary agree inside the forged record, so only the
+    // cross-record rule can catch it.
     const editedLines = rawLines.map(line => {
       if (
         !line.includes('"visible_message_committed"') ||
@@ -1347,8 +1337,7 @@ describe('file runtime log store plugin tool event validation', () => {
         eventType: 'USER_MESSAGE',
       });
 
-      // Valid when prepared: the turn has no messages, so a rejection
-      // without visibleMessageIds matches the evidence of that moment.
+      // Valid when prepared: the turn had no messages yet.
       const staleTerminal = logStore.prepareRawEvent({
         ...turnIdentity,
         kind: 'runtime_turn_rejected',
@@ -1393,8 +1382,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // What remains is an open turn — the crash shape — which stays
-    // readable.
+    // What remains is an open turn, the crash shape, which stays readable.
     expect(reopenStore(paths).conversationMessages()).toHaveLength(1);
   });
 
@@ -1434,7 +1422,6 @@ describe('file runtime log store plugin tool event validation', () => {
         record.visibleMessage?.role === 'character',
       message: 'visible reply raw append failed',
     });
-    // The one session this process keeps, the way the CLI holds it.
     const session = createConversationSession({id: sessionId, character});
 
     await expect(
@@ -1461,8 +1448,7 @@ describe('file runtime log store plugin tool event validation', () => {
       }),
     ).resolves.toMatchObject({status: 'completed'});
 
-    // The log now skips the number the failed reply took, so a session
-    // rebuilt from it holds fewer messages than the highest number used.
+    // The log skips the number the failed reply took.
     expect(
       underlying.conversationMessages().map(message => message.id),
     ).toEqual([
@@ -1525,9 +1511,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected a commit anchor line.');
     }
 
-    // One message, one commit event: a duplicate must fail closed. It is
-    // inserted before the terminal, so the turn-shape gate decides rather
-    // than the records-after-terminal rule.
+    // Inserted before the terminal, so the turn-shape gate decides rather than
+    // the records-after-terminal rule.
     const terminalIndex = rawLines.findIndex(line =>
       line.includes('"runtime_turn_completed"'),
     );
@@ -1666,8 +1651,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected two commit events.');
     }
 
-    // Message IDs are assigned per session and checked against position,
-    // so swapping two commit events breaks the file-wide sequence.
+    // Message IDs are assigned per session and checked against position.
     const [first, second] = commits;
     const swapped = rawLines.map(line =>
       line === first ? second : line === second ? first : line,
@@ -1680,10 +1664,8 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
   it('keeps a session readable when a crash left its last turn unfinished', async () => {
-    // A killed process ends the log mid-turn: messages committed, no
-    // terminal event. That is a state the reader surfaces — the shown
-    // messages stay in the transcript — and the next writer's turn
-    // implicitly closes it.
+    // A killed process ends the log mid-turn: messages committed, no terminal
+    // event. The next writer's turn implicitly closes it.
     const {paths} = await committedTurnRawLines(
       'session-crash-open-turn',
       createMultilineVisibleReplyAdapter(),
@@ -1712,8 +1694,6 @@ describe('file runtime log store plugin tool event validation', () => {
       reopened.conversationMessages().map(message => message.role),
     ).toEqual(['user', 'character']);
 
-    // The next writer rehydrates from the log, so the session resumes
-    // from the messages the crashed turn already showed.
     const session = createConversationSession({
       id: paths.sessionId,
       character: testCharacterProfile,
@@ -1792,13 +1772,11 @@ describe('file runtime log store plugin tool event validation', () => {
       boundCharacter: testCharacterProfile,
     });
 
-    // The unfinished write costs its own record, not the conversation.
     expect(reopened.conversationMessages()).toHaveLength(2);
     expect(
       reopened.rawEvents().some(record => record.eventId === 'evt_torn_second'),
     ).toBe(false);
 
-    // The next turn appends cleanly rather than splicing onto it.
     const followupResult = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
         'still there?',
@@ -1858,9 +1836,8 @@ describe('file runtime log store plugin tool event validation', () => {
     });
 
     expect(rejectedResult.status).toBe('rejected');
-    // The user message committed before the gate ran, so the terminal
-    // rejection must reference it — otherwise later full-evidence reads
-    // rebuild a prior conversation missing a durable message.
+    // The user message committed before the gate ran, so a terminal rejection
+    // that omits it leaves later reads rebuilding a shorter conversation.
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_rejected',
       status: 'rejected',
@@ -1890,8 +1867,6 @@ describe('file runtime log store plugin tool event validation', () => {
     });
 
     expect(followupResult.status).toBe('completed');
-    // The completed turn's recent-context snapshot includes the kept user
-    // message; a full validated reload must accept that agreement.
     expect(() =>
       createFileRuntimeLogStore({
         storeRoot,
@@ -1938,8 +1913,7 @@ describe('file runtime log store plugin tool event validation', () => {
       reason: 'plugin_health_rejected',
       message: 'Plugin health unavailable: health fixture offline',
     });
-    // Health gates run after delivery: they reject the turn and stop
-    // future messages, but never un-say text the user already saw.
+    // Health gates run after delivery, so they never un-say shown text.
     expect(
       logStore.conversationMessages().map(message => message.role),
     ).toEqual(['user', 'character']);
@@ -2027,8 +2001,7 @@ describe('file runtime log store plugin tool event validation', () => {
       reason: 'plugin_health_rejected',
       message: 'Plugin health degraded: health fixture backpressure',
     });
-    // Health gates run after delivery: they reject the turn and stop
-    // future messages, but never un-say text the user already saw.
+    // Health gates run after delivery, so they never un-say shown text.
     expect(
       logStore.conversationMessages().map(message => message.role),
     ).toEqual(['user', 'character']);
@@ -2759,11 +2732,7 @@ function reopenStore(
   });
 }
 
-/**
- * A model that repeats itself: two rounds whose raw output is the same
- * bytes, then a terminal one. The repeated rounds are distinguishable only
- * by which round they were, never by what they said.
- */
+// The repeated rounds are distinguishable only by which round they were.
 function createRepeatedRoundAdapter(): RoleModelAdapter {
   const repeatedRound = JSON.stringify({
     toolCalls: [

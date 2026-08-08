@@ -20,8 +20,7 @@ vi.mock('node:fs/promises', async importOriginal => {
 
   return {
     ...original,
-    // Session directory probes use lstat so a symlinked session root is
-    // rejected rather than followed; the cap under test is unchanged.
+    // Session directory probes use lstat, not stat.
     lstat: async (path: PathLike) => {
       if (
         !directoryStatProbe.blocking ||

@@ -650,9 +650,8 @@ describe('runtime config CLI location selection', () => {
       `${runtimeConfigEnvVarName}=${dotenvConfigPath}\n`,
       'utf8',
     );
-    // Only the two homes the mutations write into: the dotenv- and
-    // process-selected stores stay uninitialized, which is part of what
-    // "the explicit location won" means here.
+    // Only the homes the mutations write into: the dotenv- and
+    // process-selected stores stay uninitialized on purpose.
     await initializeTestStore(explicitStoreRoot);
     await initializeTestStore(selectedStoreRoot);
 

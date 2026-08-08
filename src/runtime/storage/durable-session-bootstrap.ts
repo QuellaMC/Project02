@@ -45,11 +45,8 @@ export async function createDurableChatRuntime(
   const sessionId = normalizeLocalRuntimeSessionId(
     args.newSessionId ?? args.sessionId,
   );
-  // Everything this runtime is about to stamp on durable records is judged
-  // before the first directory exists. The id is canonicalized here too, so
-  // the data directory, the marker, the log store, and the returned session
-  // all bind the same spelling — a padded `" nova "` would otherwise mark
-  // `character-data/nova` while stamping messages nothing can reopen.
+  // Canonicalized before the first directory exists, so the data directory,
+  // the marker, the log store, and the session all bind the same spelling.
   const characterId = normalizeLocalRuntimeCharacterId(args.character.id);
   const {character, userSpeaker: boundUserSpeaker} =
     validateConversationParticipants({
@@ -145,9 +142,8 @@ function readDurableConversationEvidence(
   );
 
   return Object.freeze({
-    // Existing sessions keep their evidence-derived profiles (historical
-    // display names); the bound character and user speaker apply to
-    // evidence-empty sessions only.
+    // Existing sessions keep their evidence-derived profiles; the bound
+    // identities apply to evidence-empty sessions only.
     character: durableRuntimeSessionCharacterProfile(evidence, boundCharacter),
     userSpeaker:
       recordedUserMessage === undefined

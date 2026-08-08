@@ -1,4 +1,4 @@
-/** Single owner of `--flag value` argv reading for all CLIs (S-13). */
+/** Single owner of `--flag value` argv reading for all CLIs. */
 export function readFlagValue(
   args: readonly string[],
   index: number,

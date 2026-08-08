@@ -324,12 +324,9 @@ export async function runChatCliFromArgs(
   try {
     const parsedArgs = parseChatCliArgs(args);
 
-    // Invalid session ids (and a malformed --store) fail here, before
-    // startup materializes any durable character state.
+    // Fails before startup materializes any durable character state.
     validateDurableSessionArgs(parsedArgs);
 
-    // And before that state is created at all, if the operator never
-    // asked for a store here.
     await assertProject02StoreConsent({
       location: parsedArgs,
       init: parsedArgs.init,
@@ -345,12 +342,8 @@ export async function runChatCliFromArgs(
         ? {}
         : {factories: options.factories}),
       continueAfterActivationErrors: options.pluginHost !== undefined,
-      // The same selection run below, run early: an unusable
-      // PROJECT02_ROLE_MODEL_PROVIDER is this command's error, and it
-      // has to be reported before startup writes the home and
-      // character-data markers. The configured file value is left out
-      // deliberately — it is a fallback, and cannot rescue an env value
-      // that does not name a provider.
+      // Run early so an unusable provider env var is reported before
+      // startup writes any marker. The config fallback cannot rescue it.
       validateRuntimeEnv: env => {
         selectChatProvider(parsedArgs.provider, env);
       },
@@ -368,8 +361,7 @@ export async function runChatCliFromArgs(
     }
 
     if (startup.status === 'config_invalid') {
-      // Resolved-config diagnostics carry both layers, so a character
-      // overlay error surfaces here with its attribution.
+      // Resolved-config diagnostics carry both layers, overlay included.
       assertNoRuntimeConfigErrors(
         startup.activationPlan.resolvedConfig.diagnostics,
         'Runtime config is invalid',
@@ -412,8 +404,7 @@ export async function runChatCliFromArgs(
 
     validateDurableSessionArgs(runtimeArgs);
 
-    // Character activation already ran inside startup, before any
-    // plugin resources were constructed.
+    // Character activation ran inside startup, before any plugin resources.
     const characterActivation = startup.characterActivation;
 
     if (characterActivation.status !== 'resolved') {
@@ -1044,10 +1035,7 @@ function mapRuntimeResult(
     };
   }
 
-  // A rejected runtime result is session-safe by construction: it exists only
-  // after the rejection was durably appended (storage failures throw instead
-  // and are wrapped as fatal by mapUnexpectedRuntimeFailureResult). The REPL
-  // therefore always continues past it.
+  // Session-safe by construction: the rejection was already durably appended.
   return {
     status: 'rejected',
     errorMessage: result.message,

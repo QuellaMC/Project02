@@ -121,8 +121,7 @@ describe('runtime config CLI reads and checks', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // No mira/ exists yet anywhere: the symlinked root alone must
-    // fail read-only startup, exactly like the writers.
+    // No mira/ exists anywhere, so the symlinked root alone is the refusal.
     symlinkSync(outside, join(storeRoot, 'character-data'));
 
     const exitCode = await runRuntimeConfigCliFromArgs(
@@ -146,9 +145,8 @@ describe('runtime config CLI reads and checks', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A marker-less directory with an overlay AND foreign content: the
-    // first durable run would refuse it, so check must not report its
-    // overlay as the effective config.
+    // A marker-less directory with an overlay and foreign content, which the
+    // first durable run would refuse.
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(join(dataRoot, 'config.json'), {
       project02: {userDisplayName: 'Foreign Name'},
@@ -176,8 +174,7 @@ describe('runtime config CLI reads and checks', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A copied directory: mira's path claims nova but carries an
-    // overlay a naive read-only check would report as mira's config.
+    // A copied directory: mira's path claims nova but carries an overlay.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
       join(dataRoot, 'schema.json'),
@@ -360,8 +357,8 @@ describe('runtime config CLI reads and checks', () => {
       storeRoot: 42,
     });
     mkdirSync(join(cwdRoot, '.env'));
-    // The authored storeRoot is the invalid value under test, so both
-    // runs fall back to the default home beside the cwd.
+    // The authored storeRoot is the invalid value, so both runs fall back to
+    // the default home beside the cwd.
     await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
     await initializeTestStore(storeRoot);
 
@@ -622,8 +619,8 @@ describe('runtime config CLI reads and checks', () => {
       `${runtimeConfigEnvVarName}=${join(storeRoot, 'config.json')}\n${envVar}="${secretValue}"\n`,
       'utf8',
     );
-    // The selected config authors no storeRoot, so the home stays the
-    // default one beside the working directory.
+    // The selected config authors no storeRoot, so the home stays the default
+    // one beside the working directory.
     await initializeTestStore(join(cwdRoot, defaultProject02HomeRoot));
 
     try {

@@ -228,15 +228,8 @@ export function createParsedRoleModelDecisionSnapshot(
 }
 
 /**
- * A snapshot names one character, so its package provenance and the
- * character the turn was decided as have to agree.
- *
- * The check belongs to the snapshot rather than to the live loop: the
- * codec rebuilds durable evidence through this same constructor, so a
- * record that was copied, hand-edited, or written by a direct writer is
- * held to the rule the loop already enforced when it was first
- * produced. Durable identity validation reads only the character
- * snapshot, and would otherwise report a contradictory ref as healthy.
+ * On the snapshot, not the loop: the codec rebuilds durable evidence through
+ * this constructor, so a hand-edited record is held to the same rule.
  */
 export function assertRoleModelCharacterRefMatchesCharacter(
   characterRef: RoleModelCharacterRef,

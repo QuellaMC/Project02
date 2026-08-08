@@ -32,9 +32,6 @@ describe('local runtime session store symlink guards', () => {
       createdAt: '2026-07-16T00:00:00.000Z',
     });
 
-    // Swap the real session directory for a link to a directory outside the
-    // character data root; evidence readers must refuse it rather than follow
-    // the link and read files from the target.
     const sessionRoot = join(store.layout.sessionsRoot, 'session-00');
     renameSync(sessionRoot, join(root, 'parked'));
     symlinkSync(outside, sessionRoot, 'dir');
@@ -65,8 +62,7 @@ describe('local runtime session store symlink guards', () => {
       }),
     ).rejects.toThrow(/must be a real directory/);
 
-    // The guard has to run before the lock root is prepared, so a rejected
-    // store never routes control files into the link target.
+    // The guard runs before the lock root is prepared.
     expect(existsSync(join(realStore, '.locks'))).toBe(false);
   });
 
@@ -79,10 +75,8 @@ describe('local runtime session store symlink guards', () => {
     mkdirSync(home, {recursive: true});
     symlinkSync(outside, join(home, 'character-data'), 'dir');
 
-    // The store root itself is absent, which a leaf-only guard accepts because
-    // the caller may create it under the lock. Acquiring that lock creates the
-    // root recursively, so the symlinked parent has to be rejected first or the
-    // rejected call still writes into the link target.
+    // A leaf-only guard admits the absent root, and taking the lock then creates
+    // it recursively inside the link target.
     const store = createLocalRuntimeSessionStore({
       storeRoot: join(home, 'character-data', 'mira'),
       characterId: 'mira',
@@ -122,9 +116,7 @@ describe('local runtime session store symlink guards', () => {
       boundCharacter: testCharacterProfile,
     });
 
-    // First access settles session identity. Whether the directory is a real
-    // directory is not settled by it, so the swap below has to be caught even
-    // though the identity check is already cached.
+    // First access caches session identity; realness is not settled with it.
     expect(logStore.rawEvents()).toEqual([]);
 
     const sessionRoot = join(store.layout.sessionsRoot, 'session-00');

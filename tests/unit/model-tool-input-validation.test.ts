@@ -77,9 +77,6 @@ describe('model tool input validation', () => {
   ] as const)(
     'phrases a mixed-branch oneOf failure with %s as the combinator, not the branches',
     (_case, inputContract) => {
-      // Each branch reports the other branch's field as unsupported;
-      // repeating those as global facts would tell the model to delete
-      // fields that are valid in one alternative.
       const result = validateModelToolInputAgainstContract({
         toolName: 'memory.capture',
         input: {pick: {a: 'x', b: 'y'}},

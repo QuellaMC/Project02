@@ -376,8 +376,6 @@ describe('role-model contracts', () => {
   });
 
   it('rejects a tool input the JSON boundary cannot carry as a malformed call', () => {
-    // The boundary's refusal feeds back as the model's correction note
-    // instead of escaping the parser as a runtime failure.
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [

@@ -1,13 +1,6 @@
 /**
- * The one owner of reserved secret-marker detection. A config value is
- * a secret marker when it is an object carrying a `$env` or
- * `$plaintextSecret` field — regardless of the field's value type, so
- * a malformed marker (e.g. a non-string `$env`) is still recognized and
- * rejected instead of slipping through as plain data. Package parsing,
- * raw resolution, scoped policy, and mutation validation all detect
- * markers through this module, and every diagnostic names nested
- * positions in one canonical path format: `parent.key` for object
- * fields and `parent[index]` for array entries.
+ * Detection ignores the marker field's value type, so a malformed marker is
+ * still recognized and rejected rather than passing as plain data.
  */
 export const secretEnvMarkerField = '$env';
 export const plaintextSecretMarkerField = '$plaintextSecret';
@@ -26,11 +19,7 @@ export type NestedSecretMarkerPathOptions = {
   readonly rejectPlaintextAllowanceMarker?: boolean;
 };
 
-/**
- * Walks a value and returns the canonical path of the first secret
- * marker found (object keys visited in sorted order for determinism),
- * or undefined when the value embeds none.
- */
+/** Keys are visited in sorted order so the reported path is deterministic. */
 export function nestedSecretMarkerPath(
   value: unknown,
   path: string,

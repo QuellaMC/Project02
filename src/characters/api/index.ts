@@ -1,6 +1,3 @@
-/**
- * Public contract surface of src/characters/api.
- */
 export {
   characterPackageDescriptorFileName,
   characterPackageDescriptorFormat,

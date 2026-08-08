@@ -474,12 +474,8 @@ describe('runtime config loading and resolution', () => {
       'project02-config-known-plugin-global-',
     );
     await initializeCharacterDataForHost(storeRoot);
-    // A known plugin's error is plugin-scoped, so it does not block
-    // anything by itself. The claim is that it blocks globally anyway,
-    // which only shows on a plugin something else enabled — hence the
-    // overlay. `character-state` defaults to off, and the global
-    // document cannot enable it because that document is the one
-    // failing to load.
+    // The global blocking only shows on a separately enabled plugin, and the
+    // failing document cannot be the one that enables it.
     writeRuntimeConfig(
       characterOverlayConfigPath(characterDataDirPath(storeRoot, 'mira')),
       {plugins: {'character-state': {enabled: true}}},
@@ -1650,8 +1646,7 @@ describe('runtime config loading and resolution', () => {
     expect(memoryFactoryInputs).toEqual([
       {
         pluginId: 'memory.required',
-        // Plugin state is character-scoped: factories receive the active
-        // character's data root, not the shared home.
+        // Plugin state is character-scoped, not shared across the home.
         storeRoot: characterDataDirPath(realpathSync.native(storeRoot), 'mira'),
         apiKeyValue: 'from-manifest-backed-factory',
         redactedApiKeyValue: '[redacted]',

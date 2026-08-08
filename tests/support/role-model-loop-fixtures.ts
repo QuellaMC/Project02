@@ -50,7 +50,6 @@ export const visibleDotReplyToolDefinition = Object.freeze({
   description: 'Exercise a provider-name collision with visible_reply.',
 } satisfies RoleModelPluginToolDefinition);
 
-/** A tool definition with an explicit concurrency mode. */
 export function toolWithConcurrency(
   definition: RoleModelPluginToolDefinition,
   concurrency: 'shared' | 'exclusive',

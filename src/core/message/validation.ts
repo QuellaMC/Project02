@@ -47,39 +47,17 @@ export function normalizeOneLineMessage(message: string | undefined): string {
   return normalizedMessage;
 }
 
-/**
- * Counts characters the way a published JSON Schema `maxLength` does.
- *
- * `String.length` counts UTF-16 code units, so any astral character -- emoji,
- * many CJK extension ideographs -- counts twice. A bound stated in a schema
- * the package author validates against therefore has to be measured in code
- * points here, or an editor-valid package is rejected at activation for being
- * half its documented length.
- */
+/** Code points, as JSON Schema `maxLength` counts them, not UTF-16 units. */
 export function characterLength(value: string): number {
-  // `Array.from` iterates code points, matching how a JSON Schema counts.
-  // Both callers bound short strings, so this stays simple rather than
-  // guarding the common all-BMP case.
   return Array.from(value).length;
 }
 
-/**
- * Bound shared by every speaker display name, character or user.
- *
- * The name is stamped into `speakerName` on each message, so it repeats per
- * turn in durable logs, rehydration, inspection, and the prompt. The generic
- * config boundary only caps strings at 16 KiB, which is far too large to repeat
- * that often.
- */
+/** Stamped on every message, so bounded well below the 16 KiB config cap. */
 export const maxSpeakerDisplayNameLength = 128;
 
 /**
- * Answers whether a value may be stamped onto messages as a speaker name.
- *
- * One line, trimmed, non-empty, bounded — the same rule the published character
- * schema states as `^\S(.*\S)?$` with `maxLength: 128`. The one-line part
- * matters beyond tidiness: names are interpolated before a colon in chat
- * output, so an embedded newline lets a name forge additional lines.
+ * Mirrors the published character schema's `^\S(.*\S)?$` and `maxLength: 128`.
+ * The newline ban is security: names are interpolated before a colon in chat.
  */
 export function isValidSpeakerDisplayName(value: unknown): value is string {
   return (

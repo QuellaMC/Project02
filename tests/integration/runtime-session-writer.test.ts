@@ -178,7 +178,6 @@ describe('durable runtime session writer ownership', () => {
         }),
       }),
     ).rejects.toMatchObject({code: 'malformed_record'});
-    // The turn is recorded as rejected; no second transcript is written.
     expect(
       logStore
         .rawEvents()
@@ -303,12 +302,8 @@ async function waitForOutput(
 ): Promise<void> {
   await new Promise<void>((resolveOutput, rejectOutput) => {
     let stdout = '';
-    // Idle deadline rather than a total one: these cases spawn several real
-    // Node processes that each cold-start, so total time tracks runner load
-    // and any fixed budget eventually goes flaky (this test reached 6.0s, then
-    // 8.0s, then timed out at 15s on progressively busier runners). Waiting on
-    // silence instead measures the thing that actually indicates a hang, and
-    // `exit` still fails fast when the child dies before it is ready.
+    // An idle deadline, not a total one: these cases cold-start several real
+    // Node processes, so any fixed budget goes flaky under runner load.
     let timeout: NodeJS.Timeout;
     const failIfIdle = (): void => {
       timeout = setTimeout(() => {
@@ -326,7 +321,6 @@ async function waitForOutput(
         resolveOutput();
         return;
       }
-      // Progress, not readiness: give the child a fresh idle window.
       clearTimeout(timeout);
       failIfIdle();
     });

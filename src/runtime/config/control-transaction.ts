@@ -1,11 +1,6 @@
 /**
- * The single transaction owner for runtime config control.
- *
- * The immutable control target contributes every file the transaction can
- * observe or write to one storage-owned lock batch. The transaction reloads
- * every authored layer under that complete lease, prepares one pure candidate,
- * and commits to the target captured before preparation. Selector drift
- * conflicts; it never retargets or restarts the transaction.
+ * Every observable or writable file locks in one batch; layers reload under it.
+ * Selector drift conflicts; the transaction never retargets or restarts.
  */
 import {pathExistsSync} from '../../shared/file-system.ts';
 import {dirname} from 'node:path';
@@ -63,9 +58,8 @@ import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 
 export type RuntimeConfigControlSnapshot = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
-  /** Exact authored document used for conflict fingerprints and repair. */
   readonly globalDocument: JsonBoundaryObject;
-  /** Validated view of that same document, including the absent-file bootstrap. */
+  /** Validated globalDocument, including the absent-file bootstrap. */
   readonly validatedGlobalConfig?: Project02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly characterRuntimeLocation?: ResolvedProject02RuntimeLocation;
@@ -105,14 +99,8 @@ type RuntimeConfigControlCandidateHome = {
 };
 
 /**
- * Lock-free snapshot used only for effect preparation. Apply always reloads
- * and re-verifies the expectation under its complete lock set.
- *
- * `requireCharacterMarker` defaults to the commit's rule — a character-scoped
- * target must already name an initialized data directory. A caller that is
- * only simulating the write passes `false`: initialization is exactly what it
- * is deciding whether to perform, so demanding the marker up front would
- * refuse the question instead of answering it.
+ * Lock-free: apply reloads and re-verifies the expectation under its locks.
+ * Pass `requireCharacterMarker: false` only when simulating initialization.
  */
 export function readRuntimeConfigControlSnapshot(
   target: ResolvedRuntimeConfigScopeTarget,
@@ -176,8 +164,7 @@ export function applyRuntimeConfigControlTransaction<T>(
     const snapshot = snapshotFromLoadedGlobal({
       target,
       loadedConfig,
-      // The commit's own rule, unconditionally: a character-scoped write
-      // lands only in a directory the initializer already claimed.
+      // A character write lands only in a directory the initializer claimed.
       requireCharacterMarker: true,
     });
 
@@ -393,11 +380,7 @@ function runtimeConfigMutationMovesEffectiveHome(
   );
 }
 
-/**
- * The overlay obeys the same repairability rule as the global document:
- * an invalid authored value is what `set` and `unset` are for, so only a
- * layer with no readable authored bytes blocks the mutation.
- */
+/** Only a layer with no readable authored bytes blocks the mutation. */
 function assertCharacterOverlayMutable(
   target: ResolvedRuntimeConfigScopeTarget,
   overlay: LoadedProject02CharacterOverlayConfig | undefined,

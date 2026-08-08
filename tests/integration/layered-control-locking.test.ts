@@ -89,11 +89,8 @@ describe('layered control lock ordering', () => {
       await waitForFile(startedPath);
       await delay(400);
 
-      // While blocked on the global-layer lock, the child must not
-      // have acquired (or even materialized) the overlay lock: the
-      // canonical order is global first, then overlay. The inverted
-      // order would hold the overlay lock here and deadlock against a
-      // concurrent character-scoped writer.
+      // The canonical order is global first, then overlay; the inverse holds
+      // the overlay lock here and deadlocks a character-scoped writer.
       expect(overlayLockEntries(overlayLocksRoot)).toEqual([]);
 
       await globalLock.release();
@@ -144,12 +141,8 @@ describe('layered control lock ordering', () => {
     await delay(250);
     await writeFile(barrierPath, 'go\n', 'utf8');
 
-    // Both must complete: the shared canonical order serializes them
-    // instead of letting opposite acquisition orders mutually wait out
-    // the lock timeout as "storage busy". When the scoped write commits
-    // first, the global child's stale expectation resolves as a clean
-    // fingerprint conflict — the serialized outcome — which its script
-    // accepts; a storage-busy timeout still fails it.
+    // Opposite acquisition orders would mutually wait out the lock timeout as
+    // "storage busy", which each child's script still fails on.
     await Promise.all(children);
   }, 30_000);
 });
@@ -263,8 +256,8 @@ async function createLayeredHome(): Promise<{
 
   tempRoots.push(root);
 
-  // Canonical from the start: lock resource keys are canonical-path
-  // based, and macOS tempdirs live behind a /var symlink.
+  // Lock resource keys are canonical-path based, and macOS tempdirs live
+  // behind a /var symlink.
   const homeRoot = realpathSync(root);
 
   writeRuntimeConfig(join(homeRoot, 'config.json'), {

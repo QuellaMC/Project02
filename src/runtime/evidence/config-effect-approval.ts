@@ -1,8 +1,6 @@
 /**
- * The one judgment of whether a durable config effect carries its
- * approval: the started/finished pair of the config-update call whose
- * result the user confirmed. The writer refuses to append an instruction
- * without it, and recovery refuses to execute one — both through here.
+ * The one judgment of whether a durable config effect carries its approval:
+ * the writer and recovery both refuse without it.
  */
 import {
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
@@ -15,7 +13,6 @@ type ApprovalToolRecords = {
   finished: RawEventLogRecord | undefined;
 };
 
-/** Each call's started/finished pair, read once for a batch of effects. */
 export function approvalToolRecordsByCallId(
   rawEvents: readonly RawEventLogRecord[],
 ): ReadonlyMap<string, ApprovalToolRecords> {
@@ -47,11 +44,6 @@ export function approvalToolRecordsByCallId(
   return records;
 }
 
-/**
- * Whether the log carries the approved config-update call that produced
- * this effect. One judgment for both askers: the writer refuses to
- * append an instruction without it, and recovery refuses to execute one.
- */
 export function runtimeConfigEffectHasLoggedApproval(
   effect: PreparedRuntimePluginConfigEffect,
   approvalRecords: ReadonlyMap<string, ApprovalToolRecords>,

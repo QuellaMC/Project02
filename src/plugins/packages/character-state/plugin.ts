@@ -103,7 +103,6 @@ export function createCharacterStatePlugin(): RuntimePlugin {
   );
 }
 
-// Package entry adapters and direct embedder constructors share this implementation.
 export function createProject02Plugin(
   input: RuntimePluginFactoryInput,
 ): RuntimePlugin {
@@ -122,8 +121,7 @@ function createCharacterStatePluginFromManifest(
           "Optionally patch the character's internal Character State. This assistant-owned model-only state is not the user's mood, energy, attention, activity, or social orientation.",
         inputContract: characterStatePatchInputContract,
         validationOwner: 'plugin_host',
-        // Writes durable character state and appends to its event log,
-        // and two patches in one batch would race the same files.
+        // Two patches in one batch would race the same files.
         annotations: {readOnlyHint: false, destructiveHint: true},
         concurrency: 'exclusive',
         requiresConfirmation: false,

@@ -1,11 +1,5 @@
-/**
- * Scaffold for `pnpm plugin:new <id>`: stamps a runnable runtime plugin
- * package under src/plugins/packages/<id>/ — descriptor (schema-linked),
- * package.json, single-export entry, and a minimal before_role_model_call
- * plugin that reads its own config. The stamped descriptor must always
- * satisfy schemas/project02.plugin.schema.json and the runtime validator;
- * tests/unit/plugin-package-schema.test.ts pins that.
- */
+// The stamped descriptor must satisfy schemas/project02.plugin.schema.json
+// and the runtime validator.
 import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';

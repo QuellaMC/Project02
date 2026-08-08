@@ -72,10 +72,8 @@ export type LocalRuntimeSessionConversationLogReader = {
   ):
     | Promise<readonly ConversationLogRecord[]>
     | readonly ConversationLogRecord[];
-  // Required since the home/character-data split: the session character
-  // is derived from durable evidence and has no default, so a reader
-  // without evidence support is a compile-time error, not a rehydrate
-  // that fails at runtime.
+  // The session character is derived from evidence and has no default, so
+  // a reader without evidence support must fail at compile time.
   readConversationEvidence(
     sessionId: string,
   ):
@@ -514,11 +512,7 @@ async function decodeSessionCatalogForLayout(
   return sessions;
 }
 
-/**
- * Every catalog entry, with a damaged one failing the read: listing
- * sessions is where an operator is told the catalog is broken. A record
- * a crash left unfinished is not an entry yet and is skipped.
- */
+/** A damaged row fails the read; a crash-truncated tail row is skipped. */
 function decodeSessionCatalog(
   catalog: string,
   filePath: string,
@@ -535,12 +529,8 @@ function decodeSessionCatalog(
 }
 
 /**
- * The requested entry alone, so opening one session does not depend on
- * every other entry being intact. A damaged row belonging to another
- * session is skipped rather than failing this read — the listing path
- * above still reports it, and refusing to open a healthy session because
- * an unrelated one is corrupt helps nobody. Framing is shared with that
- * path, so an unfinished tail row is not an entry here either.
+ * A damaged row for another session is skipped: opening one session must
+ * not depend on every other entry being intact.
  */
 function decodeRequestedSessionCatalogEntry(
   catalog: string,
@@ -757,14 +747,8 @@ async function assertSessionDirectoryReadableAsync(
 }
 
 /**
- * Re-checks the one part of session readability that the filesystem can change
- * underneath a live store: whether the session directory is still a real
- * directory rather than a symlink.
- *
- * Session identity — the character-data marker and the catalog entry — is stable
- * once observed, so callers may cache it. This check must not be cached: a
- * directory swapped for a link after the first read would otherwise let later
- * appends open the fixed evidence paths through the link.
+ * Callers must not cache this: a directory swapped for a link after the
+ * first read would let later appends open evidence paths through the link.
  */
 export function assertLocalRuntimeSessionDirectoryIsReal(
   options: AssertLocalRuntimeSessionReadableOptions,
@@ -793,14 +777,8 @@ function assertSessionDirectoryReadable(
 }
 
 /**
- * Rejects storage directories that are absent, not directories, or symbolic
- * links. Symlinked roots are refused before any read or lock so evidence reads
- * and control files cannot be routed outside the selected character data root
- * — the same rule the character-data and home guards already apply.
- *
- * A path under a non-directory parent is reported as missing rather than
- * unreadable: nothing can be at it, so the caller's answer is the same as for
- * an empty parent.
+ * Symlinked roots are refused before any read or lock, so evidence and
+ * control files cannot be routed outside the character data root.
  */
 function assertRealStorageDirectory(options: {
   readonly entry: RealEntry;
@@ -882,12 +860,9 @@ async function withSessionCatalogMutationLock<Result>(
 function assertStoreRootCanHostMutationLock(
   layout: LocalRuntimeStorageLayout,
 ): void {
-  // Runs before the lock root is prepared, because acquiring the lock creates
-  // the store root and `.locks` recursively. Checking only the store root is
-  // not enough: an absent root beneath a symlinked `character-data` parent
-  // would still let that recursive create land in the link target before the
-  // ownership guard rejected the store. Reuse the adoptability guard so the
-  // whole boundary — parent, root, and control entries — is settled first.
+  // Runs before the lock root is prepared: acquiring the lock creates the
+  // store root and `.locks` recursively, which under a symlinked parent
+  // would land in the link target.
   assertCharacterDataDirAdoptable({storeRoot: layout.storeRoot});
 }
 

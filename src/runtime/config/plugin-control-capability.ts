@@ -9,13 +9,7 @@ import {
   prepareRuntimeConfigControlOperation,
 } from './scope.ts';
 
-/**
- * Host capability handed to the builtin plugin-management tools so they can
- * validate, prepare, apply, inspect, and redact runtime config without
- * value-importing this module (arch rule: plugins never value-import
- * runtime/config). The composition root attaches it to the config-control
- * host state.
- */
+/** Lets plugins use runtime config without value-importing it (arch rule). */
 export type RuntimePluginConfigControlCapability = Readonly<{
   validateOperation: typeof validateRuntimePluginConfigControlOperation;
   prepareOperation: typeof prepareRuntimeConfigControlOperation;

@@ -308,8 +308,7 @@ const rejectedScenarios = [
 
 const readScenarios = [
   {
-    // A crash ends every turn it interrupts exactly like this, so an open
-    // turn is a state reads surface, never one they refuse.
+    // A crash ends every turn it interrupts exactly like this.
     name: 'surfaces an open turn to every read',
     expected: 'accepted',
     run(logStore, currentSessionId) {

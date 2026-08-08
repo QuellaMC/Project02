@@ -387,10 +387,6 @@ describe('runtime plugin model-facing tool policy', () => {
   });
 
   it('accepts the JSON Schema vocabulary the old field walker refused', () => {
-    // minLength, pattern, oneOf, allOf-composed required, and
-    // $defs-recursive references are ordinary JSON Schema; the same Ajv
-    // that admits them here enforces them against every input, so
-    // accepting them is a capability, not a leniency.
     const jsonSchema = {
       type: 'object',
       properties: {
@@ -420,9 +416,8 @@ describe('runtime plugin model-facing tool policy', () => {
   });
 
   it('constructs a tool with an $id-carrying contract repeatedly', () => {
-    // The storage codec re-derives the tool for every decoded record, so
-    // one schema must compile once per session, never register globally,
-    // and never collide with itself.
+    // The storage codec re-derives the tool for every decoded record, so one
+    // schema must never register globally or collide with itself.
     const jsonSchema = {
       $id: 'https://project02.test/schemas/memory-search.json',
       type: 'object',
@@ -563,8 +558,6 @@ describe('runtime plugin model-facing tool policy', () => {
   ])(
     'rejects %s as invalid JSON Schema with the compile reason',
     (_case, schema, message) => {
-      // One rule decides validity — the compile — so an author mistake
-      // is a named rejection, never a silently unenforced constraint.
       expect(() =>
         createRuntimePluginProvidedToolWithJsonSchema(schema),
       ).toThrow(message);
@@ -629,18 +622,13 @@ describe('runtime plugin model-facing tool policy', () => {
       }),
     );
 
-    // Enabling the plugin is the trust decision. A tool that prepares an
-    // effect for approval says so and is prompted, rather than being kept
-    // away from the model by its declared class.
+    // Enabling the plugin is the trust decision; a declared class withholds
+    // nothing from the model.
     expect(isApprovalGatedRuntimePluginTool({manifest, tool})).toBe(true);
     expect(isModelFacingRuntimePluginTool({manifest, tool})).toBe(true);
   });
 
   it('requires model_input write for a plugin that provides model tools', () => {
-    // Every host-validated tool reaches the model now, so a plugin that
-    // provides one must declare the access that implies. The old
-    // "non-model-facing tool" carve-out was defined by the retired
-    // effect-level enum and no longer exists.
     expect(() =>
       createRuntimePlugin({
         manifest: runtimePluginManifestFixture({

@@ -325,9 +325,8 @@ describe('configured runtime plugin package activation', () => {
     const dataRoot = characterDataDirPath(storeRoot, 'mira');
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // Marker-less, with an overlay AND foreign content: durable startup
-    // refuses this directory, so the direct plan must not trust its
-    // overlay values either.
+    // Marker-less, with an overlay and foreign content: durable startup refuses
+    // this directory.
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(join(dataRoot, 'config.json'), {
       project02: {userDisplayName: 'Foreign Name'},
@@ -350,8 +349,7 @@ describe('configured runtime plugin package activation', () => {
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     writeFileSync(join(storeRoot, 'notes.txt'), 'not a project02 home\n');
 
-    // The resolved-home owner rejects before package discovery or host
-    // construction can consume paths beneath an unadopted directory.
+    // The home owner rejects before discovery consumes paths beneath it.
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
@@ -383,9 +381,8 @@ describe('configured runtime plugin package activation', () => {
       '{ malformed',
       'utf8',
     );
-    // The global config never mentions the plugin; only the overlay
-    // enables it. The direct path (no startup, no overlay argument)
-    // must still classify against the merged view.
+    // Only the overlay enables the plugin, and the direct path is given no
+    // overlay argument.
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(join(dataRoot, 'config.json'), {
@@ -593,12 +590,8 @@ describe('configured runtime plugin package activation', () => {
       manifest,
       entrySource: 'unused: replaced by a link below',
     });
-    // index.mjs -> sub/target.mjs, and the target imports its own
-    // sibling. A relative specifier is resolved against the importer's
-    // directory, and the importer is the file the bytes came from, not
-    // the name that led to it — reading the link's own path as the
-    // parent would look for sub/helper.mjs beside index.mjs, where
-    // nothing is, and reject a package that is entirely self-contained.
+    // index.mjs links to sub/target.mjs, which imports its own sibling: a
+    // relative specifier resolves against the bytes' directory, not the link's.
     mkdirSync(join(packageRoot, 'sub'), {recursive: true});
     writeFileSync(
       join(packageRoot, 'sub', 'helper.mjs'),
@@ -644,8 +637,7 @@ describe('configured runtime plugin package activation', () => {
       activationPlan,
     });
 
-    // The factory only runs if the target's own import resolved, and
-    // the captured value is the one the sibling module exports.
+    // The factory only runs if the target's own import resolved.
     expect(
       configured.activation.plugins.find(
         plugin => plugin.pluginId === manifest.id,

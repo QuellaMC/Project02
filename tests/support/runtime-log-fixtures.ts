@@ -17,13 +17,8 @@ import {
   type CharacterProfile,
 } from '../../src/core/index.ts';
 
-/**
- * The commit anchor the runtime writes for every visible message, so a
- * fixture transcript has the shape validation requires: user rows carry
- * no model evidence, character rows carry the accepted decision — and
- * its round — that produced their text. The model input inside the
- * character evidence is the fixture user message, `hello`.
- */
+// The model input inside the character evidence is the fixture user message,
+// `hello`.
 export function appendVisibleMessageWithCommitAnchor(
   store: RuntimeLogStore,
   message: ConversationLogRecordInput,

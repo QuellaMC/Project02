@@ -1,18 +1,4 @@
-/**
- * Architecture gate runner (`pnpm arch:check` / `pnpm arch:baseline`).
- *
- * Drives dependency-cruiser through its JS API rather than the `depcruise`
- * CLI: the CLI refuses odd-numbered Node versions (for example 25.x) while
- * this repo's engines field and CI target even-numbered releases, and the
- * API carries no such gate. Behavior mirrors
- * `depcruise src --config .dependency-cruiser.mjs --ignore-known`, and with
- * `--baseline` it mirrors `--output-type baseline --output-to <file>`.
- *
- * Known violations in `.dependency-cruiser-known-violations.json` are the
- * ratchet: matching violations are reported as ignored and do not fail the
- * gate; any new violating edge does. Regenerate the baseline (shrink only)
- * with `pnpm arch:baseline` in the same PR that removes violations.
- */
+// The depcruise CLI refuses odd-numbered Node versions; its JS API does not.
 import {existsSync, readFileSync, writeFileSync} from 'node:fs';
 
 import {cruise} from 'dependency-cruiser';
@@ -23,9 +9,6 @@ const CONFIG_FILE = './.dependency-cruiser.mjs';
 const KNOWN_VIOLATIONS_FILE = '.dependency-cruiser-known-violations.json';
 const CRUISE_SCOPE = ['src'];
 
-/**
- * @return {Promise<number>} process exit code.
- */
 async function main() {
   const baselineMode = process.argv.includes('--baseline');
   const config = await extractDepcruiseConfig(CONFIG_FILE);

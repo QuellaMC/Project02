@@ -63,9 +63,8 @@ describe('character persona through the role-model loop', () => {
 
     expect(result.status).toBe('completed');
 
-    // The loop pre-renders the request; the adapter must receive the
-    // persona-driven system frame (the loop path wins over any
-    // adapter-side fallback render).
+    // The loop pre-renders the request, so its frame wins over any
+    // adapter-side fallback render.
     const systemMessage = capturedMessages[0]?.[0];
 
     expect(systemMessage?.role).toBe('system');
@@ -73,7 +72,6 @@ describe('character persona through the role-model loop', () => {
       'You are Mira, the persona-proof fixture.\n\nStay terse.',
     );
 
-    // The committed raw event round-trips characterRef through the codec.
     const committed = logStore
       .rawEvents()
       .findLast(rawEvent => rawEvent.kind === 'visible_message_committed');

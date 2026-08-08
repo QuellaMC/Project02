@@ -86,14 +86,8 @@ export function requiredVisibleMessage(
 }
 
 /**
- * A commit event's message, its turn's commit time, and the sampling
- * round that asked for it. They are one fact, so they are decoded
- * together and none appears without the kind that carries them.
- *
- * `committedAt` names the turn, not the instant: every message a turn
- * commits carries the same stamp, so it orders turns and never messages
- * within one. The round is absent on a user message, which no round
- * asked for.
+ * `committedAt` names the turn, not the instant: it orders turns and never
+ * messages within one.
  */
 export function optionalCommittedMessage(record: Record<string, unknown>): {
   readonly visibleMessage?: VisibleMessage;
@@ -104,9 +98,8 @@ export function optionalCommittedMessage(record: Record<string, unknown>): {
   const commitsAMessage = record['kind'] === 'visible_message_committed';
 
   if (value === undefined) {
-    // A commit event with no message is the silent-loss shape the merged
-    // log exists to remove: it decodes, then drops its row on the way to
-    // the transcript. Name it here instead.
+    // A commit event with no message would decode and then silently vanish
+    // from the transcript.
     if (commitsAMessage || record['committedAt'] !== undefined) {
       throwMalformedRecord('visibleMessage');
     }

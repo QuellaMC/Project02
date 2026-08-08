@@ -62,9 +62,8 @@ async function runConfigCli(
 }
 
 describe('runtime-config --character verbs', () => {
-  // Storage staying clean is startup-seam behavior, asserted once in
-  // tests/unit/runtime-config-overlay.test.ts. This covers only the config
-  // CLI's own job: routing character_invalid to an exit code and message.
+  // Storage staying clean is startup-seam behavior, covered in
+  // tests/unit/runtime-config-overlay.test.ts.
   it('maps an invalid explicit character to a usage error', async () => {
     const homeRoot = createTestTempRoot('project02-config-invalid-character-');
 
@@ -115,7 +114,6 @@ describe('runtime-config --character verbs', () => {
         'character-state': {enabled: true},
       },
     });
-    // First scoped write initializes the data dir for its character.
     const marker = requireCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
@@ -292,8 +290,8 @@ describe('runtime-config --character verbs', () => {
   it('refuses to write character data into a directory that is not a Project02 home', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-foreign-');
 
-    // A directory holding unrelated content must fail the home guard
-    // before any scoped write creates character-data inside it.
+    // Unrelated content must fail the home guard before a scoped write
+    // creates character-data inside it.
     writeFileSync(join(homeRoot, 'notes.txt'), 'not a project02 home\n');
 
     const rejected = await runConfigCli([
@@ -307,9 +305,6 @@ describe('runtime-config --character verbs', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    // The home guard's foreign-entry refusal surfaces through the CLI's
-    // storage-error formatting; the durable outcome is what matters:
-    // nothing was created inside the foreign directory.
     expect(rejected.stderr).toContain('Error:');
     expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
@@ -336,8 +331,7 @@ describe('runtime-config --character verbs', () => {
       'Config field "project02.character" is global-only; set it in the ' +
         'home config.json, not the character overlay.',
     );
-    // The dialect violation failed before ensure ran: no data marker, no
-    // data directory, no home marker.
+    // The dialect violation failed before ensure ran.
     expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
@@ -362,8 +356,7 @@ describe('runtime-config --character verbs', () => {
     expect(rejected.stderr).toContain(
       'Project02 roleModelProvider must be "local" or "nvidia".',
     );
-    // The invalid value failed preflight, before ensure: no data marker, no
-    // data directory, no home marker.
+    // The invalid value failed preflight, before ensure.
     expect(existsSync(dataRoot)).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
@@ -378,10 +371,8 @@ describe('runtime-config --character verbs', () => {
       project02: {roleModelProvider: 'nope', userDisplayName: 'Old'},
     });
 
-    // An edit repairs the values it names, not the ones it does not. The
-    // overlay it would produce still carries the bad provider, so the
-    // command must fail on that before anything is created — not commit
-    // the store and then discover it inside the transaction.
+    // An edit repairs only the values it names, so the overlay it would
+    // produce still carries the bad provider.
     const rejected = await runConfigCli([
       '--store',
       homeRoot,
@@ -398,7 +389,6 @@ describe('runtime-config --character verbs', () => {
     );
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
-    // The overlay it refused to fix is the overlay it left alone.
     expect(
       JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
     ).toMatchObject({
@@ -416,9 +406,8 @@ describe('runtime-config --character verbs', () => {
       project02: {roleModelProvider: 'nope', userDisplayName: 'Old'},
     });
 
-    // The other side of the same rule: judging the assembled candidate
-    // must still admit the edit that makes it valid, or an invalid
-    // overlay would only be repairable by hand.
+    // Judging the assembled candidate must still admit the edit that makes
+    // it valid, or the overlay is repairable only by hand.
     const repaired = await runConfigCli([
       '--store',
       homeRoot,
@@ -442,9 +431,7 @@ describe('runtime-config --character verbs', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // The env file is unreadable, and the CLI reports that. It must report
-    // it before the overlay is committed: an edit that exits non-zero after
-    // durably writing "Bob" is worse than one that never ran.
+    // An unreadable env file must be reported before the overlay commits.
     mkdirSync(join(homeRoot, '.env'));
 
     const rejected = await runConfigCli([
@@ -466,9 +453,7 @@ describe('runtime-config --character verbs', () => {
   it('rejects a scoped get from a foreign home even with no data directory', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-get-foreign-');
 
-    // A valid config next to foreign content: check and scoped set
-    // refuse this home, so a scoped get must not report the global
-    // fallback from it either.
+    // A valid config next to foreign content, which writers already refuse.
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {userDisplayName: 'Global Name'},
     });
@@ -492,8 +477,7 @@ describe('runtime-config --character verbs', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // An allowlisted control NAME with the wrong type must fail the
-    // preflight, before the home initializer writes the home marker.
+    // An allowlisted control name with the wrong type.
     mkdirSync(join(dataRoot, 'schema.json'), {recursive: true});
 
     const rejected = await runConfigCli([
@@ -516,8 +500,7 @@ describe('runtime-config --character verbs', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // Unmarked with an overlay AND foreign content: writers refuse
-    // this directory, so a read must not surface its overlay either.
+    // Unmarked with an overlay and foreign content, which writers refuse.
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       project02: {userDisplayName: 'Foreign Name'},
@@ -578,9 +561,7 @@ describe('runtime-config --character verbs', () => {
       plugins: {[secretPlugin.manifest.id]: {enabled: true}},
     });
 
-    // A missing secret says the environment is incomplete, not that the
-    // document is wrong -- and the overlay path is exactly what an
-    // operator needs to read to repair it.
+    // A missing secret says the environment is incomplete, not the document.
     const path = await runConfigCli(
       ['--store', homeRoot, '--character', 'mira', 'path'],
       {},
@@ -626,8 +607,8 @@ describe('runtime-config --character verbs', () => {
   it('still rejects a scoped read over an authoring error', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-authoring-');
 
-    // A plaintext secret is an invalid authored document, not an
-    // incomplete environment: no verb may read past it.
+    // A plaintext secret is an invalid authored document, not an incomplete
+    // environment.
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       plugins: {
         [secretPlugin.manifest.id]: {enabled: true, config: {apiKey: 'oops'}},
@@ -649,8 +630,7 @@ describe('runtime-config --character verbs', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // A copied directory: mira's path claims nova, but carries an
-    // overlay a naive read would surface as mira's config.
+    // A copied directory: mira's path claims nova but carries an overlay.
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'nova',
@@ -723,8 +703,7 @@ describe('runtime-config --character verbs', () => {
     ]);
 
     expect(rejected.code).toBe(1);
-    // The invalid overlay failed the edit before ensure: no data marker, no
-    // home marker.
+    // The invalid overlay failed the edit before ensure.
     expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
@@ -760,9 +739,6 @@ describe('runtime-config --character verbs', () => {
 
     expect(repaired.stderr).toBe('');
     expect(repaired.code).toBe(0);
-    // The edit applied to the authored document, so config the operator
-    // wrote but did not name survives the repair — the same guarantee
-    // the global document already gives.
     const written = JSON.parse(
       readFileSync(characterOverlayConfigPath(dataRoot), 'utf8'),
     ) as Record<string, unknown>;
@@ -845,8 +821,7 @@ describe('runtime-config --character verbs', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // A copied or corrupt tree: session artifacts without a data
-    // marker. Marking it would adopt that history permanently.
+    // A copied or corrupt tree: session artifacts without a data marker.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
 
@@ -886,8 +861,7 @@ describe('runtime-config --character verbs', () => {
 
     expect(rejected.code).toBe(1);
     expect(rejected.stderr).toContain('failed to load');
-    // The broken global layer was detected before ensure: no data marker,
-    // no data directory.
+    // The broken global layer was detected before ensure.
     expect(existsSync(dataRoot)).toBe(false);
   });
 
@@ -896,7 +870,7 @@ describe('runtime-config --character verbs', () => {
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // Simulate a copied directory: mira's path already claims nova.
+    // A copied directory: mira's path already claims nova.
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: 'nova',
@@ -1003,9 +977,8 @@ describe('overlay files reached through --config directly', () => {
       project02: {userDisplayName: 'Global Name'},
     });
 
-    // --store names the home the character lives in. Without it the
-    // config's own filename implies nothing, so the character scope
-    // would resolve against the default home under the cwd.
+    // Without --store the character scope resolves against the default home
+    // under the cwd, since the config's filename implies nothing.
     const scopedGet = await runConfigCli([
       '--store',
       homeRoot,

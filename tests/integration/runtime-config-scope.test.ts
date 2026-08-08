@@ -474,14 +474,12 @@ describe('scope-aware runtime config mutations', () => {
       version: runtimeConfigVersion,
       project02: {userDisplayName: 'Overlay Name'},
     });
-    // R7 pin: the global file is untouched, no secrets file appears in
-    // the character-data directory, and the overlay lock root is local
-    // to the data dir instead of re-inferring the home.
+    // R7: the overlay lock root is local to the data dir rather than
+    // re-inferred from the home.
     expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
     expect(existsSync(join(dataRoot, '.env'))).toBe(false);
     expect(existsSync(join(dataRoot, '.locks'))).toBe(true);
 
-    // The returned fingerprint is the layered pair after the write.
     const globalConfig = loadProject02RuntimeConfig({
       storeRoot: homeRoot,
       env: {},
@@ -547,9 +545,7 @@ describe('scope-aware runtime config mutations', () => {
       scope: 'character',
     });
 
-    // The marker is proof that the guarded initializer ran; a bare
-    // library call against a fresh (or foreign) home must not create
-    // character state.
+    // The marker is proof that the guarded initializer ran.
     expect(() =>
       applyRuntimeConfigControlOperation({
         target,
@@ -631,7 +627,6 @@ describe('scope-aware runtime config mutations', () => {
       characterId: 'mira',
     });
 
-    // Global supplies both required fields; the overlay overrides one.
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       plugins: {
         'scope.merged': {
@@ -668,8 +663,7 @@ describe('scope-aware runtime config mutations', () => {
       plugins: {'scope.merged': {config: {settings: {from: 'overlay'}}}},
     });
 
-    // Without the global layer the merged candidate misses a required
-    // field and the scoped write is rejected.
+    // Without the global layer the merged candidate misses a required field.
     const bareHome = createTestTempRoot('project02-config-scope-bare-');
 
     writeRuntimeConfig(join(bareHome, 'config.json'), {
@@ -701,8 +695,7 @@ describe('scope-aware runtime config mutations', () => {
         },
       }),
     ).toThrow('Cannot update plugin config');
-    // The rejected candidate must not leave a fresh overlay behind:
-    // that would move the layered fingerprint for a failed change.
+    // A fresh overlay would move the layered fingerprint for a failed change.
     expect(
       existsSync(
         characterOverlayConfigPath(characterDataDirPath(bareHome, 'mira')),
@@ -1111,8 +1104,7 @@ describe('plugin inspection target authorship', () => {
       inspected: ReturnType<typeof inspectRuntimePluginConfig>,
     ) => inspected.fields.find(field => field.name === 'settings')?.authored;
 
-    // Each target reports only its own authored rung while sharing the same
-    // effective layered value and fingerprint.
+    // Each target reports only its own authored rung.
     expect(authoredSettings(characterView)).toMatchObject({
       configured: true,
       value: {from: 'overlay'},
@@ -1133,7 +1125,6 @@ describe('plugin inspection target authorship', () => {
       effectiveSource: 'character',
       effective: {value: {from: 'overlay'}},
     });
-    // Both views fingerprint the same layered document.
     expect(globalView.fingerprint).toBe(characterView.fingerprint);
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(true);
   });
@@ -1231,8 +1222,7 @@ describe('stale global expectations', () => {
         },
       }),
     ).toThrow(RuntimeConfigConflictError);
-    // The rejected commit created no character state — not even the
-    // per-character lock root.
+    // Not even the per-character lock root.
     expect(existsSync(dataRoot)).toBe(false);
   });
 });
@@ -1322,7 +1312,7 @@ describe('global writes that move the character selection', () => {
       storageOptions: {storeRoot: characterDataDirPath(homeRoot, 'nova')},
       characterId: 'nova',
     });
-    // Give nova an overlay so the layers differ observably.
+    // Nova needs an overlay so the layers differ observably.
     const novaTarget = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({
         storeRoot: homeRoot,
@@ -1372,9 +1362,8 @@ describe('global writes that move the character selection', () => {
       },
     });
 
-    // The control target belongs to the already-running Mira runtime.
-    // Changing the authored default does not silently retarget that host's
-    // reconciliation to Nova.
+    // The control target belongs to the already-running Mira runtime, which a
+    // changed authored default must not retarget.
     expect(switched.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
         globalConfig: switched.config,

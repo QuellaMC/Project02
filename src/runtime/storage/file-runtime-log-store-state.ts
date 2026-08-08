@@ -91,9 +91,8 @@ export class FileRuntimeLogStoreState {
     };
 
     if (this.sessionReadabilityChecked) {
-      // Session identity is settled, but the directory being a real directory is
-      // a live filesystem property: a swap to a symlink after the first read
-      // would otherwise let later appends write through the link.
+      // A directory swapped for a symlink after the first read would let
+      // later appends write through the link.
       assertLocalRuntimeSessionDirectoryIsReal(sessionOptions);
       return;
     }
@@ -143,9 +142,8 @@ export class FileRuntimeLogStoreState {
       this.options.onEvidenceFileRead,
     );
 
-    // The stored log is validated the one way anything enters evidence:
-    // by replaying it through the append gate. A file that does not
-    // replay never becomes cached evidence.
+    // The stored log enters evidence the one way anything does: replayed
+    // through the append gate.
     this.options.onEvidenceValidation?.('cold_snapshot');
     const replayed = replayRuntimeEvidence({
       rawEvents: loaded.rawEvents,

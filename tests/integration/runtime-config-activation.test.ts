@@ -94,9 +94,7 @@ describe('runtime config activation planning', () => {
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
 
-    // Host construction is downstream of character initialization: it
-    // must refuse — not silently create — uninitialized character
-    // state, which previously produced a host with no package defaults
+    // Silently creating the state produced a host with no package defaults
     // and no diagnostics.
     await expect(
       createConfiguredProject02PluginHostFromPlan({
@@ -114,10 +112,7 @@ describe('runtime config activation planning', () => {
     const storeRoot = createTestTempRoot('project02-config-host-error-plan-');
     const plugin = requiredSecretPlugin('memory.uninitialized-error');
 
-    // An activation error is not a reason to skip the initialization
-    // check: the error host is still a host, and returning one bound to
-    // no character marker is what the direct-construction boundary
-    // exists to prevent.
+    // An error host is still a host, so it may not be bound to no marker.
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {[plugin.manifest.id]: {enabled: true}},
     });
@@ -153,10 +148,8 @@ describe('runtime config activation planning', () => {
       activationPlan: initialized.activationPlan,
     });
 
-    // The initializer materialized the character package: the direct
-    // host now carries the same package-authored enablement the CLI
-    // startup produces, instead of a divergent manifest-defaults-only
-    // plugin system.
+    // The materialized package makes the direct host carry the same authored
+    // enablement CLI startup produces, not manifest defaults.
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
@@ -425,8 +418,7 @@ describe('runtime config activation planning', () => {
         toolCalls: [],
       },
     });
-    // Only the accepted user message is history; with visible_reply
-    // disabled the model's folded text stays non-committed.
+    // With visible_reply disabled the model's folded text stays non-committed.
     expect(result.conversationMessages.map(message => message.role)).toEqual([
       'user',
     ]);

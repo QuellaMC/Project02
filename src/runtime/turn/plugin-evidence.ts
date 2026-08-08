@@ -22,9 +22,8 @@ export function runtimePluginEvidenceOption(
   };
 }
 
-// Structural view of the plugin host limited to what turn evidence needs.
-// Importing the host implementation here would re-create the
-// runtime <-> plugins import cycle.
+// Structural view: importing the host implementation here would re-create
+// the runtime <-> plugins import cycle.
 type RuntimePluginRegistryView = {
   registrySnapshot(): RuntimePluginRegistrySnapshot;
   enabledPluginIds(): readonly string[];

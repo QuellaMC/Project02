@@ -42,8 +42,6 @@ describe('describeRealEntry', () => {
     const entry = describeRealEntry(join(root, 'missing'));
 
     expect(entry.kind).toBe('absent');
-    // Callers that rethrow rather than re-stat need the original error, so a
-    // "not there yet" reaches their own callers by code, not by message.
     expect(entry).toMatchObject({error: {code: 'ENOENT'}});
   });
 
@@ -52,8 +50,7 @@ describe('describeRealEntry', () => {
 
     writeFileSync(join(root, 'file.txt'), 'contents\n', 'utf8');
 
-    // Callers classify ENOTDIR differently: one creates the parent, another
-    // refuses the layout. The seam hands the error back instead of deciding.
+    // Callers classify ENOTDIR differently, so the seam hands it back undecided.
     const entry = describeRealEntry(join(root, 'file.txt', 'child'));
 
     expect(entry.kind).toBe('unreadable');
@@ -106,8 +103,6 @@ describe('canonicalPath', () => {
     mkdirSync(join(root, 'real'));
     symlinkSync(join(root, 'real'), join(root, 'linked'), 'dir');
 
-    // The tail is missing, but the ancestry that does exist still resolves:
-    // this is the shape every "the runtime will create it" caller needs.
     expect(canonicalPath(join(root, 'linked', 'not', 'yet'))).toBe(
       join(root, 'real', 'not', 'yet'),
     );
@@ -277,8 +272,7 @@ describe('firstUnacceptableComponent', () => {
   it('stops at the first component that does not exist', () => {
     const root = createTestTempRoot('project02-real-path-');
 
-    // What is not there cannot redirect a write, and whatever creates it owns
-    // the path from that point down.
+    // What is not there cannot redirect a write.
     expect(
       firstUnacceptableComponent({
         root,

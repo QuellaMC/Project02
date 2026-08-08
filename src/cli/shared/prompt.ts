@@ -1,10 +1,6 @@
 /**
- * The one terminal question adapter every CLI asks through.
- *
- * A closed stream answers `undefined` rather than throwing, because
- * "the operator is not there to answer" is a normal outcome each caller
- * decides for itself: the config console quits, the store gate refuses.
- * A stream that fails while being read is not that, and rejects.
+ * The one terminal question adapter every CLI asks through. A closed
+ * stream answers `undefined`; a stream that fails while read rejects.
  */
 import {createInterface} from 'node:readline/promises';
 
@@ -107,11 +103,7 @@ export function createCliPrompt(
   };
 }
 
-/**
- * One reading of a yes/no answer, so "y" means the same thing at every
- * prompt. Silence is no: an absent answer is a stream that closed, and
- * nothing destructive should proceed on it.
- */
+/** Silence is no: nothing destructive proceeds on a stream that closed. */
 export function cliPromptAnswerIsYes(answer: string | undefined): boolean {
   const normalized = answer?.trim().toLowerCase();
 

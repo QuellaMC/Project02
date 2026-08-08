@@ -92,9 +92,8 @@ describe('local runtime session store', () => {
 
   it('creates sessions for a padded character ID instead of mismatching its own marker', async () => {
     const storeRoot = await createTempStoreRoot();
-    // An embedded caller can hand this seam an unnormalized ID. The marker
-    // it writes is canonical, so a raw comparison failed the store against
-    // the identity it had just stamped, after durable state existed.
+    // The marker this writes is canonical, so a raw comparison used to fail the
+    // store against the identity it had just stamped.
     const store = createLocalRuntimeSessionStore({
       storeRoot,
       characterId: ' mira ',
@@ -186,8 +185,7 @@ describe('local runtime session store', () => {
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
 
-    // A complete row that a crash left without its committing newline: it
-    // is not an entry yet, so neither read may report it.
+    // A complete row a crash left without its committing newline.
     await writeFile(
       store.layout.sessionCatalogPath,
       `${JSON.stringify(alpha)}\n${JSON.stringify({
@@ -240,17 +238,15 @@ describe('local runtime session store', () => {
     });
     const alpha = await store.createSession({sessionId: 'alpha'});
 
-    // A syntactically damaged row for a different session, with a valid
-    // row after it so it cannot be read as an unfinished append.
+    // A damaged row followed by a valid one, so it cannot read as an
+    // unfinished append.
     await writeFile(
       store.layout.sessionCatalogPath,
       `{"sessionId":"corr\n${JSON.stringify(alpha)}\n`,
       'utf8',
     );
 
-    // Alpha's own entry and directory are intact, so opening it works.
     await expect(store.readSession('alpha')).resolves.toEqual(alpha);
-    // Listing is where the damage is reported.
     await expectStorageErrorCode(
       async () => await store.listSessions(),
       'malformed_record',
@@ -258,10 +254,7 @@ describe('local runtime session store', () => {
   });
 
   it('requires readConversationEvidence from readers at the type level', () => {
-    // The home/character-data split made evidence mandatory: a reader
-    // without it is a compile-time migration, not a rehydrate call that
-    // fails at runtime. This fails to compile if the method becomes
-    // optional again.
+    // This stops compiling if the method becomes optional again.
     type MessagesOnlyReader = {
       readConversationMessages: () => readonly [];
     };
@@ -513,8 +506,6 @@ describe('local runtime session store', () => {
       'utf8',
     );
 
-    // The session whose entry landed is still listed and still opens; the
-    // one whose entry did not is simply absent.
     await expect(store.listSessions()).resolves.toEqual([alpha]);
     await expect(store.readSession('alpha')).resolves.toEqual(alpha);
   });
