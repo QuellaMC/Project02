@@ -1,4 +1,10 @@
-import {appendFileSync} from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from '../support/character-fixtures.ts';
@@ -253,6 +259,88 @@ describe('session history plugin through the host', () => {
 
     expect(skipped.status).toBe('completed');
     expect(existsSync(historyIndexPath(bareRoot))).toBe(false);
+  });
+
+  it('excludes the active session from search unless targeted explicitly', async () => {
+    const {host} = await createHistoryHost();
+    // The context arrives from session "alpha", whose transcript contains
+    // the query words; recall must not echo the conversation in progress.
+    const activeContext = (eventId: string) =>
+      createRuntimePluginContext({
+        ...createRuntimeEventIdentity({
+          eventId,
+          traceId: `trace_${eventId}`,
+          createdAt: '2026-06-15T00:00:00.000Z',
+        }),
+        sessionId: 'alpha',
+        eventType: 'USER_MESSAGE',
+        currentUserMessage: 'what was the permission design?',
+        character: testCharacterProfile,
+      });
+    const excluded = await host.handleToolCall(
+      historyToolCall('evt_history_active', sessionHistorySearchToolName, {
+        query: 'permission',
+      }),
+      activeContext('evt_history_active'),
+    );
+
+    expect(excluded.status).toBe('accepted');
+    if (excluded.status !== 'accepted') {
+      throw new Error('Expected the excluded search to be accepted.');
+    }
+
+    expect(excluded.output).toMatchObject({totalSessionsWithHits: 0});
+
+    const targeted = await host.handleToolCall(
+      historyToolCall('evt_history_target', sessionHistorySearchToolName, {
+        query: 'permission',
+        sessionId: 'alpha',
+      }),
+      activeContext('evt_history_target'),
+    );
+
+    expect(targeted.status).toBe('accepted');
+    if (targeted.status !== 'accepted') {
+      throw new Error('Expected the targeted search to be accepted.');
+    }
+
+    expect(targeted.output).toMatchObject({totalSessionsWithHits: 1});
+  });
+
+  it('keeps local paths out of model-facing storage failures', async () => {
+    const {host, storeRoot} = await createHistoryHost();
+    const outside = join(
+      createTestTempRoot('project02-history-outside-'),
+      'raw',
+    );
+
+    mkdirSync(outside, {recursive: true});
+    writeFileSync(join(outside, 'raw-events.jsonl'), '', 'utf8');
+
+    const sessionRoot = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'alpha',
+    }).sessionRoot;
+
+    rmSync(sessionRoot, {recursive: true});
+    symlinkSync(outside, sessionRoot);
+
+    const rejected = await host.handleToolCall(
+      historyToolCall('evt_history_redacted', sessionHistorySearchToolName, {
+        query: 'permission',
+      }),
+      createTestPluginContext('evt_history_redacted'),
+    );
+
+    expect(rejected).toMatchObject({
+      status: 'rejected',
+      reason: 'session_history_read_failed',
+    });
+    if (rejected.status !== 'rejected') {
+      throw new Error('Expected the linked-session search to be rejected.');
+    }
+
+    expect(rejected.message).not.toContain(storeRoot);
   });
 
   it('rejects requests from another character', async () => {

@@ -31,6 +31,8 @@ export type SessionIndexConversationWindow = {
 export type SessionIndexSearchOptions = {
   readonly query: string;
   readonly sessionId?: string;
+  /** Ignored when `sessionId` targets a session explicitly. */
+  readonly excludeSessionId?: string;
   readonly sessionLimit: number;
 };
 
@@ -48,15 +50,16 @@ export type SessionIndexWarmUpOptions = {
 /**
  * The plugin-owned search index over the session-history feed, stored in
  * the plugin's own database. Every query first catches the index up to
- * the feed it is derived from; warm-up only moves that cost off the
- * first search.
+ * the feed it is derived from, slice by slice with event-loop yields so
+ * a cold index never blocks the process; warm-up only moves that cost
+ * off the first search.
  */
 export type SessionHistoryEngine = {
   readonly characterId: string;
-  search(options: SessionIndexSearchOptions): SessionIndexSearchResult;
+  search(options: SessionIndexSearchOptions): Promise<SessionIndexSearchResult>;
   readAround(
     options: SessionIndexReadAroundOptions,
-  ): SessionIndexConversationWindow;
+  ): Promise<SessionIndexConversationWindow>;
   warmUp(options?: SessionIndexWarmUpOptions): Promise<void>;
   close(): void;
 };

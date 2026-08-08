@@ -38,9 +38,10 @@ export function createSessionHistorySearchTool(): RuntimePluginProvidedTool {
       'the user references an earlier conversation or relevant ' +
       'cross-session context may exist, before asking them to repeat ' +
       'themselves. The query is matched as literal text (no operators). ' +
-      'Each matching session returns its opening messages, a window around ' +
-      'the best match, and its closing messages; scroll further with ' +
-      'sessions.read.',
+      'The current conversation is not searched unless sessionId targets ' +
+      'it. Each matching session returns its opening messages, a window ' +
+      'around the best match, and its closing messages; scroll further ' +
+      'with sessions.read.',
     inputContract: {
       type: 'object',
       properties: {
@@ -71,11 +72,11 @@ export function createSessionHistorySearchTool(): RuntimePluginProvidedTool {
   };
 }
 
-export function handleSessionHistorySearchToolCall(options: {
+export async function handleSessionHistorySearchToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly engine: SessionHistoryEngine;
-}): RuntimePluginToolCallResult {
+}): Promise<RuntimePluginToolCallResult> {
   const input = options.call.input;
   const query = typeof input['query'] === 'string' ? input['query'] : '';
   const sessionId =
@@ -84,10 +85,14 @@ export function handleSessionHistorySearchToolCall(options: {
     typeof input['sessionLimit'] === 'number'
       ? input['sessionLimit']
       : sessionHistorySearchDefaultSessionLimit;
-  const result = options.engine.search({
+  // Recall is about past conversations: the active session is excluded
+  // unless the model targets it explicitly, so a fresh user message never
+  // outranks genuinely historical matches for its own words.
+  const result = await options.engine.search({
     query,
     sessionLimit,
     ...(sessionId === undefined ? {} : {sessionId}),
+    excludeSessionId: options.context.sessionId,
   });
   const output = createSessionHistorySearchOutput({result, query});
 

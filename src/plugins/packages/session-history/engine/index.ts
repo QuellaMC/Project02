@@ -16,11 +16,7 @@ import {
   type SessionIndexSearchResult,
   type SessionIndexWarmUpOptions,
 } from './contract.ts';
-import {
-  ingestSessionHistory,
-  ingestSessionSlice,
-  totalIngestedDamage,
-} from './ingest.ts';
+import {ingestSessionSlice, totalIngestedDamage} from './ingest.ts';
 import {readAroundSessionIndex} from './read.ts';
 import {
   indexMetaTable,
@@ -45,9 +41,10 @@ export {
 
 export const sessionIndexDatabaseName = 'session-index';
 
-// Sized so one warm-up slice decodes in well under a second; anything left
-// behind is picked up by the next slice or an uncapped query pass.
-const warmUpSliceMaxBytes = 2 * 1024 * 1024;
+// Sized so one catch-up slice decodes in well under a second; the loop
+// yields to the event loop between slices, so a cold index catches up
+// cooperatively instead of freezing the process.
+const catchUpSliceMaxBytes = 2 * 1024 * 1024;
 
 /**
  * The plugin's search index, built entirely from its two declared
@@ -64,37 +61,82 @@ export function createSessionHistoryEngine(options: {
   let handle: RuntimePluginDatabase | undefined;
   let closed = false;
 
+  const engineClosedError = (): SessionHistoryEngineError =>
+    new SessionHistoryEngineError(
+      'engine_closed',
+      `Session history engine for character "${feed.characterId}" is closed.`,
+    );
+
   const openedDatabase = (): BetterSQLite3Database => {
     if (closed) {
-      throw new SessionHistoryEngineError(
-        'engine_closed',
-        `Session history engine for character "${feed.characterId}" is closed.`,
-      );
+      throw engineClosedError();
     }
 
     if (orm === undefined) {
-      handle = openDatabase({
+      // The handles are cached only after adoption succeeds; a failed
+      // adoption must not leave a foreign character's rows queryable.
+      const openedHandle = openDatabase({
         name: sessionIndexDatabaseName,
         schemaVersion: sessionIndexSchemaVersion,
         initializeSchema: database => {
           database.exec(sessionIndexSchemaDdl);
         },
       });
-      orm = drizzle(handle);
-      adoptSessionIndexForCharacter(orm, feed.characterId);
+
+      registerUnicodeFold(openedHandle);
+
+      const openedOrm = drizzle(openedHandle);
+
+      try {
+        adoptSessionIndexForCharacter(openedOrm, feed.characterId);
+      } catch (error: unknown) {
+        closeQuietly(openedHandle);
+        throw error;
+      }
+
+      handle = openedHandle;
+      orm = openedOrm;
     }
 
     return orm;
   };
 
-  const refreshedView = (): {
+  // The one catch-up loop behind every query and warm-up: slice by
+  // slice, yielding between slices, stopping when the engine closes.
+  const caughtUpView = async (
+    sessionFilter: string | undefined,
+  ): Promise<{
     readonly database: BetterSQLite3Database;
     readonly catalog: RuntimePluginSessionHistoryListing;
-  } => {
+  }> => {
     const database = openedDatabase();
     const catalog = feed.listSessions();
 
-    ingestSessionHistory({database, feed, catalog});
+    for (const session of catalog.sessions) {
+      if (sessionFilter !== undefined && session.sessionId !== sessionFilter) {
+        continue;
+      }
+
+      for (;;) {
+        if (closed) {
+          throw engineClosedError();
+        }
+
+        const advanced = ingestSessionSlice({
+          database,
+          feed,
+          sessionId: session.sessionId,
+          maxBytes: catchUpSliceMaxBytes,
+        });
+
+        if (!advanced) {
+          break;
+        }
+
+        await yieldToEventLoop();
+      }
+    }
+
     return {database, catalog};
   };
 
@@ -102,40 +144,25 @@ export function createSessionHistoryEngine(options: {
     characterId: feed.characterId,
 
     async warmUp(warmUpOptions: SessionIndexWarmUpOptions = {}): Promise<void> {
-      const database = openedDatabase();
-      const catalog = feed.listSessions();
-      const sessionIds = catalog.sessions
-        .map(session => session.sessionId)
-        .filter(
-          sessionId =>
-            warmUpOptions.sessionId === undefined ||
-            sessionId === warmUpOptions.sessionId,
-        );
-
-      for (const sessionId of sessionIds) {
-        for (;;) {
-          if (closed) {
-            return;
-          }
-
-          const advanced = ingestSessionSlice({
-            database,
-            feed,
-            sessionId,
-            maxBytes: warmUpSliceMaxBytes,
-          });
-
-          if (!advanced) {
-            break;
-          }
-
-          await yieldToEventLoop();
+      try {
+        await caughtUpView(warmUpOptions.sessionId);
+      } catch (error: unknown) {
+        // Closing mid-warm-up is a normal shutdown, not a failure.
+        if (
+          error instanceof SessionHistoryEngineError &&
+          error.code === 'engine_closed'
+        ) {
+          return;
         }
+
+        throw error;
       }
     },
 
-    search(searchOptions: SessionIndexSearchOptions): SessionIndexSearchResult {
-      const {database, catalog} = refreshedView();
+    async search(
+      searchOptions: SessionIndexSearchOptions,
+    ): Promise<SessionIndexSearchResult> {
+      const {database, catalog} = await caughtUpView(searchOptions.sessionId);
       const requestedSessionId =
         searchOptions.sessionId === undefined
           ? undefined
@@ -147,6 +174,10 @@ export function createSessionHistoryEngine(options: {
         ...(requestedSessionId === undefined
           ? {}
           : {sessionId: requestedSessionId}),
+        ...(requestedSessionId !== undefined ||
+        searchOptions.excludeSessionId === undefined
+          ? {}
+          : {excludeSessionId: searchOptions.excludeSessionId}),
       });
 
       return Object.freeze({
@@ -157,10 +188,10 @@ export function createSessionHistoryEngine(options: {
       });
     },
 
-    readAround(
+    async readAround(
       readOptions: SessionIndexReadAroundOptions,
-    ): SessionIndexConversationWindow {
-      const {database, catalog} = refreshedView();
+    ): Promise<SessionIndexConversationWindow> {
+      const {database, catalog} = await caughtUpView(readOptions.sessionId);
       const sessionId = requiredKnownSessionId(catalog, readOptions.sessionId);
       const rows = readAroundSessionIndex({
         database,
@@ -182,11 +213,32 @@ export function createSessionHistoryEngine(options: {
 
     close(): void {
       closed = true;
-      handle?.close();
+      if (handle !== undefined) {
+        closeQuietly(handle);
+      }
       handle = undefined;
       orm = undefined;
     },
   } satisfies SessionHistoryEngine);
+}
+
+/**
+ * SQLite's built-in lower() folds ASCII only; short-query LIKE search
+ * folds through this function so Cyrillic, Greek, and other cased
+ * scripts match case-insensitively too.
+ */
+function registerUnicodeFold(handle: RuntimePluginDatabase): void {
+  handle.function('unicode_fold', {deterministic: true}, (value: unknown) =>
+    typeof value === 'string' ? value.toLowerCase() : null,
+  );
+}
+
+function closeQuietly(handle: RuntimePluginDatabase): void {
+  try {
+    handle.close();
+  } catch {
+    // The handle is being abandoned; a failed close changes nothing.
+  }
 }
 
 /**

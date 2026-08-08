@@ -1,14 +1,14 @@
-import {and, asc, eq, gte, lte, max, or, sql} from 'drizzle-orm';
+import {and, asc, eq, gte, lte, max, or, sql, type SQL} from 'drizzle-orm';
 import type {BetterSQLite3Database} from 'drizzle-orm/better-sqlite3';
 
 import type {RuntimePluginSessionHistoryMessage} from '../../../api/session-history-contract.ts';
 import type {SessionIndexSessionView} from './contract.ts';
 import {messagesTable} from './schema.ts';
 
-// Hermes-style retrieval bounds: scan the best raw hits, then present one
-// anchored view per session so results carry conversation context instead
-// of disconnected messages.
-const searchScanLimit = 300;
+// Hermes-style retrieval: one best hit per session, chosen and ranked in
+// SQL so a hit-heavy session can never crowd others out of the result,
+// then presented as an anchored view so results carry conversation
+// context instead of disconnected messages.
 const anchoredViewBookendCount = 2;
 const anchoredViewRadius = 3;
 
@@ -27,6 +27,7 @@ export function searchSessionIndex(options: {
   readonly database: BetterSQLite3Database;
   readonly query: string;
   readonly sessionId?: string;
+  readonly excludeSessionId?: string;
   readonly sessionLimit: number;
 }): SessionSearchHits {
   const query = options.query.trim();
@@ -38,25 +39,35 @@ export function searchSessionIndex(options: {
     });
   }
 
-  const hits = routedSearchHits(options.database, query, options.sessionId);
-  const bestHits = bestHitPerSession(hits);
-  const rankedHits = [...bestHits.values()].sort(compareBestHits);
-  const views = rankedHits
-    .slice(0, Math.max(1, options.sessionLimit))
+  const scope: SearchScope = {
+    sessionId: options.sessionId,
+    excludeSessionId:
+      options.sessionId === undefined ? options.excludeSessionId : undefined,
+    sessionLimit: Math.max(1, options.sessionLimit),
+  };
+  const hits = routedSearchHits(options.database, query, scope);
+  const views = hits
     .map(hit => anchoredSessionView(options.database, hit))
     .filter(view => view !== undefined);
 
   return Object.freeze({
     views: Object.freeze(views),
-    totalSessionsWithHits: bestHits.size,
+    totalSessionsWithHits: hits[0]?.totalSessionsWithHits ?? 0,
   });
 }
+
+type SearchScope = {
+  readonly sessionId: string | undefined;
+  readonly excludeSessionId: string | undefined;
+  readonly sessionLimit: number;
+};
 
 type RawSearchHit = {
   readonly sessionId: string;
   readonly ordinal: number;
   readonly committedAt: string;
   readonly rank: number;
+  readonly totalSessionsWithHits: number;
 };
 
 /**
@@ -68,67 +79,115 @@ type RawSearchHit = {
 function routedSearchHits(
   database: BetterSQLite3Database,
   query: string,
-  sessionId: string | undefined,
+  scope: SearchScope,
 ): readonly RawSearchHit[] {
   if (codePointCount(query) < ftsMinimumQueryCodePoints) {
-    return substringSearchHits(database, query, sessionId);
+    return substringSearchHits(database, query, scope);
   }
 
   if (cjkPattern.test(query)) {
-    return ftsSearchHits(database, 'messages_fts_trigram', query, sessionId);
+    return ftsSearchHits(database, 'messages_fts_trigram', query, scope);
   }
 
-  const wordHits = ftsSearchHits(database, 'messages_fts', query, sessionId);
+  const wordHits = ftsSearchHits(database, 'messages_fts', query, scope);
 
   return wordHits.length > 0
     ? wordHits
-    : ftsSearchHits(database, 'messages_fts_trigram', query, sessionId);
+    : ftsSearchHits(database, 'messages_fts_trigram', query, scope);
 }
 
+/**
+ * Each session's best hit is its lowest BM25 rank with recency breaking
+ * ties (higher rowid = newer); sessions rank against each other the same
+ * way. The window count carries the exact number of matching sessions
+ * independently of the returned limit.
+ */
 function ftsSearchHits(
   database: BetterSQLite3Database,
   ftsTable: 'messages_fts' | 'messages_fts_trigram',
   query: string,
-  sessionId: string | undefined,
+  scope: SearchScope,
 ): readonly RawSearchHit[] {
   // Always a single quoted phrase: the model's query is literal text, not
   // FTS boolean syntax.
   const phrase = `"${query.replaceAll('"', '""')}"`;
-  const sessionFilter =
-    sessionId === undefined ? sql`` : sql`WHERE m.session_id = ${sessionId}`;
 
   return database.all<RawSearchHit>(sql`
-    SELECT m.session_id AS sessionId,
-           m.ordinal AS ordinal,
-           m.committed_at AS committedAt,
-           f.rank AS rank
-    FROM ${sql.raw(ftsTable)}(${phrase}) AS f
-    JOIN messages AS m ON m.id = f.rowid
-    ${sessionFilter}
-    ORDER BY f.rank
-    LIMIT ${searchScanLimit}
+    WITH best_hits AS (
+      SELECT m.session_id AS sessionId,
+             m.ordinal AS ordinal,
+             m.committed_at AS committedAt,
+             f.rank AS rank,
+             ROW_NUMBER() OVER (
+               PARTITION BY m.session_id
+               ORDER BY f.rank, m.id DESC
+             ) AS hitOrder
+      FROM ${sql.raw(ftsTable)}(${phrase}) AS f
+      JOIN messages AS m ON m.id = f.rowid
+      ${scopeWhereClause(scope)}
+    )
+    SELECT sessionId, ordinal, committedAt, rank,
+           COUNT(*) OVER () AS totalSessionsWithHits
+    FROM best_hits
+    WHERE hitOrder = 1
+    ORDER BY rank, committedAt DESC, sessionId ASC
+    LIMIT ${scope.sessionLimit}
   `);
 }
 
+/** Substring hits carry no rank; sessions order by their newest hit. */
 function substringSearchHits(
   database: BetterSQLite3Database,
   query: string,
-  sessionId: string | undefined,
+  scope: SearchScope,
 ): readonly RawSearchHit[] {
   const pattern = `%${escapeLikePattern(query.toLowerCase())}%`;
-  const sessionFilter =
-    sessionId === undefined ? sql`` : sql`AND m.session_id = ${sessionId}`;
 
   return database.all<RawSearchHit>(sql`
-    SELECT m.session_id AS sessionId,
-           m.ordinal AS ordinal,
-           m.committed_at AS committedAt,
-           0 AS rank
-    FROM messages AS m
-    WHERE lower(m.text) LIKE ${pattern} ESCAPE '\\' ${sessionFilter}
-    ORDER BY m.committed_at DESC, m.session_id ASC, m.ordinal DESC
-    LIMIT ${searchScanLimit}
+    WITH best_hits AS (
+      SELECT m.session_id AS sessionId,
+             m.ordinal AS ordinal,
+             m.committed_at AS committedAt,
+             0 AS rank,
+             ROW_NUMBER() OVER (
+               PARTITION BY m.session_id
+               ORDER BY m.id DESC
+             ) AS hitOrder
+      FROM messages AS m
+      WHERE unicode_fold(m.text) LIKE ${pattern} ESCAPE '\\'
+      ${scopeAndClause(scope)}
+    )
+    SELECT sessionId, ordinal, committedAt, rank,
+           COUNT(*) OVER () AS totalSessionsWithHits
+    FROM best_hits
+    WHERE hitOrder = 1
+    ORDER BY committedAt DESC, sessionId ASC
+    LIMIT ${scope.sessionLimit}
   `);
+}
+
+function scopeWhereClause(scope: SearchScope): SQL {
+  if (scope.sessionId !== undefined) {
+    return sql`WHERE m.session_id = ${scope.sessionId}`;
+  }
+
+  if (scope.excludeSessionId !== undefined) {
+    return sql`WHERE m.session_id <> ${scope.excludeSessionId}`;
+  }
+
+  return sql``;
+}
+
+function scopeAndClause(scope: SearchScope): SQL {
+  if (scope.sessionId !== undefined) {
+    return sql`AND m.session_id = ${scope.sessionId}`;
+  }
+
+  if (scope.excludeSessionId !== undefined) {
+    return sql`AND m.session_id <> ${scope.excludeSessionId}`;
+  }
+
+  return sql``;
 }
 
 function escapeLikePattern(text: string): string {
@@ -145,33 +204,6 @@ function codePointCount(text: string): number {
   }
 
   return count;
-}
-
-/** Hits arrive best-first, so the first hit seen per session is its best. */
-function bestHitPerSession(
-  hits: readonly RawSearchHit[],
-): Map<string, RawSearchHit> {
-  const bySessionId = new Map<string, RawSearchHit>();
-
-  for (const hit of hits) {
-    if (!bySessionId.has(hit.sessionId)) {
-      bySessionId.set(hit.sessionId, hit);
-    }
-  }
-
-  return bySessionId;
-}
-
-/** BM25 rank first (lower is better); recency breaks ties. */
-function compareBestHits(left: RawSearchHit, right: RawSearchHit): number {
-  if (left.rank !== right.rank) {
-    return left.rank - right.rank;
-  }
-  if (left.committedAt === right.committedAt) {
-    return 0;
-  }
-
-  return left.committedAt < right.committedAt ? 1 : -1;
 }
 
 function anchoredSessionView(

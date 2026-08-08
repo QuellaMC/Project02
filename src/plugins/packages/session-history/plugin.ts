@@ -1,5 +1,4 @@
 import {
-  runtimePluginContractVersion,
   sessionHistoryPluginId,
   sessionHistoryReadToolName,
   sessionHistorySearchToolName,
@@ -9,7 +8,7 @@ import {
   createRuntimePluginEvidenceSnapshot,
 } from '../../api/constructors.ts';
 import {createPluginToolEvidence} from '../../api/evidence-helpers.ts';
-import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
+import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
 import type {
   RuntimePlugin,
   RuntimePluginAfterTurnCommittedContext,
@@ -35,6 +34,11 @@ import {
 } from './search.ts';
 import {createSessionHistoryCapabilitiesSnapshot} from './state.ts';
 
+const sessionHistoryPluginEntry = './index.ts';
+const sessionHistoryPluginDescriptorUrl = new URL(
+  './project02.plugin.json',
+  import.meta.url,
+);
 const sessionHistoryPluginInstances = new WeakSet<RuntimePlugin>();
 
 export function createSessionHistoryPlugin(): RuntimePlugin {
@@ -98,7 +102,7 @@ function createSessionHistoryPluginFromManifest(
 
         return guidanceHook(context);
       },
-      handleToolCall(call, context) {
+      async handleToolCall(call, context) {
         const activeEngine = engineForContext(context);
 
         if (activeEngine === undefined) {
@@ -126,7 +130,7 @@ function createSessionHistoryPluginFromManifest(
 
         try {
           if (call.toolName === sessionHistorySearchToolName) {
-            return handleSessionHistorySearchToolCall({
+            return await handleSessionHistorySearchToolCall({
               call,
               context,
               engine: activeEngine,
@@ -134,20 +138,20 @@ function createSessionHistoryPluginFromManifest(
           }
 
           if (call.toolName === sessionHistoryReadToolName) {
-            return handleSessionHistoryReadToolCall({
+            return await handleSessionHistoryReadToolCall({
               call,
               context,
               engine: activeEngine,
             });
           }
         } catch (error: unknown) {
-          const reason = sessionHistoryRejectionReason(error);
+          const rejection = sessionHistoryRejection(error);
 
-          if (reason !== undefined && error instanceof Error) {
+          if (rejection !== undefined) {
             return {
               status: 'rejected',
-              reason,
-              message: error.message,
+              reason: rejection.reason,
+              message: rejection.message,
               evidence: [
                 createPluginToolEvidence({
                   context,
@@ -222,51 +226,11 @@ function createSessionHistoryPluginFromManifest(
   return plugin;
 }
 
-export function createSessionHistoryPluginManifest() {
-  return createRuntimePluginManifest({
-    id: sessionHistoryPluginId,
-    displayName: 'Session History',
-    version: '1.0.0',
-    kind: 'first_party',
-    description:
-      'Cross-session recall over this character’s own conversation ' +
-      'history: full-text search with anchored context windows, and ' +
-      'transcript scrolling by message anchor.',
-    contractVersion: runtimePluginContractVersion,
-    compatibility: {
-      hostContractVersions: [runtimePluginContractVersion],
-    },
-    declaredPlugins: [
-      'tool_provider',
-      'handle_tool_call',
-      'before_role_model_call',
-      'after_turn_committed',
-      'on_shutdown',
-    ],
-    config: {
-      scope: 'global_with_character_overrides',
-      fields: [],
-    },
-    firstParty: true,
-    runtimePolicy: {
-      timeoutMs: 5_000,
-      redactionLabels: [],
-      failureBehavior: {
-        beforeRoleModelCall: 'degrade',
-        handleToolCall: 'reject_tool_call',
-        health: 'degrade',
-      },
-    },
-    activation: {
-      defaultEnabled: true,
-      reasons: ['built_in_session_history'],
-    },
-    requestedAccess: {
-      model_input: 'write',
-      session_history: 'read',
-      plugin_database: 'write',
-    },
-  });
+export function createSessionHistoryPluginManifest(): RuntimePluginManifest {
+  return readRuntimePluginPackageDescriptor({
+    descriptorUrl: sessionHistoryPluginDescriptorUrl,
+    expectedEntry: sessionHistoryPluginEntry,
+  }).manifest;
 }
 
 export function isSessionHistoryPlugin(plugin: RuntimePlugin): boolean {
@@ -276,13 +240,22 @@ export function isSessionHistoryPlugin(plugin: RuntimePlugin): boolean {
 /**
  * Engine errors are the plugin's own; feed errors arrive from the runtime
  * and are recognized structurally so the plugin needs no value import of
- * the storage layer. Anything else is a bug and propagates.
+ * the storage layer. Storage messages carry local file paths, so the
+ * model-facing message is a fixed sentence; engine messages name only
+ * session and message ids and pass through. Anything else is a bug and
+ * propagates.
  */
-function sessionHistoryRejectionReason(error: unknown): string | undefined {
+function sessionHistoryRejection(
+  error: unknown,
+): {readonly reason: string; readonly message: string} | undefined {
   if (error instanceof SessionHistoryEngineError) {
-    return error.code === 'engine_closed'
-      ? 'session_history_read_failed'
-      : error.code;
+    return {
+      reason:
+        error.code === 'engine_closed'
+          ? 'session_history_read_failed'
+          : error.code,
+      message: error.message,
+    };
   }
 
   if (
@@ -290,7 +263,12 @@ function sessionHistoryRejectionReason(error: unknown): string | undefined {
     error.name === 'LocalRuntimeStorageContractError' &&
     typeof (error as {readonly code?: unknown}).code === 'string'
   ) {
-    return 'session_history_read_failed';
+    return {
+      reason: 'session_history_read_failed',
+      message:
+        'Session history storage reported a read failure; the local ' +
+        'runtime log has details.',
+    };
   }
 
   return undefined;
