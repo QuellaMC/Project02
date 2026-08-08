@@ -752,7 +752,9 @@ function assertStoreRootCanHostMutationLock(
   assertCharacterDataDirAdoptable({storeRoot: layout.storeRoot});
 }
 
-function decodeSessionMetadata(line: string): LocalRuntimeSessionMetadata {
+export function decodeSessionMetadata(
+  line: string,
+): LocalRuntimeSessionMetadata {
   let parsed: unknown;
 
   try {
