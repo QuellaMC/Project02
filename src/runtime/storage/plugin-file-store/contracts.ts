@@ -1,7 +1,7 @@
 import type {
   RuntimePluginFileStorePathMode,
   RuntimePluginJsonValue,
-} from '../../../plugins/index.ts';
+} from '../../../plugins/api/index.ts';
 
 /** Engine-internal shapes; not the plugin-facing capability contract. */
 export type InMemoryPluginStoreState = {

@@ -3,7 +3,7 @@ import {dirname} from 'node:path';
 import {readTextFileSync} from '../../../shared/file-system.ts';
 import {isJsonRecord} from '../../../shared/json-boundary.ts';
 
-import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/api/index.ts';
 import {
   assertRegularFile,
   assertSafeDurableTransactionJournalDirectory,

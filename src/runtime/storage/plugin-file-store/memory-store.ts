@@ -1,5 +1,5 @@
-import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
-import type {InMemoryRuntimePluginFileStoreOptions} from '../../../plugins/index.ts';
+import type {RuntimePluginFileStore} from '../../../plugins/api/index.ts';
+import type {InMemoryRuntimePluginFileStoreOptions} from '../../../plugins/api/index.ts';
 import type {InMemoryPluginStoreState} from './contracts.ts';
 import {
   assertJsonlPathMode,

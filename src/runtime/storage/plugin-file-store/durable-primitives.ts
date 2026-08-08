@@ -32,8 +32,8 @@ import {
   LocalRuntimeMutationLocksAcquireError,
   type LocalRuntimeMutationLockOwnerToken,
 } from '../mutation-lock.ts';
-import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
-import type {RuntimePluginFileStorePathMode} from '../../../plugins/index.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/api/index.ts';
+import type {RuntimePluginFileStorePathMode} from '../../../plugins/api/index.ts';
 import {
   assertJsonlPathMode,
   assertJsonPathMode,

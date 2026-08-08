@@ -1,4 +1,5 @@
 import {
+  createLocalRuntimeSessionIndex,
   createProject02HomeLayout,
   LocalRuntimeStorageContractError,
   requireCharacterDataMarker,
@@ -383,6 +384,13 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
   assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
+  // Safe here: the character-data marker was just validated on this root,
+  // and the index itself opens its database lazily on first query.
+  const sessionIndex = createLocalRuntimeSessionIndex({
+    storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
+    characterId: activationPlan.runtimeLocation.characterScope.characterId,
+  });
+
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
 
@@ -395,6 +403,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
         ),
+        sessionIndex,
         toolConfirmationHandler: options.toolConfirmationHandler,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -428,6 +437,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
+      sessionIndex,
       toolConfirmationHandler: options.toolConfirmationHandler,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,

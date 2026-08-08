@@ -39,6 +39,9 @@ export {
   runtimePluginContractVersion,
   runtimePluginId,
   runtimePluginListToolName,
+  sessionHistoryPluginId,
+  sessionHistoryReadToolName,
+  sessionHistorySearchToolName,
   type RuntimePluginAccessMap,
   type RuntimePluginAccessSnapshot,
 } from './api/contract.ts';
