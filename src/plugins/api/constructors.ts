@@ -97,6 +97,14 @@ export function createRuntimePluginContext(
       options.currentUserMessage,
       'currentUserMessage',
     ),
+    recentVisibleMessageIds: Object.freeze(
+      (options.recentVisibleMessageIds ?? []).map((id, index) =>
+        requirePlainNonEmptyString(
+          id,
+          `recentVisibleMessageIds[${String(index)}]`,
+        ),
+      ),
+    ),
     character: Object.freeze({
       id: requirePlainNonEmptyString(options.character.id, 'character.id'),
       displayName: requirePlainNonEmptyString(

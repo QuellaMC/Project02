@@ -189,6 +189,8 @@ export type RuntimePluginContext = {
   readonly deadlineAt: number;
   readonly signal: AbortSignal;
   readonly currentUserMessage: string;
+  /** Ids of the visible messages currently in the model's context window. */
+  readonly recentVisibleMessageIds: readonly string[];
   readonly character: CharacterProfile;
   readonly privacy: {
     readonly redactionLabels: readonly string[];
@@ -218,6 +220,7 @@ export type CreateRuntimePluginContextOptions = RuntimeEventIdentity & {
   readonly sessionId: string;
   readonly eventType: RuntimeEventType;
   readonly currentUserMessage: string;
+  readonly recentVisibleMessageIds?: readonly string[];
   readonly character: CharacterProfile;
   readonly redactionLabels?: readonly string[];
   readonly deadlineAt?: number;
