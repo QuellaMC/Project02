@@ -1,12 +1,6 @@
 // The stamped descriptor must satisfy schemas/project02.plugin.schema.json
 // and the runtime validator.
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  writeFileSync,
-} from 'node:fs';
+import {existsSync, mkdirSync, readdirSync, readFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
@@ -78,10 +72,11 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   });
 }
 
-// A rerun heals a crashed scaffold; an existing file is never overwritten.
+// Atomic writes make existence mean completeness: a rerun heals a crashed
+// scaffold, a torn file cannot arise, and no existing file is overwritten.
 function writeMissingScaffoldFile(path, content) {
   if (!existsSync(path)) {
-    writeFileSync(path, content, 'utf8');
+    atomicReplaceFileSync({targetPath: path, content, mode: 0o644});
   }
 }
 
