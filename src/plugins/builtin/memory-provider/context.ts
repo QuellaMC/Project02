@@ -1,3 +1,5 @@
+import {boundedText} from '../../api/bounded-text.ts';
+
 import type {MemoryRecallItem} from './types.ts';
 
 export const memoryProviderMaxItems = 5;
@@ -21,8 +23,4 @@ export function boundedMemoryItems(
   );
 }
 
-export function boundedText(value: string, maxLength: number): string {
-  return value.length <= maxLength
-    ? value
-    : `${value.slice(0, maxLength - 3)}...`;
-}
+export {boundedText};

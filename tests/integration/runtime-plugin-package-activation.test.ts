@@ -73,6 +73,7 @@ describe('configured runtime plugin package activation', () => {
     expect(configured.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
+      [sessionHistoryPluginId]: 'bundled',
     });
     expect(configured.catalogEntries[characterStatePluginId]).toMatchObject({
       catalogKind: 'package',
@@ -132,7 +133,9 @@ describe('configured runtime plugin package activation', () => {
       activationStatus: 'disabled',
     });
     expect(operatorPackage?.activationReasons).toContain('not_enabled');
-    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([]);
+    expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
+      sessionHistoryPluginId,
+    ]);
   });
 
   it('does not let an operator default claim trigger required-config validation', () => {
@@ -572,11 +575,12 @@ describe('configured runtime plugin package activation', () => {
       },
     });
     expect(configured.plugins.map(plugin => plugin.manifest.id).sort()).toEqual(
-      [manifest.id],
+      [manifest.id, sessionHistoryPluginId].sort(),
     );
     expect(activationPlan.packageProvenanceByPluginId).toEqual({
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
+      [sessionHistoryPluginId]: 'bundled',
       [manifest.id]: 'operator',
     });
   });
@@ -647,6 +651,7 @@ describe('configured runtime plugin package activation', () => {
     ).toMatchObject({enabled: true, activationStatus: 'active'});
     expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
       manifest.id,
+      sessionHistoryPluginId,
     ]);
     expect(readFileSync(capturePath, 'utf8')).toBe('from-sub-helper');
   });
