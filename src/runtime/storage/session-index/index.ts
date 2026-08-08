@@ -1,13 +1,14 @@
 import {drizzle, type BetterSQLite3Database} from 'drizzle-orm/better-sqlite3';
+import {join} from 'node:path';
 import {setImmediate as yieldToEventLoop} from 'node:timers/promises';
 
 import {requireCharacterDataMarker} from '../character-data.ts';
 import {
+  characterPluginDataDirPath,
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeCharacterId,
   normalizeLocalRuntimeSessionId,
-  type LocalRuntimeStorageLayout,
 } from '../layout-contract.ts';
 import {
   deleteRuntimeSqliteDatabase,
@@ -55,7 +56,23 @@ const warmUpSliceMaxBytes = 2 * 1024 * 1024;
 export type CreateLocalRuntimeSessionIndexOptions = {
   readonly storeRoot: string;
   readonly characterId: string;
+  /** The plugin whose data directory holds (and owns) the view. */
+  readonly ownerPluginId: string;
 };
+
+/** Where the owning plugin's view lives; exported for tests and tooling. */
+export function sessionIndexDatabasePath(options: {
+  readonly storeRoot: string;
+  readonly ownerPluginId: string;
+}): string {
+  return join(
+    characterPluginDataDirPath({
+      storeRoot: options.storeRoot,
+      pluginId: options.ownerPluginId,
+    }),
+    'session-index.sqlite',
+  );
+}
 
 /**
  * A rebuildable SQLite view over one character's canonical transcripts.
@@ -76,6 +93,10 @@ export function createLocalRuntimeSessionIndex(
   const layout = createLocalRuntimeStorageLayout({
     storeRoot: options.storeRoot,
   });
+  const databasePath = sessionIndexDatabasePath({
+    storeRoot: options.storeRoot,
+    ownerPluginId: options.ownerPluginId,
+  });
   let handle: RuntimeSqliteDatabase | undefined;
   let orm: BetterSQLite3Database | undefined;
   let closed = false;
@@ -89,7 +110,7 @@ export function createLocalRuntimeSessionIndex(
     }
 
     if (orm === undefined) {
-      const opened = openSessionIndexHandles(layout, characterId);
+      const opened = openSessionIndexHandles(databasePath, characterId);
 
       handle = opened.handle;
       orm = opened.orm;
@@ -222,10 +243,10 @@ type SessionIndexHandles = {
 };
 
 function openSessionIndexHandles(
-  layout: LocalRuntimeStorageLayout,
+  databasePath: string,
   characterId: string,
 ): SessionIndexHandles {
-  const opened = openSessionIndexDatabase(layout);
+  const opened = openSessionIndexDatabase(databasePath);
   const meta = opened.orm.select().from(indexMetaTable).get();
 
   if (meta === undefined) {
@@ -244,19 +265,17 @@ function openSessionIndexHandles(
   // A view copied from another character's store is derived data: rebuild
   // it for this store rather than trusting or repairing it.
   opened.handle.close();
-  deleteRuntimeSqliteDatabase(layout.sessionIndexPath);
+  deleteRuntimeSqliteDatabase(databasePath);
 
-  const rebuilt = openSessionIndexDatabase(layout);
+  const rebuilt = openSessionIndexDatabase(databasePath);
 
   rebuilt.orm.insert(indexMetaTable).values({id: 1, characterId}).run();
   return rebuilt;
 }
 
-function openSessionIndexDatabase(
-  layout: LocalRuntimeStorageLayout,
-): SessionIndexHandles {
+function openSessionIndexDatabase(databasePath: string): SessionIndexHandles {
   const handle = openRuntimeSqliteDatabase({
-    filePath: layout.sessionIndexPath,
+    filePath: databasePath,
     schemaVersion: sessionIndexSchemaVersion,
     initializeSchema: database => {
       database.exec(sessionIndexSchemaDdl);
