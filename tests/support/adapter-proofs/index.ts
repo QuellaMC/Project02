@@ -983,9 +983,6 @@ function createConfigField(options: {
   };
 }
 
-// External adapter proofs already describe their tools as JSON Schema,
-// which is now exactly what a tool's input contract is. Only the three
-// members a contract must carry are filled in when a proof omits them.
 function inputContractFromSchema(schema: JsonRecord): ModelToolInputContract {
   const validated = requiredModelToolInputContract({
     ...schema,

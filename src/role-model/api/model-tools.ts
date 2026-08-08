@@ -8,12 +8,7 @@ export type BuiltInModelToolName = VisibleReplyModelToolName;
 export type ModelToolJsonSchemaType =
   'string' | 'number' | 'integer' | 'boolean' | 'object' | 'array' | 'null';
 
-/**
- * A JSON Schema as a tool contract carries it. The named members are the
- * vocabulary first-party contracts use and give an author completion;
- * the index signature admits the rest of JSON Schema, because validity
- * is Ajv's judgment at the manifest gate, not this type's.
- */
+/** The index signature admits all of JSON Schema; Ajv judges validity. */
 export type ModelToolJsonSchema = {
   readonly [keyword: string]: unknown;
   readonly type?: ModelToolJsonSchemaType | readonly ModelToolJsonSchemaType[];
@@ -25,13 +20,6 @@ export type ModelToolJsonSchema = {
   readonly items?: ModelToolJsonSchema;
 };
 
-/**
- * A tool's input shape, and the only way to declare one. It is JSON
- * Schema because that is what providers consume, what Ajv enforces, and
- * what a plugin author already knows how to write — nesting included.
- * The root is an object schema because a tool takes named arguments;
- * everything else means exactly what JSON Schema says it means.
- */
 export type ModelToolInputContract = ModelToolJsonSchema & {
   readonly type: 'object';
 };
@@ -157,10 +145,8 @@ function createBuiltInModelToolDefinition(options: {
   } satisfies BuiltInModelToolDefinition);
 }
 
-// The contract is a JSON value, so the JSON boundary is its one deep
-// freeze; a keyword-by-keyword copy would silently drop any keyword it
-// did not know. The snapshot is a faithful JSON projection of a value
-// the type system already checked, which is what the cast states.
+// A keyword-by-keyword copy would drop keywords it does not know. The cast
+// states that the snapshot is a faithful JSON projection of a checked value.
 function freezeModelToolInputContract(
   inputContract: ModelToolInputContract,
 ): ModelToolInputContract {

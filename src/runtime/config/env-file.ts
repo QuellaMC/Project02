@@ -10,14 +10,6 @@ import {
 } from './location.ts';
 import {runtimeConfigEnvVarName} from './types.ts';
 
-/**
- * A runtime location selected by the operator (store root, config
- * path, and/or character). CLI flag parsing produces this shape
- * (src/cli/shared/runtime-location-flags.ts); startup, env-file
- * resolution, and scope-aware config verbs consume it. The character
- * selects a config scope or an active character; env-file resolution
- * ignores it (secrets are shared).
- */
 export class RuntimeEnvFileError extends Error {
   readonly path: string | undefined;
 
@@ -116,16 +108,8 @@ function runtimeConfigEnvSelectsConfig(env: NodeJS.ProcessEnv): boolean {
 }
 
 /**
- * Read an env file that may not exist, without asking first. The
- * `existsSync`-then-read version this replaces reported a file created
- * between the two calls as absent, and a file deleted between them as a
- * crash.
- *
- * This does not borrow the store's read primitive: `.env` is resolved
- * against the working directory, not the store, and env failures reach
- * the operator as `RuntimeEnvFileError` — which all three CLIs print
- * verbatim and one branches on. A store `read_failed` would replace a
- * message naming the operator's own file with a generic one.
+ * No existence check first: the two-call form races creation and deletion.
+ * The store read primitive is not reused: `.env` is relative to the cwd.
  */
 function readOptionalEnvFile(path: string): string | undefined {
   try {

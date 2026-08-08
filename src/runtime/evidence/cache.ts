@@ -18,7 +18,6 @@ import type {
   RuntimeEvidenceFileStamps,
 } from './contract.ts';
 
-/** The message a commit event carries, or undefined for any other event. */
 export function conversationMessageForRawEvent(
   rawEvent: RawEventLogRecord,
 ): ConversationLogRecord | undefined {
@@ -40,9 +39,8 @@ export function conversationMessageForRawEvent(
 }
 
 /**
- * The file's decoded records under a stable stamp — codec-valid lines,
- * not yet a validated session. The caller replays them through the
- * transition machine; only what replays is evidence.
+ * Codec-valid lines, not yet a validated session: only what replays through
+ * the transition machine is evidence.
  */
 export function readCoherentRuntimeSessionRecords(
   paths: LocalRuntimeSessionPaths,
@@ -126,10 +124,8 @@ function readStampedRuntimeEvidenceFile(
 }
 
 /**
- * The file's committed records. A record a crash left unfinished is
- * skipped, so an interrupted write costs its own record rather than the
- * session around it; a committed record that is damaged fails the read
- * as a store contract error naming the file.
+ * A record a crash left unfinished is skipped; a damaged committed record
+ * fails the read.
  */
 function decodeRuntimeEvidenceJsonLines<T>(options: {
   readonly filePath: string;

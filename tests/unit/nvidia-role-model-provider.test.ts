@@ -1342,8 +1342,7 @@ describe('NVIDIA role-model provider', () => {
       turnContext: renderRoleModelTurnContext(inputEnvelope),
     });
 
-    // The provider sent 1e999-style arithmetic; JSON has no value for it,
-    // so the argument reaches the loop as the null it would be written as.
+    // JSON has no value for the provider's 1e999, so it arrives as null.
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
         {

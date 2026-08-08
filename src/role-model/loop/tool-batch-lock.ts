@@ -1,11 +1,6 @@
 /**
- * Execution gate for one model sampling batch: `shared` calls overlap
- * each other, `exclusive` calls run alone. Global across the batch, since
- * two plugins can reach the same external resource.
- *
- * The lease covers the whole dispatch, but not work that escapes a
- * timed-out hook — cancellation is cooperative, and holding the lease
- * until an unresponsive plugin returned would stall the rest of the turn.
+ * Global across the batch: two plugins can reach the same external resource.
+ * The lease covers the dispatch, not work that escapes a timed-out hook.
  */
 export type ToolBatchLockMode = 'shared' | 'exclusive';
 
@@ -27,8 +22,7 @@ export function createToolBatchLock(): ToolBatchLock {
     mode === 'shared' ? !exclusiveHeld : !exclusiveHeld && sharedHolders === 0;
 
   const admitWaiting = (): void => {
-    // Head-of-line order: stop at the first waiter that cannot run, so a
-    // queued exclusive call is never starved by a stream of shared ones.
+    // Head-of-line: stop at the first blocked waiter so exclusive is not starved.
     while (waiters.length > 0) {
       const next = waiters[0];
 

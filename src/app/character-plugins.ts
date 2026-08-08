@@ -1,8 +1,3 @@
-/**
- * Character plugin policy at the composition root: one pure planner
- * turns package declarations into a validated overlay contribution,
- * and the existing enforcement judges the finished activation.
- */
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import {ownJsonRecordValue} from '../shared/json-boundary.ts';
 import {shellQuoteCommandArgument} from '../shared/shell-command.ts';
@@ -31,11 +26,7 @@ export type CharacterPackagePluginMaterializationPlan =
       readonly diagnostics: readonly RuntimeConfigDiagnostic[];
     };
 
-/**
- * Builds the package contribution only. It never reads global config,
- * so inherited values cannot accidentally be copied into a character
- * overlay. Unknown plugin ids remain in the document for later install.
- */
+/** Global config is never read; nothing inherited leaks into the overlay. */
 export function planCharacterPackagePluginMaterialization(options: {
   readonly expectations: CharacterPluginExpectations | undefined;
   readonly pluginManifests: readonly RuntimePluginManifest[];
@@ -104,10 +95,7 @@ export function planCharacterPackagePluginMaterialization(options: {
     authoredScope: 'character',
     env: {},
   });
-  // Same polarity as startup's materialization preflight: only a
-  // readiness failure (a required value the global layer or env may
-  // still supply) passes; every other error proves the package authored
-  // invalid config and blocks before anything is written.
+  // A readiness failure may still be met by the global layer or env.
   const blocking = resolved.diagnostics.filter(
     diagnostic =>
       diagnostic.severity === 'error' &&
@@ -173,12 +161,6 @@ function invalidMaterialization(
   });
 }
 
-/**
- * Judges the finished activation against the character's expectations.
- * Required plugins that are missing or resolved-disabled are errors
- * that block startup; recommended ones only warn. Every diagnostic
- * names the plugin, the character, and the recovery.
- */
 export function enforceCharacterPluginExpectations(options: {
   readonly expectations: CharacterPluginExpectations | undefined;
   readonly characterId: string;
@@ -225,9 +207,7 @@ export function enforceCharacterPluginExpectations(options: {
           `Character "${options.characterId}" ${
             level === 'required' ? 'requires' : 'recommends'
           } plugin "${pluginId}", which is disabled. Enable it with: ` +
-            // Quoted so the hint survives a copy-paste: a home containing
-            // whitespace would otherwise split across arguments, and shell
-            // metacharacters in it would be interpreted rather than passed.
+            // Quoted because the operator copy-pastes this hint into a shell.
             `runtime-config ${
               options.storeRoot === undefined
                 ? ''

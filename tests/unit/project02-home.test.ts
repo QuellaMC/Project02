@@ -28,7 +28,6 @@ describe('project02 home initialization', () => {
       scope: 'home',
     });
 
-    // Idempotent: a second call keeps the marker and succeeds.
     const markerBefore = readFileSync(layout.schemaPath, 'utf8');
     await ensureInitializedProject02Home({homeRoot});
     expect(readFileSync(layout.schemaPath, 'utf8')).toBe(markerBefore);
@@ -51,8 +50,7 @@ describe('project02 home initialization', () => {
   it('tolerates a live in-flight marker replacement but not an abandoned one', async () => {
     const homeRoot = join(createTestTempRoot(), 'racing-home');
 
-    // A sibling process mid-initialization: its atomic replacement for
-    // the home marker is in flight and its pid is alive.
+    // A sibling's in-flight marker replacement, named after a live pid.
     mkdirSync(homeRoot, {recursive: true});
     writeFileSync(
       join(
@@ -115,8 +113,6 @@ describe('project02 home initialization', () => {
     const homeRoot = createTestTempRoot('project02-home-marker-link-');
     const donor = createTestTempRoot('project02-home-marker-donor-');
 
-    // A real marker elsewhere, borrowed via symlink, must not make a
-    // foreign directory read as initialized.
     await ensureInitializedProject02Home({homeRoot: donor});
     writeFileSync(join(homeRoot, 'notes.txt'), 'foreign\n');
     symlinkSync(join(donor, 'schema.json'), join(homeRoot, 'schema.json'));

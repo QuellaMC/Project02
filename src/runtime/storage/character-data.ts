@@ -29,9 +29,8 @@ export type EnsureCharacterDataMarkerResult = {
 };
 
 /**
- * Answers whether one already-canonical path belongs to Project02 character
- * storage. Ownership comes from an explicitly selected home or a valid
- * storage marker, never from a coincidental directory name.
+ * Ownership comes from an explicitly selected home or a valid storage
+ * marker, never from a coincidental directory name.
  */
 export function isProject02CharacterDataOwnedPath(options: {
   readonly canonicalPath: string;
@@ -94,11 +93,7 @@ function recognizedStorageMarker(
   }
 }
 
-/**
- * The one writer-side initializer for character data. It preflights
- * ownership before the home can be marked, initializes the home, then
- * persists the character identity at the data-directory boundary.
- */
+/** The one writer-side initializer for character data. */
 export async function ensureCharacterDataDir(options: {
   readonly homeRoot?: string;
   readonly characterId: string;
@@ -107,10 +102,8 @@ export async function ensureCharacterDataDir(options: {
   const homeOptions = {
     ...(options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot}),
   };
-  // Normalize once, before anything is written. The path helper and the marker
-  // constructor each normalize on their own, so carrying the raw ID further
-  // would verify the persisted marker against a value that never reaches
-  // storage -- failing after the home marker and data directory already exist.
+  // Normalize before anything is written: a raw id would fail its own marker
+  // check only after the home marker and data directory already exist.
   const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
   const selectedHome = createProject02HomeLayout(homeOptions);
   const selectedDataRoot = characterDataDirPath(
@@ -133,10 +126,8 @@ export async function ensureCharacterDataDir(options: {
 }
 
 /**
- * Read-only ownership guard for a character data directory. Missing
- * directories and marker-less control-only directories are adoptable;
- * foreign content, symlinks, wrong control-entry types, and marker/path
- * identity mismatches are not.
+ * Absent and marker-less control-only directories are adoptable; foreign
+ * content, symlinks, and identity mismatches are not.
  */
 export function assertCharacterDataDirAdoptable(
   options: LocalRuntimeStorageLayoutOptions,
@@ -198,18 +189,8 @@ function readAdoptableCharacterDataMarker(
   });
 
   if (foreignEntry !== undefined) {
-    // The marker read above and this listing are two trips to disk, so
-    // "no marker" can already be stale: a sibling initializing the same
-    // character commits its marker, sessions root, and catalog in that
-    // window, and every one of those reads as foreign to a scan that
-    // still believes the directory is unclaimed. Confirm the finding
-    // against a fresh read before condemning the directory.
-    //
-    // Re-reading rather than naming those entries in the allowlist is
-    // what keeps the guard honest: a copied or corrupt tree carries the
-    // same session artifacts and never grows a marker, so it is still
-    // refused, and a control entry added later cannot silently open a
-    // hole here by being absent from a list.
+    // "No marker" can already be stale: a sibling initializing the same
+    // character commits its marker and session artifacts in that window.
     const committed = readStorageSchemaMarker(layout);
 
     if (committed === undefined) {
@@ -226,10 +207,6 @@ function readAdoptableCharacterDataMarker(
   return undefined;
 }
 
-/**
- * Read-only guard for consumers. The selected runtime character is checked
- * against the one identity persisted in the directory marker.
- */
 export function assertCharacterDataDirReadable(options: {
   readonly storageOptions: LocalRuntimeStorageLayoutOptions;
   readonly characterId: string;
@@ -292,9 +269,8 @@ export async function ensureCharacterDataMarker(options: {
 }
 
 /**
- * Records package materialization only after the overlay commit. If the
- * process stops between those writes, the old version remains and the
- * next selection safely repeats the missing-only merge.
+ * Written only after the overlay commit: a crash between the two leaves the
+ * old version, and the next selection repeats the missing-only merge.
  */
 export async function recordMaterializedCharacterPackageVersion(options: {
   readonly storageOptions: LocalRuntimeStorageLayoutOptions;
@@ -345,15 +321,8 @@ function requireCharacterDataMarkerScope(
 }
 
 /**
- * Compares a requested character against the one the directory records.
- *
- * The requested id is normalized first because the stored one always is:
- * `createLocalRuntimeStorageSchemaMarker` canonicalizes before writing.
- * Comparing a raw request against a canonical marker made a padded id
- * like `' mira '` claim the directory, write `mira` into the marker, and
- * then fail against its own write — a mismatch reported between two
- * spellings of one character. Normalizing both sides is what makes this
- * an identity comparison rather than a string comparison.
+ * Both sides are normalized because the stored id always is; comparing a
+ * raw request would report a mismatch between two spellings of one id.
  */
 function assertExpectedCharacterDataMarker(
   layout: LocalRuntimeStorageLayout,
@@ -414,10 +383,8 @@ function assertRealDataControlRoot(rootPath: string, label: string): void {
 }
 
 /**
- * Control entries the data directory owns must be real: a link would carry
- * this character's history, locks, or settings outside the directory its
- * marker vouches for. Absent is fine — the runtime creates them on demand —
- * and so is unreadable, which the reader that opens it reports precisely.
+ * A linked control entry would carry this character's history, locks, or
+ * settings outside the directory its marker vouches for.
  */
 function assertRealDataControlEntry(
   path: string,

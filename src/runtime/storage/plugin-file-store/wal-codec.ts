@@ -17,19 +17,13 @@ import {
   normalizeRuntimePluginFileStorePath,
 } from './shared.ts';
 
-// v2 carries one operation where v1 carried an array. A v1 journal is a
-// crash remnant from a pre-release build; it decodes as an unknown version
-// and is reported rather than silently misread as this shape.
+// An unrecognized journal version is reported, never decoded as this shape.
 export const durableTransactionJournalVersion =
   'project02.plugin_transaction.v2';
 
 /**
- * One durable write, described completely enough to finish or verify it
- * after a crash.
- *
- * A tool call's writes are durable when the call returns, so a journal
- * describes exactly one operation. There is no batch and nothing to roll
- * back: recovery either completes this write or confirms it already landed.
+ * A journal describes exactly one operation: there is no batch and nothing
+ * to roll back, so recovery completes this write or confirms it landed.
  */
 export type DurablePluginFileStoreJournalOperation = {
   readonly pluginId: string;

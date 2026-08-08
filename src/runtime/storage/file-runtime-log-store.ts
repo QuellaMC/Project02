@@ -38,12 +38,8 @@ export function createFileRuntimeLogStore(
     persistPreparedRawEvent(record, expectedCharacter) {
       const machine = state.transitionMachine();
 
-      // Re-checked here, not just in prepareRawEvent: a caller may await
-      // between preparing and persisting, and both the lease and the
-      // evidence state have to hold at the moment the bytes land, not
-      // only when the record was built — an append in between makes the
-      // prepared record stale, and stale bytes on disk are a session the
-      // next start refuses to read.
+      // Re-checked at persist time: a caller may await between preparing
+      // and persisting, and both must hold when the bytes land.
       state.assertWriterOwnership();
       machine.assertRawEventAppend(record, expectedCharacter);
 

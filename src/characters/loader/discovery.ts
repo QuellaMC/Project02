@@ -1,12 +1,4 @@
-/**
- * Discovery for character packages: scans bundled and operator roots,
- * validates descriptors, and applies the identity policy. Character
- * packages are data-only, so discovery returns validated definitions
- * directly — there is no load phase. Unlike plugin discovery, a character
- * id discovered in more than one place is an error for every candidate:
- * explicit beats precedence magic, because exactly one definition may own
- * a character id per runtime.
- */
+/** Character packages are data-only: there is no load phase. */
 import {basename, join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -93,14 +85,7 @@ export type CharacterPackageDiagnostic = {
   readonly provenance: CharacterPackageProvenance;
   /** The folder the package was found in. */
   readonly characterId?: string;
-  /**
-   * The id the descriptor declares, when it disagrees with the folder.
-   * A selection is made by declared id, so a diagnostic naming only the
-   * folder is invisible to the character it actually concerns: a
-   * misspelled folder holding the selected character would report
-   * "not found" and send the operator to install or reconfigure it,
-   * never to the rename that fixes it.
-   */
+  /** The id the descriptor declares, when it disagrees with the folder. */
   readonly claimedCharacterId?: string;
 };
 
@@ -120,15 +105,7 @@ export function discoverCharacterPackages(options: {
     const scan = scanPackageSourceRoot(source.root);
 
     if (scan.status === 'unavailable') {
-      // Absent is the only state that means "no packages here". A root
-      // that exists as something other than a directory is a source that
-      // could not be read, and reporting it as empty makes installed
-      // characters vanish: selecting one then fails with "not found",
-      // sending the operator to install a package that is already there.
-      // Nothing else covers this — the home guard type-checks the data
-      // and lock roots but accepts whatever the packages root is — so
-      // silence here is silence everywhere. Plugin discovery already
-      // draws the line at ENOENT for the same reason.
+      // Only ENOENT means "no packages here"; other errors must not read as empty.
       if (isNodeErrorWithCode(scan.error, 'ENOENT')) {
         continue;
       }
@@ -141,9 +118,7 @@ export function discoverCharacterPackages(options: {
       diagnostics.push(characterPackageSourceUnavailable(source));
       continue;
     }
-    // Character packages are data-only, so stage the complete source read
-    // and publish nothing until the source directory still has the identity
-    // that owned enumeration.
+    // Publish nothing unless the source directory is still the one enumerated.
     const sourceCandidates: DiscoveredCharacterPackage[] = [];
     const sourceDiagnostics: CharacterPackageDiagnostic[] = [];
 
@@ -375,14 +350,8 @@ function characterDescriptorReadMessage(
   }
 }
 
-/**
- * One definition owns a character id per runtime — and the id it owns is
- * the durable `character-data/<id>/` directory name, so candidates are
- * grouped by what the filesystem can tell apart rather than by the exact
- * string. `mira` and `Mira` address one directory on a case-insensitive
- * volume, so accepting both would hand the second selection an identity
- * mismatch against the marker the first stamped.
- */
+// Grouped by collision key, not exact id: `mira` and `Mira` address one
+// `character-data/<id>/` directory on a case-insensitive volume.
 function applyCharacterIdentityPolicy(options: {
   readonly candidates: readonly DiscoveredCharacterPackage[];
   readonly diagnostics: CharacterPackageDiagnostic[];

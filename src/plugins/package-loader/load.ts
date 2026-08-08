@@ -1,8 +1,3 @@
-/**
- * Load phase of the runtime plugin package loader: imports a discovered
- * package entry and validates that its factory returns the manifest it
- * was discovered with.
- */
 import {createRequire} from 'node:module';
 
 import type {

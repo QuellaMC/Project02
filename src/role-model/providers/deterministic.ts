@@ -1,9 +1,5 @@
 import {type CharacterAgent, type VisibleMessage} from '../../core/index.ts';
 
-/**
- * Deterministic local fallback agent: replies from a fixed script so the
- * conversation loop stays runnable with no provider configured.
- */
 export function createDeterministicCharacterAgent(): CharacterAgent {
   return {
     reply(input) {

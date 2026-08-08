@@ -5,14 +5,9 @@ export function isProject02Identifier(value: unknown): boolean {
 }
 
 /**
- * The key two identifiers collide on when one names a durable directory.
- *
- * Case-insensitive volumes (default macOS and Windows) are the reason: ids
- * that fold together address one directory there and two directories
- * elsewhere, so a runtime that treats them as distinct is only portable by
- * accident. ASCII lowercasing is the complete fold for the accepted
- * charset above rather than an approximation of one; widening the pattern
- * to non-ASCII means widening this fold in the same edit.
+ * Case-insensitive volumes (default on macOS and Windows) address ids that
+ * fold together as one directory. ASCII lowercasing is the complete fold for
+ * the pattern above; widening that pattern means widening this fold.
  */
 export function project02IdentifierCollisionKey(id: string): string {
   return id.toLowerCase();

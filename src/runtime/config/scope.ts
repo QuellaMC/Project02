@@ -1,16 +1,4 @@
-/**
- * Scope-aware runtime config mutations: the same control operations,
- * targeted at either the global config.json or one character's
- * overlay. One resolved target carries the write path, owning global
- * layer, and scope policy for document and plugin-field changes.
- * Character scope rejects global-only fields and secret operations,
- * verifies the caller's layered expectation across both authored
- * documents, and then runs the per-file mutation
- * machinery against the overlay file — never the global one, and never
- * through the global bootstrap (which would seed a store root into the
- * overlay): an absent overlay is first materialized as a minimal
- * versioned document.
- */
+/** One control operation, aimed at the global config or one overlay. */
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
   isJsonBoundaryObject,
@@ -87,10 +75,7 @@ export type RuntimeConfigControlRequest =
 export type RuntimeConfigCharacterMaterialization = {
   /** Pure package-owned overlay contribution; never a merged global view. */
   readonly document: Project02RuntimeConfig;
-  /**
-   * True when the package version differs from the marker. An absent
-   * overlay is always materialized regardless of this flag.
-   */
+  /** Set when the package version differs; an absent overlay fills anyway. */
   readonly fillMissingFields: boolean;
 };
 
@@ -168,10 +153,7 @@ export function applyRuntimeConfigControlOperation(options: {
 export type SimulatedCharacterOverlayCandidate =
   | {
       readonly status: 'valid';
-      /**
-       * The overlay document the commit would write. Startup judges its
-       * plan against this rather than against the bytes on disk.
-       */
+      /** The document the commit would write, not the bytes on disk. */
       readonly document: Project02RuntimeConfig;
       readonly configChanged: boolean;
       readonly autoEnabledPluginIds: readonly string[];
@@ -179,22 +161,8 @@ export type SimulatedCharacterOverlayCandidate =
   | {readonly status: 'invalid'; readonly message: string};
 
 /**
- * What the character overlay would contain if this materialization and
- * edit were committed, without committing anything.
- *
- * Startup used to answer "may I proceed?" from the overlay on disk, then
- * write, then discover the write was invalid — leaving a half-created
- * store behind a failed command. It also had to exempt the overlay's own
- * errors whenever a run carried an edit, on the theory that the edit
- * fixed them; an edit only fixes the values it touches, so a second bad
- * value slipped through to the commit. Simulating removes both: the plan
- * is judged against the result, so an edit that fixes everything passes
- * and one that leaves a value invalid is rejected before the first
- * directory exists.
- *
- * This runs the commit's own preparation — same merge, same candidate
- * validation — so the two cannot disagree. It never locks or writes, and
- * it does not require the data directory to exist yet.
+ * Runs the commit's own preparation, so a plan and its commit cannot disagree.
+ * It never locks or writes, and the data directory need not exist yet.
  */
 export function simulateCharacterOverlayCandidate(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
@@ -235,11 +203,7 @@ export function simulateCharacterOverlayCandidate(options: {
       autoEnabledPluginIds: prepared.context.autoEnabledPluginIds,
     });
   } catch (error: unknown) {
-    // The candidate being unacceptable is the answer, not a failure:
-    // both the mutation seam's rejection and the validators' TypeError
-    // describe config this startup must refuse. Anything else is a real
-    // fault — a drifted target, an unreadable home — and keeps its own
-    // identity through the caller's terminal-error path.
+    // These two mean unacceptable config; anything else is a real fault.
     if (
       error instanceof RuntimeConfigMutationError ||
       error instanceof TypeError
@@ -370,13 +334,7 @@ function runtimeConfigControlCharacterLocation(
 
 export {assertGlobalConfigLoadableForCharacterScope};
 
-/**
- * Deterministic preflight for character-scoped mutations, mirroring
- * the mutation machinery's own set/unset validation: an unknown path,
- * a dialect violation (global-only field), or an invalid value is
- * rejected here, before any ensure step materializes a marker or data
- * directory for the character.
- */
+/** Rejects before any ensure step materializes a marker or data directory. */
 export function assertScopedMutationOperationAllowed(
   operation: RuntimeConfigMutationOperation,
 ): void {
@@ -412,10 +370,7 @@ export function assertScopedMutationOperationAllowed(
   }
 }
 
-/**
- * Read-only preflight for CLI verbs: validates the selected global
- * document before ensure materializes any durable character state.
- */
+/** Validates the global document before any durable state is created. */
 export function assertScopedGlobalLayerLoadable(options: {
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
   readonly env?: NodeJS.ProcessEnv;
@@ -432,10 +387,7 @@ type PreparedScopedRuntimeConfigControlCandidate = {
   readonly context: RuntimeConfigCharacterMaterializationOutcome;
 };
 
-/**
- * The one pure candidate builder used by read-only preparation and the
- * locked apply. It never reloads, locks, retries, or writes.
- */
+/** Pure: it never reloads, locks, retries, or writes. */
 function prepareScopedRuntimeConfigControlCandidate(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly snapshot: RuntimeConfigControlSnapshot;
@@ -466,10 +418,7 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
 
   const overlay = requiredCharacterOverlay(options.snapshot);
 
-  // The authored document when the file was readable, so a repair edits
-  // the operator's real bytes; the minimal versioned document only when
-  // there is nothing on disk to edit. Never the global bootstrap, which
-  // would seed a store root into the overlay.
+  // Never the global bootstrap: it would seed a store root into the overlay.
   const overlayBase =
     overlay.authoredDocument ??
     Object.freeze({
@@ -484,9 +433,6 @@ function prepareScopedRuntimeConfigControlCandidate(options: {
     loadedConfig: {
       source: 'path',
       path: options.target.configPath,
-      // The overlay's own authored layer: the shared preparer applies
-      // the operation to these bytes and validates the whole candidate,
-      // exactly as it does for the global document.
       authoredDocument: materialization.document,
       diagnostics: Object.freeze([]),
     },
@@ -565,12 +511,7 @@ type CharacterMaterializationMerge =
     readonly document: JsonBoundaryObject;
   };
 
-/**
- * Fills package-owned defaults into the overlay's authored document.
- * It only ever adds what is missing, so it composes with repair: an
- * authored value the package also defines stays exactly as written,
- * including one that is currently invalid and about to be fixed.
- */
+/** Only ever adds what is missing; an authored value is never overwritten. */
 function mergeCharacterMaterializationIntoOverlay(options: {
   readonly current: JsonBoundaryObject;
   readonly materialization: RuntimeConfigCharacterMaterialization | undefined;
@@ -585,10 +526,7 @@ function mergeCharacterMaterializationIntoOverlay(options: {
 
   const currentPlugins = authoredOverlaySection(options.current, 'plugins');
 
-  // A malformed plugins section cannot be materialized into. Leaving it
-  // untouched keeps the authored bytes intact for the candidate
-  // validation, which names the real problem instead of this merge
-  // inventing a second error for the same document.
+  // Left untouched so the candidate validation names the real problem.
   if (currentPlugins.status === 'malformed') {
     return unmaterializedOverlayDocument(
       options.current,
@@ -655,19 +593,7 @@ function unmaterializedOverlayDocument(
   });
 }
 
-/**
- * What a document holds at `key`, keeping "nothing is here" apart from
- * "something is here, but it is not a section".
- *
- * Answering both with `undefined` is what let an authored value be
- * overwritten. A merge that fills in what is missing reads "malformed"
- * as "missing" and writes package defaults over the very bytes that are
- * the problem — so the operator loses what they wrote to a run that
- * reported nothing wrong. The two states differ in exactly the way that
- * matters here: absent is a thing to fill in, malformed is a thing to
- * report. Naming them separately makes every caller say which it means
- * rather than leaving one of the two to be remembered.
- */
+/** Absent and malformed stay apart: one is filled in, one is reported. */
 type AuthoredOverlaySection =
   | {readonly status: 'absent'}
   | {readonly status: 'malformed'}
@@ -717,9 +643,7 @@ function mergeCharacterPluginMaterialization(
   const enabled = authoredEnabled ?? defaults.enabled;
 
   return Object.freeze({
-    // The authored wrapper is preserved rather than rebuilt: an
-    // unknown or invalid field an operator wrote stays in the document
-    // for the candidate validation to name.
+    // Preserved, not rebuilt: an invalid authored field survives to be named.
     plugin: changed
       ? Object.freeze({
           ...existing,
@@ -740,12 +664,7 @@ function mergeMissingCharacterPluginConfig(options: {
   readonly value: JsonBoundaryObject | undefined;
   readonly fieldsChanged: boolean;
 } {
-  // A malformed config is not a missing one, so there is nothing here to
-  // fill in. Materializing into it would replace what the operator
-  // authored with package defaults and report success, which is the one
-  // outcome a merge that only ever adds must never produce. Contributing
-  // no value leaves the authored bytes in the plugin wrapper below, where
-  // the candidate validation names them as `plugins.<id>.config`.
+  // A malformed config is not a missing one; filling it would erase authoring.
   if (options.current.status === 'malformed') {
     return Object.freeze({value: undefined, fieldsChanged: false});
   }

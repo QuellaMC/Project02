@@ -36,16 +36,8 @@ export type RuntimePluginCatalogEntry =
   RuntimePluginHostServiceCatalogEntry | RuntimePluginPackageCatalogEntry;
 
 /**
- * The one answer to "does this requested id name an installed plugin".
- *
- * Requested ids arrive from operator arguments and model tool input, so
- * the catalog map is read as data: `constructor`, `toString`, and every
- * other `Object.prototype` key resolve to an inherited function on a
- * plain index, which then fails on `.manifest` instead of reporting the
- * plugin as uninstalled. The manifest must also claim the key it was
- * filed under, because a catalog entry keyed by one id and manifesting
- * another would otherwise apply an edit to a different plugin than the
- * caller named.
+ * Requested ids arrive as untrusted data, so inherited keys must not resolve.
+ * A manifest that does not claim its key would edit the wrong plugin.
  */
 export function installedRuntimePluginCatalogEntry(
   catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,

@@ -1,8 +1,3 @@
-/**
- * Output contract of the turn-evidence projection: the read-only
- * `Inspect*` shapes the inspect CLI renders. The projection that
- * produces them lives in `turn-projection.ts`.
- */
 import type {ConversationLogRecord, RuntimeTurnStatus} from './records.ts';
 import type {
   RuntimePluginAccessMap,
@@ -131,10 +126,8 @@ export type InspectPluginToolListing = {
   readonly validationOwner: string;
   readonly requiresConfirmation: boolean;
   /**
-   * What the tool said about itself, so an audit can tell a read-only
-   * tool from one that deletes or reaches the network. Absent when the
-   * tool declared nothing — which is itself the answer, and different
-   * from declaring the call harmless.
+   * Absent when the tool declared nothing, which differs from declaring the
+   * call harmless.
    */
   readonly annotations?: RuntimePluginToolAnnotations;
   readonly concurrency?: string;

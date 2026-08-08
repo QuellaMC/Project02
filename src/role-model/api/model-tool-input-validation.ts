@@ -1,21 +1,3 @@
-/**
- * Model tool input validation: checks a proposed tool call's input
- * against the tool's declared JSON Schema input contract before the call
- * may commit.
- *
- * Both judgments about the contract belong to Ajv: whether the schema is
- * valid at the manifest gate, and whether an input satisfies it in the
- * loop. One engine, one configuration — a contract the gate admits is
- * exactly a contract the runtime can enforce. What stays here is what
- * Ajv does not answer: whether a value survives the JSON boundary, and
- * how a failure is phrased, because rejection details are fed back to
- * the model as its correction note.
- *
- * The accepted input is the JSON boundary snapshot of the proposal, not
- * the proposal itself: normalized, bounded, and frozen. Callers execute
- * that snapshot, so what a plugin receives is what validation accepted
- * and what the log records, on every path into the seam.
- */
 import {Ajv, type ErrorObject, type ValidateFunction} from 'ajv';
 import {canonicalJsonStringify} from '../../shared/canonical-json.ts';
 import {
@@ -35,19 +17,9 @@ export type ModelToolInputValidationResult =
       readonly details: string;
     };
 
-// One instance judges the contract and the input, so what the gate
-// admits and what the runtime enforces can never drift. Strict mode
-// makes an author's mistake a compile failure instead of a silently
-// unenforced wish: an unknown keyword, an object keyword on a
-// non-object type. strictRequired stays off because it is the one
-// strict flag that polices more than the engine enforces — a required
-// name is enforced wherever it is declared, composed allOf included,
-// and is never silently ignored — and the gate must not reject what the
-// engine would enforce. Own-property iteration keeps a declared field
-// named after an Object.prototype member — "toString", "constructor" —
-// from being satisfied by the inherited value. The instance registers
-// nothing it compiles, so a contract carrying an $id cannot collide
-// with a later compile of the same or another contract.
+// strictRequired is off: it rejects contracts the engine does enforce.
+// ownProperties stops inherited prototype members satisfying a field.
+// addUsedSchema is off so a contract $id cannot collide on recompile.
 const ajv = new Ajv({
   allErrors: true,
   strict: true,
@@ -57,22 +29,14 @@ const ajv = new Ajv({
   addUsedSchema: false,
 });
 
-// Keyed by canonical content, not object identity: the storage codec
-// re-derives a fresh contract object for every decoded record, and each
-// distinct schema should cost one compile per session, not one per
-// decode.
+// Content-keyed: the storage codec rebuilds the contract on every decode.
 const compiledContracts = new Map<string, ValidateFunction>();
 
 export type ModelToolInputContractCompilation =
   | {readonly status: 'compiled'}
   | {readonly status: 'invalid'; readonly details: string};
 
-/**
- * Whether Ajv accepts the contract as JSON Schema — the manifest gate's
- * validity question. A contract that compiles here is enforceable, and
- * the compile is cached, so the gate's answer is the session's
- * validator.
- */
+/** The gate's compile is cached, so it becomes the session's validator. */
 export function compileModelToolInputContract(
   inputContract: ModelToolInputContract,
 ): ModelToolInputContractCompilation {
@@ -139,16 +103,10 @@ function compiledContractValidator(
     return compiled;
   }
 
-  // Compiled from the frozen contract itself: Ajv reads the schema
-  // without mutating it, so a defensive copy would only split the
-  // compile cache key from the contract the runtime holds.
   const validate = ajv.compile(inputContract);
 
-  // Tool dispatch is synchronous policy; an $async validator returns a
-  // Promise where every caller expects a verdict, which would read as
-  // "accepted" and detonate later as an unhandled rejection. Ajv types
-  // compile() as synchronous even for $async schemas, so the runtime
-  // marker is read through a cast the types omit.
+  // An $async validator returns a Promise, which would read as accepted.
+  // Ajv's compile() type omits $async, so the marker needs a cast.
   if ((validate as {readonly $async?: boolean}).$async === true) {
     throw new TypeError(
       'asynchronous schemas ($async) cannot gate tool dispatch',
@@ -159,19 +117,8 @@ function compiledContractValidator(
   return validate;
 }
 
-/**
- * The first failure, phrased for the model. Ajv reports every failure;
- * the model can only act on one at a time, and the order below is the
- * order a reader would notice them: a missing field before an unexpected
- * one, either before a value that is merely the wrong shape.
- *
- * A failed oneOf or anyOf speaks first, and alone. Its branch failures
- * describe alternatives rather than the input — an input mixing two
- * closed branches earns an "unsupported field" from each side — and Ajv
- * gives branch-local errors no stable marking to filter by once a
- * branch is a $ref. The one statement that is always true of the input
- * is the combinator's own: match one alternative.
- */
+// A failed oneOf/anyOf speaks alone: its branch errors describe the
+// alternatives, not the input, and a $ref branch cannot be filtered out.
 function modelToolInputRejectionDetails(options: {
   readonly toolName: string;
   readonly errors: readonly ErrorObject[];
@@ -216,8 +163,7 @@ function modelToolInputRejectionDetails(options: {
     return `${options.toolName} input does not match its declared contract.`;
   }
 
-  // An error raised while checking a property name carries the name; the
-  // value path would point at the container and hide which key to fix.
+  // A propertyName error's instancePath points at the container, not the key.
   if (typeof first.propertyName === 'string') {
     return `${options.toolName} input property name "${first.propertyName}" ${describeExpectation(first)}.`;
   }
@@ -265,16 +211,10 @@ function enumValues(error: ErrorObject): readonly string[] {
   return Array.isArray(allowed) ? allowed.map(allowedValueText) : [];
 }
 
-// An allowed value is named for the model's retry: strings read best
-// bare, and anything structured is its JSON text — String() would
-// collapse an object alternative to "[object Object]" and tell the
-// model nothing.
 function allowedValueText(value: unknown): string {
   return typeof value === 'string' ? value : JSON.stringify(value);
 }
 
-// A type failure's expectation lives in params.type — a name or an array
-// of names for a union — not on the error's absent schema member.
 function expectedTypeNames(error: ErrorObject): readonly string[] {
   const params: unknown = error.params;
   const expected = isJsonRecord(params) ? params['type'] : undefined;
@@ -286,12 +226,7 @@ function expectedTypeNames(error: ErrorObject): readonly string[] {
   return typeof expected === 'string' ? [expected] : ['valid'];
 }
 
-/**
- * Ajv reports `/memory/tags/0`; the model was shown `memory.tags[0]`.
- * Segments are JSON Pointer text, so `~1` and `~0` decode back to the
- * `/` and `~` the field was declared with. The root is `$` so a
- * whole-input failure still names something.
- */
+// Ajv instancePaths are JSON Pointers: ~1 and ~0 decode to / and ~.
 function fieldPathFor(instancePath: string, property?: string): string {
   const segments = instancePath
     .split('/')

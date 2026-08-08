@@ -18,7 +18,6 @@ import {runtimeLocationForTest} from '../support/runtime-config.ts';
 
 const characterId = 'mira';
 
-/** A store whose overlay gives `character-state` the given `config`. */
 function storeWithAuthoredPluginConfig(config: unknown): string {
   const storeRoot = createTestTempRoot('project02-malformed-overlay-');
   const dataRoot = characterDataDirPath(storeRoot, characterId);
@@ -69,18 +68,12 @@ function simulateMaterialization(storeRoot: string) {
 
 describe('character overlay whose plugin config is not an object', () => {
   it('rejects the run and names the field instead of repairing it', async () => {
-    // A value typed where a section belongs: what an operator produces
-    // by hand, and what materialization used to overwrite.
     const storeRoot = storeWithAuthoredPluginConfig('KEEP-ME');
 
     await ensureInitializedProject02Home({homeRoot: storeRoot});
 
     const simulated = simulateMaterialization(storeRoot);
 
-    // Materializing defaults into a malformed value is the silent
-    // failure: it produces a valid document by discarding the authored
-    // one. The operator has to be told which field is wrong, because
-    // that is the only way they can fix it themselves.
     expect(simulated.status).toBe('invalid');
     expect(simulated.status === 'invalid' && simulated.message).toContain(
       `plugins.character-state.config`,
@@ -94,9 +87,6 @@ describe('character overlay whose plugin config is not an object', () => {
 
     const simulated = simulateMaterialization(storeRoot);
 
-    // The other half of the same rule: refusing to write over a
-    // malformed value must not cost a well-formed one its defaults.
-    // Materialization adds what is missing and touches nothing else.
     expect(simulated.status).toBe('valid');
     expect(
       simulated.status === 'valid' &&

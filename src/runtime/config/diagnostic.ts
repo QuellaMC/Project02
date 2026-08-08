@@ -11,10 +11,6 @@ export function withRuntimeConfigDiagnosticOrigin(
   return Object.freeze({...diagnostic, origin});
 }
 
-/**
- * CLI-facing attribution prefix naming the character overlay a
- * diagnostic came from; global-document diagnostics render bare.
- */
 export function runtimeConfigDiagnosticAttribution(
   diagnostic: RuntimeConfigDiagnostic,
 ): string {
@@ -24,15 +20,7 @@ export function runtimeConfigDiagnosticAttribution(
     : '';
 }
 
-/**
- * The one classifier separating activation-readiness failures from
- * authoring errors: a required value or secret that is merely not
- * supplied yet describes an incomplete environment, while every other
- * error describes an invalid authored document. Package-config
- * materialization and startup preflight both block on exactly the
- * authoring side, so a new resolver error code fails safe in both
- * without either keeping its own code list.
- */
+/** Unlisted codes count as authoring errors, so a new code fails safe. */
 export function runtimeConfigDiagnosticIsReadinessFailure(
   diagnostic: RuntimeConfigDiagnostic,
 ): boolean {

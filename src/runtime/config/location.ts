@@ -26,32 +26,20 @@ import {
   type SelectedProject02RuntimeConfigLocation,
 } from './types.ts';
 
-/**
- * Operator-selected runtime location inputs. These are retained with the
- * resolved value so a candidate global config can be resolved again without
- * losing explicit CLI or embedding choices.
- */
+/** Retained so a re-resolve keeps the operator's explicit choices. */
 export type RuntimeLocationCliState = {
   readonly storeRoot?: string;
   readonly configPath?: string;
   readonly character?: string;
 };
 
-/**
- * The selected global-config owner and effective runtime home. Character
- * storage is intentionally absent: startup binds it only after character
- * activation has validated the selected id.
- */
+/** No character storage; it is bound only after activation validates. */
 export type ResolvedProject02ConfigLocation = {
   readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
   readonly homeRoot: string;
 };
 
-/**
- * The immutable location of one activated character runtime. Every
- * character-scoped consumer receives this value instead of re-selecting a
- * character from mutable global config.
- */
+/** Consumers take this instead of re-reading the character from config. */
 export type ResolvedProject02RuntimeLocation =
   ResolvedProject02ConfigLocation & {
     readonly characterScope: RuntimeConfigCharacterScope;
@@ -59,9 +47,7 @@ export type ResolvedProject02RuntimeLocation =
   };
 
 type ResolvedRuntimeConfigScopeTargetBase = {
-  /** The file this target's mutations write. */
   readonly configPath: string;
-  /** Immutable physical identity used for admission, locks, and writes. */
   readonly canonicalConfigPath: string;
   /** One frozen environment used by activation, inspection, and mutation. */
   readonly env: NodeJS.ProcessEnv;
@@ -111,11 +97,7 @@ type ResolvedProject02HomeSelection =
   | Readonly<{kind: 'owner'; value: string}>
   | Readonly<{kind: 'default'}>;
 
-/**
- * Opaque transaction candidate. It intentionally has no selected-config
- * provenance and cannot be activated, character-bound, or turned into a
- * config-control target.
- */
+/** Deliberately without provenance: a candidate can never be activated. */
 export type RuntimeConfigCandidateHomeTarget = {
   readonly homeRoot: string;
 };
@@ -148,11 +130,7 @@ export function resolveProject02ConfigLocation(options: {
   });
 }
 
-/**
- * Validates the operator-selected home independently from the effective home
- * selected by config content. An explicit config remains standalone, while an
- * accompanying --store still carries its own home-ownership obligation.
- */
+/** Checks the operator-selected home, not the effective one from config. */
 export function assertSelectedProject02HomeAdoptable(
   location: ResolvedProject02ConfigLocation,
   options: {readonly requireRealEnvFile?: boolean} = {},
@@ -215,12 +193,7 @@ export function assertRuntimeConfigCandidateHomeAdoptable(
   );
 }
 
-/**
- * Checks a loader-owned reload against its existing effective-home authority.
- * An unchanged authored selector keeps the physical target chosen before the
- * transaction, even if an alias spelling now points elsewhere. A changed
- * selector is resolved afresh so the transaction can reject real home drift.
- */
+/** An unchanged selector keeps its bound target even if an alias moved. */
 export function assertProject02ReloadedConfigUsesBoundHome(options: {
   readonly configLocation: ResolvedProject02ConfigLocation;
   readonly loadedConfig: SelectedLoadedProject02RuntimeConfig;
@@ -373,11 +346,7 @@ export function bindProject02CharacterRuntimeLocation(options: {
   return location;
 }
 
-/**
- * Constructs and brands the complete config-control target. Target
- * construction lives beside resolved-location ownership so structural
- * callers cannot mint the runtime brand that lower transaction seams check.
- */
+/** The only place the target brand is minted; lower seams check it. */
 export function resolveRuntimeConfigScopeTarget(
   options: GlobalRuntimeConfigLocation,
 ): Extract<ResolvedRuntimeConfigScopeTarget, {readonly scope: 'global'}>;
@@ -390,9 +359,7 @@ export function resolveRuntimeConfigScopeTarget(
 export function resolveRuntimeConfigScopeTarget(
   options: ScopedRuntimeConfigLocation,
 ): ResolvedRuntimeConfigScopeTarget {
-  // Selection already consumed any environment-based config selector. Freeze
-  // every other runtime value while preserving that selected path without
-  // evaluating a potentially accessor-backed selector a second time.
+  // The config selector may be accessor-backed; it must not be read twice.
   const configLocation = requireResolvedProject02ConfigLocation(
     options.runtimeLocation,
   );
@@ -514,11 +481,7 @@ export function loadProject02RuntimeConfigForLocation(
   );
 }
 
-/**
- * Verifies that the effective home still names the physical directory target
- * captured with this location. Missing homes bind their nearest existing
- * ancestor, then adopt the new directory identity once it materializes.
- */
+/** A missing home binds its nearest ancestor until the directory exists. */
 export function assertResolvedProject02HomeCurrent(
   location: ResolvedProject02ConfigLocation,
 ): void {
@@ -571,11 +534,7 @@ function assertProject02HomeTargetCurrent(
   }
 }
 
-/**
- * One admission seam for every operation that interprets the effective home
- * as Project02-owned storage. The identity checks bracket the storage
- * contract so a replacement during admission cannot silently become current.
- */
+/** The identity check brackets admission so a mid-check replacement fails. */
 export function assertResolvedProject02HomeAdoptable(
   location: ResolvedProject02ConfigLocation,
   options: {readonly requireRealEnvFile?: boolean} = {},

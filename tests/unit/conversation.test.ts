@@ -182,9 +182,7 @@ describe('conversation core', () => {
   });
 
   it('restores transcripts of any role shape, including consecutive same-role and trailing messages', () => {
-    // Commit-as-emitted histories are not pairs: a turn may hold several
-    // character messages, a rejected turn leaves a lone user message, and a
-    // crash can end the log after either role.
+    // Commit-as-emitted histories are not user/character pairs.
     const session = createConversationSession({
       character: testCharacterProfile,
       visibleTranscript: [
@@ -286,14 +284,11 @@ describe('conversation core', () => {
       createUserSpeaker('a'.repeat(maxSpeakerDisplayNameLength)),
     ).not.toThrow();
 
-    // The name is stamped onto every user message, so an oversized value would
-    // be repeated per turn in durable logs, rehydration, and the prompt.
     expect(() =>
       createUserSpeaker('a'.repeat(maxSpeakerDisplayNameLength + 1)),
     ).toThrow(/at most 128 characters/);
 
-    // Chat interpolates the name before a colon, so a newline would
-    // let it forge additional output lines.
+    // Chat prints `<name>: <text>`, so a newline forges output lines.
     expect(() => createUserSpeaker('Mira\nError: failed')).toThrow(
       /single-line/,
     );

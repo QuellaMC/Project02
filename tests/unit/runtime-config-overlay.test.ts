@@ -260,9 +260,8 @@ describe('character overlay config loader', () => {
 
     const overlay = loadCharacterOverlay(dataRoot);
 
-    // Repairable: the authored bytes survive validation failure, so the
-    // control seam can edit the real document. Unusable: no validated
-    // config, so resolution and reads still treat the overlay as broken.
+    // Repairable and unusable at once: the bytes survive for the control seam
+    // to edit, but no validated config reaches resolution.
     expect(overlay.authoredDocument).toEqual({
       version: runtimeConfigVersion,
       project02: {userDisplayName: 42},
@@ -286,9 +285,8 @@ describe('character overlay config loader', () => {
   });
 
   it('stays structurally incompatible with the global loaded-config type', () => {
-    // Structural guard (R7): an overlay must never reach the global
-    // resolvers or re-derive a store root from its own path. This fails
-    // to compile if the overlay type ever becomes assignable.
+    // R7: an overlay must never reach the global resolvers, so this stops
+    // compiling if the type ever becomes assignable.
     type OverlayAssignableToGlobal =
       LoadedProject02CharacterOverlayConfig extends LoadedProject02RuntimeConfig
         ? true
@@ -320,9 +318,7 @@ describe('character overlay config loader', () => {
     const dataRoot = overlayDataRoot();
     const overlayPath = characterOverlayConfigPath(dataRoot);
 
-    // Two bad fields. An operator fixing one still holds an invalid
-    // overlay, which is exactly the case a single "unusable" sentinel
-    // could not tell from having fixed nothing.
+    // Two bad fields, so fixing one still leaves the overlay invalid.
     writeRuntimeConfig(overlayPath, {
       project02: {storeRoot: '/elsewhere', character: 'nova'},
     });
@@ -337,9 +333,8 @@ describe('character overlay config loader', () => {
       loadCharacterOverlay(dataRoot),
     );
 
-    // A currency gate holding `before` must decline against `after`.
-    // Both overlays are invalid; only the bytes moved, and the bytes are
-    // what an operator edits.
+    // Both overlays are invalid; only the bytes moved, and a currency gate
+    // holding `before` must still decline against `after`.
     expect(before).not.toEqual(after);
     expect(createRuntimeConfigFingerprint(before ?? {})).not.toBe(
       createRuntimeConfigFingerprint(after ?? {}),
@@ -356,9 +351,7 @@ describe('character overlay config loader', () => {
       loadCharacterOverlay(dataRoot),
     );
 
-    // Bytes that never arrived cannot be fingerprinted as bytes, so that
-    // state keeps its own sentinel rather than borrowing the empty
-    // document's fingerprint.
+    // Bytes that never arrived keep their own sentinel.
     expect(invalid).not.toEqual({$overlayUnreadable: true});
 
     writeRuntimeConfig(overlayPath, {});
@@ -367,8 +360,6 @@ describe('character overlay config loader', () => {
       loadCharacterOverlay(dataRoot),
     );
 
-    // A valid empty overlay and an invalid one must not agree either:
-    // the wrapper is what says which of the two this layer is.
     expect(empty).not.toEqual(invalid);
   });
 });
@@ -427,8 +418,7 @@ describe('layered runtime config resolution', () => {
             userDisplayName: 'Overlay Name',
             roleModelProvider: 'nvidia',
             defaultMemoryProvider: 'memory.overlay',
-            // Smuggled global-only values must never cross the merge, even
-            // when a hand-built overlay bypasses the loader's rejection.
+            // Hand-built to bypass the loader's rejection of global-only keys.
             storeRoot: '/smuggled-home',
             character: 'nova',
           },
@@ -440,8 +430,7 @@ describe('layered runtime config resolution', () => {
           userDisplayName: 'Overlay Name',
           roleModelProvider: 'nvidia',
           defaultMemoryProvider: 'memory.overlay',
-          // Smuggled global-only values must never cross the merge, even
-          // when a hand-built overlay bypasses the loader's rejection.
+          // Hand-built to bypass the loader's rejection of global-only keys.
           storeRoot: '/smuggled-home',
           character: 'nova',
         },
@@ -503,8 +492,6 @@ describe('layered runtime config resolution', () => {
       }),
     });
 
-    // The overlay re-enables the plugin and replaces one field; the
-    // other field survives from the global layer.
     expect(reEnabled.pluginConfigs['demo.layered']).toMatchObject({
       settings: {resolved: true, value: {from: 'overlay'}},
       endpoints: {resolved: true, value: ['global']},
@@ -531,8 +518,7 @@ describe('layered runtime config resolution', () => {
       }),
     });
 
-    // Disabling via overlay suppresses the required-config validation
-    // that an enabled plugin with no config would fail.
+    // Disabling via overlay suppresses the required-config validation.
     expect(disabledByOverlay.diagnostics).toEqual([]);
   });
 
@@ -663,10 +649,8 @@ describe('startup with a character overlay', () => {
 
     mkdirSync(dataRoot, {recursive: true});
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
-    // Authored bytes are readable, so the config CLI could repair this
-    // overlay. A startup that is not repairing it must still refuse: the
-    // permission is granted by a requested mutation, never by the shape
-    // of the invalid value.
+    // Repairability is granted by a requested mutation, never by the shape of
+    // the invalid value.
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       project02: {userDisplayName: 42},
     });

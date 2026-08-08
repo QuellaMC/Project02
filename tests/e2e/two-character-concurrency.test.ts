@@ -66,8 +66,8 @@ async function runOneMessageChat(
     let stdout = '';
     let stderr = '';
     let sent = false;
-    // Generous on purpose: loaded CI runners have taken >5s just to
-    // cold-start the child Node process before any output appears.
+    // Generous on purpose: loaded CI runners take seconds just to cold-start
+    // the child Node process.
     const timeout = setTimeout(() => {
       child.kill();
       rejectExit(new Error(`Timed out waiting for chat: ${stdout}${stderr}`));
@@ -121,9 +121,8 @@ describe('two characters from one home', () => {
     expect(nova.stdout).toContain('Nova:');
     expect(`${mira.stderr}${nova.stderr}`).not.toContain('busy');
 
-    // Durable conversations landed in per-character directories, each
-    // with its own lock root (leases are released on clean exit); the
-    // home lock root never hosts session locks.
+    // Leases are released on clean exit, and the home lock root never hosts
+    // session locks.
     for (const characterId of ['mira', 'nova']) {
       const dataRoot = characterDataDirPath(homeRoot, characterId);
 

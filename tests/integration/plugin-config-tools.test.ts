@@ -579,8 +579,8 @@ describe('host-owned runtime plugin management tools', () => {
   });
 
   it('names the broken contract when a confirmable tool prepares nothing', async () => {
-    // A tool returning no prepared effect either acted already or set
-    // the flag by mistake; the model is told which contract it broke.
+    // A tool returning no prepared effect either acted already or set the flag
+    // by mistake.
     const manifest = configurablePluginManifest();
     let confirmationCalls = 0;
     const pluginId = 'settings.acts-immediately.fixture';
@@ -632,7 +632,6 @@ describe('host-owned runtime plugin management tools', () => {
     expect((result as {message?: string}).message).toMatch(
       /prepared no effect to confirm/iu,
     );
-    // No prompt: there was never an effect to show the user.
     expect(confirmationCalls).toBe(0);
   });
 
@@ -937,8 +936,8 @@ describe('host-owned runtime plugin management tools', () => {
       },
     });
 
-    // A reloader alone is not enough: a cold (installed, not live) plugin
-    // cannot be live-applied either.
+    // A cold plugin is installed but not live, so a reloader alone is not
+    // enough to apply to it.
     const hostWithColdPlugin = createRuntimePluginHost({
       storeRoot,
       pluginConfigControl: runtimePluginConfigControlStateForTest({
@@ -1064,8 +1063,7 @@ describe('host-owned runtime plugin management tools', () => {
       output: {appliesTo: 'future_host_construction', reloadRequired: true},
     });
 
-    // Committed same-plugin changes reload as one group and a mixed group
-    // always defers, so the live field must stop promising next_turn now.
+    // Same-plugin changes reload as one group, and a mixed group always defers.
     const liveAfterMix = await updateConfigField(host, {
       pluginId: manifest.id,
       fieldName: 'tone',
@@ -1101,8 +1099,8 @@ describe('host-owned runtime plugin management tools', () => {
       output: {appliesTo: 'next_turn'},
     });
 
-    // The turn record is keyed by the full runtime identity: a reused event
-    // id under a fresh trace is a different turn, not a mixed group.
+    // The turn record is keyed by the full runtime identity, so a reused event
+    // id under a fresh trace is a different turn.
     const freshTrace = await updateConfigField(
       host,
       {
@@ -1177,8 +1175,7 @@ describe('host-owned runtime plugin management tools', () => {
         control: testRuntimePluginConfigControlCapability,
         pluginManifests: [manifest],
       }),
-      // Deny exactly the session-scoped field; a denied update never commits,
-      // so it must not poison the live field's next_turn promise.
+      // Deny exactly the session-scoped field; a denied update never commits.
       toolConfirmationHandler: request => ({
         status:
           request.preview['fieldName'] === 'signoff' ? 'denied' : 'approved',
@@ -2287,11 +2284,8 @@ describe('host-owned runtime plugin management tools', () => {
   });
 });
 
-/**
- * A third-party plugin that prepares a config effect for approval, rather
- * than the host's own config-update tool. Used to prove the confirmation
- * protocol is a contract any plugin can meet, not a carve-out for one ID.
- */
+// Proves the confirmation protocol is a contract any plugin can meet, not a
+// carve-out for the host's own config-update tool.
 function arbitraryConfigPluginManifest(id: string) {
   return {
     id,

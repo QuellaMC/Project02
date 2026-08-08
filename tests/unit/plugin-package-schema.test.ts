@@ -141,9 +141,7 @@ describe('plugin package descriptor schema parity', () => {
       'a non-string $schema reference',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,
-        // The key is allowed and ignored, so nothing else validates it;
-        // without its own guard the code accepted a shape this schema
-        // rejects, and the mistake surfaced only in the other tool.
+        // The key is allowed and ignored, so only its own guard validates it.
         $schema: 42,
       }),
     ],
@@ -217,8 +215,6 @@ describe('plugin package descriptor schema parity', () => {
       'accepted',
     );
 
-    // Referencing the editor schema is optional, so an absent key stays
-    // acceptable to both validators.
     const withoutSchemaRef = {...descriptor};
 
     delete withoutSchemaRef['$schema'];

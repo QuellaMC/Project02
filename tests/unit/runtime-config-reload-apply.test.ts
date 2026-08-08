@@ -68,9 +68,8 @@ describe('applyCompletedRuntimeConfigReloads', () => {
       },
     } satisfies RuntimePluginHost);
 
-    // One turn updates TWO plugins: the file chains alpha then beta, so
-    // alpha's group must verify against beta's (turn-final) fingerprint or
-    // the reloader declines it as moved-past.
+    // One turn chains alpha then beta, so alpha's group must verify against
+    // beta's turn-final fingerprint.
     const result = await applyCompletedRuntimeConfigReloads({
       pluginHost: capturingHost,
       effects: [
@@ -106,8 +105,7 @@ describe('applyCompletedRuntimeConfigReloads', () => {
       },
     } satisfies RuntimePluginHost);
 
-    // The turn is already durable by the time reloads run, so a throwing
-    // host predicate must surface as a post-commit failure, not a rejection.
+    // The turn is already durable by the time reloads run.
     const result = await applyCompletedRuntimeConfigReloads({
       pluginHost: explodingHost,
       effects: [
@@ -150,9 +148,8 @@ describe('applyCompletedRuntimeConfigReloads', () => {
       };
     };
 
-    // Alpha's accepted update left the file exactly where it was and the
-    // host was built from that state: rebuilding alpha would reset its
-    // per-session state for nothing.
+    // The host was built from the state alpha's update left, so rebuilding it
+    // would reset per-session state for nothing.
     const current = capturingHost('sha256:f0');
 
     await applyCompletedRuntimeConfigReloads({
@@ -163,9 +160,8 @@ describe('applyCompletedRuntimeConfigReloads', () => {
 
     expect(current.calls).toEqual([['plugin.beta']]);
 
-    // Same no-op update against a STALE host (an earlier reload failed and
-    // nothing reflects f0): the same-value update must retry the reload
-    // instead of being skipped as "unchanged".
+    // The same no-op update against a stale host, where an earlier reload
+    // failed and nothing reflects f0.
     const stale = capturingHost();
 
     await applyCompletedRuntimeConfigReloads({

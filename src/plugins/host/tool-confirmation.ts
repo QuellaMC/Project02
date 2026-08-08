@@ -97,9 +97,7 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
   const effect = options.result.preparedConfigEffect;
 
   if (effect === undefined) {
-    // Unreachable: normalizing an accepted result already rejects an
-    // approval-gated tool that prepared no effect, so this is a type
-    // narrowing rather than a second copy of that rule.
+    // Unreachable: normalization already rejects this; this only narrows.
     throw new TypeError(
       'Approval-gated runtime config tool result is missing its prepared effect.',
     );

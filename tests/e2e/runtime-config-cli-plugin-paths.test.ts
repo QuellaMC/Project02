@@ -156,8 +156,7 @@ describe('runtime config CLI plugin paths', () => {
       ),
     ).toBe(1);
     expect(stderr).toContain('Unsupported runtime config path: enabledPlugins');
-    // The store was arranged, so "wrote nothing" is the document
-    // sitting exactly as the initializer left it.
+    // The store was arranged, so the document sits as the initializer left it.
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 
@@ -309,8 +308,7 @@ describe('runtime config CLI plugin paths', () => {
       'no non-escaping dotenv quote delimiter and cannot be safely written as an unquoted value',
     );
     expect(existsSync(join(storeRoot, '.env'))).toBe(false);
-    // The store was arranged, so "wrote nothing" is the document
-    // sitting exactly as the initializer left it.
+    // The store was arranged, so the document sits as the initializer left it.
     expect(readFileSync(configPath, 'utf8')).toBe(originalConfig);
   });
 

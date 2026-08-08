@@ -233,9 +233,7 @@ function requestedDecisionEvidenceKey(
   }
 
   // Every executable round appends at least one observation before the next
-  // model invocation. That makes the prior-observation count plus raw output a
-  // stable key shared by the interim event and every tool-start event for the
-  // same decision, including after durable decoding.
+  // model invocation, so this pair is a stable key for one decision.
   return `${String(
     roleModelIOSnapshot.inputEnvelope.toolObservations.length,
   )}:${roleModelIOSnapshot.rawOutputText}`;
@@ -257,10 +255,8 @@ export function terminalDecisionEvidenceRawEvent(
       event.parsedRoleModelDecisionSnapshot !== undefined,
   );
 
-  // Commit events exist for every visible message. Only one carrying a
-  // decision with no executable tool calls is the terminal decision — the
-  // same rule the loop uses to stop; interim commits carry executable
-  // calls and user-message commits carry no decision at all.
+  // Terminal means a decision with no executable tool calls — the same rule
+  // the loop uses to stop.
   return (
     persistedTerminalEvent ??
     reverseEvents.find(

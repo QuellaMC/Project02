@@ -26,9 +26,8 @@ export function normalizeMutationLockTarget(
     );
   }
 
-  // Two spellings of one lock root must hash to one lock file, so the root is
-  // canonicalized before the resource key is joined onto it. The root need not
-  // exist yet: acquiring the lock creates it.
+  // Two spellings of one lock root must hash to one lock file. The root need
+  // not exist yet: acquiring the lock creates it.
   const locksRoot = canonicalPath(target.locksRoot);
   const hash = createHash('sha256').update(resourceKey).digest('hex');
 

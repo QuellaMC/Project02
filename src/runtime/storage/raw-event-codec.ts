@@ -1022,10 +1022,8 @@ function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
     return;
   }
 
-  // Mirrors the live parser: executable calls outside allowedTools are legal
-  // in accepted decisions (tool routing rejects them pre-dispatch as
-  // tool_not_declared); only visible_reply must be allowed when present,
-  // because it commits without a routing gate.
+  // Only visible_reply must be allowed when present: it commits without a
+  // routing gate, unlike executable calls the router rejects pre-dispatch.
   const visibleReplyIsAllowed = parsedResult.decision.toolCalls.every(
     call =>
       call.name !== visibleReplyModelToolName ||

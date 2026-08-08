@@ -1,9 +1,3 @@
-/**
- * Tool wire for the role-model prompt: turns runtime model tool
- * definitions into provider chat-completion tools (the contract renders
- * as-is; strict mode is a per-tool eligibility check) and maps runtime
- * tool names to provider-safe names and back.
- */
 import {
   isModelToolJsonSchemaTypeArray,
   type ModelToolDefinition,
@@ -29,8 +23,6 @@ export function modelToolDefinitionToChatTool(
     function: Object.freeze({
       name: definition.name,
       description: definition.description,
-      // The contract is already a frozen JSON value; rendering it is
-      // showing it, not translating it.
       parameters: definition.inputContract,
       ...(strict ? {strict: true} : {}),
     }),
@@ -95,11 +87,7 @@ function roleModelProviderSafeToolName(runtimeName: string): string {
   return `tool_${safeName}`;
 }
 
-// The keyword shapes this eligibility rule can vouch for. A contract may
-// use anything Ajv compiles; strict mode is only ever claimed for
-// schemas made of these, because a keyword the rule cannot see through —
-// a combinator hiding an open object, a constraint the provider's strict
-// grammar refuses — must cost the strict flag, never the request.
+// An unrecognized keyword costs the strict flag, never the request.
 const strictEligibleKeywords = new Set([
   'type',
   'description',
@@ -111,9 +99,7 @@ const strictEligibleKeywords = new Set([
 ]);
 
 function jsonSchemaSupportsStrictTools(schema: ModelToolJsonSchema): boolean {
-  // A JSON manifest may carry a boolean subschema, which is legal JSON
-  // Schema the walk cannot see through — same rule as any other opaque
-  // shape: it costs the strict flag.
+  // A boolean subschema is legal JSON Schema and opaque to this walk.
   if (!isJsonRecord(schema)) {
     return false;
   }

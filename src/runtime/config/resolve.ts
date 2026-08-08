@@ -37,12 +37,8 @@ export type ResolveProject02RuntimeConfigOptions = {
   readonly allowPlaintextSecrets?: boolean;
   readonly validateInactivePluginConfigs?: boolean;
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
-  /** Scope of this authored document. Defaults to the global home config. */
   readonly authoredScope?: 'global' | 'character';
-  /**
-   * Layered resolution validates each raw layer before merging, then
-   * disables this merged-document check so origins are not lost.
-   */
+  /** Set after per-layer validation; the merged document loses origins. */
   readonly skipPluginScopeValidation?: boolean;
 };
 
@@ -73,11 +69,7 @@ export type ResolvedRuntimePluginConfigs = Readonly<{
   diagnostics: readonly RuntimeConfigDiagnostic[];
 }>;
 
-/**
- * Pure plugin-config resolution shared by the full runtime resolver and
- * character-package planning. It owns manifest policy and field validation
- * without requiring either caller to fabricate a filesystem location.
- */
+/** Needs no filesystem location, so package planning can call it too. */
 export function resolveRuntimePluginConfigs(
   options: ResolveRuntimePluginConfigsOptions,
 ): ResolvedRuntimePluginConfigs {
@@ -141,11 +133,7 @@ export function resolveProject02RuntimeConfig(
   });
 }
 
-/**
- * Resolves an already-selected effective document. Loaded config and layered
- * config delegate here, while mutation code continues to require a real
- * loader-owned snapshot.
- */
+/** Mutation code must not use this; it needs a real loader-owned snapshot. */
 export function resolveEffectiveProject02RuntimeConfig(
   options: ResolveEffectiveProject02RuntimeConfigOptions,
 ): ResolvedProject02RuntimeConfig {
@@ -170,10 +158,9 @@ export function resolveEffectiveProject02RuntimeConfig(
   ]);
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
-  // Trimmed via the shared helper, mirroring userDisplayName below.
+  // Already trimmed by the character-scope helper.
   const character = options.runtimeLocation.characterScope.characterId;
-  // Trimmed at the resolve seam so an authored value with stray padding
-  // never reaches the strict speaker constructor as a startup crash.
+  // Trimmed here: the strict speaker constructor would crash on padding.
   const userDisplayName = (
     config?.project02?.userDisplayName ?? defaultProject02UserDisplayName
   ).trim();
@@ -327,9 +314,7 @@ function resolvePluginConfigField(options: {
     });
   }
 
-  // The shared walker: any embedded reserved marker — malformed ones
-  // included — blocks a non-secret field, matching load-time rejection
-  // and the mutation-control validation.
+  // Any reserved marker, malformed included, blocks a non-secret field.
   const secretValuePath = nestedSecretMarkerPath(options.rawValue, path);
 
   if (secretValuePath !== undefined) {

@@ -141,9 +141,8 @@ describe('runtime config loader validation', () => {
     ['a multiline user display name', 'Alice\nSystem'],
     ['an over-length user display name', 'a'.repeat(129)],
   ])('rejects %s at the authoring boundary', (_label, userDisplayName) => {
-    // Authoring must accept exactly what `createUserSpeaker` accepts. When it
-    // is laxer, the config validates here and chat throws later -- after its
-    // plugin host is already built.
+    // Authoring must accept exactly what `createUserSpeaker` accepts, or chat
+    // throws later with its plugin host already built.
     expect(
       validateProject02RuntimeConfig({
         version: runtimeConfigVersion,
@@ -158,8 +157,6 @@ describe('runtime config loader validation', () => {
   });
 
   it('still accepts a user display name that resolution will trim', () => {
-    // Surrounding whitespace is repaired downstream, so rejecting it here
-    // would break an authored config the runtime handles fine.
     expect(
       validateProject02RuntimeConfig({
         version: runtimeConfigVersion,

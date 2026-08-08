@@ -11,15 +11,8 @@ import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
-/**
- * Every test here uses a bare temp root rather than an arranged store,
- * because the gate is the subject: an initialized store would answer the
- * one question these tests ask before the gate ever spoke.
- *
- * The whole layout a store is born with is asserted once, on the `--init`
- * run. Everywhere else the proof of a refusal is the same and simpler:
- * the directory is still empty.
- */
+// The gate is the subject here, so every test starts from a bare temp root
+// rather than an arranged store.
 const initializedStoreEntries = Object.freeze([
   '.locks',
   'character-data',
@@ -27,16 +20,8 @@ const initializedStoreEntries = Object.freeze([
   'schema.json',
 ]);
 
-/**
- * A stream the gate will treat as a person at a terminal.
- *
- * `isTTY` is what the gate reads: it separates an operator who can
- * answer from a pipe that cannot. The stream stays open after the
- * scripted keystrokes for the same reason a real terminal does —
- * readline emits `close` on an ended input *before* the pending
- * question resolves, so a finite `Readable.from` would answer every
- * prompt with silence no matter what was typed into it.
- */
+// The stream stays open after the scripted keystrokes because readline emits
+// `close` on an ended input before the pending question resolves.
 function interactiveStdin(...lines: readonly string[]): NodeJS.ReadableStream {
   const stdin: PassThrough & {isTTY?: boolean} = new PassThrough();
 
@@ -56,7 +41,7 @@ function pipedStdin(): NodeJS.ReadableStream {
   return Readable.from([]);
 }
 
-/** A terminal that is gone by the time the question is asked. */
+// A terminal that is gone by the time the question is asked.
 function closedInteractiveStdin(): NodeJS.ReadableStream {
   const stdin: Readable & {isTTY?: boolean} = Readable.from([]);
 
@@ -109,9 +94,6 @@ describe('store consent gate', () => {
     expect(stderr).toBe('');
     expect(exitCode).toBe(0);
     expect(stdout).toContain('"runtimeConfig"');
-    // One initializer, one complete store: the marker, the locks it
-    // needed to write it, the character-data root, and the global
-    // config document all arrive together.
     expect(readdirSync(storeRoot).sort()).toEqual(initializedStoreEntries);
     expect(
       JSON.parse(readFileSync(join(storeRoot, 'config.json'), 'utf8')),
@@ -139,9 +121,7 @@ describe('store consent gate', () => {
 
     expect(stderr).toBe('');
     expect(exitCode).toBe(0);
-    // Both halves of the answer are on one stream, in order: the store
-    // was offered, and saying yes ran `check` rather than ending the
-    // run and making the operator type it again.
+    // Saying yes runs `check` rather than ending the run.
     expect(stdout).toContain(
       `No Project02 store at "${storeRoot}". Create one there? [y/N]`,
     );
@@ -178,8 +158,7 @@ describe('store consent gate', () => {
     const storeRoot = createTestTempRoot('project02-consent-unanswered-');
     let stderr = '';
 
-    // A terminal that goes away mid-question is silence, and nothing
-    // durable may be built on silence.
+    // A terminal that goes away mid-question is silence.
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'check'],
       {
@@ -202,8 +181,7 @@ describe('store consent gate', () => {
     let stdout = '';
     let stderr = '';
 
-    // `path` is how an operator asks where a store *would* live, so it
-    // has to answer for one that is not there yet.
+    // `path` asks where a store would live, so it answers for an absent one.
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--store', storeRoot, 'path'],
       {
@@ -251,9 +229,7 @@ describe('store consent gate', () => {
     let stdout = '';
     let stderr = '';
 
-    // An explicit --config names a document, not a home. No store comes
-    // into being here, so there is nothing to ask about — and the
-    // directory holding it must not turn into one.
+    // An explicit --config names a document, not a home.
     const exitCode = await runRuntimeConfigCliFromArgs(
       ['--config', configPath, 'set', 'project02.roleModelProvider', 'local'],
       {
@@ -274,10 +250,8 @@ describe('store consent gate', () => {
     expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
       project02: {roleModelProvider: 'local'},
     });
-    // What the gate owes here is that no store was born, which is the
-    // marker plus the layout around it — not that the directory is
-    // pristine. The write takes a lock next to the document it writes,
-    // so a `.locks` root is expected and is not a store.
+    // The write takes a lock beside the document, so a `.locks` root is
+    // expected here and is not a store.
     expect(existsSync(join(configRoot, 'schema.json'))).toBe(false);
     expect(existsSync(join(configRoot, 'character-data'))).toBe(false);
     expect(existsSync(join(configRoot, 'config.json'))).toBe(false);
@@ -301,10 +275,8 @@ describe('store consent gate', () => {
       },
     );
 
-    // Inspect has no consent to ask for, because it never creates the
-    // store it describes. It reports what a run against this path would
-    // find — an empty store with no sessions — and leaves the path as it
-    // found it.
+    // Inspect never creates the store it describes, so it has no consent to
+    // ask for.
     expect(stderr).toBe('');
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});

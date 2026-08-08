@@ -4,24 +4,13 @@ import {
 } from '../../runtime/config/index.ts';
 import type {RuntimeCliStartupResult} from '../../app/index.ts';
 
-/**
- * A startup result an operator surface refuses to run on, reduced to
- * what every surface needs: the diagnostic that blocked it (absent when
- * the failure carries no diagnostic) and a fallback describing the
- * status. Surfaces keep their own message format — `formatReason` is
- * offered for the common one, not imposed.
- */
 export type RejectedRuntimeCliStartup = {
   readonly outcome: 'rejected';
   readonly diagnostic: RuntimeConfigDiagnostic | undefined;
   readonly fallbackReason: string;
 };
 
-/**
- * A startup an operator surface may run on. `warnings` is carried here
- * rather than left on the activation, because a surface that reads only
- * the resolved plan is exactly how discovery warnings went unreported.
- */
+/** Warnings ride here so a surface reading only the plan cannot drop them. */
 export type UsableRuntimeCliStartup<TStartup> = {
   readonly outcome: 'usable';
   readonly startup: TStartup;
@@ -29,22 +18,8 @@ export type UsableRuntimeCliStartup<TStartup> = {
 };
 
 /**
- * The one reading of a startup result for an operator-facing surface
- * (chat, inspect).
- *
- * Each surface used to re-derive this by hand, and they drifted: two
- * emitted character discovery warnings and one dropped them. Deciding
- * it once means a new surface starts out handling every case it shares
- * with the others.
- *
- * What is *not* decided here: an incompletely configured runtime, which
- * arrives either as `activation_blocked_before_runtime_env` or as
- * activation errors on a resolved plan. Chat refuses it, because it
- * constructs plugin resources from that plan. Inspect
- * reports it and exits 0 — describing a partly-configured runtime is
- * precisely what an operator runs inspect for, so refusing would remove
- * the answer they came for. That is a real difference in what these
- * surfaces are, not drift, so it stays with each surface.
+ * The one reading of a startup result for an operator-facing surface.
+ * An incompletely configured runtime is left to each surface to decide.
  */
 export function interpretRuntimeCliStartup<
   TStartup extends RuntimeCliStartupResult,
@@ -76,8 +51,7 @@ export function interpretRuntimeCliStartup<
 
   const characterActivation = startup.characterActivation;
 
-  // A resolved startup carries a resolved character by construction;
-  // this narrows the type rather than expecting to fire.
+  // A resolved startup carries a resolved character; this narrows the type.
   if (characterActivation.status !== 'resolved') {
     return rejected(undefined, 'Character activation failed.');
   }
@@ -91,10 +65,6 @@ export function interpretRuntimeCliStartup<
   });
 }
 
-/**
- * The common one-line rendering of a rejection: the blocking
- * diagnostic with its character attribution, or the status fallback.
- */
 export function formatRejectedRuntimeCliStartup(
   rejection: RejectedRuntimeCliStartup,
 ): string {

@@ -324,12 +324,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
   readonly canLiveReload?: (pluginId: string) => boolean;
-  /**
-   * Host-kept turn record: true when this turn already CONFIRMED a
-   * session-scoped update for the plugin. Committed same-plugin changes
-   * reload as one group and a mixed group always defers, so a live-field
-   * update must stop promising appliesTo: next_turn in that case.
-   */
+  /** A mixed group defers, so a live update must stop promising next_turn. */
   readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
@@ -469,13 +464,7 @@ function approvedRuntimePluginConfigUpdateResult(options: {
   const {call, context, manifest, field, operation, resultFingerprint} =
     options;
   const liveField = field.reloadRequired === false;
-  // Backward-looking on purpose. A later same-turn update cannot break an
-  // earlier next_turn promise: config mutations are compare-and-swap on the
-  // whole-file fingerprint, so once a fingerprint-CHANGING live update is
-  // approved, any later update prepared this turn conflict-closes at commit
-  // and never joins the group. The one sequence where both commit is a
-  // value-preserving (no-op) live update first — whose next_turn promise is
-  // vacuous, since there is no observable change to apply.
+  // Backward-looking: a later update conflict-closes on the file fingerprint.
   const mixedTurnGroup =
     liveField &&
     options.sessionScopedUpdateConfirmedThisTurn?.(manifest.id) === true;

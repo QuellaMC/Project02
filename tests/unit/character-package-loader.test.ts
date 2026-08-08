@@ -102,9 +102,8 @@ describe('character package discovery', () => {
       sources: defaultCharacterPackageSources(storeRoot),
     });
 
-    // Silence here would be indistinguishable from an empty store, and
-    // every installed operator character would then fail selection with
-    // "not found" — advice to install what is already installed.
+    // Silence reads as an empty store, and every installed character then
+    // fails selection with "not found".
     expect(discovery.diagnostics).toEqual([
       expect.objectContaining({
         code: 'package_source_unavailable',
@@ -182,9 +181,8 @@ describe('character package discovery', () => {
     const storeRoot = createTestTempRoot();
     const operatorRoot = operatorCharacterPackagesRoot(storeRoot);
 
-    // Distinct ids, one character-data directory on a case-insensitive
-    // filesystem: whichever selection ran first would stamp the shared
-    // marker and the other would fail as an identity mismatch.
+    // Distinct ids share one character-data directory on a case-insensitive
+    // filesystem, so the first to stamp the marker locks the other out.
     writeCharacterPackage(operatorRoot, 'Mira', {displayName: 'Upper Mira'});
 
     const discovery = discoverCharacterPackages({
@@ -224,8 +222,7 @@ describe('character package discovery', () => {
       expect.objectContaining({
         code: 'package_id_mismatch',
         characterId: 'folder-name',
-        // Selection is by declared id, so the diagnostic has to name it
-        // too or it is invisible to the character it concerns.
+        // Selection is by declared id, so the diagnostic has to name it too.
         claimedCharacterId: 'other-id',
         provenance: 'operator',
       }),
@@ -452,12 +449,8 @@ describe('character package discovery', () => {
       sources: [{root: sourceRoot, provenance: 'operator'}],
     });
 
-    // An ancestor that is swapped and restored mid-scan can be caught by the
-    // per-package ancestry guard or by the closing source-root equality check,
-    // depending on where the rename lands between those reads. Both are
-    // correct refusals, so pin the contract — no outside descriptor is ever
-    // published, and the swap is reported as an error — instead of pinning
-    // which guard happened to win the race.
+    // Either the ancestry guard or the closing source-root check catches the
+    // swap, so pin the refusal rather than which one won the race.
     expect(discovery.characters).toEqual([]);
     expect(discovery.diagnostics).not.toEqual([]);
     for (const diagnostic of discovery.diagnostics) {

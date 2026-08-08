@@ -5,10 +5,8 @@ import {createRuntimeEvidenceTransitionMachine} from './transition.ts';
 import {deriveRuntimeTraceEntries} from './trace-projection.ts';
 
 /**
- * In-memory `RuntimeLogStore`: the second store implementation next to
- * storage/file-runtime-log-store.ts. Both fold appends through the same
- * evidence transition machine and build read snapshots with the same
- * shared derivation (one snapshot implementation, arch rule 7).
+ * The second store implementation: both fold appends through the same
+ * transition machine and share one snapshot derivation (arch rule 7).
  */
 export function createRuntimeLogStore(
   options: {

@@ -43,9 +43,7 @@ export type RoleModelChatToolCall = {
   };
 };
 
-// The rendered parameters are the tool's input contract itself — there
-// is no wire-side schema vocabulary for the contract to be translated
-// into, and so nothing for the two to disagree about.
+// Parameters are the input contract itself; there is no wire-side translation.
 export type RoleModelChatCompletionTool = {
   readonly type: 'function';
   readonly function: {

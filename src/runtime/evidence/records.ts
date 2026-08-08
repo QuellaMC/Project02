@@ -79,7 +79,6 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   /** The message this event commits; present exactly on commit events. */
   readonly visibleMessage?: VisibleMessage;
   readonly committedAt?: string;
-  /** The sampling round that asked for a committed reply. */
   readonly decisionRound?: number;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
@@ -113,7 +112,6 @@ export type RawEventLogRecordInput = RuntimeEventIdentity & {
   /** The message this event commits; present exactly on commit events. */
   readonly visibleMessage?: VisibleMessage;
   readonly committedAt?: string;
-  /** The sampling round that asked for a committed reply. */
   readonly decisionRound?: number;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;

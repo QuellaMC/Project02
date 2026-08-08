@@ -61,17 +61,7 @@ export type PreparedRuntimeConfigMutationCandidate = {
   readonly config: Project02RuntimeConfig;
 };
 
-/**
- * The mutation lock guarding one runtime control file.
- *
- * Every writer of a control document names its lock through here, so
- * "the same file" means one lock rather than one per caller's spelling
- * of it. The key is the canonical path because that is what makes two
- * spellings — a link and its target, `--config` and the layout's own
- * path — agree on being the same file; `canonicalRuntimeConfigPath`
- * resolves through dangling links precisely so a file about to be
- * created can be locked before it exists.
- */
+/** Keyed by canonical path so two spellings of one file take one lock. */
 export function runtimeConfigControlFileLockTarget(
   canonicalPath: string,
 ): LocalRuntimeMutationLockTarget {
@@ -82,11 +72,7 @@ export function runtimeConfigControlFileLockTarget(
   });
 }
 
-/**
- * Commits one already-prepared candidate to exact paths while the caller
- * holds the transaction's complete lock set. This primitive never resolves
- * locations, acquires locks, reloads config, or retries.
- */
+/** The caller must hold the locks: this never resolves, locks, or retries. */
 export function commitPreparedRuntimeConfigMutation(options: {
   readonly canonicalConfigPath: string;
   readonly displayConfigPath: string;
@@ -153,9 +139,8 @@ export class RuntimeConfigMutationError extends Error {
 }
 
 export class RuntimeConfigConflictError extends RuntimeConfigMutationError {
-  // Stable machine-readable marker: plugins detect conflicts through this
-  // code (isRuntimeConfigConflictError in the builtin plugin) instead of
-  // importing the class. Keep in sync with runtimeConfigConflictErrorCode.
+  // Plugins detect conflicts by this code instead of importing the class.
+  // Keep in sync with runtimeConfigConflictErrorCode.
   readonly code = 'runtime_config_conflict';
 
   constructor(message: string) {
@@ -217,35 +202,8 @@ function bootstrapRuntimeConfig(options: {
 }
 
 /**
- * Creates a store complete, or not at all.
- *
- * A store is born exactly once, and everything that makes it one — the
- * marker, the character-data root, the global config document — comes
- * from this single call. Creation used to be spread across routes:
- * `check` produced a marker with no config, a global `set` produced a
- * config with no marker, and each left a directory that answered "is
- * this a store?" differently depending on which command got there
- * first. One birth, one answer.
- *
- * It lives here rather than in `runtime/storage` because the config
- * document's shape belongs to this module, and this module already
- * depends on storage — storage owns the layout, config owns the
- * document, and composing them in that direction keeps the dependency
- * pointing the way it already points.
- *
- * Idempotent, so every route may call it and all but the first find
- * the store already there. The document is written only when genuinely
- * absent: a store can be created around a config the operator authored
- * by hand, and that document is theirs to keep.
- *
- * "Absent" is decided under the same lock every other writer of this
- * file takes, and re-decided after acquiring it. Checking first and
- * writing second leaves a window: two trips to disk, and a config
- * authored between them is replaced by the bootstrap document with no
- * error to notice — the operator's file is simply gone. Holding the
- * lock across both makes the check and the write one decision. The
- * marker written a line above already works this way; this is the
- * store's other birth-time file catching up to it.
+ * The one birth of a store: idempotent, and an existing config is never
+ * replaced. Absence is decided under the lock, or a concurrent write is lost.
  */
 export async function ensureInitializedProject02Store(options: {
   readonly homeRoot?: string;
@@ -277,11 +235,7 @@ export async function ensureInitializedProject02Store(options: {
   return layout;
 }
 
-/**
- * A candidate written to an overlay-located file must stay within the
- * character-scoped dialect regardless of which internal control path
- * prepared it. Public callers select this scope with --character.
- */
+/** Any path that writes an overlay must go through this dialect check. */
 export function assertOverlayLocatedCandidateStaysCharacterScoped(
   candidate: Project02RuntimeConfig,
 ): void {
@@ -307,29 +261,13 @@ export type RuntimeConfigAuthoredSnapshot = Readonly<{
   validatedConfig?: Project02RuntimeConfig;
 }>;
 
-/**
- * One authored layer as the mutation machinery sees it, independent of
- * which file it came from. A layer is repairable exactly when its
- * authored document was readable: the edit then applies to the real
- * bytes and the complete candidate is validated afterwards, so an
- * invalid field can be fixed in place instead of only by hand.
- */
+/** One authored layer, global or overlay, as the mutation seam sees it. */
 export type AuthoredRuntimeConfigLayer = {
   readonly authoredDocument?: JsonBoundaryObject;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
-/**
- * The one definition of "this layer failed to load so badly that no edit
- * can be based on it". Absence is not such a failure — it is the state a
- * bootstrap or a first overlay write is for — and neither is an invalid
- * value inside a document that was read, because that is precisely what
- * repair fixes. Every remaining error means there are no authored bytes
- * to edit: unparseable JSON, an unreadable file, a rejected symlink.
- *
- * Global and character scope share this predicate so that "can I repair
- * it with the CLI" has one answer per layer instead of one per file.
- */
+/** Blocks only when there are no authored bytes to edit; absence does not. */
 export function blockingRuntimeConfigLayerDiagnostic(
   layer: AuthoredRuntimeConfigLayer,
 ): RuntimeConfigDiagnostic | undefined {
@@ -582,9 +520,6 @@ function validateMutatedRuntimeConfig(
   );
 
   if (blockingDiagnostic !== undefined) {
-    // With the field named, an operator can go fix it. Without it, a
-    // document with several plugins says only that one of them is
-    // wrong.
     throw new TypeError(
       'Cannot mutate runtime config because the mutation would produce ' +
         `invalid config: ${blockingDiagnostic.message} ` +
@@ -814,10 +749,6 @@ type PreviousConfigState = {
 };
 
 function snapshotPreviousConfigState(path: string): PreviousConfigState {
-  // Wrapped like every other file access in this module. Before, a read
-  // failure here escaped as a raw filesystem error and bypassed the CLI's
-  // error formatting entirely — the operator got a stack trace instead of
-  // a message.
   try {
     const text = readOptionalStoreText(path);
 
@@ -889,10 +820,7 @@ function restorePreviousConfigState(
 ): Error | undefined {
   try {
     if (previousConfigState.text === undefined) {
-      // There was no config file to roll back to, so removing it is the
-      // restore. Unlink and accept ENOENT rather than checking first: the
-      // check-then-act version raced anything else cleaning up the same
-      // failed mutation.
+      // Unlink and accept ENOENT; checking first races other cleanup.
       try {
         unlinkPathSync(previousConfigState.path);
       } catch (error: unknown) {

@@ -22,11 +22,7 @@ export type CreateRuntimePluginFileStoreOptions =
 
 export type RuntimePluginFileStorePathMode = 'json' | 'jsonl';
 
-/**
- * Host capability for creating plugin file stores and their transactions.
- * The composition root injects the concrete engine
- * (src/runtime/storage/plugin-file-store/) so the host never imports it.
- */
+/** The composition root injects the engine, so the host never imports it. */
 export type RuntimePluginFileStoreProvider = {
   readonly createFileStore: (
     options: CreateRuntimePluginFileStoreOptions,

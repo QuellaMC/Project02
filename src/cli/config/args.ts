@@ -1,9 +1,4 @@
-/**
- * Argument and command parsing for the runtime config CLI: separates
- * location flags from command words and parses the command vocabulary
- * into the typed RuntimeConfigCliArgs command union. Pure parsing; no
- * IO and no runtime access beyond reading the supplied env.
- */
+/** Pure parsing: no IO, and no runtime access beyond the supplied env. */
 import {
   emptyRuntimeStoreCliState,
   parseRuntimeStoreFlag,
@@ -163,12 +158,7 @@ function envHasNonEmptyValue(env: NodeJS.ProcessEnv, name: string): boolean {
   return (env[name]?.length ?? 0) > 0;
 }
 
-/**
- * Env is consulted only by `secret set`, which reads the secret value
- * from the named variable; every other command parses without it, so
- * surfaces that reject secret commands up front can parse before any
- * environment staging.
- */
+/** Only `secret set` reads env, so every other command parses without one. */
 export function parseRuntimeConfigCommand(
   args: readonly string[],
   env?: NodeJS.ProcessEnv,

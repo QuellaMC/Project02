@@ -1,13 +1,3 @@
-/**
- * Character overlay config: the optional config.json inside a
- * character-data/<id>/ directory. It shares the global document dialect
- * and version gate but is restricted to character-scoped fields;
- * global-only fields (storeRoot, character) are rejected with a
- * diagnostic naming the fix. The loaded shape is deliberately not
- * assignable to LoadedProject02RuntimeConfig — its source says
- * 'overlay' — so an overlay can never reach the global resolvers or
- * re-derive a store root from its own path.
- */
 import {describeRealEntry} from '../../shared/real-path.ts';
 import {
   createLocalRuntimeStorageLayout,
@@ -42,16 +32,10 @@ import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
 export type LoadedProject02CharacterOverlayConfig = {
   readonly scope: 'character';
   readonly characterId: string;
-  // 'overlay' is not a RuntimeConfigSource on purpose: it keeps this
-  // type structurally incompatible with the global loaded config.
+  // 'overlay' is not a RuntimeConfigSource, so this type cannot pass as global.
   readonly source: 'none' | 'overlay';
   readonly path?: string;
-  /**
-   * The bounded authored JSON object, retained on the same terms as the
-   * global loaded config: it survives failed schema validation so the
-   * control seam can repair the real document instead of rebuilding a
-   * minimal one and discarding everything the operator authored.
-   */
+  /** Survives failed validation so control can repair the real document. */
   readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -67,16 +51,10 @@ function loadProject02CharacterOverlayConfig(options: {
 }): LoadedProject02CharacterOverlayConfig {
   const path = characterOverlayConfigPath(options.dataRoot);
 
-  // The entry, not existence: a dangling symlink is a non-regular overlay
-  // entry, never an absent overlay.
+  // A dangling symlink is a non-regular entry here, not an absent overlay.
   const overlayEntry = describeRealEntry(path);
 
-  // Only ENOENT means there is no overlay. An entry we could not inspect
-  // — a per-entry ACL, a transient filesystem error — is an overlay whose
-  // contents are unknown, and reporting it as absent would resolve the
-  // character against inherited global values, fingerprint as null, and
-  // let materialization rewrite settings the operator did author. The
-  // read below already fails closed on exactly this, so it decides.
+  // Only ENOENT means absent; another error must not erase authored settings.
   if (overlayEntry.kind === 'absent') {
     return Object.freeze({
       scope: 'character',
@@ -92,8 +70,7 @@ function loadProject02CharacterOverlayConfig(options: {
     path,
   });
 
-  // The overlay must live inside the identity-marked data directory: a
-  // symlinked file would let authored settings live outside it.
+  // A symlink would let authored settings live outside the data directory.
   if (overlayEntry.kind === 'link') {
     return loadedOverlay({
       ...options,
@@ -158,9 +135,7 @@ function loadedOverlay(options: {
     ...(options.authoredDocument === undefined
       ? {}
       : {authoredDocument: options.authoredDocument}),
-    // An invalid overlay keeps its authored document but never its
-    // validated config: resolution, fingerprints, and reads must still
-    // treat it as unusable — only repair may look at the raw bytes.
+    // An invalid overlay keeps its bytes for repair, never a usable config.
     ...(options.config === undefined || hasErrors
       ? {}
       : {config: options.config}),
@@ -173,24 +148,8 @@ function loadedOverlay(options: {
 }
 
 /**
- * The overlay's contribution to the layered authored fingerprint: the
- * validated config, null when the file is absent, the authored bytes
- * when they are readable but do not validate, and an unreadable
- * sentinel when even the bytes could not be obtained.
- *
- * A fingerprint exists to answer "did this change since I looked?", so
- * every state it can distinguish, it must. An invalid overlay keeps its
- * authored document precisely because an operator may still edit it —
- * fix one of two bad fields, or replace it with different bad bytes —
- * and answering all of those with one sentinel says the file has not
- * moved. A currency gate would then commit against an expectation taken
- * before the edit. Fingerprinting the retained document instead makes
- * an edit to an invalid overlay as visible as an edit to a valid one.
- *
- * Wrapped rather than returned bare so that "these bytes did not
- * validate" cannot fingerprint the same as some other overlay whose
- * validated config happens to have that shape. The wrapper is what says
- * which of the two this layer is.
+ * Invalid bytes fingerprint distinctly, not as one sentinel, so an edit to a
+ * broken overlay stays visible. The wrapper stops a collision with a config.
  */
 export function characterOverlayFingerprintLayer(
   overlay: LoadedProject02CharacterOverlayConfig,
@@ -213,14 +172,7 @@ export type RuntimeConfigCharacterOverlaySnapshot = {
   readonly overlay: LoadedProject02CharacterOverlayConfig;
 };
 
-/**
- * The one guarded overlay read: wherever a scope's overlay feeds
- * config, fingerprints, or inspection, the identity and adoptability
- * rules hold first — a data directory rebound to another character,
- * holding foreign content, or reached through a symlink must never
- * have its overlay reported as this character's config. An absent or
- * marker-less (still adoptable) directory loads as an absent overlay.
- */
+/** The one overlay read: the data directory's identity is checked first. */
 export function readCharacterOverlayForScope(
   scope: RuntimeConfigCharacterScope,
 ): RuntimeConfigCharacterOverlaySnapshot {
@@ -238,12 +190,7 @@ export function readCharacterOverlayForScope(
   } satisfies RuntimeConfigCharacterOverlaySnapshot);
 }
 
-/**
- * The one authored-fingerprint composition every consumer shares:
- * layered over the global document and the overlay snapshot when a
- * character scope exists, the plain per-file fingerprint otherwise —
- * so any two sites comparing fingerprints compose them identically.
- */
+/** The one composition, so any two sites comparing fingerprints agree. */
 export function layeredRuntimeConfigFingerprintForScope(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
@@ -258,8 +205,7 @@ export function layeredRuntimeConfigFingerprintForScope(options: {
       });
 }
 
-// Checked against the raw document so a global-only field is named even
-// when its value would also fail the per-field validation.
+// Reads the raw document so a global-only field is named even if invalid.
 function globalOnlyFieldDiagnostics(
   value: unknown,
 ): readonly RuntimeConfigDiagnostic[] {

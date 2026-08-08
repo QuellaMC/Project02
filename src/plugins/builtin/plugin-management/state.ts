@@ -7,10 +7,7 @@ import {
   type ResolvedRuntimeConfigScopeTarget,
 } from '../../../runtime/config/index.ts';
 
-/**
- * Manifest inventory a host can serve without any config mutation
- * capability: enough for runtime.plugin.list and activation display.
- */
+/** Manifest inventory a host serves without any config mutation capability. */
 export type RuntimePluginInventoryHostState = {
   readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly activationByPluginId?: Readonly<
@@ -19,12 +16,7 @@ export type RuntimePluginInventoryHostState = {
   readonly defaultEnabledPluginIds?: readonly string[];
 };
 
-/**
- * One construction-time binding for every value that decides where config
- * reads and writes go. Keeping these values together prevents a host from
- * mixing a control capability, scope, and location captured at different
- * times.
- */
+/** One binding, so control, scope, and location cannot be mismatched. */
 export type RuntimePluginConfigControlBinding = Readonly<{
   /** Injected by the composition root; plugins never import the functions. */
   control: RuntimePluginConfigControlCapability;
@@ -39,12 +31,7 @@ export type RuntimePluginConfigControlHostState =
 const runtimePluginConfigControlBindings =
   new WeakSet<RuntimePluginConfigControlBinding>();
 
-/**
- * Canonicalizes the complete routing binding at the composition boundary.
- * Capability methods and every nested location object are copied into a
- * frozen snapshot, so later caller mutation cannot retarget an advertised
- * config tool.
- */
+/** Frozen so caller mutation cannot retarget an advertised config tool. */
 export function createRuntimePluginConfigControlBinding(
   binding: RuntimePluginConfigControlBinding,
 ): RuntimePluginConfigControlBinding {
@@ -71,11 +58,7 @@ export function requiredRuntimePluginConfigControl(
 
 export const runtimeConfigConflictErrorCode = 'runtime_config_conflict';
 
-/**
- * Structural stand-in for `error instanceof RuntimeConfigConflictError`:
- * matches the stable `code` the runtime config mutation layer stamps on
- * conflict errors, so plugins need no value import of that layer.
- */
+/** Structural check so plugins need no value import of the config layer. */
 export function isRuntimeConfigConflictError(
   error: unknown,
 ): error is Error & {readonly code: typeof runtimeConfigConflictErrorCode} {
@@ -85,9 +68,7 @@ export function isRuntimeConfigConflictError(
   );
 }
 
-// One marker set per role: a config-control snapshot passed to the
-// inventory helper must NOT short-circuit, or it would come back with
-// its control capability still attached instead of stripped.
+// One marker set per role: a control snapshot must not short-circuit here.
 const runtimePluginInventoryHostStateSnapshots =
   new WeakSet<RuntimePluginInventoryHostState>();
 const runtimePluginConfigControlHostStateSnapshots =

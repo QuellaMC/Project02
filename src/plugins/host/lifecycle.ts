@@ -6,11 +6,6 @@ import type {
   RuntimePluginSessionEndOptions,
 } from './host.ts';
 
-/**
- * Best-effort session-end / shutdown hooks for CLIs that own a plugin
- * host (one owner for the synthesized-context cleanup pattern). Failures
- * are swallowed: cleanup must never mask the error that triggered it.
- */
 export async function runBestEffortPluginSessionEnd(options: {
   readonly pluginHost: RuntimePluginHost;
   readonly sessionId: string;
@@ -51,6 +46,6 @@ export async function runBestEffortPluginShutdown(options: {
       }),
     );
   } catch {
-    // Shutdown is best-effort and must not mask the completed or failing chat lifetime.
+    // Best-effort: shutdown must not mask the failing chat lifetime.
   }
 }

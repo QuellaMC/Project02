@@ -213,9 +213,8 @@ describe('memory provider runtime plugin helper', () => {
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
 
-    // Providers own their storage behind the provider interface and
-    // never touch the host file store, so they request no file_store
-    // access; capture shows up as the after-turn hook instead.
+    // Providers own their storage behind the provider interface, so they never
+    // touch the host file store.
     expect(plugin.manifest.requestedAccess.file_store).toBeUndefined();
     expect(plugin.manifest.declaredPlugins).toContain('after_turn_committed');
     expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');

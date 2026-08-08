@@ -6,9 +6,7 @@ import {
 
 /**
  * A record is committed once its terminating newline is on disk, so text
- * after the final newline is dropped — a crash left it unfinished. A line
- * before that tail which does not parse is damage, not an interrupted
- * append, and fails the read.
+ * after the final newline is an unfinished append and is dropped.
  */
 export function readCompleteJsonLines(content: string): readonly string[] {
   return Object.freeze(
@@ -22,21 +20,10 @@ export function readCompleteJsonLines(content: string): readonly string[] {
   );
 }
 
-/**
- * Committed records with damaged ones dropped, for a reader that must
- * survive a row it does not need. Same definition of "committed" and
- * "damaged" as {@link readCompleteJsonLines} — the only difference is
- * what happens to damage, so the two can never disagree about which
- * bytes are a record.
- */
 export function readUndamagedJsonLines(content: string): readonly string[] {
   return Object.freeze(committedJsonLines(content).filter(isParseableJson));
 }
 
-/**
- * The framing alone, for readers that tolerate a damaged record instead of
- * failing the whole file.
- */
 function committedJsonLines(content: string): readonly string[] {
   if (content.length === 0) {
     return Object.freeze([]);
@@ -50,10 +37,7 @@ function committedJsonLines(content: string): readonly string[] {
   return Object.freeze(lines);
 }
 
-/**
- * Drops an unfinished trailing record, so an append starts on its own
- * line. Every append-only JSONL writer here calls this first.
- */
+/** Every append-only JSONL writer here calls this first. */
 export function discardTornJsonLineTail(filePath: string): void {
   const finalByte = readFinalByteSync(filePath);
 
@@ -61,8 +45,7 @@ export function discardTornJsonLineTail(filePath: string): void {
     return;
   }
 
-  // Bytes, not characters: truncation counts bytes, and a string offset
-  // would cut into the previous record when the tail is non-ASCII.
+  // Truncation counts bytes; a string offset would cut into a non-ASCII record.
   const content = readFileBytesSync(filePath);
 
   truncateFileSync(filePath, content.lastIndexOf(0x0a) + 1);
@@ -79,7 +62,6 @@ export class MalformedJsonLineError extends TypeError {
   }
 }
 
-/** Whether the text is a complete JSON document — `null` included. */
 export function isParseableJson(line: string): boolean {
   try {
     JSON.parse(line);

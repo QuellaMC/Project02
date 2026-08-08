@@ -218,8 +218,8 @@ describe('configured runtime plugin reloader', () => {
       env: {},
     });
 
-    // One currency chain: the plan's construction stamp equals what the
-    // inspection path hands the model as expectedFingerprint.
+    // The plan's construction stamp is what inspection hands the model as
+    // expectedFingerprint.
     const inspectedFingerprint = authoredFingerprint({
       activationPlan,
       configPath,
@@ -237,7 +237,6 @@ describe('configured runtime plugin reloader', () => {
     expect(configTarget.runtimeLocation.characterScope).toMatchObject({
       characterId: 'mira',
     });
-    // The overlay layer already governs the resolved value.
     expect(
       activationPlan.resolvedConfig.pluginConfigs['demo-config']?.['tone'],
     ).toMatchObject({value: 'formal'});
@@ -255,8 +254,7 @@ describe('configured runtime plugin reloader', () => {
       'formal tone',
     );
 
-    // An overlay edit after approval is a moved authored config: the
-    // reload declines instead of rebuilding from a stale layer pair.
+    // An overlay edit after approval is a moved authored config.
     writeRuntimeConfig(overlayPath, {
       plugins: {'demo-config': {config: {tone: 'pirate'}}},
     });
@@ -311,8 +309,7 @@ describe('configured runtime plugin reloader', () => {
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
 
-    // The data dir is rebound to another character after approval:
-    // the reload must fail exactly as startup would refuse the store.
+    // The data dir is rebound to another character after approval.
     writeFileSync(
       join(dirname(overlayPath), 'schema.json'),
       `${JSON.stringify({
@@ -458,8 +455,7 @@ describe('configured runtime plugin reloader', () => {
         retainCandidate: plugin => retained.push(plugin),
       }),
     ).rejects.toThrow('factory returned a different manifest');
-    // Package acceptance owns the manifest check and transfers a rejected
-    // factory product before throwing.
+    // Package acceptance transfers a rejected factory product before throwing.
     expect(constructed).toBeDefined();
     expect(retained).toEqual([constructed]);
   });
@@ -551,8 +547,7 @@ describe('configured runtime plugin reloader', () => {
     const storeRoot = createTestTempRoot('project02-plugin-reload-unrelated-');
     const configPath = join(storeRoot, 'config.json');
 
-    // character-state carries an undeclared config field (a plugin-scoped
-    // error); demo-config itself is valid and must still be reloadable.
+    // The undeclared field on character-state is a plugin-scoped error.
     writeRuntimeConfig(configPath, {
       plugins: {
         'demo-config': {enabled: true, config: {tone: 'warm'}},
@@ -736,8 +731,8 @@ describe('configured runtime plugin reloader', () => {
             load: () => {
               const candidate = trackedPlugin('candidate');
 
-              // Simulate the character marker becoming unreadable only after
-              // the replacement factory has allocated its instance.
+              // The marker becomes unreadable only after the replacement
+              // factory has allocated its instance.
               writeFileSync(
                 join(
                   activationPlan.runtimeLocation.characterScope.dataRoot,

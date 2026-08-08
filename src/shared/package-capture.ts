@@ -1,15 +1,6 @@
 /**
- * Physical package capture shared by data-only character packages and
- * executable plugin packages. A capture is rooted in one already-bound
- * package directory and traverses only its canonical tree, so every path it
- * describes belongs to the package it was rooted in.
- *
- * Walking and reading are separate. `planPackageDirectoryCapture` stats every
- * entry and enforces every limit without reading a byte; `capturePackageFiles`
- * plans and reads a few named files; `readPlannedPackageFile` reads one planned
- * file whenever its caller actually needs it. A caller that only needs to know
- * whether a tree is capturable pays no memory for its contents, and because
- * both answers come from the same walk they cannot drift.
+ * A capture is rooted in one already-bound package directory and traverses
+ * only its canonical tree, so every path it describes belongs to that package.
  */
 import {
   closeFileSync,
@@ -50,23 +41,9 @@ export type CapturedPackageArtifact = {
 };
 
 /**
- * One regular file the walk accepted, described by its stat alone.
- *
- * `maxReadableBytes` is resolved here rather than at read time so a planned
- * file carries its own bound: a later reader does not need the limits the walk
- * ran under, and cannot widen them. It bounds one file. The aggregate `maxBytes`
- * is a walk-time bound on the tree as the walk found it, not a running total
- * over reads that may happen much later.
- *
- * `identity` is the file's filesystem identity as the walk saw it. A later read
- * is bounded but not pinned to it — a package edited underneath a running
- * process is read as it is then — so it describes the walk, not a promise about
- * the bytes.
- *
- * `absolutePath` is where the package names the file, not necessarily the file
- * itself: a link is resolved to the contained file it names, and resolved again
- * at read time rather than remembered, so a name that comes to point somewhere
- * else is re-judged instead of trusted.
+ * `identity` describes the walk and is not re-imposed at read time.
+ * `absolutePath` is where the package names the file, which for a link is not
+ * where the bytes are.
  */
 export type PlannedPackageFile = {
   readonly absolutePath: string;
@@ -83,12 +60,8 @@ export type PlannedPackageCapture = {
 };
 
 /**
- * Why a package could not be captured.
- *
- * A file link is not among them: the walk resolves one to the real file it
- * names and captures that, so a link is only rejected for what it points at
- * — nothing (`not_regular`), or a file that moved out from under the plan
- * (`changed`).
+ * A link is not itself a rejection: the walk resolves one to the file it names
+ * and rejects only what it points at.
  */
 export type PackageCaptureRejectionReason =
   'changed' | 'not_regular' | 'too_large' | 'unreadable';
@@ -112,11 +85,8 @@ type PackageCaptureState = {
   readonly directories: Set<string>;
   readonly files: Map<string, PlannedPackageFile>;
   /**
-   * Every captured entry, directory or file, counted against `maxFiles`.
-   *
-   * Directories are recorded and recursed into, so counting only files let a
-   * package of empty directories traverse without limit: it consumed no bytes
-   * and never reached the file cap.
+   * Directories count against `maxFiles` too: a tree of empty directories
+   * consumes no bytes and would otherwise traverse without limit.
    */
   entryCount: number;
   totalBytes: number;
@@ -130,21 +100,14 @@ type PackageCaptureLimits = {
 };
 
 /**
- * Bounds how deep a captured package may nest.
- *
- * `planDirectory` recurses per level, so depth is stack depth. Most
- * filesystems reject a long enough path first, but that is a platform
- * accident: this makes the limit a package diagnostic instead.
+ * The walk recurses per level, so this bounds stack depth rather than leaving
+ * it to whichever path limit the platform happens to enforce first.
  */
 const maxPackageCaptureDepth = 64;
 
 /**
- * Walks the package tree with stat only.
- *
- * Every rejection a reading capture can raise while walking is raised here too
- * — a non-regular entry, an unreadable directory, an entry or byte budget
- * overrun, an over-deep tree, a package that changed mid-walk — because stat is
- * what those decisions were always made on. What is missing is only the bytes.
+ * Stat only: every rejection a reading capture raises while walking is raised
+ * here too, and only the bytes are missing.
  */
 export function planPackageDirectoryCapture(
   options: PackageCaptureLimits,
@@ -173,19 +136,9 @@ export function planPackageDirectoryCapture(
 }
 
 /**
- * Reads the bytes of one planned file, whenever its caller needs them.
- *
- * What the plan supplies is the file's own byte limit and the promise that the
- * walk accepted this path; what is re-checked now is everything about the file
- * itself — still inside the package, still a regular file, still within that
- * limit, still whole. The walk's stat is deliberately not re-imposed: a package
- * edited underneath a running process is read as it is then, because refusing it
- * would turn an ordinary edit into a failure the operator cannot act on.
- *
- * The package snapshot is not re-asserted either. It says the tree still matches
- * the walk, which a deferred read has no reason to require and every reason not
- * to — a package legitimately reinstalled after discovery would otherwise become
- * unloadable.
+ * The file itself is re-checked; the walk's stat and the package snapshot are
+ * deliberately not, so an ordinary edit or reinstall after discovery does not
+ * make the package unloadable.
  */
 export function readPlannedPackageFile(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
@@ -203,15 +156,8 @@ export function readPlannedPackageFile(options: {
 }
 
 /**
- * Where a planned file's bytes actually live, or undefined when its path no
- * longer names a contained regular file.
- *
- * This is not `absolutePath`: that is where the package names the file, and a
- * link names one place while the bytes are in another. Reading needs the
- * second, and so does resolving a module's own relative imports — those are
- * relative to the file that holds them, not to the name that led there. Both
- * ask at the moment they need it rather than carrying an answer from the walk,
- * so a path that comes to name something else is re-judged then.
+ * Where the bytes live, which for a link is not `absolutePath`. Resolved at
+ * each use, so a path that comes to name something else is re-judged then.
  */
 export function plannedPackageFileReadPath(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
@@ -409,8 +355,8 @@ function planDirectory(options: {
     assertBoundPackage(packageDirectory);
     const entry = describeRealEntry(absolutePath);
 
-    // An entry the directory listed a moment ago and no longer has is as
-    // uncapturable as one that cannot be stat'd, so both read as unreadable.
+    // An entry the listing showed a moment ago and no longer has is as
+    // uncapturable as one that cannot be stat'd.
     if (entry.kind === 'absent' || entry.kind === 'unreadable') {
       throw captureError(absolutePath, 'unreadable');
     }
@@ -423,10 +369,6 @@ function planDirectory(options: {
       });
 
       if (linked === undefined) {
-        // A link to anything but a contained regular file: a directory link
-        // would let the walk cycle, a link out of the package would let it
-        // describe a tree it does not own, and a dangling link has nothing to
-        // read at all.
         throw captureError(absolutePath, 'not_regular');
       }
       const planned = planFile({
@@ -469,17 +411,9 @@ function planDirectory(options: {
 }
 
 /**
- * Resolves a package path to the contained regular file it names.
- *
- * A plain file resolves to itself and a link resolves to its target, so the
- * walk and every later read agree on what a path means without either needing
- * to know which it was. Only a contained regular file resolves: a link out of
- * the package would let the walk describe one tree while a read returns another,
- * and a directory link would let the walk cycle.
- *
- * The walk and the read call this separately rather than sharing a remembered
- * result, so a path that comes to name something else is re-judged at the moment
- * it is used.
+ * Only a contained regular file resolves: a link out of the package would let
+ * the walk describe one tree while a read returns another, and a directory
+ * link would let the walk cycle.
  */
 function resolveContainedPackageFile(options: {
   readonly packageDirectory: PackageDirectorySnapshot;
@@ -506,12 +440,9 @@ function resolveContainedPackageFile(options: {
 }
 
 /**
- * Accepts one regular file against the remaining budgets, from its stat.
- *
- * The stat's size is what the budgets are spent on, and the bound that survives
- * on the planned file is re-checked against the descriptor when the bytes are
- * read, so a file that grew after the walk is refused at the read rather than
- * silently outspending the accounting.
+ * Budgets are spent from the walk's stat, and the surviving bound is
+ * re-checked against the descriptor at read time, so a file that grew after
+ * the walk is refused there rather than outspending the accounting.
  */
 function planFile(options: {
   readonly absolutePath: string;
@@ -547,16 +478,6 @@ function planFile(options: {
   } satisfies PlannedPackageFile);
 }
 
-/**
- * Reads one already-resolved regular file, whole and unchanged.
- *
- * The checks here are about this read: the descriptor is a regular file within
- * its limit, the bytes are exactly the file, and nothing rewrote it while it was
- * being read. Whether the surrounding package is still the one that was walked
- * is a separate question, and belongs to whoever knows when the walk happened —
- * an immediate capture asserts it around the whole operation, and a deferred
- * read deliberately does not.
- */
 function readBoundRegularFile(options: {
   readonly path: string;
   readonly maxBytes: number;
@@ -564,9 +485,8 @@ function readBoundRegularFile(options: {
   let descriptor: number | undefined;
 
   try {
-    // The path is already canonical, so opening without following is not a
-    // restriction on links — it is what keeps the descriptor bound to a real
-    // file rather than to a name that could be repointed after resolution.
+    // The path is already canonical, so `O_NOFOLLOW` binds the descriptor to
+    // the resolved file rather than to a name that could be repointed after.
     descriptor = openFileSync(
       options.path,
       fileSystemConstants.O_RDONLY | fileSystemConstants.O_NOFOLLOW,
@@ -674,11 +594,8 @@ function assertBoundDirectory(snapshot: PackageDirectorySnapshot): void {
 }
 
 /**
- * Re-checks that an open file is still the one the read was bounded against.
- *
- * The path must still be its own canonical spelling: this runs on a path the
- * caller already resolved, so a link appearing at it means the file was
- * replaced between the resolve and the read.
+ * The path is one the caller already resolved, so a spelling that is no longer
+ * its own canonical form means the file was replaced mid-read.
  */
 function assertBoundRegularFile(path: string, expected: BigIntStats): void {
   const current = describeRealEntry(path);

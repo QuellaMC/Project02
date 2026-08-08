@@ -130,7 +130,6 @@ export type CreateRuntimePluginHostOptions = {
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
   readonly pluginReloader?: RuntimePluginReloader;
-  /** Authored-config fingerprint the host's plugin instances were constructed from. */
   readonly constructionConfigFingerprint?: string;
 };
 
@@ -214,17 +213,12 @@ export type RuntimePluginHost = {
   reconcileConfigEffect?(
     effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
-  /**
-   * True when this host's live instance of the plugin is known to reflect
-   * the fingerprinted authored config — it was constructed from it, or a
-   * live reload swapped it in. Recovery uses this to skip redundant rebuilds
-   * without ever skipping a reload whose outcome was never made durable.
-   */
+  /** Recovery skips a rebuild when the live instance reflects this config. */
   pluginConfigCurrentFor?(pluginId: string, configFingerprint: string): boolean;
   reloadPluginForCommittedConfig?(
     effects: readonly PreparedRuntimePluginConfigEffect[],
     reloadOptions?: {
-      /** Authored fingerprint after ALL of the turn's accepted effects, across plugins. */
+      /** Authored fingerprint after ALL of the turn's accepted effects. */
       readonly turnResultFingerprint?: string;
     },
   ): Promise<RuntimePluginConfigReloadHostResult>;
@@ -266,7 +260,7 @@ type RuntimePluginHostState = {
   readonly pluginConfigControl: RuntimePluginConfigControlHostState | undefined;
   readonly enabledIds: readonly string[];
   readonly enabledPlugins: readonly RuntimePlugin[];
-  /** Current instances: identical to enabledPlugins until a live config reload swaps one. */
+  /** Identical to enabledPlugins until a live config reload swaps one. */
   readonly livePlugins: () => readonly RuntimePlugin[];
   /** Replaces the live instance sharing next's plugin id; pure list swap. */
   readonly swapEnabledPlugin: (
@@ -355,8 +349,7 @@ export function createRuntimePluginHost(
         createFileStore: options.fileStore?.createFileStore,
       });
 
-      // Settled results pass exactly one choke point, so the turn log sees
-      // the same confirmed effects the commit path will consume.
+      // Settled results pass one choke point; turn log and commit agree.
       confirmedConfigUpdates?.note(result);
       return result;
     },
@@ -373,9 +366,6 @@ export function createRuntimePluginHost(
       });
     },
     pluginConfigCurrentFor(pluginId, configFingerprint) {
-      // A live reload supersedes the construction fingerprint for its
-      // plugin: currency is what the CURRENT instance was built from, not
-      // any config this host ever reflected.
       return (
         (liveAppliedFingerprintFor(pluginId) ??
           options.constructionConfigFingerprint) === configFingerprint
@@ -657,9 +647,7 @@ function lifecycleCatalogManifestResolver(
 export async function runRuntimePluginSessionEndHooks(
   options: RunRuntimePluginSessionEndHooksOptions,
 ): Promise<RuntimePluginHookHostResult> {
-  // This standalone helper treats the supplied plugins as already selected and
-  // enabled. Callers that need activation filtering should pass only activated
-  // plugins, or use the configured host path.
+  // Supplied plugins are treated as already enabled; no activation filtering.
   return await runRuntimePluginSessionEndHooksForTargets({
     targets: runtimePluginLifecycleTargets(options.plugins),
     context: options.context,
@@ -678,8 +666,7 @@ export async function runRuntimePluginSessionEndHooks(
 export async function runRuntimePluginShutdownHooks(
   options: RunRuntimePluginShutdownHooksOptions,
 ): Promise<RuntimePluginHookHostResult> {
-  // As with standalone session-end cleanup, callers supply the already-selected
-  // plugin set. This path deliberately does not rebuild or revalidate a host.
+  // Supplied plugins are treated as already enabled; no host is rebuilt here.
   return await runRuntimePluginShutdownHooksForTargets({
     targets: runtimePluginLifecycleTargets(options.plugins),
     context: options.context,
@@ -712,14 +699,7 @@ export async function runRuntimePluginSessionEndHooksForTargets(
   });
 }
 
-/**
- * Runs shutdown, the last phase, and closes instance ownership around it.
- *
- * Quiescing is bounded, so a reload factory that outlived its own deadline can
- * still produce a candidate after this point. Nothing reads the retired list
- * again, so late arrivals are torn down as they appear rather than filed where
- * no dispatch will reach them, holding whatever their factory opened.
- */
+/** Quiescing is bounded, so late reload candidates are torn down on arrival. */
 async function runFinalShutdownPhase(
   options: Omit<
     RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions,
@@ -977,12 +957,7 @@ type ResolvedRuntimePluginToolExecution = {
   readonly access: ReturnType<typeof runtimePluginAccessForPlugin>;
   readonly failureDegrades: boolean;
   readonly approvalGatedTool: boolean;
-  /**
-   * The call the hook executes. For a host-validated tool its input is
-   * the snapshot validation accepted, so the plugin receives exactly
-   * what was validated and what the log records — on every path into
-   * the host, not only the model loop's.
-   */
+  /** Host-validated tools get the exact input snapshot validation accepted. */
   readonly call: RuntimePluginToolCall;
 };
 
@@ -1508,12 +1483,7 @@ function normalizeToolCallResult(options: {
     });
 
     if (approvalGatedTool && preparedConfigEffect === undefined) {
-      // requiresConfirmation asks the user to approve an effect the call
-      // only staged, and the prompt is honest because the hook applied
-      // nothing. A tool returning no prepared effect either acted
-      // already — asking now would be too late — or set the flag by
-      // mistake. Rejecting here means the effect is never confirmed and
-      // the model is told which contract the plugin broke.
+      // No staged effect means the tool already acted, so asking is too late.
       throw new TypeError(
         `Tool "${options.providedTool.name}" sets requiresConfirmation but prepared no effect to confirm. A confirmable tool stages its effect as preparedConfigEffect and applies nothing until the user approves.`,
       );

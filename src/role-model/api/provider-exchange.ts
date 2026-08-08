@@ -267,10 +267,7 @@ function isRoleModelProviderExchangeTool(
     isJsonRecord(toolFunction) &&
     typeof toolFunction['name'] === 'string' &&
     typeof toolFunction['description'] === 'string' &&
-    // The parameters are evidence of what the provider was shown, and
-    // they were rendered from a contract the manifest gate had already
-    // judged; re-judging the schema here would be a second gate for the
-    // same rule. The exchange only needs it to be a JSON object.
+    // Not re-judged here: the manifest gate already judged the contract.
     isJsonRecord(toolFunction['parameters']) &&
     (toolFunction['strict'] === undefined || toolFunction['strict'] === true)
   );
@@ -357,8 +354,7 @@ function recordableMetadataNumber(
 export function freezeProviderMetadata(
   metadata: RoleModelProviderMetadata,
 ): RoleModelProviderMetadata {
-  // A count JSON cannot carry is not a count. Dropping the field records
-  // that we have none, rather than a number that would read back as null.
+  // Dropped rather than recorded as a number that would read back as null.
   const messageCount = recordableMetadataNumber(metadata.request?.messageCount);
   const status = recordableMetadataNumber(metadata.response?.status);
 

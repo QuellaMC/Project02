@@ -1,8 +1,3 @@
-/**
- * Project02 section of the runtime config console: lists the core
- * config fields and stages set/unset changes against the loaded
- * snapshot's fingerprint.
- */
 import {
   applyRuntimeConfigControlOperation,
   getRedactedRuntimeConfigValueAtPath,
@@ -30,8 +25,6 @@ export async function runProject02ConfigSection(
   context: RuntimeConfigConsoleContext,
   snapshot: RuntimeConfigConsoleSnapshot,
 ): Promise<void> {
-  // Character scope edits the overlay: only character-scoped fields
-  // appear, and current values come from the overlay document.
   const fields =
     snapshot.scope === 'global'
       ? project02RuntimeConfigFieldDefinitions()

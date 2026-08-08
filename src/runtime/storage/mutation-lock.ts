@@ -203,12 +203,7 @@ async function acquireNormalizedMutationLock(
   }
 }
 
-/**
- * @internal Production multi-target acquisition is sync-only
- * ({@link acquireLocalRuntimeMutationLocksSync}); this async form exists for
- * concurrency regression tests, which interleave contenders across awaits
- * and spawn child-process lock holders that production cannot simulate.
- */
+/** @internal For concurrency regression tests; production is sync-only. */
 export async function acquireLocalRuntimeMutationLocks(
   options: AcquireLocalRuntimeMutationLocksOptions,
 ): Promise<LocalRuntimeMutationLocksLease> {
@@ -256,11 +251,7 @@ export async function acquireLocalRuntimeMutationLocks(
   } satisfies LocalRuntimeMutationLocksLease);
 }
 
-/**
- * @internal Production sync callers hold multiple targets
- * ({@link acquireLocalRuntimeMutationLocksSync}); the single-target sync
- * form exists for reentrancy and abandoned-lock regression tests.
- */
+/** @internal For reentrancy and abandoned-lock regression tests. */
 export function acquireLocalRuntimeMutationLockSync(
   options: AcquireLocalRuntimeMutationLockOptions,
 ): LocalRuntimeMutationLockLeaseSync {
@@ -1130,40 +1121,21 @@ function ownerPath(lockPath: string): string {
 }
 
 type MutationLockWait = {
-  /**
-   * Returns how long to sleep before the next acquisition attempt, throwing the
-   * busy error once the resource has stopped making progress.
-   */
+  /** Throws the busy error once the resource has stopped making progress. */
   remainingRetryDelayMs(): number;
 };
 
 /**
- * Gives every target in a multi-lock acquisition its own full stall budget.
- *
- * `waitTimeoutMs` is per-resource health, so it cannot also be spent as one
- * pooled allowance across targets: time spent legitimately queueing on a healthy
- * first target would arrive at the second as a zero budget and reject it on the
- * first contended attempt. Each target is a distinct resource and answers the
- * stall question independently.
+ * Every target gets its own full stall budget; a pooled allowance would
+ * reach the second target already spent on a healthy first one.
  */
 function waitTimeoutMsPerTarget(configuredWaitMs: number | undefined): number {
   return configuredWaitMs ?? defaultLocalRuntimeMutationLockWaitTimeoutMs;
 }
 
 /**
- * Tracks a contended acquisition as a *stall* budget rather than a total one.
- *
- * `waitTimeoutMs` bounds how long the resource may sit without progress, not how
- * long this caller may queue. A fair queue of N contenders takes N times the
- * per-holder work to drain, so a total budget rejects healthy waiters purely
- * because the queue is long — and it does so first on the slowest machine, which
- * makes the failure look like flake instead of saturation.
- *
- * Progress is observed through the owner nonce: a different nonce means some
- * other contender both acquired and released while we waited, so the resource is
- * alive and this caller's budget restarts. A holder that dies without releasing
- * is still handled by reclamation, and a holder that hangs forever never changes
- * the nonce, so it still trips the budget.
+ * `waitTimeoutMs` bounds how long the resource may sit without progress,
+ * not how long this caller may queue behind other contenders.
  */
 function startMutationLockWait(
   normalized: NormalizedMutationLockOptions,
@@ -1178,8 +1150,7 @@ function startMutationLockWait(
       )?.nonce;
 
       if (currentNonce !== undefined && currentNonce !== observedNonce) {
-        // Hand-off observed: the queue is draining, so stop counting against
-        // this caller.
+        // A new nonce means the queue is draining; restart the budget.
         observedNonce = currentNonce;
         deadlineStartedAt = Date.now();
       }

@@ -82,8 +82,7 @@ describe('runtime plugin package loader', () => {
     });
 
     expect(discovery.diagnostics).toEqual([]);
-    // Discovery reads the two metadata files it must parse to build a manifest,
-    // and nothing else. Module bytes wait for an import that may never happen.
+    // Module bytes wait for an import that may never happen.
     expect(opened.filter(path => path.startsWith(packageRoot)).sort()).toEqual([
       join(packageRoot, 'package.json'),
       join(packageRoot, 'project02.plugin.json'),
@@ -195,8 +194,8 @@ describe('runtime plugin package loader', () => {
     const packageRoot = join(root, 'wide');
 
     mkdirSync(packageRoot, {recursive: true});
-    // Empty directories consume no bytes and are not files, so counting only
-    // files let a package traverse and snapshot without limit.
+    // Empty directories are neither bytes nor files, so counting only files let
+    // a package traverse without limit.
     for (let index = 0; index < 6; index += 1) {
       mkdirSync(join(packageRoot, `d${String(index)}`));
     }
@@ -244,9 +243,8 @@ describe('runtime plugin package loader', () => {
     if (file === undefined) {
       throw new Error('Expected the descriptor to be planned.');
     }
-    // The walk accepted 16 bytes under a 32-byte limit. Growing past the limit
-    // before the read means the plan's bound is what refuses it, not the size
-    // the walk happened to see.
+    // Growing past the limit after the walk leaves the plan's bound as the only
+    // thing that can refuse the read.
     writeFileSync(descriptorPath, Buffer.alloc(64));
 
     expect(() => readPlannedPackageFile({packageDirectory, file})).toThrow(
@@ -262,8 +260,8 @@ describe('runtime plugin package loader', () => {
   it('bounds how deep a captured package may nest', () => {
     const root = createTestTempRoot('project02-plugin-artifact-deep-');
     const packageRoot = join(root, 'deep');
-    // Capture recurses per level, so depth is stack depth. A long path is
-    // rejected by some filesystems first; the bound must not depend on that.
+    // Some filesystems reject a long path first, and the bound must not depend
+    // on that.
     const nested = join(packageRoot, ...Array.from({length: 70}, () => 'n'));
 
     mkdirSync(nested, {recursive: true});

@@ -54,8 +54,7 @@ describe('snapshotPackageSourceDirectory', () => {
     const home = createTestTempRoot('project02-package-home-');
     const installed = createTestTempRoot('project02-package-installed-');
     const elsewhere = createTestTempRoot('project02-package-elsewhere-');
-    // The home ownership guard permits this layout, so discovery must too:
-    // rejecting it makes even the bundled default package fail to load.
+    // The home ownership guard permits this layout, so discovery must too.
     const sourceRoot = join(home, 'characters');
 
     mkdirSync(join(installed, 'mira'));

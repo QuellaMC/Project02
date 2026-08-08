@@ -131,7 +131,6 @@ function createRejectedRoleModelLoopResult(options: {
   } satisfies RejectedRoleModelLoopResult);
 }
 
-/** Every reply the decision asks to send, in the order it asked. */
 export function executionVisibleReplyTexts(
   decision: CharacterDecision,
 ): readonly string[] {
@@ -267,10 +266,7 @@ function rejectWithReason(
     readonly details: string;
   },
 ): RejectedRoleModelLoopResult {
-  // The round was parsed and accepted before this gate refused it, so the
-  // names the model asked for are already in hand. Recording them here is
-  // what keeps them out of the read path: nothing downstream has to
-  // recover them by re-parsing the raw output.
+  // Recorded here so no read path has to recover them by re-parsing raw output.
   const rejectedDecisionResult = createRejectedRoleModelDecisionResult(
     gate.reason,
     gate.details,
@@ -335,13 +331,7 @@ function terminalAcceptedRoleModelLoopResult(options: {
   } satisfies AcceptedRoleModelLoopResult);
 }
 
-/**
- * One gate for every accepted round: a decision that speaks must speak
- * validly (visible_reply text survives normalization), and a terminal
- * decision must produce something (a visible reply or non-committed text).
- * Failures here reach the model as a feedback round while budget remains,
- * so invalid text is corrected before anything is shown or committed.
- */
+// Runs before anything is shown or committed; failures go back to the model.
 function visibleReplyGateRejection(
   decisionResult: AcceptedRoleModelDecisionResult,
   isTerminalRound: boolean,

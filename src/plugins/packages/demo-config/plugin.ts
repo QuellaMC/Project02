@@ -25,9 +25,7 @@ export function createDemoConfigPluginManifest(): RuntimePluginManifest {
   }).manifest;
 }
 
-// Package entry adapter: runs at host construction AND again after an
-// approved update to a reloadRequired: false field commits (the host swaps
-// in the rebuilt instance, so the next turn reflects the change).
+// Runs at host construction and again after a live config reload.
 export function createProject02Plugin(
   input: RuntimePluginFactoryInput,
 ): RuntimePlugin {

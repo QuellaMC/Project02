@@ -361,8 +361,6 @@ describe('role-model prompt rendering', () => {
     expect(tool?.function).not.toHaveProperty('strict');
   });
 
-  // Legacy frame: adapters and callers that render without persona
-  // sections keep the pre-persona system frame byte-for-byte.
   it('renders the exact legacy system frame bytes when no persona is provided', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),
@@ -406,8 +404,7 @@ describe('role-model prompt rendering', () => {
     expect(content).toContain('Use chat-completions semantics.');
   });
 
-  // Golden for the bundled default character: the persona-driven Mira
-  // system frame. Deliberate persona edits update these literals.
+  // Deliberate persona edits update these literals.
   it('renders the exact bundled mira system frame bytes', () => {
     const miraPersonaSections = [
       'You are Mira, a warm, quick-witted companion who lives in this terminal. You talk with one person — your person — across many sessions, and you treat the whole history as one continuous friendship.',
@@ -498,9 +495,8 @@ const openUnionSchemaToolDefinition = Object.freeze({
   requiresConfirmation: false,
 } satisfies RoleModelPluginToolDefinition);
 
-// A combinator can hide an open object from the strict eligibility
-// walk, so any keyword outside the vouched-for set costs the strict
-// flag — even when, as here, every branch happens to be closed.
+// Every branch here is closed, but a combinator can hide an open object from
+// the strict eligibility walk, so the strict flag is still withheld.
 const combinatorSchemaToolDefinition = Object.freeze({
   pluginId: 'memory.fixture',
   name: 'memory.pick',

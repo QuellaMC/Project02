@@ -1,11 +1,4 @@
-/**
- * Layered config resolution: plugin-manifest defaults < global config <
- * character overlay. The snapshot keeps both authored documents separate
- * from one plain effective document, then delegates that document to the
- * same effective resolver as the global loader path. The merge can only
- * override character-scoped project02 fields plus per-plugin enablement and
- * field-level plugin config.
- */
+/** Layer precedence: plugin defaults, then global config, then the overlay. */
 import type {LoadedProject02CharacterOverlayConfig} from './overlay.ts';
 import {
   resolveEffectiveProject02RuntimeConfig,
@@ -49,11 +42,7 @@ export type ResolveLayeredProject02RuntimeConfigOptions =
     readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
   };
 
-/**
- * The raw authored layers and their effective merge captured together. Reads,
- * mutation-target authorship, and effective provenance can therefore refer to
- * the same documents without reconstructing ownership from the merged value.
- */
+/** Keeps authored layers so ownership is never re-derived from the merge. */
 export function createLayeredProject02RuntimeConfigSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
@@ -101,8 +90,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   const source = loadedConfig.source;
   const path = loadedConfig.path;
 
-  // No overlay file, no override, nothing to report: the layered
-  // resolve is the global resolve, fingerprint included.
+  // With no overlay this must equal the global resolve, fingerprint included.
   if (
     overlayConfig === undefined ||
     (overlayConfig.config === undefined &&
@@ -156,11 +144,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   });
 }
 
-/**
- * Merges one overlay document over the global document; exported for
- * scope-aware candidate validation, which must judge exactly what the
- * layered resolver would see.
- */
+/** Exported so candidate validation judges exactly what the resolver sees. */
 export function mergeCharacterOverlayDocument(
   globalDocument: Project02RuntimeConfig | undefined,
   overlayDocument: Project02RuntimeConfig,
@@ -193,8 +177,7 @@ function mergedProject02Section(
     ...globalSection,
   };
 
-  // Only character-scoped fields cross from the overlay. The loader has
-  // already rejected the rest; the merge does not trust it anyway.
+  // The loader already rejects global-only fields; the merge does not trust it.
   for (const field of project02RuntimeConfigFieldDefinitions()) {
     const value = overlaySection[field.name];
 

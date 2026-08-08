@@ -1,9 +1,4 @@
-/**
- * What a valid conversation turn looks like, stated once. The append
- * gate in validation.ts applies these rules to every record — a live
- * append directly, a stored log by replaying it through the same gate —
- * so a stored file is valid iff it replays.
- */
+/** The turn rules the append gate applies to live and replayed records. */
 import {
   type CharacterDecision,
   visibleReplyToolCalls,
@@ -35,7 +30,6 @@ export function assertVisibleMessageCommitEvidence(
   }
 }
 
-/** The model input texts one record carries, in restatement order. */
 export function turnModelInputTexts(
   record: RawEventLogRecord,
 ): readonly string[] {
@@ -82,20 +76,15 @@ export function assertSingleLeadingUserMessage(
 }
 
 /**
- * Replies keep the order their decisions committed them in: rows of one
- * round keep that round's reply order, and rows of a later round never
- * precede rows of an earlier one. Each row already matches an accepted
- * reply of its decision; this is what stops a writer reordering or
- * repeating them within or across the rounds of one turn.
+ * Rows of one round keep that round's reply order, and rows of a later
+ * round never precede rows of an earlier one.
  */
 export function assertCharacterRowsFollowTheirDecision(
   turnMessages: readonly ConversationLogRecord[],
   commitEventByMessageKey: ReadonlyMap<string, RawEventLogRecord>,
 ): void {
-  // Keyed by the sampling round the commit event records: one decision
-  // commits each of its replies as its own event, and two rounds may
-  // legitimately say the same thing, so the key names the round rather
-  // than what it said.
+  // Keyed by round, not by text: two rounds may legitimately say the same
+  // thing.
   const rowsByDecision = new Map<
     number,
     {readonly texts: string[]; readonly replies: readonly string[]}
@@ -146,11 +135,8 @@ export function assertCharacterRowsFollowTheirDecision(
 }
 
 /**
- * A decision's replies as the commit path would have stored them, so the
- * rows compare through the same normalization. A stored reply that cannot
- * be normalized is a damaged record, named as one: this runs inside a
- * store read, where an unclassified text error would reach the operator
- * without saying which file broke.
+ * Normalized the way the commit path stored them, so rows compare through
+ * one normalization.
  */
 function storedDecisionReplyTexts(
   decision: CharacterDecision,
@@ -175,9 +161,8 @@ function assertCharacterCommitCarriesItsDecision(
   const commitResult = commitEvent.commitValidation?.result;
   const decisionResult = commitEvent.parsedRoleModelDecisionSnapshot?.result;
 
-  // The round is part of carrying the decision: it names which of the
-  // turn's decisions produced this row, and the ordering check below
-  // keys on it — a row without one would escape that check entirely.
+  // The round is required: the ordering check keys on it, so a row without
+  // one would escape that check.
   if (
     commitResult?.status !== 'accepted' ||
     commitResult.acceptedVisibleReplyText === undefined ||

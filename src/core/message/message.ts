@@ -3,9 +3,7 @@ export type CharacterProfile = {
   readonly displayName: string;
 };
 
-// Shared shape for any transcript speaker identity (the character or the
-// local user): stable id plus a display name that is a per-message
-// historical fact once committed.
+// A committed displayName is a per-message historical fact, never rewritten.
 export type SpeakerIdentity = {
   readonly id: string;
   readonly displayName: string;

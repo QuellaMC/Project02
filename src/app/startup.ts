@@ -66,21 +66,9 @@ type RuntimeCliStartupCommonOptions = {
 type RuntimeCliActivationStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage?: 'activation';
   readonly continueAfterActivationErrors?: boolean;
-  /**
-   * The caller's own judgment of the runtime env, run in phase one over
-   * the same env the resolved startup returns. A caller that rejects on
-   * an env value — `PROJECT02_ROLE_MODEL_PROVIDER`, say — cannot make
-   * that call before startup, because the env file lives under a home
-   * this function is the one that resolves; without this hook the
-   * rejection lands after the home and character-data markers are
-   * already written. Throwing here rejects the startup with nothing
-   * durable created; the thrown error reaches the caller unchanged.
-   */
+  /** Throwing here rejects the startup before anything durable is written. */
   readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
-  /**
-   * Optional first scoped edit. The initializer composes it with
-   * package materialization and commits one locked overlay candidate.
-   */
+  /** Composed with package materialization into one locked overlay commit. */
   readonly characterConfigRequest?:
     | {
         readonly kind: 'document';
@@ -97,15 +85,7 @@ type RuntimeCliConfigStartupOptions = RuntimeCliStartupCommonOptions & {
   readonly stage: 'config';
 };
 
-/**
- * The activation stage for a caller that only reports on a store.
- *
- * Same decisions, same rejections, no write: what a run would produce,
- * described rather than performed. It is a separate stage rather than a
- * flag on the activation one because "does this create the store" is
- * the question the two callers differ on, and a caller should have to
- * say which it is.
- */
+/** Same decisions and rejections as an activation startup, but no write. */
 type RuntimeCliReportStartupOptions = Omit<
   RuntimeCliActivationStartupOptions,
   'stage' | 'characterConfigRequest'
@@ -165,17 +145,11 @@ type StartupPreEnvState = {
     | {readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig};
   readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
   readonly activationPlanBeforeRuntimeEnv: PreparedProject02PluginActivationPlan;
-  // Everything but the activation plan: each exit pairs its own plan
-  // with the status that describes it.
+  // Each exit pairs its own plan with the status that describes it.
   readonly base: Omit<RuntimeCliActivationStartupBase, 'activationPlan'>;
 };
 
-/**
- * A startup that survived every env-independent rejection. It carries
- * the validated package document plus the two closures the commit needs
- * to re-derive state over post-commit config — nothing that could
- * itself reject the startup before the write.
- */
+/** A startup that survived every rejection except the write itself. */
 type PlannedRuntimeCliActivationStartup = {
   readonly startupBase: RuntimeCliStartupBase;
   readonly configEnv: NodeJS.ProcessEnv;
@@ -193,11 +167,7 @@ type PlannedRuntimeCliActivationStartup = {
   ) => NodeJS.ProcessEnv | undefined;
   readonly document: Project02RuntimeConfig;
   readonly request?: RuntimeConfigControlRequest;
-  /**
-   * The overlay the commit would write, already assembled to decide
-   * this startup was admissible. A reader finishes from it instead of
-   * from bytes no one has written yet.
-   */
+  /** The overlay the commit would write; a reader finishes from it. */
   readonly simulatedOverlay: LoadedProject02CharacterOverlayConfig;
 };
 
@@ -208,15 +178,7 @@ function rejectedStartup(result: RuntimeCliStartupResult): {
   return Object.freeze({outcome: 'rejected', result: Object.freeze(result)});
 }
 
-/**
- * The one character-runtime initializer for embedded consumers: runs
- * the exact CLI startup sequence — character activation, guarded
- * character-data materialization with package-config defaults, layered
- * activation planning — and throws on any non-resolved outcome instead
- * of returning CLI statuses. Host construction is downstream of this:
- * createConfiguredProject02PluginHostFromPlan refuses uninitialized
- * character state instead of creating it.
- */
+/** Throws on any non-resolved startup; must run before host construction. */
 export async function initializeProject02CharacterRuntime(
   options: RuntimeCliStartupCommonOptions & {
     readonly continueAfterActivationErrors?: boolean;
@@ -335,16 +297,8 @@ export function resolveRuntimeCliStartup(
 }
 
 /**
- * The one activation-stage sequence every CLI shares, in two phases.
- *
- * Everything that can reject a startup is decided first, by a
- * synchronous planner, and only a plan that survived all of it reaches
- * the commit below. That split is the rule this function exists to
- * enforce: no durable effect may precede a validation that could have
- * rejected the startup. It is enforced structurally rather than by
- * review, because `planRuntimeCliActivationStartup` is not `async` and
- * the only durable effect in the startup path is — so a write moved
- * into the planning phase is a type error, not a bug found later.
+ * No durable effect may precede a validation that could reject the
+ * startup: the planner is synchronous, so a write cannot move into it.
  */
 async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
@@ -365,17 +319,9 @@ async function resolveRuntimeCliActivationStartup(input: {
   return await commitPlannedRuntimeCliActivationStartup(planned.plan);
 }
 
-/**
- * Phase one: every decision that can reject this startup, made before
- * anything durable exists. A `rejected` outcome is a finished
- * RuntimeCliStartupResult; a `committable` outcome carries the
- * validated package document plus the state the commit needs, and says
- * that nothing left can reject the startup except the write itself.
- */
+/** Phase one: every rejection, decided before anything durable exists. */
 function planRuntimeCliActivationStartup(input: {
-  // Both stages plan the same way — that is what makes a report worth
-  // reading. They part company after this returns, over whether the
-  // plan is committed or described.
+  // Both stages plan the same way; they part company after this returns.
   readonly options:
     RuntimeCliActivationStartupOptions | RuntimeCliReportStartupOptions;
   readonly configLocation: ResolvedProject02ConfigLocation;
@@ -398,14 +344,7 @@ function planRuntimeCliActivationStartup(input: {
   );
   const homeRoot = configLocation.homeRoot;
 
-  // Judge the container before reading what is inside it. Character
-  // discovery reads `<home>/characters`, so on a home that is not a
-  // directory at all both guards refuse — and whichever runs first is
-  // the one the operator hears. Discovery answering first points at a
-  // subdirectory of a store whose real problem is the store itself.
-  //
-  // Same guard, same home target: binding the character below only adds
-  // the character scope, and carries this target through unchanged.
+  // Judged first so the operator hears about the home, not a subdirectory.
   assertResolvedProject02HomeAdoptable(configLocation);
 
   const characterActivation = prepareProject02CharacterActivation({
@@ -430,10 +369,7 @@ function planRuntimeCliActivationStartup(input: {
     runtimeLocation,
   };
 
-  // One filesystem discovery for the whole startup: every activation
-  // plan — pre-materialization, post-materialization, and the final
-  // runtime-env one — judges the same manifest snapshot, and only the
-  // diagnostic classification re-runs as the overlay state changes.
+  // One discovery per startup, so every plan judges the same manifests.
   const catalogDiscovery = discoverRuntimePluginCatalog({
     storeRoot: homeRoot,
     ...(options.factories === undefined
@@ -476,9 +412,7 @@ function planRuntimeCliActivationStartup(input: {
     };
   };
 
-  // An invalid global config must not create durable state: report it
-  // (with the overlay read-only for attribution) before the home,
-  // or identity marker would be written.
+  // An invalid global config must not create durable state.
   if (diagnosticsHaveErrors(loadedConfig.diagnostics)) {
     const invalidState = buildPreEnvState(
       loadCharacterOverlayForStartup(runtimeLocation),
@@ -491,10 +425,7 @@ function planRuntimeCliActivationStartup(input: {
     });
   }
 
-  // Read before anything is written. Bytes that cannot be parsed cannot
-  // be simulated either, so an overlay with no authored document is
-  // rejected here; every other overlay error is judged below against the
-  // document this startup would actually write.
+  // An unparseable overlay cannot be simulated, so it is rejected here.
   const preexistingOverlay = loadCharacterOverlayForStartup(runtimeLocation);
   const unreadableOverlay =
     blockingRuntimeConfigLayerDiagnostic(preexistingOverlay);
@@ -514,8 +445,7 @@ function planRuntimeCliActivationStartup(input: {
     expectations: characterActivation.definition.plugins,
     plan: preMaterializationState.activationPlanBeforeRuntimeEnv,
     catalogSnapshot: preMaterializationState.catalogSnapshot,
-    // A reader carries no edit: it describes the store as a run would
-    // find it, not as one particular edit would leave it.
+    // A reader describes the store as a run would find it, carrying no edit.
     request:
       options.stage === 'report' ? undefined : options.characterConfigRequest,
   });
@@ -535,11 +465,7 @@ function planRuntimeCliActivationStartup(input: {
     throw new TypeError('Character package materialization planning drifted.');
   }
 
-  // The overlay as it will be, not as it is. Every remaining phase-one
-  // decision — required plugins, the env-file gate, the caller's env
-  // judgment — is made over this, so a startup is admitted on the state
-  // the commit produces rather than on the not-yet-set-up state it
-  // replaces.
+  // The overlay as it will be, so later decisions judge the committed state.
   const simulated = simulateCharacterMaterialization({
     runtimeLocation,
     configEnv: input.configEnv,
@@ -580,16 +506,11 @@ function planRuntimeCliActivationStartup(input: {
     continueAfterActivationErrors: options.continueAfterActivationErrors,
   });
 
-  // Still phase one, and that is the point: the env file is read while
-  // rejecting is still free. An unreadable file has to be reported
-  // instead of reported after the commit below already landed.
+  // Still phase one: the env file is read while rejecting is still free.
   const plannedRuntimeEnv = readRuntimeEnvFileUnlessBlocked(
     plannedState.activationPlanBeforeRuntimeEnv.activation.diagnostics,
   );
 
-  // The caller judges that same env here, for the same reason. A
-  // blocked activation never read the file, so there is nothing to
-  // judge — that startup is already rejected by phase two.
   if (plannedRuntimeEnv !== undefined) {
     options.validateRuntimeEnv?.(plannedRuntimeEnv);
   }
@@ -611,11 +532,7 @@ function planRuntimeCliActivationStartup(input: {
   });
 }
 
-/**
- * Phase two: the durable write, and the plans that can only be built
- * once it lands. Every rejection reachable from here is caused by the
- * commit itself — a failed write, or config the commit just changed.
- */
+/** Phase two: the durable write; every rejection here comes from it. */
 async function commitPlannedRuntimeCliActivationStartup(
   plan: PlannedRuntimeCliActivationStartup,
 ): Promise<RuntimeCliStartupResult> {
@@ -636,9 +553,7 @@ async function commitPlannedRuntimeCliActivationStartup(
     });
   }
 
-  // Read back rather than reused from the plan: the commit is what made
-  // these bytes, so the overlay every downstream plan judges is the one
-  // actually on disk.
+  // Read back from disk: the commit is what made these bytes.
   return finishRuntimeCliActivationStartup({
     plan,
     overlayLoadedConfig: loadCharacterOverlayForStartup(plan.runtimeLocation),
@@ -649,21 +564,7 @@ async function commitPlannedRuntimeCliActivationStartup(
   });
 }
 
-/**
- * Phase two without the write: the startup this plan would produce,
- * reported from the overlay phase one already simulated.
- *
- * A reader — `inspect` — needs the same answer a run would get, and
- * needs it without setting the store up on the operator's behalf.
- * Reporting on state a command created while reporting is its own kind
- * of wrong answer: the first `inspect` of a store would describe a
- * store that existed because `inspect` ran.
- *
- * It is the same plan, finished the same way, so what a reader reports
- * and what a run commits cannot drift. Only where the overlay comes
- * from differs, and phase one already built that overlay to decide
- * whether the commit was admissible at all.
- */
+/** Phase two without the write, finished from the simulated overlay. */
 function simulatePlannedRuntimeCliActivationStartup(
   plan: PlannedRuntimeCliActivationStartup,
 ): RuntimeCliStartupResult {
@@ -674,10 +575,6 @@ function simulatePlannedRuntimeCliActivationStartup(
   });
 }
 
-/**
- * The rest of a startup once the overlay is settled, shared by the
- * commit and the simulation so both answer with one implementation.
- */
 function finishRuntimeCliActivationStartup(input: {
   readonly plan: PlannedRuntimeCliActivationStartup;
   readonly overlayLoadedConfig: LoadedProject02CharacterOverlayConfig;
@@ -716,8 +613,7 @@ function finishRuntimeCliActivationStartup(input: {
     });
   }
 
-  // Asked again over the post-materialization diagnostics: materializing
-  // the character can add the error that blocks this startup.
+  // Materializing the character can add the error that blocks this startup.
   const runtimeEnv = readRuntimeEnvFileUnlessBlocked(
     activationPlanBeforeRuntimeEnv.activation.diagnostics,
   );
@@ -751,15 +647,7 @@ function finishRuntimeCliActivationStartup(input: {
   });
 }
 
-/**
- * The read-only twin of `materializeCharacterDataDir`: the overlay that
- * commit would write, without writing it.
- *
- * Both call the same config seam with the same inputs, so what phase one
- * admits and what phase two produces cannot drift. The one asymmetry is
- * deliberate — the marker this startup has not created yet is not
- * required here, because creating it is what is being decided.
- */
+/** Read-only twin of materializeCharacterDataDir: no marker required. */
 function simulateCharacterMaterialization(input: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly configEnv: NodeJS.ProcessEnv;
@@ -798,10 +686,7 @@ function simulateCharacterMaterialization(input: {
 
   return Object.freeze({
     status: 'valid',
-    // The candidate validated, so it carries a config: every plan built
-    // from here reads the overlay this startup is about to write. It
-    // carries no authored document, because there are none yet — this
-    // overlay describes a file that has not been written.
+    // This overlay describes a file that has not been written yet.
     overlay: Object.freeze({
       scope: 'character',
       characterId,
@@ -813,12 +698,7 @@ function simulateCharacterMaterialization(input: {
   });
 }
 
-/**
- * Character selection initialization. The package plan and any
- * existing config were validated before this function runs. It commits
- * the overlay first through the target-aware config seam, then records
- * the package version in the data marker.
- */
+/** The overlay commits before the marker records the package version. */
 async function materializeCharacterDataDir(input: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly configEnv: NodeJS.ProcessEnv;
@@ -896,9 +776,7 @@ async function materializeCharacterDataDir(input: {
       ...(input.request === undefined ? {} : {configMutation: applied}),
     });
   } catch (error: unknown) {
-    // Only an identity mismatch is character-shaped (wrong character for
-    // this data directory); every other storage error keeps its own
-    // formatted identity through the caller's terminal-error path.
+    // Only an identity mismatch is character-shaped; other errors rethrow.
     if (
       error instanceof LocalRuntimeStorageContractError &&
       error.code === 'character_identity_mismatch'
@@ -979,13 +857,7 @@ function prepareCharacterMaterializationPreflight(options: {
   });
 }
 
-/**
- * Errors that describe the config as it stands, before materialization
- * runs. Only the ones no write could fix belong here; the overlay's own
- * values are judged later against the document this startup would
- * actually produce, so a run carrying an edit is not blocked by the very
- * value it repairs — nor admitted by leaving a second one unchecked.
- */
+/** Only errors no write could fix belong here. */
 function materializationConfigPreflightDiagnostics(
   plan: PreparedProject02PluginActivationPlan,
 ): readonly RuntimeConfigDiagnostic[] {
@@ -993,15 +865,9 @@ function materializationConfigPreflightDiagnostics(
     plan.resolvedConfig.diagnostics.filter(
       diagnostic =>
         diagnostic.severity === 'error' &&
-        // Readiness failures are not proof that an authored document is
-        // malformed (runtime .env also loads only after durable
-        // initialization); every other error describes an invalid
-        // authored global or overlay value and must fail before
-        // materialization writes anything.
+        // The runtime .env loads only after durable initialization.
         !runtimeConfigDiagnosticIsReadinessFailure(diagnostic) &&
-        // Overlay errors excepted: the simulated candidate below is the
-        // authority on those, and it judges the merged result rather
-        // than the bytes this startup is about to replace.
+        // The simulated candidate is the authority on overlay errors.
         diagnostic.origin?.scope !== 'character',
     ),
   );
@@ -1052,27 +918,13 @@ function startupConfigHasErrors(
   );
 }
 
-/**
- * The overlay location derives from the loaded global config alone: the
- * home root plus the configured character id. A store root or character
- * id the storage layer rejects fails startup later with its own
- * diagnostic; the overlay simply does not exist for it.
- */
 function loadCharacterOverlayForStartup(
   runtimeLocation: ResolvedProject02RuntimeLocation,
 ): LoadedProject02CharacterOverlayConfig {
-  // The guarded loader holds the marker and adoptability rules for
-  // read-only startups too: a data directory marked for another
-  // character, holding foreign content, or reached through a symlink
-  // fails check and inspect exactly as durable materialization does.
+  // The guarded loader applies marker and adoptability rules to reads too.
   return readCharacterOverlayForScope(runtimeLocation.characterScope).overlay;
 }
 
-/**
- * The data marker through the same guarded read, absent when this
- * startup has not created the directory yet — which is exactly the
- * state that makes every package field missing and worth filling.
- */
 function readCharacterDataMarkerForStartup(
   runtimeLocation: ResolvedProject02RuntimeLocation,
 ): LocalRuntimeCharacterDataStorageSchemaMarker | undefined {
@@ -1171,14 +1023,7 @@ function withActivationDiagnostics(
   });
 }
 
-/**
- * Reads the home env file at most once per startup, and only for a
- * startup that needs it: `undefined` says this activation is blocked by
- * an env-independent error, so the file is not read at all. The reader is
- * asked twice — before materialization commits anything durable, and again
- * over the post-materialization diagnostics — and the cache is what makes
- * the second ask free.
- */
+/** Undefined says the activation is blocked, so the file is not read. */
 function createStartupRuntimeEnvFileReader(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly suppliedEnv: NodeJS.ProcessEnv;
@@ -1203,18 +1048,8 @@ function createStartupRuntimeEnvFileReader(options: {
 }
 
 /**
- * The one answer to "does this startup read the home env file", asked
- * both before materialization commits and before the final activation
- * plan resolves.
- *
- * An activation already blocked by an env-independent error must not have
- * that error displaced by an env-file failure, so those startups skip the
- * read entirely. A missing secret is the exception in the other
- * direction: the env file is where the secret would come from, so
- * skipping the read would be reporting a diagnostic the read might have
- * removed. One predicate keeps both call sites in agreement — if only
- * the second one skipped, materialization would have already read (and
- * failed on) a file the startup then decided not to need.
+ * A blocked activation skips the read, so no env-file failure displaces
+ * its error. A missing secret is the exception: the env file supplies it.
  */
 function startupReadsRuntimeEnvFile(options: {
   readonly continueAfterActivationErrors: boolean | undefined;

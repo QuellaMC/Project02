@@ -93,13 +93,8 @@ export async function ensureStorageSchemaMarker(
 }
 
 /**
- * Serialized marker update used after a separately committed durable
- * resource. Callers provide the complete next marker so the schema
- * codec remains the sole validation boundary, and the same
- * `assertAdoptable` guard the create path takes, because rewriting a
- * marker in place is no less of a claim on the directory than writing
- * the first one: the marker read here decides what gets encoded back
- * over it, so both have to come from a directory the caller still owns.
+ * Callers provide the complete next marker, so the schema codec remains
+ * the sole validation boundary.
  */
 export async function updateStorageSchemaMarker(
   location: StorageSchemaMarkerLocation,
@@ -108,11 +103,8 @@ export async function updateStorageSchemaMarker(
   ) => LocalRuntimeStorageSchemaMarker,
   assertAdoptable: () => Promise<void> | void,
 ): Promise<UpdateStorageSchemaMarkerResult> {
-  // The lock file lives inside the directory under claim, so ownership is
-  // checked before acquiring it and again before the rename: the first
-  // check keeps the runtime from writing lock state into a directory it
-  // does not own, the second closes the window the lock cannot cover
-  // because the swap happens above it, in the path itself.
+  // The lock file lives inside the directory under claim: check ownership
+  // before acquiring it, and again before the rename the lock cannot cover.
   await assertAdoptable();
 
   const lock = await acquireLocalRuntimeMutationLock({

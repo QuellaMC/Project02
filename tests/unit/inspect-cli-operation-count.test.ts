@@ -91,8 +91,8 @@ describe('inspect CLI evidence indexing', () => {
   });
 });
 
-// A whole-record projection pass classifies through `kind`. Proxying that
-// discriminator makes repeated scans observable without a wall-clock assertion.
+// Proxying `kind` makes repeated projection scans observable without a
+// wall-clock assertion.
 function countClassificationVisits<T extends {readonly kind: string}>(
   values: readonly T[],
 ): {

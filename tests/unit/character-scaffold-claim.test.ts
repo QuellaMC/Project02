@@ -10,12 +10,8 @@ const staleScan = vi.hoisted(() => ({
   hiddenEntryName: undefined as string | undefined,
 }));
 
-// Two runs of `pnpm character:new` overlapping is not something a
-// sequential test can arrange, so the interleaving is expressed at the
-// step that observes it: a directory listing taken before a concurrent
-// run stamped its package. Everything else is the real filesystem, and
-// the scaffold is given no hint that the listing is stale — which is
-// exactly the position it is in when the race is real.
+// Two overlapping scaffold runs are expressed at the step that observes them:
+// a directory listing taken before the concurrent run stamped its package.
 vi.mock('node:fs', async importOriginal => {
   const original = await importOriginal<typeof NodeFileSystem>();
 
@@ -49,18 +45,13 @@ describe('character package scaffold claiming a directory', () => {
     const packageRoot = join(packagesRoot, 'test.race-char');
     const descriptorPath = join(packageRoot, 'project02.character.json');
 
-    // The concurrent run: it got the directory and wrote its descriptor.
     mkdirSync(packageRoot, {recursive: true});
     writeFileSync(descriptorPath, '{"stamped":"by the winner"}\n', 'utf8');
 
-    // This run's listing predates that, so it believes the id is free.
     staleScan.hiddenEntryName = 'test.race-char';
 
-    // Deciding from the stale listing and creating afterwards is what
-    // loses the winner's descriptor: `mkdir` with `recursive: true`
-    // reports success on a directory it did not create, so the write
-    // lands on top. Claiming the directory exclusively is the one step
-    // that cannot be raced, and it is what refuses here.
+    // `mkdir` with `recursive: true` reports success on a directory it did not
+    // create, so only an exclusive claim refuses here.
     expect(() =>
       scaffoldCharacterPackage({id: 'test.race-char', packagesRoot}),
     ).toThrow(`already exists: ${packageRoot}`);

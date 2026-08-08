@@ -97,9 +97,7 @@ export function inspectRuntimePluginConfig(options: {
     options.runtimeLocation,
   );
   const characterScope = options.runtimeLocation.characterScope;
-  // The guarded overlay loader enforces the identity and adoptability
-  // rules for control reads too: a data directory rebound to another
-  // character must not feed its overlay into model-visible config.
+  // A rebound data directory must not feed an overlay into model-visible config.
   const overlayConfig = readCharacterOverlayForScope(characterScope).overlay;
   const manifests = manifestsIncludingTarget(
     options.manifest,

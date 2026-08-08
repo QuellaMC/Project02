@@ -1,17 +1,6 @@
 /**
- * Immutable executable artifact boundary for runtime plugin packages.
- *
- * Discovery walks every regular file while the package identities are stable,
- * but reads none of them: an artifact is a plan, and the plan is what makes
- * the package importable through a private module URL, so neither the entry
- * path nor a transitive relative import can name a file the walk did not
- * accept.
- *
- * Bytes are read when a module is actually evaluated, and only for that
- * module. Every discovered package would otherwise sit in memory for a run
- * that imports one of them, or none. The cost is that a file edited between
- * discovery and load is read as it is now — a package that changes underneath
- * a running process was never going to be the version that was walked.
+ * The walk is the plan: no path it did not accept can be imported. Bytes are
+ * read only when a module is evaluated, so an edit after discovery is seen.
  */
 import {createHash} from 'node:crypto';
 import {
@@ -160,18 +149,7 @@ export function activateRuntimePluginPackageArtifact(options: {
   return createArtifactUrl(options.artifact.id, entryRelativePath);
 }
 
-/**
- * The private module URL's hostname, and the key artifacts are activated
- * under.
- *
- * It hashes the walk — every path plus the filesystem identity of each file —
- * rather than file contents, because contents are no longer read at discovery.
- * That is what this identifier needs: two different packages get two different
- * ids, and an edited package gets a new one, so the resolve and load hooks
- * cannot route an import into an artifact it does not belong to. It is not a
- * content digest, and nothing treats it as one: a file touched without being
- * edited also yields a new id, which is harmless for a lookup key.
- */
+/** Hashes the walk, not file contents: a lookup key, not a content digest. */
 function createArtifactId(options: {
   readonly directories: ReadonlySet<string>;
   readonly files: ReadonlyMap<string, PlannedPackageFile>;
@@ -299,10 +277,7 @@ function ensureRuntimePluginArtifactHooks(): void {
       }
       return {
         format: runtimePluginArtifactModuleFormat(address.relativePath),
-        // The one place plugin bytes are read, and only for a module actually
-        // being evaluated. The walk already decided this path belongs to the
-        // package; the read re-checks that it still names a contained regular
-        // file within its own limit.
+        // The read re-checks the path still names a contained regular file.
         source: readPlannedArtifactFile(address.artifact, file),
         shortCircuit: true,
       };
@@ -324,9 +299,6 @@ function readPlannedArtifactFile(
     if (!(error instanceof PackageCaptureError)) {
       throw error;
     }
-    // A path the walk accepted that no longer names a readable file inside the
-    // package is not loadable. The importer reports this as an entry that could
-    // not be imported, which is what it is.
     throw new TypeError('Runtime plugin artifact module is unavailable.', {
       cause: error,
     });
@@ -346,12 +318,7 @@ function resolveFromArtifact(options: {
   if (parentFile === undefined) {
     throw new TypeError('Runtime plugin artifact parent is unavailable.');
   }
-  // The directory a relative specifier is resolved against is the one
-  // holding the importing module's bytes, which is the file the plan
-  // reads — not the path the package named it by. Those differ for a
-  // link: an entry linked to sub/target.mjs would otherwise have its own
-  // ./helper.mjs looked for beside the link, and a self-contained
-  // package would fail to import a file the walk already accepted.
+  // A relative specifier resolves against the file's real path, not its link.
   const physicalParentPath = plannedPackageFileReadPath({
     packageDirectory: options.parentAddress.artifact.packageDirectory,
     file: parentFile,

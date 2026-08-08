@@ -46,9 +46,8 @@ export function createRuntimeEvidenceIncrementalState(
   boundCharacter?: CharacterProfile,
   boundUserSpeaker?: SpeakerIdentity,
 ): RuntimeEvidenceIncrementalState {
-  // Every record enters through the machine's assert-then-apply — a
-  // stored log by replay, a live append directly. Seeding state from
-  // pre-populated evidence would readmit the unasserted path.
+  // Seeding state from pre-populated evidence would readmit the unasserted
+  // path; every record enters through assert-then-apply.
   if (
     evidence.rawEvents.length > 0 ||
     evidence.conversationMessages.length > 0
@@ -120,9 +119,8 @@ function assertIncrementalRawSequence(
     );
   }
 
-  // A turn starting implicitly closes any turn a crash left open — that
-  // is what a resumed session looks like. Any other record must belong to
-  // the turn that is open.
+  // A turn starting implicitly closes any turn a crash left open; any other
+  // record must belong to the open turn.
   if (
     record.kind !== 'after_turn_committed' &&
     record.kind !== 'runtime_event_received' &&
@@ -346,11 +344,8 @@ function assertIncrementalRawVisibleReferences(
 }
 
 /**
- * The turn-shape rules of {@link assertConversationTurnShape} that a
- * commit-event append can already violate, checked before the row is
- * accepted. The cold gate re-states the whole shape on a fresh read; this
- * keeps a live writer from appending a row that gate would reject, which
- * would strand the session as unreadable on the next start.
+ * Checked live so a writer cannot append a row the cold gate would reject,
+ * stranding the session as unreadable on the next start.
  */
 function assertIncrementalVisibleCommitShape(
   state: RuntimeEvidenceIncrementalState,
@@ -466,11 +461,8 @@ export function assertIncrementalConversationAppend(options: {
   readonly record: ConversationLogRecord;
   readonly expectedCharacter?: CharacterProfile;
   /**
-   * The character snapshot the committing raw event itself carries. On
-   * the session's first character row nothing is recorded yet, and the
-   * store binding pins only the id — the display name is the session's
-   * own historical fact, so the row's decision evidence supplies it.
-   * Cross-record agreement is already asserted at the raw-event level.
+   * The display name is a per-session historical fact, so the row's own
+   * decision evidence supplies it on the session's first character row.
    */
   readonly recordCharacter?: CharacterProfile;
 }): void {
@@ -515,18 +507,8 @@ export function assertIncrementalConversationAppend(options: {
     }
   }
 
-  // The store's binding is a fact about the store, not a default the
-  // caller outranks. The precedence above reads the other way — a
-  // supplied character wins, and the loop only compares against evidence
-  // already recorded — so on a session with none, a caller could append
-  // `nova` into a store bound to `mira`. That append succeeded and
-  // mutated durable state; the refusal arrived one call later, on the
-  // terminal raw event, by which point the messages were on disk.
-  //
-  // Same rule, same function, same message as that later refusal and as
-  // every cold read: id only, so a renamed character's sessions stay
-  // appendable. Only the timing changes — the check now runs before the
-  // record is accepted rather than after.
+  // Runs before the record is accepted: the store's binding is a fact about
+  // the store, not a default a caller outranks.
   validateDurableCharacterProfiles({
     roleModelCharacter: expectedCharacter,
     conversationCharacter: options.state.conversationCharacter,
@@ -551,20 +533,9 @@ export function assertIncrementalConversationAppend(options: {
   }
 }
 
-// The first user record anchors the session's speaker name; every later
-// row must match the anchor exactly. The store binding pins only the id
-// — a display name is a historical per-session fact, so a session
-// written under an earlier configured name stays valid under a renamed
-// binding, and the current name reaches new sessions through the writer
-// that stamps it.
-//
-// The anchoring name is judged by the same rule every other speaker
-// name is. A looser check here only decided *which* write produced an
-// unreadable session: a non-empty but multiline or overlong name was
-// accepted and appended, and the next read of that session ran it
-// through `createUserSpeaker`, which rejects it — so the store held
-// durable evidence that could never be opened again. Two boundaries
-// judging one field by two rules, with the lenient one writing first.
+// The first user record anchors the session's speaker name, judged by the
+// same rule as every other name: a looser one here writes a session no
+// later read accepts.
 function userRecordSpeakerIsValid(
   record: {readonly speakerId: string; readonly speakerName: string},
   recordedUserSpeaker: SpeakerIdentity | undefined,
@@ -613,15 +584,8 @@ export function applyIncrementalConversationAppend(
 }
 
 /**
- * A message ID names its session and climbs.
- *
- * Climbing rather than counting: the session chooses message numbers and
- * the log records them, so a write that failed leaves a number the log
- * never sees. Demanding the next number here would make the session's own
- * count a second answer to a question it already answers, and the two
- * would disagree on exactly the lagging log this design expects. What a
- * damaged or forged log looks like is a number that repeats or goes
- * backwards, and that is what this rejects.
+ * Message numbers climb rather than count: a failed write leaves a number
+ * the log never sees, so only a repeat or a reversal is damage.
  */
 function assertConversationMessageIdClimbs(options: {
   readonly evidence: DurableRuntimeSessionEvidence;
@@ -809,10 +773,8 @@ export function durableRuntimeSessionCharacterProfile(
 }
 
 /**
- * The terminal record a turn identity landed, from an already-validated
- * record list — pass a store read, never a raw decode. An identity whose
- * records carry a different createdAt is a different occurrence of the
- * ids, so it has no terminal here.
+ * Pass an already-validated record list, never a raw decode; records with a
+ * different createdAt are a different occurrence of the same ids.
  */
 export function findRuntimeTurnTerminalRawEvent(
   rawEvents: readonly RawEventLogRecord[],

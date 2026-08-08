@@ -122,10 +122,8 @@ function normalizeJsonBoundaryValue(
   }
 
   if (typeof value === 'number') {
-    // JSON has no NaN or Infinity, and JSON.stringify writes null for
-    // both. Normalizing here rather than throwing keeps the boundary
-    // total: what a caller holds after crossing it is what the log will
-    // hold, so the two can never disagree.
+    // JSON has no NaN or Infinity, so the snapshot carries what
+    // serialization would have written anyway.
     if (!Number.isFinite(value)) {
       return null;
     }
@@ -310,7 +308,6 @@ export function isJsonBoundaryObject(
   return isJsonRecord(value);
 }
 
-/** The one "plain JSON object" predicate; every boundary narrows with this. */
 export function isJsonRecord(
   value: unknown,
 ): value is Readonly<Record<string, unknown>> {

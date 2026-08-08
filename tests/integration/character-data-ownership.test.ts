@@ -190,9 +190,8 @@ describe('character data ownership marker', () => {
   it('accepts a padded character ID against the canonical marker it wrote', async () => {
     const dataRoot = createTestTempRoot();
 
-    // The marker constructor canonicalizes before writing, so comparing a
-    // raw request against it made a padded ID claim the directory, stamp
-    // `mira`, and then mismatch against its own write.
+    // The marker constructor canonicalizes before writing, so a padded ID
+    // compared raw used to mismatch against its own write.
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
       characterId: ' mira ',
@@ -335,8 +334,8 @@ describe('layered config control against a rebound character-data directory', ()
       project02: {storeRoot: homeRoot, character: 'mira'},
     });
 
-    // Simulate a copied/renamed directory: mira's data dir claims nova
-    // and carries nova's overlay.
+    // A copied directory: mira's data dir claims nova and carries nova's
+    // overlay.
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
     mkdirSync(dataRoot, {recursive: true});
@@ -455,8 +454,7 @@ describe('character data directories through the durable runtime', () => {
     const homeRoot = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
-    // A copied or corrupt tree: session artifacts without a data
-    // marker. Direct durable bootstrap must not mark it.
+    // A copied or corrupt tree: session artifacts without a data marker.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
 
@@ -468,8 +466,7 @@ describe('character data directories through the durable runtime', () => {
       }),
     ).rejects.toThrow('without a data marker');
     expect(existsSync(schemaPath(dataRoot))).toBe(false);
-    // The data dir was preflighted before the home initializer ran:
-    // no home marker was written for the rejected bootstrap.
+    // The data dir was preflighted before the home initializer ran.
     expect(existsSync(join(homeRoot, 'schema.json'))).toBe(false);
   });
 
@@ -499,8 +496,7 @@ describe('character data directories through the durable runtime', () => {
     const homeRoot = createTestTempRoot();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
 
-    // A concurrent initializer between temp-write and rename: the live
-    // replacement must not read as foreign content.
+    // A concurrent initializer caught between temp-write and rename.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
       join(
@@ -565,8 +561,8 @@ describe('character data directories through the durable runtime', () => {
     const homeRoot = createTestTempRoot();
     const donorHome = createTestTempRoot();
 
-    // A REAL character-data marker in another store, borrowed via
-    // symlink next to foreign content, must not prove ownership.
+    // The donor turn produces a real marker in another store, which the
+    // symlink below borrows.
     await runOneTurn({
       homeRoot: donorHome,
       character: testCharacterProfile,
@@ -603,8 +599,7 @@ describe('character data directories through the durable runtime', () => {
     const homeRoot = createTestTempRoot();
     const outside = createTestTempRoot();
 
-    // The target carries a matching marker: trusting it would move
-    // locks and session files outside the selected home.
+    // The target carries a matching marker, so only the link is wrong.
     writeFileSync(schemaPath(outside), characterDataMarkerBytes('mira'));
     mkdirSync(join(homeRoot, 'character-data'), {recursive: true});
     symlinkSync(outside, characterDataDirPath(homeRoot, 'mira'));
@@ -679,7 +674,7 @@ describe('character data directories through the durable runtime', () => {
     ).rejects.toThrow('without a data marker');
     expect(existsSync(schemaPath(dataRoot))).toBe(false);
 
-    // Simulate a copied/renamed directory: mira's data dir claims nova.
+    // A copied directory: mira's data dir claims nova.
     writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('nova'));
 
     await expect(
@@ -697,10 +692,8 @@ describe('character data directories through the durable runtime', () => {
   it('rejects an unusable character display name before the home exists', async () => {
     const homeRoot = createTestTempRoot();
 
-    // A display name is not just decoration: it is stamped into every
-    // durable character message and interpolated into prompt output, so
-    // a multiline one has to be refused at the same boundary the user's
-    // is — and refused before the boundary writes anything.
+    // The name is stamped into every durable character message and into prompt
+    // output, so it is judged at the same boundary the user's name is.
     await expect(
       createDurableChatRuntime({
         homeRoot,
@@ -728,9 +721,8 @@ describe('character data directories through the durable runtime', () => {
   it('binds the canonical character id everywhere a padded one was passed', async () => {
     const homeRoot = createTestTempRoot();
 
-    // The directory name has always been canonical. What the session and
-    // the log store bound was the caller's spelling, so messages written
-    // under `" nova "` could not be reopened by the discovered `nova`.
+    // The directory name is canonical, but the session and log store bound the
+    // caller's spelling, so `" nova "` could not be reopened as `nova`.
     const runtime = await createDurableChatRuntime({
       homeRoot,
       character: {id: ' nova ', displayName: 'Nova'},
@@ -744,8 +736,7 @@ describe('character data directories through the durable runtime', () => {
       await runtime.writerLease.release();
     }
 
-    // The proof that the binding is canonical all the way down: a turn
-    // written through the padded profile reopens through the plain one.
+    // A turn written through the padded profile reopens through the plain one.
     const resumed = await runOneTurn({
       homeRoot,
       character: novaProfile,

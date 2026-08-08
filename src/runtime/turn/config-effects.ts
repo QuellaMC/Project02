@@ -55,9 +55,8 @@ export async function recoverPendingRuntimeConfigEffects(options: {
     const failedEffectIds = new Set<string>();
 
     for (const effect of pendingEffects) {
-      // Replaying acts purely on what the log says, so the instruction is
-      // validated where it is consumed: an effect with no matching
-      // approved config-update call is closed rejected, never applied.
+      // Replay acts only on what the log says: an effect with no approved
+      // config-update call is closed rejected, never applied.
       if (!runtimeConfigEffectHasLoggedApproval(effect, approvalRecords)) {
         reconcileEvidence.push(
           closeRejectedPreparedRuntimePluginConfigEffect({
@@ -86,10 +85,8 @@ export async function recoverPendingRuntimeConfigEffects(options: {
           continue;
         }
 
-        // A transient (non-conflict) failure must not abort the pass: the
-        // effects already replayed keep their durable evidence below, and
-        // this one stays pending — its failed snapshot is audit, not
-        // closure, so the next pass retries it.
+        // A transient failure must not abort the pass: this effect stays
+        // pending, and the next pass retries it.
         failedEffectIds.add(effect.effectId);
         reconcileEvidence.push(
           failedRuntimeConfigEffectRecoveryEvidence({
@@ -100,16 +97,8 @@ export async function recoverPendingRuntimeConfigEffects(options: {
       }
     }
 
-    // The host was constructed before this replay mutated the config
-    // file, so its instances are stale in exactly the mid-session way;
-    // recovery runs at turn start, which is what keeps the "next turn
-    // reflects the change" contract across crashes. The event's effects
-    // reload as ONE batch — including effects already reconciled by an
-    // earlier pass — so a group the original commit would have refused
-    // to live-apply (e.g. mixed live and session-scoped fields) defers
-    // here exactly the same way. Whether a reload is even needed is the
-    // apply layer's call: it alone knows the final ACCEPTED fingerprint
-    // and asks the host whether its instances already reflect it.
+    // Recovery runs at turn start, keeping the "next turn reflects the
+    // change" contract across crashes; the effects reload as one batch.
     const reload = await applyCompletedRuntimeConfigReloads({
       pluginHost: options.pluginHost,
       effects: terminalEffects,
@@ -174,10 +163,8 @@ function failedRuntimeConfigEffectRecoveryEvidence(options: {
 }
 
 /**
- * Live-applies committed config effects after reconciliation: groups the
- * effects whose reconcile evidence was accepted by target plugin and asks
- * the host to rebuild each. Hosts without reload support (or without any
- * accepted effect) do nothing; a reload problem never fails the turn.
+ * Only effects whose reconcile evidence was accepted are applied, and a
+ * reload problem never fails the turn.
  */
 export async function applyCompletedRuntimeConfigReloads(options: {
   readonly pluginHost: RuntimePluginHost;
@@ -216,9 +203,8 @@ export async function applyCompletedRuntimeConfigReloads(options: {
       continue;
     }
 
-    // Effects arrive in apply order, so the authored file ends at the LAST
-    // accepted effect of the whole turn — every per-plugin group must verify
-    // against that fingerprint, not its own last effect.
+    // Effects arrive in apply order, so the authored file ends at the last
+    // accepted effect of the turn, not at each group's own last one.
     turnFinalAcceptedEffect = effect;
 
     const group = effectsByPluginId.get(effect.targetPluginId) ?? [];
@@ -231,13 +217,8 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   const failures: string[] = [];
 
   for (const [groupPluginId, group] of effectsByPluginId.entries()) {
-    // One rule, one primitive: skip only when the host's live instance
-    // already reflects this group — its own final accepted state (for a
-    // pure no-op group that IS the unchanged file) or the turn's final
-    // state (a host constructed at or after everything this turn applied).
-    // A host that reflects neither — e.g. an earlier reload failed and
-    // left it stale — re-runs the reload and re-derives its decision
-    // durably, so even a same-value update can heal a stale instance.
+    // Skip only when the host already reflects this group's final state or
+    // the turn's; a host that reflects neither reloads and heals.
     const groupFinalEffect = group[group.length - 1];
     const hostReflects = (fingerprint: string | undefined): boolean =>
       fingerprint !== undefined &&
@@ -247,9 +228,8 @@ export async function applyCompletedRuntimeConfigReloads(options: {
       ) === true;
 
     try {
-      // Inside the try on purpose: a host whose currency predicate throws
-      // is handled exactly like a throwing reloader — recorded as a reload
-      // failure, never escaping after the turn is already durable.
+      // Inside the try on purpose: a throwing currency predicate is recorded
+      // as a reload failure, never escaping after the turn is durable.
       if (
         hostReflects(groupFinalEffect?.resultFingerprint) ||
         hostReflects(turnFinalAcceptedEffect?.resultFingerprint)

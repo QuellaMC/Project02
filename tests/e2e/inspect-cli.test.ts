@@ -208,9 +208,8 @@ describe('inspect CLI plugin evidence', () => {
       ]),
     );
 
-    // An audit has to be able to tell a tool that changes durable state
-    // from one that only reads, so the tool's own declaration is carried
-    // into the projection rather than summarized away.
+    // An audit must tell a state-changing tool from a read-only one, so the
+    // tool's own declaration is carried into the projection.
     const patchTool = output.turns[0].pluginEvidence.plugins
       .find(plugin => plugin.pluginId === 'character-state')
       ?.providedTools.find(
@@ -613,9 +612,8 @@ describe('inspect CLI plugin evidence', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A data directory that exists but lost its schema marker while
-    // sessions/ still holds content: corruption or foreign data, never
-    // an "empty" view.
+    // A data directory that lost its schema marker while sessions/ still
+    // holds content.
     mkdirSync(join(dataRoot, 'sessions', 'lost-session'), {recursive: true});
     writeFileSync(
       join(dataRoot, 'sessions', 'lost-session', 'raw-events.jsonl'),
@@ -648,10 +646,8 @@ describe('inspect CLI plugin evidence', () => {
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     mkdirSync(brokenRoot, {recursive: true});
-    // An unrelated installed package is broken. The selected character
-    // still resolves, so inspect succeeds — but reporting otherwise
-    // healthy state without mentioning the broken package leaves the
-    // operator no indication it needs fixing.
+    // The selected character still resolves, so inspect succeeds and the
+    // broken package would otherwise go unmentioned.
     writeFileSync(
       join(brokenRoot, 'project02.character.json'),
       '{not json',
@@ -709,8 +705,7 @@ describe('inspect CLI plugin evidence', () => {
       storageOptions: {storeRoot: dataRoot},
       characterId: 'mira',
     });
-    // A concurrent first initializer between temp-write and rename:
-    // the live replacement must not fail the control-only view.
+    // A concurrent first initializer caught between temp-write and rename.
     writeFileSync(
       join(
         dataRoot,
@@ -732,10 +727,8 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
-    // The overlay this run would have needed is the one it declined to
-    // write. Reporting on a store is not a reason to change it, so the
-    // view is built from the overlay a run *would* produce and the
-    // directory keeps only what was arranged here.
+    // The view is built from the overlay a run would produce, without
+    // writing it.
     expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
   });
 
@@ -746,8 +739,7 @@ describe('inspect CLI plugin evidence', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A marker-less data directory holding anything outside the
-    // control allowlist is foreign or corrupt, never an empty view.
+    // A marker-less data directory holding a non-allowlisted entry.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(join(dataRoot, 'notes.txt'), 'foreign\n');
 
@@ -845,9 +837,8 @@ describe('inspect CLI plugin evidence', () => {
     let stderr = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A copied data directory: mira's path carries nova's marker. The
-    // identity must hold at inspection even when the selected session
-    // carries no character evidence at all.
+    // A copied data directory: mira's path carries nova's marker, and the
+    // selected session carries no character evidence at all.
     mkdirSync(dataRoot, {recursive: true});
     writeFileSync(
       join(dataRoot, 'schema.json'),
@@ -911,9 +902,8 @@ describe('inspect CLI plugin evidence', () => {
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
   });
 
-  // Storage staying clean is startup-seam behavior, asserted once in
-  // tests/unit/runtime-config-overlay.test.ts. This covers only the inspect
-  // CLI's own job: routing character_invalid to an exit code and message.
+  // Storage staying clean is startup-seam behavior, covered in
+  // tests/unit/runtime-config-overlay.test.ts.
   it('maps an invalid explicit character to a usage error', async () => {
     const storeRoot = createTestTempRoot(
       'project02-inspect-invalid-character-',
@@ -998,9 +988,7 @@ describe('inspect CLI plugin evidence', () => {
     let stdout = '';
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-    // A config-only workflow leaves an identity marker, an overlay, and
-    // locks — but no session artifacts. That is an empty view, not a
-    // corrupt store.
+    // A config-only workflow leaves control state but no session artifacts.
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: characterDataDirPath(storeRoot, 'mira')},
       characterId: 'mira',

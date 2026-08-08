@@ -4,12 +4,7 @@ import type {
   RuntimePluginJsonValue,
 } from '../../../plugins/index.ts';
 
-/**
- * Engine-internal shapes of the plugin file-store. The plugin-facing
- * capability contract (store, transaction, provider) stays in
- * src/plugins/file-store/contracts.ts; these types describe how this engine
- * stages and tracks state and are not part of that contract.
- */
+/** Engine-internal shapes; not the plugin-facing capability contract. */
 export type InMemoryPluginStoreState = {
   readonly files: Map<string, RuntimePluginJsonValue>;
   readonly pathModes: Map<string, RuntimePluginFileStorePathMode>;

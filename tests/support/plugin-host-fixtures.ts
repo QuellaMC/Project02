@@ -55,13 +55,11 @@ export type TestRuntimePluginHostOptions = Omit<
   readonly plugins: readonly RuntimePlugin[];
 };
 
-/** Real engine wired the way the composition root does in production. */
 export const testRuntimePluginFileStoreProvider: RuntimePluginFileStoreProvider =
   Object.freeze({
     createFileStore: createRuntimePluginFileStore,
   });
 
-/** Real config-control capability wired the way the composition root does. */
 export const testRuntimePluginConfigControlCapability =
   createRuntimePluginConfigControlCapability();
 
@@ -911,9 +909,6 @@ export function createReadOnlyFileStoreProbePlugin(): RuntimePlugin {
   const pluginId = 'memory.read-only-file-store.fixture';
 
   // Genuinely read-only: the granted access is what withholds writes.
-  // This fixture used to request write access and rely on a declared
-  // effect level to be refused anyway — two systems answering one
-  // question, which is the overlap the annotations model retired.
   return createRuntimePlugin({
     manifest: {
       ...memorySearchPluginManifest(pluginId),

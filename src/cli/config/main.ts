@@ -136,19 +136,8 @@ export function runRuntimeConfigCliFromArgs(
 }
 
 /**
- * Asks before a route that would create one. Every caller runs this
- * after its command has parsed: a malformed command line is a usage
- * error whatever store it names, and asking first would answer the
- * wrong question — offering to create a store for a command that was
- * never going to run.
- *
- * Read verbs (`path`, `env-path`, `get` at global scope) never call
- * it. They create nothing today, and `path` in particular is how an
- * operator asks where a store *would* live.
- *
- * `creates` says which of the two things a route brings into being, so
- * the gate can tell a run that stands up a home from one that only
- * writes the config document it was pointed at.
+ * Called after the command has parsed: a malformed command line is a
+ * usage error whatever store it names. Read verbs never call it at all.
  */
 function assertRuntimeConfigCliStoreConsent(
   parsedArgs: RuntimeConfigCliParsedArgs,
@@ -160,8 +149,7 @@ function assertRuntimeConfigCliStoreConsent(
     init: parsedArgs.init,
     stdout: options.stdout,
     creates,
-    // The same env staging the command itself will use, so the gate
-    // judges the home the command would actually resolve.
+    // The same env staging the command uses, so the gate judges the same home.
     cwdDotEnv: runtimeConfigCwdDotEnvModeForCommand(
       parsedArgs,
       options.env ?? process.env,
@@ -212,9 +200,7 @@ async function runRuntimeConfigCheckCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
 ): Promise<number> {
-  // Check parses without env — only `secret set` reads one, and this
-  // route is reached only for `check` — so a malformed command line is
-  // rejected before anything is asked for or created.
+  // Parsing first rejects a malformed command line before anything is created.
   const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
 
   if (command.kind !== 'check') {
@@ -254,11 +240,8 @@ async function runRuntimePluginSecretSetCommand(
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
 ): Promise<number> {
-  // Secret set is the one verb that reads env while parsing, so it
-  // stages env through the config-stage startup — which creates
-  // nothing — rather than the activation startup that does. The
-  // command is then rejected, and the store offered, in that order:
-  // both before anything is written.
+  // Secret set is the one verb that reads env while parsing; the
+  // config-stage startup stages it without creating anything.
   const command = parseRuntimeConfigCommand(
     parsedArgs.commandArgs,
     resolveRuntimeCliStartup({
@@ -358,11 +341,7 @@ async function runRuntimeConfigDocumentCommand(
     throw new TypeError('Runtime config command routing drifted.');
   }
 
-  // Every read verb returned above, so what is left writes. Plugin
-  // activation resolves its manifest through the activation startup,
-  // which stands up the home; the plain document write touches only
-  // the selected config, which standalone is just the file the
-  // operator named.
+  // Every read verb returned above, so what is left writes.
   if (isPluginActivationOperation(parsed.command.operation)) {
     await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
 
@@ -462,11 +441,7 @@ async function runManifestAwarePluginActivation(options: {
   return 0;
 }
 
-/**
- * Verb routing under --character: path/get/set/unset target the named
- * character's overlay; check stays layered-global; secret and env-file
- * verbs are rejected because secrets are shared across characters.
- */
+/** Under `--character`, `check` alone stays layered-global. */
 async function runCharacterScopedRuntimeConfigCommand(
   parsedArgs: RuntimeConfigCliParsedArgs,
   options: RuntimeConfigCliOptions,
@@ -479,16 +454,11 @@ async function runCharacterScopedRuntimeConfigCommand(
 
   assertCharacterScopedRawCommandAllowed(parsedArgs.commandArgs);
 
-  // Secret commands were rejected above and no remaining verb consults
-  // the environment while parsing, so the command parses before the one
-  // activation startup — the config-stage pre-startup this route used
-  // to run existed only to stage env for parsing.
+  // No remaining verb reads env while parsing, so this parses before startup.
   const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
 
   assertCharacterScopedParsedCommandAllowed(command);
-  // Every scoped verb runs the activation startup, which materializes
-  // the character's data directory — so unlike global scope, the read
-  // verbs create too and none of them are exempt.
+  // Every scoped verb materializes character data, so reads consent too.
   await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
   const characterConfigRequest =
     characterConfigStartupRequestForCommand(command);
@@ -533,8 +503,7 @@ async function runCharacterScopedRuntimeConfigCommand(
 function assertCharacterScopedRawCommandAllowed(
   commandArgs: readonly string[],
 ): void {
-  // Secret set reads its env var during parsing, so scope rejection
-  // intentionally comes first.
+  // Secret set reads env while parsing, so scope rejection comes first.
   if (commandArgs[0] === 'secret' && commandArgs[1] === 'set') {
     throw new RuntimeConfigCliUsageError(
       'Secrets are shared across characters; run the secret command ' +
@@ -626,16 +595,8 @@ function writeCharacterScopedRuntimeConfigResult(options: {
 }
 
 /**
- * Blocks a scoped verb on an invalid authored document, not on an
- * incomplete environment.
- *
- * The distinction is the shared classifier's, not this command's: a
- * missing required value or secret says activation is not ready yet,
- * which is precisely the state an operator runs `path` and `get` to
- * inspect and `set` to repair. Materialization already draws the line
- * here, so deferring to the same predicate keeps one answer for
- * "does this diagnostic stop config work" instead of a per-verb
- * allowlist that a new resolver error code could fall through.
+ * Blocks on an invalid authored document, not on an incomplete
+ * environment — the state an operator runs these verbs to repair.
  */
 function assertScopedStartupConfigReadable(
   startup: CharacterScopedRuntimeCliStartup,
@@ -654,12 +615,7 @@ function assertScopedStartupConfigReadable(
   }
 }
 
-/**
- * Read-only commands that treat the selected store as a home refuse a
- * directory the runtime would not adopt. Mutations are admitted by the
- * immutable transaction target itself. Explicit --config and env-selected
- * paths remain standalone files with no home semantics.
- */
+/** Mutations are admitted by the transaction target; only reads need this. */
 function assertReadableSelectedHome(
   runtimeLocation: ResolvedProject02ConfigLocation,
 ): void {
@@ -677,10 +633,7 @@ function writeCharacterScopedValue(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly path: string;
 }): number {
-  // The guarded loader holds the identity and adoptability rules for
-  // reads too: a directory marked for another character, or one the
-  // writers would refuse, must not report its overlay as this
-  // character's config.
+  // A directory marked for another character must not report its overlay here.
   const overlay = readCharacterOverlayForScope(
     options.target.runtimeLocation.characterScope,
   ).overlay;

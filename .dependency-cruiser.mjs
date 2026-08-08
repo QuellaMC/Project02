@@ -1,22 +1,4 @@
-/**
- * Architecture gate rules (`pnpm arch:check`).
- *
- * Ratchet contract (same as the max-lines overrides in eslint.config.mjs):
- * pre-existing violations live in `.dependency-cruiser-known-violations.json`
- * and that file may only shrink. Regenerate it with `pnpm arch:baseline` in
- * the same PR that removes violations; reviewers reject baseline diffs that
- * add entries. Rules marked "green" below have zero baseline entries and act
- * as hard regression guards from day one.
- *
- * Rule 6 (shared additions need approved consumers) is enforced by
- * `scripts/check-shared-consumers.mjs` against `src/shared/consumers.json`.
- * Rule 7 (one responsibility, one owner) is a human review rule — module
- * README ownership statements — and is deliberately not encoded here.
- *
- * See docs/plan/repo-structure-migration-2026-07-16.md, Slice 0.
- */
-
-// Default export: required by dependency-cruiser's config loader.
+// The known-violations baseline may only shrink (pnpm arch:baseline).
 export default {
   forbidden: [
     {
@@ -186,8 +168,7 @@ export default {
   options: {
     doNotFollow: {path: 'node_modules'},
     tsConfig: {fileName: 'tsconfig.json'},
-    // Make `import type` edges visible so rules can distinguish type-only
-    // from value dependencies (verbatimModuleSyntax erases them at runtime).
+    // Rules that filter type-only edges need this to see them.
     tsPreCompilationDeps: true,
     enhancedResolveOptions: {extensions: ['.ts']},
   },

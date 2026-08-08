@@ -1,9 +1,3 @@
-/**
- * Plugin section of the runtime config console: builds the plugin
- * catalog from the activation plan, inspects per-plugin config, and
- * stages enable/disable and field changes (secrets are directed to the
- * secret set command instead).
- */
 import type {
   RuntimePluginConfigField,
   RuntimePluginManifest,
@@ -311,9 +305,7 @@ function pluginCatalog(
   const activationPlan = prepareConfiguredProject02PluginActivation({
     loadedConfig: snapshot.loadedConfig,
     runtimeLocation: snapshot.runtimeLocation,
-    // A scoped console judges activation for the selected character —
-    // the snapshot's scope may be a flag override the loaded config
-    // does not name.
+    // The scope may be a flag override the loaded config does not name.
     ...(snapshot.scope === 'global'
       ? {}
       : {

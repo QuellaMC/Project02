@@ -1,10 +1,3 @@
-/**
- * Public API of src/runtime/storage.
- *
- * Cross-module imports of storage must land here (arch:check rule 5).
- * The session-store surface joins as the Slice 3f cli extractions route
- * through it; until then its deep imports stay baselined.
- */
 export {
   createLocalRuntimePluginPaths,
   createLocalRuntimeSessionMetadata,

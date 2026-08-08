@@ -1057,8 +1057,7 @@ describe('runtime config activation checks and construction', () => {
       },
     });
 
-    // Bound-home admission rejects the unusable store before package
-    // discovery or any factory can construct against it.
+    // Bound-home admission rejects before any factory constructs against it.
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({

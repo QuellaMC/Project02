@@ -194,11 +194,8 @@ export function createSequencedAdapter(
   } satisfies RoleModelAdapter);
 }
 
-/**
- * A store whose raw-event append fails on the matching record. `persist`
- * appends first and then throws, which is what a write reaching disk
- * before its caller fails looks like.
- */
+// `persist` appends before throwing, modelling a write that reached disk before
+// its caller failed.
 export function createRawEventAppendFailingLogStore(options: {
   readonly logStore?: RuntimeLogStore;
   readonly matches: (record: RawEventLogRecordInput) => boolean;
@@ -248,7 +245,6 @@ export function createRawEventAppendFailingLogStore(options: {
   } satisfies RuntimeLogStore);
 }
 
-/** Every store method forwarded, so a wrapper names only what it overrides. */
 function delegateRuntimeLogStore(logStore: RuntimeLogStore): RuntimeLogStore {
   return Object.freeze({
     ...(logStore.localRuntimeSessionPaths === undefined

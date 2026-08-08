@@ -111,14 +111,7 @@ export function discoverableCurrentTurnPluginTools(options: {
   );
 }
 
-/**
- * Whether the model may be shown this tool on this turn.
- *
- * A plugin tool needs a handler to run; a first-party built-in is owned
- * by the host and has none. The two cases cannot overlap, because
- * `isModelFacingRuntimePluginTool` excludes built-in names and
- * `isFirstPartyBuiltInModelTool` requires one.
- */
+/** A plugin tool needs a handler; a host-owned built-in has none. */
 function isDiscoverableCurrentTurnTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;

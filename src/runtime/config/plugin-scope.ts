@@ -18,10 +18,6 @@ export type RuntimePluginScopeViolation = {
   readonly fieldName?: string;
 };
 
-/**
- * Pure policy predicate shared by raw-document diagnostics and every
- * mutation surface.
- */
 export function runtimePluginScopeViolation(options: {
   readonly manifest: RuntimePluginManifest;
   readonly authoredScope: RuntimeConfigFieldScope;
@@ -82,11 +78,7 @@ export function runtimePluginScopeViolation(options: {
   return undefined;
 }
 
-/**
- * The one policy judge for where plugin enablement and fields may be
- * authored. It operates on one raw document at a time so a layered
- * merge cannot hide whether a value came from the home or character.
- */
+/** Takes one raw document; a merged one hides which layer authored a value. */
 export function runtimePluginScopeDiagnostics(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly manifests: readonly RuntimePluginManifest[];

@@ -50,9 +50,8 @@ export function createDurableRuntimePluginFileStore(
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
 
   /**
-   * Finishes an interrupted write. Callers already holding the mutation
-   * lease pass it through, so no writer can journal a new one between
-   * recovery and the read that follows it.
+   * Callers already holding the mutation lease pass it through, so no
+   * writer can journal a new write between recovery and the read after it.
    */
   function recoverInterruptedWrite(): void {
     recoverDirectDurablePluginFileStoreMutationLocked({
