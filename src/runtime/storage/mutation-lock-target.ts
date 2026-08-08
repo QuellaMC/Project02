@@ -1,6 +1,7 @@
 import {createHash} from 'node:crypto';
 import {join} from 'node:path';
 
+import {compareText} from '../../shared/package-metadata.ts';
 import {canonicalPath} from '../../shared/real-path.ts';
 
 export type LocalRuntimeMutationLockTarget = {
@@ -58,11 +59,7 @@ export function normalizeMutationLockTargets(
 
   return Object.freeze(
     [...byLockPath.values()].sort((left, right) =>
-      compareCodeUnits(left.lockPath, right.lockPath),
+      compareText(left.lockPath, right.lockPath),
     ),
   );
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }

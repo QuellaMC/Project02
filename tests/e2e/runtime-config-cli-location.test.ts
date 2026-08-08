@@ -8,18 +8,16 @@ import {
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {
-  defaultRuntimeConfigPath,
-  runtimeConfigEnvVarName,
-} from '../../src/runtime/config/index.ts';
+import {runtimeConfigEnvVarName} from '../../src/runtime/config/index.ts';
+import {createProject02HomeLayout} from '../../src/runtime/storage/index.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   initializeTestStore,
-  requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 
 const installedSecretPlugin = requiredSecretPlugin('mem0-local');
 const installedSecretFactories = Object.freeze({
@@ -344,7 +342,7 @@ describe('runtime config CLI location selection', () => {
       {storeRoot: configStoreRoot},
     );
     const storeConfigPath = writeRuntimeConfig(
-      defaultRuntimeConfigPath(storeRoot),
+      createProject02HomeLayout({homeRoot: storeRoot}).configPath,
       {
         storeRoot,
       },
@@ -438,7 +436,7 @@ describe('runtime config CLI location selection', () => {
       {storeRoot: configStoreRoot},
     );
     const storeConfigPath = writeRuntimeConfig(
-      defaultRuntimeConfigPath(storeRoot),
+      createProject02HomeLayout({homeRoot: storeRoot}).configPath,
       {
         storeRoot,
       },
@@ -969,7 +967,7 @@ describe('runtime config CLI location selection', () => {
   it('uses the default runtime home for a standalone config filename', async () => {
     const storeRoot = createTestTempRoot('project02-config-env-path-inferred-');
     const configPath = writeRuntimeConfig(
-      defaultRuntimeConfigPath(storeRoot),
+      createProject02HomeLayout({homeRoot: storeRoot}).configPath,
       {},
     );
     let stdout = '';

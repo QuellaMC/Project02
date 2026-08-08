@@ -60,13 +60,7 @@ import {
   instantiateRuntimePluginPackages,
 } from './plugin-construction.ts';
 
-export type {
-  RuntimePluginFactoryFunction,
-  RuntimePluginFactoryInput,
-} from '../plugins/index.ts';
 export type {RuntimePluginFactoryDefinition} from './plugin-catalog.ts';
-
-export type RuntimePluginActivationStatus = 'active' | 'disabled' | 'blocked';
 
 export type RuntimePluginActivationSnapshot = {
   readonly pluginId: string;
@@ -74,7 +68,7 @@ export type RuntimePluginActivationSnapshot = {
   readonly enabled: boolean;
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly grantedAccess: RuntimePluginAccessMap;
-  readonly activationStatus: RuntimePluginActivationStatus;
+  readonly activationStatus: RuntimePluginConfigActivationInspectShape['status'];
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
@@ -146,10 +140,6 @@ const selectedAsDefaultMemoryProviderReason =
 export function createRuntimePluginCatalogSnapshot(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  /** Overrides extend the discovered catalog rather than replacing it. */
-  readonly factoryOverrides?: Readonly<
-    Record<string, RuntimePluginFactoryDefinition>
-  >;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
 }): RuntimePluginCatalogSnapshot {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
@@ -157,9 +147,6 @@ export function createRuntimePluginCatalogSnapshot(options: {
   return classifyRuntimePluginCatalogDiscovery({
     discovery: discoverRuntimePluginCatalog({
       storeRoot: options.runtimeLocation.homeRoot,
-      ...(options.factoryOverrides === undefined
-        ? {}
-        : {factoryOverrides: options.factoryOverrides}),
     }),
     classificationConfig: createLayeredProject02RuntimeConfigSnapshot({
       loadedConfig: options.loadedConfig,
@@ -226,7 +213,9 @@ export function discoverRuntimePluginCatalog(options: {
     discoveredPluginIds: new Set([
       ...ordinaryPackages.map(item => item.manifest.id),
       ...Object.keys(defaultRuntimePluginHostServiceEntries),
-      ...Object.keys(options.factoryOverrides ?? {}),
+      ...Object.values(options.factoryOverrides ?? {}).map(
+        definition => definition.manifest.id,
+      ),
     ]),
   } satisfies RuntimePluginCatalogDiscovery);
 }
@@ -260,21 +249,10 @@ export function prepareConfiguredProject02PluginActivation(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly overlayConfig?: LoadedProject02CharacterOverlayConfig;
-  readonly strictUnknownPlugins?: boolean;
   readonly validateInactivePluginConfigs?: boolean;
   readonly env?: NodeJS.ProcessEnv;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
-  if (
-    options.factories !== undefined &&
-    options.catalogSnapshot !== undefined
-  ) {
-    throw new TypeError(
-      'Runtime plugin factories and a catalog snapshot cannot both be provided.',
-    );
-  }
-
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
 
   // The supplied overlay decides the scope: its id may be a flag override.
@@ -326,7 +304,6 @@ export function prepareConfiguredProject02PluginActivation(options: {
     resolvedConfig,
     // The enablement ladder judges the merged view, not just the global one.
     effectiveConfig: layeredConfig.effective,
-    strictUnknownPlugins: options.strictUnknownPlugins === true,
     catalogDiagnostics: composition.diagnostics,
   });
   const globalMutationBase = createRuntimeConfigAuthoredSnapshot(
@@ -362,18 +339,8 @@ function activationCatalogComposition(options: {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly overlayConfig: LoadedProject02CharacterOverlayConfig;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
 }): RuntimePluginCatalogSnapshot {
-  if (options.factories !== undefined) {
-    return Object.freeze({
-      storeRoot: options.runtimeLocation.homeRoot,
-      ...composeRuntimePluginCatalog({factories: options.factories}),
-      packageProvenanceByPluginId: Object.freeze({}),
-      diagnostics: Object.freeze([]),
-    } satisfies RuntimePluginCatalogSnapshot);
-  }
-
   return (
     options.catalogSnapshot ??
     createRuntimePluginCatalogSnapshot({
@@ -520,18 +487,13 @@ function assertCharacterRuntimeInitialized(
 }
 
 export function resolveRuntimePluginActivation(options: {
-  readonly plugins?: readonly RuntimePlugin[];
-  readonly pluginManifests?: readonly RuntimePluginManifest[];
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly defaultEnabledPluginIds?: ReadonlySet<string>;
   readonly catalogDiagnostics?: readonly RuntimeConfigDiagnostic[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
-  readonly strictUnknownPlugins?: boolean;
 }): RuntimePluginActivationResult {
-  const pluginManifests =
-    options.pluginManifests ??
-    options.plugins?.map(plugin => plugin.manifest) ??
-    [];
+  const {pluginManifests} = options;
   const config = options.effectiveConfig.config;
   const pluginIds = new Set(pluginManifests.map(manifest => manifest.id));
   const baseDiagnostics: readonly RuntimeConfigDiagnostic[] = Object.freeze([
@@ -543,7 +505,6 @@ export function resolveRuntimePluginActivation(options: {
         : {
             defaultMemoryProviderId: config.project02.defaultMemoryProvider,
           }),
-      strict: options.strictUnknownPlugins === true,
     }),
     ...options.resolvedConfig.diagnostics,
     ...(options.catalogDiagnostics ?? []),
@@ -569,11 +530,6 @@ export function resolveRuntimePluginActivation(options: {
 
     return Object.freeze({
       manifest,
-      duplicateCandidateDecision: activationDecision({
-        configuredEnabled: configured?.enabled,
-        defaultEnabled,
-        configErrors: false,
-      }),
       decision: activationDecision({
         configuredEnabled: configured?.enabled,
         defaultEnabled,
@@ -581,32 +537,7 @@ export function resolveRuntimePluginActivation(options: {
       }),
     });
   });
-  const duplicateCandidateMemoryProviderDecision =
-    defaultMemoryProviderDecision({
-      ...(config?.project02?.defaultMemoryProvider === undefined
-        ? {}
-        : {
-            configDefaultMemoryProvider: config.project02.defaultMemoryProvider,
-          }),
-      pluginManifests,
-      memoryProviderManifests: pluginManifests.filter(
-        manifest => manifest.kind === 'memory_provider',
-      ),
-      enabledPluginManifests: preliminaryDecisions
-        .filter(preliminary => preliminary.duplicateCandidateDecision.enabled)
-        .map(preliminary => preliminary.manifest),
-    });
-  const duplicateManifestDiagnostics = duplicatePluginManifestIdDiagnostics({
-    pluginManifests: duplicateDiagnosticPluginManifests({
-      preliminaryDecisions,
-      memoryProviderDecision: duplicateCandidateMemoryProviderDecision,
-    }),
-    reservedPluginIds: [],
-  });
-  const diagnostics: RuntimeConfigDiagnostic[] = [
-    ...duplicateManifestDiagnostics,
-    ...baseDiagnostics,
-  ];
+  const diagnostics: RuntimeConfigDiagnostic[] = [...baseDiagnostics];
 
   const memoryProviderDecision = defaultMemoryProviderDecision({
     ...(config?.project02?.defaultMemoryProvider === undefined
@@ -820,7 +751,7 @@ function activationDecision(options: {
   readonly configErrors: boolean;
 }): {
   readonly enabled: boolean;
-  readonly status: RuntimePluginActivationStatus;
+  readonly status: RuntimePluginConfigActivationInspectShape['status'];
   readonly reasons: readonly string[];
 } {
   if (options.configuredEnabled === false) {
@@ -862,38 +793,6 @@ function activationDecision(options: {
   };
 }
 
-function duplicateDiagnosticPluginManifests(options: {
-  readonly preliminaryDecisions: readonly {
-    readonly manifest: RuntimePluginManifest;
-    readonly duplicateCandidateDecision: ReturnType<typeof activationDecision>;
-  }[];
-  readonly memoryProviderDecision: ReturnType<
-    typeof defaultMemoryProviderDecision
-  >;
-}): readonly RuntimePluginManifest[] {
-  const activePluginIds = new Set<string>();
-
-  for (const preliminary of options.preliminaryDecisions) {
-    const decision = options.memoryProviderDecision.ambiguous
-      ? preliminary.duplicateCandidateDecision
-      : finalizeMemoryProviderActivation({
-          manifest: preliminary.manifest,
-          decision: preliminary.duplicateCandidateDecision,
-          memoryProviderDecision: options.memoryProviderDecision,
-        });
-
-    if (decision.enabled) {
-      activePluginIds.add(preliminary.manifest.id);
-    }
-  }
-
-  return Object.freeze(
-    options.preliminaryDecisions
-      .filter(preliminary => activePluginIds.has(preliminary.manifest.id))
-      .map(preliminary => preliminary.manifest),
-  );
-}
-
 function blockActivationAfterRuntimeConfigErrors(options: {
   readonly decision: ReturnType<typeof activationDecision>;
   readonly configErrors: boolean;
@@ -918,7 +817,6 @@ function unknownPluginDiagnostics(options: {
     LoadedProject02RuntimeConfig['config']
   >['plugins'];
   readonly defaultMemoryProviderId?: string;
-  readonly strict: boolean;
 }): readonly RuntimeConfigDiagnostic[] {
   const unknown = new Map<string, string>();
   const addUnknown = (pluginId: string, path: string): void => {
@@ -950,39 +848,10 @@ function unknownPluginDiagnostics(options: {
   return Object.freeze(
     [...unknown].map(([pluginId, path]) =>
       createRuntimeConfigDiagnostic(
-        options.strict ? 'error' : 'warning',
+        'warning',
         'runtime_config_unknown_plugin',
         `Runtime config references unknown plugin "${pluginId}".`,
         path,
-        {pluginId},
-      ),
-    ),
-  );
-}
-
-function duplicatePluginManifestIdDiagnostics(options: {
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-  readonly reservedPluginIds: readonly string[];
-}): readonly RuntimeConfigDiagnostic[] {
-  const seen = new Set<string>(options.reservedPluginIds);
-  const duplicateIds = new Set<string>();
-
-  for (const manifest of options.pluginManifests) {
-    if (seen.has(manifest.id)) {
-      duplicateIds.add(manifest.id);
-      continue;
-    }
-
-    seen.add(manifest.id);
-  }
-
-  return Object.freeze(
-    [...duplicateIds].map(pluginId =>
-      createRuntimeConfigDiagnostic(
-        'error',
-        'runtime_config_duplicate_plugin_manifest_id',
-        `Runtime plugin manifest id "${pluginId}" is declared more than once.`,
-        `plugins.${pluginId}`,
         {pluginId},
       ),
     ),

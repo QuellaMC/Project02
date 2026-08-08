@@ -27,13 +27,13 @@ import {
   initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
-import {loadProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {collect} from '../support/streams.ts';
 import {
   writeRuntimeConfig,
   runtimeConfigSnapshotForTest,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 
@@ -45,7 +45,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
 
@@ -113,7 +113,7 @@ describe('configured runtime plugin package activation', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
@@ -160,7 +160,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
 
@@ -259,7 +259,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
 
@@ -297,7 +297,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
 
@@ -336,7 +336,7 @@ describe('configured runtime plugin package activation', () => {
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          loadedConfig: loadRuntimeConfigForTest({storeRoot}),
           storeRoot: storeRoot,
         }),
       }),
@@ -353,7 +353,7 @@ describe('configured runtime plugin package activation', () => {
     expect(() =>
       prepareConfiguredProject02PluginActivation({
         ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+          loadedConfig: loadRuntimeConfigForTest({storeRoot}),
           storeRoot: storeRoot,
         }),
       }),
@@ -391,7 +391,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
         storeRoot: storeRoot,
       }),
     });
@@ -423,7 +423,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
 
@@ -459,7 +459,7 @@ describe('configured runtime plugin package activation', () => {
 
     const configured = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
 
@@ -523,7 +523,7 @@ describe('configured runtime plugin package activation', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({
@@ -630,7 +630,7 @@ describe('configured runtime plugin package activation', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({storeRoot}),
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
       }),
     });
     const configured = await createConfiguredProject02PluginHostFromPlan({

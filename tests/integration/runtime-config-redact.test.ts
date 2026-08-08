@@ -6,14 +6,12 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   writeRuntimeConfig,
   runtimeConfigSnapshotForTest,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {
-  loadProject02RuntimeConfig,
-  resolveProject02RuntimeConfig,
-} from '../../src/runtime/config/index.ts';
+import {resolveProject02RuntimeConfig} from '../../src/runtime/config/index.ts';
 import {
   createRuntimePlugin,
   runtimePluginContractVersion,
@@ -46,7 +44,7 @@ describe('runtime config redaction', () => {
 
     const resolved = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
 
       pluginManifests: [dottedConfigManifest()],
@@ -108,7 +106,7 @@ describe('runtime config redaction', () => {
 
     const resolved = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({
-        loadedConfig: loadProject02RuntimeConfig({configPath}),
+        loadedConfig: loadRuntimeConfigForTest({configPath}),
       }),
 
       pluginManifests: [dottedConfigManifest()],
@@ -221,7 +219,6 @@ function dottedConfigManifest(): RuntimePluginManifest {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'project02',
     },
     declaredPlugins: [],
     config: {

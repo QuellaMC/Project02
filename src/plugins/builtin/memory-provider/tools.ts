@@ -13,7 +13,6 @@ export function memorySearchTool(name: string): RuntimePluginProvidedTool {
       additionalProperties: false,
     },
     validationOwner: 'plugin_host',
-    annotations: {readOnlyHint: true},
     concurrency: 'shared',
     requiresConfirmation: false,
   } satisfies RuntimePluginProvidedTool);
@@ -32,7 +31,6 @@ export function memoryAddTool(name: string): RuntimePluginProvidedTool {
       additionalProperties: false,
     },
     validationOwner: 'plugin_host',
-    annotations: {readOnlyHint: false},
     concurrency: 'exclusive',
     requiresConfirmation: false,
   } satisfies RuntimePluginProvidedTool);

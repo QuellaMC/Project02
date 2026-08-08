@@ -185,7 +185,6 @@ describe('role-model loop routing and policy', () => {
         decisionResult: result.decisionResult,
         allowedTools: result.inputEnvelope.allowedTools,
         pluginToolDefinitions: result.inputEnvelope.pluginToolDefinitions,
-        toolObservations: result.inputEnvelope.toolObservations,
       }),
     ).toBe(true);
   });
@@ -623,11 +622,11 @@ describe('role-model loop routing and policy', () => {
           } satisfies RoleModelAssistantChatMessage);
           const providerExchange: RoleModelProviderExchangeSnapshot = {
             provider: {
-              name: 'local',
+              name: 'nvidia',
             },
             capabilities: defaultRoleModelProviderCapabilities,
             reasoning: {
-              mode: 'none',
+              mode: 'enabled',
               params: {},
             },
             renderedMessages: invocation.turnContext.messages,
@@ -751,11 +750,11 @@ describe('role-model loop routing and policy', () => {
           } satisfies RoleModelAssistantChatMessage);
           const providerExchange: RoleModelProviderExchangeSnapshot = {
             provider: {
-              name: 'local',
+              name: 'nvidia',
             },
             capabilities: defaultRoleModelProviderCapabilities,
             reasoning: {
-              mode: 'none',
+              mode: 'enabled',
               params: {},
             },
             renderedMessages: invocation.turnContext.messages,

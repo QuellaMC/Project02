@@ -26,15 +26,9 @@ export type RuntimePluginPackageLoadFunction = (
   options?: RuntimePluginPackageLoadOptions,
 ) => Promise<RuntimePlugin>;
 
-export type RuntimePluginFactoryCreate = (
-  ...args: never[]
-) => Promise<RuntimePlugin> | RuntimePlugin;
-
-export type RuntimePluginFactoryDefinition<
-  TCreate extends RuntimePluginFactoryCreate = RuntimePluginFactoryCreate,
-> = {
+export type RuntimePluginFactoryDefinition = {
   readonly manifest: RuntimePluginManifest;
-  readonly create: TCreate;
+  readonly create: RuntimePluginFactoryFunction;
 };
 
 export type RuntimePluginPackageCatalogEntry = {

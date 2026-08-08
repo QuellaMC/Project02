@@ -1,6 +1,6 @@
 import {testCharacterProfile} from './character-fixtures.ts';
 import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
-import type {ConversationLogRecordInput} from '../../src/runtime/evidence/records.ts';
+import type {ConversationLogRecord} from '../../src/runtime/evidence/records.ts';
 import {createRoleModelCommitValidationSnapshot} from '../../src/runtime/evidence/records.ts';
 import {
   createDecisionContext,
@@ -21,7 +21,7 @@ import {
 // `hello`.
 export function appendVisibleMessageWithCommitAnchor(
   store: RuntimeLogStore,
-  message: ConversationLogRecordInput,
+  message: ConversationLogRecord,
   expectedCharacter?: CharacterProfile,
 ): void {
   const eventIdentity = {

@@ -27,10 +27,12 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,
   createHealthRejectingPlugin,
-  createSequencedAdapter,
-  createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
+import {
+  createSequencedAdapter,
+  createTestEvent,
+} from '../support/role-model-loop-fixtures.ts';
 
 describe('plugin-driven Character State tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {

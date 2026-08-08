@@ -1,14 +1,21 @@
 // The stamped descriptor must satisfy schemas/project02.plugin.schema.json
 // and the runtime validator.
-import {existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {existsSync, mkdirSync, readdirSync, readFileSync} from 'node:fs';
+import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {
   displayNameFromProject02Identifier,
   isProject02Identifier,
 } from '../src/shared/identifier.ts';
+import {canonicalPath} from '../src/shared/real-path.ts';
+import {atomicReplaceFileSync} from '../src/runtime/storage/atomic-file.ts';
+import {
+  acquireLocalRuntimeMutationLockSync,
+  LocalRuntimeMutationLockBusyError,
+} from '../src/runtime/storage/mutation-lock.ts';
 
-export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
+export function scaffoldRuntimePluginPackage({id, packagesRoot, bundledPath}) {
   if (!isProject02Identifier(id)) {
     throw new Error(
       `Plugin id "${id}" must start with a letter and use only letters, numbers, dots, underscores, or hyphens.`,
@@ -17,35 +24,200 @@ export function scaffoldRuntimePluginPackage({id, packagesRoot}) {
 
   const packageRoot = join(packagesRoot, id);
 
-  if (existsSync(packageRoot)) {
-    throw new Error(`Plugin package directory already exists: ${packageRoot}`);
+  // One scaffold at a time per registry: check, create, and register must
+  // not interleave, or a colliding loser leaves files it can never register.
+  return withBundledRegistryLock(bundledPath, () => {
+    const source = readFileSync(bundledPath, 'utf8');
+    const registered = source.includes(`'../packages/${id}/index.ts'`);
+    const packageRootExists = existsSync(packageRoot);
+
+    if (packageRootExists) {
+      assertOwnScaffold({id, packageRoot});
+      if (registered) {
+        throw new Error(
+          `Plugin package directory already exists: ${packageRoot}`,
+        );
+      }
+    }
+    if (!registered) {
+      assertBundledRegistrationNamesAvailable({id, source});
+    }
+    if (!packageRootExists) {
+      mkdirSync(packageRoot, {recursive: true});
+    }
+
+    const displayName = displayNameFromProject02Identifier(id);
+
+    writeMissingScaffoldFile(
+      join(packageRoot, 'project02.plugin.json'),
+      `${JSON.stringify(descriptorTemplate({id, displayName}), null, 2)}\n`,
+    );
+    writeMissingScaffoldFile(
+      join(packageRoot, 'package.json'),
+      `${JSON.stringify({type: 'module'}, null, 2)}\n`,
+    );
+    writeMissingScaffoldFile(
+      join(packageRoot, 'index.ts'),
+      "export {createProject02Plugin} from './plugin.ts';\n",
+    );
+    writeMissingScaffoldFile(
+      join(packageRoot, 'plugin.ts'),
+      pluginModuleTemplate(id),
+    );
+    if (!registered) {
+      registerBundledRuntimePluginFactory({id, bundledPath, source});
+    }
+
+    return {packageRoot};
+  });
+}
+
+// Atomic writes make existence mean completeness: a rerun heals a crashed
+// scaffold, a torn file cannot arise, and no existing file is overwritten.
+function writeMissingScaffoldFile(path, content) {
+  if (!existsSync(path)) {
+    atomicReplaceFileSync({targetPath: path, content, mode: 0o644});
+  }
+}
+
+// Only an empty directory or this id's own descriptor may be completed.
+function assertOwnScaffold({id, packageRoot}) {
+  if (readdirSync(packageRoot).length === 0) {
+    return;
   }
 
-  const displayName = displayNameFromProject02Identifier(id);
+  let descriptorId;
 
-  mkdirSync(packageRoot, {recursive: true});
-  writeFileSync(
-    join(packageRoot, 'project02.plugin.json'),
-    `${JSON.stringify(descriptorTemplate({id, displayName}), null, 2)}\n`,
-    'utf8',
-  );
-  writeFileSync(
-    join(packageRoot, 'package.json'),
-    `${JSON.stringify({type: 'module'}, null, 2)}\n`,
-    'utf8',
-  );
-  writeFileSync(
-    join(packageRoot, 'index.ts'),
-    "export {createProject02Plugin} from './plugin.ts';\n",
-    'utf8',
-  );
-  writeFileSync(
-    join(packageRoot, 'plugin.ts'),
-    pluginModuleTemplate(id),
-    'utf8',
-  );
+  try {
+    const descriptor = JSON.parse(
+      readFileSync(join(packageRoot, 'project02.plugin.json'), 'utf8'),
+    );
 
-  return {packageRoot};
+    descriptorId = descriptor.manifest.id;
+  } catch {
+    descriptorId = undefined;
+  }
+  if (descriptorId !== id) {
+    throw new Error(
+      `Plugin package directory already exists and is not a scaffold of "${id}": ${packageRoot}`,
+    );
+  }
+}
+
+function withBundledRegistryLock(bundledPath, transaction) {
+  let lease;
+
+  try {
+    lease = acquireLocalRuntimeMutationLockSync({
+      locksRoot: join(tmpdir(), 'project02-scaffold-locks'),
+      resourceKey: `bundled-registry:${canonicalPath(bundledPath)}`,
+    });
+  } catch (error) {
+    if (error instanceof LocalRuntimeMutationLockBusyError) {
+      throw new Error(
+        'Another scaffold is updating the bundled registry; retry when it finishes.',
+        {cause: error},
+      );
+    }
+    throw error;
+  }
+  try {
+    return transaction();
+  } finally {
+    lease.release();
+  }
+}
+
+// Ids that differ only in separators derive one registration name; emitting
+// the second would break bundled.ts for both packages.
+function assertBundledRegistrationNamesAvailable({id, source}) {
+  const constantPrefix = identifierConstantPrefix(id);
+
+  for (const name of [
+    `create${capitalize(constantPrefix)}Plugin`,
+    `${constantPrefix}PluginId`,
+  ]) {
+    if (new RegExp(`\\b${name}\\b`, 'u').test(source)) {
+      throw new Error(
+        `Plugin id "${id}" derives the registration name "${name}", which bundled.ts already uses for another package. Pick an id that differs in letters or digits, not only in separators.`,
+      );
+    }
+  }
+}
+
+/** A package the host cannot import statically never loads at runtime. */
+function registerBundledRuntimePluginFactory({id, bundledPath, source}) {
+  const constantPrefix = identifierConstantPrefix(id);
+  const factoryAlias = `create${capitalize(constantPrefix)}Plugin`;
+  const idConstant = `${constantPrefix}PluginId`;
+  const lines = source.split('\n');
+  const importLines = [
+    `import {createProject02Plugin as ${factoryAlias}} from '../packages/${id}/index.ts';`,
+    `import {${idConstant}} from '../packages/${id}/plugin.ts';`,
+  ];
+  const entryLines = [
+    '  [',
+    `    ${idConstant},`,
+    '    Object.freeze({',
+    "      entryRelativePath: 'index.ts',",
+    `      factory: ${factoryAlias},`,
+    '    }),',
+    '  ],',
+  ];
+
+  lines.splice(bundledMapEntryIndex(lines, idConstant), 0, ...entryLines);
+  lines.splice(bundledImportIndex(lines, id), 0, ...importLines);
+  atomicReplaceFileSync({
+    targetPath: bundledPath,
+    content: lines.join('\n'),
+    mode: 0o644,
+  });
+}
+
+function bundledImportIndex(lines, id) {
+  const packageImport = /from '\.\.\/packages\/(?<packageId>[^/]+)\//u;
+  let lastImport = 0;
+
+  for (const [index, line] of lines.entries()) {
+    const packageId = packageImport.exec(line)?.groups?.packageId;
+
+    if (packageId !== undefined && packageId > id) {
+      return index;
+    }
+
+    if (line.startsWith('import ')) {
+      lastImport = index + 1;
+    }
+  }
+
+  return lastImport;
+}
+
+function bundledMapEntryIndex(lines, idConstant) {
+  const mapEnd = lines.findIndex(line => line === ']);');
+
+  for (let index = 0; index < mapEnd; index += 1) {
+    const entryId =
+      lines[index] === '  [' ? lines[index + 1]?.trim() : undefined;
+
+    if (entryId !== undefined && entryId > `${idConstant},`) {
+      return index;
+    }
+  }
+
+  return mapEnd;
+}
+
+function capitalize(value) {
+  return `${value[0].toUpperCase()}${value.slice(1)}`;
+}
+
+function identifierConstantPrefix(id) {
+  return id
+    .split(/[._-]/u)
+    .filter(part => part.length > 0)
+    .map((part, index) => (index === 0 ? part : capitalize(part)))
+    .join('');
 }
 
 function descriptorTemplate({id, displayName}) {
@@ -62,7 +234,6 @@ function descriptorTemplate({id, displayName}) {
       contractVersion: 'mvp-008.runtime_plugin.v2',
       compatibility: {
         hostContractVersions: ['mvp-008.runtime_plugin.v2'],
-        sourceSystem: 'project02',
       },
       declaredPlugins: ['before_role_model_call'],
       config: {
@@ -100,13 +271,7 @@ function descriptorTemplate({id, displayName}) {
 }
 
 function pluginModuleTemplate(id) {
-  const constantPrefix = id
-    .split(/[._-]/u)
-    .filter(part => part.length > 0)
-    .map((part, index) =>
-      index === 0 ? part : part[0].toUpperCase() + part.slice(1),
-    )
-    .join('');
+  const constantPrefix = identifierConstantPrefix(id);
 
   return `import {createRuntimePlugin} from '../../api/constructors.ts';
 import {createRuntimePluginContextItem} from '../../api/manifest-validation.ts';
@@ -126,7 +291,7 @@ const ${constantPrefix}PluginDescriptorUrl = new URL(
   import.meta.url,
 );
 
-export function create${constantPrefix[0].toUpperCase()}${constantPrefix.slice(1)}PluginManifest(): RuntimePluginManifest {
+export function create${capitalize(constantPrefix)}PluginManifest(): RuntimePluginManifest {
   return readRuntimePluginPackageDescriptor({
     descriptorUrl: ${constantPrefix}PluginDescriptorUrl,
     expectedEntry: './index.ts',
@@ -197,9 +362,13 @@ if (invokedDirectly) {
       packagesRoot: fileURLToPath(
         new URL('../src/plugins/packages/', import.meta.url),
       ),
+      bundledPath: fileURLToPath(
+        new URL('../src/plugins/package-loader/bundled.ts', import.meta.url),
+      ),
     });
 
     console.log(`Created ${packageRoot}`);
+    console.log('Registered it in src/plugins/package-loader/bundled.ts');
     console.log('Next steps:');
     console.log('  1. Edit the manifest and plugin behavior.');
     console.log('  2. pnpm check');

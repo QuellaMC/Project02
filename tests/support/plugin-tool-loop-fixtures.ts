@@ -1,10 +1,6 @@
 import type {RawEventLogRecordInput} from '../../src/runtime/evidence/records.ts';
 import {testCharacterProfile} from './character-fixtures.ts';
-import {
-  createConversationSession,
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent,
-} from '../../src/core/index.ts';
+import {createConversationSession} from '../../src/core/index.ts';
 import {characterStatePluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
@@ -173,27 +169,6 @@ export function createNativeVisibleReplyAndPluginListAdapter(
   } satisfies RoleModelAdapter);
 }
 
-export function createSequencedAdapter(
-  decisions: readonly Readonly<Record<string, unknown>>[],
-): RoleModelAdapter {
-  let index = 0;
-
-  return Object.freeze({
-    invoke() {
-      const decision = decisions[index] ?? decisions.at(-1);
-
-      if (decision === undefined) {
-        throw new Error('Sequenced adapter needs at least one decision.');
-      }
-
-      index += 1;
-      return {
-        rawOutputText: JSON.stringify(decision),
-      };
-    },
-  } satisfies RoleModelAdapter);
-}
-
 // `persist` appends before throwing, modelling a write that reached disk before
 // its caller failed.
 export function createRawEventAppendFailingLogStore(options: {
@@ -297,7 +272,6 @@ export function createHealthRejectingPlugin() {
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['health'],
       config: {
@@ -352,7 +326,6 @@ export function createHandleFileStoreWritePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins:
         healthRejectsWhenValue === undefined
@@ -491,7 +464,6 @@ export function createAfterTurnCommittedProbeHost(
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test',
           },
           declaredPlugins: ['after_turn_committed'],
           config: {
@@ -566,7 +538,6 @@ export function createPluginStoreRevisionFixtureHost() {
           contractVersion: runtimePluginContractVersion,
           compatibility: {
             hostContractVersions: [runtimePluginContractVersion],
-            sourceSystem: 'test',
           },
           declaredPlugins: ['tool_provider', 'handle_tool_call'],
           config: {
@@ -623,17 +594,6 @@ export function createRevisionFixtureTool(name: string) {
     validationOwner: 'plugin_host',
     requiresConfirmation: false,
   } as const;
-}
-
-export function createTestEvent(message: string, eventId: string) {
-  return createUserMessageRuntimeEvent(
-    message,
-    createRuntimeEventIdentity({
-      eventId,
-      traceId: `trace_${eventId}`,
-      createdAt: '2026-06-15T00:00:00.000Z',
-    }),
-  );
 }
 
 export function transactionIdentityFromContext(context: {

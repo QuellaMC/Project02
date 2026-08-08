@@ -631,10 +631,7 @@ export function createRuntimePluginListingSnapshot(
     manifest,
     providedTools: Object.freeze(providedTools),
     registeredLifecycleHooks: registeredLifecycleHooks.value,
-    installed: requireBooleanRecordField(options, 'installed'),
-    registered: requireBooleanRecordField(options, 'registered'),
     enabled: requireBooleanRecordField(options, 'enabled'),
-    availableForTurn: requireBooleanRecordField(options, 'availableForTurn'),
     redactionLabels: freezeRedactedStrings(redactionLabels),
     requestedAccess: access.requestedAccess,
     grantedAccess: access.grantedAccess,
@@ -710,6 +707,22 @@ export function createRuntimePluginTurnEvidenceSnapshot(
   } satisfies RuntimePluginTurnEvidenceSnapshot);
 }
 
+/** Every lifecycle hook, with the declaration a plugin must carry to use it. */
+export const runtimePluginLifecycleHookDeclarations = Object.freeze([
+  ['handleToolCall', 'handle_tool_call'],
+  ['beforeRoleModelCall', 'before_role_model_call'],
+  ['afterTurnCommitted', 'after_turn_committed'],
+  ['onSessionEnd', 'on_session_end'],
+  ['onShutdown', 'on_shutdown'],
+  ['health', 'health'],
+] as const satisfies readonly (readonly [
+  keyof RuntimePluginLifecycleHooks,
+  RuntimePluginDeclaration,
+])[]);
+
+export type RuntimePluginLifecycleHookName =
+  (typeof runtimePluginLifecycleHookDeclarations)[number][0];
+
 function validatePluginDeclarationsAgainstRuntime(options: {
   readonly manifest: RuntimePluginManifest;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
@@ -738,64 +751,16 @@ function validatePluginDeclarationsAgainstRuntime(options: {
     seenToolNames.add(tool.name);
   }
 
-  if (
-    options.lifecycleHooks.handleToolCall !== undefined &&
-    !options.manifest.declaredPlugins.includes('handle_tool_call')
-  ) {
-    return reject(
-      'missing_required_declaration',
-      'handleToolCall hooks must declare handle_tool_call.',
-    );
-  }
-
-  if (
-    options.lifecycleHooks.beforeRoleModelCall !== undefined &&
-    !options.manifest.declaredPlugins.includes('before_role_model_call')
-  ) {
-    return reject(
-      'missing_required_declaration',
-      'beforeRoleModelCall hooks must declare before_role_model_call.',
-    );
-  }
-
-  if (
-    options.lifecycleHooks.afterTurnCommitted !== undefined &&
-    !options.manifest.declaredPlugins.includes('after_turn_committed')
-  ) {
-    return reject(
-      'missing_required_declaration',
-      'afterTurnCommitted hooks must declare after_turn_committed.',
-    );
-  }
-
-  if (
-    options.lifecycleHooks.onSessionEnd !== undefined &&
-    !options.manifest.declaredPlugins.includes('on_session_end')
-  ) {
-    return reject(
-      'missing_required_declaration',
-      'onSessionEnd hooks must declare on_session_end.',
-    );
-  }
-
-  if (
-    options.lifecycleHooks.onShutdown !== undefined &&
-    !options.manifest.declaredPlugins.includes('on_shutdown')
-  ) {
-    return reject(
-      'missing_required_declaration',
-      'onShutdown hooks must declare on_shutdown.',
-    );
-  }
-
-  if (
-    options.lifecycleHooks.health !== undefined &&
-    !options.manifest.declaredPlugins.includes('health')
-  ) {
-    return reject(
-      'missing_required_declaration',
-      'health hooks must declare health.',
-    );
+  for (const [hook, declaration] of runtimePluginLifecycleHookDeclarations) {
+    if (
+      options.lifecycleHooks[hook] !== undefined &&
+      !options.manifest.declaredPlugins.includes(declaration)
+    ) {
+      return reject(
+        'missing_required_declaration',
+        `${hook} hooks must declare ${declaration}.`,
+      );
+    }
   }
 
   return accept(undefined);
@@ -804,37 +769,14 @@ function validatePluginDeclarationsAgainstRuntime(options: {
 export function registeredRuntimePluginLifecycleHooks(
   plugin: RuntimePlugin,
 ): readonly RuntimePluginDeclaration[] {
-  const hooks: RuntimePluginDeclaration[] = [];
-
-  if (plugin.providedTools.length > 0) {
-    hooks.push('tool_provider');
-  }
-
-  if (plugin.lifecycleHooks.handleToolCall !== undefined) {
-    hooks.push('handle_tool_call');
-  }
-
-  if (plugin.lifecycleHooks.beforeRoleModelCall !== undefined) {
-    hooks.push('before_role_model_call');
-  }
-
-  if (plugin.lifecycleHooks.afterTurnCommitted !== undefined) {
-    hooks.push('after_turn_committed');
-  }
-
-  if (plugin.lifecycleHooks.onSessionEnd !== undefined) {
-    hooks.push('on_session_end');
-  }
-
-  if (plugin.lifecycleHooks.onShutdown !== undefined) {
-    hooks.push('on_shutdown');
-  }
-
-  if (plugin.lifecycleHooks.health !== undefined) {
-    hooks.push('health');
-  }
-
-  return Object.freeze(hooks);
+  return Object.freeze([
+    ...(plugin.providedTools.length > 0
+      ? (['tool_provider'] satisfies RuntimePluginDeclaration[])
+      : []),
+    ...runtimePluginLifecycleHookDeclarations
+      .filter(([hookName]) => plugin.lifecycleHooks[hookName] !== undefined)
+      .map(([, declaration]) => declaration),
+  ]);
 }
 
 function requiredRegisteredLifecycleHooks(

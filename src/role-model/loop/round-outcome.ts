@@ -73,7 +73,7 @@ export type RoleModelLoopState = {
   nativeAdditionalMessages: readonly RoleModelChatMessage[];
 };
 
-export type AcceptedRoundView = {
+type AcceptedRoundView = {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
@@ -81,7 +81,7 @@ export type AcceptedRoundView = {
   readonly executableToolCalls: readonly ModelToolCall[];
 };
 
-export type RejectedRoundView = {
+type RejectedRoundView = {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;

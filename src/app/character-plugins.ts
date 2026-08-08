@@ -167,7 +167,7 @@ export function enforceCharacterPluginExpectations(options: {
   readonly activation: RuntimePluginActivationResult;
   readonly installedPluginIds: ReadonlySet<string>;
   /** Selected home, so the recovery command edits the right store. */
-  readonly storeRoot?: string;
+  readonly storeRoot: string;
 }): readonly RuntimeConfigDiagnostic[] {
   if (options.expectations === undefined) {
     return Object.freeze([]);
@@ -208,11 +208,8 @@ export function enforceCharacterPluginExpectations(options: {
             level === 'required' ? 'requires' : 'recommends'
           } plugin "${pluginId}", which is disabled. Enable it with: ` +
             // Quoted because the operator copy-pastes this hint into a shell.
-            `runtime-config ${
-              options.storeRoot === undefined
-                ? ''
-                : `--store ${shellQuoteCommandArgument(options.storeRoot)} `
-            }--character ${shellQuoteCommandArgument(options.characterId)} plugin ` +
+            `runtime-config --store ${shellQuoteCommandArgument(options.storeRoot)} ` +
+            `--character ${shellQuoteCommandArgument(options.characterId)} plugin ` +
             `enable ${shellQuoteCommandArgument(pluginId)}`,
           `plugins.${pluginId}.enabled`,
           {pluginId},

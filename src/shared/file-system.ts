@@ -30,24 +30,11 @@ import {
   type Dirent,
   type Stats,
 } from 'node:fs';
-import {
-  chmod,
-  lstat,
-  mkdir,
-  open,
-  readdir,
-  readFile,
-  rename,
-  rm,
-  rmdir,
-  unlink,
-  writeFile,
-  type FileHandle,
-} from 'node:fs/promises';
+import {mkdir, readdir, readFile, rmdir} from 'node:fs/promises';
 
 import {isNodeErrorWithCode} from './node-error.ts';
 
-export type {BigIntStats, Dirent, FileHandle, Stats};
+export type {BigIntStats, Dirent, Stats};
 
 export const fileSystemConstants = constants;
 
@@ -117,17 +104,10 @@ export function lstatPathSync(path: string): BigIntStats {
   return lstatSync(path, {bigint: true});
 }
 
-export async function lstatPath(path: string): Promise<BigIntStats> {
-  return lstat(path, {bigint: true});
-}
-
-export function realPathSync(path: string): string {
-  return realpathSync(path);
-}
-
 /**
- * Only the OS resolver returns the spelling the filesystem stored; Node's
- * JavaScript one disagrees on case-insensitive filesystems.
+ * The OS resolver, which is the only one that returns the spelling the
+ * filesystem stored; Node's JavaScript one disagrees on case-insensitive
+ * filesystems.
  */
 export function nativeRealPathSync(path: string): string {
   return realpathSync.native(path);
@@ -161,10 +141,6 @@ export async function listDirectoryEntries(path: string): Promise<Dirent[]> {
   return readdir(path, {withFileTypes: true});
 }
 
-export async function listDirectoryNames(path: string): Promise<string[]> {
-  return readdir(path);
-}
-
 // --- Writing -------------------------------------------------------------
 
 export function appendTextFileSync(
@@ -191,22 +167,10 @@ export function appendBytesFileSync(path: string, bytes: Uint8Array): void {
  * `flag` is the caller's: lock files claim exclusivity with `'wx'`, and a
  * default would turn a failed claim into a silent overwrite.
  */
-export type WriteTextFileOptions = {
+type WriteTextFileOptions = {
   readonly mode: number;
   readonly flag?: string;
 };
-
-export async function writeTextFile(
-  path: string,
-  text: string,
-  options: WriteTextFileOptions,
-): Promise<void> {
-  await writeFile(path, text, {
-    encoding: 'utf8',
-    mode: options.mode,
-    ...(options.flag === undefined ? {} : {flag: options.flag}),
-  });
-}
 
 export function writeTextFileSync(
   path: string,
@@ -224,19 +188,8 @@ export function renamePathSync(fromPath: string, toPath: string): void {
   renameSync(fromPath, toPath);
 }
 
-export async function renamePath(
-  fromPath: string,
-  toPath: string,
-): Promise<void> {
-  await rename(fromPath, toPath);
-}
-
 export function chmodPathSync(path: string, mode: number): void {
   chmodSync(path, mode);
-}
-
-export async function chmodPath(path: string, mode: number): Promise<void> {
-  await chmod(path, mode);
 }
 
 // --- Creating and removing ----------------------------------------------
@@ -259,22 +212,11 @@ export function unlinkPathSync(path: string): void {
   unlinkSync(path);
 }
 
-export async function unlinkPath(path: string): Promise<void> {
-  await unlink(path);
-}
-
 export function removePathSync(
   path: string,
   options?: {readonly recursive?: boolean; readonly force?: boolean},
 ): void {
   rmSync(path, options);
-}
-
-export async function removePath(
-  path: string,
-  options?: {readonly recursive?: boolean; readonly force?: boolean},
-): Promise<void> {
-  await rm(path, options);
 }
 
 export async function removeDirectory(path: string): Promise<void> {
@@ -289,14 +231,6 @@ export function openFileSync(
   mode?: number,
 ): number {
   return openSync(path, flags, mode);
-}
-
-export async function openFile(
-  path: string,
-  flags: string | number,
-  mode?: number,
-): Promise<FileHandle> {
-  return open(path, flags, mode);
 }
 
 export function closeFileSync(fileDescriptor: number): void {

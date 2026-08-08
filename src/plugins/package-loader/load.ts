@@ -6,7 +6,10 @@ import type {
   RuntimePluginPackageLoadFunction,
   RuntimePluginPackageLoadOptions,
 } from '../api/factory.ts';
-import {createRuntimePlugin} from '../api/constructors.ts';
+import {
+  createRuntimePlugin,
+  runtimePluginLifecycleHookDeclarations,
+} from '../api/constructors.ts';
 import {isRecord} from '../api/validation-primitives.ts';
 import type {
   RuntimePlugin,
@@ -227,16 +230,8 @@ function isRuntimePluginLifecycleHooks(
     return false;
   }
 
-  const hookNames = [
-    'beforeRoleModelCall',
-    'handleToolCall',
-    'afterTurnCommitted',
-    'onSessionEnd',
-    'health',
-  ] as const;
-
-  return hookNames.every(
-    hookName =>
+  return runtimePluginLifecycleHookDeclarations.every(
+    ([hookName]) =>
       value[hookName] === undefined || typeof value[hookName] === 'function',
   );
 }

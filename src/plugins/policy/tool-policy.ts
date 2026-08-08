@@ -10,10 +10,6 @@ import {
 import type {RuntimePlugin, RuntimePluginProvidedTool} from '../api/types.ts';
 import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
-export type IsHostOwnedFirstPartyModelToolsPlugin = (
-  plugin: RuntimePlugin,
-) => boolean;
-
 export function pluginToolDefinitionsForEnabledPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
@@ -68,10 +64,7 @@ export function routableModelFacingPluginTools(options: {
     options.plugin.providedTools.filter(
       tool =>
         pluginCanWriteModelInput(options.access) &&
-        isModelFacingRuntimePluginTool({
-          manifest: options.plugin.manifest,
-          tool,
-        }),
+        isModelFacingRuntimePluginTool(tool),
     ),
   );
 }
@@ -90,23 +83,13 @@ export function discoverableCurrentTurnPluginTools(options: {
   readonly plugin: RuntimePlugin;
   readonly access: RuntimePluginAccessSnapshot;
   readonly confirmationAvailable: boolean;
-  readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): readonly RuntimePluginProvidedTool[] {
   return Object.freeze(
     options.plugin.providedTools.filter(
       tool =>
         pluginCanWriteModelInput(options.access) &&
         (!tool.requiresConfirmation || options.confirmationAvailable) &&
-        isDiscoverableCurrentTurnTool({
-          plugin: options.plugin,
-          tool,
-          ...(options.isHostOwnedFirstPartyModelToolsPlugin === undefined
-            ? {}
-            : {
-                isHostOwnedFirstPartyModelToolsPlugin:
-                  options.isHostOwnedFirstPartyModelToolsPlugin,
-              }),
-        }),
+        isDiscoverableCurrentTurnTool({plugin: options.plugin, tool}),
     ),
   );
 }
@@ -115,32 +98,20 @@ export function discoverableCurrentTurnPluginTools(options: {
 function isDiscoverableCurrentTurnTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;
-  readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): boolean {
-  if (
-    isModelFacingRuntimePluginTool({
-      manifest: options.plugin.manifest,
-      tool: options.tool,
-    })
-  ) {
+  if (isModelFacingRuntimePluginTool(options.tool)) {
     return options.plugin.lifecycleHooks.handleToolCall !== undefined;
   }
 
-  return isFirstPartyBuiltInModelTool({
-    ...options,
-    isHostOwnedFirstPartyModelToolsPlugin:
-      options.isHostOwnedFirstPartyModelToolsPlugin ??
-      isFirstPartyModelToolsPlugin,
-  });
+  return isFirstPartyBuiltInModelTool(options);
 }
 
 export function isFirstPartyBuiltInModelTool(options: {
   readonly plugin: RuntimePlugin;
   readonly tool: RuntimePluginProvidedTool;
-  readonly isHostOwnedFirstPartyModelToolsPlugin?: IsHostOwnedFirstPartyModelToolsPlugin;
 }): boolean {
   return (
-    options.isHostOwnedFirstPartyModelToolsPlugin?.(options.plugin) === true &&
+    isFirstPartyModelToolsPlugin(options.plugin) &&
     options.tool.validationOwner === 'built_in_model_tools' &&
     isBuiltInModelToolName(options.tool.name) &&
     !toolRequiresConfirmation(options.tool)

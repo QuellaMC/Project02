@@ -1,7 +1,10 @@
 import {listDirectoryNamesSync} from '../../shared/file-system.ts';
 import {basename, dirname, join} from 'node:path';
 
-import {describeRealEntry, pathIsAtOrBelow} from '../../shared/real-path.ts';
+import {
+  describeRealEntry,
+  relativePathIfContained,
+} from '../../shared/real-path.ts';
 import {isLiveAtomicReplacementForAnyTarget} from './atomic-file.ts';
 import {
   characterDataDirPath,
@@ -38,12 +41,12 @@ export function isProject02CharacterDataOwnedPath(options: {
 }): boolean {
   if (
     options.selectedHomeRoot !== undefined &&
-    pathIsAtOrBelow(
-      options.canonicalPath,
+    relativePathIfContained(
       createProject02HomeLayout({
         homeRoot: options.selectedHomeRoot,
       }).characterDataRoot,
-    )
+      options.canonicalPath,
+    ) !== undefined
   ) {
     return true;
   }
@@ -59,10 +62,10 @@ export function isProject02CharacterDataOwnedPath(options: {
 
     if (
       marker?.scope === 'home' &&
-      pathIsAtOrBelow(
-        options.canonicalPath,
+      relativePathIfContained(
         createProject02HomeLayout({homeRoot: ancestor}).characterDataRoot,
-      )
+        options.canonicalPath,
+      ) !== undefined
     ) {
       return true;
     }

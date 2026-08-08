@@ -14,7 +14,7 @@ import {afterEach, describe, expect, it} from 'vitest';
 
 import {
   atomicReplacementFileBelongsToTarget,
-  atomicReplaceFile,
+  atomicReplaceFileSync,
   parseAtomicReplacementFileName,
 } from '../../src/runtime/storage/atomic-file.ts';
 
@@ -34,7 +34,7 @@ describe('atomic file replacement', () => {
     const targetPath = join(root, 'config.json');
     await writeFile(targetPath, 'old\n', 'utf8');
 
-    await atomicReplaceFile({
+    atomicReplaceFileSync({
       targetPath,
       content: 'new\n',
       mode: 0o600,
@@ -50,9 +50,9 @@ describe('atomic file replacement', () => {
     const targetPath = join(root, 'config.json');
     await mkdir(targetPath);
 
-    await expect(
-      atomicReplaceFile({targetPath, content: 'new\n', mode: 0o600}),
-    ).rejects.toThrow();
+    expect(() => {
+      atomicReplaceFileSync({targetPath, content: 'new\n', mode: 0o600});
+    }).toThrow();
 
     expect(await readdir(root)).toEqual(['config.json']);
   });

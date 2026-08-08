@@ -1,8 +1,5 @@
 import type {ConversationLogRecord, RuntimeTurnStatus} from './records.ts';
-import type {
-  RuntimePluginAccessMap,
-  RuntimePluginToolAnnotations,
-} from '../../plugins/api/index.ts';
+import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
 
 export type InspectTurnEvidence = {
   readonly eventId: string;
@@ -108,10 +105,7 @@ export type InspectPluginListing = {
   readonly version: string;
   readonly kind: string;
   readonly firstParty: boolean;
-  readonly installed: boolean;
-  readonly registered: boolean;
   readonly enabled: boolean;
-  readonly availableForTurn: boolean;
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly grantedAccess: RuntimePluginAccessMap;
   readonly providedTools: readonly InspectPluginToolListing[];
@@ -125,11 +119,6 @@ export type InspectPluginToolListing = {
   readonly name: string;
   readonly validationOwner: string;
   readonly requiresConfirmation: boolean;
-  /**
-   * Absent when the tool declared nothing, which differs from declaring the
-   * call harmless.
-   */
-  readonly annotations?: RuntimePluginToolAnnotations;
   readonly concurrency?: string;
 };
 

@@ -1,17 +1,12 @@
 export {
   classifyRuntimePluginCatalogDiscovery,
   createConfiguredProject02PluginHostFromPlan,
-  createRuntimePluginCatalogSnapshot,
   discoverRuntimePluginCatalog,
   prepareConfiguredProject02PluginActivation,
   resolveRuntimePluginActivation,
   type PreparedProject02PluginActivationPlan,
   type Project02ConfiguredPluginActivation,
-  type Project02ConfiguredPluginHost,
   type RuntimePluginActivationResult,
-  type RuntimePluginActivationSnapshot,
-  type RuntimePluginActivationStatus,
-  type RuntimePluginCatalogDiscovery,
   type RuntimePluginCatalogSnapshot,
   type RuntimePluginFactoryDefinition,
 } from './activation.ts';
@@ -20,13 +15,8 @@ export {
   resolveRuntimeCliStartup,
   type RuntimeCliStartupResult,
 } from './startup.ts';
-export {
-  defaultProject02CharacterId,
-  prepareProject02CharacterActivation,
-  type Project02CharacterActivation,
-} from './character.ts';
+export {type Project02CharacterActivation} from './character.ts';
 export {
   enforceCharacterPluginExpectations,
   planCharacterPackagePluginMaterialization,
-  type CharacterPackagePluginMaterializationPlan,
 } from './character-plugins.ts';

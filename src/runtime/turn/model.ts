@@ -84,10 +84,7 @@ type RunRuntimeModelResult =
 export async function runSerializedLocalUserMessageEvent(
   options: RunLocalUserMessageEventOptions,
 ): Promise<LocalRuntimeUserMessageResult> {
-  const state = createRuntimeTurnState({
-    ...options,
-    pluginHost: requiredRuntimePluginHost(options.pluginHost),
-  });
+  const state = createRuntimeTurnState(options);
 
   initializeRuntimeTurnEvidence(state);
   try {
@@ -135,9 +132,6 @@ async function prepareRuntimeTurn(
   // before this turn, and the current user message rides the event payload.
   const decisionContext = buildUserTurnDecisionContext({
     session: state.options.session,
-    ...(state.options.recentMessageLimit === undefined
-      ? {}
-      : {recentMessageLimit: state.options.recentMessageLimit}),
   });
 
   await commitUserMessage(state);
@@ -149,10 +143,9 @@ async function prepareRuntimeTurn(
     currentUserMessage: state.event.payload.currentUserMessage,
     character: decisionContext.characterSnapshot,
   });
-  const pluginHost = createPluginHostForTurn(state);
+  const pluginHost = state.options.pluginHost;
 
   state.runtimePluginContextForTurn = runtimePluginContext;
-  state.runtimePluginHostForTurn = pluginHost;
   const beforeRoleModelCallResult =
     await pluginHost.beforeRoleModelCall(runtimePluginContext);
 
@@ -436,22 +429,6 @@ function roleModelLoopAdapterOption(options: RunLocalUserMessageEventOptions): {
   return options.roleModelAdapter === undefined
     ? {}
     : {adapter: options.roleModelAdapter};
-}
-
-function createPluginHostForTurn(state: RuntimeTurnState): RuntimePluginHost {
-  return requiredRuntimePluginHost(state.options.pluginHost);
-}
-
-function requiredRuntimePluginHost(
-  pluginHost: RuntimePluginHost | undefined,
-): RuntimePluginHost {
-  if (pluginHost === undefined) {
-    throw new TypeError(
-      'Local runtime turns require an explicitly configured plugin host.',
-    );
-  }
-
-  return pluginHost;
 }
 
 function pluginToolEvidenceFromRouting(

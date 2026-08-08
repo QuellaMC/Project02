@@ -5,11 +5,10 @@ type RuntimePluginFileStoreIdentity = {
   readonly pluginId: string;
 };
 
-export type DurableRuntimePluginFileStoreOptions =
-  RuntimePluginFileStoreIdentity & {
-    readonly storeRoot: string;
-    readonly sessionIdentity?: object;
-  };
+type DurableRuntimePluginFileStoreOptions = RuntimePluginFileStoreIdentity & {
+  readonly storeRoot: string;
+  readonly sessionIdentity?: object;
+};
 
 export type InMemoryRuntimePluginFileStoreOptions =
   RuntimePluginFileStoreIdentity & {

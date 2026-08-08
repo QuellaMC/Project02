@@ -21,6 +21,7 @@ import {
 } from '../../role-model/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
+  type RawEventLogRecordInput,
   type RoleModelCommitValidationSnapshot,
 } from '../evidence/records.ts';
 import {
@@ -43,22 +44,21 @@ export async function appendRejectedResult(
   optionsForRejection: RuntimeTurnRejectionOptions,
 ): Promise<LocalRuntimeUserMessageRejectedResult> {
   const evidence = optionsForRejection.evidence ?? {};
-  const pluginHostForEvidence =
-    state.runtimePluginHostForTurn ?? state.options.pluginHost;
+  const pluginHost = state.options.pluginHost;
   const healthResult =
     optionsForRejection.healthResult ??
     (await pluginHealthForTurn({
-      pluginHost: pluginHostForEvidence,
+      pluginHost,
       runtimePluginContext: optionsForRejection.runtimePluginContext,
     }));
   const runtimePluginEvidence = combineRuntimePluginEvidence(
     optionsForRejection.runtimePluginEvidence ?? [],
     healthResult.evidence,
   );
-
-  appendRawEvent(state, {
+  // Both records describe the same rejection, so they carry one body and
+  // one plugin turn-evidence snapshot; only the kind tells them apart.
+  const rejectionRecord: Omit<RawEventLogRecordInput, 'kind'> = {
     ...state.identity,
-    kind: optionsForRejection.rawKind,
     eventType: state.event.type,
     status: 'rejected',
     reason: optionsForRejection.rawReason,
@@ -68,32 +68,22 @@ export async function appendRejectedResult(
     ...runtimePluginEvidenceOption(runtimePluginEvidence),
     ...runtimePluginTurnEvidenceOption({
       identity: state.identity,
-      pluginHost: pluginHostForEvidence,
+      pluginHost,
       contextItems: optionsForRejection.runtimePluginContextItems ?? [],
       toolInvocations: optionsForRejection.runtimePluginToolInvocations ?? [],
       evidence: runtimePluginEvidence,
       health: healthResult.snapshots,
     }),
+  };
+
+  appendRawEvent(state, {
+    ...rejectionRecord,
+    kind: optionsForRejection.rawKind,
   });
 
   const rawEvent = appendRawEvent(state, {
-    ...state.identity,
+    ...rejectionRecord,
     kind: 'runtime_turn_rejected',
-    eventType: state.event.type,
-    status: 'rejected',
-    reason: optionsForRejection.rawReason,
-    ...rejectionIdentityOptions(optionsForRejection),
-    payloadSummary: state.payloadSummary,
-    ...evidence,
-    ...runtimePluginEvidenceOption(runtimePluginEvidence),
-    ...runtimePluginTurnEvidenceOption({
-      identity: state.identity,
-      pluginHost: pluginHostForEvidence,
-      contextItems: optionsForRejection.runtimePluginContextItems ?? [],
-      toolInvocations: optionsForRejection.runtimePluginToolInvocations ?? [],
-      evidence: runtimePluginEvidence,
-      health: healthResult.snapshots,
-    }),
   });
 
   return Object.freeze({

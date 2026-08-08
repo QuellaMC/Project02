@@ -2,20 +2,20 @@ import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {runtimeConfigEnvVarName} from '../../src/runtime/config/index.ts';
 import {
-  defaultRuntimeConfigPath,
-  runtimeConfigEnvVarName,
-} from '../../src/runtime/config/index.ts';
-import {defaultProject02HomeRoot} from '../../src/runtime/storage/index.ts';
+  createProject02HomeLayout,
+  defaultProject02HomeRoot,
+} from '../../src/runtime/storage/index.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   initializeTestStore,
   requiredDottedConfigPlugin,
-  requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 
 describe('runtime config CLI reads and checks', () => {
   it('rejects check when the character-data root is a symlink', async () => {
@@ -179,7 +179,7 @@ describe('runtime config CLI reads and checks', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -350,9 +350,12 @@ describe('runtime config CLI reads and checks', () => {
     );
     const previousCwd = process.cwd();
 
-    writeRuntimeConfig(defaultRuntimeConfigPath(storeRoot), {
-      storeRoot: 42,
-    });
+    writeRuntimeConfig(
+      createProject02HomeLayout({homeRoot: storeRoot}).configPath,
+      {
+        storeRoot: 42,
+      },
+    );
     writeRuntimeConfig(configPath, {
       storeRoot: 42,
     });
@@ -420,7 +423,9 @@ describe('runtime config CLI reads and checks', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-check-env-selected-store-error-',
     );
-    const configPath = defaultRuntimeConfigPath(storeRoot);
+    const configPath = createProject02HomeLayout({
+      homeRoot: storeRoot,
+    }).configPath;
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let stdout = '';
@@ -551,13 +556,14 @@ describe('runtime config CLI reads and checks', () => {
       expect(output.activationDiagnostics.map(item => item.code)).not.toContain(
         'runtime_config_required_secret_missing',
       );
-      expect(output.plugins).toContainEqual(
-        expect.objectContaining({
-          pluginId: plugin.manifest.id,
-          activationStatus: 'active',
-          enabled: true,
-        }),
-      );
+      // Same projected plugin shape `inspect` reports, redaction included.
+      expect(
+        output.plugins.find(entry => entry.pluginId === plugin.manifest.id),
+      ).toMatchObject({
+        activationStatus: 'active',
+        enabled: true,
+        config: {apiKey: {secret: true, resolved: true, value: '[redacted]'}},
+      });
       expect(stdout).not.toContain(secretValue);
       expect(process.env[envVar]).toBeUndefined();
 

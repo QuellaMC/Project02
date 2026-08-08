@@ -105,7 +105,7 @@ export function freezeRoleModelChatMessage(
     | RoleModelUserChatMessage);
 }
 
-export function freezeRoleModelChatToolCall(
+function freezeRoleModelChatToolCall(
   call: RoleModelChatToolCall,
 ): RoleModelChatToolCall {
   return Object.freeze({

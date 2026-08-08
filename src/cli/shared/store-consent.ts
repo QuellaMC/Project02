@@ -18,7 +18,7 @@ export class Project02StoreConsentError extends Error {
   }
 }
 
-export type Project02StoreConsentOptions = {
+type Project02StoreConsentOptions = {
   readonly location: RuntimeLocationCliState;
   /** The operator already agreed on the command line via `--init`. */
   readonly init: boolean;

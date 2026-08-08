@@ -26,16 +26,13 @@ export type RoleModelPluginToolDefinition = RuntimePluginProvidedTool & {
   readonly pluginId: string;
 };
 
-export const roleModelDecisionOutputContractText =
-  'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, recentVisibleMessages, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A response may use as many visible_reply calls as it has messages to send; each commits as its own message, in the order listed. A terminal response may end with visible_reply calls, or may use top-level text only as folded model text with no visible final reply.';
-
 export type RoleModelOutputContract = {
   readonly version: string;
   readonly text: string;
 };
 
 export type RoleModelProviderMetadata = {
-  readonly provider: 'local' | 'nvidia';
+  readonly provider: 'nvidia';
   readonly model?: string;
   readonly request?: {
     readonly endpoint?: string;
@@ -51,38 +48,25 @@ export type RoleModelProviderMetadata = {
   };
 };
 
-export type RoleModelThinkingMode =
-  | {
-      readonly mode: 'none';
-    }
-  | {
-      readonly mode: 'enabled';
-      readonly budgetTokens: number;
-    };
-
 export type RoleModelProviderExchangeSnapshot = {
   readonly provider: {
-    readonly name: 'local' | 'nvidia';
+    readonly name: 'nvidia';
     readonly model?: string;
     readonly endpoint?: string;
   };
   readonly capabilities: RoleModelProviderCapabilities;
   readonly reasoning: {
-    readonly mode: RoleModelThinkingMode['mode'];
+    readonly mode: 'enabled';
     readonly params: RuntimePluginJsonValue;
   };
   readonly renderedMessages: readonly RoleModelChatMessage[];
   readonly renderedTools: readonly RoleModelChatCompletionTool[];
   readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
-  readonly toolChoice?: RuntimePluginJsonValue;
-  readonly parallelToolCalls?: boolean;
   readonly requestBody: RuntimePluginJsonValue;
-  readonly rawFinishReason?: RuntimePluginJsonValue;
   readonly finishReason?: string;
   readonly usage?: RuntimePluginJsonValue;
   readonly nativeAssistantMessage?: RoleModelChatMessage;
   readonly nativeToolResultMessages: readonly RoleModelChatMessage[];
-  readonly responseBody?: RuntimePluginJsonValue;
   readonly outputNormalization?: {
     readonly source: 'terminal_assistant_content' | 'native_tool_calls';
     readonly committed: false;
@@ -91,7 +75,7 @@ export type RoleModelProviderExchangeSnapshot = {
 
 export const roleModelDecisionOutputContract = Object.freeze({
   version: roleModelDecisionContractVersion,
-  text: roleModelDecisionOutputContractText,
+  text: 'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, recentVisibleMessages, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A response may use as many visible_reply calls as it has messages to send; each commits as its own message, in the order listed. A terminal response may end with visible_reply calls, or may use top-level text only as folded model text with no visible final reply.',
 } satisfies RoleModelOutputContract);
 
 export type DecisionContext = {
@@ -155,7 +139,6 @@ export type CharacterDecision = {
 
 export const roleModelMalformedOutputRejectionReason = 'malformed_output';
 export const roleModelMalformedToolCallRejectionReason = 'malformed_tool_call';
-export const roleModelUnknownToolRejectionReason = 'unknown_tool';
 export const roleModelDisallowedToolRejectionReason = 'disallowed_tool';
 export const roleModelUnsupportedEffectRejectionReason = 'unsupported_effect';
 export const roleModelInvalidVisibleReplyRejectionReason =
@@ -197,7 +180,6 @@ export function isRoleModelMalformedAdapterRawOutputDetails(
 export type RoleModelDecisionRejectionReason =
   | typeof roleModelMalformedOutputRejectionReason
   | typeof roleModelMalformedToolCallRejectionReason
-  | typeof roleModelUnknownToolRejectionReason
   | typeof roleModelDisallowedToolRejectionReason
   | typeof roleModelUnsupportedEffectRejectionReason
   | typeof roleModelInvalidVisibleReplyRejectionReason
@@ -208,7 +190,6 @@ export type RoleModelDecisionRejectionReason =
 export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelMalformedOutputRejectionReason,
   roleModelMalformedToolCallRejectionReason,
-  roleModelUnknownToolRejectionReason,
   roleModelDisallowedToolRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
   roleModelInvalidVisibleReplyRejectionReason,

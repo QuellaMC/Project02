@@ -122,7 +122,6 @@ function createCharacterStatePluginFromManifest(
         inputContract: characterStatePatchInputContract,
         validationOwner: 'plugin_host',
         // Two patches in one batch would race the same files.
-        annotations: {readOnlyHint: false, destructiveHint: true},
         concurrency: 'exclusive',
         requiresConfirmation: false,
       }),

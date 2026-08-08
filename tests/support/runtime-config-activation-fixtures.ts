@@ -9,7 +9,7 @@ import {
 } from '../../src/plugins/index.ts';
 
 export function requiredSecretPlugin(
-  id: string,
+  id = 'memory.required',
   options: {
     readonly defaultEnabled?: boolean;
   } = {},
@@ -17,14 +17,13 @@ export function requiredSecretPlugin(
   return createRuntimePlugin({
     manifest: {
       id,
-      displayName: 'Required Secret',
+      displayName: 'Required Memory',
       version: '1.0.0',
       kind: 'memory_provider',
       description: 'Test plugin with required secret config.',
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -125,7 +124,6 @@ export function firstPartyPlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'project02',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -300,13 +298,13 @@ export function parseActivationOutput(stdout: string): {
   };
 }
 
-export function nonHostScopedActivationPlugins(
-  output: ReturnType<typeof parseActivationOutput>,
-): ReturnType<typeof parseActivationOutput>['plugins'] {
+export function nonHostScopedActivationPlugins<
+  Plugin extends {readonly pluginId: string},
+>(plugins: readonly Plugin[]): readonly Plugin[] {
   const hostScopedPluginIds = new Set(hostScopedFirstPartyRuntimePluginIds);
 
   return Object.freeze(
-    output.plugins.filter(plugin => !hostScopedPluginIds.has(plugin.pluginId)),
+    plugins.filter(plugin => !hostScopedPluginIds.has(plugin.pluginId)),
   );
 }
 
@@ -314,6 +312,8 @@ export function enabledNonHostScopedActivationPlugins(
   output: ReturnType<typeof parseActivationOutput>,
 ): ReturnType<typeof parseActivationOutput>['plugins'] {
   return Object.freeze(
-    nonHostScopedActivationPlugins(output).filter(plugin => plugin.enabled),
+    nonHostScopedActivationPlugins(output.plugins).filter(
+      plugin => plugin.enabled,
+    ),
   );
 }

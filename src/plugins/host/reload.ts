@@ -10,6 +10,10 @@ import type {
   RuntimePluginEvidenceSnapshot,
   RuntimePluginManifest,
 } from '../api/index.ts';
+import {
+  runtimeEventIdentityKey,
+  type RuntimeEventIdentity,
+} from '../../core/index.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import type {RuntimePluginConfigControlHostState} from '../builtin/plugin-management/index.ts';
 
@@ -37,19 +41,13 @@ export type RuntimePluginConfigReloadHostResult = {
   readonly failure?: string;
 };
 
-export type RuntimeEventIdentitySlice = {
-  readonly eventId: string;
-  readonly traceId: string;
-  readonly createdAt: string;
-};
-
 export type ConfirmedRuntimePluginConfigUpdateLog = {
   readonly note: (result: {
     readonly status: string;
     readonly preparedConfigEffect?: PreparedRuntimePluginConfigEffect;
   }) => void;
   readonly sessionScopedConfirmed: (
-    identity: RuntimeEventIdentitySlice,
+    identity: RuntimeEventIdentity,
     pluginId: string,
   ) => boolean;
 };
@@ -60,9 +58,6 @@ export function createConfirmedRuntimePluginConfigUpdateLog(options: {
 }): ConfirmedRuntimePluginConfigUpdateLog {
   let turnKey: string | undefined;
   const sessionScopedPluginIds = new Set<string>();
-  // Identity components are single-line, so a newline cannot collide.
-  const keyOf = (identity: RuntimeEventIdentitySlice): string =>
-    [identity.eventId, identity.traceId, identity.createdAt].join('\n');
 
   return {
     note: result => {
@@ -72,7 +67,7 @@ export function createConfirmedRuntimePluginConfigUpdateLog(options: {
         return;
       }
 
-      const key = keyOf(effect);
+      const key = runtimeEventIdentityKey(effect);
 
       if (turnKey !== key) {
         turnKey = key;
@@ -89,7 +84,8 @@ export function createConfirmedRuntimePluginConfigUpdateLog(options: {
       }
     },
     sessionScopedConfirmed: (identity, pluginId) =>
-      turnKey === keyOf(identity) && sessionScopedPluginIds.has(pluginId),
+      turnKey === runtimeEventIdentityKey(identity) &&
+      sessionScopedPluginIds.has(pluginId),
   };
 }
 

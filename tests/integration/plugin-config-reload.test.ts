@@ -14,14 +14,12 @@ import {
 import type {RuntimePlugin} from '../../src/plugins/api/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {acceptRuntimePluginPackageCandidate} from '../../src/plugins/package-loader/index.ts';
-import {
-  loadProject02RuntimeConfig,
-  inspectRuntimePluginConfig,
-} from '../../src/runtime/config/index.ts';
+import {inspectRuntimePluginConfig} from '../../src/runtime/config/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   writeRuntimeConfig,
   runtimeLocationForTest,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
 import {testPluginContext} from '../support/plugin-host-fixtures.ts';
@@ -92,7 +90,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -101,7 +99,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -125,7 +123,7 @@ describe('configured runtime plugin reloader', () => {
     }
     expect(await demoConfigContextText(rebuilt.plugin)).toContain('warm tone');
 
-    const authored = loadProject02RuntimeConfig({
+    const authored = loadRuntimeConfigForTest({
       configPath,
       storeRoot,
       env: {},
@@ -200,7 +198,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -209,7 +207,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -290,7 +288,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -299,7 +297,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -313,7 +311,7 @@ describe('configured runtime plugin reloader', () => {
     writeFileSync(
       join(dirname(overlayPath), 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -338,7 +336,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -347,7 +345,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -387,7 +385,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -396,7 +394,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -470,7 +468,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -479,7 +477,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -557,7 +555,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -566,7 +564,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -601,7 +599,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -610,7 +608,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},
@@ -676,7 +674,7 @@ describe('configured runtime plugin reloader', () => {
     });
     await initializeCharacterDataForHost(storeRoot);
 
-    const loadedConfig = loadProject02RuntimeConfig({
+    const loadedConfig = loadRuntimeConfigForTest({
       configPath,
       storeRoot,
       env: {},
@@ -773,9 +771,9 @@ describe('configured runtime plugin reloader', () => {
       operation: {kind: 'set', value: 'warm'},
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([effect]);
+    const result = await host.reloadPluginForCommittedConfig([effect]);
 
-    expect(result?.outcome).toBe('failed');
+    expect(result.outcome).toBe('failed');
     await host.onSessionEnd(testPluginContext(), {
       allowFileStoreWrites: false,
     });
@@ -792,7 +790,7 @@ describe('configured runtime plugin reloader', () => {
 
     const activationPlan = prepareConfiguredProject02PluginActivation({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           configPath,
           storeRoot,
           env: {},
@@ -801,7 +799,7 @@ describe('configured runtime plugin reloader', () => {
         storeRoot: storeRoot,
         env: {},
       }),
-      loadedConfig: loadProject02RuntimeConfig({
+      loadedConfig: loadRuntimeConfigForTest({
         configPath,
         storeRoot,
         env: {},

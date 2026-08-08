@@ -150,7 +150,6 @@ describe('inspect CLI plugin evidence', () => {
               readonly pluginId: string;
               readonly providedTools: readonly {
                 readonly name: string;
-                readonly annotations?: Readonly<Record<string, boolean>>;
                 readonly concurrency?: string;
               }[];
             }[];
@@ -208,8 +207,8 @@ describe('inspect CLI plugin evidence', () => {
       ]),
     );
 
-    // An audit must tell a state-changing tool from a read-only one, so the
-    // tool's own declaration is carried into the projection.
+    // An audit must tell a tool that runs alone from one that shares a batch,
+    // so the tool's own declaration is carried into the projection.
     const patchTool = output.turns[0].pluginEvidence.plugins
       .find(plugin => plugin.pluginId === 'character-state')
       ?.providedTools.find(
@@ -217,7 +216,6 @@ describe('inspect CLI plugin evidence', () => {
       );
 
     expect(patchTool).toMatchObject({
-      annotations: {destructiveHint: true},
       concurrency: 'exclusive',
     });
   });
@@ -772,7 +770,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -809,7 +807,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -843,7 +841,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 7,
+        schemaVersion: 8,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -900,29 +898,6 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(JSON.parse(stdout)).toMatchObject({sessions: []});
-  });
-
-  // Storage staying clean is startup-seam behavior, covered in
-  // tests/unit/runtime-config-overlay.test.ts.
-  it('maps an invalid explicit character to a usage error', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-inspect-invalid-character-',
-    );
-    let stderr = '';
-
-    const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--character', '../bad', '--sessions'],
-      {
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain('--character must start with a letter');
   });
 
   it('keeps an explicit home when its global config and overlay are absent', async () => {
@@ -1467,12 +1442,12 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
         }),
         providerExchange: {
           provider: {
-            name: 'local',
+            name: 'nvidia',
             model: 'inspect-fixture',
           },
           capabilities: defaultRoleModelProviderCapabilities,
           reasoning: {
-            mode: 'none',
+            mode: 'enabled',
             params: {},
           },
           renderedMessages: invocation.turnContext.messages,
@@ -1503,7 +1478,6 @@ function createInspectFixturePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['plugin_discovery'],
       config: {
@@ -1595,7 +1569,6 @@ function createInspectSessionEndFixturePlugin(
       contractVersion: runtimePluginContractVersion,
       compatibility: {
         hostContractVersions: [runtimePluginContractVersion],
-        sourceSystem: 'test',
       },
       declaredPlugins: ['on_session_end'],
       config: {

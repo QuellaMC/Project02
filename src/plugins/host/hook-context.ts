@@ -8,7 +8,7 @@ import type {
 } from '../api/types.ts';
 import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
-export type PluginHookContextScope<TContext extends RuntimePluginContext> = {
+type PluginHookContextScope<TContext extends RuntimePluginContext> = {
   readonly context: TContext;
   readonly revokeFileStoreWrites: () => void;
 };

@@ -15,12 +15,13 @@ import {describe, expect, it} from 'vitest';
 
 import {
   characterOnlyConfigPlugin,
-  requiredSecretPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {
   runtimeLocationForTest,
   writeRuntimeConfig,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
@@ -29,7 +30,6 @@ import {
   characterOverlayConfigPath,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
-  loadProject02RuntimeConfig,
   loadProject02RuntimeConfigWithLocation,
   RuntimeConfigConflictError,
   runtimeConfigVersion,
@@ -480,7 +480,7 @@ describe('scope-aware runtime config mutations', () => {
     expect(existsSync(join(dataRoot, '.env'))).toBe(false);
     expect(existsSync(join(dataRoot, '.locks'))).toBe(true);
 
-    const globalConfig = loadProject02RuntimeConfig({
+    const globalConfig = loadRuntimeConfigForTest({
       storeRoot: homeRoot,
       env: {},
     }).config;
@@ -907,7 +907,7 @@ describe('plugin manifest config scope policy', () => {
 });
 
 function resolveScopedExpected(homeRoot: string): string {
-  const loaded = loadProject02RuntimeConfig({storeRoot: homeRoot, env: {}});
+  const loaded = loadRuntimeConfigForTest({storeRoot: homeRoot, env: {}});
 
   if (loaded.config === undefined) {
     throw new Error('Expected the seeded global config to load.');
@@ -1140,13 +1140,13 @@ describe('configured character id normalization', () => {
 
     const resolved = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadProject02RuntimeConfig({
+        loadedConfig: loadRuntimeConfigForTest({
           storeRoot: homeRoot,
           env: {},
         }),
         storeRoot: homeRoot,
       }),
-      loadedConfig: loadProject02RuntimeConfig({storeRoot: homeRoot, env: {}}),
+      loadedConfig: loadRuntimeConfigForTest({storeRoot: homeRoot, env: {}}),
     });
 
     expect(resolved.project02.character).toBe('mira');
@@ -1237,7 +1237,7 @@ describe('character targets bound to an activated runtime', () => {
     writeRuntimeConfig(globalConfigPath, {
       project02: {character: 'mira'},
     });
-    const originalGlobalConfig = loadProject02RuntimeConfig({
+    const originalGlobalConfig = loadRuntimeConfigForTest({
       storeRoot: homeRoot,
       env: {},
     }).config;
@@ -1335,7 +1335,7 @@ describe('global writes that move the character selection', () => {
       },
     });
 
-    const loaded = loadProject02RuntimeConfig({storeRoot: homeRoot, env: {}});
+    const loaded = loadRuntimeConfigForTest({storeRoot: homeRoot, env: {}});
     const globalDocument = loaded.config;
 
     if (globalDocument === undefined) {

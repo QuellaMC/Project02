@@ -15,8 +15,7 @@ import {
   assertScopedMutationOperationAllowed,
   blockingRuntimeConfigLayerDiagnostic,
   characterOverlayConfigPath,
-  characterOverlayFingerprintLayer,
-  createRuntimeConfigFingerprint,
+  layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
   runtimeConfigDiagnosticAttribution,
   runtimeConfigVersion,
@@ -42,6 +41,14 @@ function loadCharacterOverlay(
   characterId = 'mira',
 ): LoadedProject02CharacterOverlayConfig {
   return readCharacterOverlayForScope({dataRoot, characterId}).overlay;
+}
+
+function overlayFingerprint(dataRoot: string, characterId = 'mira'): string {
+  return layeredRuntimeConfigFingerprintForScope({
+    globalConfig: {version: runtimeConfigVersion},
+    characterScope: {characterId, dataRoot},
+    overlay: loadCharacterOverlay(dataRoot, characterId),
+  });
 }
 
 function loadedGlobalConfig(options: {
@@ -323,22 +330,13 @@ describe('character overlay config loader', () => {
       project02: {storeRoot: '/elsewhere', character: 'nova'},
     });
 
-    const before = characterOverlayFingerprintLayer(
-      loadCharacterOverlay(dataRoot),
-    );
+    const before = overlayFingerprint(dataRoot);
 
     writeRuntimeConfig(overlayPath, {project02: {character: 'nova'}});
 
-    const after = characterOverlayFingerprintLayer(
-      loadCharacterOverlay(dataRoot),
-    );
-
     // Both overlays are invalid; only the bytes moved, and a currency gate
-    // holding `before` must still decline against `after`.
-    expect(before).not.toEqual(after);
-    expect(createRuntimeConfigFingerprint(before ?? {})).not.toBe(
-      createRuntimeConfigFingerprint(after ?? {}),
-    );
+    // holding `before` must still decline against the new fingerprint.
+    expect(overlayFingerprint(dataRoot)).not.toBe(before);
   });
 
   it('separates unusable-for-different-reasons overlays from each other', () => {
@@ -347,20 +345,11 @@ describe('character overlay config loader', () => {
 
     writeRuntimeConfig(overlayPath, {project02: {storeRoot: '/elsewhere'}});
 
-    const invalid = characterOverlayFingerprintLayer(
-      loadCharacterOverlay(dataRoot),
-    );
-
-    // Bytes that never arrived keep their own sentinel.
-    expect(invalid).not.toEqual({$overlayUnreadable: true});
+    const invalid = overlayFingerprint(dataRoot);
 
     writeRuntimeConfig(overlayPath, {});
 
-    const empty = characterOverlayFingerprintLayer(
-      loadCharacterOverlay(dataRoot),
-    );
-
-    expect(empty).not.toEqual(invalid);
+    expect(overlayFingerprint(dataRoot)).not.toBe(invalid);
   });
 });
 

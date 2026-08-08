@@ -12,10 +12,12 @@ import {
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,
-  createSequencedAdapter,
-  createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
+import {
+  createSequencedAdapter,
+  createTestEvent,
+} from '../support/role-model-loop-fixtures.ts';
 
 describe('plugin-driven tool loop progress and evidence', () => {
   it('does not expose plugin inventory through hidden runtime context', async () => {

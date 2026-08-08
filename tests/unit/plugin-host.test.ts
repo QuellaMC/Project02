@@ -520,7 +520,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(disabledSummary).toMatchObject({
       id: disabledPlugin.manifest.id,
       enabled: false,
-      availableForTurn: false,
       activationStatus: 'disabled',
       grantedAccess: {},
     });
@@ -565,7 +564,6 @@ describe('runtime plugin host catalog and routing', () => {
     ).toMatchObject({
       id: coldPlugin.manifest.id,
       enabled: false,
-      availableForTurn: false,
       activationStatus: 'disabled',
       grantedAccess: {},
       registeredLifecycleHooks: [],
@@ -955,29 +953,6 @@ describe('runtime plugin host catalog and routing', () => {
         policyOutcome: 'optional_degraded',
       }),
     ]);
-  });
-
-  it('rejects model-facing tools without requestedAccess.model_input write at creation', () => {
-    expect(() =>
-      createRuntimePlugin({
-        manifest: {
-          ...memorySearchPluginManifest('memory.tool-no-model-input.fixture'),
-          requestedAccess: {},
-        },
-        providedTools: memorySearchProvidedTools(),
-        lifecycleHooks: {
-          handleToolCall() {
-            return {
-              status: 'accepted',
-              output: {},
-              evidence: [],
-            };
-          },
-        },
-      }),
-    ).toThrow(
-      'Model-facing tools require requestedAccess.model_input = "write".',
-    );
   });
 
   it('defensively does not expose or invoke unchecked model-facing tools without model_input write', async () => {

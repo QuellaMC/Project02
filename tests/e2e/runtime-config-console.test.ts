@@ -10,7 +10,7 @@ import {
   characterDataDirPath,
   ensureCharacterDataMarker,
 } from '../../src/runtime/storage/index.ts';
-import type {RuntimeConfigConsolePromptAdapter} from '../../src/cli/config/console.ts';
+import type {CliPromptAdapter} from '../../src/cli/shared/prompt.ts';
 import {
   createRuntimePlugin,
   type RuntimePlugin,
@@ -20,9 +20,9 @@ import type {RuntimePluginFactoryDefinition} from '../../src/app/index.ts';
 import {
   createInitializedTestStoreRoot,
   requiredDottedConfigPlugin,
-  requiredSecretPlugin,
   requiredSecretPluginWithManifestEnvVar,
 } from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 import {
   runtimeLocationForTest,
   writeRuntimeConfig,
@@ -55,7 +55,6 @@ describe('runtime config console UI', () => {
           env: {},
         }),
         scope: 'character',
-        env: {},
       }),
     ).rejects.toThrow();
     expect(existsSync(join(dataRoot, 'schema.json'))).toBe(false);
@@ -373,8 +372,10 @@ describe('runtime config console UI', () => {
     );
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('\nPlugins\n1) Required Memory (sample.plugin)\n');
-    expect(stdout).toContain('\nSystem services\n');
+    // The console lists the catalog the startup validated, factories included.
+    expect(stdout).toMatch(
+      /Plugins\n(?:\d+\) .+\n)*?\d+\) Required Memory \(sample\.plugin\)\n(?:\d+\) .+\n)*?System services/,
+    );
     expect(stdout).toContain('runtime.plugin');
   });
 
@@ -949,7 +950,7 @@ function optionalDottedConfigPlugin(
 
 function scriptedPrompt(
   steps: readonly ScriptedPromptStep[],
-): RuntimeConfigConsolePromptAdapter {
+): CliPromptAdapter {
   let index = 0;
 
   return Object.freeze({

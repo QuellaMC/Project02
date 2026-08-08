@@ -176,11 +176,11 @@ export async function applyCompletedRuntimeConfigReloads(options: {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly failures: readonly string[];
 }> {
-  const reload = options.pluginHost.reloadPluginForCommittedConfig?.bind(
+  const reload = options.pluginHost.reloadPluginForCommittedConfig.bind(
     options.pluginHost,
   );
 
-  if (reload === undefined || options.effects.length === 0) {
+  if (options.effects.length === 0) {
     return {evidence: Object.freeze([]), failures: Object.freeze([])};
   }
 
@@ -222,10 +222,7 @@ export async function applyCompletedRuntimeConfigReloads(options: {
     const groupFinalEffect = group[group.length - 1];
     const hostReflects = (fingerprint: string | undefined): boolean =>
       fingerprint !== undefined &&
-      options.pluginHost.pluginConfigCurrentFor?.(
-        groupPluginId,
-        fingerprint,
-      ) === true;
+      options.pluginHost.pluginConfigCurrentFor(groupPluginId, fingerprint);
 
     try {
       // Inside the try on purpose: a throwing currency predicate is recorded
@@ -318,12 +315,6 @@ export function assertRuntimeConfigEffectsCanCommit(options: {
     );
   }
 
-  if (options.pluginHost.reconcileConfigEffect === undefined) {
-    throw new Error(
-      'Approved runtime config effects require host reconciliation support.',
-    );
-  }
-
   const effectIds = new Set<string>();
 
   for (const effect of options.effects) {
@@ -395,12 +386,6 @@ function reconcileRuntimeConfigEffect(options: {
   readonly pluginHost: RuntimePluginHost;
   readonly effect: PreparedRuntimePluginConfigEffect;
 }): RuntimePluginEvidenceSnapshot {
-  if (options.pluginHost.reconcileConfigEffect === undefined) {
-    throw new Error(
-      'Pending runtime config effect requires host reconciliation support.',
-    );
-  }
-
   const evidence = options.pluginHost.reconcileConfigEffect(options.effect);
   const referencesEffect = evidence.sourceReferences?.some(
     reference =>

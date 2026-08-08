@@ -3,15 +3,13 @@ import {
   isHostOwnedFirstPartyRuntimePluginId,
   isHostScopedFirstPartyRuntimePluginId,
   type RuntimePluginCatalogEntry,
-  type RuntimePluginFactoryDefinition as RuntimePluginFactoryDefinitionContract,
-  type RuntimePluginFactoryFunction,
+  type RuntimePluginFactoryDefinition,
   type RuntimePluginPackageCatalogEntry,
 } from '../plugins/index.ts';
 import type {DiscoveredRuntimePluginPackage} from '../plugins/package-loader/index.ts';
 import {acceptRuntimePluginPackageCandidate} from '../plugins/package-loader/index.ts';
 
-export type RuntimePluginFactoryDefinition =
-  RuntimePluginFactoryDefinitionContract<RuntimePluginFactoryFunction>;
+export type {RuntimePluginFactoryDefinition};
 
 export const defaultRuntimePluginHostServiceEntries =
   defaultRuntimePluginHostServiceCatalogEntries();
@@ -24,11 +22,16 @@ export function composeRuntimePluginCatalog(options: {
   readonly defaultEnabledPluginIds: readonly string[];
 } {
   const discoveredPackages = options.discoveredPackages ?? [];
+  const factoryDefinitions = Object.values(options.factories ?? {});
+  // Keying by manifest id is what makes the catalog id the only plugin id.
   const factoryEntries = Object.fromEntries(
-    Object.entries(options.factories ?? {})
-      .filter(([pluginId]) => !isHostScopedFirstPartyRuntimePluginId(pluginId))
-      .map(([pluginId, definition]) => [
-        pluginId,
+    factoryDefinitions
+      .filter(
+        definition =>
+          !isHostScopedFirstPartyRuntimePluginId(definition.manifest.id),
+      )
+      .map(definition => [
+        definition.manifest.id,
         Object.freeze({
           catalogKind: 'package',
           manifest: definition.manifest,
@@ -53,7 +56,9 @@ export function composeRuntimePluginCatalog(options: {
     ),
     ...factoryEntries,
   });
-  const overriddenPluginIds = new Set(Object.keys(options.factories ?? {}));
+  const overriddenPluginIds = new Set(
+    factoryDefinitions.map(definition => definition.manifest.id),
+  );
   const defaultEnabledPluginIds = new Set<string>();
 
   for (const definition of Object.values(
@@ -74,7 +79,6 @@ export function composeRuntimePluginCatalog(options: {
   }
   for (const [pluginId, entry] of Object.entries(factoryEntries)) {
     if (
-      pluginId === entry.manifest.id &&
       !isHostOwnedFirstPartyRuntimePluginId(pluginId) &&
       entry.manifest.activation.defaultEnabled
     ) {

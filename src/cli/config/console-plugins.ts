@@ -13,6 +13,7 @@ import {
 } from '../../runtime/config/index.ts';
 import {prepareConfiguredProject02PluginActivation} from '../../app/index.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
+import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {
   askForFieldValue,
   askForNumber,
@@ -20,7 +21,6 @@ import {
   ensureConsoleCommitTarget,
   formatInspectedFieldValue,
   previewAndCommitChange,
-  shellQuoteConsoleCommandArgument,
   writeDiagnostics,
   writeLine,
   type RuntimeConfigConsoleContext,
@@ -186,7 +186,6 @@ async function stagePluginActivationChange(
       await ensureConsoleCommitTarget({
         runtimeLocation: snapshot.runtimeLocation,
         scope: snapshot.scope,
-        ...(context.env === undefined ? {} : {env: context.env}),
       });
       const target = resolveRuntimeConfigScopeTarget({
         runtimeLocation: snapshot.runtimeLocation,
@@ -275,7 +274,6 @@ async function stagePluginFieldChange(
       await ensureConsoleCommitTarget({
         runtimeLocation: snapshot.runtimeLocation,
         scope: snapshot.scope,
-        ...(context.env === undefined ? {} : {env: context.env}),
       });
       const runtimeEnv = context.runtimeEnv ?? context.env;
       const target = resolveRuntimeConfigScopeTarget({
@@ -314,7 +312,7 @@ function pluginCatalog(
     ...(context.runtimeEnv === undefined && context.env === undefined
       ? {}
       : {env: context.runtimeEnv ?? context.env}),
-    ...(context.factories === undefined ? {} : {factories: context.factories}),
+    catalogSnapshot: context.catalogSnapshot,
   });
   const entriesById = new Map<string, RuntimeConfigConsolePluginEntry>();
 
@@ -392,9 +390,9 @@ function writeSecretConfigInstructions(
   const commandArgs = [
     'secret',
     'set',
-    shellQuoteConsoleCommandArgument(manifest.id),
-    shellQuoteConsoleCommandArgument(field.name),
-    shellQuoteConsoleCommandArgument(envVar),
+    shellQuoteCommandArgument(manifest.id),
+    shellQuoteCommandArgument(field.name),
+    shellQuoteCommandArgument(envVar),
   ];
 
   writeLine(

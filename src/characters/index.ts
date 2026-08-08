@@ -12,7 +12,7 @@ export {
   type CharacterPackageDescriptorParseResult,
   type CharacterPersona,
   type CharacterPluginExpectations,
-} from './api/index.ts';
+} from './api/package-descriptor.ts';
 export {
   bundledCharacterPackagesRoot,
   defaultCharacterPackageSources,

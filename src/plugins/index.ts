@@ -44,7 +44,6 @@ export {
 } from './api/contract.ts';
 export type {
   CreateRuntimePluginFileStoreOptions,
-  DurableRuntimePluginFileStoreOptions,
   InMemoryRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePathMode,
   RuntimePluginFileStoreProvider,
@@ -55,15 +54,11 @@ export {
 } from './api/contract.ts';
 export {
   createRuntimePluginHost,
-  runRuntimePluginSessionEndHooks,
   runRuntimePluginSessionEndHooksForTargets,
-  runRuntimePluginShutdownHooks,
   runRuntimePluginShutdownHooksForTargets,
   type RuntimePluginSessionEndOptions,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginBeforeRoleModelCallCompletedResult,
-  type RuntimePluginBeforeRoleModelCallHostResult,
-  type RuntimePluginBeforeRoleModelCallRejectedResult,
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,

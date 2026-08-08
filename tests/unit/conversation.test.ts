@@ -150,37 +150,6 @@ describe('conversation core', () => {
     expect(session.visibleTranscript).toEqual([]);
   });
 
-  it('rehydrates a validated visible transcript and allocates later message IDs after restored records', () => {
-    const session = createConversationSession({
-      character: testCharacterProfile,
-      visibleTranscript: [
-        {
-          id: 'local-session:message-1',
-          role: 'user',
-          speakerId: 'local-user',
-          speakerName: 'You',
-          text: 'first',
-        },
-        {
-          id: 'local-session:message-2',
-          role: 'character',
-          speakerId: 'mira',
-          speakerName: 'Mira',
-          text: "I'm here. Tell me what you need.",
-        },
-      ],
-    });
-
-    const next = appendUserMessage(session, 'second');
-
-    expect(next.id).toBe('local-session:message-3');
-    expect(session.visibleTranscript.map(message => message.id)).toEqual([
-      'local-session:message-1',
-      'local-session:message-2',
-      'local-session:message-3',
-    ]);
-  });
-
   it('restores transcripts of any role shape, including consecutive same-role and trailing messages', () => {
     // Commit-as-emitted histories are not user/character pairs.
     const session = createConversationSession({

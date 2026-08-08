@@ -133,10 +133,10 @@ function discoverRuntimePluginPackageSource(options: {
   const sourceDiagnostics: RuntimePluginPackageDiagnostic[] = [];
 
   for (const candidate of scan.candidates) {
-    const packageRoot = join(options.source.root, candidate.name);
+    const packageRoot = join(options.source.root, candidate);
     const packageDirectory = snapshotPackageDirectoryFromSource({
       sourceDirectory,
-      packageName: candidate.name,
+      packageName: candidate,
     });
 
     try {
@@ -146,7 +146,7 @@ function discoverRuntimePluginPackageSource(options: {
             packageRoot,
             provenance,
           },
-          candidate.name,
+          candidate,
         );
       }
       sourceCandidates.push(
@@ -161,10 +161,13 @@ function discoverRuntimePluginPackageSource(options: {
           ? error.diagnostic
           : packageDiagnostic({
               code: 'invalid_package',
-              message: 'Runtime plugin package is invalid.',
+              // The operator needs the failure itself, not that one happened.
+              message: `Runtime plugin package is invalid: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
               path: packageRoot,
               provenance,
-              pluginId: candidate.name,
+              pluginId: candidate,
             }),
       );
     }

@@ -1,12 +1,13 @@
 /**
- * Filesystem mechanics for package discovery. Callers retain ownership of
- * source policy, diagnostics, descriptor parsing, and package identity.
+ * Filesystem mechanics for package discovery and bounded JSON file reads.
+ * Callers retain ownership of source policy, diagnostics, descriptor parsing,
+ * and package identity.
  */
 import {
   listDirectoryEntriesSync,
   lstatPathSync,
+  nativeRealPathSync,
   readTextFileSync,
-  realPathSync,
   statPathSync,
   type BigIntStats,
   type Dirent,
@@ -20,14 +21,10 @@ import {
 } from './json-boundary.ts';
 import {describeRealEntry, pathComponentChain} from './real-path.ts';
 
-export type PackageSourceCandidate = {
-  readonly name: string;
-};
-
-export type PackageSourceScanResult =
+type PackageSourceScanResult =
   | {
       readonly status: 'scanned';
-      readonly candidates: readonly PackageSourceCandidate[];
+      readonly candidates: readonly string[];
     }
   | {
       readonly status: 'unavailable';
@@ -41,7 +38,7 @@ export type PackageDirectorySnapshot = {
   readonly canonicalAncestry: readonly PackageDirectoryAncestryEntry[];
 };
 
-export type PackageDirectoryAncestryEntry = {
+type PackageDirectoryAncestryEntry = {
   readonly path: string;
   readonly device: string;
   readonly inode: string;
@@ -79,7 +76,7 @@ function snapshotDirectory(
     if (!initialStat.isDirectory()) {
       return undefined;
     }
-    const realPackageRoot = realPathSync(normalizedRoot);
+    const realPackageRoot = nativeRealPathSync(normalizedRoot);
     const canonicalAncestry =
       snapshotCanonicalDirectoryAncestry(realPackageRoot);
     const finalStat = statRoot(normalizedRoot);
@@ -88,7 +85,7 @@ function snapshotDirectory(
       !finalStat.isDirectory() ||
       filesystemMetadataIdentity(initialStat) !==
         filesystemMetadataIdentity(finalStat) ||
-      realPathSync(normalizedRoot) !== realPackageRoot
+      nativeRealPathSync(normalizedRoot) !== realPackageRoot
     ) {
       return undefined;
     }
@@ -170,12 +167,8 @@ export function scanPackageSourceRoot(root: string): PackageSourceScanResult {
 
   const candidates = entries
     .filter(entry => entry.isDirectory() || entry.isSymbolicLink())
-    .map(entry =>
-      Object.freeze({
-        name: entry.name,
-      } satisfies PackageSourceCandidate),
-    )
-    .sort((left, right) => compareText(left.name, right.name));
+    .map(entry => entry.name)
+    .sort(compareText);
 
   return Object.freeze({
     status: 'scanned',
@@ -194,7 +187,7 @@ export function packageDescriptorSchemaRefIsValid(value: unknown): boolean {
 export type BoundedPackageJsonRejectionReason =
   'unreadable' | 'not_file' | 'too_large' | 'invalid_json' | 'unsafe_json';
 
-export type BoundedPackageJsonReadResult =
+type BoundedPackageJsonReadResult =
   | {
       readonly status: 'accepted';
       readonly value: JsonBoundaryValue;
@@ -243,6 +236,39 @@ export function readBoundedPackageJsonFile(options: {
   readonly maxBytes: number;
   readonly boundaryField: string;
 }): BoundedPackageJsonReadResult {
+  const read = readBoundedJsonFileSource(options);
+
+  if (read.status === 'rejected') {
+    return rejectedPackageJson(
+      read.reason === 'uninspectable' ? 'unreadable' : read.reason,
+    );
+  }
+
+  return parseBoundedPackageJsonSource({
+    source: read.source,
+    maxBytes: options.maxBytes,
+    boundaryField: options.boundaryField,
+  });
+}
+
+export type BoundedJsonFileSourceRejectionReason =
+  'uninspectable' | 'not_file' | 'too_large' | 'unreadable';
+
+type BoundedJsonFileSourceResult =
+  | {readonly status: 'accepted'; readonly source: string}
+  | {
+      readonly status: 'rejected';
+      readonly reason: BoundedJsonFileSourceRejectionReason;
+    };
+
+/**
+ * The identity recheck after the read is what the size cap rests on: a file
+ * swapped between the stat and the read is refused instead of parsed.
+ */
+export function readBoundedJsonFileSource(options: {
+  readonly path: string | URL;
+  readonly maxBytes: number;
+}): BoundedJsonFileSourceResult {
   let path: string;
 
   // A package reading its own descriptor has a `file:` URL, and the
@@ -253,7 +279,7 @@ export function readBoundedPackageJsonFile(options: {
         ? options.path
         : fileURLToPath(options.path);
   } catch {
-    return rejectedPackageJson('unreadable');
+    return rejectedJsonFileSource('uninspectable');
   }
 
   let metadataStat: BigIntStats;
@@ -263,14 +289,14 @@ export function readBoundedPackageJsonFile(options: {
   try {
     metadataStat = statPathSync(path);
   } catch {
-    return rejectedPackageJson('unreadable');
+    return rejectedJsonFileSource('uninspectable');
   }
 
   if (!metadataStat.isFile()) {
-    return rejectedPackageJson('not_file');
+    return rejectedJsonFileSource('not_file');
   }
   if (metadataStat.size > BigInt(options.maxBytes)) {
-    return rejectedPackageJson('too_large');
+    return rejectedJsonFileSource('too_large');
   }
 
   let source: string;
@@ -278,7 +304,7 @@ export function readBoundedPackageJsonFile(options: {
   try {
     source = readTextFileSync(path);
   } catch {
-    return rejectedPackageJson('unreadable');
+    return rejectedJsonFileSource('unreadable');
   }
 
   let finalMetadataStat: BigIntStats;
@@ -286,7 +312,7 @@ export function readBoundedPackageJsonFile(options: {
   try {
     finalMetadataStat = statPathSync(path);
   } catch {
-    return rejectedPackageJson('unreadable');
+    return rejectedJsonFileSource('unreadable');
   }
 
   if (
@@ -294,16 +320,17 @@ export function readBoundedPackageJsonFile(options: {
     filesystemMetadataIdentity(finalMetadataStat) !==
       filesystemMetadataIdentity(metadataStat)
   ) {
-    return rejectedPackageJson('unreadable');
+    return rejectedJsonFileSource('unreadable');
   }
 
-  return parseBoundedPackageJsonSource({
-    source,
-    maxBytes: options.maxBytes,
-    boundaryField: options.boundaryField,
-  });
+  // Invalid bytes decode to replacement characters that weigh more than the
+  // bytes on disk, so the decoded source is capped too.
+  return Buffer.byteLength(source, 'utf8') > options.maxBytes
+    ? rejectedJsonFileSource('too_large')
+    : Object.freeze({status: 'accepted', source});
 }
 
+/** Every file-change stamp in the runtime compares these fields. */
 export function filesystemMetadataIdentity(stat: BigIntStats): string {
   return [
     stat.dev,
@@ -345,22 +372,27 @@ function snapshotCanonicalDirectoryAncestry(
   );
 }
 
+function directoryAncestryEntriesEqual(
+  entry: PackageDirectoryAncestryEntry,
+  candidate: PackageDirectoryAncestryEntry | undefined,
+): boolean {
+  return (
+    candidate !== undefined &&
+    entry.path === candidate.path &&
+    entry.device === candidate.device &&
+    entry.inode === candidate.inode
+  );
+}
+
 function directoryAncestriesEqual(
   left: readonly PackageDirectoryAncestryEntry[],
   right: readonly PackageDirectoryAncestryEntry[],
 ): boolean {
   return (
     left.length === right.length &&
-    left.every((entry, index) => {
-      const candidate = right[index];
-
-      return (
-        candidate !== undefined &&
-        entry.path === candidate.path &&
-        entry.device === candidate.device &&
-        entry.inode === candidate.inode
-      );
-    })
+    left.every((entry, index) =>
+      directoryAncestryEntriesEqual(entry, right[index]),
+    )
   );
 }
 
@@ -370,22 +402,21 @@ function directoryAncestryStartsWith(
 ): boolean {
   return (
     ancestry.length === expectedPrefix.length + 1 &&
-    expectedPrefix.every((entry, index) => {
-      const candidate = ancestry[index];
-
-      return (
-        candidate !== undefined &&
-        entry.path === candidate.path &&
-        entry.device === candidate.device &&
-        entry.inode === candidate.inode
-      );
-    })
+    expectedPrefix.every((entry, index) =>
+      directoryAncestryEntriesEqual(entry, ancestry[index]),
+    )
   );
 }
 
 function rejectedPackageJson(
   reason: BoundedPackageJsonRejectionReason,
 ): BoundedPackageJsonReadResult {
+  return Object.freeze({status: 'rejected', reason});
+}
+
+function rejectedJsonFileSource(
+  reason: BoundedJsonFileSourceRejectionReason,
+): BoundedJsonFileSourceResult {
   return Object.freeze({status: 'rejected', reason});
 }
 

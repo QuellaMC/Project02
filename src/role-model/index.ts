@@ -20,7 +20,6 @@ export {
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
-  roleModelDecisionOutputContractText,
   type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
   roleModelDecisionRejectionReasons,
@@ -41,11 +40,9 @@ export {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   roleModelTerminalEmptyOutputRejectionDetails,
-  type RoleModelThinkingMode,
   type RoleModelToolDefinition,
   type RoleModelToolObservation,
   type RoleModelToolObservationResult,
-  roleModelUnknownToolRejectionReason,
   roleModelUnsupportedEffectRejectionReason,
 } from './api/contracts.ts';
 export {
@@ -58,7 +55,6 @@ export {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
-  createVisibleReplyCharacterDecision,
   freezeAllowedTools,
 } from './api/decision.ts';
 export {
@@ -117,16 +113,7 @@ export {
 } from './loop/replay-evidence.ts';
 export {
   defaultRoleModelProviderCapabilities,
-  prepareRoleModelRequest,
   renderRoleModelTurnContext,
-  type RenderRoleModelTurnContextOptions,
-  type RoleModelPreparedRequest,
-  type RoleModelPromptFragment,
-  type RoleModelPromptFragmentKind,
-  type RoleModelPromptFragmentSlot,
-  type RoleModelPromptFrame,
-  type RoleModelPromptFrameKind,
-  roleModelStableSystemPromptText,
   type RoleModelTurnContext,
 } from './prompt/render.ts';
 export {
@@ -144,27 +131,15 @@ export {
   createNvidiaRoleModelProviderAdapter,
   type CreateNvidiaRoleModelProviderAdapterOptions,
   createNvidiaRoleModelProviderConfigFromEnv,
-  defaultNvidiaChatCompletionsEndpoint,
-  defaultNvidiaRoleModelName,
   defaultNvidiaRoleModelReasoningBudget,
   defaultNvidiaRoleModelRequestTimeoutMs,
   nvidiaApiKeyEnvName,
-  type NvidiaChatCompletionMessage,
-  type NvidiaChatCompletionTool,
   type NvidiaFetchClient,
   type NvidiaFetchRequest,
   type NvidiaFetchResponse,
   nvidiaModelEnvName,
-  nvidiaRoleModelMaxTokens,
   nvidiaRoleModelProviderCapabilities,
   type NvidiaRoleModelProviderConfig,
-  type NvidiaRoleModelProviderEnvironment,
-  nvidiaRoleModelProviderName,
-  nvidiaRoleModelTemperature,
-  type NvidiaRoleModelThinkingMode,
-  nvidiaRoleModelTopP,
-  renderNvidiaMessages,
-  renderNvidiaTools,
 } from './providers/nvidia.ts';
 export {
   createSelectedRoleModelAdapter,

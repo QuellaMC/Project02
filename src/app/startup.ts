@@ -118,7 +118,7 @@ type RuntimeCliActivationStartupBase = Omit<
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly characterActivation: Project02CharacterActivation;
   readonly overlayLoadedConfig?: LoadedProject02CharacterOverlayConfig;
-  readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
   readonly activationPlan: PreparedProject02PluginActivationPlan;
   readonly characterConfigMutation?: RuntimeConfigControlApplyResult;
 };
@@ -647,8 +647,7 @@ function finishRuntimeCliActivationStartup(input: {
   });
 }
 
-/** Read-only twin of materializeCharacterDataDir: no marker required. */
-function simulateCharacterMaterialization(input: {
+type CharacterMaterializationInput = {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly document: Project02RuntimeConfig;
@@ -657,15 +656,14 @@ function simulateCharacterMaterialization(input: {
     Project02CharacterActivation,
     {status: 'resolved'}
   >;
-}):
-  | {
-      readonly status: 'valid';
-      readonly overlay: LoadedProject02CharacterOverlayConfig;
-    }
-  | {readonly status: 'invalid'; readonly message: string} {
-  const characterId = input.characterActivation.profile.id;
-  const marker = readCharacterDataMarkerForStartup(input.runtimeLocation);
-  const simulated = simulateCharacterOverlayCandidate({
+};
+
+/** The simulation and the commit must judge the same operation. */
+function characterMaterializationOperation(
+  input: CharacterMaterializationInput,
+  materializedPackageVersion: string | undefined,
+) {
+  return {
     target: resolveRuntimeConfigScopeTarget({
       runtimeLocation: input.runtimeLocation,
       env: input.configEnv,
@@ -674,11 +672,30 @@ function simulateCharacterMaterialization(input: {
     characterMaterialization: {
       document: input.document,
       fillMissingFields:
-        marker?.materializedCharacterPackageVersion !==
+        materializedPackageVersion !==
         input.characterActivation.definition.meta.version,
     },
     ...(input.request === undefined ? {} : {request: input.request}),
-  });
+  };
+}
+
+/** Read-only twin of materializeCharacterDataDir: no marker required. */
+function simulateCharacterMaterialization(
+  input: CharacterMaterializationInput,
+):
+  | {
+      readonly status: 'valid';
+      readonly overlay: LoadedProject02CharacterOverlayConfig;
+    }
+  | {readonly status: 'invalid'; readonly message: string} {
+  const characterId = input.characterActivation.profile.id;
+  const marker = readCharacterDataMarkerForStartup(input.runtimeLocation);
+  const simulated = simulateCharacterOverlayCandidate(
+    characterMaterializationOperation(
+      input,
+      marker?.materializedCharacterPackageVersion,
+    ),
+  );
 
   if (simulated.status === 'invalid') {
     return simulated;
@@ -699,16 +716,9 @@ function simulateCharacterMaterialization(input: {
 }
 
 /** The overlay commits before the marker records the package version. */
-async function materializeCharacterDataDir(input: {
-  readonly runtimeLocation: ResolvedProject02RuntimeLocation;
-  readonly configEnv: NodeJS.ProcessEnv;
-  readonly document: Project02RuntimeConfig;
-  readonly request?: RuntimeConfigControlRequest;
-  readonly characterActivation: Extract<
-    Project02CharacterActivation,
-    {status: 'resolved'}
-  >;
-}): Promise<
+async function materializeCharacterDataDir(
+  input: CharacterMaterializationInput,
+): Promise<
   | {
       readonly status: 'resolved';
       readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -734,21 +744,12 @@ async function materializeCharacterDataDir(input: {
       storageOptions: {storeRoot: dataRoot},
       characterId,
     });
-    const target = resolveRuntimeConfigScopeTarget({
-      runtimeLocation: input.runtimeLocation,
-      env: input.configEnv,
-      scope: 'character',
-    });
-    const applied = applyRuntimeConfigControlOperation({
-      target,
-      characterMaterialization: {
-        document: input.document,
-        fillMissingFields:
-          marker.materializedCharacterPackageVersion !==
-          input.characterActivation.definition.meta.version,
-      },
-      ...(input.request === undefined ? {} : {request: input.request}),
-    });
+    const applied = applyRuntimeConfigControlOperation(
+      characterMaterializationOperation(
+        input,
+        marker.materializedCharacterPackageVersion,
+      ),
+    );
 
     await recordMaterializedCharacterPackageVersion({
       storageOptions: {storeRoot: dataRoot},
@@ -977,8 +978,7 @@ function prepareActivationPlan(options: {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly env: NodeJS.ProcessEnv;
   readonly validateInactivePluginConfigs?: boolean;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly catalogSnapshot?: RuntimePluginCatalogSnapshot;
+  readonly catalogSnapshot: RuntimePluginCatalogSnapshot;
 }): PreparedProject02PluginActivationPlan {
   const plan = prepareConfiguredProject02PluginActivation({
     loadedConfig: options.loadedConfig,
@@ -989,10 +989,7 @@ function prepareActivationPlan(options: {
     env: options.env,
     validateInactivePluginConfigs:
       options.validateInactivePluginConfigs === true,
-    ...(options.factories === undefined ? {} : {factories: options.factories}),
-    ...(options.catalogSnapshot === undefined
-      ? {}
-      : {catalogSnapshot: options.catalogSnapshot}),
+    catalogSnapshot: options.catalogSnapshot,
   });
   const enforcement = enforceCharacterPluginExpectations({
     expectations: options.characterActivation.definition.plugins,

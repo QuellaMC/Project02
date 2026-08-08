@@ -59,7 +59,7 @@ type AcceptedRoleModelLoopResult = Extract<
   {readonly status: 'accepted'}
 >;
 
-export type CompleteRuntimeTurnOptions = {
+type CompleteRuntimeTurnOptions = {
   readonly state: RuntimeTurnState;
   readonly decisionContext: DecisionContext;
   readonly pluginHost: RuntimePluginHost;
@@ -165,7 +165,7 @@ async function commitVisibleMessage(
       eventType: state.event.type,
       visibleMessageIds: [message.id],
       visibleMessage: message,
-      committedAt: state.options.committedAt ?? state.options.event.createdAt,
+      committedAt: state.options.event.createdAt,
       payloadSummary: state.payloadSummary,
       ...evidence,
     },
@@ -435,7 +435,7 @@ async function recordAfterTurnCommitted(
         eventType: state.event.type,
         currentUserMessage: state.event.payload.currentUserMessage,
         character: options.decisionContext.characterSnapshot,
-        committedAt: state.options.committedAt ?? state.options.event.createdAt,
+        committedAt: state.options.event.createdAt,
         visibleMessages: state.committedVisibleMessages,
       });
     afterCommitResult = await options.pluginHost.afterTurnCommitted(

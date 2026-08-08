@@ -25,28 +25,6 @@ export const runtimeTurnStatusValues = [
 
 export type RuntimeTurnStatus = (typeof runtimeTurnStatusValues)[number];
 
-export const runtimeTraceStepValues = [
-  'runtime_event_received',
-  'runtime_event_normalized',
-  'runtime_turn_started',
-  'plugin_before_role_model_call_rejected',
-  'tool_call_started',
-  'tool_call_finished',
-  'visible_message_committed',
-  'input_validation_rejected',
-  'character_reply_rejected',
-  'commit_validation_rejected',
-  'raw_event_log_appended',
-  'runtime_turn_completed',
-  'runtime_turn_rejected',
-] as const;
-
-export type RuntimeTraceStepName = (typeof runtimeTraceStepValues)[number];
-
-export type RuntimeTraceEntry = RuntimeEventIdentity & {
-  readonly step: RuntimeTraceStepName;
-};
-
 export const rawEventLogRecordKindValues = [
   'runtime_event_received',
   'runtime_event_normalized',
@@ -64,6 +42,19 @@ export const rawEventLogRecordKindValues = [
 
 export type RawEventLogRecordKind =
   (typeof rawEventLogRecordKindValues)[number];
+
+/**
+ * A trace replays the raw event log, so its steps are the raw kinds minus the
+ * post-commit record, plus the two steps the projection synthesizes.
+ */
+export type RuntimeTraceStepName =
+  | Exclude<RawEventLogRecordKind, 'after_turn_committed'>
+  | 'runtime_turn_started'
+  | 'raw_event_log_appended';
+
+export type RuntimeTraceEntry = RuntimeEventIdentity & {
+  readonly step: RuntimeTraceStepName;
+};
 
 export type RawEventLogPayloadSummary = {
   readonly rawInput?: string;
@@ -103,38 +94,8 @@ export type ConversationLogRecord = VisibleMessage &
     readonly committedAt: string;
   };
 
-export type RawEventLogRecordInput = RuntimeEventIdentity & {
-  readonly kind: RawEventLogRecordKind;
-  readonly eventType: RuntimeEventType;
-  readonly status?: RuntimeTurnStatus;
-  readonly reason?: string;
-  readonly visibleMessageIds?: readonly string[];
-  /** The message this event commits; present exactly on commit events. */
-  readonly visibleMessage?: VisibleMessage;
-  readonly committedAt?: string;
-  readonly decisionRound?: number;
-  readonly toolCallIds?: readonly string[];
-  readonly toolCallId?: string;
-  readonly dispatchedToHost?: boolean;
-  readonly toolRound?: number;
-  readonly toolName?: string;
-  readonly toolPluginId?: string;
-  readonly toolInput?: RuntimePluginJsonObject;
-  readonly toolResult?: RuntimePluginToolCallResult;
-  readonly pluginStoreRevision?: number;
-  readonly payloadSummary?: RawEventLogPayloadSummary;
-  readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
-  readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
-  readonly commitValidation?: RoleModelCommitValidationSnapshot;
-  readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
-  readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
-  readonly runtimeConfigEffects?: readonly PreparedRuntimePluginConfigEffect[];
-};
-
-export type ConversationLogRecordInput = VisibleMessage &
-  RuntimeEventIdentity & {
-    readonly committedAt: string;
-  };
+/** What a caller hands the log store; the store returns the stored record. */
+export type RawEventLogRecordInput = RawEventLogRecord;
 
 export type AcceptedRoleModelCommitValidationResult = {
   readonly status: 'accepted';
@@ -156,11 +117,10 @@ export type RoleModelCommitValidationSnapshot = RuntimeEventIdentity & {
   readonly result: RoleModelCommitValidationResult;
 };
 
-export type CreateRoleModelCommitValidationSnapshotOptions =
-  RuntimeEventIdentity & {
-    readonly sessionId: string;
-    readonly result: RoleModelCommitValidationResult;
-  };
+type CreateRoleModelCommitValidationSnapshotOptions = RuntimeEventIdentity & {
+  readonly sessionId: string;
+  readonly result: RoleModelCommitValidationResult;
+};
 
 export function createRoleModelCommitValidationSnapshot(
   options: CreateRoleModelCommitValidationSnapshotOptions,

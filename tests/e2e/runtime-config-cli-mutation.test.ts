@@ -13,14 +13,14 @@ import {
 } from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
-import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
+import {
+  createProject02HomeLayout,
+  ensureInitializedProject02Home,
+} from '../../src/runtime/storage/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
-  defaultRuntimeConfigPath,
   applyRuntimeConfigControlOperation,
-  loadProject02RuntimeConfig,
   roleModelProviderEnvVarName,
-  runtimeControlEnvVarNames,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
   resolveProject02RuntimeConfig,
@@ -31,13 +31,14 @@ import {
   writeRuntimeConfig,
   runtimeLocationForTest,
   runtimeConfigSnapshotForTest,
+  loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
 import {
   initializeTestStore,
-  requiredSecretPlugin,
   restoreProcessEnvValue,
 } from '../support/runtime-config-fixtures.ts';
+import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
 
 const installedSecretPlugin = requiredSecretPlugin('mem0-local');
 const installedSecretFactories = Object.freeze({
@@ -683,7 +684,9 @@ describe('runtime config CLI mutation and storage', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-cli-env-store-seed-',
     );
-    const configPath = defaultRuntimeConfigPath(storeRoot);
+    const configPath = createProject02HomeLayout({
+      homeRoot: storeRoot,
+    }).configPath;
     const defaultHomeRoot = join(process.cwd(), '.project02');
     let setStdout = '';
     let envPathStdout = '';
@@ -714,7 +717,7 @@ describe('runtime config CLI mutation and storage', () => {
       project02: {roleModelProvider: 'local'},
     });
 
-    const loaded = loadProject02RuntimeConfig({
+    const loaded = loadRuntimeConfigForTest({
       env: {
         [runtimeConfigEnvVarName]: configPath,
       },
@@ -768,7 +771,9 @@ describe('runtime config CLI mutation and storage', () => {
       const storeRoot = createTestTempRoot(
         'project02-config-cli-missing-env-path-store-',
       );
-      const configPath = defaultRuntimeConfigPath(storeRoot);
+      const configPath = createProject02HomeLayout({
+        homeRoot: storeRoot,
+      }).configPath;
       let stdout = '';
       let stderr = '';
 
@@ -799,7 +804,9 @@ describe('runtime config CLI mutation and storage', () => {
     const storeRoot = createTestTempRoot(
       'project02-config-cli-dotenv-selected-store-',
     );
-    const configPath = defaultRuntimeConfigPath(storeRoot);
+    const configPath = createProject02HomeLayout({
+      homeRoot: storeRoot,
+    }).configPath;
     const previousCwd = process.cwd();
     const previousRuntimeConfig = process.env[runtimeConfigEnvVarName];
     let setStdout = '';
@@ -1157,8 +1164,12 @@ describe('runtime config CLI mutation and storage', () => {
       const linkStoreRoot = createTestTempRoot(
         'project02-config-link-default-selected-',
       );
-      const targetConfigPath = defaultRuntimeConfigPath(targetStoreRoot);
-      const linkConfigPath = defaultRuntimeConfigPath(linkStoreRoot);
+      const targetConfigPath = createProject02HomeLayout({
+        homeRoot: targetStoreRoot,
+      }).configPath;
+      const linkConfigPath = createProject02HomeLayout({
+        homeRoot: linkStoreRoot,
+      }).configPath;
       const defaultHomeRoot = join(process.cwd(), '.project02');
       let stdout = '';
 
@@ -1234,7 +1245,7 @@ describe('runtime config CLI mutation and storage', () => {
     );
   });
 
-  it.each(runtimeControlEnvVarNames)(
+  it.each([runtimeConfigEnvVarName, roleModelProviderEnvVarName])(
     'rejects reserved runtime control env var %s before creating secret files',
     async envVar => {
       const storeRoot = await initializeTestStore(
@@ -1862,7 +1873,7 @@ describe('runtime config CLI mutation and storage', () => {
       for (const example of [
         {
           args: ['--store', storeRoot, 'path'] as const,
-          expected: defaultRuntimeConfigPath(storeRoot),
+          expected: createProject02HomeLayout({homeRoot: storeRoot}).configPath,
         },
         {
           args: ['--config', configPath, 'path'] as const,

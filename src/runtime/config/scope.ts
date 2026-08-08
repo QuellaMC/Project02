@@ -15,16 +15,13 @@ import {
 } from './control.ts';
 import {
   applyRuntimeConfigControlTransaction,
-  assertGlobalConfigLoadableForCharacterScope,
   readRuntimeConfigControlSnapshot,
   verifyRuntimeConfigControlExpectation,
   type RuntimeConfigControlSnapshot,
 } from './control-transaction.ts';
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
-  loadProject02RuntimeConfigForLocation,
   requireResolvedRuntimeConfigScopeTarget,
-  type ResolvedProject02ConfigLocation,
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
 } from './location.ts';
@@ -42,7 +39,7 @@ import {
 import {mergeCharacterOverlayDocument} from './resolve-layered.ts';
 import {
   characterRuntimeConfigFieldScopeViolation,
-  project02RuntimeConfigValueMatchesField,
+  project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinitions,
 } from './schema.ts';
 import {runtimePluginScopeViolation} from './plugin-scope.ts';
@@ -52,8 +49,6 @@ import {
   type Project02RuntimePluginConfig,
   type RuntimeConfigMutationOperation,
 } from './types.ts';
-
-export type RuntimeConfigMutationScopeSelector = 'global' | 'character';
 
 export type RuntimeConfigControlRequest =
   | {
@@ -80,7 +75,6 @@ export type RuntimeConfigCharacterMaterialization = {
 };
 
 export type RuntimeConfigCharacterMaterializationOutcome = {
-  readonly configChanged: boolean;
   readonly autoEnabledPluginIds: readonly string[];
 };
 
@@ -155,7 +149,6 @@ export type SimulatedCharacterOverlayCandidate =
       readonly status: 'valid';
       /** The document the commit would write, not the bytes on disk. */
       readonly document: Project02RuntimeConfig;
-      readonly configChanged: boolean;
       readonly autoEnabledPluginIds: readonly string[];
     }
   | {readonly status: 'invalid'; readonly message: string};
@@ -199,7 +192,6 @@ export function simulateCharacterOverlayCandidate(options: {
     return Object.freeze({
       status: 'valid',
       document: prepared.preparedCandidate.config,
-      configChanged: prepared.context.configChanged,
       autoEnabledPluginIds: prepared.context.autoEnabledPluginIds,
     });
   } catch (error: unknown) {
@@ -332,8 +324,6 @@ function runtimeConfigControlCharacterLocation(
   return runtimeLocation;
 }
 
-export {assertGlobalConfigLoadableForCharacterScope};
-
 /** Rejects before any ensure step materializes a marker or data directory. */
 export function assertScopedMutationOperationAllowed(
   operation: RuntimeConfigMutationOperation,
@@ -360,24 +350,12 @@ export function assertScopedMutationOperationAllowed(
 
   if (
     operation.kind === 'set' &&
-    (!project02RuntimeConfigValueMatchesField(operation.value, field) ||
-      (typeof operation.value === 'string' &&
-        operation.value.trim().length === 0))
+    !project02RuntimeConfigFieldAcceptsValue(operation.value, field)
   ) {
     throw new RuntimeConfigMutationError(
       `${field.invalidValueMessage} Path: ${operation.path}.`,
     );
   }
-}
-
-/** Validates the global document before any durable state is created. */
-export function assertScopedGlobalLayerLoadable(options: {
-  readonly runtimeLocation: ResolvedProject02ConfigLocation;
-  readonly env?: NodeJS.ProcessEnv;
-}): void {
-  assertGlobalConfigLoadableForCharacterScope(
-    loadProject02RuntimeConfigForLocation(options.runtimeLocation),
-  );
 }
 
 type PreparedScopedRuntimeConfigControlCandidate = {
@@ -495,7 +473,6 @@ function requiredCharacterOverlay(
 
 function emptyCharacterMaterializationOutcome(): RuntimeConfigCharacterMaterializationOutcome {
   return Object.freeze({
-    configChanged: false,
     autoEnabledPluginIds: Object.freeze([]),
   });
 }
@@ -509,6 +486,8 @@ function assertCharacterScopedControlOperation(
 type CharacterMaterializationMerge =
   RuntimeConfigCharacterMaterializationOutcome & {
     readonly document: JsonBoundaryObject;
+    /** Drives the commit decision; never leaves this file. */
+    readonly configChanged: boolean;
   };
 
 /** Only ever adds what is missing; an authored value is never overwritten. */
@@ -696,7 +675,6 @@ function withMaterializationOutcome(
   return Object.freeze({
     ...result,
     materialization: Object.freeze({
-      configChanged: outcome.configChanged,
       autoEnabledPluginIds: Object.freeze([...outcome.autoEnabledPluginIds]),
     }),
   });

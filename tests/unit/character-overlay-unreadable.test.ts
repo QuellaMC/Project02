@@ -33,12 +33,14 @@ vi.mock('../../src/shared/file-system.ts', async importOriginal => {
   };
 });
 
-const {characterOverlayConfigPath, characterOverlayFingerprintLayer} =
-  await import('../../src/runtime/config/overlay.ts');
 const {blockingRuntimeConfigLayerDiagnostic} =
   await import('../../src/runtime/config/mutate.ts');
-const {readCharacterOverlayForScope} =
-  await import('../../src/runtime/config/index.ts');
+const {
+  characterOverlayConfigPath,
+  layeredRuntimeConfigFingerprintForScope,
+  readCharacterOverlayForScope,
+  runtimeConfigVersion,
+} = await import('../../src/runtime/config/index.ts');
 const {createTestTempRoot} = await import('../support/temp-root.ts');
 
 describe('character overlay that cannot be inspected', () => {
@@ -64,15 +66,29 @@ describe('character overlay that cannot be inspected', () => {
     ]);
     expect(overlay.diagnostics).toHaveLength(1);
 
-    // A shared fingerprint would let a currency gate accept a resolution taken
-    // while the file was still readable.
-    expect(characterOverlayFingerprintLayer(overlay)).toEqual({
-      $overlayUnreadable: true,
-    });
-
     // There are no authored bytes to repair, so mutation fails closed.
     expect(blockingRuntimeConfigLayerDiagnostic(overlay)).toMatchObject({
       code: 'runtime_config_read_failed',
     });
+
+    // A shared fingerprint would let a currency gate accept a resolution taken
+    // while the file was still readable.
+    const scope = {
+      globalConfig: {version: runtimeConfigVersion},
+      characterScope: {characterId: 'mira', dataRoot},
+    };
+    const unreadableFingerprint = layeredRuntimeConfigFingerprintForScope({
+      ...scope,
+      overlay,
+    });
+
+    deniedEntry.path = undefined;
+
+    expect(
+      layeredRuntimeConfigFingerprintForScope({
+        ...scope,
+        overlay: readCharacterOverlayForScope(scope.characterScope).overlay,
+      }),
+    ).not.toBe(unreadableFingerprint);
   });
 });

@@ -22,7 +22,6 @@ export {
   requireResolvedProject02ConfigLocation,
   requireResolvedProject02RuntimeLocation,
   requireResolvedRuntimeConfigScopeTarget,
-  resolveProject02ConfigLocation,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigLocationUsesDefaultConfigPath,
   type ResolvedProject02ConfigLocation,
@@ -50,17 +49,13 @@ export {
   type InspectConfiguredPlugin,
 } from './inspect.ts';
 export {
-  defaultRuntimeConfigEnvPath,
-  defaultRuntimeConfigPath,
-  loadProject02RuntimeConfig,
-  maxProject02RuntimeConfigBytes,
   readProject02RuntimeConfigDocument,
   RuntimeConfigLocationError,
   validateProject02RuntimeConfig,
 } from './load.ts';
+export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction.ts';
 export {
   characterOverlayConfigPath,
-  characterOverlayFingerprintLayer,
   layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
@@ -77,8 +72,6 @@ export {
   type ResolveLayeredProject02RuntimeConfigOptions,
 } from './resolve-layered.ts';
 export {
-  assertGlobalConfigLoadableForCharacterScope,
-  assertScopedGlobalLayerLoadable,
   assertScopedMutationOperationAllowed,
   applyRuntimeConfigControlOperation,
   prepareRuntimeConfigControlOperation,
@@ -87,7 +80,6 @@ export {
   type RuntimeConfigCharacterMaterializationOutcome,
   type RuntimeConfigControlApplyResult,
   type RuntimeConfigControlRequest,
-  type RuntimeConfigMutationScopeSelector,
   type SimulatedCharacterOverlayCandidate,
 } from './scope.ts';
 export {
@@ -110,7 +102,6 @@ export {
 } from './plugin-scope.ts';
 export {
   diagnosticsHaveErrors,
-  pluginHasConfigErrors,
   resolveProject02RuntimeConfig,
   resolveRuntimePluginConfigs,
   runtimeConfigDiagnosticMatchesPlugin,
@@ -130,7 +121,6 @@ export {
   runtimeConfigDiagnosticLocation,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
-  runtimeControlEnvVarNames,
   type LoadedProject02RuntimeConfig,
   type Project02HostConfig,
   type Project02RuntimeConfig,

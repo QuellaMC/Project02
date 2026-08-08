@@ -1,10 +1,9 @@
 import {isJsonRecord} from '../../shared/json-boundary.ts';
+import {pathExistsSync} from '../../shared/file-system.ts';
 import {
-  pathExistsSync,
-  readTextFileSync,
-  statPathSync,
-  type BigIntStats,
-} from '../../shared/file-system.ts';
+  readBoundedJsonFileSource,
+  type BoundedJsonFileSourceRejectionReason,
+} from '../../shared/package-metadata.ts';
 import {dirname} from 'node:path';
 
 import {
@@ -33,10 +32,7 @@ import {
   type JsonBoundaryObject,
   type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
-import {
-  canonicalRuntimeConfigPath,
-  RuntimeConfigPathResolutionError,
-} from './path.ts';
+import {canonicalRuntimeConfigPath} from './path.ts';
 import {
   allowPlaintextSecretMarkerField,
   plaintextSecretMarkerField,
@@ -44,7 +40,7 @@ import {
 } from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
-  project02RuntimeConfigValueMatchesField,
+  project02RuntimeConfigFieldAcceptsValue,
   project02RuntimeConfigFieldDefinitions,
   project02RuntimeConfigFieldNames,
 } from './schema.ts';
@@ -56,17 +52,14 @@ const project02RuntimeConfigFields = Object.freeze([
 ]);
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
 const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
-const runtimeConfigSecretRefFields = Object.freeze([
-  secretEnvMarkerField,
-  'description',
-]);
+const runtimeConfigSecretRefFields = Object.freeze([secretEnvMarkerField]);
 const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
   plaintextSecretMarkerField,
   allowPlaintextSecretMarkerField,
   'justification',
 ]);
 
-export const maxProject02RuntimeConfigBytes = 256 * 1_024;
+const maxProject02RuntimeConfigBytes = 256 * 1_024;
 const runtimeConfigJsonBoundaryLimits = Object.freeze({
   ...defaultJsonBoundaryLimits,
   maxTotalStringBytes: maxProject02RuntimeConfigBytes,
@@ -79,13 +72,7 @@ export class RuntimeConfigLocationError extends Error {
   }
 }
 
-export type LoadProject02RuntimeConfigOptions = {
-  readonly configPath?: string;
-  readonly storeRoot?: string;
-  readonly env?: NodeJS.ProcessEnv;
-};
-
-export type Project02RuntimeConfigValidationResult = {
+type Project02RuntimeConfigValidationResult = {
   readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
@@ -93,18 +80,6 @@ export type Project02RuntimeConfigValidationResult = {
 
 const selectedLoadedProject02RuntimeConfigSnapshots = new WeakSet<object>();
 const selectedProject02RuntimeConfigLocations = new WeakSet<object>();
-
-export function loadProject02RuntimeConfig(
-  options: LoadProject02RuntimeConfigOptions = {},
-): SelectedLoadedProject02RuntimeConfig {
-  const env = options.env ?? process.env;
-  const location = selectProject02RuntimeConfigLocation({
-    selection: options,
-    env,
-  });
-
-  return loadSelectedProject02RuntimeConfig(location);
-}
 
 export function loadSelectedProject02RuntimeConfig(
   location: SelectedProject02RuntimeConfigLocation,
@@ -233,16 +208,22 @@ export function readProject02RuntimeConfigDocument(path: string):
       readonly status: 'rejected';
       readonly diagnostic: RuntimeConfigDiagnostic;
     } {
-  const readResult = readRuntimeConfigSource(path);
+  const read = readBoundedJsonFileSource({
+    path,
+    maxBytes: maxProject02RuntimeConfigBytes,
+  });
 
-  if (readResult.status === 'rejected') {
-    return readResult;
+  if (read.status === 'rejected') {
+    return {
+      status: 'rejected',
+      diagnostic: runtimeConfigSourceDiagnostic(read.reason, path),
+    };
   }
 
   try {
     return {
       status: 'accepted',
-      value: JSON.parse(readResult.source) as unknown,
+      value: JSON.parse(read.source) as unknown,
     };
   } catch (error: unknown) {
     return {
@@ -258,72 +239,34 @@ export function readProject02RuntimeConfigDocument(path: string):
   }
 }
 
-function readRuntimeConfigSource(path: string):
-  | {readonly status: 'accepted'; readonly source: string}
-  | {
-      readonly status: 'rejected';
-      readonly diagnostic: RuntimeConfigDiagnostic;
-    } {
-  let fileStat: BigIntStats;
-
-  try {
-    fileStat = statPathSync(path);
-  } catch {
-    return {
-      status: 'rejected',
-      diagnostic: createRuntimeConfigDiagnostic(
+function runtimeConfigSourceDiagnostic(
+  reason: BoundedJsonFileSourceRejectionReason,
+  path: string,
+): RuntimeConfigDiagnostic {
+  switch (reason) {
+    case 'uninspectable':
+      return createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_read_failed',
         `Runtime config file could not be inspected: ${path}.`,
-      ),
-    };
-  }
-
-  if (!fileStat.isFile()) {
-    return {
-      status: 'rejected',
-      diagnostic: createRuntimeConfigDiagnostic(
+      );
+    case 'not_file':
+      return createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_read_failed',
         `Runtime config path is not a regular file: ${path}.`,
-      ),
-    };
-  }
-
-  if (fileStat.size > BigInt(maxProject02RuntimeConfigBytes)) {
-    return {
-      status: 'rejected',
-      diagnostic: runtimeConfigLimitDiagnostic(
+      );
+    case 'too_large':
+      return runtimeConfigLimitDiagnostic(
         `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`,
-      ),
-    };
-  }
-
-  let source: string;
-
-  try {
-    source = readTextFileSync(path);
-  } catch {
-    return {
-      status: 'rejected',
-      diagnostic: createRuntimeConfigDiagnostic(
+      );
+    case 'unreadable':
+      return createRuntimeConfigDiagnostic(
         'error',
         'runtime_config_read_failed',
         `Runtime config file could not be read: ${path}.`,
-      ),
-    };
+      );
   }
-
-  if (Buffer.byteLength(source, 'utf8') > maxProject02RuntimeConfigBytes) {
-    return {
-      status: 'rejected',
-      diagnostic: runtimeConfigLimitDiagnostic(
-        `Runtime config file exceeds the ${String(maxProject02RuntimeConfigBytes)}-byte size limit.`,
-      ),
-    };
-  }
-
-  return {status: 'accepted', source};
 }
 
 export function validateProject02RuntimeConfig(
@@ -364,7 +307,7 @@ export function validateProject02RuntimeConfig(
   } satisfies Project02RuntimeConfigValidationResult);
 }
 
-export function defaultRuntimeConfigPath(storeRoot?: string): string {
+function defaultRuntimeConfigPath(storeRoot?: string): string {
   return createProject02HomeLayout(
     storeRoot === undefined ? {} : {homeRoot: storeRoot},
   ).configPath;
@@ -413,16 +356,12 @@ export function selectProject02RuntimeConfigLocation(options: {
   );
 }
 
-function canonicalSelectedRuntimeConfigPath(path: string): string {
-  try {
-    return canonicalRuntimeConfigPath(path);
-  } catch (error: unknown) {
-    if (error instanceof RuntimeConfigPathResolutionError) {
-      throw new RuntimeConfigLocationError(error.message);
-    }
-
-    throw error;
-  }
+/** Selection, re-binding, and home resolution are location boundaries. */
+export function canonicalRuntimeConfigLocationPath(path: string): string {
+  return canonicalRuntimeConfigPath(
+    path,
+    cause => new RuntimeConfigLocationError(cause.message),
+  );
 }
 
 function createSelectedRuntimeConfigLocation(
@@ -430,7 +369,7 @@ function createSelectedRuntimeConfigLocation(
   path: string,
   runtimeHomeRoot?: string,
 ): SelectedProject02RuntimeConfigLocation {
-  const canonicalPath = canonicalSelectedRuntimeConfigPath(path);
+  const canonicalPath = canonicalRuntimeConfigLocationPath(path);
   const normalizedRuntimeHomeRoot =
     runtimeHomeRoot === undefined
       ? undefined
@@ -466,7 +405,7 @@ function createSelectedRuntimeConfigLocation(
 }
 
 export function canonicalRuntimeConfigHomeRoot(homeRoot?: string): string {
-  return canonicalSelectedRuntimeConfigPath(
+  return canonicalRuntimeConfigLocationPath(
     createProject02HomeLayout(homeRoot === undefined ? {} : {homeRoot})
       .homeRoot,
   );
@@ -497,7 +436,7 @@ export function assertSelectedRuntimeConfigStillBound(
 ): void {
   selectedConfig =
     requireSelectedProject02RuntimeConfigLocation(selectedConfig);
-  const currentCanonicalPath = canonicalSelectedRuntimeConfigPath(
+  const currentCanonicalPath = canonicalRuntimeConfigLocationPath(
     selectedConfig.path,
   );
 
@@ -639,8 +578,7 @@ function optionalProject02HostConfig(
 
     if (
       !isRuntimeConfigValue(fieldValue) ||
-      !project02RuntimeConfigValueMatchesField(fieldValue, field) ||
-      (typeof fieldValue === 'string' && fieldValue.trim().length === 0)
+      !project02RuntimeConfigFieldAcceptsValue(fieldValue, field)
     ) {
       diagnostics.push(project02HostConfigFieldDiagnostic(field));
       continue;
@@ -859,9 +797,7 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
     return (
       hasOnlyFields(value, runtimeConfigSecretRefFields) &&
       typeof value[secretEnvMarkerField] === 'string' &&
-      value[secretEnvMarkerField].trim().length > 0 &&
-      (value['description'] === undefined ||
-        typeof value['description'] === 'string')
+      value[secretEnvMarkerField].trim().length > 0
     );
   }
 

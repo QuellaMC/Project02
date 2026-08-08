@@ -18,11 +18,6 @@ import {
 import {runProject02ConfigSection} from './console-project02.ts';
 import {runPluginConfigSection} from './console-plugins.ts';
 
-export type {
-  RuntimeConfigConsoleOptions,
-  RuntimeConfigConsolePromptAdapter,
-} from './console-shared.ts';
-
 export async function runRuntimeConfigConsole(
   options: RuntimeConfigConsoleOptions,
 ): Promise<number> {

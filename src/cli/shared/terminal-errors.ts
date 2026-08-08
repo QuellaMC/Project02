@@ -1,17 +1,32 @@
 import {ConversationRehydrationError} from '../../core/index.ts';
-import {RuntimeConfigLocationError} from '../../runtime/config/index.ts';
+import {RoleModelProviderSelectionError} from '../../role-model/index.ts';
+import {
+  RuntimeConfigLocationError,
+  RuntimeConfigMutationError,
+  RuntimeEnvFileError,
+} from '../../runtime/config/index.ts';
 import {
   LocalRuntimeSessionStoreError,
   LocalRuntimeStorageContractError,
 } from '../../runtime/storage/index.ts';
+import {Project02StoreConsentError} from './store-consent.ts';
+import {CliUsageError} from './usage-error.ts';
 
-export type LocalRuntimeTerminalError =
+/** Chat rejects its own startup; the terminal set below carries it. */
+export class ChatCliStartupError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ChatCliStartupError';
+  }
+}
+
+type LocalRuntimeTerminalError =
   | ConversationRehydrationError
   | RuntimeConfigLocationError
   | LocalRuntimeSessionStoreError
   | LocalRuntimeStorageContractError;
 
-export function isLocalRuntimeTerminalError(
+function isLocalRuntimeTerminalError(
   error: unknown,
 ): error is LocalRuntimeTerminalError {
   return (
@@ -19,6 +34,22 @@ export function isLocalRuntimeTerminalError(
     error instanceof RuntimeConfigLocationError ||
     error instanceof LocalRuntimeSessionStoreError ||
     error instanceof LocalRuntimeStorageContractError
+  );
+}
+
+/**
+ * The one membership list: every CLI reports exactly these as a message and
+ * exit code 1, and lets anything else escape as the fault it is.
+ */
+export function isCliTerminalError(error: unknown): error is Error {
+  return (
+    error instanceof CliUsageError ||
+    error instanceof ChatCliStartupError ||
+    error instanceof Project02StoreConsentError ||
+    error instanceof RoleModelProviderSelectionError ||
+    error instanceof RuntimeConfigMutationError ||
+    error instanceof RuntimeEnvFileError ||
+    isLocalRuntimeTerminalError(error)
   );
 }
 

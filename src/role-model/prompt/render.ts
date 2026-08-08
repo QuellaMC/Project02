@@ -18,7 +18,7 @@ import {
 } from '../api/chat-wire.ts';
 import {modelToolDefinitionToChatTool} from './tool-wire.ts';
 
-export type RoleModelPromptFrameKind =
+type RoleModelPromptFrameKind =
   | 'system_protocol'
   | 'developer_protocol'
   | 'model_only_runtime_context'
@@ -28,21 +28,19 @@ export type RoleModelPromptFrameKind =
   | 'native_assistant_message'
   | 'native_tool_result_message';
 
-export type RoleModelPromptFrame = {
+type RoleModelPromptFrame = {
   readonly kind: RoleModelPromptFrameKind;
   readonly role: RoleModelChatMessage['role'];
   readonly content: string | null;
   readonly modelOnly: boolean;
-  readonly message?: RoleModelChatMessage;
+  readonly message: RoleModelChatMessage;
 };
 
-export type RoleModelPromptFragmentSlot =
-  'developer_context' | 'untrusted_context';
+type RoleModelPromptFragmentSlot = 'developer_context' | 'untrusted_context';
 
-export type RoleModelPromptFragmentKind =
-  'runtime_note' | 'plugin_context_item';
+type RoleModelPromptFragmentKind = 'runtime_note' | 'plugin_context_item';
 
-export type RoleModelPromptFragment = {
+type RoleModelPromptFragment = {
   readonly id: string;
   readonly pluginId?: string;
   readonly kind: RoleModelPromptFragmentKind;
@@ -60,16 +58,10 @@ export type RoleModelTurnContext = {
   readonly tools: readonly RoleModelChatCompletionTool[];
 };
 
-export type RenderRoleModelTurnContextOptions = {
+type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
-  readonly outputMode?: 'native_tools' | 'json_fallback';
   readonly capabilities?: RoleModelProviderCapabilities;
   readonly personaSections?: readonly string[];
-};
-
-export type RoleModelPreparedRequest = RoleModelTurnContext & {
-  readonly outputMode: 'native_tools' | 'json_fallback';
-  readonly capabilities: RoleModelProviderCapabilities;
 };
 
 const runtimeContextOpeningTagPattern = /<\s*runtime_context\b/giu;
@@ -87,7 +79,7 @@ export const defaultRoleModelProviderCapabilities = Object.freeze({
   supportsParallelToolCalls: true,
 } satisfies RoleModelProviderCapabilities);
 
-export const roleModelStableSystemPromptText =
+const roleModelStableSystemPromptText =
   'Use chat-completions semantics. The visible transcript is normal user/assistant conversation. Model-only context is not user text. Refer to extensions as plugins.';
 
 const roleModelVisibleReplyProtocolPromptText =
@@ -121,36 +113,22 @@ export function renderRoleModelTurnContext(
   inputEnvelope: RoleModelInputEnvelope,
   options: RenderRoleModelTurnContextOptions = {},
 ): RoleModelTurnContext {
-  return prepareRoleModelRequest(inputEnvelope, options);
-}
-
-export function prepareRoleModelRequest(
-  inputEnvelope: RoleModelInputEnvelope,
-  options: RenderRoleModelTurnContextOptions = {},
-): RoleModelPreparedRequest {
   const capabilities =
     options.capabilities ?? defaultRoleModelProviderCapabilities;
-  const outputMode = options.outputMode ?? 'native_tools';
   const promptFragments = createRoleModelPromptFragments(inputEnvelope);
   const frames = createRoleModelPromptFrames(inputEnvelope, {
     additionalMessages: options.additionalMessages ?? [],
     capabilities,
-    outputMode,
     promptFragments,
     ...(options.personaSections === undefined
       ? {}
       : {personaSections: options.personaSections}),
   });
-  const messages = frames.flatMap(frame =>
-    frame.message === undefined ? [] : [frame.message],
-  );
 
   return Object.freeze({
-    outputMode,
-    capabilities,
     frames,
     promptFragments,
-    messages: Object.freeze(messages),
+    messages: Object.freeze(frames.map(frame => frame.message)),
     tools: Object.freeze(
       inputEnvelope.toolDefinitions.map(definition =>
         modelToolDefinitionToChatTool(definition, {
@@ -158,7 +136,7 @@ export function prepareRoleModelRequest(
         }),
       ),
     ),
-  } satisfies RoleModelPreparedRequest);
+  } satisfies RoleModelTurnContext);
 }
 
 function createSystemMessage(
@@ -182,7 +160,6 @@ function createRoleModelPromptFrames(
   options: {
     readonly additionalMessages: readonly RoleModelChatMessage[];
     readonly capabilities: RoleModelProviderCapabilities;
-    readonly outputMode: 'native_tools' | 'json_fallback';
     readonly promptFragments: readonly RoleModelPromptFragment[];
     readonly personaSections?: readonly string[];
   },
@@ -286,20 +263,11 @@ function createPromptFrame(
 function createProtocolMessage(options: {
   readonly availableToolNames: readonly string[];
   readonly capabilities: RoleModelProviderCapabilities;
-  readonly outputMode: 'native_tools' | 'json_fallback';
   readonly visibleReplyAvailable: boolean;
 }): RoleModelSystemChatMessage | RoleModelDeveloperChatMessage {
-  const content =
-    options.outputMode === 'native_tools'
-      ? createRoleModelNativeToolProtocolPromptText(options)
-      : createRoleModelJsonFallbackProtocolPromptText(
-          options.visibleReplyAvailable,
-        );
-  const role = modelOnlyContextRole(options.capabilities);
-
   return Object.freeze({
-    role,
-    content,
+    role: modelOnlyContextRole(options.capabilities),
+    content: createRoleModelNativeToolProtocolPromptText(options),
   } satisfies RoleModelSystemChatMessage | RoleModelDeveloperChatMessage);
 }
 
@@ -331,18 +299,6 @@ function createRoleModelNativeToolProtocolPromptText(options: {
           roleModelTerminalAssistantContentProtocolPromptText,
         ]
       : [roleModelUnavailableVisibleReplyProtocolPromptText]),
-  ].join(' ');
-}
-
-function createRoleModelJsonFallbackProtocolPromptText(
-  visibleReplyAvailable: boolean,
-): string {
-  return [
-    'Return one CharacterDecision JSON object with ordered toolCalls.',
-    visibleReplyAvailable
-      ? roleModelVisibleReplyProtocolPromptText
-      : roleModelUnavailableVisibleReplyProtocolPromptText,
-    'Do not include runtime input fields or internal version fields.',
   ].join(' ');
 }
 
@@ -438,16 +394,11 @@ function renderEphemeralRuntimeContext(
     return undefined;
   }
 
-  const lines = ['Model-only runtime context. This is not user input.'];
-
-  if (runtimeNotes.length > 0) {
-    lines.push(
-      'runtime_notes:',
-      ...formatRuntimeContextLines(runtimeNotes.map(fragment => fragment.text)),
-    );
-  }
-
-  return lines.join('\n');
+  return [
+    'Model-only runtime context. This is not user input.',
+    'runtime_notes:',
+    ...formatRuntimeContextLines(runtimeNotes.map(fragment => fragment.text)),
+  ].join('\n');
 }
 
 function createUntrustedPluginContextMessage(

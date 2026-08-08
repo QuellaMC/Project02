@@ -189,13 +189,18 @@ export function runtimeConfigValueMatchesField(
   return true;
 }
 
-export function project02RuntimeConfigValueMatchesField(
+/**
+ * The one judge of an authored Project02 field value, for every writer and
+ * the loader. A blank string is never a value: unsetting is its own operation.
+ */
+export function project02RuntimeConfigFieldAcceptsValue(
   value: RuntimeConfigValue,
   field: Project02ConfigFieldDefinition,
 ): boolean {
   return (
     runtimeConfigValueMatchesField(value, field) &&
-    (field.acceptsValue?.(value) ?? true)
+    (field.acceptsValue?.(value) ?? true) &&
+    !(typeof value === 'string' && value.trim().length === 0)
   );
 }
 

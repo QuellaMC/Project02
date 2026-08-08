@@ -1,6 +1,7 @@
 import {statPathSync} from '../../shared/file-system.ts';
 import {basename} from 'node:path';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
+import {filesystemMetadataIdentity} from '../../shared/package-metadata.ts';
 import {
   LocalRuntimeStorageContractError,
   type LocalRuntimeSessionPaths,
@@ -155,15 +156,9 @@ function readRuntimeEvidenceFileStamp(
   filePath: string,
 ): RuntimeEvidenceFileStamp {
   try {
-    const stat = statPathSync(filePath);
-
     return Object.freeze({
       exists: true,
-      device: stat.dev,
-      inode: stat.ino,
-      size: stat.size,
-      modifiedAtNanoseconds: stat.mtimeNs,
-      changedAtNanoseconds: stat.ctimeNs,
+      identity: filesystemMetadataIdentity(statPathSync(filePath)),
     });
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
@@ -189,17 +184,9 @@ function sameRuntimeEvidenceFileStamp(
   left: RuntimeEvidenceFileStamp,
   right: RuntimeEvidenceFileStamp,
 ): boolean {
-  if (!left.exists || !right.exists) {
-    return left.exists === right.exists;
-  }
-
-  return (
-    left.device === right.device &&
-    left.inode === right.inode &&
-    left.size === right.size &&
-    left.modifiedAtNanoseconds === right.modifiedAtNanoseconds &&
-    left.changedAtNanoseconds === right.changedAtNanoseconds
-  );
+  return left.exists && right.exists
+    ? left.identity === right.identity
+    : left.exists === right.exists;
 }
 
 export function scavengeAbandonedRuntimeEvidenceTemporaryFiles(

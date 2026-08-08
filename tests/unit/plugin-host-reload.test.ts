@@ -36,7 +36,6 @@ function reloadFixtureManifest(): RuntimePluginManifest {
     contractVersion: runtimePluginContractVersion,
     compatibility: {
       hostContractVersions: [runtimePluginContractVersion],
-      sourceSystem: 'test',
     },
     declaredPlugins: ['before_role_model_call', 'on_session_end'],
     config: {
@@ -212,10 +211,10 @@ describe('runtime plugin host live config reload', () => {
 
     expect(await contextText(host)).toBe('v1');
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('live_applied');
-    expect(result?.evidence).toMatchObject({
+    expect(result.outcome).toBe('live_applied');
+    expect(result.evidence).toMatchObject({
       status: 'accepted',
       sourceReferences: [{kind: 'runtime', id: 'effect-tone-1'}],
     });
@@ -255,11 +254,11 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('deferred');
-    expect(result?.evidence).toMatchObject({status: 'degraded'});
-    expect(result?.evidence?.summary).toContain('tool surface');
+    expect(result.outcome).toBe('deferred');
+    expect(result.evidence).toMatchObject({status: 'degraded'});
+    expect(result.evidence?.summary).toContain('tool surface');
     expect(await contextText(host)).toBe('v1');
   });
 
@@ -270,11 +269,11 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('failed');
-    expect(result?.failure).toContain('factory exploded');
-    expect(result?.evidence).toMatchObject({status: 'failed'});
+    expect(result.outcome).toBe('failed');
+    expect(result.failure).toContain('factory exploded');
+    expect(result.evidence).toMatchObject({status: 'failed'});
     expect(await contextText(host)).toBe('v1');
   });
 
@@ -289,12 +288,12 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([
+    const result = await host.reloadPluginForCommittedConfig([
       toneEffect('note', 'effect-note-1'),
     ]);
 
-    expect(result?.outcome).toBe('not_eligible');
-    expect(result?.evidence).toBeUndefined();
+    expect(result.outcome).toBe('not_eligible');
+    expect(result.evidence).toBeUndefined();
     expect(await contextText(host)).toBe('v1');
   });
 
@@ -309,13 +308,13 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([
+    const result = await host.reloadPluginForCommittedConfig([
       toneEffect('tone', 'effect-tone-1'),
       toneEffect('note', 'effect-note-1'),
     ]);
 
-    expect(result?.outcome).toBe('deferred');
-    expect(result?.evidence?.summary).toContain(
+    expect(result.outcome).toBe('deferred');
+    expect(result.evidence?.summary).toContain(
       'mix live and reload-required fields',
     );
     expect(await contextText(host)).toBe('v1');
@@ -335,14 +334,14 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([
+    const result = await host.reloadPluginForCommittedConfig([
       toneEffect('tone', 'effect-tone-1', 'sha256:intermediate'),
       toneEffect('tone', 'effect-tone-2', 'sha256:final'),
     ]);
 
-    expect(result?.outcome).toBe('live_applied');
+    expect(result.outcome).toBe('live_applied');
     expect(seenFingerprints).toEqual(['sha256:final']);
-    expect(result?.evidence).toMatchObject({
+    expect(result.evidence).toMatchObject({
       configFingerprint: 'sha256:final',
     });
   });
@@ -368,10 +367,10 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('deferred');
-    expect(result?.evidence?.summary).toContain('hook');
+    expect(result.outcome).toBe('deferred');
+    expect(result.evidence?.summary).toContain('hook');
     expect(await contextText(host)).toBe('v1');
 
     // The declined rebuild may hold factory-allocated resources.
@@ -395,14 +394,14 @@ describe('runtime plugin host live config reload', () => {
 
     // A turn that also updated another plugin leaves the file at the turn's
     // final fingerprint, past this group's last effect.
-    const result = await host.reloadPluginForCommittedConfig?.(
+    const result = await host.reloadPluginForCommittedConfig(
       [toneEffect('tone', 'effect-tone-1', 'sha256:intermediate')],
       {turnResultFingerprint: 'sha256:turn-final'},
     );
 
-    expect(result?.outcome).toBe('live_applied');
+    expect(result.outcome).toBe('live_applied');
     expect(seenFingerprints).toEqual(['sha256:turn-final']);
-    expect(result?.evidence).toMatchObject({
+    expect(result.evidence).toMatchObject({
       configFingerprint: 'sha256:turn-final',
     });
   });
@@ -423,9 +422,9 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('deferred');
+    expect(result.outcome).toBe('deferred');
     expect(await contextText(host)).toBe('v1');
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     expect(sessionEndLog.sort()).toEqual(['orphan', 'v1']);
@@ -449,13 +448,13 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const first = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
-    const second = await host.reloadPluginForCommittedConfig?.([
+    const first = await host.reloadPluginForCommittedConfig([toneEffect()]);
+    const second = await host.reloadPluginForCommittedConfig([
       toneEffect('tone', 'effect-tone-2'),
     ]);
 
-    expect(first?.outcome).toBe('live_applied');
-    expect(second?.outcome).toBe('live_applied');
+    expect(first.outcome).toBe('live_applied');
+    expect(second.outcome).toBe('live_applied');
     expect(await contextText(host)).toBe('v1');
 
     // A config-keyed factory cache took v1 live, retired, then live again.
@@ -490,9 +489,9 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('deferred');
+    expect(result.outcome).toBe('deferred');
     // Construction transfers teardown ownership even for a candidate that
     // never goes live.
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
@@ -509,9 +508,9 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('live_applied');
+    expect(result.outcome).toBe('live_applied');
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     // The same object must not receive terminal hooks twice (live + retired).
     expect(sessionEndLog).toEqual(['v1']);
@@ -530,9 +529,9 @@ describe('runtime plugin host live config reload', () => {
       },
     });
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('live_applied');
+    expect(result.outcome).toBe('live_applied');
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     // Retired instances run first so the live one's terminal writes land last.
     expect(sessionEndLog).toEqual(['v1', 'v2']);
@@ -547,16 +546,14 @@ describe('runtime plugin host live config reload', () => {
           reload: () => new Promise<never>(() => undefined),
         },
       });
-      const resultPromise = host.reloadPluginForCommittedConfig?.([
-        toneEffect(),
-      ]);
+      const resultPromise = host.reloadPluginForCommittedConfig([toneEffect()]);
 
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
 
       const result = await resultPromise;
 
-      expect(result?.outcome).toBe('failed');
-      expect(result?.failure).toContain('did not settle');
+      expect(result.outcome).toBe('failed');
+      expect(result.failure).toContain('did not settle');
     } finally {
       vi.useRealTimers();
     }
@@ -575,22 +572,22 @@ describe('runtime plugin host live config reload', () => {
     });
 
     expect(
-      host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:construction'),
+      host.pluginConfigCurrentFor(reloadPluginId, 'sha256:construction'),
     ).toBe(true);
-    expect(host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:after')).toBe(
+    expect(host.pluginConfigCurrentFor(reloadPluginId, 'sha256:after')).toBe(
       false,
     );
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('live_applied');
-    expect(host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:after')).toBe(
+    expect(result.outcome).toBe('live_applied');
+    expect(host.pluginConfigCurrentFor(reloadPluginId, 'sha256:after')).toBe(
       true,
     );
     // Restoring the startup config must not read as already-current while the
     // newer instance is the one serving.
     expect(
-      host.pluginConfigCurrentFor?.(reloadPluginId, 'sha256:construction'),
+      host.pluginConfigCurrentFor(reloadPluginId, 'sha256:construction'),
     ).toBe(false);
   });
 
@@ -614,12 +611,10 @@ describe('runtime plugin host live config reload', () => {
             }),
         },
       });
-      const resultPromise = host.reloadPluginForCommittedConfig?.([
-        toneEffect(),
-      ]);
+      const resultPromise = host.reloadPluginForCommittedConfig([toneEffect()]);
 
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
-      expect((await resultPromise)?.outcome).toBe('failed');
+      expect((await resultPromise).outcome).toBe('failed');
 
       const sessionEnd = host.onSessionEnd(testPluginContext(), {
         allowFileStoreWrites: false,
@@ -663,12 +658,10 @@ describe('runtime plugin host live config reload', () => {
             }),
         },
       });
-      const resultPromise = host.reloadPluginForCommittedConfig?.([
-        toneEffect(),
-      ]);
+      const resultPromise = host.reloadPluginForCommittedConfig([toneEffect()]);
 
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
-      expect((await resultPromise)?.outcome).toBe('failed');
+      expect((await resultPromise).outcome).toBe('failed');
 
       const shutdown = host.shutdown(testPluginContext());
 
@@ -695,12 +688,10 @@ describe('runtime plugin host live config reload', () => {
           reload: () => new Promise(() => undefined),
         },
       });
-      const resultPromise = host.reloadPluginForCommittedConfig?.([
-        toneEffect(),
-      ]);
+      const resultPromise = host.reloadPluginForCommittedConfig([toneEffect()]);
 
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
-      expect((await resultPromise)?.outcome).toBe('failed');
+      expect((await resultPromise).outcome).toBe('failed');
 
       // Terminal dispatch is the one phase that must always finish, so without
       // a bound the session can never shut down.
@@ -733,12 +724,10 @@ describe('runtime plugin host live config reload', () => {
             }),
         },
       });
-      const resultPromise = host.reloadPluginForCommittedConfig?.([
-        toneEffect(),
-      ]);
+      const resultPromise = host.reloadPluginForCommittedConfig([toneEffect()]);
 
       await vi.advanceTimersByTimeAsync(runtimePluginReloadTimeoutMs);
-      expect((await resultPromise)?.outcome).toBe('failed');
+      expect((await resultPromise).outcome).toBe('failed');
 
       const shutdown = host.shutdown(testPluginContext());
 
@@ -761,10 +750,10 @@ describe('runtime plugin host live config reload', () => {
   it('defers when the host has no reloader', async () => {
     const host = reloadHost({});
 
-    const result = await host.reloadPluginForCommittedConfig?.([toneEffect()]);
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
-    expect(result?.outcome).toBe('deferred');
-    expect(result?.evidence?.summary).toContain('no plugin reloader');
+    expect(result.outcome).toBe('deferred');
+    expect(result.evidence?.summary).toContain('no plugin reloader');
     expect(await contextText(host)).toBe('v1');
   });
 });

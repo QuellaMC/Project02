@@ -40,7 +40,6 @@ export function createRuntimePluginConfigReadTool(): RuntimePluginProvidedTool {
       additionalProperties: false,
     },
     validationOwner: 'plugin_host',
-    annotations: {readOnlyHint: true},
     concurrency: 'shared',
     requiresConfirmation: false,
   };

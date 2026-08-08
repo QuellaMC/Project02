@@ -139,7 +139,7 @@ export type RuntimePluginBeforeRoleModelCallCompletedResult = {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
-export type RuntimePluginBeforeRoleModelCallRejectedResult = {
+type RuntimePluginBeforeRoleModelCallRejectedResult = {
   readonly status: 'rejected';
   readonly reason: RuntimePluginBeforeRoleModelCallRejectionReason;
   readonly pluginId: string;
@@ -147,7 +147,7 @@ export type RuntimePluginBeforeRoleModelCallRejectedResult = {
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
-export type RuntimePluginBeforeRoleModelCallHostResult =
+type RuntimePluginBeforeRoleModelCallHostResult =
   | RuntimePluginBeforeRoleModelCallCompletedResult
   | RuntimePluginBeforeRoleModelCallRejectedResult;
 
@@ -160,36 +160,20 @@ export type RuntimePluginSessionEndOptions = {
   readonly allowFileStoreWrites?: boolean;
 };
 
-export type RunRuntimePluginSessionEndHooksOptions = {
-  readonly plugins: readonly RuntimePlugin[];
+type RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions = {
   readonly context: RuntimePluginContext;
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-  readonly hookOptions?: RuntimePluginSessionEndOptions | undefined;
-};
-
-export type RunRuntimePluginShutdownHooksOptions = {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly context: RuntimePluginContext;
-  readonly storeRoot?: string | undefined;
-  readonly sessionId?: string | undefined;
-  readonly sessionIdentity?: object | undefined;
-  readonly createFileStore?: CreateRuntimePluginFileStore | undefined;
-};
-
-type RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions = Omit<
-  RunRuntimePluginShutdownHooksOptions,
-  'plugins'
-> & {
   readonly targets: readonly RuntimePluginLifecycleTarget[];
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
 };
 
 type RunRuntimePluginSessionEndHooksWithResolvedPermissionsOptions =
-  RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions &
-    Pick<RunRuntimePluginSessionEndHooksOptions, 'hookOptions'>;
+  RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions & {
+    readonly hookOptions?: RuntimePluginSessionEndOptions | undefined;
+  };
 
 type RunRuntimePluginShutdownHooksWithResolvedPermissionsOptions =
   RunRuntimePluginTerminalHooksWithResolvedPermissionsOptions;
@@ -210,12 +194,12 @@ export type RuntimePluginHost = {
     call: RuntimePluginToolCall,
     context: RuntimePluginContext,
   ): Promise<RuntimePluginToolCallExecutionResult>;
-  reconcileConfigEffect?(
+  reconcileConfigEffect(
     effect: PreparedRuntimePluginConfigEffect,
   ): RuntimePluginEvidenceSnapshot;
   /** Recovery skips a rebuild when the live instance reflects this config. */
-  pluginConfigCurrentFor?(pluginId: string, configFingerprint: string): boolean;
-  reloadPluginForCommittedConfig?(
+  pluginConfigCurrentFor(pluginId: string, configFingerprint: string): boolean;
+  reloadPluginForCommittedConfig(
     effects: readonly PreparedRuntimePluginConfigEffect[],
     reloadOptions?: {
       /** Authored fingerprint after ALL of the turn's accepted effects. */
@@ -642,43 +626,6 @@ function lifecycleCatalogManifestResolver(
 
     return manifest;
   };
-}
-
-export async function runRuntimePluginSessionEndHooks(
-  options: RunRuntimePluginSessionEndHooksOptions,
-): Promise<RuntimePluginHookHostResult> {
-  // Supplied plugins are treated as already enabled; no activation filtering.
-  return await runRuntimePluginSessionEndHooksForTargets({
-    targets: runtimePluginLifecycleTargets(options.plugins),
-    context: options.context,
-    accessByPluginId: resolveRuntimePluginAccessForPlugins({
-      plugins: options.plugins,
-      enabledPluginIds: options.plugins.map(plugin => plugin.manifest.id),
-    }),
-    storeRoot: options.storeRoot,
-    sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity,
-    createFileStore: options.createFileStore,
-    hookOptions: options.hookOptions,
-  });
-}
-
-export async function runRuntimePluginShutdownHooks(
-  options: RunRuntimePluginShutdownHooksOptions,
-): Promise<RuntimePluginHookHostResult> {
-  // Supplied plugins are treated as already enabled; no host is rebuilt here.
-  return await runRuntimePluginShutdownHooksForTargets({
-    targets: runtimePluginLifecycleTargets(options.plugins),
-    context: options.context,
-    accessByPluginId: resolveRuntimePluginAccessForPlugins({
-      plugins: options.plugins,
-      enabledPluginIds: options.plugins.map(plugin => plugin.manifest.id),
-    }),
-    storeRoot: options.storeRoot,
-    sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity,
-    createFileStore: options.createFileStore,
-  });
 }
 
 export async function runRuntimePluginSessionEndHooksForTargets(
@@ -1145,10 +1092,7 @@ function rejectedRuntimePluginToolPolicy(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
 }): RejectedRuntimePluginToolExecution | undefined {
-  const modelFacing = isModelFacingRuntimePluginTool({
-    manifest: options.plugin.manifest,
-    tool: options.providedTool,
-  });
+  const modelFacing = isModelFacingRuntimePluginTool(options.providedTool);
 
   if (modelFacing && !pluginCanWriteModelInput(options.access)) {
     return rejectedRuntimePluginToolExecution({
@@ -1224,10 +1168,7 @@ function resolveRuntimePluginToolHandler(options: {
     });
   }
 
-  const approvalGatedTool = isApprovalGatedRuntimePluginTool({
-    manifest: plugin.manifest,
-    tool: providedTool,
-  });
+  const approvalGatedTool = isApprovalGatedRuntimePluginTool(providedTool);
 
   if (
     approvalGatedTool &&
@@ -1471,10 +1412,9 @@ function normalizeToolCallResult(options: {
       } satisfies RuntimePluginToolCallResult);
     }
 
-    const approvalGatedTool = isApprovalGatedRuntimePluginTool({
-      manifest: options.plugin.manifest,
-      tool: options.providedTool,
-    });
+    const approvalGatedTool = isApprovalGatedRuntimePluginTool(
+      options.providedTool,
+    );
     const preparedConfigEffect = normalizePreparedRuntimePluginConfigEffect({
       providedTool: options.providedTool,
       approvalGatedTool,

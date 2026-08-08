@@ -28,12 +28,12 @@ export type RuntimePluginToolConfirmationRequest = {
   readonly preview: RuntimePluginJsonObject;
 };
 
-export type RuntimePluginToolConfirmationDecision =
+type RuntimePluginToolConfirmationDecision =
   | {readonly status: 'approved'}
   | {readonly status: 'denied'}
   | {readonly status: 'cancelled'};
 
-export type RuntimePluginToolConfirmationContext = {
+type RuntimePluginToolConfirmationContext = {
   readonly signal: AbortSignal;
   readonly deadlineAt: number;
 };

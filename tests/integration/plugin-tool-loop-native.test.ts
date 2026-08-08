@@ -11,10 +11,12 @@ import {
   createNativePluginListAdapter,
   createNativeVisibleReplyAndPluginListAdapter,
   createPluginStoreRevisionFixtureHost,
-  createSequencedAdapter,
-  createTestEvent,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
+import {
+  createSequencedAdapter,
+  createTestEvent,
+} from '../support/role-model-loop-fixtures.ts';
 
 describe('plugin-driven native tool loop routing', () => {
   it('feeds native assistant tool calls back as OpenAI tool result messages', async () => {
