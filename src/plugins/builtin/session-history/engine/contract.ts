@@ -1,13 +1,4 @@
-import type {VisibleMessageRole} from '../../../core/index.ts';
-
-export type SessionIndexMessage = {
-  readonly sessionId: string;
-  readonly messageId: string;
-  readonly role: VisibleMessageRole;
-  readonly speakerName: string;
-  readonly text: string;
-  readonly committedAt: string;
-};
+import type {RuntimePluginSessionHistoryMessage} from '../../../api/session-history-contract.ts';
 
 /**
  * One matching session, presented the way a reader reconstructs an old
@@ -16,9 +7,9 @@ export type SessionIndexMessage = {
  */
 export type SessionIndexSessionView = {
   readonly sessionId: string;
-  readonly bookendStart: readonly SessionIndexMessage[];
-  readonly window: readonly SessionIndexMessage[];
-  readonly bookendEnd: readonly SessionIndexMessage[];
+  readonly bookendStart: readonly RuntimePluginSessionHistoryMessage[];
+  readonly window: readonly RuntimePluginSessionHistoryMessage[];
+  readonly bookendEnd: readonly RuntimePluginSessionHistoryMessage[];
   readonly matchMessageId: string;
 };
 
@@ -31,7 +22,7 @@ export type SessionIndexSearchResult = {
 
 export type SessionIndexConversationWindow = {
   /** Oldest-first within the window. */
-  readonly messages: readonly SessionIndexMessage[];
+  readonly messages: readonly RuntimePluginSessionHistoryMessage[];
   readonly hasBefore: boolean;
   readonly hasAfter: boolean;
   readonly damagedRecordCount: number;
@@ -54,17 +45,31 @@ export type SessionIndexWarmUpOptions = {
   readonly sessionId?: string;
 };
 
-export type LocalRuntimeSessionIndex = {
+/**
+ * The plugin-owned search index over the session-history feed, stored in
+ * the plugin's own database. Every query first catches the index up to
+ * the feed it is derived from; warm-up only moves that cost off the
+ * first search.
+ */
+export type SessionHistoryEngine = {
   readonly characterId: string;
   search(options: SessionIndexSearchOptions): SessionIndexSearchResult;
   readAround(
     options: SessionIndexReadAroundOptions,
   ): SessionIndexConversationWindow;
-  /**
-   * Advisory chunked catch-up that yields to the event loop between
-   * slices. Queries stay correct without it; it only moves projection
-   * cost off the first search.
-   */
   warmUp(options?: SessionIndexWarmUpOptions): Promise<void>;
   close(): void;
 };
+
+export type SessionHistoryEngineErrorCode =
+  'engine_closed' | 'session_not_found' | 'message_not_found';
+
+export class SessionHistoryEngineError extends Error {
+  readonly code: SessionHistoryEngineErrorCode;
+
+  constructor(code: SessionHistoryEngineErrorCode, message: string) {
+    super(message);
+    this.name = 'SessionHistoryEngineError';
+    this.code = code;
+  }
+}

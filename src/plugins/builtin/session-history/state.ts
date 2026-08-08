@@ -1,50 +1,60 @@
-import type {LocalRuntimeSessionIndex} from '../../../runtime/storage/index.ts';
+import type {
+  RuntimePluginDatabaseOpener,
+  RuntimePluginSessionHistoryFeed,
+} from '../../api/index.ts';
 
-export type {LocalRuntimeSessionIndex};
+export type SessionHistoryCapabilities = {
+  readonly sessionHistory: RuntimePluginSessionHistoryFeed;
+  readonly sessionHistoryDatabase: RuntimePluginDatabaseOpener;
+};
 
-const sessionIndexSnapshots = new WeakSet<LocalRuntimeSessionIndex>();
+const sessionHistoryCapabilitySnapshots =
+  new WeakSet<SessionHistoryCapabilities>();
 
 /**
- * Injected by the composition root; the plugin never imports the index
- * implementation. Frozen so caller mutation cannot retarget the advertised
- * history tools.
+ * Injected by the composition root; the plugin never imports the
+ * implementations. Frozen so caller mutation cannot retarget the
+ * advertised history tools.
  */
-export function createSessionIndexSnapshot(
-  index: LocalRuntimeSessionIndex,
-): LocalRuntimeSessionIndex {
-  if (sessionIndexSnapshots.has(index)) {
-    return index;
+export function createSessionHistoryCapabilitiesSnapshot(
+  capabilities: SessionHistoryCapabilities,
+): SessionHistoryCapabilities {
+  if (sessionHistoryCapabilitySnapshots.has(capabilities)) {
+    return capabilities;
   }
 
-  if (typeof index !== 'object') {
-    throw new TypeError('Session index must be an object.');
+  const feed = capabilities.sessionHistory;
+
+  if (typeof feed !== 'object') {
+    throw new TypeError('sessionHistory must be an object.');
   }
 
-  if (typeof index.characterId !== 'string' || index.characterId.length === 0) {
-    throw new TypeError('Session index must carry a non-empty characterId.');
+  if (typeof feed.characterId !== 'string' || feed.characterId.length === 0) {
+    throw new TypeError('sessionHistory must carry a non-empty characterId.');
   }
 
-  for (const methodName of [
-    'search',
-    'readAround',
-    'warmUp',
-    'close',
-  ] as const) {
-    if (typeof index[methodName] !== 'function') {
-      throw new TypeError(`sessionIndex.${methodName} must be a function.`);
+  for (const methodName of ['listSessions', 'readNewMessages'] as const) {
+    if (typeof feed[methodName] !== 'function') {
+      throw new TypeError(`sessionHistory.${methodName} must be a function.`);
     }
   }
 
-  const snapshot = Object.freeze({
-    characterId: index.characterId,
-    search: options => index.search(options),
-    readAround: options => index.readAround(options),
-    warmUp: options => index.warmUp(options),
-    close: () => {
-      index.close();
-    },
-  } satisfies LocalRuntimeSessionIndex);
+  if (typeof capabilities.sessionHistoryDatabase !== 'function') {
+    throw new TypeError('sessionHistoryDatabase must be a function.');
+  }
 
-  sessionIndexSnapshots.add(snapshot);
+  const snapshot = Object.freeze({
+    sessionHistory: Object.freeze({
+      characterId: feed.characterId,
+      listSessions: () => feed.listSessions(),
+      readNewMessages: options => feed.readNewMessages(options),
+    } satisfies RuntimePluginSessionHistoryFeed),
+    sessionHistoryDatabase: (options =>
+      capabilities.sessionHistoryDatabase(
+        options,
+      )) satisfies RuntimePluginDatabaseOpener,
+  } satisfies SessionHistoryCapabilities);
+
+  sessionHistoryCapabilitySnapshots.add(snapshot);
   return snapshot;
 }

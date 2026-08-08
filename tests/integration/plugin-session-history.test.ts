@@ -25,11 +25,15 @@ import {
   createRuntimePluginHost,
   type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
-import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
-import {sessionIndexDatabasePath} from '../../src/runtime/storage/session-index/index.ts';
+import {join} from 'node:path';
+
 import {
-  createLocalRuntimeSessionIndex,
-  type LocalRuntimeSessionIndex,
+  characterPluginDataDirPath,
+  createLocalRuntimeSessionPaths,
+} from '../../src/runtime/storage/layout-contract.ts';
+import {
+  createLocalRuntimeSessionHistoryFeed,
+  createRuntimePluginDatabaseOpener,
 } from '../../src/runtime/storage/index.ts';
 
 const enabledWithSessionHistory = [
@@ -233,11 +237,7 @@ describe('session history plugin through the host', () => {
     const bareHost = createRuntimePluginHost({
       plugins: [],
       enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
-      sessionIndex: createLocalRuntimeSessionIndex({
-        storeRoot: bareRoot,
-        characterId: testCharacterProfile.id,
-        ownerPluginId: sessionHistoryPluginId,
-      }),
+      ...historyCapabilities(bareRoot),
     });
     const skipped = await bareHost.afterTurnCommitted(
       afterTurnContext('evt_history_cold', 'alpha'),
@@ -278,7 +278,6 @@ describe('session history plugin through the host', () => {
 async function createHistoryHost(): Promise<{
   readonly host: RuntimePluginHost;
   readonly storeRoot: string;
-  readonly sessionIndex: LocalRuntimeSessionIndex;
 }> {
   const storeRoot = createTestTempRoot('project02-history-plugin-');
 
@@ -299,25 +298,33 @@ async function createHistoryHost(): Promise<{
     exchanges: [['how is the weather?', 'Sunny.']],
   });
 
-  const sessionIndex = createLocalRuntimeSessionIndex({
-    storeRoot,
-    characterId: testCharacterProfile.id,
-    ownerPluginId: sessionHistoryPluginId,
-  });
   const host = createRuntimePluginHost({
     plugins: [],
     enabledPluginIds: enabledWithSessionHistory,
-    sessionIndex,
+    ...historyCapabilities(storeRoot),
   });
 
-  return {host, storeRoot, sessionIndex};
+  return {host, storeRoot};
+}
+
+function historyCapabilities(storeRoot: string) {
+  return {
+    sessionHistory: createLocalRuntimeSessionHistoryFeed({
+      storeRoot,
+      characterId: testCharacterProfile.id,
+    }),
+    sessionHistoryDatabase: createRuntimePluginDatabaseOpener({
+      storeRoot,
+      pluginId: sessionHistoryPluginId,
+    }),
+  };
 }
 
 function historyIndexPath(storeRoot: string): string {
-  return sessionIndexDatabasePath({
-    storeRoot,
-    ownerPluginId: sessionHistoryPluginId,
-  });
+  return join(
+    characterPluginDataDirPath({storeRoot, pluginId: sessionHistoryPluginId}),
+    'session-index.sqlite',
+  );
 }
 
 function afterTurnContext(eventId: string, sessionId: string) {

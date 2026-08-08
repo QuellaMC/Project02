@@ -1,6 +1,7 @@
 import {
-  createLocalRuntimeSessionIndex,
+  createLocalRuntimeSessionHistoryFeed,
   createProject02HomeLayout,
+  createRuntimePluginDatabaseOpener,
   LocalRuntimeStorageContractError,
   requireCharacterDataMarker,
 } from '../runtime/storage/index.ts';
@@ -385,19 +386,25 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
   assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
-  // Built only when its owner plugin is enabled: the view is the
-  // session-history plugin's capability, stored in that plugin's
-  // character-scoped data directory. Enablement changes take effect at the
-  // next host construction.
-  const sessionIndex = activationPlan.activation.enabledPluginIds.includes(
-    sessionHistoryPluginId,
-  )
-    ? createLocalRuntimeSessionIndex({
-        storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
-        characterId: activationPlan.runtimeLocation.characterScope.characterId,
-        ownerPluginId: sessionHistoryPluginId,
-      })
-    : undefined;
+  // Built only when their owner plugin is enabled: the feed and the
+  // database opener are the session-history plugin's declared
+  // capabilities, and its data lives in its own character-scoped
+  // directory. Enablement changes take effect at the next host
+  // construction.
+  const sessionHistoryCapabilities =
+    activationPlan.activation.enabledPluginIds.includes(sessionHistoryPluginId)
+      ? {
+          sessionHistory: createLocalRuntimeSessionHistoryFeed({
+            storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
+            characterId:
+              activationPlan.runtimeLocation.characterScope.characterId,
+          }),
+          sessionHistoryDatabase: createRuntimePluginDatabaseOpener({
+            storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
+            pluginId: sessionHistoryPluginId,
+          }),
+        }
+      : undefined;
 
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
@@ -411,7 +418,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
         ),
-        ...(sessionIndex === undefined ? {} : {sessionIndex}),
+        ...(sessionHistoryCapabilities ?? {}),
         toolConfirmationHandler: options.toolConfirmationHandler,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -423,12 +430,6 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       pluginConfigControl: activationPlan.pluginConfigControl,
       runtimeLocation: activationPlan.runtimeLocation,
     } satisfies Project02ConfiguredPluginHost);
-  }
-
-  if (sessionIndex !== undefined) {
-    // Advisory pre-warm so the first search finds a warm view; a real
-    // failure resurfaces honestly on the first query instead.
-    void sessionIndex.warmUp().catch(() => undefined);
   }
 
   const instantiated = await instantiateRuntimePluginPackages({
@@ -451,7 +452,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
-      ...(sessionIndex === undefined ? {} : {sessionIndex}),
+      ...(sessionHistoryCapabilities ?? {}),
       toolConfirmationHandler: options.toolConfirmationHandler,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,

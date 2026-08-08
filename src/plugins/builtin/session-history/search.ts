@@ -1,8 +1,9 @@
+import type {RuntimePluginSessionHistoryMessage} from '../../api/session-history-contract.ts';
 import type {
-  SessionIndexMessage,
+  SessionHistoryEngine,
   SessionIndexSearchResult,
   SessionIndexSessionView,
-} from '../../../runtime/storage/index.ts';
+} from './engine/index.ts';
 import {
   sessionHistoryPluginId,
   sessionHistorySearchToolName,
@@ -17,7 +18,6 @@ import type {
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 import {boundedText} from '../memory-provider/context.ts';
-import type {LocalRuntimeSessionIndex} from './state.ts';
 
 export const sessionHistorySessionIdPattern =
   '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$';
@@ -74,7 +74,7 @@ export function createSessionHistorySearchTool(): RuntimePluginProvidedTool {
 export function handleSessionHistorySearchToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
-  readonly sessionIndex: LocalRuntimeSessionIndex;
+  readonly engine: SessionHistoryEngine;
 }): RuntimePluginToolCallResult {
   const input = options.call.input;
   const query = typeof input['query'] === 'string' ? input['query'] : '';
@@ -84,7 +84,7 @@ export function handleSessionHistorySearchToolCall(options: {
     typeof input['sessionLimit'] === 'number'
       ? input['sessionLimit']
       : sessionHistorySearchDefaultSessionLimit;
-  const result = options.sessionIndex.search({
+  const result = options.engine.search({
     query,
     sessionLimit,
     ...(sessionId === undefined ? {} : {sessionId}),
@@ -145,7 +145,7 @@ function sessionHistorySessionViewOutput(
 }
 
 export function sessionHistoryMessageOutput(
-  message: SessionIndexMessage,
+  message: RuntimePluginSessionHistoryMessage,
   textLength = sessionHistoryMessageTextLength,
 ): RuntimePluginJsonObject {
   return Object.freeze({
@@ -161,7 +161,7 @@ export function sessionHistoryMessageOutput(
 }
 
 function sessionHistoryMatchedMessageOutput(
-  message: SessionIndexMessage,
+  message: RuntimePluginSessionHistoryMessage,
   query: string,
 ): RuntimePluginJsonObject {
   return Object.freeze({

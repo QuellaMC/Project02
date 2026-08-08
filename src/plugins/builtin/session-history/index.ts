@@ -13,11 +13,19 @@ import {createRuntimePluginManifest} from '../../api/manifest-validation.ts';
 import type {
   RuntimePlugin,
   RuntimePluginAfterTurnCommittedContext,
+  RuntimePluginDatabaseOpener,
   RuntimePluginEvidenceSnapshot,
+  RuntimePluginLifecycleHooks,
   RuntimePluginProvidedTool,
+  RuntimePluginSessionHistoryFeed,
   RuntimePluginToolCallResult,
-} from '../../api/types.ts';
+} from '../../api/index.ts';
 import {createSessionHistoryGuidanceHook} from './context.ts';
+import {
+  createSessionHistoryEngine,
+  SessionHistoryEngineError,
+  type SessionHistoryEngine,
+} from './engine/index.ts';
 import {
   createSessionHistoryReadTool,
   handleSessionHistoryReadToolCall,
@@ -26,13 +34,11 @@ import {
   createSessionHistorySearchTool,
   handleSessionHistorySearchToolCall,
 } from './search.ts';
-import {
-  createSessionIndexSnapshot,
-  type LocalRuntimeSessionIndex,
-} from './state.ts';
+import {createSessionHistoryCapabilitiesSnapshot} from './state.ts';
 
 type CreateSessionHistoryPluginOptions = {
-  readonly sessionIndex?: LocalRuntimeSessionIndex;
+  readonly sessionHistory?: RuntimePluginSessionHistoryFeed;
+  readonly sessionHistoryDatabase?: RuntimePluginDatabaseOpener;
 };
 
 const sessionHistoryPluginInstances = new WeakSet<RuntimePlugin>();
@@ -40,13 +46,17 @@ const sessionHistoryPluginInstances = new WeakSet<RuntimePlugin>();
 export function createSessionHistoryPlugin(
   options: CreateSessionHistoryPluginOptions = {},
 ): RuntimePlugin {
-  const sessionIndex =
-    options.sessionIndex === undefined
+  const engine =
+    options.sessionHistory === undefined ||
+    options.sessionHistoryDatabase === undefined
       ? undefined
-      : createSessionIndexSnapshot(options.sessionIndex);
+      : createEngineFromCapabilities({
+          sessionHistory: options.sessionHistory,
+          sessionHistoryDatabase: options.sessionHistoryDatabase,
+        });
   const providedTools: RuntimePluginProvidedTool[] = [];
 
-  if (sessionIndex !== undefined) {
+  if (engine !== undefined) {
     providedTools.push(createSessionHistorySearchTool());
     providedTools.push(createSessionHistoryReadTool());
   }
@@ -55,123 +65,140 @@ export function createSessionHistoryPlugin(
     manifest: createSessionHistoryPluginManifest(),
     providedTools,
     lifecycleHooks:
-      sessionIndex === undefined
-        ? {}
-        : {
-            beforeRoleModelCall: createSessionHistoryGuidanceHook(),
-            handleToolCall(call, context) {
-              if (context.character.id !== sessionIndex.characterId) {
-                return {
-                  status: 'rejected',
-                  reason: 'character_scope_mismatch',
-                  message:
-                    `Session history is bound to character ` +
-                    `"${sessionIndex.characterId}" but ` +
-                    `"${context.character.id}" is active.`,
-                  evidence: [
-                    createPluginToolEvidence({
-                      context,
-                      pluginId: sessionHistoryPluginId,
-                      status: 'rejected',
-                      summary: 'Rejected a cross-character history request.',
-                    }),
-                  ],
-                };
-              }
-
-              try {
-                if (call.toolName === sessionHistorySearchToolName) {
-                  return handleSessionHistorySearchToolCall({
-                    call,
-                    context,
-                    sessionIndex,
-                  });
-                }
-
-                if (call.toolName === sessionHistoryReadToolName) {
-                  return handleSessionHistoryReadToolCall({
-                    call,
-                    context,
-                    sessionIndex,
-                  });
-                }
-              } catch (error: unknown) {
-                if (isLocalRuntimeStorageContractError(error)) {
-                  return {
-                    status: 'rejected',
-                    reason:
-                      error.code === 'missing_file'
-                        ? 'session_not_found'
-                        : error.code === 'invalid_session_id'
-                          ? 'invalid_session_id'
-                          : 'session_history_read_failed',
-                    message: error.message,
-                    evidence: [
-                      createPluginToolEvidence({
-                        context,
-                        pluginId: sessionHistoryPluginId,
-                        status: 'rejected',
-                        summary: 'Rejected a session-history request.',
-                      }),
-                    ],
-                  };
-                }
-
-                throw error;
-              }
-
-              return unavailableSessionHistoryTool(call.toolName);
-            },
-            async afterTurnCommitted(context) {
-              if (context.character.id !== sessionIndex.characterId) {
-                return {
-                  status: 'completed',
-                  evidence: [
-                    afterTurnEvidence(
-                      context,
-                      'degraded',
-                      'Skipped indexing for a foreign character context.',
-                    ),
-                  ],
-                };
-              }
-
-              try {
-                await sessionIndex.warmUp({sessionId: context.sessionId});
-              } catch {
-                // Advisory catch-up: the next query surfaces real failures.
-                return {
-                  status: 'completed',
-                  evidence: [
-                    afterTurnEvidence(
-                      context,
-                      'degraded',
-                      'Session index catch-up failed; the next search retries.',
-                    ),
-                  ],
-                };
-              }
-
-              return {
-                status: 'completed',
-                evidence: [
-                  afterTurnEvidence(
-                    context,
-                    'accepted',
-                    'Caught the session index up to the committed turn.',
-                  ),
-                ],
-              };
-            },
-            onShutdown() {
-              sessionIndex.close();
-              return {status: 'completed', evidence: []};
-            },
-          },
+      engine === undefined ? {} : sessionHistoryLifecycleHooks(engine),
   });
 
   sessionHistoryPluginInstances.add(plugin);
   return plugin;
+}
+
+function createEngineFromCapabilities(capabilities: {
+  readonly sessionHistory: RuntimePluginSessionHistoryFeed;
+  readonly sessionHistoryDatabase: RuntimePluginDatabaseOpener;
+}): SessionHistoryEngine {
+  const snapshot = createSessionHistoryCapabilitiesSnapshot(capabilities);
+
+  return createSessionHistoryEngine({
+    feed: snapshot.sessionHistory,
+    openDatabase: snapshot.sessionHistoryDatabase,
+  });
+}
+
+function sessionHistoryLifecycleHooks(
+  engine: SessionHistoryEngine,
+): RuntimePluginLifecycleHooks {
+  const guidanceHook = createSessionHistoryGuidanceHook();
+  let warmUpKicked = false;
+
+  return {
+    beforeRoleModelCall(context) {
+      if (!warmUpKicked) {
+        // Advisory pre-warm on the first enabled turn; a real failure
+        // resurfaces honestly on the first query instead.
+        warmUpKicked = true;
+        void engine.warmUp().catch(() => undefined);
+      }
+
+      return guidanceHook(context);
+    },
+    handleToolCall(call, context) {
+      if (context.character.id !== engine.characterId) {
+        return {
+          status: 'rejected',
+          reason: 'character_scope_mismatch',
+          message:
+            `Session history is bound to character ` +
+            `"${engine.characterId}" but ` +
+            `"${context.character.id}" is active.`,
+          evidence: [
+            createPluginToolEvidence({
+              context,
+              pluginId: sessionHistoryPluginId,
+              status: 'rejected',
+              summary: 'Rejected a cross-character history request.',
+            }),
+          ],
+        };
+      }
+
+      try {
+        if (call.toolName === sessionHistorySearchToolName) {
+          return handleSessionHistorySearchToolCall({call, context, engine});
+        }
+
+        if (call.toolName === sessionHistoryReadToolName) {
+          return handleSessionHistoryReadToolCall({call, context, engine});
+        }
+      } catch (error: unknown) {
+        const reason = sessionHistoryRejectionReason(error);
+
+        if (reason !== undefined && error instanceof Error) {
+          return {
+            status: 'rejected',
+            reason,
+            message: error.message,
+            evidence: [
+              createPluginToolEvidence({
+                context,
+                pluginId: sessionHistoryPluginId,
+                status: 'rejected',
+                summary: 'Rejected a session-history request.',
+              }),
+            ],
+          };
+        }
+
+        throw error;
+      }
+
+      return unavailableSessionHistoryTool(call.toolName);
+    },
+    async afterTurnCommitted(context) {
+      if (context.character.id !== engine.characterId) {
+        return {
+          status: 'completed',
+          evidence: [
+            afterTurnEvidence(
+              context,
+              'degraded',
+              'Skipped indexing for a foreign character context.',
+            ),
+          ],
+        };
+      }
+
+      try {
+        await engine.warmUp({sessionId: context.sessionId});
+      } catch {
+        // Advisory catch-up: the next query surfaces real failures.
+        return {
+          status: 'completed',
+          evidence: [
+            afterTurnEvidence(
+              context,
+              'degraded',
+              'Session index catch-up failed; the next search retries.',
+            ),
+          ],
+        };
+      }
+
+      return {
+        status: 'completed',
+        evidence: [
+          afterTurnEvidence(
+            context,
+            'accepted',
+            'Caught the session index up to the committed turn.',
+          ),
+        ],
+      };
+    },
+    onShutdown() {
+      engine.close();
+      return {status: 'completed', evidence: []};
+    },
+  };
 }
 
 export function createSessionHistoryPluginManifest() {
@@ -213,7 +240,11 @@ export function createSessionHistoryPluginManifest() {
       defaultEnabled: true,
       reasons: ['host_provided_session_history'],
     },
-    requestedAccess: {model_input: 'write'},
+    requestedAccess: {
+      model_input: 'write',
+      session_history: 'read',
+      plugin_database: 'write',
+    },
   });
 }
 
@@ -221,15 +252,27 @@ export function isSessionHistoryPlugin(plugin: RuntimePlugin): boolean {
   return sessionHistoryPluginInstances.has(plugin);
 }
 
-/** Structural check so the plugin needs no value import of the storage layer. */
-function isLocalRuntimeStorageContractError(
-  error: unknown,
-): error is Error & {readonly code: string} {
-  return (
+/**
+ * Engine errors are the plugin's own; feed errors arrive from the runtime
+ * and are recognized structurally so the plugin needs no value import of
+ * the storage layer. Anything else is a bug and propagates.
+ */
+function sessionHistoryRejectionReason(error: unknown): string | undefined {
+  if (error instanceof SessionHistoryEngineError) {
+    return error.code === 'engine_closed'
+      ? 'session_history_read_failed'
+      : error.code;
+  }
+
+  if (
     error instanceof Error &&
     error.name === 'LocalRuntimeStorageContractError' &&
     typeof (error as {readonly code?: unknown}).code === 'string'
-  );
+  ) {
+    return 'session_history_read_failed';
+  }
+
+  return undefined;
 }
 
 function afterTurnEvidence(
@@ -260,5 +303,3 @@ function unavailableSessionHistoryTool(
     evidence: Object.freeze([]),
   };
 }
-
-export type {LocalRuntimeSessionIndex} from './state.ts';

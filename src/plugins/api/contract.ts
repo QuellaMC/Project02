@@ -33,6 +33,8 @@ export const runtimePluginDeclarationValues = [
 export const runtimePluginAccessNameValues = [
   'file_store',
   'character_file_store',
+  'session_history',
+  'plugin_database',
   'turn_context',
   'model_input',
 ] as const;

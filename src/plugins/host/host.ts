@@ -39,7 +39,10 @@ import {
   enabledPluginIdsForHost,
   isHostScopedFirstPartyRuntimePluginId,
 } from './catalog.ts';
-import type {LocalRuntimeSessionIndex} from '../builtin/session-history/index.ts';
+import type {
+  RuntimePluginDatabaseOpener,
+  RuntimePluginSessionHistoryFeed,
+} from '../api/index.ts';
 import {createPluginHookContext} from './hook-context.ts';
 import type {RuntimePluginFileStoreProvider} from '../api/file-store-contract.ts';
 import {
@@ -127,7 +130,8 @@ export type CreateRuntimePluginHostOptions = {
   readonly sessionIdentity?: object | undefined;
   readonly pluginInventoryState?: RuntimePluginInventoryHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly sessionIndex?: LocalRuntimeSessionIndex;
+  readonly sessionHistory?: RuntimePluginSessionHistoryFeed;
+  readonly sessionHistoryDatabase?: RuntimePluginDatabaseOpener;
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
@@ -523,9 +527,12 @@ function createRuntimePluginHostState(
           }),
     }),
     ...(pluginConfigControl === undefined ? {} : {pluginConfigControl}),
-    ...(options.sessionIndex === undefined
+    ...(options.sessionHistory === undefined
       ? {}
-      : {sessionIndex: options.sessionIndex}),
+      : {sessionHistory: options.sessionHistory}),
+    ...(options.sessionHistoryDatabase === undefined
+      ? {}
+      : {sessionHistoryDatabase: options.sessionHistoryDatabase}),
   });
   const plugins = Object.freeze([...hostScopedPlugins, ...configuredPlugins]);
   allPlugins = plugins;

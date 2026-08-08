@@ -3,7 +3,10 @@ import {
   sessionHistoryReadToolName,
 } from '../../api/contract.ts';
 import {createPluginToolEvidence} from '../../api/evidence-helpers.ts';
-import type {SessionIndexConversationWindow} from '../../../runtime/storage/index.ts';
+import type {
+  SessionHistoryEngine,
+  SessionIndexConversationWindow,
+} from './engine/index.ts';
 import type {
   RuntimePluginContext,
   RuntimePluginJsonObject,
@@ -15,7 +18,6 @@ import {
   sessionHistoryMessageOutput,
   sessionHistorySessionIdPattern,
 } from './search.ts';
-import type {LocalRuntimeSessionIndex} from './state.ts';
 
 const sessionHistoryReadDefaultWindow = 8;
 // 2x15+1 messages x 400 UTF-16 units stays inside the JSON boundary at the
@@ -64,7 +66,7 @@ export function createSessionHistoryReadTool(): RuntimePluginProvidedTool {
 export function handleSessionHistoryReadToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
-  readonly sessionIndex: LocalRuntimeSessionIndex;
+  readonly engine: SessionHistoryEngine;
 }): RuntimePluginToolCallResult {
   const input = options.call.input;
   const sessionId =
@@ -77,7 +79,7 @@ export function handleSessionHistoryReadToolCall(options: {
     typeof input['window'] === 'number'
       ? input['window']
       : sessionHistoryReadDefaultWindow;
-  const conversation = options.sessionIndex.readAround({
+  const conversation = options.engine.readAround({
     sessionId,
     window,
     ...(anchorMessageId === undefined ? {} : {anchorMessageId}),

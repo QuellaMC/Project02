@@ -139,3 +139,16 @@ export {
   type RuntimePluginFileStoreProvider,
   type RuntimePluginFileStoreScope,
 } from './file-store-contract.ts';
+export {
+  type OpenRuntimePluginDatabaseOptions,
+  type RuntimePluginDatabase,
+  type RuntimePluginDatabaseOpener,
+} from './database-contract.ts';
+export {
+  type ReadNewSessionHistoryMessagesOptions,
+  type RuntimePluginSessionHistoryFeed,
+  type RuntimePluginSessionHistoryListing,
+  type RuntimePluginSessionHistoryMessage,
+  type RuntimePluginSessionHistorySummary,
+  type SessionHistoryMessageBatch,
+} from './session-history-contract.ts';
