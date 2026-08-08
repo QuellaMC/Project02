@@ -24,6 +24,7 @@ import {
 } from '../atomic-file.ts';
 import {isParseableJson} from '../json-lines.ts';
 import {
+  characterPluginDataDirPath,
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout,
 } from '../layout-contract.ts';
@@ -62,11 +63,25 @@ type DurablePluginFileStoreOperation = {
   readonly value: RuntimePluginJsonValue;
 };
 
+/**
+ * Character-scoped stores share one durable identity across sessions, so
+ * their WAL journals recover under any session. The sentinel cannot
+ * collide with a real session id (ids may not start with a dot).
+ */
+export const characterScopeDurableStoreIdentity = '.character-scope';
+
 export function durablePluginRoot(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
   readonly pluginId: string;
 }): string {
+  if (options.sessionId === characterScopeDurableStoreIdentity) {
+    return characterPluginDataDirPath({
+      storeRoot: options.storeRoot,
+      pluginId: options.pluginId,
+    });
+  }
+
   return createLocalRuntimePluginPaths(options).pluginRoot;
 }
 

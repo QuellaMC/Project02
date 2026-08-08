@@ -82,7 +82,10 @@ export function createInMemoryRuntimePluginFileStore(
 function inMemoryPluginStoreState(
   options: InMemoryRuntimePluginFileStoreOptions,
 ): InMemoryPluginStoreState {
-  const key = `${options.sessionId}\u0000${options.pluginId}`;
+  const key =
+    options.scope === 'character'
+      ? `c\u0000${options.pluginId}`
+      : `s\u0000${options.sessionId}\u0000${options.pluginId}`;
   let stores = inMemoryPluginStoresBySessionIdentity.get(
     options.sessionIdentity,
   );

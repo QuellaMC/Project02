@@ -50,6 +50,7 @@ export type {
   InMemoryRuntimePluginFileStoreOptions,
   RuntimePluginFileStorePathMode,
   RuntimePluginFileStoreProvider,
+  RuntimePluginFileStoreScope,
 } from './api/file-store-contract.ts';
 export {
   runtimePluginBeforeRoleModelCallRejectionReason,
