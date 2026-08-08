@@ -5,10 +5,10 @@ import type {RuntimePluginSessionHistoryMessage} from '../../../api/session-hist
 import type {SessionIndexSessionView} from './contract.ts';
 import {messagesTable} from './schema.ts';
 
-// Hermes-style retrieval: one best hit per session, chosen and ranked in
-// SQL so a hit-heavy session can never crowd others out of the result,
-// then presented as an anchored view so results carry conversation
-// context instead of disconnected messages.
+// Retrieval returns one best hit per session, chosen and ranked in SQL
+// so a hit-heavy session can never crowd others out of the result, then
+// presented as an anchored view so results carry conversation context
+// instead of disconnected messages.
 const anchoredViewBookendCount = 2;
 const anchoredViewRadius = 3;
 
@@ -71,10 +71,10 @@ type RawSearchHit = {
 };
 
 /**
- * Query routing, in Hermes's shape minus its compiled CJK tokenizer:
- * substring LIKE for queries too short to form a trigram, the trigram
- * index for CJK text unicode61 cannot segment, and the word index first
- * for everything else with a trigram retry when it finds nothing.
+ * Query routing: substring LIKE for queries too short to form a trigram,
+ * the trigram index for CJK text unicode61 cannot segment, and the word
+ * index first for everything else with a trigram retry when it finds
+ * nothing.
  */
 function routedSearchHits(
   database: BetterSQLite3Database,
