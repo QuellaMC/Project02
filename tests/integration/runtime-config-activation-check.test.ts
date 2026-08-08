@@ -63,8 +63,8 @@ describe('runtime config activation checks and construction', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedAccess: {file_store: 'write', model_input: 'write'},
-        grantedAccess: {file_store: 'write', model_input: 'write'},
+        requestedAccess: {character_file_store: 'write', model_input: 'write'},
+        grantedAccess: {character_file_store: 'write', model_input: 'write'},
       }),
     );
   });
@@ -106,8 +106,8 @@ describe('runtime config activation checks and construction', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedAccess: {file_store: 'write', model_input: 'write'},
-        grantedAccess: {file_store: 'write', model_input: 'write'},
+        requestedAccess: {character_file_store: 'write', model_input: 'write'},
+        grantedAccess: {character_file_store: 'write', model_input: 'write'},
       }),
     );
   });
@@ -155,8 +155,8 @@ describe('runtime config activation checks and construction', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedAccess: {file_store: 'write', model_input: 'write'},
-        grantedAccess: {file_store: 'write', model_input: 'write'},
+        requestedAccess: {character_file_store: 'write', model_input: 'write'},
+        grantedAccess: {character_file_store: 'write', model_input: 'write'},
       }),
     );
   });

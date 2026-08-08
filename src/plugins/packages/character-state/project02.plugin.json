@@ -36,7 +36,7 @@
       "reasons": ["built_in_character_state"]
     },
     "requestedAccess": {
-      "file_store": "write",
+      "character_file_store": "write",
       "model_input": "write"
     }
   }

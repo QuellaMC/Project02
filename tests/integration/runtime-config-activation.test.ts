@@ -603,7 +603,7 @@ describe('runtime config activation planning', () => {
       expect.objectContaining({
         pluginId: characterStatePluginId,
         enabled: false,
-        requestedAccess: {file_store: 'write', model_input: 'write'},
+        requestedAccess: {character_file_store: 'write', model_input: 'write'},
         grantedAccess: {},
       }),
     );
@@ -643,7 +643,7 @@ describe('runtime config activation planning', () => {
       expect.objectContaining({
         pluginId: characterStatePluginId,
         enabled: false,
-        requestedAccess: {file_store: 'write', model_input: 'write'},
+        requestedAccess: {character_file_store: 'write', model_input: 'write'},
         grantedAccess: {},
       }),
     );
@@ -718,7 +718,7 @@ describe('runtime config activation planning', () => {
       expect.objectContaining({
         pluginId: characterStatePluginId,
         enabled: false,
-        requestedAccess: {file_store: 'write', model_input: 'write'},
+        requestedAccess: {character_file_store: 'write', model_input: 'write'},
         grantedAccess: {},
       }),
     );

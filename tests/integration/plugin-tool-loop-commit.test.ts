@@ -825,6 +825,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
       pluginId: characterStatePluginId,
+      scope: 'character',
     });
 
     const result = await runLocalUserMessageEvent({
