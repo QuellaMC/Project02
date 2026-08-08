@@ -194,23 +194,25 @@ export function assertRuntimePluginFileStoreProviderPresent(options: {
     return;
   }
 
-  const grantedPlugin = options.enabledPlugins.find(plugin =>
-    runtimePluginGrantsAccess({
-      access: runtimePluginAccessForPlugin({
-        plugin,
-        accessByPluginId: options.accessByPluginId,
+  for (const accessName of ['file_store', 'character_file_store'] as const) {
+    const grantedPlugin = options.enabledPlugins.find(plugin =>
+      runtimePluginGrantsAccess({
+        access: runtimePluginAccessForPlugin({
+          plugin,
+          accessByPluginId: options.accessByPluginId,
+        }),
+        accessName,
+        requiredAccess: 'read',
       }),
-      accessName: 'file_store',
-      requiredAccess: 'read',
-    }),
-  );
-
-  if (grantedPlugin !== undefined) {
-    throw new TypeError(
-      `Plugin "${grantedPlugin.manifest.id}" is granted file_store access, ` +
-        'but the host was created without a file-store provider. Pass ' +
-        'createRuntimePluginHost({ fileStore }) or compose the host through ' +
-        'the configured plugin activation factory.',
     );
+
+    if (grantedPlugin !== undefined) {
+      throw new TypeError(
+        `Plugin "${grantedPlugin.manifest.id}" is granted ${accessName} ` +
+          'access, but the host was created without a file-store provider. ' +
+          'Pass createRuntimePluginHost({ fileStore }) or compose the host ' +
+          'through the configured plugin activation factory.',
+      );
+    }
   }
 }

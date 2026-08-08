@@ -66,7 +66,10 @@ export default {
       severity: 'error',
       from: {path: '^src/', pathNot: ['^src/runtime/storage/sqlite\\.ts$']},
       to: {
-        path: '^node_modules/better-sqlite3/',
+        // pnpm nests the resolved path under node_modules/.pnpm/, so the
+        // node_modules segment must stay unanchored; the bare name covers
+        // unresolved imports.
+        path: ['^better-sqlite3$', 'node_modules/better-sqlite3/'],
         dependencyTypesNot: ['type-only'],
       },
     },

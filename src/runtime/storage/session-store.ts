@@ -645,9 +645,10 @@ export function assertLocalRuntimeSessionDirectoryIsReal(
   );
 }
 
-function assertSessionDirectoryReadable(
+export function assertSessionDirectoryReadable(
   layout: LocalRuntimeStorageLayout,
   sessionId: string,
+  onMissing: 'reject' | 'allow' = 'reject',
 ): void {
   const sessionRoot = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
@@ -658,7 +659,7 @@ function assertSessionDirectoryReadable(
     entry: describeRealEntry(sessionRoot),
     path: sessionRoot,
     label: 'session directory',
-    onMissing: 'reject',
+    onMissing,
   });
 }
 

@@ -35,9 +35,15 @@ export function openRuntimeSqliteDatabase(
 
   try {
     return openAtExpectedVersion(options);
-  } catch {
-    // Any first-attempt failure means an unusable view; the JSONL log is
-    // canonical, so the recovery is delete-and-reproject, not repair.
+  } catch (error: unknown) {
+    // Delete only a positively unusable view: corruption or a schema
+    // version this build does not serve. A transient failure (another
+    // window's lock, a full disk) propagates and leaves the database to
+    // its current owner; the JSONL log stays canonical either way.
+    if (!isRebuildableSqliteViewFailure(error)) {
+      throw sqliteViewFailure('write_failed', options.filePath, error);
+    }
+
     deleteRuntimeSqliteDatabase(options.filePath);
   }
 
@@ -66,9 +72,11 @@ function openAtExpectedVersion(
   try {
     // The view carries the same conversation text as the 0o600 transcripts.
     chmodPathSync(options.filePath, 0o600);
+    // The busy timeout comes first: journal-mode conversion takes a lock,
+    // and a second window must wait on it rather than fail.
+    database.pragma('busy_timeout = 2000');
     database.pragma('journal_mode = WAL');
     database.pragma('synchronous = NORMAL');
-    database.pragma('busy_timeout = 2000');
     database.pragma('foreign_keys = ON');
 
     const version = readUserVersion(database);
@@ -117,6 +125,23 @@ function isEmptyDatabase(database: RuntimeSqliteDatabase): boolean {
     .get();
 
   return isRecord(row) && row['objectCount'] === 0;
+}
+
+function isRebuildableSqliteViewFailure(error: unknown): boolean {
+  if (error instanceof LocalRuntimeStorageContractError) {
+    return error.code === 'unsupported_schema_version';
+  }
+
+  if (typeof error !== 'object' || error === null) {
+    return false;
+  }
+
+  const code = (error as {readonly code?: unknown}).code;
+
+  return (
+    typeof code === 'string' &&
+    (code.startsWith('SQLITE_CORRUPT') || code === 'SQLITE_NOTADB')
+  );
 }
 
 function closeQuietly(database: RuntimeSqliteDatabase): void {
