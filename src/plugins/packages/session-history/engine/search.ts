@@ -27,7 +27,7 @@ export function searchSessionIndex(options: {
   readonly database: BetterSQLite3Database;
   readonly query: string;
   readonly sessionId?: string;
-  readonly excludeSessionId?: string;
+  readonly excludeMessageIds?: readonly string[];
   readonly sessionLimit: number;
 }): SessionSearchHits {
   const query = options.query.trim();
@@ -41,8 +41,7 @@ export function searchSessionIndex(options: {
 
   const scope: SearchScope = {
     sessionId: options.sessionId,
-    excludeSessionId:
-      options.sessionId === undefined ? options.excludeSessionId : undefined,
+    excludeMessageIds: options.excludeMessageIds ?? [],
     sessionLimit: Math.max(1, options.sessionLimit),
   };
   const hits = routedSearchHits(options.database, query, scope);
@@ -58,7 +57,7 @@ export function searchSessionIndex(options: {
 
 type SearchScope = {
   readonly sessionId: string | undefined;
-  readonly excludeSessionId: string | undefined;
+  readonly excludeMessageIds: readonly string[];
   readonly sessionLimit: number;
 };
 
@@ -124,7 +123,7 @@ function ftsSearchHits(
              ) AS hitOrder
       FROM ${sql.raw(ftsTable)}(${phrase}) AS f
       JOIN messages AS m ON m.id = f.rowid
-      ${scopeWhereClause(scope)}
+      ${scopeFilterClause(scope, 'WHERE')}
     )
     SELECT sessionId, ordinal, committedAt, rank,
            COUNT(*) OVER () AS totalSessionsWithHits
@@ -155,7 +154,7 @@ function substringSearchHits(
              ) AS hitOrder
       FROM messages AS m
       WHERE unicode_fold(m.text) LIKE ${pattern} ESCAPE '\\'
-      ${scopeAndClause(scope)}
+      ${scopeFilterClause(scope, 'AND')}
     )
     SELECT sessionId, ordinal, committedAt, rank,
            COUNT(*) OVER () AS totalSessionsWithHits
@@ -166,28 +165,32 @@ function substringSearchHits(
   `);
 }
 
-function scopeWhereClause(scope: SearchScope): SQL {
+/**
+ * Scope filters restrict which messages may MATCH; anchored views still
+ * render the complete conversation around a hit. Excluded ids suppress
+ * noise hits on text the caller already sees, they do not redact it.
+ */
+function scopeFilterClause(scope: SearchScope, lead: 'WHERE' | 'AND'): SQL {
+  const conditions: SQL[] = [];
+
   if (scope.sessionId !== undefined) {
-    return sql`WHERE m.session_id = ${scope.sessionId}`;
+    conditions.push(sql`m.session_id = ${scope.sessionId}`);
   }
 
-  if (scope.excludeSessionId !== undefined) {
-    return sql`WHERE m.session_id <> ${scope.excludeSessionId}`;
+  if (scope.excludeMessageIds.length > 0) {
+    conditions.push(
+      sql`m.message_id NOT IN (${sql.join(
+        scope.excludeMessageIds.map(id => sql`${id}`),
+        sql`, `,
+      )})`,
+    );
   }
 
-  return sql``;
-}
-
-function scopeAndClause(scope: SearchScope): SQL {
-  if (scope.sessionId !== undefined) {
-    return sql`AND m.session_id = ${scope.sessionId}`;
+  if (conditions.length === 0) {
+    return sql``;
   }
 
-  if (scope.excludeSessionId !== undefined) {
-    return sql`AND m.session_id <> ${scope.excludeSessionId}`;
-  }
-
-  return sql``;
+  return sql`${sql.raw(lead)} ${sql.join(conditions, sql` AND `)}`;
 }
 
 function escapeLikePattern(text: string): string {

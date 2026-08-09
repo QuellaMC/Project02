@@ -40,7 +40,8 @@
     "requestedAccess": {
       "model_input": "write",
       "session_history": "read",
-      "plugin_database": "write"
+      "plugin_database": "write",
+      "turn_context": "read"
     }
   }
 }

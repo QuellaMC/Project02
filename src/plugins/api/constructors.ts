@@ -70,6 +70,21 @@ import {
   requiredStringArrayOrThrow,
 } from './validation-primitives.ts';
 
+function frozenRecentVisibleMessageIds(
+  source: CreateRuntimePluginContextOptions['recentVisibleMessageIds'],
+): readonly string[] {
+  const ids = (typeof source === 'function' ? source() : source) ?? [];
+
+  return Object.freeze(
+    ids.map((id, index) =>
+      requirePlainNonEmptyString(
+        id,
+        `recentVisibleMessageIds[${String(index)}]`,
+      ),
+    ),
+  );
+}
+
 export function createRuntimePluginContext(
   options: CreateRuntimePluginContextOptions,
 ): RuntimePluginContext {
@@ -97,6 +112,12 @@ export function createRuntimePluginContext(
       options.currentUserMessage,
       'currentUserMessage',
     ),
+    // A getter, because interim replies commit while the turn's context
+    // is live; hook scopes snapshot the current value when they spread
+    // the context per invocation.
+    get recentVisibleMessageIds(): readonly string[] {
+      return frozenRecentVisibleMessageIds(options.recentVisibleMessageIds);
+    },
     character: Object.freeze({
       id: requirePlainNonEmptyString(options.character.id, 'character.id'),
       displayName: requirePlainNonEmptyString(

@@ -215,14 +215,18 @@ function grantedPluginDatabaseOpener(
 }
 
 const scrubbedRuntimePluginCurrentUserMessage = '';
+const scrubbedRuntimePluginRecentVisibleMessageIds: readonly string[] =
+  Object.freeze([]);
 
 function scrubRuntimePluginTurnContext<TContext extends RuntimePluginContext>(
   context: Omit<TContext, InheritedCapabilityContextFields>,
 ): Omit<TContext, InheritedCapabilityContextFields> {
-  // Empty currentUserMessage represents no turn_context.read grant.
+  // Empty turn fields represent no turn_context.read grant; message ids
+  // carry session and sequence metadata, so they are turn context too.
   const baseContext = {
     ...context,
     currentUserMessage: scrubbedRuntimePluginCurrentUserMessage,
+    recentVisibleMessageIds: scrubbedRuntimePluginRecentVisibleMessageIds,
   };
 
   if ('committedTurn' in context) {

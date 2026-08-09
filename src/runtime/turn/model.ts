@@ -141,6 +141,14 @@ async function prepareRuntimeTurn(
     sessionId: decisionContext.sessionId,
     eventType: state.event.type,
     currentUserMessage: state.event.payload.currentUserMessage,
+    // What the model sees this turn: the recent window plus everything
+    // committed so far, read live because interim replies land while
+    // the turn is still running.
+    recentVisibleMessageIds: () =>
+      [
+        ...decisionContext.recentVisibleMessages,
+        ...state.committedVisibleMessages,
+      ].map(message => message.id),
     character: decisionContext.characterSnapshot,
   });
   const pluginHost = state.options.pluginHost;
