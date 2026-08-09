@@ -206,7 +206,11 @@ async function runMemorySearchTool(
     pluginId: options.pluginId,
     output: {items: items.map(memoryItemOutput)},
     summary: `Returned ${String(items.length)} memory search result(s).`,
-    sourceReferences: searchSourceReferences({context, items}),
+    sourceReferences: searchSourceReferences({
+      context,
+      items,
+      searchToolName: options.searchToolName,
+    }),
   });
 }
 
@@ -379,6 +383,7 @@ function memoryContextItemId(providerItemId: string): string {
 function searchSourceReferences(options: {
   readonly context: RuntimePluginContext;
   readonly items: readonly MemoryRecallItem[];
+  readonly searchToolName: string;
 }): readonly RuntimePluginSourceReference[] {
   const itemSourceReferences = options.items.flatMap(
     item => item.sourceReferences,
@@ -391,7 +396,7 @@ function searchSourceReferences(options: {
   return Object.freeze([
     {
       kind: 'runtime',
-      id: `${options.context.eventId}:memory.search.no_results`,
+      id: `${options.context.eventId}:${options.searchToolName}.no_results`,
       title: 'Memory search completed with no results',
     },
   ] satisfies RuntimePluginSourceReference[]);
