@@ -13,6 +13,8 @@ import {createProject02Plugin as createMem0PackagePlugin} from '../packages/mem0
 import {mem0PluginId} from '../packages/mem0/plugin.ts';
 import {createProject02Plugin as createOpenClawCompatPackagePlugin} from '../packages/openclaw-compat/index.ts';
 import {openClawCompatPluginId} from '../packages/openclaw-compat/plugin.ts';
+import {createProject02Plugin as createHermesCompatPackagePlugin} from '../packages/hermes-compat/index.ts';
+import {hermesCompatPluginId} from '../packages/hermes-compat/plugin.ts';
 
 const bundledRuntimePluginFactories = new Map<
   string,
@@ -61,6 +63,13 @@ const bundledRuntimePluginFactories = new Map<
     Object.freeze({
       entryRelativePath: 'index.ts',
       factory: createOpenClawCompatPackagePlugin,
+    }),
+  ],
+  [
+    hermesCompatPluginId,
+    Object.freeze({
+      entryRelativePath: 'index.ts',
+      factory: createHermesCompatPackagePlugin,
     }),
   ],
 ]);

@@ -1,0 +1,68 @@
+{
+  "$schema": "../../../../schemas/project02.plugin.schema.json",
+  "format": "project02.plugin.v1",
+  "entry": "./index.ts",
+  "manifest": {
+    "id": "hermes-compat",
+    "displayName": "Hermes Memory Provider Compat",
+    "version": "1.0.0",
+    "kind": "memory_provider",
+    "description": "Mounts a Hermes memory-provider module (JS binding of the provider ABC: prefetch, syncTurn, search, shutdown) as a memory provider. Pinned to interface v1; their system-prompt-block verb is not bridged, and loading the configured module runs operator-trusted code.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
+    },
+    "declaredPlugins": [
+      "before_role_model_call",
+      "after_turn_committed",
+      "tool_provider",
+      "handle_tool_call",
+      "on_shutdown"
+    ],
+    "config": {
+      "scope": "global_with_character_overrides",
+      "fields": [
+        {
+          "name": "modulePath",
+          "description": "Absolute path to the provider module to mount. Importing it executes operator-trusted code.",
+          "required": true,
+          "secret": false,
+          "valueType": "path",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true
+        },
+        {
+          "name": "interfaceVersion",
+          "description": "Pinned compat interface version this adapter validates the module against.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "allowedValues": ["1"],
+          "defaultValueSummary": "1",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true
+        }
+      ]
+    },
+    "firstParty": false,
+    "runtimePolicy": {
+      "timeoutMs": 8000,
+      "redactionLabels": ["memory"],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "degrade",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": false,
+      "reasons": ["memory_provider_package"]
+    },
+    "requestedAccess": {
+      "turn_context": "read",
+      "model_input": "write"
+    }
+  }
+}

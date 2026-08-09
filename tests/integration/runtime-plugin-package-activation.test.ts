@@ -26,6 +26,7 @@ import {runtimePluginConstructionErrorName} from '../../src/plugins/api/construc
 import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.ts';
 import {mem0PluginId} from '../../src/plugins/packages/mem0/plugin.ts';
 import {openClawCompatPluginId} from '../../src/plugins/packages/openclaw-compat/plugin.ts';
+import {hermesCompatPluginId} from '../../src/plugins/packages/hermes-compat/plugin.ts';
 import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
@@ -62,6 +63,7 @@ describe('configured runtime plugin package activation', () => {
         characterStatePluginId,
         demoConfigPluginId,
         firstPartyModelToolsPluginId,
+        hermesCompatPluginId,
         mem0PluginId,
         openClawCompatPluginId,
         runtimePluginId,
@@ -81,6 +83,7 @@ describe('configured runtime plugin package activation', () => {
       [characterMemoryPluginId]: 'bundled',
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
+      [hermesCompatPluginId]: 'bundled',
       [mem0PluginId]: 'bundled',
       [openClawCompatPluginId]: 'bundled',
       [sessionHistoryPluginId]: 'bundled',
@@ -668,6 +671,7 @@ describe('configured runtime plugin package activation', () => {
       [characterMemoryPluginId]: 'bundled',
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
+      [hermesCompatPluginId]: 'bundled',
       [mem0PluginId]: 'bundled',
       [openClawCompatPluginId]: 'bundled',
       [sessionHistoryPluginId]: 'bundled',
