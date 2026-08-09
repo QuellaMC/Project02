@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Project02 Memory System</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #17202a; }
+    code, pre { font-family: ui-monospace, monospace; }
+    pre { overflow-x: auto; padding: 1rem; background: #f4f6f7; border-radius: 0.4rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 0.55rem; border: 1px solid #ccd1d1; text-align: left; vertical-align: top; }
+    .rule { padding: 0.8rem 1rem; border-left: 4px solid #2874a6; background: #ebf5fb; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Project02 Memory System</h1>
+
+    <p>
+      A character has three ways to know something that happened before this turn, and each
+      lives in its own layer with its own trust story: a tiny curated memory that is always
+      in the prompt, session history it can search on demand, and at most one external
+      retrieval-driven provider running alongside them.
+    </p>
+
+    <p class="rule">
+      The model curates and proposes; the runtime validates, caps, and commits. No layer lets
+      raw model output or foreign plugin content write the trusted prompt directly.
+    </p>
+
+    <h2>The three layers</h2>
+
+    <table>
+      <tr>
+        <th></th>
+        <th>Curated memory (<code>character-memory</code>)</th>
+        <th>Session search (<code>session-history</code>)</th>
+        <th>External provider (<code>mem0</code>, compat packages)</th>
+      </tr>
+      <tr>
+        <td>Storage</td>
+        <td>One JSON document under <code>plugin-data/character-memory/</code></td>
+        <td>Canonical transcripts + a rebuildable SQLite index</td>
+        <td>The provider's own backend</td>
+      </tr>
+      <tr>
+        <td>Size</td>
+        <td>Tiny: 2,200 chars of notes + 1,375 chars of user profile per character</td>
+        <td>Every session</td>
+        <td>Unbounded, provider-owned</td>
+      </tr>
+      <tr>
+        <td>Retrieval</td>
+        <td>Always injected, whole store</td>
+        <td>On-demand via <code>sessions.search</code> / <code>sessions.read</code></td>
+        <td>Per-turn recall plus <code>&lt;provider&gt;.search</code> / <code>&lt;provider&gt;.add</code></td>
+      </tr>
+      <tr>
+        <td>Written by</td>
+        <td>The model, through <code>memory.update</code></td>
+        <td>Recorded automatically</td>
+        <td>Per-turn capture (backend extracts) + explicit adds</td>
+      </tr>
+      <tr>
+        <td>Prompt placement</td>
+        <td>Trusted curated-context frame</td>
+        <td>Tool results</td>
+        <td>Untrusted plugin-context frame, budget-capped</td>
+      </tr>
+      <tr>
+        <td>Default</td>
+        <td>On</td>
+        <td>On</td>
+        <td>Off; enable one</td>
+      </tr>
+    </table>
+
+    <h2>Curated memory</h2>
+
+    <p>
+      The <code>character-memory</code> package keeps two capped stores per character:
+      character notes and a user profile. The whole store is injected every session as a
+      <em>Curated memory</em> block with capacity headers, so the character never has to
+      search for what it must always know. The snapshot is frozen per launch: writes land on
+      disk immediately and reach the prompt at the next launch, keeping the prompt prefix
+      byte-stable for provider caching.
+    </p>
+
+    <p>
+      The model maintains the store through one atomic tool, <code>memory.update</code>:
+      <code>add</code> appends an entry, <code>replace</code> and <code>remove</code> select
+      exactly one existing entry by a unique <code>old_text</code> substring, and a batch
+      either fully commits or fully rejects. Capacity overflows reject with usage numbers so
+      the model compresses or prunes instead of silently losing entries. There is no read
+      tool and no automatic extraction.
+    </p>
+
+    <h2>Session search</h2>
+
+    <p>
+      Everything said in past sessions is recorded and indexed; the character recovers exact
+      conversations with <code>sessions.search</code> and <code>sessions.read</code>. Curated
+      memory holds what must always be known; session search recovers what was merely said.
+      A fact worth keeping gets promoted by the model from a transcript into
+      <code>memory.update</code>.
+    </p>
+
+    <h2>External providers</h2>
+
+    <p>
+      Retrieval-driven long-term memory rides the <code>memory_provider</code> plugin kind:
+      per-turn recall items enter the untrusted plugin frame (source-referenced, bounded,
+      budget-capped), turns are captured for backend-side extraction, and each provider
+      exposes namespaced search/add tools. Providers are disabled by default; enable one and,
+      when several are enabled, select it with
+      <code>runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation keeps at
+      most one selected, so an external provider always runs <em>alongside</em> curated
+      memory, never instead of it.
+    </p>
+
+    <table>
+      <tr>
+        <th>Package</th>
+        <th>Backend</th>
+        <th>Notes</th>
+      </tr>
+      <tr>
+        <td><code>mem0</code></td>
+        <td>Mem0 platform API or a self-hosted Mem0 server</td>
+        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores verbatim.</td>
+      </tr>
+      <tr>
+        <td><code>openclaw-compat</code></td>
+        <td>An OpenClaw context-engine plugin module</td>
+        <td>Pinned interface v1: assembly becomes recall, turns are ingested; no tool surface.</td>
+      </tr>
+      <tr>
+        <td><code>hermes-compat</code></td>
+        <td>A Hermes memory-provider module (JS binding)</td>
+        <td>Pinned interface v1: prefetch/syncTurn/search/shutdown; one search tool.</td>
+      </tr>
+    </table>
+
+    <h2>Trust model</h2>
+
+    <p>
+      Curated memory renders in a trusted prompt frame because the runtime owns every step:
+      entries are validated and capped at write time, sections are typed and screened at
+      render time, and the <code>curated_context</code> access that feeds the frame is granted
+      only to bundled packages by catalog provenance — a manifest flag alone never earns it.
+      External provider content stays in the untrusted plugin frame under the shared token
+      budget, and recall items without source references are dropped rather than shown.
+    </p>
+
+    <p class="rule">
+      Compat packages import the module the operator configures, which executes
+      operator-trusted code — the same trust an installed operator package already gets.
+      Both compat surfaces are version-pinned: when the foreign interface moves, construction
+      fails with the exact mismatch instead of guessing.
+    </p>
+
+    <h2>Picking a setup</h2>
+
+    <table>
+      <tr>
+        <th>Want</th>
+        <th>Do</th>
+      </tr>
+      <tr>
+        <td>Characters that remember preferences and facts out of the box</td>
+        <td>Nothing — curated memory and session search are on by default.</td>
+      </tr>
+      <tr>
+        <td>Large semantic long-term memory</td>
+        <td>Enable <code>mem0</code>, set <code>MEM0_API_KEY</code> (or point <code>baseUrl</code> at a self-hosted server).</td>
+      </tr>
+      <tr>
+        <td>Reuse a memory plugin from another ecosystem</td>
+        <td>Enable the matching compat package and set its <code>modulePath</code>.</td>
+      </tr>
+    </table>
+  </main>
+</body>
+</html>
