@@ -6,6 +6,7 @@ import {
 } from '../../api/contract.ts';
 import type {
   RuntimePlugin,
+  RuntimePluginManifest,
   RuntimePluginProvidedTool,
 } from '../../api/types.ts';
 import {createMemoryProviderLifecycleHooks} from './provider-lifecycle.ts';
@@ -16,18 +17,26 @@ export type CreateMemoryProviderRuntimePluginOptions = {
   readonly pluginId?: string;
   readonly version?: string;
   readonly toolNamespace?: string;
+  /**
+   * Descriptor manifest for packaged providers. Package loading requires the
+   * returned manifest to equal the descriptor, so the factory adopts it
+   * wholesale after consistency checks; hooks and tools still derive from
+   * the provider.
+   */
+  readonly manifest?: RuntimePluginManifest;
 };
 
 export function createMemoryProviderRuntimePlugin(
   provider: Project02MemoryProvider,
   options: CreateMemoryProviderRuntimePluginOptions = {},
 ): RuntimePlugin {
-  const pluginId = options.pluginId ?? provider.id;
-  const toolNamespace = options.toolNamespace ?? 'memory';
+  const suppliedManifest = consistentSuppliedManifest(provider, options);
+  const pluginId = suppliedManifest?.id ?? options.pluginId ?? provider.id;
+  const toolNamespace = options.toolNamespace ?? provider.id;
   const searchToolName = `${toolNamespace}.search`;
   const addToolName = `${toolNamespace}.add`;
   return createRuntimePlugin({
-    manifest: {
+    manifest: suppliedManifest ?? {
       id: pluginId,
       displayName: provider.displayName,
       version: options.version ?? '1.0.0',
@@ -70,6 +79,58 @@ export function createMemoryProviderRuntimePlugin(
       addToolName,
     }),
   });
+}
+
+/**
+ * A supplied manifest is the descriptor's; anything the provider needs but
+ * the descriptor omits would surface as scrubbed context or rejected tools
+ * at runtime, so divergence fails at construction instead.
+ */
+function consistentSuppliedManifest(
+  provider: Project02MemoryProvider,
+  options: CreateMemoryProviderRuntimePluginOptions,
+): RuntimePluginManifest | undefined {
+  const manifest = options.manifest;
+
+  if (manifest === undefined) {
+    return undefined;
+  }
+
+  if (options.pluginId !== undefined || options.version !== undefined) {
+    throw new TypeError(
+      'Memory provider manifest option cannot combine with pluginId or version overrides.',
+    );
+  }
+
+  if (manifest.kind !== 'memory_provider') {
+    throw new TypeError(
+      `Memory provider manifest "${manifest.id}" must have kind "memory_provider", not "${manifest.kind}".`,
+    );
+  }
+
+  for (const [accessName, requiredLevel] of Object.entries(
+    memoryProviderRequestedAccess(provider),
+  )) {
+    const granted =
+      manifest.requestedAccess[accessName as keyof RuntimePluginAccessMap];
+
+    if (!accessLevelSatisfies(granted, requiredLevel)) {
+      throw new TypeError(
+        `Memory provider manifest "${manifest.id}" must request ${accessName} "${requiredLevel}" for the implemented provider methods.`,
+      );
+    }
+  }
+
+  return manifest;
+}
+
+function accessLevelSatisfies(
+  granted: 'none' | 'read' | 'write' | undefined,
+  required: 'none' | 'read' | 'write',
+): boolean {
+  const rank = {none: 0, read: 1, write: 2} as const;
+
+  return rank[granted ?? 'none'] >= rank[required];
 }
 
 function memoryProviderDeclarations(
