@@ -1,14 +1,34 @@
 import {join} from 'node:path';
 
-import type {RuntimePluginDatabaseOpener} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginDatabaseOpener,
+  RuntimePluginDatabaseProvider,
+} from '../../plugins/api/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
 import {characterPluginDataDirPath} from './layout-contract.ts';
 import {openRuntimeSqliteDatabase} from './sqlite.ts';
 
+/** One provider per character store; the host curries it per plugin. */
+export function createRuntimePluginDatabaseProvider(options: {
+  readonly storeRoot: string;
+}): RuntimePluginDatabaseProvider {
+  return Object.freeze({
+    openPluginDatabase: databaseOptions =>
+      createRuntimePluginDatabaseOpener({
+        storeRoot: options.storeRoot,
+        pluginId: databaseOptions.pluginId,
+      })({
+        name: databaseOptions.name,
+        schemaVersion: databaseOptions.schemaVersion,
+        initializeSchema: databaseOptions.initializeSchema,
+      }),
+  });
+}
+
 /**
- * Scopes the sqlite seam to one plugin's character data directory. The
- * composition root builds one per plugin, so the opener itself is the
- * boundary: a plugin can only ever open databases in its own folder.
+ * Scopes the sqlite seam to one plugin's character data directory: the
+ * opener itself is the boundary, so a plugin can only ever open databases
+ * in its own folder.
  */
 export function createRuntimePluginDatabaseOpener(options: {
   readonly storeRoot: string;

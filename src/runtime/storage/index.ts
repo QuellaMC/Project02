@@ -33,7 +33,10 @@ export {
 } from './home.ts';
 export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
 export {createLocalRuntimeSessionHistoryFeed} from './session-history-feed.ts';
-export {createRuntimePluginDatabaseOpener} from './plugin-database.ts';
+export {
+  createRuntimePluginDatabaseOpener,
+  createRuntimePluginDatabaseProvider,
+} from './plugin-database.ts';
 export {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
