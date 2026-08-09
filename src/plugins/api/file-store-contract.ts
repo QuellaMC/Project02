@@ -1,8 +1,16 @@
 import type {RuntimePluginFileStore} from './types.ts';
 
+export type RuntimePluginFileStoreScope = 'session' | 'character';
+
 type RuntimePluginFileStoreIdentity = {
   readonly sessionId: string;
   readonly pluginId: string;
+  /**
+   * Placement: per-session scratch (the default) or the plugin's
+   * character-scoped cross-session data directory. sessionId always names
+   * the calling session; character-scoped placement does not use it.
+   */
+  readonly scope?: RuntimePluginFileStoreScope;
 };
 
 type DurableRuntimePluginFileStoreOptions = RuntimePluginFileStoreIdentity & {

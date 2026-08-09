@@ -17,6 +17,7 @@ export function createRuntimePluginFileStore(
         sessionId: options.sessionId,
         sessionIdentity,
         pluginId: options.pluginId,
+        ...(options.scope === undefined ? {} : {scope: options.scope}),
       } satisfies InMemoryRuntimePluginFileStoreOptions),
     );
   }
