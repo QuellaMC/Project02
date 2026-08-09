@@ -174,7 +174,7 @@ describe('runtime config console UI', () => {
 
     expect(exitCode).toBe(0);
     expect(stdout).toMatch(
-      /Plugins\n1\) .+ \(character-memory\)\n2\) .+ \(character-state\)\n3\) .+ \(demo-config\)\n4\) .+ \(mem0\)\n5\) .+ \(session-history\)\nSystem services\n6\) .+ \(first_party\.model_tools\)\n7\) .+ \(runtime\.plugin\)/,
+      /Plugins\n1\) .+ \(character-memory\)\n2\) .+ \(character-state\)\n3\) .+ \(demo-config\)\n4\) .+ \(mem0\)\n5\) .+ \(openclaw-compat\)\n6\) .+ \(session-history\)\nSystem services\n7\) .+ \(first_party\.model_tools\)\n8\) .+ \(runtime\.plugin\)/,
     );
     expect(stdout.match(/\(runtime\.plugin\)/g)).toHaveLength(1);
     expect(stdout).not.toContain('runtime.plugin_discovery');
