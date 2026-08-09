@@ -6,6 +6,7 @@ import type {
 } from '../../core/index.ts';
 import type {
   RuntimePluginContextItem,
+  RuntimePluginCuratedContextSection,
   RuntimePluginJsonValue,
   RuntimePluginProvidedTool,
 } from '../../plugins/api/index.ts';
@@ -84,6 +85,7 @@ export type DecisionContext = {
   readonly recentVisibleMessages: readonly VisibleMessage[];
   readonly runtimeNotes: readonly string[];
   readonly pluginContextItems: readonly RuntimePluginContextItem[];
+  readonly curatedContextSections: readonly RuntimePluginCuratedContextSection[];
 };
 
 export type CreateDecisionContextOptions = {
@@ -92,6 +94,7 @@ export type CreateDecisionContextOptions = {
   readonly recentVisibleMessages?: readonly VisibleMessage[];
   readonly runtimeNotes?: readonly string[];
   readonly pluginContextItems?: readonly RuntimePluginContextItem[];
+  readonly curatedContextSections?: readonly RuntimePluginCuratedContextSection[];
 };
 
 export type RoleModelInputEnvelope = {

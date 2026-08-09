@@ -7,7 +7,9 @@ import {
 } from '../../core/index.ts';
 import {
   createRuntimePluginContextItem,
+  createRuntimePluginCuratedContextSection,
   type RuntimePluginContextItem,
+  type RuntimePluginCuratedContextSection,
 } from '../../plugins/api/index.ts';
 import {freezeModelToolCalls, type ModelToolCall} from './model-tools.ts';
 import {
@@ -69,6 +71,9 @@ export function createDecisionContext(
     runtimeNotes: Object.freeze([...(options.runtimeNotes ?? [])]),
     pluginContextItems: freezePluginContextItems(
       options.pluginContextItems ?? [],
+    ),
+    curatedContextSections: freezeCuratedContextSections(
+      options.curatedContextSections ?? [],
     ),
   } satisfies DecisionContext);
 }
@@ -314,6 +319,12 @@ function freezePluginContextItems(
   contextItems: readonly RuntimePluginContextItem[],
 ): readonly RuntimePluginContextItem[] {
   return Object.freeze(contextItems.map(createRuntimePluginContextItem));
+}
+
+function freezeCuratedContextSections(
+  sections: readonly RuntimePluginCuratedContextSection[],
+): readonly RuntimePluginCuratedContextSection[] {
+  return Object.freeze(sections.map(createRuntimePluginCuratedContextSection));
 }
 
 export function freezeAllowedTools(

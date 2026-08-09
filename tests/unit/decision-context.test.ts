@@ -37,6 +37,7 @@ describe('user-turn decision context builder', () => {
       recentVisibleMessages: [],
       runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only'],
       pluginContextItems: [],
+      curatedContextSections: [],
     });
     expect(Object.isFrozen(context)).toBe(true);
     expect(Object.isFrozen(context.characterSnapshot)).toBe(true);

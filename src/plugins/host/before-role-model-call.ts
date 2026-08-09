@@ -1,10 +1,12 @@
 import {createRuntimePluginContextItem} from '../api/manifest-validation.ts';
+import {createRuntimePluginCuratedContextSection} from '../api/curated-context.ts';
 import {isRecord} from '../api/validation-primitives.ts';
 import type {
   RuntimePlugin,
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginContext,
   RuntimePluginContextItem,
+  RuntimePluginCuratedContextSection,
   RuntimePluginEvidenceSnapshot,
 } from '../api/types.ts';
 import {
@@ -21,6 +23,10 @@ import {
   type RuntimePluginAccessMapByPluginId,
 } from '../policy/access-control.ts';
 import {pluginCanWriteModelInput} from '../policy/tool-policy.ts';
+import {
+  assertPluginCuratedContextWithinCaps,
+  pluginCanContributeCuratedContext,
+} from '../policy/curated-context.ts';
 import {
   assertSnapshotPluginId,
   createHookFailureEvidence,
@@ -43,6 +49,7 @@ import {
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
   readonly status: 'completed';
   readonly contextItems: readonly RuntimePluginContextItem[];
+  readonly curatedContext: readonly RuntimePluginCuratedContextSection[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
@@ -79,6 +86,7 @@ type BeforeRoleModelCallPluginOutcome =
   | {
       readonly status: 'continued';
       readonly contextItems: readonly CollectedPluginContextItem[];
+      readonly curatedContext: readonly RuntimePluginCuratedContextSection[];
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
     }
   | {
@@ -92,6 +100,7 @@ export async function runBeforeRoleModelCall(
   options: BeforeRoleModelCallOptions,
 ): Promise<RuntimePluginBeforeRoleModelCallHostResult> {
   const contextItems: CollectedPluginContextItem[] = [];
+  const curatedContext: RuntimePluginCuratedContextSection[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
 
   for (const plugin of options.plugins) {
@@ -109,6 +118,7 @@ export async function runBeforeRoleModelCall(
     }
 
     contextItems.push(...outcome.contextItems);
+    curatedContext.push(...outcome.curatedContext);
   }
 
   const boundedContext = boundPluginPromptContext({
@@ -130,6 +140,7 @@ export async function runBeforeRoleModelCall(
   return Object.freeze({
     status: 'completed',
     contextItems: boundedContext.contextItems,
+    curatedContext: Object.freeze([...curatedContext]),
     evidence: Object.freeze([...evidence]),
   } satisfies RuntimePluginBeforeRoleModelCallHostResult);
 }
@@ -200,11 +211,23 @@ async function runBeforeRoleModelCallPlugin(
     });
   }
 
+  const curatedContext = result.value.curatedContext ?? [];
+
+  if (curatedContext.length > 0 && !pluginCanContributeCuratedContext(access)) {
+    return failedBeforeRoleModelCallPlugin({
+      plugin,
+      context: options.context,
+      message: `Plugin "${plugin.manifest.id}" returned curated context sections without granted curated_context write access.`,
+      acceptedEvidence: result.value.evidence,
+    });
+  }
+
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze(
       result.value.contextItems.map(item => ({plugin, item})),
     ),
+    curatedContext,
     evidence: result.value.evidence,
   } satisfies BeforeRoleModelCallPluginOutcome);
 }
@@ -254,6 +277,7 @@ function continuedBeforeRoleModelCall(
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze([]),
+    curatedContext: Object.freeze([]),
     evidence,
   });
 }
@@ -323,9 +347,14 @@ function normalizeBeforeRoleModelCallResult(options: {
     plugin: options.plugin,
     value: value['contextItems'],
   });
+  const curatedContext = normalizeCuratedContextSections({
+    plugin: options.plugin,
+    value: value['curatedContext'],
+  });
 
   return Object.freeze({
     contextItems,
+    ...(curatedContext.length === 0 ? {} : {curatedContext}),
     evidence: normalizeEvidenceSnapshots({
       plugin: options.plugin,
       context: options.context,
@@ -355,6 +384,35 @@ function normalizeContextItems(options: {
       return contextItem;
     }),
   );
+}
+
+function normalizeCuratedContextSections(options: {
+  readonly plugin: RuntimePlugin;
+  readonly value: unknown;
+}): readonly RuntimePluginCuratedContextSection[] {
+  if (options.value === undefined) {
+    return Object.freeze([]);
+  }
+
+  const entries = requiredArray(options.value, 'curatedContext');
+  const sections = Object.freeze(
+    entries.map(entry => {
+      const section = createRuntimePluginCuratedContextSection(entry);
+
+      assertSnapshotPluginId({
+        plugin: options.plugin,
+        actualPluginId: section.pluginId,
+        field: 'curatedContext.pluginId',
+      });
+      return section;
+    }),
+  );
+
+  assertPluginCuratedContextWithinCaps({
+    pluginId: options.plugin.manifest.id,
+    sections,
+  });
+  return sections;
 }
 
 function evidenceRecordsBlockingBeforeRoleModelCall(

@@ -7,6 +7,7 @@ import {
   createRuntimePluginAfterTurnCommittedContext,
   createRuntimePluginContext,
   createRuntimePluginContextItem,
+  createRuntimePluginCuratedContextSection,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginManifest,
   createRuntimePluginProvidedTool,
@@ -250,6 +251,41 @@ export function createTurnContextCapturePlugin(options: {
 
         return {
           status: 'completed',
+          evidence: [],
+        };
+      },
+    },
+  });
+}
+
+export function createCuratedContextSectionPlugin(options: {
+  readonly pluginId: string;
+  readonly sectionText?: string;
+  readonly sectionCount?: number;
+  readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
+}): RuntimePlugin {
+  const sectionCount = options.sectionCount ?? 1;
+  const sectionText = options.sectionText ?? 'Prefers concise answers.';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(options.pluginId),
+      declaredPlugins: ['before_role_model_call'],
+      requestedAccess: options.requestedAccess ?? {curated_context: 'write'},
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall() {
+        return {
+          contextItems: [],
+          curatedContext: Array.from({length: sectionCount}, (_, index) =>
+            createRuntimePluginCuratedContextSection({
+              pluginId: options.pluginId,
+              id: `section-${String(index + 1)}`,
+              title: 'Character notes',
+              text: sectionText,
+            }),
+          ),
           evidence: [],
         };
       },

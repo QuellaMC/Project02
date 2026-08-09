@@ -4,9 +4,11 @@ import {
   createRuntimePlugin,
   createRuntimePluginManifest,
   createRuntimePluginContextItem,
+  createRuntimePluginCuratedContextSection,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
   createRuntimePluginToolInvocationSnapshot,
+  curatedContextSectionTextCharLimit,
   runtimePluginContractVersion,
   validateRuntimePluginContextItem,
   type RuntimePluginAccessMap,
@@ -15,6 +17,7 @@ import {
   normalizeRuntimePluginAccessMap,
   runtimePluginAccessAllows,
   runtimePluginAccessFor,
+  runtimePluginAccessSnapshot,
 } from '../../src/plugins/policy/access-control.ts';
 import {isFirstPartyBuiltInModelTool} from '../../src/plugins/policy/tool-policy.ts';
 import {createFirstPartyModelToolsPlugin} from '../../src/plugins/builtin/model-tools/index.ts';
@@ -369,6 +372,102 @@ describe('runtime plugin access control', () => {
     expect(runtimePluginAccessAllows('write', 'read')).toBe(true);
     expect(runtimePluginAccessAllows('read', 'write')).toBe(false);
     expect(runtimePluginAccessAllows('read', 'none')).toBe(true);
+  });
+
+  it('withholds curated_context from ineligible plugins while keeping the request truthful', () => {
+    const requestedAccess = {
+      curated_context: 'write',
+      model_input: 'write',
+    } satisfies RuntimePluginAccessMap;
+    const ineligible = runtimePluginAccessSnapshot({
+      requestedAccess,
+      enabled: true,
+    });
+    const eligible = runtimePluginAccessSnapshot({
+      requestedAccess,
+      enabled: true,
+      curatedContextEligible: true,
+    });
+
+    expect(ineligible.requestedAccess).toEqual(requestedAccess);
+    expect(ineligible.grantedAccess).toEqual({model_input: 'write'});
+    expect(eligible.grantedAccess).toEqual(requestedAccess);
+  });
+});
+
+describe('runtime plugin curated context sections', () => {
+  it('accepts a section and normalizes carriage returns to newlines', () => {
+    const section = createRuntimePluginCuratedContextSection({
+      pluginId: 'memory.fixture',
+      id: 'notes',
+      title: 'Character notes',
+      text: 'line one\r\nline two\rline three',
+      capChars: 2200,
+      usedChars: 40,
+    });
+
+    expect(section).toEqual({
+      pluginId: 'memory.fixture',
+      id: 'notes',
+      title: 'Character notes',
+      text: 'line one\nline two\nline three',
+      capChars: 2200,
+      usedChars: 40,
+    });
+  });
+
+  it.each([
+    ['not-an-object', 'must be an object'],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'multi\nline',
+        text: 'x',
+      },
+      'single line',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: `t${'x'.repeat(64)}`,
+        text: 'x',
+      },
+      'single line',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Notes',
+        text: 'null byte \u0000 stays out',
+      },
+      'control characters',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Notes',
+        text: 'x'.repeat(curatedContextSectionTextCharLimit + 1),
+      },
+      'character limit',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Notes',
+        text: 'x',
+        capChars: 0,
+      },
+      'positive integer',
+    ],
+  ])('rejects malformed section %#', (value, messagePart) => {
+    expect(() => createRuntimePluginCuratedContextSection(value)).toThrow(
+      new RegExp(messagePart, 'u'),
+    );
   });
 });
 
