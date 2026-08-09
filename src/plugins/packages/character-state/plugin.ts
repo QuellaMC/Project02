@@ -129,7 +129,7 @@ function createCharacterStatePluginFromManifest(
     lifecycleHooks: {
       beforeRoleModelCall(context) {
         const state = readCharacterStateStore(
-          requiredFileStore(context),
+          requiredCharacterFileStore(context),
         ).current;
         const brief = createLivingStateBrief(state);
 
@@ -176,7 +176,7 @@ function createCharacterStatePluginFromManifest(
           };
         }
 
-        const fileStore = requiredFileStore(context);
+        const fileStore = requiredCharacterFileStore(context);
         const store = readCharacterStateStore(fileStore);
         const duplicateEvent = readCharacterStatePatchIdempotencyRecord({
           fileStore,
@@ -610,14 +610,16 @@ function isNonNegativeSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === 'number' && value >= 0;
 }
 
-function requiredFileStore(
+function requiredCharacterFileStore(
   context: RuntimePluginContext,
 ): RuntimePluginFileStore {
-  if (context.fileStore === undefined) {
-    throw new TypeError('Character State plugin requires file_store API.');
+  if (context.characterFileStore === undefined) {
+    throw new TypeError(
+      'Character State plugin requires the character_file_store API.',
+    );
   }
 
-  return context.fileStore;
+  return context.characterFileStore;
 }
 
 function isJsonObject(value: unknown): value is RuntimePluginJsonObject {

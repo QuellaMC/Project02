@@ -466,6 +466,7 @@ describe('plugin-driven Character State tool loop', () => {
       storeRoot,
       sessionId,
       pluginId: characterStatePluginId,
+      scope: 'character',
     });
     const adapter = createSequencedAdapter([
       {
@@ -557,6 +558,7 @@ describe('plugin-driven Character State tool loop', () => {
       storeRoot,
       sessionId,
       pluginId: characterStatePluginId,
+      scope: 'character',
     });
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -646,6 +648,7 @@ describe('plugin-driven Character State tool loop', () => {
       storeRoot,
       sessionId,
       pluginId: characterStatePluginId,
+      scope: 'character',
     });
     const originalResult = await pluginHost.handleToolCall(
       originalCall,

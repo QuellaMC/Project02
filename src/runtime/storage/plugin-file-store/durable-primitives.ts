@@ -128,9 +128,12 @@ function withDurablePluginStoreMutations<T>(
   let lease: ReturnType<typeof acquireLocalRuntimeMutationLocksSync>;
 
   try {
+    // Character-scoped stores are shared by concurrent sessions of one
+    // character, and every guarded operation is a short write: wait
+    // briefly instead of failing the sibling's turn outright.
     lease = acquireLocalRuntimeMutationLocksSync({
       targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
-      waitTimeoutMs: 0,
+      waitTimeoutMs: 2_000,
       ...(options.ownerToken === undefined
         ? {}
         : {ownerToken: options.ownerToken}),

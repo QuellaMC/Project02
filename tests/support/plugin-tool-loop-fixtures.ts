@@ -635,6 +635,7 @@ export async function createDurableCharacterStateHarness(sessionId: string) {
       storeRoot,
       sessionId,
       pluginId: characterStatePluginId,
+      scope: 'character',
     }),
   };
 }
