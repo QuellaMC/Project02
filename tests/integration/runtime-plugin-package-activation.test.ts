@@ -18,6 +18,7 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginContractVersion,
   runtimePluginId,
+  sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginManifest} from '../../src/plugins/api/manifest-validation.ts';
 import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.ts';
@@ -57,6 +58,7 @@ describe('configured runtime plugin package activation', () => {
         demoConfigPluginId,
         firstPartyModelToolsPluginId,
         runtimePluginId,
+        sessionHistoryPluginId,
       ].sort(),
     );
     const characterState = configured.activation.plugins.find(

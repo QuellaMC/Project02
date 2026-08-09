@@ -4,8 +4,8 @@ import {parseAtomicReplacementFileName} from '../atomic-file.ts';
 import {createJsonBoundarySnapshot} from '../../../shared/json-boundary.ts';
 import {isNodeErrorWithCode} from '../../../shared/node-error.ts';
 import {readCompleteJsonLines} from '../json-lines.ts';
-import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
-import type {RuntimePluginFileStorePathMode} from '../../../plugins/index.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/api/index.ts';
+import type {RuntimePluginFileStorePathMode} from '../../../plugins/api/index.ts';
 
 export const durableRevisionFileName = '.project02-plugin-store-revision';
 export const durablePathModesFileName = '.project02-plugin-store-modes.json';

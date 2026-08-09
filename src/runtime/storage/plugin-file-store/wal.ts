@@ -25,7 +25,7 @@ import {
   writeDurableRevision,
   writeTextAtomic,
 } from './durable-primitives.ts';
-import type {RuntimePluginJsonValue} from '../../../plugins/index.ts';
+import type {RuntimePluginJsonValue} from '../../../plugins/api/index.ts';
 import {discardTornJsonLineTail} from '../json-lines.ts';
 import {
   durableDirectMutationJournalFileName,

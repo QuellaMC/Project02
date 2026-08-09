@@ -10,4 +10,4 @@ export {
 export type {
   CreateRuntimePluginFileStoreOptions,
   RuntimePluginFileStoreProvider,
-} from '../../../plugins/index.ts';
+} from '../../../plugins/api/index.ts';
