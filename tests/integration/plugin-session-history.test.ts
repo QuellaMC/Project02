@@ -25,10 +25,8 @@ import {
   createRuntimePluginHost,
   type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
-import {
-  createLocalRuntimeSessionPaths,
-  createLocalRuntimeStorageLayout,
-} from '../../src/runtime/storage/layout-contract.ts';
+import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
+import {sessionIndexDatabasePath} from '../../src/runtime/storage/session-index/index.ts';
 import {
   createLocalRuntimeSessionIndex,
   type LocalRuntimeSessionIndex,
@@ -213,16 +211,15 @@ describe('session history plugin through the host', () => {
 
   it('keeps the index warm after committed turns, only when enabled', async () => {
     const {host, storeRoot} = await createHistoryHost();
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
 
-    expect(existsSync(layout.sessionIndexPath)).toBe(false);
+    expect(existsSync(historyIndexPath(storeRoot))).toBe(false);
 
     const committed = await host.afterTurnCommitted(
       afterTurnContext('evt_history_warm', 'alpha'),
     );
 
     expect(committed.status).toBe('completed');
-    expect(existsSync(layout.sessionIndexPath)).toBe(true);
+    expect(existsSync(historyIndexPath(storeRoot))).toBe(true);
 
     // With the plugin disabled the hook never runs, so nothing materializes.
     const bareRoot = createTestTempRoot('project02-history-bare-');
@@ -239,6 +236,7 @@ describe('session history plugin through the host', () => {
       sessionIndex: createLocalRuntimeSessionIndex({
         storeRoot: bareRoot,
         characterId: testCharacterProfile.id,
+        ownerPluginId: sessionHistoryPluginId,
       }),
     });
     const skipped = await bareHost.afterTurnCommitted(
@@ -246,11 +244,7 @@ describe('session history plugin through the host', () => {
     );
 
     expect(skipped.status).toBe('completed');
-    expect(
-      existsSync(
-        createLocalRuntimeStorageLayout({storeRoot: bareRoot}).sessionIndexPath,
-      ),
-    ).toBe(false);
+    expect(existsSync(historyIndexPath(bareRoot))).toBe(false);
   });
 
   it('rejects requests from another character', async () => {
@@ -308,6 +302,7 @@ async function createHistoryHost(): Promise<{
   const sessionIndex = createLocalRuntimeSessionIndex({
     storeRoot,
     characterId: testCharacterProfile.id,
+    ownerPluginId: sessionHistoryPluginId,
   });
   const host = createRuntimePluginHost({
     plugins: [],
@@ -316,6 +311,13 @@ async function createHistoryHost(): Promise<{
   });
 
   return {host, storeRoot, sessionIndex};
+}
+
+function historyIndexPath(storeRoot: string): string {
+  return sessionIndexDatabasePath({
+    storeRoot,
+    ownerPluginId: sessionHistoryPluginId,
+  });
 }
 
 function afterTurnContext(eventId: string, sessionId: string) {

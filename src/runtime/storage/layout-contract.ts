@@ -71,7 +71,6 @@ export type LocalRuntimeStorageLayout = {
   readonly locksRoot: string;
   readonly sessionCatalogPath: string;
   readonly sessionsRoot: string;
-  readonly sessionIndexPath: string;
 };
 
 export type LocalRuntimeSessionPaths = {
@@ -173,11 +172,7 @@ export const characterDataDirectoryName = 'character-data';
 
 const rawEventsFileName = 'raw-events.jsonl';
 
-// Rebuildable derived state lives apart from canonical files, so "safe to
-// delete" has a one-word answer.
-const indexDirectoryName = 'index';
-
-const sessionIndexFileName = 'session-index.sqlite';
+const pluginDataDirectoryName = 'plugin-data';
 
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
 
@@ -255,8 +250,27 @@ export function createLocalRuntimeStorageLayout(
     locksRoot: join(storeRoot, locksDirectoryName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),
     sessionsRoot,
-    sessionIndexPath: join(storeRoot, indexDirectoryName, sessionIndexFileName),
   } satisfies LocalRuntimeStorageLayout);
+}
+
+/**
+ * A plugin's character-scoped durable data directory: cross-session, owned
+ * by the plugin, and deleted with it. Session-scoped plugin state lives
+ * under the session's own `plugins/` directory instead.
+ */
+export function characterPluginDataDirPath(options: {
+  readonly storeRoot: string;
+  readonly pluginId: string;
+}): string {
+  const layout = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  });
+
+  return join(
+    layout.storeRoot,
+    pluginDataDirectoryName,
+    normalizeLocalRuntimePluginId(options.pluginId),
+  );
 }
 
 export function createLocalRuntimeSessionPaths(
