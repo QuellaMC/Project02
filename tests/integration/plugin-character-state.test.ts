@@ -136,14 +136,7 @@ describe('Character State plugin', () => {
       context,
     );
     unlinkSync(
-      join(
-        storeRoot,
-        'sessions',
-        'session-character-state',
-        'plugins',
-        characterStatePluginId,
-        'checkpoint.json',
-      ),
+      join(storeRoot, 'plugin-data', characterStatePluginId, 'checkpoint.json'),
     );
 
     const beforeResult =
@@ -556,6 +549,7 @@ function createCharacterStateHarness(
       sessionId,
       ...(storeRoot === undefined ? {sessionIdentity: {}} : {}),
       pluginId: characterStatePluginId,
+      scope: 'character',
     });
   const context = {
     ...createCharacterStateContext({sessionId, fileStore}),
@@ -581,7 +575,7 @@ function createCharacterStateContext(options: {
       character: testCharacterProfile,
     }),
     pluginId: characterStatePluginId,
-    fileStore: options.fileStore,
+    characterFileStore: options.fileStore,
   };
 }
 
