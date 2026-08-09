@@ -6,6 +6,7 @@ import {createLocalRuntimeMutationLockOwnerToken} from '../mutation-lock.ts';
 import type {RuntimePluginFileStore} from '../../../plugins/api/index.ts';
 import type {CreateRuntimePluginFileStoreOptions} from '../../../plugins/api/index.ts';
 import {
+  characterScopeDurableStoreIdentity,
   assertDurableOperationPathMode,
   assertSafeDurablePluginPath,
   assertSafeDurablePluginRoot,
@@ -38,6 +39,12 @@ export function createDurableRuntimePluginFileStore(
 ): RuntimePluginFileStore {
   const durableOptions = Object.freeze({
     ...options,
+    // One engine identity per store: character scope replaces the calling
+    // session so every session derives the same root and WAL identity.
+    sessionId:
+      options.scope === 'character'
+        ? characterScopeDurableStoreIdentity
+        : options.sessionId,
     storeRoot: canonicalDurablePluginStoreRoot(options.storeRoot),
   } satisfies CreateRuntimePluginFileStoreOptions & {
     readonly storeRoot: string;

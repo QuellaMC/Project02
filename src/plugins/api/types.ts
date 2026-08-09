@@ -188,6 +188,8 @@ export type RuntimePluginContext = {
   };
   readonly pluginId?: string;
   readonly fileStore?: RuntimePluginFileStore;
+  /** Character-scoped cross-session store; needs character_file_store. */
+  readonly characterFileStore?: RuntimePluginFileStore;
 };
 
 export type RuntimePluginCommittedTurnSnapshot = {

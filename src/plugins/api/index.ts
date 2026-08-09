@@ -137,4 +137,5 @@ export {
   type InMemoryRuntimePluginFileStoreOptions,
   type RuntimePluginFileStorePathMode,
   type RuntimePluginFileStoreProvider,
+  type RuntimePluginFileStoreScope,
 } from './file-store-contract.ts';
