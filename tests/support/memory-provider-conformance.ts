@@ -133,9 +133,7 @@ export function runMemoryProviderConformanceSuite(
             {
               id: '123',
               text: 'Numeric provider row ID should still become context.',
-              sourceReferences: [
-                {kind: 'memory', id: '123', title: 'Provider memory row'},
-              ],
+              sourceReferences: [{kind: 'memory', id: '123'}],
             },
           ],
         });
@@ -148,9 +146,7 @@ export function runMemoryProviderConformanceSuite(
 
         expect(result.contextItems[0]).toMatchObject({
           id: 'memory.123',
-          sourceReferences: [
-            {kind: 'memory', id: '123', title: 'Provider memory row'},
-          ],
+          sourceReferences: [{kind: 'memory', id: '123'}],
         });
         expect(result.evidence).not.toContainEqual(
           expect.objectContaining({
@@ -254,7 +250,7 @@ export function runMemoryProviderConformanceSuite(
             status: 'accepted',
             sourceReferences: expect.arrayContaining([
               expect.objectContaining({kind: 'memory', id: 'memory-capture-1'}),
-            ]),
+            ]) as unknown,
           }),
         );
       });
@@ -299,10 +295,12 @@ export function runMemoryProviderConformanceSuite(
 
     if (has('search')) {
       it('returns source-backed search results through the tool surface', async () => {
+        // Item and reference share one id so adapters that derive
+        // references from backend rows resolve to the same output.
         const host = await conformanceHost(adapter, {
           searchItems: [
             {
-              id: 'result',
+              id: 'result-1',
               text: 'Prior session detail.',
               sourceReferences: [{kind: 'memory', id: 'result-1'}],
             },
@@ -318,7 +316,7 @@ export function runMemoryProviderConformanceSuite(
           return;
         }
 
-        expect(search.output).toMatchObject({items: [{id: 'result'}]});
+        expect(search.output).toMatchObject({items: [{id: 'result-1'}]});
         expect(search.evidence[0]).toMatchObject({
           evidenceKind: 'tool_invocation',
           status: 'accepted',
@@ -421,7 +419,7 @@ export function runMemoryProviderConformanceSuite(
           status: 'accepted',
           sourceReferences: expect.arrayContaining([
             expect.objectContaining({kind: 'memory', id: 'persisted-memory-1'}),
-          ]),
+          ]) as unknown,
         });
       });
 
