@@ -1,8 +1,12 @@
 import type {RuntimePluginFactoryFunction} from '../api/factory.ts';
-import {characterStatePluginId} from '../api/contract.ts';
+import {
+  characterStatePluginId,
+  sessionHistoryPluginId,
+} from '../api/contract.ts';
 import {createProject02Plugin as createCharacterStatePlugin} from '../packages/character-state/index.ts';
 import {createProject02Plugin as createDemoConfigPlugin} from '../packages/demo-config/index.ts';
 import {demoConfigPluginId} from '../packages/demo-config/plugin.ts';
+import {createProject02Plugin as createSessionHistoryPackagePlugin} from '../packages/session-history/index.ts';
 
 const bundledRuntimePluginFactories = new Map<
   string,
@@ -23,6 +27,13 @@ const bundledRuntimePluginFactories = new Map<
     Object.freeze({
       entryRelativePath: 'index.ts',
       factory: createDemoConfigPlugin,
+    }),
+  ],
+  [
+    sessionHistoryPluginId,
+    Object.freeze({
+      entryRelativePath: 'index.ts',
+      factory: createSessionHistoryPackagePlugin,
     }),
   ],
 ]);

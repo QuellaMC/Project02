@@ -4,6 +4,7 @@ import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId,
+  sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
 import {
   createRuntimePluginHost,
@@ -23,26 +24,31 @@ const bundledPackageDiscovery = discoverRuntimePluginPackages({
   ],
   reservedPluginIds: hostFirstPartyRuntimePluginIds,
 });
-const characterStatePackage = bundledPackageDiscovery.packages.find(
-  entry => entry.manifest.id === characterStatePluginId,
-);
-
-if (
-  bundledPackageDiscovery.diagnostics.length > 0 ||
-  characterStatePackage === undefined
-) {
-  throw new TypeError(
-    'Default test plugin host could not discover the bundled Character State package.',
+async function loadBundledPlugin(pluginId: string) {
+  const bundledPackage = bundledPackageDiscovery.packages.find(
+    entry => entry.manifest.id === pluginId,
   );
+
+  if (
+    bundledPackageDiscovery.diagnostics.length > 0 ||
+    bundledPackage === undefined
+  ) {
+    throw new TypeError(
+      `Default test plugin host could not discover the bundled "${pluginId}" package.`,
+    );
+  }
+
+  return await bundledPackage.load({
+    pluginId: bundledPackage.manifest.id,
+    manifest: bundledPackage.manifest,
+    storeRoot: bundledRuntimePluginPackageRoot,
+    resolvedConfig: Object.freeze({}),
+    redactedConfig: Object.freeze({}),
+  });
 }
 
-const characterStatePlugin = await characterStatePackage.load({
-  pluginId: characterStatePackage.manifest.id,
-  manifest: characterStatePackage.manifest,
-  storeRoot: bundledRuntimePluginPackageRoot,
-  resolvedConfig: Object.freeze({}),
-  redactedConfig: Object.freeze({}),
-});
+const characterStatePlugin = await loadBundledPlugin(characterStatePluginId);
+const sessionHistoryPlugin = await loadBundledPlugin(sessionHistoryPluginId);
 
 export function createDefaultProject02PluginHost(
   options: Omit<CreateRuntimePluginHostOptions, 'plugins'> = {},
@@ -50,7 +56,7 @@ export function createDefaultProject02PluginHost(
   return createRuntimePluginHost({
     fileStore: testRuntimePluginFileStoreProvider,
     ...options,
-    plugins: [characterStatePlugin],
+    plugins: [characterStatePlugin, sessionHistoryPlugin],
     enabledPluginIds: options.enabledPluginIds ?? [
       runtimePluginId,
       firstPartyModelToolsPluginId,

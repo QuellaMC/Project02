@@ -2,13 +2,13 @@ import {describe, expect, it} from 'vitest';
 
 import {jsonArray, jsonRecord} from '../support/json-view.ts';
 
-import {createSessionHistoryReadOutput} from '../../src/plugins/builtin/session-history/read.ts';
+import {createSessionHistoryReadOutput} from '../../src/plugins/packages/session-history/read.ts';
 import {
   centeredSnippet,
   createSessionHistorySearchOutput,
-} from '../../src/plugins/builtin/session-history/search.ts';
+} from '../../src/plugins/packages/session-history/search.ts';
 import type {RuntimePluginSessionHistoryMessage} from '../../src/plugins/api/session-history-contract.ts';
-import type {SessionIndexSessionView} from '../../src/plugins/builtin/session-history/engine/index.ts';
+import type {SessionIndexSessionView} from '../../src/plugins/packages/session-history/engine/index.ts';
 import {createJsonBoundarySnapshot} from '../../src/shared/json-boundary.ts';
 
 describe('session history output shaping', () => {

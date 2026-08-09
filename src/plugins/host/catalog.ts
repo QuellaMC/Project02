@@ -11,11 +11,6 @@ import {
   type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
 import {
-  createSessionHistoryPlugin,
-  createSessionHistoryPluginManifest,
-  isSessionHistoryPlugin,
-} from '../builtin/session-history/index.ts';
-import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId,
@@ -76,11 +71,6 @@ export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
       manifest: createFirstPartyModelToolsPluginManifest(),
       bootstrap: () => createFirstPartyModelToolsPlugin(),
     } satisfies RuntimePluginHostServiceCatalogEntry),
-    [sessionHistoryPluginId]: Object.freeze({
-      catalogKind: 'host_service',
-      manifest: createSessionHistoryPluginManifest(),
-      bootstrap: () => createSessionHistoryPlugin(),
-    } satisfies RuntimePluginHostServiceCatalogEntry),
   });
 }
 
@@ -89,6 +79,7 @@ export const hostFirstPartyRuntimePluginIds = Object.freeze([
     definition => definition.manifest.id,
   ),
   characterStatePluginId,
+  sessionHistoryPluginId,
 ]);
 
 export const hostScopedFirstPartyRuntimePluginIds = Object.freeze(
@@ -132,8 +123,7 @@ export function isHostOwnedFirstPartyRuntimePlugin(
 ): boolean {
   return (
     isRuntimePluginManagementPlugin(plugin) ||
-    isFirstPartyModelToolsPlugin(plugin) ||
-    isSessionHistoryPlugin(plugin)
+    isFirstPartyModelToolsPlugin(plugin)
   );
 }
 

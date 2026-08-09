@@ -17,6 +17,8 @@ import type {
   RuntimePluginEvidenceSnapshot,
   RuntimePluginToolCallResult,
 } from '../../api/index.ts';
+import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
+import type {RuntimePluginManifest} from '../../api/types.ts';
 import {createSessionHistoryGuidanceHook} from './context.ts';
 import {
   createSessionHistoryEngine,
@@ -36,6 +38,14 @@ import {createSessionHistoryCapabilitiesSnapshot} from './state.ts';
 const sessionHistoryPluginInstances = new WeakSet<RuntimePlugin>();
 
 export function createSessionHistoryPlugin(): RuntimePlugin {
+  return createSessionHistoryPluginFromManifest(
+    createSessionHistoryPluginManifest(),
+  );
+}
+
+function createSessionHistoryPluginFromManifest(
+  manifest: RuntimePluginManifest,
+): RuntimePlugin {
   const guidanceHook = createSessionHistoryGuidanceHook();
   let engine: SessionHistoryEngine | undefined;
   let warmUpKicked = false;
@@ -66,7 +76,7 @@ export function createSessionHistoryPlugin(): RuntimePlugin {
   };
 
   const plugin = createRuntimePlugin({
-    manifest: createSessionHistoryPluginManifest(),
+    manifest,
     providedTools: [
       createSessionHistorySearchTool(),
       createSessionHistoryReadTool(),
@@ -249,7 +259,7 @@ export function createSessionHistoryPluginManifest() {
     },
     activation: {
       defaultEnabled: true,
-      reasons: ['host_provided_session_history'],
+      reasons: ['built_in_session_history'],
     },
     requestedAccess: {
       model_input: 'write',
@@ -313,4 +323,10 @@ function unavailableSessionHistoryTool(
     message: `Tool "${toolName}" is not available in this host.`,
     evidence: Object.freeze([]),
   };
+}
+
+export function createProject02Plugin(
+  input: RuntimePluginFactoryInput,
+): RuntimePlugin {
+  return createSessionHistoryPluginFromManifest(input.manifest);
 }
