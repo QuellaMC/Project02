@@ -14,6 +14,7 @@ import {describe, expect, it} from 'vitest';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
+  characterMemoryPluginId,
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginContractVersion,
@@ -54,6 +55,7 @@ describe('configured runtime plugin package activation', () => {
       configured.activation.plugins.map(plugin => plugin.pluginId).sort(),
     ).toEqual(
       [
+        characterMemoryPluginId,
         characterStatePluginId,
         demoConfigPluginId,
         firstPartyModelToolsPluginId,
@@ -71,6 +73,7 @@ describe('configured runtime plugin package activation', () => {
     });
     expect(characterState?.activationReasons).toContain('not_enabled');
     expect(configured.packageProvenanceByPluginId).toEqual({
+      [characterMemoryPluginId]: 'bundled',
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
       [sessionHistoryPluginId]: 'bundled',
@@ -176,6 +179,7 @@ describe('configured runtime plugin package activation', () => {
     });
     expect(operatorPackage?.activationReasons).toContain('not_enabled');
     expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
+      characterMemoryPluginId,
       sessionHistoryPluginId,
     ]);
   });
@@ -617,9 +621,10 @@ describe('configured runtime plugin package activation', () => {
       },
     });
     expect(configured.plugins.map(plugin => plugin.manifest.id).sort()).toEqual(
-      [manifest.id, sessionHistoryPluginId].sort(),
+      [characterMemoryPluginId, manifest.id, sessionHistoryPluginId].sort(),
     );
     expect(activationPlan.packageProvenanceByPluginId).toEqual({
+      [characterMemoryPluginId]: 'bundled',
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
       [sessionHistoryPluginId]: 'bundled',
@@ -692,6 +697,7 @@ describe('configured runtime plugin package activation', () => {
       ),
     ).toMatchObject({enabled: true, activationStatus: 'active'});
     expect(configured.plugins.map(plugin => plugin.manifest.id)).toEqual([
+      characterMemoryPluginId,
       manifest.id,
       sessionHistoryPluginId,
     ]);

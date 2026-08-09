@@ -11,6 +11,7 @@ import {
   type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
 import {
+  characterMemoryPluginId,
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId,
@@ -78,6 +79,7 @@ export const hostFirstPartyRuntimePluginIds = Object.freeze([
   ...Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(
     definition => definition.manifest.id,
   ),
+  characterMemoryPluginId,
   characterStatePluginId,
   sessionHistoryPluginId,
 ]);
