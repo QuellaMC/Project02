@@ -144,10 +144,10 @@ interface, codec, validator, or helper, look for it in this order:
 2. **The Node standard library and existing dev dependencies.** Node 24 covers
    far more than it used to; check before hand-rolling.
 3. **A maintained package**, when the problem is real, general, and solved
-   better elsewhere than we would solve it. This repo ships exactly **one
-   runtime dependency** — Ajv, the user-approved judge of every JSON Schema
-   tool contract. Adding another is a decision to raise with the user, with
-   the alternative you rejected, not to make quietly.
+   better elsewhere than we would solve it. Prefer a well-maintained
+   community package over hand-rolling the same wheel; `package.json` is the
+   inventory. Name every new runtime dependency and the alternative you
+   rejected in the PR description; never add one quietly.
 4. **Write it yourself**, on a shared seam with a concrete second caller.
 
 Say what you looked for and what you found. "I searched and there was nothing"

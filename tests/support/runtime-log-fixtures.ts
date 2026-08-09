@@ -17,12 +17,14 @@ import {
   type CharacterProfile,
 } from '../../src/core/index.ts';
 
-// The model input inside the character evidence is the fixture user message,
-// `hello`.
+// The model input inside the character evidence must match the turn's
+// committed user message; callers whose turn committed something other than
+// the default `hello` pass that text.
 export function appendVisibleMessageWithCommitAnchor(
   store: RuntimeLogStore,
   message: ConversationLogRecord,
   expectedCharacter?: CharacterProfile,
+  modelInputText = 'hello',
 ): void {
   const eventIdentity = {
     eventId: message.eventId,
@@ -53,7 +55,7 @@ export function appendVisibleMessageWithCommitAnchor(
               sessionId,
               inputEnvelope: createRoleModelInputEnvelope({
                 event: createUserMessageRuntimeEvent(
-                  'hello',
+                  modelInputText,
                   createRuntimeEventIdentity(eventIdentity),
                 ),
                 decisionContext: createDecisionContext({

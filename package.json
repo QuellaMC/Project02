@@ -7,6 +7,11 @@
   "engines": {
     "node": ">=24.12.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
+  },
   "exports": {
     ".": "./src/index.ts"
   },
@@ -28,13 +33,17 @@
     "check": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm arch:check && pnpm test:coverage"
   },
   "dependencies": {
-    "ajv": "^8.20.0"
+    "ajv": "^8.20.0",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.45.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.12.4",
     "@vitest/coverage-v8": "4.1.7",
     "dependency-cruiser": "^18.1.0",
+    "drizzle-kit": "^0.31.10",
     "eslint": "^10.4.0",
     "prettier": "3.9.5",
     "typescript": "^6.0.3",
