@@ -385,12 +385,19 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   assertResolvedProject02HomeAdoptable(activationPlan.runtimeLocation);
   assertCharacterRuntimeInitialized(activationPlan.runtimeLocation);
 
-  // Safe here: the character-data marker was just validated on this root,
-  // and the index itself opens its database lazily on first query.
-  const sessionIndex = createLocalRuntimeSessionIndex({
-    storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
-    characterId: activationPlan.runtimeLocation.characterScope.characterId,
-  });
+  // Built only when its owner plugin is enabled: the view is the
+  // session-history plugin's capability, stored in that plugin's
+  // character-scoped data directory. Enablement changes take effect at the
+  // next host construction.
+  const sessionIndex = activationPlan.activation.enabledPluginIds.includes(
+    sessionHistoryPluginId,
+  )
+    ? createLocalRuntimeSessionIndex({
+        storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
+        characterId: activationPlan.runtimeLocation.characterScope.characterId,
+        ownerPluginId: sessionHistoryPluginId,
+      })
+    : undefined;
 
   if (diagnosticsHaveErrors(activationPlan.activation.diagnostics)) {
     const plugins: readonly RuntimePlugin[] = Object.freeze([]);
@@ -404,7 +411,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
           activationPlan.pluginConfigControl,
         ),
-        sessionIndex,
+        ...(sessionIndex === undefined ? {} : {sessionIndex}),
         toolConfirmationHandler: options.toolConfirmationHandler,
         sessionId: options.sessionId,
         sessionIdentity: options.sessionIdentity,
@@ -418,9 +425,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     } satisfies Project02ConfiguredPluginHost);
   }
 
-  if (
-    activationPlan.activation.enabledPluginIds.includes(sessionHistoryPluginId)
-  ) {
+  if (sessionIndex !== undefined) {
     // Advisory pre-warm so the first search finds a warm view; a real
     // failure resurfaces honestly on the first query instead.
     void sessionIndex.warmUp().catch(() => undefined);
@@ -446,7 +451,7 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
-      sessionIndex,
+      ...(sessionIndex === undefined ? {} : {sessionIndex}),
       toolConfirmationHandler: options.toolConfirmationHandler,
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,

@@ -39,6 +39,7 @@ describe('session history through the tool loop', () => {
     const sessionIndex = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: testCharacterProfile.id,
+      ownerPluginId: sessionHistoryPluginId,
     });
     const pluginHost = createDefaultProject02PluginHost({
       sessionIndex,

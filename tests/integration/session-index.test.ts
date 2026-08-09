@@ -23,7 +23,10 @@ import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
-import {createLocalRuntimeSessionIndex} from '../../src/runtime/storage/session-index/index.ts';
+import {
+  createLocalRuntimeSessionIndex,
+  sessionIndexDatabasePath,
+} from '../../src/runtime/storage/session-index/index.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 
 const character = testCharacterProfile;
@@ -47,6 +50,7 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
     const result = index.search({query: 'permission', sessionLimit: 3});
 
@@ -121,6 +125,7 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
     const result = index.search({query: 'anchovy', sessionLimit: 1});
     const view = result.sessions[0];
@@ -172,18 +177,18 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     expect(
       index.search({query: 'first', sessionLimit: 1}).totalSessionsWithHits,
     ).toBe(1);
 
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
     const rawEventsPath = createLocalRuntimeSessionPaths({
       storeRoot,
       sessionId: 'grows',
     }).rawEventsPath;
-    const watermarkAfterFirst = readWatermark(layout.sessionIndexPath, 'grows');
+    const watermarkAfterFirst = readWatermark(indexPath(storeRoot), 'grows');
 
     await appendDurableConversationExchanges({
       storeRoot,
@@ -196,10 +201,7 @@ describe('session index', () => {
       index.search({query: 'narwhals', sessionLimit: 1}).totalSessionsWithHits,
     ).toBe(1);
 
-    const watermarkAfterSecond = readWatermark(
-      layout.sessionIndexPath,
-      'grows',
-    );
+    const watermarkAfterSecond = readWatermark(indexPath(storeRoot), 'grows');
 
     expect(watermarkAfterSecond).toBeGreaterThan(watermarkAfterFirst);
     expect(watermarkAfterSecond).toBe(fileSize(rawEventsPath));
@@ -226,6 +228,7 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
     const tornResult = index.search({query: 'drawbridge', sessionLimit: 3});
 
@@ -285,6 +288,7 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
     const result = index.search({query: 'hello', sessionLimit: 3});
 
@@ -309,6 +313,7 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     expect(
@@ -316,10 +321,8 @@ describe('session index', () => {
     ).toBe(2);
     index.close();
 
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
-
     // A future-version view is deleted and reprojected, never migrated.
-    const tampered = new Database(layout.sessionIndexPath);
+    const tampered = new Database(indexPath(storeRoot));
 
     tampered.pragma('user_version = 99');
     tampered.close();
@@ -327,6 +330,7 @@ describe('session index', () => {
     const afterVersionBump = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     expect(
@@ -336,7 +340,7 @@ describe('session index', () => {
     afterVersionBump.close();
 
     // A view claiming another character is derived data: rebuilt in place.
-    const foreign = new Database(layout.sessionIndexPath);
+    const foreign = new Database(indexPath(storeRoot));
 
     foreign.prepare('UPDATE index_meta SET character_id = ?').run('nova');
     foreign.close();
@@ -344,6 +348,7 @@ describe('session index', () => {
     const afterForeignMeta = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     expect(
@@ -382,6 +387,7 @@ describe('session index', () => {
       createLocalRuntimeSessionIndex({
         storeRoot: versionedRoot,
         characterId: character.id,
+        ownerPluginId: 'session-history',
       }),
     ).toThrow(expect.objectContaining({code: 'unsupported_schema_version'}));
 
@@ -389,6 +395,7 @@ describe('session index', () => {
       createLocalRuntimeSessionIndex({
         storeRoot: createStoreRoot(),
         characterId: character.id,
+        ownerPluginId: 'session-history',
       }),
     ).toThrow(expect.objectContaining({code: 'missing_file'}));
 
@@ -402,6 +409,7 @@ describe('session index', () => {
       createLocalRuntimeSessionIndex({
         storeRoot: foreignRoot,
         characterId: character.id,
+        ownerPluginId: 'session-history',
       }),
     ).toThrow(expect.objectContaining({code: 'character_identity_mismatch'}));
   });
@@ -414,6 +422,7 @@ describe('session index', () => {
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     expect(() => index.readAround({sessionId: '../x', window: 5})).toThrow(
@@ -439,16 +448,16 @@ describe('session index', () => {
     await writeSession(storeRoot, 'alpha', [['hello there', 'hi']]);
     await writeSession(storeRoot, 'beta', [['more words', 'indeed']]);
 
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
     const index = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     await index.warmUp();
-    expect(existsSync(layout.sessionIndexPath)).toBe(true);
+    expect(existsSync(indexPath(storeRoot))).toBe(true);
 
-    const database = new Database(layout.sessionIndexPath, {readonly: true});
+    const database = new Database(indexPath(storeRoot), {readonly: true});
 
     try {
       const row = database
@@ -469,21 +478,22 @@ describe('session index', () => {
 
     await writeSession(storeRoot, 'lazy', [['open sesame', 'opened']]);
 
-    const layout = createLocalRuntimeStorageLayout({storeRoot});
     const first = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
-    expect(existsSync(layout.sessionIndexPath)).toBe(false);
+    expect(existsSync(indexPath(storeRoot))).toBe(false);
     expect(
       first.search({query: 'sesame', sessionLimit: 1}).totalSessionsWithHits,
     ).toBe(1);
-    expect(existsSync(layout.sessionIndexPath)).toBe(true);
+    expect(existsSync(indexPath(storeRoot))).toBe(true);
 
     const second = createLocalRuntimeSessionIndex({
       storeRoot,
       characterId: character.id,
+      ownerPluginId: 'session-history',
     });
 
     expect(
@@ -503,6 +513,13 @@ describe('session index', () => {
 
 function createStoreRoot(): string {
   return createTestTempRoot('project02-session-index-');
+}
+
+function indexPath(storeRoot: string): string {
+  return sessionIndexDatabasePath({
+    storeRoot,
+    ownerPluginId: 'session-history',
+  });
 }
 
 async function writeSession(
