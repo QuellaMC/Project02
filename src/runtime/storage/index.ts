@@ -32,14 +32,8 @@ export {
   project02HomeCreationIsNew,
 } from './home.ts';
 export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
-export {
-  createLocalRuntimeSessionIndex,
-  type LocalRuntimeSessionIndex,
-  type SessionIndexConversationWindow,
-  type SessionIndexMessage,
-  type SessionIndexSearchResult,
-  type SessionIndexSessionView,
-} from './session-index/index.ts';
+export {createLocalRuntimeSessionHistoryFeed} from './session-history-feed.ts';
+export {createRuntimePluginDatabaseOpener} from './plugin-database.ts';
 export {
   acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,

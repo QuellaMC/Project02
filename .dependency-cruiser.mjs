@@ -58,14 +58,17 @@ export default {
     {
       name: 'sqlite-driver-only-in-sqlite-seam',
       comment:
-        'Rule 2d — the better-sqlite3 driver is importable from ' +
+        'Rule 2d — the better-sqlite3 driver is VALUE-importable from ' +
         'src/runtime/storage/sqlite.ts and nowhere else, so "which files ' +
-        'hold a database handle" has a one-word answer. Everything else ' +
-        'goes through that seam or a query layer built on it. Green with ' +
-        'no exemptions.',
+        'open a database" has a one-word answer. Type-only imports are ' +
+        'erased and stay free: capability contracts name the handle type. ' +
+        'Green with no exemptions.',
       severity: 'error',
       from: {path: '^src/', pathNot: ['^src/runtime/storage/sqlite\\.ts$']},
-      to: {path: '^node_modules/better-sqlite3/'},
+      to: {
+        path: '^node_modules/better-sqlite3/',
+        dependencyTypesNot: ['type-only'],
+      },
     },
     {
       name: 'contracts-no-impl-value-deps',

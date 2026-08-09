@@ -1,7 +1,8 @@
 import {and, asc, eq, gte, lte, max, or, sql} from 'drizzle-orm';
 import type {BetterSQLite3Database} from 'drizzle-orm/better-sqlite3';
 
-import type {SessionIndexMessage, SessionIndexSessionView} from './contract.ts';
+import type {RuntimePluginSessionHistoryMessage} from '../../../api/session-history-contract.ts';
+import type {SessionIndexSessionView} from './contract.ts';
 import {messagesTable} from './schema.ts';
 
 // Hermes-style retrieval bounds: scan the best raw hits, then present one
@@ -243,11 +244,11 @@ function anchoredSessionView(
 export function indexedMessage(row: {
   readonly sessionId: string;
   readonly messageId: string;
-  readonly role: SessionIndexMessage['role'];
+  readonly role: RuntimePluginSessionHistoryMessage['role'];
   readonly speakerName: string;
   readonly text: string;
   readonly committedAt: string;
-}): SessionIndexMessage {
+}): RuntimePluginSessionHistoryMessage {
   return Object.freeze({
     sessionId: row.sessionId,
     messageId: row.messageId,

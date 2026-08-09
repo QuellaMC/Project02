@@ -18,7 +18,10 @@ import {
   sessionHistorySearchToolName,
 } from '../../src/plugins/api/contract.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import {createLocalRuntimeSessionIndex} from '../../src/runtime/storage/index.ts';
+import {
+  createLocalRuntimeSessionHistoryFeed,
+  createRuntimePluginDatabaseOpener,
+} from '../../src/runtime/storage/index.ts';
 import {runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent} from '../support/plugin-tool-loop-fixtures.ts';
 
 describe('session history through the tool loop', () => {
@@ -36,13 +39,15 @@ describe('session history through the tool loop', () => {
       ],
     });
 
-    const sessionIndex = createLocalRuntimeSessionIndex({
-      storeRoot,
-      characterId: testCharacterProfile.id,
-      ownerPluginId: sessionHistoryPluginId,
-    });
     const pluginHost = createDefaultProject02PluginHost({
-      sessionIndex,
+      sessionHistory: createLocalRuntimeSessionHistoryFeed({
+        storeRoot,
+        characterId: testCharacterProfile.id,
+      }),
+      sessionHistoryDatabase: createRuntimePluginDatabaseOpener({
+        storeRoot,
+        pluginId: sessionHistoryPluginId,
+      }),
       enabledPluginIds: [
         runtimePluginId,
         firstPartyModelToolsPluginId,

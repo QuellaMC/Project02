@@ -52,6 +52,19 @@ export type {
   RuntimePluginFileStoreProvider,
   RuntimePluginFileStoreScope,
 } from './api/file-store-contract.ts';
+export type {
+  OpenRuntimePluginDatabaseOptions,
+  RuntimePluginDatabase,
+  RuntimePluginDatabaseOpener,
+} from './api/database-contract.ts';
+export type {
+  ReadNewSessionHistoryMessagesOptions,
+  RuntimePluginSessionHistoryFeed,
+  RuntimePluginSessionHistoryListing,
+  RuntimePluginSessionHistoryMessage,
+  RuntimePluginSessionHistorySummary,
+  SessionHistoryMessageBatch,
+} from './api/session-history-contract.ts';
 export {
   runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginBeforeRoleModelCallRejectionReason,

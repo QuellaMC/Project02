@@ -1,13 +1,13 @@
 import {and, asc, eq, gte, lte, max} from 'drizzle-orm';
 import type {BetterSQLite3Database} from 'drizzle-orm/better-sqlite3';
 
-import {LocalRuntimeStorageContractError} from '../layout-contract.ts';
-import type {SessionIndexMessage} from './contract.ts';
+import type {RuntimePluginSessionHistoryMessage} from '../../../api/session-history-contract.ts';
+import {SessionHistoryEngineError} from './contract.ts';
 import {indexedMessage} from './search.ts';
 import {messagesTable} from './schema.ts';
 
 export type SessionIndexWindowRows = {
-  readonly messages: readonly SessionIndexMessage[];
+  readonly messages: readonly RuntimePluginSessionHistoryMessage[];
   readonly hasBefore: boolean;
   readonly hasAfter: boolean;
 };
@@ -94,8 +94,8 @@ function requiredAnchorOrdinal(
     .get();
 
   if (anchor === undefined) {
-    throw new LocalRuntimeStorageContractError(
-      'missing_file',
+    throw new SessionHistoryEngineError(
+      'message_not_found',
       `Message "${anchorMessageId}" is not in session "${sessionId}".`,
     );
   }
