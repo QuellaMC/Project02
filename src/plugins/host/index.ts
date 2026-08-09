@@ -5,12 +5,12 @@ export {
   runRuntimePluginShutdownHooksForTargets,
   runtimePluginId,
   type CreateRuntimePluginHostOptions,
-  type RuntimePluginBeforeRoleModelCallCompletedResult,
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,
   type RuntimePluginSessionEndOptions,
 } from './host.ts';
+export {type RuntimePluginBeforeRoleModelCallCompletedResult} from './before-role-model-call.ts';
 export {
   runtimePluginLifecycleTarget,
   type RuntimePluginLifecycleTarget,
