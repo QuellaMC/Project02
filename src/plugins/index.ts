@@ -76,11 +76,11 @@ export {
   runRuntimePluginShutdownHooksForTargets,
   type RuntimePluginSessionEndOptions,
   type CreateRuntimePluginHostOptions,
-  type RuntimePluginBeforeRoleModelCallCompletedResult,
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,
 } from './host/host.ts';
+export {type RuntimePluginBeforeRoleModelCallCompletedResult} from './host/before-role-model-call.ts';
 export {
   runtimePluginLifecycleTarget,
   type RuntimePluginLifecycleTarget,

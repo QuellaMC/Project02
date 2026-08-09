@@ -123,3 +123,11 @@ function pluginHookTimeoutError(options: {
     timeoutMs: options.policyManifest.runtimePolicy.timeoutMs,
   });
 }
+
+export function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Plugin hook failed.';
+}

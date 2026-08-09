@@ -16,6 +16,18 @@ import type {
 } from '../api/types.ts';
 import type {RuntimePluginAccessSnapshot} from '../api/contract.ts';
 
+/** Capability wiring threaded from host options into every hook context. */
+export type PluginHookCapabilityOptions = {
+  readonly storeRoot?: string | undefined;
+  readonly sessionId?: string | undefined;
+  readonly sessionIdentity?: object | undefined;
+  readonly createFileStore?:
+    RuntimePluginFileStoreProvider['createFileStore'] | undefined;
+  readonly sessionHistory?: RuntimePluginSessionHistoryFeed | undefined;
+  readonly openPluginDatabase?:
+    RuntimePluginDatabaseProvider['openPluginDatabase'] | undefined;
+};
+
 type PluginHookContextScope<TContext extends RuntimePluginContext> = {
   readonly context: TContext;
   readonly revokeFileStoreWrites: () => void;
