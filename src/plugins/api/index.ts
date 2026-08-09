@@ -1,6 +1,8 @@
 /** runtime-plugins-value-via-api: runtime imports plugins only through here. */
 export {
   beforeRoleModelFailureBehaviorValues,
+  characterMemoryPluginId,
+  characterMemoryUpdateToolName,
   characterStatePatchModelToolName,
   characterStatePluginId,
   firstPartyModelToolsPluginId,

@@ -9,6 +9,7 @@ import {
   hostFirstPartyRuntimePluginIds,
 } from '../../src/plugins/host/catalog.ts';
 import {
+  characterMemoryPluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginListToolName,
@@ -236,6 +237,7 @@ describe('runtime plugin host catalog and routing', () => {
     expect([...hostFirstPartyRuntimePluginIds]).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      characterMemoryPluginId,
       characterStatePluginId,
       sessionHistoryPluginId,
     ]);
