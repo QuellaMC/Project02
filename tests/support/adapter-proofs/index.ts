@@ -36,16 +36,16 @@ export type RuntimePluginAdapterMapping = {
   readonly plugin: RuntimePlugin;
 };
 
-export function mapOpenClawMemoryPluginFixture(
+export function mapTidepoolMemoryPluginFixture(
   value: unknown,
 ): RuntimePluginAdapterMapping {
-  const fixture = requiredRecord(value, 'OpenClaw fixture');
+  const fixture = requiredRecord(value, 'Tidepool fixture');
   const contracts = requiredRecord(fixture['contracts'], 'contracts');
   const toolNames = requiredStringArray(contracts['tools'], 'contracts.tools');
   const configSchema = requiredRecord(fixture['configSchema'], 'configSchema');
   const toolMetadata = optionalRecord(fixture['toolMetadata'], 'toolMetadata');
   const activation = requiredRecord(fixture['activation'], 'activation');
-  const manifestId = 'openclaw.memory_core.fixture';
+  const manifestId = 'tidepool.memory_core.fixture';
   const providedTools = toolNames.map(toolName =>
     createProvidedToolFromSchema({
       name: toolName,
@@ -56,12 +56,12 @@ export function mapOpenClawMemoryPluginFixture(
       validationOwner: 'adapter',
     }),
   );
-  const manifest = createOpenClawManifest({
+  const manifest = createTidepoolManifest({
     fixture,
     manifestId,
     providedTools,
     configFields: configFieldsFromSchema(configSchema),
-    activationReasons: activationReasonsFromOpenClawActivation(activation),
+    activationReasons: activationReasonsFromTidepoolActivation(activation),
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -73,17 +73,17 @@ export function mapOpenClawMemoryPluginFixture(
           call,
           context,
           output: {
-            source: 'openclaw.fixture',
+            source: 'tidepool.fixture',
             toolName: call.toolName,
             declaredBy: 'contracts.tools',
           },
-          summary: `Mapped OpenClaw tool ${call.toolName} through fixture adapter.`,
+          summary: `Mapped Tidepool tool ${call.toolName} through fixture adapter.`,
           sourceReferences: [
             createToolContractSourceReference({
               pluginId: manifestId,
               toolName: call.toolName,
-              title: `OpenClaw contracts.tools entry ${call.toolName}`,
-              uri: `fixture://openclaw/tools/${sourceReferenceIdSegment(
+              title: `Tidepool contracts.tools entry ${call.toolName}`,
+              uri: `fixture://tidepool/tools/${sourceReferenceIdSegment(
                 call.toolName,
               )}`,
             }),
@@ -96,7 +96,7 @@ export function mapOpenClawMemoryPluginFixture(
           status: 'ok',
           checkedAt: context.timestamp,
           summary:
-            'OpenClaw fixture is static; no universal upstream health field was executed.',
+            'Tidepool fixture is static; no universal upstream health field was executed.',
           redactionLabels: [],
         });
       },
@@ -106,10 +106,10 @@ export function mapOpenClawMemoryPluginFixture(
   return Object.freeze({plugin});
 }
 
-export function mapTencentDbMemoryGatewayFixture(
+export function mapCoralDbMemoryGatewayFixture(
   value: unknown,
 ): RuntimePluginAdapterMapping {
-  const fixture = requiredRecord(value, 'TencentDB gateway fixture');
+  const fixture = requiredRecord(value, 'CoralDB gateway fixture');
   const endpoints = requiredRecord(fixture['endpoints'], 'endpoints');
   const recall = requiredEndpoint(endpoints, 'recall');
   const capture = requiredEndpoint(endpoints, 'capture');
@@ -121,19 +121,19 @@ export function mapTencentDbMemoryGatewayFixture(
   const sessionEnd = requiredEndpoint(endpoints, 'sessionEnd');
   const health = requiredEndpoint(endpoints, 'health');
   const config = requiredRecord(fixture['config'], 'config');
-  const manifestId = 'memory_tencentdb.gateway.fixture';
+  const manifestId = 'memory_coraldb.gateway.fixture';
   const providedTools = [
     createProvidedToolFromSchema({
-      name: 'memory_tencentdb.memory_search',
-      description: 'Search TencentDB memory records from the fixture gateway.',
+      name: 'memory_coraldb.memory_search',
+      description: 'Search CoralDB memory records from the fixture gateway.',
       inputContract: inputContractFromSchema(searchMemories.requestSchema),
       validationOwner: 'adapter',
       maxCalls: 2,
     }),
     createProvidedToolFromSchema({
-      name: 'memory_tencentdb.conversation_search',
+      name: 'memory_coraldb.conversation_search',
       description:
-        'Search TencentDB conversation records from the fixture gateway.',
+        'Search CoralDB conversation records from the fixture gateway.',
       inputContract: inputContractFromSchema(searchConversations.requestSchema),
       validationOwner: 'adapter',
       maxCalls: 2,
@@ -141,13 +141,13 @@ export function mapTencentDbMemoryGatewayFixture(
   ];
   const manifest = createMemoryGatewayManifest({
     id: manifestId,
-    displayName: 'TencentDB Agent Memory gateway fixture',
+    displayName: 'CoralDB Agent Memory gateway fixture',
     version: optionalString(fixture['version'], 'version') ?? 'fixture',
     description:
-      'Fixture adapter for TencentDB-Agent-Memory gateway recall, capture, search, session, and health contracts.',
+      'Fixture adapter for CoralDB-Agent-Memory gateway recall, capture, search, session, and health contracts.',
     providedTools,
     configFields: configFieldsFromConfigRecord(config),
-    configFingerprint: 'fixture-redacted-tdai-gateway',
+    configFingerprint: 'fixture-redacted-coral-gateway',
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -160,14 +160,14 @@ export function mapTencentDbMemoryGatewayFixture(
         );
         const contextItem = createMemoryContextItem({
           pluginId: manifestId,
-          id: 'tdai.recall.fixture',
+          id: 'coral.recall.fixture',
           text: requiredString(
             recall.response['context'],
             'endpoints.recall.response.context',
           ),
-          sourceId: 'tdai.recall.fixture',
-          sourceTitle: 'TencentDB /recall fixture',
-          sourceUri: 'fixture://tencentdb/recall',
+          sourceId: 'coral.recall.fixture',
+          sourceTitle: 'CoralDB /recall fixture',
+          sourceUri: 'fixture://coraldb/recall',
           estimatedTokens:
             optionalPositiveInteger(
               recall.response['estimatedTokens'],
@@ -184,7 +184,7 @@ export function mapTencentDbMemoryGatewayFixture(
               context,
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
-              summary: 'Mapped TencentDB /recall fixture into memory context.',
+              summary: 'Mapped CoralDB /recall fixture into memory context.',
               sourceReferences: contextItem.sourceReferences,
               ...(manifest.config.fingerprint === undefined
                 ? {}
@@ -194,39 +194,39 @@ export function mapTencentDbMemoryGatewayFixture(
         });
       },
       handleToolCall(call, context) {
-        if (call.toolName === 'memory_tencentdb.memory_search') {
+        if (call.toolName === 'memory_coraldb.memory_search') {
           return createAcceptedToolCallResult({
             pluginId: manifestId,
             call,
             context,
             output: endpointToolOutput(searchMemories),
-            summary: 'Mapped TencentDB /search/memories fixture response.',
+            summary: 'Mapped CoralDB /search/memories fixture response.',
             sourceReferences: [
               createEndpointSourceReference({
                 pluginId: manifestId,
                 endpointName: 'searchMemories',
                 endpoint: searchMemories,
-                titlePrefix: 'TencentDB gateway fixture',
-                uriBase: 'fixture://tencentdb',
+                titlePrefix: 'CoralDB gateway fixture',
+                uriBase: 'fixture://coraldb',
               }),
             ],
           });
         }
 
-        if (call.toolName === 'memory_tencentdb.conversation_search') {
+        if (call.toolName === 'memory_coraldb.conversation_search') {
           return createAcceptedToolCallResult({
             pluginId: manifestId,
             call,
             context,
             output: endpointToolOutput(searchConversations),
-            summary: 'Mapped TencentDB /search/conversations fixture response.',
+            summary: 'Mapped CoralDB /search/conversations fixture response.',
             sourceReferences: [
               createEndpointSourceReference({
                 pluginId: manifestId,
                 endpointName: 'searchConversations',
                 endpoint: searchConversations,
-                titlePrefix: 'TencentDB gateway fixture',
-                uriBase: 'fixture://tencentdb',
+                titlePrefix: 'CoralDB gateway fixture',
+                uriBase: 'fixture://coraldb',
               }),
             ],
           });
@@ -237,7 +237,7 @@ export function mapTencentDbMemoryGatewayFixture(
           call,
           context,
           reason: 'unsupported_fixture_tool',
-          message: `TencentDB fixture does not map tool ${call.toolName}.`,
+          message: `CoralDB fixture does not map tool ${call.toolName}.`,
         });
       },
       afterTurnCommitted(context) {
@@ -245,7 +245,7 @@ export function mapTencentDbMemoryGatewayFixture(
           pluginId: manifestId,
           context,
           evidenceKind: 'after_turn_committed',
-          summary: `Mapped TencentDB /capture response: ${JSON.stringify(
+          summary: `Mapped CoralDB /capture response: ${JSON.stringify(
             endpointToolOutput(capture),
           )}.`,
         });
@@ -255,7 +255,7 @@ export function mapTencentDbMemoryGatewayFixture(
           pluginId: manifestId,
           context,
           evidenceKind: 'session_end',
-          summary: `Mapped TencentDB /session/end response: ${JSON.stringify(
+          summary: `Mapped CoralDB /session/end response: ${JSON.stringify(
             endpointToolOutput(sessionEnd),
           )}.`,
         });
@@ -273,10 +273,10 @@ export function mapTencentDbMemoryGatewayFixture(
   return Object.freeze({plugin});
 }
 
-export function mapHermesMemoryProviderFixture(
+export function mapAstraMemoryProviderFixture(
   value: unknown,
 ): RuntimePluginAdapterMapping {
-  const fixture = requiredRecord(value, 'Hermes provider fixture');
+  const fixture = requiredRecord(value, 'Astra provider fixture');
   const behavior = requiredRecord(fixture['behavior'], 'behavior');
   const prefetch = requiredRecord(behavior['prefetch'], 'behavior.prefetch');
   const sync = requiredRecord(behavior['sync'], 'behavior.sync');
@@ -291,7 +291,7 @@ export function mapHermesMemoryProviderFixture(
   );
   const config = requiredRecord(fixture['config'], 'config');
   const degradation = requiredRecord(fixture['degradation'], 'degradation');
-  const manifestId = 'hermes.memory_tencentdb.fixture';
+  const manifestId = 'astra.memory_coraldb.fixture';
   const providedTools = searchTools.map(tool =>
     createProvidedToolFromSchema({
       name: requiredString(tool['name'], 'behavior.searchTools.name'),
@@ -310,13 +310,13 @@ export function mapHermesMemoryProviderFixture(
     id: manifestId,
     displayName:
       optionalString(fixture['displayName'], 'displayName') ??
-      'Hermes memory provider fixture',
+      'Astra memory provider fixture',
     version: optionalString(fixture['version'], 'version') ?? 'fixture',
     description:
-      'Fixture adapter for Hermes memory provider prefetch, sync, search, session, health, and degradation metadata.',
+      'Fixture adapter for Astra memory provider prefetch, sync, search, session, health, and degradation metadata.',
     providedTools,
     configFields: configFieldsFromConfigRecord(config),
-    configFingerprint: 'fixture-redacted-hermes-provider',
+    configFingerprint: 'fixture-redacted-astra-provider',
   });
   const plugin = createRuntimePlugin({
     manifest,
@@ -329,14 +329,14 @@ export function mapHermesMemoryProviderFixture(
         );
         const contextItem = createMemoryContextItem({
           pluginId: manifestId,
-          id: 'hermes.prefetch.fixture',
+          id: 'astra.prefetch.fixture',
           text: requiredString(
             prefetch['context'],
             'behavior.prefetch.context',
           ),
-          sourceId: 'hermes.prefetch.fixture',
-          sourceTitle: 'Hermes prefetch fixture',
-          sourceUri: 'fixture://hermes/prefetch',
+          sourceId: 'astra.prefetch.fixture',
+          sourceTitle: 'Astra prefetch fixture',
+          sourceUri: 'fixture://astra/prefetch',
           estimatedTokens:
             optionalPositiveInteger(
               prefetch['estimatedTokens'],
@@ -353,7 +353,7 @@ export function mapHermesMemoryProviderFixture(
               context,
               evidenceKind: 'before_role_model_call',
               status: 'accepted',
-              summary: 'Mapped Hermes prefetch fixture into memory context.',
+              summary: 'Mapped Astra prefetch fixture into memory context.',
               sourceReferences: contextItem.sourceReferences,
               ...(manifest.config.fingerprint === undefined
                 ? {}
@@ -375,7 +375,7 @@ export function mapHermesMemoryProviderFixture(
             call,
             context,
             reason: 'unsupported_fixture_tool',
-            message: `Hermes fixture does not map tool ${call.toolName}.`,
+            message: `Astra fixture does not map tool ${call.toolName}.`,
           });
         }
 
@@ -386,13 +386,13 @@ export function mapHermesMemoryProviderFixture(
           output: jsonObjectFromRecord(
             requiredRecord(tool['fixtureResponse'], 'fixtureResponse'),
           ),
-          summary: `Mapped Hermes search tool ${call.toolName}.`,
+          summary: `Mapped Astra search tool ${call.toolName}.`,
           sourceReferences: [
             createToolContractSourceReference({
               pluginId: manifestId,
               toolName: call.toolName,
-              title: `Hermes search tool ${call.toolName}`,
-              uri: `fixture://hermes/searchTools/${sourceReferenceIdSegment(
+              title: `Astra search tool ${call.toolName}`,
+              uri: `fixture://astra/searchTools/${sourceReferenceIdSegment(
                 call.toolName,
               )}`,
             }),
@@ -404,7 +404,7 @@ export function mapHermesMemoryProviderFixture(
           pluginId: manifestId,
           context,
           evidenceKind: 'after_turn_committed',
-          summary: `Mapped Hermes sync response: ${JSON.stringify(
+          summary: `Mapped Astra sync response: ${JSON.stringify(
             jsonObjectFromRecord(sync),
           )}.`,
         });
@@ -414,7 +414,7 @@ export function mapHermesMemoryProviderFixture(
           pluginId: manifestId,
           context,
           evidenceKind: 'session_end',
-          summary: `Mapped Hermes session-end response: ${JSON.stringify(
+          summary: `Mapped Astra session-end response: ${JSON.stringify(
             jsonObjectFromRecord(sessionEnd),
           )}.`,
         });
@@ -427,7 +427,7 @@ export function mapHermesMemoryProviderFixture(
               'degraded',
           ),
           checkedAt: context.timestamp,
-          summary: `Hermes health fixture; ${degradationSummary(degradation)}.`,
+          summary: `Astra health fixture; ${degradationSummary(degradation)}.`,
           redactionLabels: Object.freeze(['secret']),
         });
       },
@@ -596,7 +596,7 @@ export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
   return Object.freeze({plugin: createFirstPartyModelToolsPlugin()});
 }
 
-function createOpenClawManifest(options: {
+function createTidepoolManifest(options: {
   readonly fixture: JsonRecord;
   readonly manifestId: string;
   readonly providedTools: readonly RuntimePluginProvidedTool[];
@@ -608,13 +608,13 @@ function createOpenClawManifest(options: {
     displayName:
       optionalString(options.fixture['name'], 'name') ??
       optionalString(options.fixture['displayName'], 'displayName') ??
-      'OpenClaw memory fixture',
+      'Tidepool memory fixture',
     version:
       optionalString(options.fixture['version'], 'version') ?? '0.0.0-fixture',
     kind: 'bridge_adapter',
     description:
       optionalString(options.fixture['description'], 'description') ??
-      'OpenClaw memory plugin fixture mapped into the local plugin contract.',
+      'Tidepool memory plugin fixture mapped into the local plugin contract.',
     declaredPlugins: ['tool_provider', 'handle_tool_call', 'health'],
     providedTools: options.providedTools,
     configFields: options.configFields,
@@ -1118,7 +1118,7 @@ function toolDescriptionFromMetadata(
     optionalString(
       tool?.['description'],
       `toolMetadata.${toolName}.description`,
-    ) ?? `OpenClaw fixture tool ${toolName}.`
+    ) ?? `Tidepool fixture tool ${toolName}.`
   );
 }
 
@@ -1141,10 +1141,10 @@ function toolInputSchemaFromMetadata(
   );
 }
 
-function activationReasonsFromOpenClawActivation(
+function activationReasonsFromTidepoolActivation(
   activation: JsonRecord,
 ): readonly string[] {
-  const reasons = ['openclaw_fixture_mapping'];
+  const reasons = ['tidepool_fixture_mapping'];
   const commands = optionalStringArray(
     activation['commands'],
     'activation.commands',

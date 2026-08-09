@@ -42,6 +42,12 @@ export type RuntimePluginFileStore = {
   writeJsonAtomic(path: string, value: RuntimePluginJsonValue): void;
   appendJsonl(path: string, value: RuntimePluginJsonValue): void;
   revision(): number;
+  /**
+   * Runs the synchronous operation under the store's cross-process
+   * mutation lease, so a read-modify-write derives only from state it
+   * observed itself. Store calls inside the operation re-enter the lease.
+   */
+  withMutations<T>(operation: () => T): T;
 };
 
 export type RuntimePluginCompatibilityMetadata = {

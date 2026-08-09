@@ -1,7 +1,7 @@
 {
   "id": "memory-core",
-  "name": "OpenClaw memory-core",
-  "description": "OpenClaw-style memory plugin manifest fixture.",
+  "name": "Tidepool memory-core",
+  "description": "Tidepool memory plugin manifest fixture.",
   "version": "0.0.0-fixture",
   "kind": "memory",
   "activation": {
@@ -45,7 +45,7 @@
       }
     },
     "memory_search": {
-      "description": "Search OpenClaw memory.",
+      "description": "Search Tidepool memory.",
       "inputSchema": {
         "type": "object",
         "additionalProperties": false,
@@ -74,7 +74,7 @@
   },
   "requiresPlugins": ["gateway-core"],
   "package": {
-    "openclaw": {
+    "tidepool": {
       "compat": {
         "pluginApi": "0.4.0"
       },
@@ -82,7 +82,7 @@
         "minHostVersion": "0.4.0"
       },
       "build": {
-        "openclawVersion": "0.4.0",
+        "tidepoolVersion": "0.4.0",
         "pluginSdkVersion": "0.4.0"
       }
     }
@@ -99,7 +99,7 @@
       "evidence": "Plugin dependency resolution belongs to a later install/registry slice."
     },
     {
-      "fieldPath": "package.openclaw.install",
+      "fieldPath": "package.tidepool.install",
       "disposition": "future_extension",
       "evidence": "Dynamic package installation is outside MVP-007."
     }

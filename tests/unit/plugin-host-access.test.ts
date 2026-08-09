@@ -49,6 +49,14 @@ describe('runtime plugin host access and lifecycle', () => {
         enabledPluginIds: [plugin.manifest.id],
       }),
     ).toThrow('created without a file-store provider');
+    // The character-scoped store rides the same provider, so a
+    // character_file_store-only plugin fails construction the same way.
+    expect(() =>
+      createRuntimePluginHost({
+        plugins: [createCharacterStatePlugin()],
+        enabledPluginIds: [characterStatePluginId],
+      }),
+    ).toThrow('created without a file-store provider');
     expect(() =>
       createRuntimePluginHost({
         plugins: [plugin],

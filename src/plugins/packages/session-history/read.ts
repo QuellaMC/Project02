@@ -63,11 +63,11 @@ export function createSessionHistoryReadTool(): RuntimePluginProvidedTool {
   };
 }
 
-export function handleSessionHistoryReadToolCall(options: {
+export async function handleSessionHistoryReadToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly engine: SessionHistoryEngine;
-}): RuntimePluginToolCallResult {
+}): Promise<RuntimePluginToolCallResult> {
   const input = options.call.input;
   const sessionId =
     typeof input['sessionId'] === 'string' ? input['sessionId'] : '';
@@ -79,10 +79,11 @@ export function handleSessionHistoryReadToolCall(options: {
     typeof input['window'] === 'number'
       ? input['window']
       : sessionHistoryReadDefaultWindow;
-  const conversation = options.engine.readAround({
+  const conversation = await options.engine.readAround({
     sessionId,
     window,
     ...(anchorMessageId === undefined ? {} : {anchorMessageId}),
+    signal: options.context.signal,
   });
   const output = createSessionHistoryReadOutput({conversation, sessionId});
 
