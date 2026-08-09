@@ -306,22 +306,23 @@
     </p>
 
     <p>
-      A future OpenClaw importer should be an adapter into this document and the existing
-      Project02 manifest contract. It may translate stable IDs, config schema and UI hints,
-      activation defaults, tool declarations, compatibility metadata, and supported migrations.
-      It must not make OpenClaw's internal config shape Project02's storage model, and imported
-      code remains disabled until installation, access, and activation are approved.
+      A future third-party plugin importer should be an adapter into this document and the
+      existing Project02 manifest contract. It may translate stable IDs, config schema and UI
+      hints, activation defaults, tool declarations, compatibility metadata, and supported
+      migrations. It must not make the source tool's internal config shape Project02's storage
+      model, and imported code remains disabled until installation, access, and activation are
+      approved.
     </p>
 
-    <h2>Research influences</h2>
+    <h2>Design principles</h2>
 
     <ul>
-      <li>Hermes, inspected locally from <code>explore_repo/hermes-agent</code> at <code>6cb88a0</code>: a compact terminal Save/Cancel flow and a useful distinction between authored and effective config; Project02 keeps its stronger cross-process lock and manifest schema.</li>
-      <li>OpenClaw, inspected locally from <code>explore_repo/openclaw</code> at <code>501f634</code>: cold manifest inspection, schema-driven forms, authored/runtime separation, and fingerprint-bound writes; Project02 adds explicit per-call approval.</li>
-      <li><a href="https://github.com/openai/codex/tree/main/codex-rs/config/src/loader">Codex config loader</a>: clear source precedence and centralized loading.</li>
-      <li><a href="https://github.com/openai/codex/blob/main/codex-rs/config/src/config_toml.rs">Codex typed config</a>: a strict typed boundary rather than independent ad hoc readers.</li>
-      <li><a href="https://github.com/openai/codex/blob/main/codex-rs/config/src/plugin_edit.rs">Codex plugin config edits</a>: targeted atomic edits that preserve unrelated state.</li>
-      <li><a href="https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md">Codex app-server config API</a>: shared read/write primitives and approval-aware clients.</li>
+      <li>A compact terminal Save/Cancel flow and a real distinction between authored and effective config, on top of Project02's cross-process lock and manifest schema.</li>
+      <li>Cold manifest inspection, schema-driven forms, authored/runtime separation, and fingerprint-bound writes, with explicit per-call approval.</li>
+      <li>Clear source precedence and centralized loading.</li>
+      <li>A strict typed config boundary rather than independent ad hoc readers.</li>
+      <li>Targeted atomic edits that preserve unrelated state.</li>
+      <li>Shared read/write primitives and approval-aware clients.</li>
     </ul>
 
     <h2>Explicit non-goals for v2</h2>
@@ -330,7 +331,7 @@
       <li>No plugin marketplace, package-manager installation, dependency resolution, remote loading, signing, or sandbox claim.</li>
       <li>No JSON5 includes, profiles, raw-document model editing, or custom plugin UI code.</li>
       <li>No agent mutation of secrets, activation, permissions, Project02 host settings, or config location.</li>
-      <li>No hot reload, filesystem watcher, or OpenClaw importer implementation in this slice.</li>
+      <li>No hot reload, filesystem watcher, or third-party importer implementation in this slice.</li>
     </ul>
   </main>
 </body>

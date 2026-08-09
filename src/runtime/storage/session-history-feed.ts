@@ -24,7 +24,10 @@ import {
   type LocalRuntimeStorageLayout,
 } from './layout-contract.ts';
 import {decodeRawEventLogRecord} from './raw-event-codec.ts';
-import {decodeSessionMetadata} from './session-store.ts';
+import {
+  assertSessionDirectoryReadable,
+  decodeSessionMetadata,
+} from './session-store.ts';
 import {readOptionalStoreText} from './store-file.ts';
 
 const sessionHistoryCursorPattern = /^v1:(\d{1,15})$/u;
@@ -62,6 +65,11 @@ export function createLocalRuntimeSessionHistoryFeed(options: {
     },
 
     readNewMessages(readOptions): SessionHistoryMessageBatch {
+      // The same real-directory refusal as the session reader: a linked
+      // session root must not route reads outside the character store. An
+      // absent directory stays lenient and reads as an empty session.
+      assertSessionDirectoryReadable(layout, readOptions.sessionId, 'allow');
+
       const rawEventsPath = createLocalRuntimeSessionPaths({
         storeRoot: layout.storeRoot,
         sessionId: readOptions.sessionId,

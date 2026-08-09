@@ -3,11 +3,11 @@ import {createFirstPartyModelToolsPlugin} from '../../src/plugins/builtin/model-
 import {firstPartyModelToolsPluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
-  mapHermesMemoryProviderFixture,
+  mapAstraMemoryProviderFixture,
   mapFirstPartyModelToolsPlugin,
   mapMcpToolsResourcesFixture,
-  mapOpenClawMemoryPluginFixture,
-  mapTencentDbMemoryGatewayFixture,
+  mapTidepoolMemoryPluginFixture,
+  mapCoralDbMemoryGatewayFixture,
 } from '../support/adapter-proofs/index.ts';
 import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {
@@ -60,20 +60,20 @@ describe('runtime plugin host adapters and contracts', () => {
 
   it.each([
     [
-      'TencentDB',
-      'tencentdb-memory-gateway.json',
-      mapTencentDbMemoryGatewayFixture,
-      'memory_tencentdb.gateway.fixture',
-      ['tdai.recall.fixture'],
+      'CoralDB',
+      'coraldb-memory-gateway.json',
+      mapCoralDbMemoryGatewayFixture,
+      'memory_coraldb.gateway.fixture',
+      ['coral.recall.fixture'],
       'Mira remembers that the user prefers short implementation notes.',
     ],
     [
-      'Hermes',
-      'hermes-memory-provider.json',
-      mapHermesMemoryProviderFixture,
-      'hermes.memory_tencentdb.fixture',
-      ['hermes.prefetch.fixture'],
-      'Hermes prefetch recalls that Mira should keep plugin evidence compact.',
+      'Astra',
+      'astra-memory-provider.json',
+      mapAstraMemoryProviderFixture,
+      'astra.memory_coraldb.fixture',
+      ['astra.prefetch.fixture'],
+      'Astra prefetch recalls that Mira should keep plugin evidence compact.',
     ],
     [
       'MCP',
@@ -138,9 +138,9 @@ describe('runtime plugin host adapters and contracts', () => {
     },
   );
 
-  it('does not request model input for adapter-owned OpenClaw tools', () => {
-    const mapping = mapOpenClawMemoryPluginFixture(
-      readAgentCapabilityFixture('openclaw-memory-plugin.json'),
+  it('does not request model input for adapter-owned Tidepool tools', () => {
+    const mapping = mapTidepoolMemoryPluginFixture(
+      readAgentCapabilityFixture('tidepool-memory-plugin.json'),
     );
     const host = createRuntimePluginHost({
       plugins: [mapping.plugin],

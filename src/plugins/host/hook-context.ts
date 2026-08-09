@@ -276,6 +276,11 @@ function createRevocableRuntimePluginFileStore(
       revision() {
         return fileStore.revision();
       },
+      // The operation body calls this proxy's methods, so write
+      // revocation still applies inside the scope.
+      withMutations(operation) {
+        return fileStore.withMutations(operation);
+      },
     } satisfies RuntimePluginFileStore),
     revokeWrites() {
       writesRevoked = true;

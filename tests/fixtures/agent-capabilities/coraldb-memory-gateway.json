@@ -1,5 +1,5 @@
 {
-  "name": "TencentDB-Agent-Memory gateway",
+  "name": "CoralDB-Agent-Memory gateway",
   "version": "main-fixture",
   "config": {
     "gateway_host": {

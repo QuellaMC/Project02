@@ -1,4 +1,12 @@
-import {appendFileSync, truncateSync, writeFileSync} from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
+import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from '../support/character-fixtures.ts';
@@ -223,6 +231,38 @@ describe('session history feed', () => {
       'third question',
       'third answer',
     ]);
+  });
+
+  it('refuses a linked session directory instead of reading through it', async () => {
+    const storeRoot = createStoreRoot();
+
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'linked',
+      exchanges: [['hello', 'hi']],
+    });
+
+    const outside = join(createTestTempRoot('project02-feed-outside-'), 'raw');
+
+    mkdirSync(outside, {recursive: true});
+    writeFileSync(join(outside, 'raw-events.jsonl'), '', 'utf8');
+
+    const sessionRoot = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'linked',
+    }).sessionRoot;
+
+    rmSync(sessionRoot, {recursive: true});
+    symlinkSync(outside, sessionRoot);
+
+    const feed = createLocalRuntimeSessionHistoryFeed({
+      storeRoot,
+      characterId: character.id,
+    });
+
+    expect(() => feed.readNewMessages({sessionId: 'linked'})).toThrow(
+      expect.objectContaining({code: 'read_failed'}),
+    );
   });
 
   it('fails closed on marker problems', async () => {

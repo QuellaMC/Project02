@@ -19,7 +19,7 @@ import {
   characterEnergyValues,
   characterMoodValues,
   characterSocialOrientationValues,
-  characterRuntimeStatesEqual,
+  applyCharacterStatePatch,
   createDefaultCharacterRuntimeState,
   createLivingStateBrief,
   decodeAcceptedCharacterStatePatchResult,
@@ -37,6 +37,8 @@ import type {
   RuntimePluginBeforeRoleModelCallResult,
   RuntimePluginFileStore,
   RuntimePluginManifest,
+  RuntimePluginToolCall,
+  RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 import {characterStatePluginId} from '../../api/contract.ts';
 
@@ -177,126 +179,136 @@ function createCharacterStatePluginFromManifest(
         }
 
         const fileStore = requiredCharacterFileStore(context);
-        const store = readCharacterStateStore(fileStore);
-        const duplicateEvent = readCharacterStatePatchIdempotencyRecord({
-          fileStore,
-          eventId: call.eventId,
-          traceId: call.traceId,
-          createdAt: call.createdAt,
-          ...(call.toolCallId === undefined
-            ? {}
-            : {toolCallId: call.toolCallId}),
-        });
 
-        if (duplicateEvent !== undefined) {
-          const storedResult = duplicateEvent.result;
-
-          if (!jsonObjectEntriesEqual(call.input, storedResult.patch)) {
-            const message =
-              'character_state.patch identity was already committed with different input.';
-
-            return {
-              status: 'rejected',
-              reason: 'character_state_idempotency_conflict',
-              message,
-              evidence: [
-                createPluginToolEvidence({
-                  context,
-                  pluginId: characterStatePluginId,
-                  status: 'rejected',
-                  summary: message,
-                }),
-              ],
-            };
-          }
-
-          return {
-            status: 'accepted',
-            output: Object.freeze({
-              status: 'accepted',
-              current: storedResult.after.current,
-              appliedChanges: storedResult.appliedChanges,
-              idempotent: true,
-            }),
-            evidence: [
-              createPluginToolEvidence({
-                context,
-                pluginId: characterStatePluginId,
-                status: 'accepted',
-                summary: 'Skipped duplicate Character State patch event.',
-              }),
-            ],
-          };
-        }
-
-        const before = store.current;
-        const result = planCharacterStatePatch({
-          before,
-          patchInput: call.input,
-        });
-
-        if (result.status === 'rejected') {
-          return {
-            status: 'rejected',
-            reason: result.rejection.reason,
-            message: result.rejection.details,
-            evidence: [
-              createPluginToolEvidence({
-                context,
-                pluginId: characterStatePluginId,
-                status: 'rejected',
-                summary: result.rejection.details,
-              }),
-            ],
-          };
-        }
-
-        const event = Object.freeze({
-          type: 'character_state.patch',
-          eventId: call.eventId,
-          traceId: call.traceId,
-          ...(call.toolCallId === undefined
-            ? {}
-            : {toolCallId: call.toolCallId}),
-          createdAt: call.createdAt,
-          input: call.input,
-          result,
-        } satisfies RuntimePluginJsonObject);
-
-        fileStore.appendJsonl(characterStateEventsPath, event);
-        writeCharacterStatePatchIdempotencyRecord(
-          fileStore,
-          decodeStoredCharacterStatePatchEvent(event),
+        // One lease across read, append, and checkpoint: concurrent
+        // processes serialize behind it, so a checkpoint always folds
+        // every event the log held when it lands.
+        return fileStore.withMutations(() =>
+          appliedCharacterStatePatchCall(call, context, fileStore),
         );
-        writeCharacterStateCheckpoint(fileStore, {
-          eventCount: store.eventCount + 1,
-          current: result.after,
-        });
-
-        return {
-          status: 'accepted',
-          output: Object.freeze({
-            status: 'accepted',
-            current: result.after.current,
-            appliedChanges: result.appliedChanges,
-          }),
-          evidence: [
-            createPluginToolEvidence({
-              context,
-              pluginId: characterStatePluginId,
-              status: 'accepted',
-              summary:
-                result.appliedChanges.length === 0
-                  ? 'Recorded no-op Character State patch identity.'
-                  : `Applied ${String(result.appliedChanges.length)} Character State changes.`,
-            }),
-          ],
-        };
       },
     },
   });
 
   return plugin;
+}
+
+function appliedCharacterStatePatchCall(
+  call: RuntimePluginToolCall,
+  context: RuntimePluginContext,
+  fileStore: RuntimePluginFileStore,
+): RuntimePluginToolCallResult {
+  const store = readCharacterStateStore(fileStore);
+  const duplicateEvent = readCharacterStatePatchIdempotencyRecord({
+    fileStore,
+    eventId: call.eventId,
+    traceId: call.traceId,
+    createdAt: call.createdAt,
+    ...(call.toolCallId === undefined ? {} : {toolCallId: call.toolCallId}),
+  });
+
+  if (duplicateEvent !== undefined) {
+    const storedResult = duplicateEvent.result;
+
+    if (!jsonObjectEntriesEqual(call.input, storedResult.patch)) {
+      const message =
+        'character_state.patch identity was already committed with different input.';
+
+      return {
+        status: 'rejected',
+        reason: 'character_state_idempotency_conflict',
+        message,
+        evidence: [
+          createPluginToolEvidence({
+            context,
+            pluginId: characterStatePluginId,
+            status: 'rejected',
+            summary: message,
+          }),
+        ],
+      };
+    }
+
+    return {
+      status: 'accepted',
+      output: Object.freeze({
+        status: 'accepted',
+        current: storedResult.after.current,
+        appliedChanges: storedResult.appliedChanges,
+        idempotent: true,
+      }),
+      evidence: [
+        createPluginToolEvidence({
+          context,
+          pluginId: characterStatePluginId,
+          status: 'accepted',
+          summary: 'Skipped duplicate Character State patch event.',
+        }),
+      ],
+    };
+  }
+
+  const before = store.current;
+  const result = planCharacterStatePatch({
+    before,
+    patchInput: call.input,
+  });
+
+  if (result.status === 'rejected') {
+    return {
+      status: 'rejected',
+      reason: result.rejection.reason,
+      message: result.rejection.details,
+      evidence: [
+        createPluginToolEvidence({
+          context,
+          pluginId: characterStatePluginId,
+          status: 'rejected',
+          summary: result.rejection.details,
+        }),
+      ],
+    };
+  }
+
+  const event = Object.freeze({
+    type: 'character_state.patch',
+    eventId: call.eventId,
+    traceId: call.traceId,
+    ...(call.toolCallId === undefined ? {} : {toolCallId: call.toolCallId}),
+    createdAt: call.createdAt,
+    input: call.input,
+    result,
+  } satisfies RuntimePluginJsonObject);
+
+  fileStore.appendJsonl(characterStateEventsPath, event);
+  writeCharacterStatePatchIdempotencyRecord(
+    fileStore,
+    decodeStoredCharacterStatePatchEvent(event),
+  );
+  writeCharacterStateCheckpoint(fileStore, {
+    eventCount: store.eventCount + 1,
+    current: result.after,
+  });
+
+  return {
+    status: 'accepted',
+    output: Object.freeze({
+      status: 'accepted',
+      current: result.after.current,
+      appliedChanges: result.appliedChanges,
+    }),
+    evidence: [
+      createPluginToolEvidence({
+        context,
+        pluginId: characterStatePluginId,
+        status: 'accepted',
+        summary:
+          result.appliedChanges.length === 0
+            ? 'Recorded no-op Character State patch identity.'
+            : `Applied ${String(result.appliedChanges.length)} Character State changes.`,
+      }),
+    ],
+  };
 }
 
 function readCharacterStatePatchIdempotencyRecord(options: {
@@ -370,21 +382,23 @@ function decodeCharacterStateEventLog(
     const event = decodeStoredCharacterStatePatchEvent(rawEvent);
     const identity = characterStatePatchIdentityKey(event);
 
+    // A crash between append and checkpoint replays the same event on
+    // retry; the duplicate is the same fact and folds to nothing.
     if (identities.has(identity)) {
-      throw new TypeError(
-        'Stored Character State plugin event identity is duplicated.',
-      );
-    }
-
-    if (!characterRuntimeStatesEqual(event.result.before, authoritativeState)) {
-      throw new TypeError(
-        'Stored Character State plugin event chain is discontinuous.',
-      );
+      continue;
     }
 
     identities.add(identity);
     decodedEvents.push(event);
-    authoritativeState = event.result.after;
+    // Append order is the serialization: each event folds as a field
+    // patch onto the running state, so two sessions patching the same
+    // character concurrently converge instead of failing a continuity
+    // check forever. Each event still records the before/after its
+    // writer saw.
+    authoritativeState = applyCharacterStatePatch(
+      authoritativeState,
+      event.result.patch,
+    );
   }
 
   return Object.freeze({
@@ -489,27 +503,31 @@ function jsonObjectEntriesEqual(left: object, right: object): boolean {
 function readCharacterStateStore(
   fileStore: RuntimePluginFileStore,
 ): CharacterStateCheckpoint {
-  const storedCheckpoint = fileStore.readJson(characterStateCheckpointPath);
+  // Trust-check, fold, and repair under one lease, so the checkpoint a
+  // repair writes derives only from the log it just read.
+  return fileStore.withMutations(() => {
+    const storedCheckpoint = fileStore.readJson(characterStateCheckpointPath);
 
-  if (storedCheckpoint !== undefined) {
-    const checkpoint = decodeCharacterStateCheckpoint(storedCheckpoint);
+    if (storedCheckpoint !== undefined) {
+      const checkpoint = decodeCharacterStateCheckpoint(storedCheckpoint);
 
-    if (checkpoint.storeRevision === fileStore.revision()) {
-      return checkpoint;
+      if (checkpoint.storeRevision === fileStore.revision()) {
+        return checkpoint;
+      }
     }
-  }
 
-  const eventLog = decodeCharacterStateEventLog(
-    fileStore.readJsonl(characterStateEventsPath),
-  );
+    const eventLog = decodeCharacterStateEventLog(
+      fileStore.readJsonl(characterStateEventsPath),
+    );
 
-  for (const event of eventLog.events) {
-    writeCharacterStatePatchIdempotencyRecord(fileStore, event);
-  }
+    for (const event of eventLog.events) {
+      writeCharacterStatePatchIdempotencyRecord(fileStore, event);
+    }
 
-  return writeCharacterStateCheckpoint(fileStore, {
-    eventCount: eventLog.events.length,
-    current: eventLog.current,
+    return writeCharacterStateCheckpoint(fileStore, {
+      eventCount: eventLog.events.length,
+      current: eventLog.current,
+    });
   });
 }
 

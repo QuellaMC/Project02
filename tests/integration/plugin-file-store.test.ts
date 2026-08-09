@@ -110,6 +110,42 @@ describe('runtime plugin file store', () => {
     expect(second.revision()).toBe(5);
   });
 
+  it('runs read-modify-write sequences under one re-entrant mutation lease', () => {
+    const storeRoot = createTempRoot();
+    const store = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-mutations',
+      pluginId: 'plugin.mutations',
+    });
+
+    // Nested store calls re-enter the held lease, and the scope returns
+    // the operation's value; a derived write can therefore trust exactly
+    // the state it read.
+    const result = store.withMutations(() => {
+      const revisionBefore = store.revision();
+
+      store.appendJsonl('events.jsonl', {value: 1});
+      store.writeJsonAtomic('derived.json', {events: 1});
+
+      expect(store.revision()).toBe(revisionBefore + 2);
+      return store.readJson('derived.json');
+    });
+
+    expect(result).toEqual({events: 1});
+
+    // A second store instance (its own lease owner) observes the whole
+    // scope's outcome.
+    const observer = createRuntimePluginFileStore({
+      storeRoot,
+      sessionId: 'session-mutations',
+      pluginId: 'plugin.mutations',
+    });
+
+    expect(
+      observer.withMutations(() => observer.readJsonl('events.jsonl')),
+    ).toEqual([{value: 1}]);
+  });
+
   it('cleans dead atomic temp files and never counts live temps as plugin state', () => {
     const storeRoot = createTempRoot();
     const sessionId = 'session-durable-orphan-temps';

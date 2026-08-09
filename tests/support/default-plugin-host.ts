@@ -1,62 +1,31 @@
-import {hostFirstPartyRuntimePluginIds} from '../../src/plugins/host/catalog.ts';
 import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId,
-  sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
 import {
   createRuntimePluginHost,
   type CreateRuntimePluginHostOptions,
   type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
-import {
-  bundledRuntimePluginPackageRoot,
-  discoverRuntimePluginPackages,
-} from '../../src/plugins/package-loader/index.ts';
+import {createCharacterStatePlugin} from '../../src/plugins/packages/character-state/plugin.ts';
+import {createSessionHistoryPlugin} from '../../src/plugins/packages/session-history/plugin.ts';
 
-const bundledPackageDiscovery = discoverRuntimePluginPackages({
-  sources: [
-    {
-      root: bundledRuntimePluginPackageRoot,
-    },
-  ],
-  reservedPluginIds: hostFirstPartyRuntimePluginIds,
-});
-async function loadBundledPlugin(pluginId: string) {
-  const bundledPackage = bundledPackageDiscovery.packages.find(
-    entry => entry.manifest.id === pluginId,
-  );
-
-  if (
-    bundledPackageDiscovery.diagnostics.length > 0 ||
-    bundledPackage === undefined
-  ) {
-    throw new TypeError(
-      `Default test plugin host could not discover the bundled "${pluginId}" package.`,
-    );
-  }
-
-  return await bundledPackage.load({
-    pluginId: bundledPackage.manifest.id,
-    manifest: bundledPackage.manifest,
-    storeRoot: bundledRuntimePluginPackageRoot,
-    resolvedConfig: Object.freeze({}),
-    redactedConfig: Object.freeze({}),
-  });
-}
-
-const characterStatePlugin = await loadBundledPlugin(characterStatePluginId);
-const sessionHistoryPlugin = await loadBundledPlugin(sessionHistoryPluginId);
-
+/**
+ * Every host gets fresh bundled-plugin instances: session-history caches
+ * its engine and character per instance, so a shared instance would leak
+ * one host's index and shutdown into the next. Manifests come from the
+ * package descriptors, the same source the discovery pipeline reads;
+ * discovery itself is covered by the package-loader suite.
+ */
 export function createDefaultProject02PluginHost(
   options: Omit<CreateRuntimePluginHostOptions, 'plugins'> = {},
 ): RuntimePluginHost {
   return createRuntimePluginHost({
     fileStore: testRuntimePluginFileStoreProvider,
     ...options,
-    plugins: [characterStatePlugin, sessionHistoryPlugin],
+    plugins: [createCharacterStatePlugin(), createSessionHistoryPlugin()],
     enabledPluginIds: options.enabledPluginIds ?? [
       runtimePluginId,
       firstPartyModelToolsPluginId,

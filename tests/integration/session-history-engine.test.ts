@@ -44,11 +44,12 @@ describe('session history engine', () => {
       exchanges: [
         ['how is the weather?', 'Sunny, with a chance of tool calls.'],
         ['我们讨论了插件权限设计吗？', '讨论过，结论是每个插件一个能力授权。'],
+        ['Привет, как дела?', 'Хорошо!'],
       ],
     });
 
     const engine = createEngine(storeRoot);
-    const result = engine.search({query: 'permission', sessionLimit: 3});
+    const result = await engine.search({query: 'permission', sessionLimit: 3});
 
     expect(result.totalSessionsWithHits).toBe(1);
     expect(result.sessions[0]?.sessionId).toBe('alpha');
@@ -59,21 +60,76 @@ describe('session history engine', () => {
     ).toBe(true);
     expect(result.damagedRecordCount).toBe(0);
 
-    const cjk = engine.search({query: '插件权限', sessionLimit: 3});
+    const cjk = await engine.search({query: '插件权限', sessionLimit: 3});
 
     expect(cjk.sessions.map(view => view.sessionId)).toContain('beta');
 
-    const short = engine.search({query: 'su', sessionLimit: 3});
+    const short = await engine.search({query: 'su', sessionLimit: 3});
 
     expect(short.totalSessionsWithHits).toBe(1);
     expect(short.sessions[0]?.sessionId).toBe('beta');
 
-    const literal = engine.search({
+    // SQLite's built-in lower() folds ASCII only; the registered fold
+    // makes short non-ASCII queries case-insensitive too.
+    const cyrillic = await engine.search({query: 'ПР', sessionLimit: 3});
+
+    expect(cyrillic.totalSessionsWithHits).toBe(1);
+    expect(cyrillic.sessions[0]?.sessionId).toBe('beta');
+
+    const literal = await engine.search({
       query: '"permission" OR archi*',
       sessionLimit: 3,
     });
 
     expect(literal.totalSessionsWithHits).toBe(0);
+
+    engine.close();
+  });
+
+  it('ranks one best hit per session so a hit-heavy session cannot crowd others out', async () => {
+    const storeRoot = createStoreRoot();
+    const hogExchanges: [string, string][] = [];
+
+    for (let turn = 0; turn < 12; turn += 1) {
+      hogExchanges.push([
+        `kraken sighting number ${String(turn)}`,
+        `kraken confirmed again ${String(turn)}`,
+      ]);
+    }
+
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'hog',
+      exchanges: hogExchanges,
+    });
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'quiet',
+      exchanges: [['one kraken mention here', 'noted']],
+    });
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'ties',
+      exchanges: [
+        ['echoed unique phrase', 'first reply'],
+        ['echoed unique phrase', 'second reply'],
+      ],
+    });
+
+    const engine = createEngine(storeRoot);
+    const grouped = await engine.search({query: 'kraken', sessionLimit: 5});
+
+    expect(grouped.totalSessionsWithHits).toBe(2);
+    expect(grouped.sessions.map(view => view.sessionId).sort()).toEqual([
+      'hog',
+      'quiet',
+    ]);
+
+    // Equal-rank hits within a session resolve to the newest message
+    // (fixture ids are 1-based: the two user turns are messages 1 and 3).
+    const tied = await engine.search({query: 'echoed unique', sessionLimit: 1});
+
+    expect(tied.sessions[0]?.matchMessageId).toBe('ties:message-3');
 
     engine.close();
   });
@@ -98,7 +154,8 @@ describe('session history engine', () => {
     });
 
     const engine = createEngine(storeRoot);
-    const view = engine.search({query: 'anchovy', sessionLimit: 1}).sessions[0];
+    const view = (await engine.search({query: 'anchovy', sessionLimit: 1}))
+      .sessions[0];
 
     expect(view?.bookendStart.map(message => message.text)).toEqual([
       'filler question 0',
@@ -110,7 +167,7 @@ describe('session history engine', () => {
       'filler answer 9',
     ]);
 
-    const scrolled = engine.readAround({
+    const scrolled = await engine.readAround({
       sessionId: 'long-session',
       anchorMessageId: view?.matchMessageId ?? '',
       window: 2,
@@ -149,14 +206,15 @@ describe('session history engine', () => {
     });
 
     expect(
-      engine.search({query: 'narwhals', sessionLimit: 1}).totalSessionsWithHits,
+      (await engine.search({query: 'narwhals', sessionLimit: 1}))
+        .totalSessionsWithHits,
     ).toBe(1);
     expect(countIndexedMessages(storeRoot)).toBe(4);
 
     engine.close();
   });
 
-  it('rebuilds on database version bumps and adopts foreign databases', async () => {
+  it('rebuilds on version bumps and corruption, and adopts foreign databases only on success', async () => {
     const storeRoot = createStoreRoot();
 
     await writeDurableConversationSession({
@@ -168,7 +226,8 @@ describe('session history engine', () => {
     const engine = createEngine(storeRoot);
 
     expect(
-      engine.search({query: 'thread', sessionLimit: 3}).totalSessionsWithHits,
+      (await engine.search({query: 'thread', sessionLimit: 3}))
+        .totalSessionsWithHits,
     ).toBe(1);
     engine.close();
 
@@ -181,24 +240,34 @@ describe('session history engine', () => {
     const afterVersionBump = createEngine(storeRoot);
 
     expect(
-      afterVersionBump.search({query: 'thread', sessionLimit: 3})
+      (await afterVersionBump.search({query: 'thread', sessionLimit: 3}))
         .totalSessionsWithHits,
     ).toBe(1);
     afterVersionBump.close();
 
-    // A database claiming another character is wiped and adopted.
+    // A database claiming another character is wiped and adopted; while
+    // another window blocks the adoption write, nothing is cached and no
+    // foreign row is ever served.
     const foreign = new Database(indexPath(storeRoot));
 
     foreign.prepare('UPDATE index_meta SET character_id = ?').run('nova');
+
+    foreign.exec('BEGIN EXCLUSIVE');
+
+    const blocked = createEngine(storeRoot);
+
+    await expect(
+      blocked.search({query: 'thread', sessionLimit: 3}),
+    ).rejects.toThrow();
+
+    foreign.exec('ROLLBACK');
     foreign.close();
 
-    const afterForeignMeta = createEngine(storeRoot);
-
     expect(
-      afterForeignMeta.search({query: 'thread', sessionLimit: 3})
+      (await blocked.search({query: 'thread', sessionLimit: 3}))
         .totalSessionsWithHits,
     ).toBe(1);
-    afterForeignMeta.close();
+    blocked.close();
   });
 
   it('rejects database names outside the identifier rules', async () => {
@@ -235,32 +304,89 @@ describe('session history engine', () => {
 
     const engine = createEngine(storeRoot);
 
-    expect(() =>
+    await expect(
       engine.search({query: 'hello', sessionId: 'nope', sessionLimit: 1}),
-    ).toThrow(expect.objectContaining({code: 'session_not_found'}));
-    expect(() => engine.readAround({sessionId: '../x', window: 5})).toThrow(
-      expect.objectContaining({code: 'session_not_found'}),
-    );
-    expect(() =>
+    ).rejects.toThrow(expect.objectContaining({code: 'session_not_found'}));
+    await expect(
+      engine.readAround({sessionId: '../x', window: 5}),
+    ).rejects.toThrow(expect.objectContaining({code: 'session_not_found'}));
+    await expect(
       engine.readAround({
         sessionId: 'only',
         anchorMessageId: 'only:message-99',
         window: 5,
       }),
-    ).toThrow(expect.objectContaining({code: 'message_not_found'}));
+    ).rejects.toThrow(expect.objectContaining({code: 'message_not_found'}));
 
     engine.close();
-    expect(() => engine.search({query: 'hello', sessionLimit: 1})).toThrow(
-      expect.objectContaining({code: 'engine_closed'}),
-    );
+    await expect(
+      engine.search({query: 'hello', sessionLimit: 1}),
+    ).rejects.toThrow(expect.objectContaining({code: 'engine_closed'}));
 
     // A second engine over the same store keeps working.
     const second = createEngine(storeRoot);
 
     expect(
-      second.search({query: 'hello', sessionLimit: 1}).totalSessionsWithHits,
+      (await second.search({query: 'hello', sessionLimit: 1}))
+        .totalSessionsWithHits,
     ).toBe(1);
     second.close();
+  });
+
+  it('ingests past a record larger than one catch-up slice', async () => {
+    const storeRoot = createStoreRoot();
+
+    // The first user message alone exceeds the 2 MiB slice cap, so a
+    // capped read finds no newline; ingestion must still consume it and
+    // reach the exchange behind it.
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'oversized',
+      exchanges: [
+        [
+          `please archive this dump: ${'x'.repeat(3 * 1024 * 1024)}`,
+          'Archived.',
+        ],
+        ['and what was the codename?', 'The codename was halcyon-otter.'],
+      ],
+    });
+
+    const engine = createEngine(storeRoot);
+    const result = await engine.search({
+      query: 'halcyon-otter',
+      sessionLimit: 1,
+    });
+
+    expect(result.totalSessionsWithHits).toBe(1);
+    expect(result.sessions[0]?.sessionId).toBe('oversized');
+    expect(result.damagedRecordCount).toBe(0);
+    engine.close();
+  });
+
+  it('stops catch-up when the caller aborts', async () => {
+    const storeRoot = createStoreRoot();
+
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId: 'cold',
+      exchanges: [['hello there', 'hi']],
+    });
+
+    const engine = createEngine(storeRoot);
+    const aborted = AbortSignal.abort();
+
+    await expect(
+      engine.search({query: 'hello', sessionLimit: 1, signal: aborted}),
+    ).rejects.toThrow(expect.objectContaining({code: 'aborted'}));
+
+    // Aborted warm-up ends quietly, and the next live query catches up.
+    await engine.warmUp({signal: aborted});
+
+    expect(
+      (await engine.search({query: 'hello', sessionLimit: 1}))
+        .totalSessionsWithHits,
+    ).toBe(1);
+    engine.close();
   });
 });
 

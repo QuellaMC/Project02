@@ -1,35 +1,14 @@
 import {eq, sql} from 'drizzle-orm';
 import type {BetterSQLite3Database} from 'drizzle-orm/better-sqlite3';
 
-import type {
-  RuntimePluginSessionHistoryFeed,
-  RuntimePluginSessionHistoryListing,
-} from '../../../api/session-history-contract.ts';
+import type {RuntimePluginSessionHistoryFeed} from '../../../api/session-history-contract.ts';
 import {messagesTable, projectionStateTable} from './schema.ts';
 
 /**
- * Catches the index up to the feed, one immediate transaction per
- * session; concurrent ingesters serialize on each and re-read the
- * cursors they find, so double ingestion cannot happen.
- */
-export function ingestSessionHistory(options: {
-  readonly database: BetterSQLite3Database;
-  readonly feed: RuntimePluginSessionHistoryFeed;
-  readonly catalog: RuntimePluginSessionHistoryListing;
-}): void {
-  for (const session of options.catalog.sessions) {
-    // An uncapped slice consumes the whole feed tail in one pass.
-    ingestSessionSlice({
-      database: options.database,
-      feed: options.feed,
-      sessionId: session.sessionId,
-    });
-  }
-}
-
-/**
- * One transactional ingestion step. Without maxBytes it consumes the
- * whole feed tail; with it, at most one slice, so a warm-up loop can
+ * One transactional ingestion step; concurrent ingesters serialize on
+ * the immediate transaction and re-read the cursors they find, so
+ * double ingestion cannot happen. Without maxBytes it consumes the
+ * whole feed tail; with it, at most one slice, so the catch-up loop can
  * yield to the event loop between slices. Returns whether it advanced.
  */
 export function ingestSessionSlice(options: {
@@ -151,7 +130,7 @@ function readIngestState(
     .get();
 }
 
-export function resetSessionIngest(
+function resetSessionIngest(
   database: BetterSQLite3Database,
   sessionId: string,
 ): void {
