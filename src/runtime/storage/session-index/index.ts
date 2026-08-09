@@ -1,4 +1,5 @@
 import {drizzle, type BetterSQLite3Database} from 'drizzle-orm/better-sqlite3';
+import {setImmediate as yieldToEventLoop} from 'node:timers/promises';
 
 import {requireCharacterDataMarker} from '../character-data.ts';
 import {
@@ -19,8 +20,10 @@ import type {
   SessionIndexReadAroundOptions,
   SessionIndexSearchOptions,
   SessionIndexSearchResult,
+  SessionIndexWarmUpOptions,
 } from './contract.ts';
 import {
+  catchUpSessionSlice,
   projectSessionIndex,
   readLenientSessionCatalog,
   totalProjectedTranscriptDamage,
@@ -42,7 +45,12 @@ export type {
   SessionIndexSearchOptions,
   SessionIndexSearchResult,
   SessionIndexSessionView,
+  SessionIndexWarmUpOptions,
 } from './contract.ts';
+
+// Sized so one warm-up slice decodes in well under a second; anything left
+// behind is picked up by the next slice or an uncapped query pass.
+const warmUpSliceMaxBytes = 2 * 1024 * 1024;
 
 export type CreateLocalRuntimeSessionIndexOptions = {
   readonly storeRoot: string;
@@ -52,8 +60,8 @@ export type CreateLocalRuntimeSessionIndexOptions = {
 /**
  * A rebuildable SQLite view over one character's canonical transcripts.
  * Construction validates the store marker and nothing else; the database
- * opens lazily on the first query, and every query first catches the view
- * up to the JSONL log it is derived from.
+ * opens lazily on the first query or warm-up, and every query first
+ * catches the view up to the JSONL log it is derived from.
  */
 export function createLocalRuntimeSessionIndex(
   options: CreateLocalRuntimeSessionIndexOptions,
@@ -72,10 +80,7 @@ export function createLocalRuntimeSessionIndex(
   let orm: BetterSQLite3Database | undefined;
   let closed = false;
 
-  const refreshedView = (): {
-    readonly database: BetterSQLite3Database;
-    readonly catalog: LenientSessionCatalog;
-  } => {
+  const openedDatabase = (): BetterSQLite3Database => {
     if (closed) {
       throw new LocalRuntimeStorageContractError(
         'read_failed',
@@ -90,14 +95,55 @@ export function createLocalRuntimeSessionIndex(
       orm = opened.orm;
     }
 
+    return orm;
+  };
+
+  const refreshedView = (): {
+    readonly database: BetterSQLite3Database;
+    readonly catalog: LenientSessionCatalog;
+  } => {
+    const database = openedDatabase();
     const catalog = readLenientSessionCatalog(layout);
 
-    projectSessionIndex({database: orm, layout, catalog});
-    return {database: orm, catalog};
+    projectSessionIndex({database, layout, catalog});
+    return {database, catalog};
   };
 
   return Object.freeze({
     characterId,
+
+    async warmUp(warmUpOptions: SessionIndexWarmUpOptions = {}): Promise<void> {
+      const database = openedDatabase();
+      const catalog = readLenientSessionCatalog(layout);
+      const sessionIds = catalog.sessions
+        .map(session => session.sessionId)
+        .filter(
+          sessionId =>
+            warmUpOptions.sessionId === undefined ||
+            sessionId === warmUpOptions.sessionId,
+        );
+
+      for (const sessionId of sessionIds) {
+        for (;;) {
+          if (closed) {
+            return;
+          }
+
+          const consumedBytes = catchUpSessionSlice({
+            database,
+            layout,
+            sessionId,
+            maxBytes: warmUpSliceMaxBytes,
+          });
+
+          if (consumedBytes === 0) {
+            break;
+          }
+
+          await yieldToEventLoop();
+        }
+      }
+    },
 
     search(searchOptions: SessionIndexSearchOptions): SessionIndexSearchResult {
       const {database, catalog} = refreshedView();

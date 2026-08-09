@@ -24,7 +24,12 @@ export function createSessionIndexSnapshot(
     throw new TypeError('Session index must carry a non-empty characterId.');
   }
 
-  for (const methodName of ['search', 'readAround', 'close'] as const) {
+  for (const methodName of [
+    'search',
+    'readAround',
+    'warmUp',
+    'close',
+  ] as const) {
     if (typeof index[methodName] !== 'function') {
       throw new TypeError(`sessionIndex.${methodName} must be a function.`);
     }
@@ -34,6 +39,7 @@ export function createSessionIndexSnapshot(
     characterId: index.characterId,
     search: options => index.search(options),
     readAround: options => index.readAround(options),
+    warmUp: options => index.warmUp(options),
     close: () => {
       index.close();
     },

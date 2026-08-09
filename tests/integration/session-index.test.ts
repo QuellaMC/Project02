@@ -433,6 +433,37 @@ describe('session index', () => {
     index.close();
   });
 
+  it('warms up without a query and tolerates unknown sessions', async () => {
+    const storeRoot = createStoreRoot();
+
+    await writeSession(storeRoot, 'alpha', [['hello there', 'hi']]);
+    await writeSession(storeRoot, 'beta', [['more words', 'indeed']]);
+
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
+    const index = createLocalRuntimeSessionIndex({
+      storeRoot,
+      characterId: character.id,
+    });
+
+    await index.warmUp();
+    expect(existsSync(layout.sessionIndexPath)).toBe(true);
+
+    const database = new Database(layout.sessionIndexPath, {readonly: true});
+
+    try {
+      const row = database
+        .prepare<[], {total: number}>('SELECT count(*) AS total FROM messages')
+        .get();
+
+      expect(row?.total).toBe(4);
+    } finally {
+      database.close();
+    }
+
+    await index.warmUp({sessionId: 'never-existed'});
+    index.close();
+  });
+
   it('opens lazily and serves concurrent instances', async () => {
     const storeRoot = createStoreRoot();
 
