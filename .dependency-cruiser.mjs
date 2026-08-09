@@ -56,6 +56,18 @@ export default {
       to: {path: '^fs(/promises)?$', dependencyTypes: ['core']},
     },
     {
+      name: 'sqlite-driver-only-in-sqlite-seam',
+      comment:
+        'Rule 2d — the better-sqlite3 driver is importable from ' +
+        'src/runtime/storage/sqlite.ts and nowhere else, so "which files ' +
+        'hold a database handle" has a one-word answer. Everything else ' +
+        'goes through that seam or a query layer built on it. Green with ' +
+        'no exemptions.',
+      severity: 'error',
+      from: {path: '^src/', pathNot: ['^src/runtime/storage/sqlite\\.ts$']},
+      to: {path: '^node_modules/better-sqlite3/'},
+    },
+    {
       name: 'contracts-no-impl-value-deps',
       comment:
         'Rule 3 — contract files (contract.ts, contracts.ts, *-contract.ts) ' +
