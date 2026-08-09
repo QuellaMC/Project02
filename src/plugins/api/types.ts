@@ -239,8 +239,25 @@ export type CreateRuntimePluginAfterTurnCommittedContextOptions =
     readonly visibleMessages: readonly VisibleMessage[];
   };
 
+/**
+ * A structured entry for the trusted curated-context prompt frame. Plugins
+ * never contribute raw prompt text; the host renders sections it validated.
+ */
+export type RuntimePluginCuratedContextSection = {
+  readonly pluginId: string;
+  readonly id: string;
+  /** Single-line section heading rendered by the host. */
+  readonly title: string;
+  readonly text: string;
+  /** Capacity display only; enforcement belongs to the owning plugin. */
+  readonly capChars?: number;
+  readonly usedChars?: number;
+};
+
 export type RuntimePluginBeforeRoleModelCallResult = {
   readonly contextItems: readonly RuntimePluginContextItem[];
+  /** Trusted-frame sections; granted only via curated_context write access. */
+  readonly curatedContext?: readonly RuntimePluginCuratedContextSection[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
 
@@ -352,6 +369,7 @@ export type RuntimePluginValidationFailureReason =
   | 'missing_required_declaration'
   | 'malformed_tool_definition'
   | 'malformed_context_item'
+  | 'malformed_curated_context_section'
   | 'duplicate_plugin_id';
 
 export type RuntimePluginValidationResult<T> =

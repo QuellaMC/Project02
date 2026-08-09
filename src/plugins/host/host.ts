@@ -117,6 +117,8 @@ export type CreateRuntimePluginHostOptions = {
   /** Catalog-authoritative ownership records for configured plugin instances. */
   readonly lifecycleTargets?: readonly RuntimePluginLifecycleTarget[];
   readonly enabledPluginIds?: readonly string[];
+  /** Bundled-provenance ids the composition root cleared for curated_context. */
+  readonly curatedContextEligiblePluginIds?: readonly string[];
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -512,6 +514,9 @@ function createRuntimePluginHostState(
   accessByPluginId = resolveRuntimePluginAccessForPlugins({
     plugins,
     enabledPluginIds: enabledIds,
+    curatedContextEligiblePluginIds: new Set(
+      options.curatedContextEligiblePluginIds ?? [],
+    ),
   });
   const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins, {
     accessByPluginId,
@@ -1571,4 +1576,3 @@ function handleToolCallFailureDegrades(options: {
     'degrade'
   );
 }
-

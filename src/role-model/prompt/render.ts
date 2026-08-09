@@ -1,6 +1,7 @@
 import type {VisibleMessage} from '../../core/index.ts';
 import type {
   RuntimePluginContextBudget,
+  RuntimePluginCuratedContextSection,
   RuntimePluginSourceReference,
 } from '../../plugins/api/index.ts';
 import {runtimePluginListToolName} from '../../plugins/api/index.ts';
@@ -21,6 +22,7 @@ import {modelToolDefinitionToChatTool} from './tool-wire.ts';
 type RoleModelPromptFrameKind =
   | 'system_protocol'
   | 'developer_protocol'
+  | 'curated_context'
   | 'model_only_runtime_context'
   | 'untrusted_plugin_context'
   | 'visible_transcript'
@@ -36,9 +38,11 @@ type RoleModelPromptFrame = {
   readonly message: RoleModelChatMessage;
 };
 
-type RoleModelPromptFragmentSlot = 'developer_context' | 'untrusted_context';
+type RoleModelPromptFragmentSlot =
+  'developer_context' | 'curated_context' | 'untrusted_context';
 
-type RoleModelPromptFragmentKind = 'runtime_note' | 'plugin_context_item';
+type RoleModelPromptFragmentKind =
+  'runtime_note' | 'curated_context_section' | 'plugin_context_item';
 
 type RoleModelPromptFragment = {
   readonly id: string;
@@ -165,6 +169,10 @@ function createRoleModelPromptFrames(
   },
 ): readonly RoleModelPromptFrame[] {
   const frames: RoleModelPromptFrame[] = [];
+  const curatedContextMessage = createCuratedContextMessage(
+    options.promptFragments,
+    options.capabilities,
+  );
   const runtimeContextMessage = createRuntimeContextMessage(
     options.promptFragments,
     options.capabilities,
@@ -195,6 +203,15 @@ function createRoleModelPromptFrames(
       true,
     ),
   );
+
+  // Before the runtime-context frame: runtime notes change per turn, while
+  // the curated snapshot stays byte-stable, keeping the prompt prefix
+  // cacheable across turns.
+  if (curatedContextMessage !== undefined) {
+    frames.push(
+      createPromptFrame('curated_context', curatedContextMessage, true),
+    );
+  }
 
   if (runtimeContextMessage !== undefined) {
     frames.push(
@@ -327,6 +344,52 @@ function createCurrentUserMessage(
   } satisfies RoleModelUserChatMessage);
 }
 
+const curatedContextPromptPreamble =
+  'Curated memory (assistant-maintained durable notes; model-only, not user input).';
+
+const curatedContextSectionMarker = '--';
+
+function createCuratedContextMessage(
+  promptFragments: readonly RoleModelPromptFragment[],
+  capabilities: RoleModelProviderCapabilities,
+): RoleModelSystemChatMessage | RoleModelDeveloperChatMessage | undefined {
+  const sections = promptFragments.filter(
+    fragment => fragment.kind === 'curated_context_section',
+  );
+
+  if (sections.length === 0) {
+    return undefined;
+  }
+
+  return Object.freeze({
+    role: modelOnlyContextRole(capabilities),
+    content: [
+      curatedContextPromptPreamble,
+      ...sections.map(fragment => fragment.text),
+    ].join('\n'),
+  } satisfies RoleModelSystemChatMessage | RoleModelDeveloperChatMessage);
+}
+
+function renderCuratedContextSectionBlock(
+  section: RuntimePluginCuratedContextSection,
+): string {
+  const usedChars = section.usedChars ?? section.text.length;
+  const capacity =
+    section.capChars === undefined
+      ? ''
+      : ` [${String(Math.round((usedChars / section.capChars) * 100))}% - ${String(
+          usedChars,
+        )}/${String(section.capChars)} chars]`;
+  const body = section.text
+    .split('\n')
+    .map(line =>
+      line.startsWith(curatedContextSectionMarker) ? ` ${line}` : line,
+    )
+    .join('\n');
+
+  return `${curatedContextSectionMarker} ${section.title}${capacity} ${curatedContextSectionMarker}\n${body}`;
+}
+
 function createRuntimeContextMessage(
   promptFragments: readonly RoleModelPromptFragment[],
   capabilities: RoleModelProviderCapabilities,
@@ -364,6 +427,17 @@ function createRoleModelPromptFragments(
         kind: 'runtime_note',
         slot: 'developer_context',
         text,
+        sourceReferences: Object.freeze([]),
+        redactionLabels: Object.freeze([]),
+      } satisfies RoleModelPromptFragment),
+    ),
+    ...inputEnvelope.decisionContext.curatedContextSections.map(section =>
+      Object.freeze({
+        id: `curated-context-${section.pluginId}-${section.id}`,
+        pluginId: section.pluginId,
+        kind: 'curated_context_section',
+        slot: 'curated_context',
+        text: renderCuratedContextSectionBlock(section),
         sourceReferences: Object.freeze([]),
         redactionLabels: Object.freeze([]),
       } satisfies RoleModelPromptFragment),

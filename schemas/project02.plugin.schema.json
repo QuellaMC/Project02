@@ -161,7 +161,8 @@
             "session_history": {"$ref": "#/definitions/accessLevel"},
             "plugin_database": {"$ref": "#/definitions/accessLevel"},
             "turn_context": {"$ref": "#/definitions/accessLevel"},
-            "model_input": {"$ref": "#/definitions/accessLevel"}
+            "model_input": {"$ref": "#/definitions/accessLevel"},
+            "curated_context": {"$ref": "#/definitions/accessLevel"}
           }
         }
       },

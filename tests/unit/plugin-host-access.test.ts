@@ -18,6 +18,7 @@ import {
 } from '../../src/plugins/packages/character-state/plugin.ts';
 import {
   callFileStoreAvailabilityProbe,
+  createCuratedContextSectionPlugin,
   createDegradableMemorySearchPlugin,
   createExplicitlyEnabledRuntimePluginHost,
   createFileStoreAvailabilityProbePlugin,
@@ -35,6 +36,89 @@ import {
   testPluginAfterTurnCommittedContext,
   testPluginContext,
 } from '../support/plugin-host-fixtures.ts';
+
+describe('runtime plugin host curated context', () => {
+  it('drops sections and degrades when the host has not cleared the plugin for curated_context', () => {
+    const plugin = createCuratedContextSectionPlugin({
+      pluginId: 'memory.curated.fixture',
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
+
+    return host.beforeRoleModelCall(testPluginContext()).then(result => {
+      expect(result.status).toBe('completed');
+      if (result.status !== 'completed') {
+        return;
+      }
+
+      expect(result.curatedContext).toEqual([]);
+      expect(result.evidence).toContainEqual(
+        expect.objectContaining({
+          evidenceKind: 'before_role_model_call',
+          status: 'degraded',
+          policyOutcome: 'optional_degraded',
+          summary: expect.stringContaining(
+            'curated_context write access',
+          ) as string,
+        }),
+      );
+    });
+  });
+
+  it('carries sections from a cleared plugin outside the untrusted context budget', async () => {
+    // 3000 chars is far past the 256-token untrusted budget; the trusted
+    // frame must not be bounded by it.
+    const sectionText = 'x'.repeat(3_000);
+    const plugin = createCuratedContextSectionPlugin({
+      pluginId: 'memory.curated.fixture',
+      sectionText,
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin],
+      curatedContextEligiblePluginIds: [plugin.manifest.id],
+    });
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      return;
+    }
+
+    expect(result.curatedContext).toHaveLength(1);
+    expect(result.curatedContext[0]).toMatchObject({
+      pluginId: plugin.manifest.id,
+      title: 'Character notes',
+      text: sectionText,
+    });
+    expect(result.evidence).toEqual([]);
+  });
+
+  it('degrades a cleared plugin whose sections exceed the per-plugin caps', async () => {
+    const plugin = createCuratedContextSectionPlugin({
+      pluginId: 'memory.curated.fixture',
+      sectionCount: 3,
+      sectionText: 'x'.repeat(3_000),
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin],
+      curatedContextEligiblePluginIds: [plugin.manifest.id],
+    });
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      return;
+    }
+
+    expect(result.curatedContext).toEqual([]);
+    expect(result.evidence).toContainEqual(
+      expect.objectContaining({
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        summary: expect.stringContaining('8192-character limit') as string,
+      }),
+    );
+  });
+});
 
 describe('runtime plugin host access and lifecycle', () => {
   it('fails at construction when a file_store plugin is enabled without a provider', () => {

@@ -195,6 +195,7 @@ async function runRuntimeModel(
     recentVisibleMessages: prepared.decisionContext.recentVisibleMessages,
     runtimeNotes: prepared.decisionContext.runtimeNotes,
     pluginContextItems: prepared.beforeRoleModelCallResult.contextItems,
+    curatedContextSections: prepared.beforeRoleModelCallResult.curatedContext,
   });
   const result = await runRoleModelLoop({
     event: state.event,
