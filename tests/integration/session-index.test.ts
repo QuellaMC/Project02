@@ -10,22 +10,21 @@ import {
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {appendVisibleMessageWithCommitAnchor} from '../support/runtime-log-fixtures.ts';
+import {
+  appendDurableConversationExchanges,
+  writeDurableConversationSession,
+  type DurableConversationExchange,
+} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 import type {CharacterProfile} from '../../src/core/index.ts';
-import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
 } from '../../src/runtime/storage/layout-contract.ts';
-import {createLocalRuntimeMutationLockOwnerToken} from '../../src/runtime/storage/mutation-lock.ts';
 import {createLocalRuntimeSessionIndex} from '../../src/runtime/storage/session-index/index.ts';
-import {
-  acquireLocalRuntimeSessionWriterLease,
-  createLocalRuntimeSessionStore,
-} from '../../src/runtime/storage/session-store.ts';
+import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 
 const character = testCharacterProfile;
 
@@ -186,9 +185,12 @@ describe('session index', () => {
     }).rawEventsPath;
     const watermarkAfterFirst = readWatermark(layout.sessionIndexPath, 'grows');
 
-    await appendToSession(storeRoot, 'grows', 2, [
-      ['second question about narwhals', 'second answer'],
-    ]);
+    await appendDurableConversationExchanges({
+      storeRoot,
+      sessionId: 'grows',
+      firstTurn: 2,
+      exchanges: [['second question about narwhals', 'second answer']],
+    });
 
     expect(
       index.search({query: 'narwhals', sessionLimit: 1}).totalSessionsWithHits,
@@ -475,115 +477,15 @@ function createStoreRoot(): string {
 async function writeSession(
   storeRoot: string,
   sessionId: string,
-  exchanges: readonly (readonly [string, string])[],
-  boundCharacter: CharacterProfile = character,
+  exchanges: readonly DurableConversationExchange[],
+  boundCharacter?: CharacterProfile,
 ): Promise<void> {
-  await createLocalRuntimeSessionStore({
-    storeRoot,
-    characterId: boundCharacter.id,
-  }).createSession({sessionId, createdAt: '2026-07-16T00:00:00.000Z'});
-  await appendToSession(storeRoot, sessionId, 0, exchanges, boundCharacter);
-}
-
-async function appendToSession(
-  storeRoot: string,
-  sessionId: string,
-  firstTurn: number,
-  exchanges: readonly (readonly [string, string])[],
-  boundCharacter: CharacterProfile = character,
-): Promise<void> {
-  const ownerToken = createLocalRuntimeMutationLockOwnerToken();
-  const logStore = createFileRuntimeLogStore({
+  await writeDurableConversationSession({
     storeRoot,
     sessionId,
-    characterId: boundCharacter.id,
-    writerLockOwnerToken: ownerToken,
-    boundCharacter,
+    exchanges,
+    ...(boundCharacter === undefined ? {} : {character: boundCharacter}),
   });
-  const writerLease = await acquireLocalRuntimeSessionWriterLease({
-    storeRoot,
-    sessionId,
-    ownerToken,
-  });
-
-  try {
-    for (const [offset, [userText, characterText]] of exchanges.entries()) {
-      appendExchange(
-        logStore,
-        sessionId,
-        firstTurn + offset,
-        userText,
-        characterText,
-        boundCharacter,
-      );
-    }
-  } finally {
-    await writerLease.release();
-  }
-}
-
-function appendExchange(
-  logStore: RuntimeLogStore,
-  sessionId: string,
-  turn: number,
-  userText: string,
-  characterText: string,
-  boundCharacter: CharacterProfile,
-): void {
-  const identity = {
-    eventId: `evt_${sessionId}_${String(turn)}`,
-    traceId: `trace_${sessionId}_${String(turn)}`,
-    createdAt: turnTimestamp(turn, 0),
-  };
-  const userMessageId = `${sessionId}:message-${String(turn * 2 + 1)}`;
-  const characterMessageId = `${sessionId}:message-${String(turn * 2 + 2)}`;
-
-  logStore.appendRawEvent({
-    ...identity,
-    kind: 'runtime_event_received',
-    eventType: 'USER_MESSAGE',
-  });
-  logStore.appendRawEvent({
-    ...identity,
-    kind: 'visible_message_committed',
-    eventType: 'USER_MESSAGE',
-    visibleMessageIds: [userMessageId],
-    visibleMessage: {
-      id: userMessageId,
-      role: 'user',
-      speakerId: 'local-user',
-      speakerName: 'You',
-      text: userText,
-    },
-    committedAt: turnTimestamp(turn, 1),
-  });
-  appendVisibleMessageWithCommitAnchor(
-    logStore,
-    {
-      ...identity,
-      id: characterMessageId,
-      role: 'character',
-      speakerId: boundCharacter.id,
-      speakerName: boundCharacter.displayName,
-      text: characterText,
-      committedAt: turnTimestamp(turn, 2),
-    },
-    boundCharacter,
-    userText,
-  );
-  logStore.appendRawEvent({
-    ...identity,
-    kind: 'runtime_turn_completed',
-    eventType: 'USER_MESSAGE',
-    status: 'completed',
-    visibleMessageIds: [userMessageId, characterMessageId],
-  });
-}
-
-function turnTimestamp(turn: number, step: number): string {
-  return new Date(
-    Date.parse('2026-07-16T01:00:00.000Z') + turn * 1_000 + step * 100,
-  ).toISOString();
 }
 
 function readWatermark(sessionIndexPath: string, sessionId: string): number {

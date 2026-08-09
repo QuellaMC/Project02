@@ -36,9 +36,10 @@ import {
 } from '../policy/access-control.ts';
 import {
   createHostScopedFirstPartyRuntimePlugins,
-  isHostOwnedFirstPartyRuntimePlugin,
+  enabledPluginIdsForHost,
   isHostScopedFirstPartyRuntimePluginId,
 } from './catalog.ts';
+import type {LocalRuntimeSessionIndex} from '../builtin/session-history/index.ts';
 import {createPluginHookContext} from './hook-context.ts';
 import type {RuntimePluginFileStoreProvider} from '../api/file-store-contract.ts';
 import {
@@ -126,6 +127,7 @@ export type CreateRuntimePluginHostOptions = {
   readonly sessionIdentity?: object | undefined;
   readonly pluginInventoryState?: RuntimePluginInventoryHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly sessionIndex?: LocalRuntimeSessionIndex;
   readonly toolConfirmationHandler?:
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
@@ -521,6 +523,9 @@ function createRuntimePluginHostState(
           }),
     }),
     ...(pluginConfigControl === undefined ? {} : {pluginConfigControl}),
+    ...(options.sessionIndex === undefined
+      ? {}
+      : {sessionIndex: options.sessionIndex}),
   });
   const plugins = Object.freeze([...hostScopedPlugins, ...configuredPlugins]);
   allPlugins = plugins;
@@ -1868,42 +1873,6 @@ function normalizeContextItems(options: {
       return contextItem;
     }),
   );
-}
-
-function enabledPluginIdsForHost(options: {
-  readonly plugins: readonly RuntimePlugin[];
-  readonly enabledPluginIds: readonly string[] | undefined;
-}): readonly string[] {
-  if (options.enabledPluginIds === undefined) {
-    return Object.freeze(
-      options.plugins
-        .filter(
-          plugin =>
-            isHostOwnedFirstPartyRuntimePlugin(plugin) &&
-            plugin.manifest.activation.defaultEnabled,
-        )
-        .map(plugin => plugin.manifest.id),
-    );
-  }
-
-  const pluginIds = new Set(options.plugins.map(plugin => plugin.manifest.id));
-  const seenEnabledIds = new Set<string>();
-  const enabledIds: string[] = [];
-
-  for (const enabledId of options.enabledPluginIds) {
-    if (!pluginIds.has(enabledId)) {
-      throw new TypeError(`Unknown enabled plugin id "${enabledId}".`);
-    }
-
-    if (seenEnabledIds.has(enabledId)) {
-      throw new TypeError(`Duplicate enabled plugin id "${enabledId}".`);
-    }
-
-    seenEnabledIds.add(enabledId);
-    enabledIds.push(enabledId);
-  }
-
-  return Object.freeze(enabledIds);
 }
 
 function assertNoCallerSuppliedHostScopedFirstPartyPlugins(

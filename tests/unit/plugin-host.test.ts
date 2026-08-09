@@ -12,6 +12,7 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginListToolName,
+  sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {
@@ -235,12 +236,15 @@ describe('runtime plugin host catalog and routing', () => {
     expect([...hostFirstPartyRuntimePluginIds]).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      sessionHistoryPluginId,
       characterStatePluginId,
     ]);
     expect(Object.keys(catalog).sort()).toEqual(
-      [runtimePluginId, firstPartyModelToolsPluginId].sort((left, right) =>
-        left.localeCompare(right),
-      ),
+      [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        sessionHistoryPluginId,
+      ].sort((left, right) => left.localeCompare(right)),
     );
     expect(Object.values(catalog)).toEqual(
       expect.arrayContaining([

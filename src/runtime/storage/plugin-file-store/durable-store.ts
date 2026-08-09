@@ -3,8 +3,8 @@ import {join} from 'node:path';
 import {readTextFileSync} from '../../../shared/file-system.ts';
 
 import {createLocalRuntimeMutationLockOwnerToken} from '../mutation-lock.ts';
-import type {RuntimePluginFileStore} from '../../../plugins/index.ts';
-import type {CreateRuntimePluginFileStoreOptions} from '../../../plugins/index.ts';
+import type {RuntimePluginFileStore} from '../../../plugins/api/index.ts';
+import type {CreateRuntimePluginFileStoreOptions} from '../../../plugins/api/index.ts';
 import {
   assertDurableOperationPathMode,
   assertSafeDurablePluginPath,

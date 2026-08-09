@@ -11,9 +11,16 @@ import {
   type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
 import {
+  createSessionHistoryPlugin,
+  createSessionHistoryPluginManifest,
+  isSessionHistoryPlugin,
+  type LocalRuntimeSessionIndex,
+} from '../builtin/session-history/index.ts';
+import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
   runtimePluginId,
+  sessionHistoryPluginId,
 } from '../api/contract.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import type {RuntimePlugin, RuntimePluginManifest} from '../api/types.ts';
@@ -22,6 +29,7 @@ import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 type RuntimePluginHostServiceBootstrapInput = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly sessionIndex?: LocalRuntimeSessionIndex;
 };
 
 type RuntimePluginHostServiceCatalogEntry = {
@@ -70,6 +78,16 @@ export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
       manifest: createFirstPartyModelToolsPluginManifest(),
       bootstrap: () => createFirstPartyModelToolsPlugin(),
     } satisfies RuntimePluginHostServiceCatalogEntry),
+    [sessionHistoryPluginId]: Object.freeze({
+      catalogKind: 'host_service',
+      manifest: createSessionHistoryPluginManifest(),
+      bootstrap: input =>
+        createSessionHistoryPlugin({
+          ...(input.sessionIndex === undefined
+            ? {}
+            : {sessionIndex: input.sessionIndex}),
+        }),
+    } satisfies RuntimePluginHostServiceCatalogEntry),
   });
 }
 
@@ -96,6 +114,7 @@ const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
 export function createHostScopedFirstPartyRuntimePlugins(options: {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
+  readonly sessionIndex?: LocalRuntimeSessionIndex;
 }): readonly RuntimePlugin[] {
   return Object.freeze(
     Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(entry =>
@@ -121,6 +140,44 @@ export function isHostOwnedFirstPartyRuntimePlugin(
 ): boolean {
   return (
     isRuntimePluginManagementPlugin(plugin) ||
-    isFirstPartyModelToolsPlugin(plugin)
+    isFirstPartyModelToolsPlugin(plugin) ||
+    isSessionHistoryPlugin(plugin)
   );
+}
+
+/** Absent an explicit selection, host-owned defaults decide enablement. */
+export function enabledPluginIdsForHost(options: {
+  readonly plugins: readonly RuntimePlugin[];
+  readonly enabledPluginIds: readonly string[] | undefined;
+}): readonly string[] {
+  if (options.enabledPluginIds === undefined) {
+    return Object.freeze(
+      options.plugins
+        .filter(
+          plugin =>
+            isHostOwnedFirstPartyRuntimePlugin(plugin) &&
+            plugin.manifest.activation.defaultEnabled,
+        )
+        .map(plugin => plugin.manifest.id),
+    );
+  }
+
+  const pluginIds = new Set(options.plugins.map(plugin => plugin.manifest.id));
+  const seenEnabledIds = new Set<string>();
+  const enabledIds: string[] = [];
+
+  for (const enabledId of options.enabledPluginIds) {
+    if (!pluginIds.has(enabledId)) {
+      throw new TypeError(`Unknown enabled plugin id "${enabledId}".`);
+    }
+
+    if (seenEnabledIds.has(enabledId)) {
+      throw new TypeError(`Duplicate enabled plugin id "${enabledId}".`);
+    }
+
+    seenEnabledIds.add(enabledId);
+    enabledIds.push(enabledId);
+  }
+
+  return Object.freeze(enabledIds);
 }

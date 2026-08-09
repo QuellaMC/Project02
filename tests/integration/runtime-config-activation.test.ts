@@ -20,6 +20,7 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginListToolName,
+  sessionHistoryPluginId,
 } from '../../src/plugins/index.ts';
 import {
   characterStatePluginId,
@@ -153,6 +154,7 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      sessionHistoryPluginId,
       characterStatePluginId,
     ]);
     expect(configured.activation.enabledPluginIds).toEqual(
@@ -513,6 +515,7 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      sessionHistoryPluginId,
       plugin.manifest.id,
     ]);
     expect(configured.plugins.map(item => item.manifest.id)).toEqual([
@@ -1063,6 +1066,7 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      sessionHistoryPluginId,
       selectedPlugin.manifest.id,
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -1174,6 +1178,7 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      sessionHistoryPluginId,
       selectedPlugin.manifest.id,
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
