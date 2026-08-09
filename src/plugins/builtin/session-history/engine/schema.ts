@@ -1,10 +1,10 @@
 import {integer, sqliteTable, text, uniqueIndex} from 'drizzle-orm/sqlite-core';
 
-import type {VisibleMessageRole} from '../../../core/index.ts';
+import type {VisibleMessageRole} from '../../../../core/index.ts';
 
 // Bumped whenever the view shape changes; a mismatched file is deleted and
-// reprojected from the canonical JSONL, never migrated.
-export const sessionIndexSchemaVersion = 1;
+// reprojected from the canonical feed, never migrated.
+export const sessionIndexSchemaVersion = 2;
 
 export const messagesTable = sqliteTable(
   'messages',
@@ -29,7 +29,7 @@ export const messagesTable = sqliteTable(
 
 export const projectionStateTable = sqliteTable('projection_state', {
   sessionId: text('session_id').primaryKey(),
-  nextByteOffset: integer('next_byte_offset').notNull(),
+  nextCursor: text('next_cursor').notNull(),
   nextOrdinal: integer('next_ordinal').notNull(),
   damagedRecordCount: integer('damaged_record_count').notNull(),
 });
@@ -64,7 +64,7 @@ CREATE UNIQUE INDEX messages_session_message ON messages (session_id, message_id
 CREATE UNIQUE INDEX messages_session_ordinal ON messages (session_id, ordinal);
 CREATE TABLE projection_state (
   session_id TEXT PRIMARY KEY,
-  next_byte_offset INTEGER NOT NULL,
+  next_cursor TEXT NOT NULL,
   next_ordinal INTEGER NOT NULL,
   damaged_record_count INTEGER NOT NULL
 );

@@ -7,10 +7,8 @@ import {
   centeredSnippet,
   createSessionHistorySearchOutput,
 } from '../../src/plugins/builtin/session-history/search.ts';
-import type {
-  SessionIndexMessage,
-  SessionIndexSessionView,
-} from '../../src/runtime/storage/index.ts';
+import type {RuntimePluginSessionHistoryMessage} from '../../src/plugins/api/session-history-contract.ts';
+import type {SessionIndexSessionView} from '../../src/plugins/builtin/session-history/engine/index.ts';
 import {createJsonBoundarySnapshot} from '../../src/shared/json-boundary.ts';
 
 describe('session history output shaping', () => {
@@ -129,7 +127,10 @@ describe('session history output shaping', () => {
   });
 });
 
-function message(ordinal: number, text: string): SessionIndexMessage {
+function message(
+  ordinal: number,
+  text: string,
+): RuntimePluginSessionHistoryMessage {
   return {
     sessionId: 's1',
     messageId: `s1:message-${String(ordinal)}`,
