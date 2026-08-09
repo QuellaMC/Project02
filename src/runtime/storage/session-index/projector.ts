@@ -65,21 +65,43 @@ export function readLenientSessionCatalog(
 }
 
 /**
- * Catches the view up to the canonical transcripts inside one immediate
- * transaction; concurrent projectors serialize on it and re-read the
- * watermarks they find, so double projection cannot happen.
+ * Catches the view up to the canonical transcripts, one immediate
+ * transaction per session; concurrent projectors serialize on each and
+ * re-read the watermarks they find, so double projection cannot happen.
  */
 export function projectSessionIndex(options: {
   readonly database: BetterSQLite3Database;
   readonly layout: LocalRuntimeStorageLayout;
   readonly catalog: LenientSessionCatalog;
 }): void {
-  options.database.transaction(
-    transaction => {
-      for (const session of options.catalog.sessions) {
-        catchUpSession(transaction, options.layout, session.sessionId);
-      }
-    },
+  for (const session of options.catalog.sessions) {
+    catchUpSessionSlice({
+      database: options.database,
+      layout: options.layout,
+      sessionId: session.sessionId,
+    });
+  }
+}
+
+/**
+ * One transactional catch-up step. Without maxBytes it consumes the whole
+ * committed tail; with it, at most one slice, so a warm-up loop can yield
+ * to the event loop between slices. Returns the bytes consumed.
+ */
+export function catchUpSessionSlice(options: {
+  readonly database: BetterSQLite3Database;
+  readonly layout: LocalRuntimeStorageLayout;
+  readonly sessionId: string;
+  readonly maxBytes?: number;
+}): number {
+  return options.database.transaction(
+    transaction =>
+      catchUpSessionSliceInTransaction(
+        transaction,
+        options.layout,
+        options.sessionId,
+        options.maxBytes,
+      ),
     {behavior: 'immediate'},
   );
 }
@@ -107,51 +129,52 @@ const freshProjectionState: SessionProjectionState = Object.freeze({
   damagedRecordCount: 0,
 });
 
-function catchUpSession(
+function catchUpSessionSliceInTransaction(
   database: BetterSQLite3Database,
   layout: LocalRuntimeStorageLayout,
   sessionId: string,
-): void {
+  maxBytes: number | undefined,
+): number {
   const rawEventsPath = createLocalRuntimeSessionPaths({
     storeRoot: layout.storeRoot,
     sessionId,
   }).rawEventsPath;
   const stored = readProjectionState(database, sessionId);
-  const tail = readCommittedTranscriptTail(
+  let state = stored ?? freshProjectionState;
+  let didReset = false;
+  let tail = readCommittedTranscriptTail(
     rawEventsPath,
-    stored?.nextByteOffset ?? 0,
+    state.nextByteOffset,
+    maxBytes,
   );
 
   if (tail.kind === 'stale_watermark') {
     // The transcript shrank below the watermark (replaced or deleted), so
     // the projected rows describe a file that no longer exists.
     resetSessionProjection(database, sessionId);
-
-    const fresh = readCommittedTranscriptTail(rawEventsPath, 0);
-
-    if (fresh.kind === 'lines') {
-      applyTranscriptTail(database, sessionId, freshProjectionState, fresh);
-    }
-
-    return;
+    state = freshProjectionState;
+    didReset = true;
+    tail = readCommittedTranscriptTail(rawEventsPath, 0, maxBytes);
   }
 
-  if (tail.kind === 'absent') {
-    if (stored !== undefined && stored.nextByteOffset > 0) {
+  if (tail.kind !== 'lines') {
+    if (
+      !didReset &&
+      stored !== undefined &&
+      stored.nextByteOffset > 0 &&
+      tail.kind === 'absent'
+    ) {
       resetSessionProjection(database, sessionId);
     }
 
-    return;
+    return 0;
   }
 
-  if (stored === undefined || tail.consumedBytes > 0) {
-    applyTranscriptTail(
-      database,
-      sessionId,
-      stored ?? freshProjectionState,
-      tail,
-    );
+  if (didReset || stored === undefined || tail.consumedBytes > 0) {
+    applyTranscriptTail(database, sessionId, state, tail);
   }
+
+  return tail.consumedBytes;
 }
 
 type CommittedTranscriptTail =
@@ -172,6 +195,7 @@ const noNewLines: CommittedTranscriptTail = Object.freeze({
 function readCommittedTranscriptTail(
   filePath: string,
   fromOffset: number,
+  maxBytes?: number,
 ): CommittedTranscriptTail {
   let fileDescriptor: number;
 
@@ -196,7 +220,13 @@ function readCommittedTranscriptTail(
       return noNewLines;
     }
 
-    const tail = Buffer.alloc(size - fromOffset);
+    // A capped slice can end before any newline (one record larger than
+    // the cap); its bytes stay unconsumed for an uncapped pass.
+    const readLength =
+      maxBytes === undefined
+        ? size - fromOffset
+        : Math.min(size - fromOffset, maxBytes);
+    const tail = Buffer.alloc(readLength);
     const bytesRead = readBytesFromFileSync(
       fileDescriptor,
       tail,

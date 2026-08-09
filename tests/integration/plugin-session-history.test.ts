@@ -7,8 +7,13 @@ import {createTestPluginContext} from '../support/role-model-loop-fixtures.ts';
 import {writeDurableConversationSession} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
+import {existsSync} from 'node:fs';
+
 import {createRuntimeEventIdentity} from '../../src/core/index.ts';
-import {createRuntimePluginContext} from '../../src/plugins/api/index.ts';
+import {
+  createRuntimePluginAfterTurnCommittedContext,
+  createRuntimePluginContext,
+} from '../../src/plugins/api/index.ts';
 import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
@@ -20,7 +25,10 @@ import {
   createRuntimePluginHost,
   type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
-import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
+import {
+  createLocalRuntimeSessionPaths,
+  createLocalRuntimeStorageLayout,
+} from '../../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionIndex,
   type LocalRuntimeSessionIndex,
@@ -203,6 +211,48 @@ describe('session history plugin through the host', () => {
     ).toBe(false);
   });
 
+  it('keeps the index warm after committed turns, only when enabled', async () => {
+    const {host, storeRoot} = await createHistoryHost();
+    const layout = createLocalRuntimeStorageLayout({storeRoot});
+
+    expect(existsSync(layout.sessionIndexPath)).toBe(false);
+
+    const committed = await host.afterTurnCommitted(
+      afterTurnContext('evt_history_warm', 'alpha'),
+    );
+
+    expect(committed.status).toBe('completed');
+    expect(existsSync(layout.sessionIndexPath)).toBe(true);
+
+    // With the plugin disabled the hook never runs, so nothing materializes.
+    const bareRoot = createTestTempRoot('project02-history-bare-');
+
+    await writeDurableConversationSession({
+      storeRoot: bareRoot,
+      sessionId: 'alpha',
+      exchanges: [['hi', 'ho']],
+    });
+
+    const bareHost = createRuntimePluginHost({
+      plugins: [],
+      enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
+      sessionIndex: createLocalRuntimeSessionIndex({
+        storeRoot: bareRoot,
+        characterId: testCharacterProfile.id,
+      }),
+    });
+    const skipped = await bareHost.afterTurnCommitted(
+      afterTurnContext('evt_history_cold', 'alpha'),
+    );
+
+    expect(skipped.status).toBe('completed');
+    expect(
+      existsSync(
+        createLocalRuntimeStorageLayout({storeRoot: bareRoot}).sessionIndexPath,
+      ),
+    ).toBe(false);
+  });
+
   it('rejects requests from another character', async () => {
     const {host} = await createHistoryHost();
     const eventId = 'evt_history_foreign';
@@ -266,6 +316,22 @@ async function createHistoryHost(): Promise<{
   });
 
   return {host, storeRoot, sessionIndex};
+}
+
+function afterTurnContext(eventId: string, sessionId: string) {
+  return createRuntimePluginAfterTurnCommittedContext({
+    ...createRuntimeEventIdentity({
+      eventId,
+      traceId: `trace_${eventId}`,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    }),
+    sessionId,
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: 'hi',
+    character: testCharacterProfile,
+    committedAt: '2026-06-15T00:00:00.000Z',
+    visibleMessages: [],
+  });
 }
 
 function historyToolCall(

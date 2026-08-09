@@ -49,11 +49,22 @@ export type SessionIndexReadAroundOptions = {
   readonly window: number;
 };
 
+export type SessionIndexWarmUpOptions = {
+  /** Catch up one session only; unknown sessions are a quiet no-op. */
+  readonly sessionId?: string;
+};
+
 export type LocalRuntimeSessionIndex = {
   readonly characterId: string;
   search(options: SessionIndexSearchOptions): SessionIndexSearchResult;
   readAround(
     options: SessionIndexReadAroundOptions,
   ): SessionIndexConversationWindow;
+  /**
+   * Advisory chunked catch-up that yields to the event loop between
+   * slices. Queries stay correct without it; it only moves projection
+   * cost off the first search.
+   */
+  warmUp(options?: SessionIndexWarmUpOptions): Promise<void>;
   close(): void;
 };
