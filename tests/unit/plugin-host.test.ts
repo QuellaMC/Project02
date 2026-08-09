@@ -236,15 +236,13 @@ describe('runtime plugin host catalog and routing', () => {
     expect([...hostFirstPartyRuntimePluginIds]).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
-      sessionHistoryPluginId,
       characterStatePluginId,
+      sessionHistoryPluginId,
     ]);
     expect(Object.keys(catalog).sort()).toEqual(
-      [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        sessionHistoryPluginId,
-      ].sort((left, right) => left.localeCompare(right)),
+      [runtimePluginId, firstPartyModelToolsPluginId].sort((left, right) =>
+        left.localeCompare(right),
+      ),
     );
     expect(Object.values(catalog)).toEqual(
       expect.arrayContaining([

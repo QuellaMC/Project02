@@ -128,6 +128,7 @@ export {
   readRuntimePluginPackageDescriptor,
 } from './package-descriptor.ts';
 // factory.ts stays out: re-exporting it would cycle runtime->api->runtime.
+export {boundedText} from './bounded-text.ts';
 export {
   createPluginContextEvidence,
   createPluginToolEvidence,

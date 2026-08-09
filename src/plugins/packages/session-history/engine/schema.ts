@@ -1,6 +1,6 @@
 import {integer, sqliteTable, text, uniqueIndex} from 'drizzle-orm/sqlite-core';
 
-import type {VisibleMessageRole} from '../../../../core/index.ts';
+import type {RuntimePluginSessionHistoryMessage} from '../../../api/session-history-contract.ts';
 
 // Bumped whenever the view shape changes; a mismatched file is deleted and
 // reprojected from the canonical feed, never migrated.
@@ -12,7 +12,9 @@ export const messagesTable = sqliteTable(
     id: integer('id').primaryKey(),
     sessionId: text('session_id').notNull(),
     messageId: text('message_id').notNull(),
-    role: text('role').$type<VisibleMessageRole>().notNull(),
+    role: text('role')
+      .$type<RuntimePluginSessionHistoryMessage['role']>()
+      .notNull(),
     speakerName: text('speaker_name').notNull(),
     text: text('text').notNull(),
     committedAt: text('committed_at').notNull(),

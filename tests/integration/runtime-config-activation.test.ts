@@ -154,8 +154,8 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
-      sessionHistoryPluginId,
       characterStatePluginId,
+      sessionHistoryPluginId,
     ]);
     expect(configured.activation.enabledPluginIds).toEqual(
       configured.host.enabledPluginIds(),
@@ -515,7 +515,6 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
-      sessionHistoryPluginId,
       plugin.manifest.id,
     ]);
     expect(configured.plugins.map(item => item.manifest.id)).toEqual([
@@ -1066,7 +1065,6 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
-      sessionHistoryPluginId,
       selectedPlugin.manifest.id,
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -1178,7 +1176,6 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
-      sessionHistoryPluginId,
       selectedPlugin.manifest.id,
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(

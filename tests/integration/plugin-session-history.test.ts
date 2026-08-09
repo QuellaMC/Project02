@@ -25,6 +25,7 @@ import {
   createRuntimePluginHost,
   type RuntimePluginHost,
 } from '../../src/plugins/host/index.ts';
+import {createSessionHistoryPlugin} from '../../src/plugins/packages/session-history/plugin.ts';
 import {join} from 'node:path';
 
 import {
@@ -100,7 +101,7 @@ describe('session history plugin through the host', () => {
     // A host without the capability providers (minimal test hosts) leaves
     // the context capabilities absent; the plugin rejects politely.
     const bareHost = createRuntimePluginHost({
-      plugins: [],
+      plugins: [createSessionHistoryPlugin()],
       enabledPluginIds: enabledWithSessionHistory,
     });
 
@@ -183,7 +184,7 @@ describe('session history plugin through the host', () => {
   it('emits the recall guidance context item when the plugin is enabled', async () => {
     const {host, storeRoot} = await createHistoryHost();
     const disabledHost = createRuntimePluginHost({
-      plugins: [],
+      plugins: [createSessionHistoryPlugin()],
       enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
       ...historyCapabilities(storeRoot),
     });
@@ -242,7 +243,7 @@ describe('session history plugin through the host', () => {
     });
 
     const bareHost = createRuntimePluginHost({
-      plugins: [],
+      plugins: [createSessionHistoryPlugin()],
       enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
       ...historyCapabilities(bareRoot),
     });
@@ -306,7 +307,7 @@ async function createHistoryHost(): Promise<{
   });
 
   const host = createRuntimePluginHost({
-    plugins: [],
+    plugins: [createSessionHistoryPlugin()],
     enabledPluginIds: enabledWithSessionHistory,
     ...historyCapabilities(storeRoot),
   });

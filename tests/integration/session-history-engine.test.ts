@@ -14,7 +14,7 @@ import {sessionHistoryPluginId} from '../../src/plugins/api/contract.ts';
 import {
   createSessionHistoryEngine,
   type SessionHistoryEngine,
-} from '../../src/plugins/builtin/session-history/engine/index.ts';
+} from '../../src/plugins/packages/session-history/engine/index.ts';
 import {characterPluginDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionHistoryFeed,

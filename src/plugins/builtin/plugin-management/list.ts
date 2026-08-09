@@ -23,6 +23,7 @@ import type {
   RuntimePluginToolCall,
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
+import {boundedText} from '../../api/bounded-text.ts';
 
 const runtimePluginListMaxPlugins = 16;
 const runtimePluginListMaxToolsPerPlugin = 8;
@@ -293,9 +294,5 @@ function runtimePluginListIncludesDisabled(
 }
 
 function boundedRuntimePluginListText(value: string): string {
-  if (value.length <= runtimePluginListMaxTextLength) {
-    return value;
-  }
-
-  return `${value.slice(0, runtimePluginListMaxTextLength - 3)}...`;
+  return boundedText(value, runtimePluginListMaxTextLength);
 }

@@ -17,7 +17,7 @@ import type {
   RuntimePluginToolCall,
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
-import {boundedText} from '../memory-provider/context.ts';
+import {boundedText} from '../../api/bounded-text.ts';
 
 export const sessionHistorySessionIdPattern =
   '^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$';
