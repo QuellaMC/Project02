@@ -1,7 +1,10 @@
+import {readFileSync} from 'node:fs';
+
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
+import {jsonArray, jsonRecord} from '../support/json-view.ts';
 import {
   createSequencedAdapter,
   createTestEvent,
@@ -18,6 +21,8 @@ import {
   sessionHistorySearchToolName,
 } from '../../src/plugins/api/contract.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
+import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionHistoryFeed,
   createRuntimePluginDatabaseProvider,
@@ -109,5 +114,195 @@ describe('session history through the tool loop', () => {
       toolName: sessionHistorySearchToolName,
       toolResult: {status: 'accepted'},
     });
+  });
+
+  it('recalls messages that scrolled out of the model window in the same session', async () => {
+    const storeRoot = createTestTempRoot('project02-history-window-');
+    const sessionId = 'local-session';
+    const exchanges: readonly [string, string][] = [
+      ['the wifi password is stormlight42', 'Saved it, I will remember.'],
+      ...Array.from({length: 5}, (_, index): [string, string] => [
+        `filler question ${String(index + 1)}`,
+        `filler answer ${String(index + 1)}`,
+      ]),
+    ];
+
+    await writeDurableConversationSession({storeRoot, sessionId, exchanges});
+
+    // Restore the same transcript the store holds; the model window is its
+    // last 8 messages, so the wifi exchange sits beyond what the model sees.
+    const session = createConversationSession({
+      id: sessionId,
+      character: testCharacterProfile,
+      visibleTranscript: exchanges.flatMap(
+        ([userText, characterText], turn) => [
+          {
+            id: `${sessionId}:message-${String(turn * 2 + 1)}`,
+            role: 'user' as const,
+            speakerId: 'local-user',
+            speakerName: 'You',
+            text: userText,
+          },
+          {
+            id: `${sessionId}:message-${String(turn * 2 + 2)}`,
+            role: 'character' as const,
+            speakerId: testCharacterProfile.id,
+            speakerName: testCharacterProfile.displayName,
+            text: characterText,
+          },
+        ],
+      ),
+    });
+    const pluginHost = createDefaultProject02PluginHost({
+      sessionHistory: createLocalRuntimeSessionHistoryFeed({
+        storeRoot,
+        characterId: testCharacterProfile.id,
+      }),
+      pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId,
+        sessionHistoryPluginId,
+      ],
+    });
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {name: sessionHistorySearchToolName, input: {query: 'stormlight42'}},
+        ],
+      },
+      {
+        toolCalls: [
+          {name: sessionHistorySearchToolName, input: {query: 'zephyr77'}},
+        ],
+      },
+      {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'It was stormlight42.'}},
+        ],
+      },
+    ]);
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent(
+        'what was the wifi password again? my locker code is zephyr77 now.',
+        'evt_history_window',
+      ),
+      session,
+      logStore: createFileRuntimeLogStore({
+        boundCharacter: testCharacterProfile,
+        characterId: testCharacterProfile.id,
+        storeRoot,
+        sessionId,
+      }),
+      roleModelAdapter: adapter,
+      pluginHost,
+    });
+
+    expect(result.status).toBe('completed');
+
+    const searchResults = readFileSync(
+      createLocalRuntimeSessionPaths({storeRoot, sessionId}).rawEventsPath,
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map(line => jsonRecord(JSON.parse(line)))
+      .filter(record => record['kind'] === 'tool_call_finished')
+      .map(record => jsonRecord(jsonRecord(record['toolResult'])['output']));
+
+    expect(searchResults).toHaveLength(2);
+
+    // The recalled hit is the out-of-window message, not anything the
+    // model already sees.
+    expect(searchResults[0]).toMatchObject({totalSessionsWithHits: 1});
+
+    const matched = jsonArray(
+      jsonRecord(jsonArray(searchResults[0]?.['sessions'])[0])['aroundMatch'],
+    )
+      .map(row => jsonRecord(row))
+      .find(row => row['matched'] === true);
+
+    expect(matched?.['messageId']).toBe(`${sessionId}:message-1`);
+
+    // The just-committed user message carries "zephyr77", but what the
+    // model already sees never matches.
+    expect(searchResults[1]).toMatchObject({totalSessionsWithHits: 0});
+  });
+
+  it('never returns the model its own interim reply from the same turn', async () => {
+    const storeRoot = createTestTempRoot('project02-history-interim-');
+    const sessionId = 'local-session';
+
+    // An empty durable session: the whole turn, including the interim
+    // reply, commits into the store the search index reads.
+    await writeDurableConversationSession({
+      storeRoot,
+      sessionId,
+      exchanges: [],
+    });
+
+    const pluginHost = createDefaultProject02PluginHost({
+      sessionHistory: createLocalRuntimeSessionHistoryFeed({
+        storeRoot,
+        characterId: testCharacterProfile.id,
+      }),
+      pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        characterStatePluginId,
+        sessionHistoryPluginId,
+      ],
+    });
+    // The interim reply commits before the search in the same round; the
+    // search must not surface the words the model just said.
+    const adapter = createSequencedAdapter([
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {text: 'One moment, the secret phrase is glimmerwing.'},
+          },
+          {name: sessionHistorySearchToolName, input: {query: 'glimmerwing'}},
+        ],
+      },
+      {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'Nothing else came up.'}},
+        ],
+      },
+    ]);
+    const result = await runLocalUserMessageEvent({
+      event: createTestEvent('what was that phrase?', 'evt_history_interim'),
+      session: createConversationSession({
+        id: sessionId,
+        character: testCharacterProfile,
+      }),
+      logStore: createFileRuntimeLogStore({
+        boundCharacter: testCharacterProfile,
+        characterId: testCharacterProfile.id,
+        storeRoot,
+        sessionId,
+      }),
+      roleModelAdapter: adapter,
+      pluginHost,
+    });
+
+    expect(result.status).toBe('completed');
+
+    const searchResults = readFileSync(
+      createLocalRuntimeSessionPaths({storeRoot, sessionId}).rawEventsPath,
+      'utf8',
+    )
+      .trim()
+      .split('\n')
+      .map(line => jsonRecord(JSON.parse(line)))
+      .filter(record => record['kind'] === 'tool_call_finished')
+      .map(record => jsonRecord(jsonRecord(record['toolResult'])['output']));
+
+    expect(searchResults).toEqual([
+      expect.objectContaining({totalSessionsWithHits: 0}),
+    ]);
   });
 });

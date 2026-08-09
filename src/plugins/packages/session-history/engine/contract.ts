@@ -31,8 +31,8 @@ export type SessionIndexConversationWindow = {
 export type SessionIndexSearchOptions = {
   readonly query: string;
   readonly sessionId?: string;
-  /** Ignored when `sessionId` targets a session explicitly. */
-  readonly excludeSessionId?: string;
+  /** Message ids that never match: the caller already sees them. */
+  readonly excludeMessageIds?: readonly string[];
   readonly sessionLimit: number;
   /** Stops the catch-up between slices; use the hook context's signal. */
   readonly signal?: AbortSignal;

@@ -862,7 +862,9 @@ describe('runtime plugin host catalog and routing', () => {
     });
     const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
 
-    await host.beforeRoleModelCall(testPluginContext());
+    await host.beforeRoleModelCall(
+      testPluginContext({recentVisibleMessageIds: ['message-user']}),
+    );
     await host.afterTurnCommitted(
       createRuntimePluginAfterTurnCommittedContext({
         ...testIdentity(),
@@ -891,6 +893,7 @@ describe('runtime plugin host catalog and routing', () => {
     );
 
     expect(captured.beforeCurrentUserMessage).toBe('');
+    expect(captured.beforeRecentVisibleMessageIds).toEqual([]);
     expect(captured.afterCurrentUserMessage).toBe('');
     expect(captured.visibleMessageIds).toEqual([]);
     expect(captured.visibleMessages).toEqual([]);
@@ -905,7 +908,9 @@ describe('runtime plugin host catalog and routing', () => {
     });
     const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
 
-    await host.beforeRoleModelCall(testPluginContext());
+    await host.beforeRoleModelCall(
+      testPluginContext({recentVisibleMessageIds: ['message-user']}),
+    );
     await host.afterTurnCommitted(
       createRuntimePluginAfterTurnCommittedContext({
         ...testIdentity(),
@@ -927,6 +932,7 @@ describe('runtime plugin host catalog and routing', () => {
     );
 
     expect(captured.beforeCurrentUserMessage).toBe('hello');
+    expect(captured.beforeRecentVisibleMessageIds).toEqual(['message-user']);
     expect(captured.afterCurrentUserMessage).toBe('hello');
     expect(captured.visibleMessageIds).toEqual(['message-user']);
     expect(captured.visibleMessages?.map(message => message.text)).toEqual([

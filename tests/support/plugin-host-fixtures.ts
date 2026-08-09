@@ -42,6 +42,7 @@ export type LateFileStoreWriteOutcome =
 
 export type TurnContextCapture = {
   beforeCurrentUserMessage?: string;
+  beforeRecentVisibleMessageIds?: readonly string[];
   afterCurrentUserMessage?: string;
   visibleMessageIds?: readonly string[];
   visibleMessages?: readonly {readonly text: string}[];
@@ -233,6 +234,8 @@ export function createTurnContextCapturePlugin(options: {
     lifecycleHooks: {
       beforeRoleModelCall(context) {
         options.capture.beforeCurrentUserMessage = context.currentUserMessage;
+        options.capture.beforeRecentVisibleMessageIds =
+          context.recentVisibleMessageIds;
 
         return {
           contextItems: [],
@@ -1309,6 +1312,7 @@ export function testPluginContext(
     readonly eventId?: string;
     readonly traceId?: string;
     readonly createdAt?: string;
+    readonly recentVisibleMessageIds?: readonly string[];
   } = {},
 ) {
   return createRuntimePluginContext({
@@ -1316,6 +1320,9 @@ export function testPluginContext(
     sessionId: 'session-plugin-host',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'hello',
+    ...(identity.recentVisibleMessageIds === undefined
+      ? {}
+      : {recentVisibleMessageIds: identity.recentVisibleMessageIds}),
     character: testCharacterProfile,
   });
 }

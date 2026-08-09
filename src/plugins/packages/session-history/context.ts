@@ -4,9 +4,10 @@ import {createPluginContextEvidence} from '../../api/evidence-helpers.ts';
 import type {RuntimePluginLifecycleHooks} from '../../api/types.ts';
 
 const sessionHistoryGuidanceText =
-  'When the user references a past conversation or relevant cross-session ' +
-  'context may exist, use sessions.search to recall it before asking them ' +
-  'to repeat themselves; scroll the transcript with sessions.read.';
+  'When the user references a past conversation, or relevant context may ' +
+  'exist beyond what you can see (including earlier in this conversation), ' +
+  'use sessions.search to recall it before asking them to repeat ' +
+  'themselves; scroll the transcript with sessions.read.';
 
 // Below memory recall (priority 70): the nudge is the first thing to evict
 // when real recalled context needs the prompt budget.

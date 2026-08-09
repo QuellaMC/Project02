@@ -261,11 +261,11 @@ describe('session history plugin through the host', () => {
     expect(existsSync(historyIndexPath(bareRoot))).toBe(false);
   });
 
-  it('excludes the active session from search unless targeted explicitly', async () => {
+  it('excludes only messages the model sees, reaching the rest of the active session', async () => {
     const {host} = await createHistoryHost();
-    // The context arrives from session "alpha", whose transcript contains
-    // the query words; recall must not echo the conversation in progress.
-    const activeContext = (eventId: string) =>
+    // The context arrives from session "alpha": what the model still sees
+    // never matches, while messages that scrolled out of its window do.
+    const activeContext = (eventId: string, visibleIds: readonly string[]) =>
       createRuntimePluginContext({
         ...createRuntimeEventIdentity({
           eventId,
@@ -275,36 +275,71 @@ describe('session history plugin through the host', () => {
         sessionId: 'alpha',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'what was the permission design?',
+        recentVisibleMessageIds: visibleIds,
         character: testCharacterProfile,
       });
-    const excluded = await host.handleToolCall(
-      historyToolCall('evt_history_active', sessionHistorySearchToolName, {
+    const scrolledPast = await host.handleToolCall(
+      historyToolCall('evt_history_scrolled', sessionHistorySearchToolName, {
         query: 'permission',
       }),
-      activeContext('evt_history_active'),
+      activeContext('evt_history_scrolled', [
+        'alpha:message-3',
+        'alpha:message-4',
+      ]),
     );
 
-    expect(excluded.status).toBe('accepted');
-    if (excluded.status !== 'accepted') {
-      throw new Error('Expected the excluded search to be accepted.');
+    expect(scrolledPast.status).toBe('accepted');
+    if (scrolledPast.status !== 'accepted') {
+      throw new Error('Expected the scrolled-past search to be accepted.');
     }
 
-    expect(excluded.output).toMatchObject({totalSessionsWithHits: 0});
+    expect(scrolledPast.output).toMatchObject({totalSessionsWithHits: 1});
 
-    const targeted = await host.handleToolCall(
-      historyToolCall('evt_history_target', sessionHistorySearchToolName, {
+    // The anchored view stays a complete conversation: visible neighbors
+    // are filtered from matching, not redacted from the window.
+    const views = jsonArray(jsonRecord(scrolledPast.output)['sessions']);
+    const aroundMatch = jsonArray(jsonRecord(views[0])['aroundMatch']).map(
+      row => jsonRecord(row),
+    );
+
+    expect(aroundMatch.some(row => row['matched'] === true)).toBe(true);
+    expect(
+      aroundMatch.some(row => row['messageId'] === 'alpha:message-4'),
+    ).toBe(true);
+
+    const allVisible = await host.handleToolCall(
+      historyToolCall('evt_history_visible', sessionHistorySearchToolName, {
         query: 'permission',
-        sessionId: 'alpha',
       }),
-      activeContext('evt_history_target'),
+      activeContext('evt_history_visible', [
+        'alpha:message-1',
+        'alpha:message-2',
+        'alpha:message-3',
+        'alpha:message-4',
+      ]),
     );
 
-    expect(targeted.status).toBe('accepted');
-    if (targeted.status !== 'accepted') {
-      throw new Error('Expected the targeted search to be accepted.');
+    expect(allVisible.status).toBe('accepted');
+    if (allVisible.status !== 'accepted') {
+      throw new Error('Expected the all-visible search to be accepted.');
     }
 
-    expect(targeted.output).toMatchObject({totalSessionsWithHits: 1});
+    expect(allVisible.output).toMatchObject({totalSessionsWithHits: 0});
+
+    const restricted = await host.handleToolCall(
+      historyToolCall('evt_history_restrict', sessionHistorySearchToolName, {
+        query: 'permission',
+        sessionId: 'beta',
+      }),
+      activeContext('evt_history_restrict', []),
+    );
+
+    expect(restricted.status).toBe('accepted');
+    if (restricted.status !== 'accepted') {
+      throw new Error('Expected the restricted search to be accepted.');
+    }
+
+    expect(restricted.output).toMatchObject({totalSessionsWithHits: 0});
   });
 
   it('keeps local paths out of model-facing storage failures', async () => {

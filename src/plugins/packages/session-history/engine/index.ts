@@ -202,10 +202,9 @@ export function createSessionHistoryEngine(options: {
         ...(requestedSessionId === undefined
           ? {}
           : {sessionId: requestedSessionId}),
-        ...(requestedSessionId !== undefined ||
-        searchOptions.excludeSessionId === undefined
+        ...(searchOptions.excludeMessageIds === undefined
           ? {}
-          : {excludeSessionId: searchOptions.excludeSessionId}),
+          : {excludeMessageIds: searchOptions.excludeMessageIds}),
       });
 
       return Object.freeze({
