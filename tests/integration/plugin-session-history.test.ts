@@ -33,7 +33,7 @@ import {
 } from '../../src/runtime/storage/layout-contract.ts';
 import {
   createLocalRuntimeSessionHistoryFeed,
-  createRuntimePluginDatabaseOpener,
+  createRuntimePluginDatabaseProvider,
 } from '../../src/runtime/storage/index.ts';
 
 const enabledWithSessionHistory = [
@@ -95,22 +95,25 @@ describe('session history plugin through the host', () => {
     });
   });
 
-  it('advertises the tools only when an index is injected', async () => {
+  it('always advertises the tools and rejects without providers', async () => {
     const {host} = await createHistoryHost();
+    // A host without the capability providers (minimal test hosts) leaves
+    // the context capabilities absent; the plugin rejects politely.
     const bareHost = createRuntimePluginHost({
       plugins: [],
       enabledPluginIds: enabledWithSessionHistory,
     });
 
-    expect(host.pluginToolDefinitions().map(tool => tool.name)).toEqual(
-      expect.arrayContaining([
-        sessionHistorySearchToolName,
-        sessionHistoryReadToolName,
-      ]),
-    );
-    expect(bareHost.pluginToolDefinitions().map(tool => tool.name)).not.toEqual(
-      expect.arrayContaining([sessionHistorySearchToolName]),
-    );
+    for (const configuredHost of [host, bareHost]) {
+      expect(
+        configuredHost.pluginToolDefinitions().map(tool => tool.name),
+      ).toEqual(
+        expect.arrayContaining([
+          sessionHistorySearchToolName,
+          sessionHistoryReadToolName,
+        ]),
+      );
+    }
 
     const forced = await bareHost.handleToolCall(
       historyToolCall('evt_history_bare', sessionHistorySearchToolName, {
@@ -119,7 +122,10 @@ describe('session history plugin through the host', () => {
       createTestPluginContext('evt_history_bare'),
     );
 
-    expect(forced.status).toBe('rejected');
+    expect(forced).toMatchObject({
+      status: 'rejected',
+      reason: 'session_history_tool_unavailable',
+    });
   });
 
   it('rejects malformed input at the host boundary', async () => {
@@ -174,11 +180,12 @@ describe('session history plugin through the host', () => {
     });
   });
 
-  it('emits the recall guidance context item only with an index', async () => {
-    const {host} = await createHistoryHost();
-    const bareHost = createRuntimePluginHost({
+  it('emits the recall guidance context item when the plugin is enabled', async () => {
+    const {host, storeRoot} = await createHistoryHost();
+    const disabledHost = createRuntimePluginHost({
       plugins: [],
-      enabledPluginIds: enabledWithSessionHistory,
+      enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
+      ...historyCapabilities(storeRoot),
     });
     const guided = await host.beforeRoleModelCall(
       createTestPluginContext('evt_history_guidance'),
@@ -197,13 +204,13 @@ describe('session history plugin through the host', () => {
       ),
     ).toBe(true);
 
-    const unguided = await bareHost.beforeRoleModelCall(
+    const unguided = await disabledHost.beforeRoleModelCall(
       createTestPluginContext('evt_history_no_guidance'),
     );
 
     expect(unguided.status).toBe('completed');
     if (unguided.status !== 'completed') {
-      throw new Error('Expected the bare beforeRoleModelCall to complete.');
+      throw new Error('Expected the disabled beforeRoleModelCall to complete.');
     }
 
     expect(
@@ -313,10 +320,7 @@ function historyCapabilities(storeRoot: string) {
       storeRoot,
       characterId: testCharacterProfile.id,
     }),
-    sessionHistoryDatabase: createRuntimePluginDatabaseOpener({
-      storeRoot,
-      pluginId: sessionHistoryPluginId,
-    }),
+    pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
   };
 }
 

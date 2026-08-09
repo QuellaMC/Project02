@@ -15,10 +15,6 @@ import {
   createSessionHistoryPluginManifest,
   isSessionHistoryPlugin,
 } from '../builtin/session-history/index.ts';
-import type {
-  RuntimePluginDatabaseOpener,
-  RuntimePluginSessionHistoryFeed,
-} from '../api/index.ts';
 import {
   characterStatePluginId,
   firstPartyModelToolsPluginId,
@@ -32,8 +28,6 @@ import type {RuntimePluginPackageCatalogEntry} from '../api/factory.ts';
 type RuntimePluginHostServiceBootstrapInput = {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly sessionHistory?: RuntimePluginSessionHistoryFeed;
-  readonly sessionHistoryDatabase?: RuntimePluginDatabaseOpener;
 };
 
 type RuntimePluginHostServiceCatalogEntry = {
@@ -85,15 +79,7 @@ export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
     [sessionHistoryPluginId]: Object.freeze({
       catalogKind: 'host_service',
       manifest: createSessionHistoryPluginManifest(),
-      bootstrap: input =>
-        createSessionHistoryPlugin({
-          ...(input.sessionHistory === undefined
-            ? {}
-            : {sessionHistory: input.sessionHistory}),
-          ...(input.sessionHistoryDatabase === undefined
-            ? {}
-            : {sessionHistoryDatabase: input.sessionHistoryDatabase}),
-        }),
+      bootstrap: () => createSessionHistoryPlugin(),
     } satisfies RuntimePluginHostServiceCatalogEntry),
   });
 }
@@ -121,8 +107,6 @@ const hostScopedFirstPartyRuntimePluginIdSet = new Set<string>(
 export function createHostScopedFirstPartyRuntimePlugins(options: {
   readonly hostStateForTurn: RuntimePluginListHostState;
   readonly pluginConfigControl?: RuntimePluginConfigControlHostState;
-  readonly sessionHistory?: RuntimePluginSessionHistoryFeed;
-  readonly sessionHistoryDatabase?: RuntimePluginDatabaseOpener;
 }): readonly RuntimePlugin[] {
   return Object.freeze(
     Object.values(defaultRuntimePluginHostServiceCatalogEntries()).map(entry =>

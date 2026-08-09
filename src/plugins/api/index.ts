@@ -143,6 +143,7 @@ export {
   type OpenRuntimePluginDatabaseOptions,
   type RuntimePluginDatabase,
   type RuntimePluginDatabaseOpener,
+  type RuntimePluginDatabaseProvider,
 } from './database-contract.ts';
 export {
   type ReadNewSessionHistoryMessagesOptions,

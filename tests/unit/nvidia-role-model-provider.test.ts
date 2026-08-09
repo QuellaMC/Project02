@@ -537,6 +537,8 @@ describe('NVIDIA role-model provider', () => {
       'runtime_plugin_list',
       'runtime_plugin_config',
       'runtime_plugin_config_update',
+      'sessions_search',
+      'sessions_read',
     ]);
   });
 

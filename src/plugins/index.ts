@@ -56,6 +56,7 @@ export type {
   OpenRuntimePluginDatabaseOptions,
   RuntimePluginDatabase,
   RuntimePluginDatabaseOpener,
+  RuntimePluginDatabaseProvider,
 } from './api/database-contract.ts';
 export type {
   ReadNewSessionHistoryMessagesOptions,

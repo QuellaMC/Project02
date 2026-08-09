@@ -5,6 +5,8 @@ import {
   type VisibleMessage,
 } from '../../core/index.ts';
 import type {ModelToolInputContract} from '../../role-model/api/index.ts';
+import type {RuntimePluginDatabaseOpener} from './database-contract.ts';
+import type {RuntimePluginSessionHistoryFeed} from './session-history-contract.ts';
 import type {
   JsonBoundaryObject,
   JsonBoundaryValue,
@@ -190,6 +192,10 @@ export type RuntimePluginContext = {
   readonly fileStore?: RuntimePluginFileStore;
   /** Character-scoped cross-session store; needs character_file_store. */
   readonly characterFileStore?: RuntimePluginFileStore;
+  /** Visible-message history feed; needs session_history read. */
+  readonly sessionHistory?: RuntimePluginSessionHistoryFeed;
+  /** Opener for this plugin's own databases; needs plugin_database write. */
+  readonly pluginDatabase?: RuntimePluginDatabaseOpener;
 };
 
 export type RuntimePluginCommittedTurnSnapshot = {
