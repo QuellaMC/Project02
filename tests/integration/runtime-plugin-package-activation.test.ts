@@ -24,6 +24,7 @@ import {
 import {createRuntimePluginManifest} from '../../src/plugins/api/manifest-validation.ts';
 import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.ts';
 import {mem0PluginId} from '../../src/plugins/packages/mem0/plugin.ts';
+import {openClawCompatPluginId} from '../../src/plugins/packages/openclaw-compat/plugin.ts';
 import type {RuntimePluginManifest} from '../../src/plugins/api/types.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
@@ -61,6 +62,7 @@ describe('configured runtime plugin package activation', () => {
         demoConfigPluginId,
         firstPartyModelToolsPluginId,
         mem0PluginId,
+        openClawCompatPluginId,
         runtimePluginId,
         sessionHistoryPluginId,
       ].sort(),
@@ -79,6 +81,7 @@ describe('configured runtime plugin package activation', () => {
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
       [mem0PluginId]: 'bundled',
+      [openClawCompatPluginId]: 'bundled',
       [sessionHistoryPluginId]: 'bundled',
     });
     expect(configured.catalogEntries[characterStatePluginId]).toMatchObject({
@@ -631,6 +634,7 @@ describe('configured runtime plugin package activation', () => {
       [characterStatePluginId]: 'bundled',
       [demoConfigPluginId]: 'bundled',
       [mem0PluginId]: 'bundled',
+      [openClawCompatPluginId]: 'bundled',
       [sessionHistoryPluginId]: 'bundled',
       [manifest.id]: 'operator',
     });

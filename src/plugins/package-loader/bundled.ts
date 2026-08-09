@@ -11,6 +11,8 @@ import {demoConfigPluginId} from '../packages/demo-config/plugin.ts';
 import {createProject02Plugin as createSessionHistoryPackagePlugin} from '../packages/session-history/index.ts';
 import {createProject02Plugin as createMem0PackagePlugin} from '../packages/mem0/index.ts';
 import {mem0PluginId} from '../packages/mem0/plugin.ts';
+import {createProject02Plugin as createOpenClawCompatPackagePlugin} from '../packages/openclaw-compat/index.ts';
+import {openClawCompatPluginId} from '../packages/openclaw-compat/plugin.ts';
 
 const bundledRuntimePluginFactories = new Map<
   string,
@@ -52,6 +54,13 @@ const bundledRuntimePluginFactories = new Map<
     Object.freeze({
       entryRelativePath: 'index.ts',
       factory: createMem0PackagePlugin,
+    }),
+  ],
+  [
+    openClawCompatPluginId,
+    Object.freeze({
+      entryRelativePath: 'index.ts',
+      factory: createOpenClawCompatPackagePlugin,
     }),
   ],
 ]);
