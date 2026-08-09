@@ -71,6 +71,7 @@ runMemoryProviderConformanceSuite({
     'endSession',
     'close',
   ]),
+  provesSeamGuarantees: true,
   createPlugin(scenario) {
     return createMemoryProviderRuntimePlugin(createReferenceProvider(scenario));
   },

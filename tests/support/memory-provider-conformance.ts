@@ -40,6 +40,13 @@ export type MemoryProviderConformanceAdapter = {
   /** Tool namespace the adapter uses; defaults to the plugin id. */
   readonly toolNamespace?: string;
   readonly capabilities: ReadonlySet<MemoryProviderConformanceCapability>;
+  /**
+   * Seam-guarantee cases (source-less filtering, degraded capture,
+   * reference synthesis, no-results references) need seeds a real backend
+   * adapter can never produce — its references derive from backend rows.
+   * Only the reference adapter proves them; translation cases run for all.
+   */
+  readonly provesSeamGuarantees?: boolean;
   createPlugin(
     scenario: MemoryProviderConformanceScenario,
   ): RuntimePlugin | Promise<RuntimePlugin>;
@@ -50,6 +57,7 @@ export function runMemoryProviderConformanceSuite(
 ): void {
   const has = (capability: MemoryProviderConformanceCapability) =>
     adapter.capabilities.has(capability);
+  const seam = adapter.provesSeamGuarantees === true;
   const namespace = adapter.toolNamespace ?? adapter.pluginId;
   const searchToolName = `${namespace}.search`;
   const addToolName = `${namespace}.add`;
@@ -152,68 +160,74 @@ export function runMemoryProviderConformanceSuite(
         );
       });
 
-      it('omits source-less recall items without rejecting valid rows', async () => {
-        const host = await conformanceHost(adapter, {
-          recallItems: [
-            {
-              id: 'source-less',
-              text: 'This unauditable item should be omitted.',
-              sourceReferences: [],
-            },
-            {
-              id: 'source-backed',
-              text: 'This auditable item should remain.',
-              sourceReferences: [{kind: 'memory', id: 'source-backed'}],
-            },
-          ],
-        });
-        const result = await host.beforeRoleModelCall(conformanceContext());
+      it.runIf(seam)(
+        'omits source-less recall items without rejecting valid rows',
+        async () => {
+          const host = await conformanceHost(adapter, {
+            recallItems: [
+              {
+                id: 'source-less',
+                text: 'This unauditable item should be omitted.',
+                sourceReferences: [],
+              },
+              {
+                id: 'source-backed',
+                text: 'This auditable item should remain.',
+                sourceReferences: [{kind: 'memory', id: 'source-backed'}],
+              },
+            ],
+          });
+          const result = await host.beforeRoleModelCall(conformanceContext());
 
-        expect(result.status).toBe('completed');
-        if (result.status !== 'completed') {
-          return;
-        }
+          expect(result.status).toBe('completed');
+          if (result.status !== 'completed') {
+            return;
+          }
 
-        expect(result.contextItems.map(item => item.id)).toEqual([
-          'memory.source-backed',
-        ]);
-        expect(result.evidence).toContainEqual(
-          expect.objectContaining({
-            pluginId: adapter.pluginId,
-            evidenceKind: 'before_role_model_call',
-            status: 'accepted',
-            summary: 'Provided 1 memory item(s).',
-          }),
-        );
-      });
+          expect(result.contextItems.map(item => item.id)).toEqual([
+            'memory.source-backed',
+          ]);
+          expect(result.evidence).toContainEqual(
+            expect.objectContaining({
+              pluginId: adapter.pluginId,
+              evidenceKind: 'before_role_model_call',
+              status: 'accepted',
+              summary: 'Provided 1 memory item(s).',
+            }),
+          );
+        },
+      );
     }
 
     if (has('captureTurn')) {
-      it('degrades source-less capture evidence with the current-turn reference', async () => {
-        const host = await conformanceHost(adapter, {
-          captureResult: {captured: true, summary: 'Captured.'},
-        });
-        const result = await host.afterTurnCommitted(
-          conformanceAfterTurnContext(),
-        );
+      it.runIf(seam)(
+        'degrades source-less capture evidence with the current-turn reference',
+        async () => {
+          const host = await conformanceHost(adapter, {
+            captureResult: {captured: true, summary: 'Captured.'},
+          });
+          const result = await host.afterTurnCommitted(
+            conformanceAfterTurnContext(),
+          );
 
-        expect(result.status).toBe('completed');
-        expect(result.evidence).toContainEqual(
-          expect.objectContaining({
-            pluginId: adapter.pluginId,
-            evidenceKind: 'after_turn_committed',
-            status: 'degraded',
-            summary: 'Captured. Missing provider source references.',
-            sourceReferences: [
-              {
-                kind: 'conversation',
-                id: 'evt_memory',
-                title: 'Current conversation turn',
-              },
-            ],
-          }),
-        );
-      });
+          expect(result.status).toBe('completed');
+          expect(result.evidence).toContainEqual(
+            expect.objectContaining({
+              pluginId: adapter.pluginId,
+              evidenceKind: 'after_turn_committed',
+              status: 'degraded',
+              summary: 'Captured. Missing provider source references.',
+              sourceReferences: [
+                {
+                  kind: 'conversation',
+                  id: 'evt_memory',
+                  title: 'Current conversation turn',
+                },
+              ],
+            }),
+          );
+        },
+      );
 
       it('preserves provider capture source references as accepted evidence', async () => {
         const host = await conformanceHost(adapter, {
@@ -238,13 +252,9 @@ export function runMemoryProviderConformanceSuite(
             pluginId: adapter.pluginId,
             evidenceKind: 'after_turn_committed',
             status: 'accepted',
-            sourceReferences: [
-              {
-                kind: 'memory',
-                id: 'memory-capture-1',
-                title: 'Captured memory row',
-              },
-            ],
+            sourceReferences: expect.arrayContaining([
+              expect.objectContaining({kind: 'memory', id: 'memory-capture-1'}),
+            ]),
           }),
         );
       });
@@ -316,73 +326,82 @@ export function runMemoryProviderConformanceSuite(
         });
       });
 
-      it('accepts no-hit search results with a runtime no-results reference', async () => {
-        const host = await conformanceHost(adapter, {searchItems: []});
-        const search = await host.handleToolCall(
-          conformanceToolCall(adapter, searchToolName, {
-            query: 'missing memory',
-          }),
-          conformanceContext(),
-        );
+      it.runIf(seam)(
+        'accepts no-hit search results with a runtime no-results reference',
+        async () => {
+          const host = await conformanceHost(adapter, {searchItems: []});
+          const search = await host.handleToolCall(
+            conformanceToolCall(adapter, searchToolName, {
+              query: 'missing memory',
+            }),
+            conformanceContext(),
+          );
 
-        expect(search.status).toBe('accepted');
-        if (search.status !== 'accepted') {
-          return;
-        }
+          expect(search.status).toBe('accepted');
+          if (search.status !== 'accepted') {
+            return;
+          }
 
-        expect(search.output).toEqual({items: []});
-        expect(search.evidence[0]).toMatchObject({
-          evidenceKind: 'tool_invocation',
-          status: 'accepted',
-          sourceReferences: [
-            {
-              kind: 'runtime',
-              id: `evt_memory:${searchToolName}.no_results`,
-            },
-          ],
-        });
-      });
+          expect(search.output).toEqual({items: []});
+          expect(search.evidence[0]).toMatchObject({
+            evidenceKind: 'tool_invocation',
+            status: 'accepted',
+            sourceReferences: [
+              {
+                kind: 'runtime',
+                id: `evt_memory:${searchToolName}.no_results`,
+              },
+            ],
+          });
+        },
+      );
 
-      it('omits source-less search items before accepting the result', async () => {
-        const host = await conformanceHost(adapter, {
-          searchItems: [
-            {
-              id: 'source-less',
-              text: 'This item lacks evidence.',
-              sourceReferences: [],
-            },
-          ],
-        });
-        const search = await host.handleToolCall(
-          conformanceToolCall(adapter, searchToolName, {
-            query: 'source-less memory',
-          }),
-          conformanceContext(),
-        );
+      it.runIf(seam)(
+        'omits source-less search items before accepting the result',
+        async () => {
+          const host = await conformanceHost(adapter, {
+            searchItems: [
+              {
+                id: 'source-less',
+                text: 'This item lacks evidence.',
+                sourceReferences: [],
+              },
+            ],
+          });
+          const search = await host.handleToolCall(
+            conformanceToolCall(adapter, searchToolName, {
+              query: 'source-less memory',
+            }),
+            conformanceContext(),
+          );
 
-        expect(search.status).toBe('accepted');
-        if (search.status !== 'accepted') {
-          return;
-        }
+          expect(search.status).toBe('accepted');
+          if (search.status !== 'accepted') {
+            return;
+          }
 
-        expect(search.output).toEqual({items: []});
-        expect(search.evidence[0]).toMatchObject({
-          evidenceKind: 'tool_invocation',
-          status: 'accepted',
-          sourceReferences: [
-            {
-              kind: 'runtime',
-              id: `evt_memory:${searchToolName}.no_results`,
-            },
-          ],
-        });
-      });
+          expect(search.output).toEqual({items: []});
+          expect(search.evidence[0]).toMatchObject({
+            evidenceKind: 'tool_invocation',
+            status: 'accepted',
+            sourceReferences: [
+              {
+                kind: 'runtime',
+                id: `evt_memory:${searchToolName}.no_results`,
+              },
+            ],
+          });
+        },
+      );
     }
 
     if (has('add')) {
-      it('synthesizes a persisted memory reference for add results without one', async () => {
+      it('persists an explicit memory through the add tool', async () => {
         const host = await conformanceHost(adapter, {
-          addResult: {id: 'persisted-memory-1', sourceReferences: []},
+          addResult: {
+            id: 'persisted-memory-1',
+            sourceReferences: [{kind: 'memory', id: 'persisted-memory-1'}],
+          },
         });
         const add = await host.handleToolCall(
           conformanceToolCall(adapter, addToolName, {
@@ -396,29 +415,58 @@ export function runMemoryProviderConformanceSuite(
           return;
         }
 
-        expect(add.output).toEqual({
-          id: 'persisted-memory-1',
-          sourceReferences: [
-            {
-              kind: 'memory',
-              id: 'persisted-memory-1',
-              title: 'Persisted memory item',
-            },
-          ],
-        });
+        expect(add.output).toMatchObject({id: 'persisted-memory-1'});
         expect(add.evidence[0]).toMatchObject({
           evidenceKind: 'tool_invocation',
           status: 'accepted',
-          sourceReferences: [
-            {kind: 'conversation', id: 'evt_memory'},
-            {
-              kind: 'memory',
-              id: 'persisted-memory-1',
-              title: 'Persisted memory item',
-            },
-          ],
+          sourceReferences: expect.arrayContaining([
+            expect.objectContaining({kind: 'memory', id: 'persisted-memory-1'}),
+          ]),
         });
       });
+
+      it.runIf(seam)(
+        'synthesizes a persisted memory reference for add results without one',
+        async () => {
+          const host = await conformanceHost(adapter, {
+            addResult: {id: 'persisted-memory-1', sourceReferences: []},
+          });
+          const add = await host.handleToolCall(
+            conformanceToolCall(adapter, addToolName, {
+              text: 'New durable memory.',
+            }),
+            conformanceContext(),
+          );
+
+          expect(add.status).toBe('accepted');
+          if (add.status !== 'accepted') {
+            return;
+          }
+
+          expect(add.output).toEqual({
+            id: 'persisted-memory-1',
+            sourceReferences: [
+              {
+                kind: 'memory',
+                id: 'persisted-memory-1',
+                title: 'Persisted memory item',
+              },
+            ],
+          });
+          expect(add.evidence[0]).toMatchObject({
+            evidenceKind: 'tool_invocation',
+            status: 'accepted',
+            sourceReferences: [
+              {kind: 'conversation', id: 'evt_memory'},
+              {
+                kind: 'memory',
+                id: 'persisted-memory-1',
+                title: 'Persisted memory item',
+              },
+            ],
+          });
+        },
+      );
     }
   });
 }
