@@ -99,9 +99,10 @@
     <h2>Session search</h2>
 
     <p>
-      Everything said in past sessions is recorded and indexed; the character reads back
-      windows of those transcripts with <code>sessions.search</code> and
-      <code>sessions.read</code>. The windows are bounded &mdash; a matched message comes
+      Everything said is recorded and indexed &mdash; past sessions and the parts of the
+      current one that have scrolled out of the model's recent-message window alike; the
+      character reads back windows of those transcripts with <code>sessions.search</code>
+      and <code>sessions.read</code>. The windows are bounded &mdash; a matched message comes
       back trimmed to 200 characters, and reading a session raises that to 400 &mdash; so a
       long message arrives shortened, never in full. Curated
       memory holds what must always be known; session search recovers what was merely said.
@@ -133,7 +134,7 @@
       <tr>
         <td><code>mem0</code></td>
         <td>Mem0 platform API or a self-hosted Mem0 server</td>
-        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores verbatim.</td>
+        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores the text as given, trimmed to 600 characters like every other memory the runtime carries.</td>
       </tr>
       <tr>
         <td><code>openclaw-compat</code></td>
@@ -164,8 +165,10 @@
       Enablement and the settings that choose that code stay in the global config, so
       selecting a character can never start exporting the conversation to an engine the
       operator did not approve.
-      Both compat surfaces are version-pinned: when the foreign interface moves, construction
-      fails with the exact mismatch instead of guessing.
+      Both compat surfaces are version-pinned. A module missing a pinned method fails at
+      construction, naming the member; a module that keeps its methods but changes what
+      they return fails on the call that reads it, which degrades that recall or capture
+      and records the mismatch rather than reporting an empty memory.
     </p>
 
     <h2>Picking a setup</h2>
