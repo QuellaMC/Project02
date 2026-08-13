@@ -1,9 +1,14 @@
 import {createRuntimePlugin} from '../../api/constructors.ts';
 import {
+  runtimePluginAccessNameValues,
   runtimePluginContractVersion,
   type RuntimePluginAccessMap,
   type RuntimePluginDeclaration,
 } from '../../api/contract.ts';
+import {
+  runtimePluginAccessAllows,
+  runtimePluginAccessFor,
+} from '../../policy/access-control.ts';
 import type {
   RuntimePlugin,
   RuntimePluginManifest,
@@ -108,13 +113,18 @@ function consistentSuppliedManifest(
     );
   }
 
-  for (const [accessName, requiredLevel] of Object.entries(
-    memoryProviderRequestedAccess(provider),
-  )) {
-    const granted =
-      manifest.requestedAccess[accessName as keyof RuntimePluginAccessMap];
+  const derivedAccess = memoryProviderRequestedAccess(provider);
 
-    if (!accessLevelSatisfies(granted, requiredLevel)) {
+  for (const accessName of runtimePluginAccessNameValues) {
+    const requiredLevel = derivedAccess[accessName];
+
+    if (
+      requiredLevel !== undefined &&
+      !runtimePluginAccessAllows(
+        runtimePluginAccessFor(manifest.requestedAccess, accessName),
+        requiredLevel,
+      )
+    ) {
       throw new TypeError(
         `Memory provider manifest "${manifest.id}" must request ${accessName} "${requiredLevel}" for the implemented provider methods.`,
       );
@@ -122,15 +132,6 @@ function consistentSuppliedManifest(
   }
 
   return manifest;
-}
-
-function accessLevelSatisfies(
-  granted: 'none' | 'read' | 'write' | undefined,
-  required: 'none' | 'read' | 'write',
-): boolean {
-  const rank = {none: 0, read: 1, write: 2} as const;
-
-  return rank[granted ?? 'none'] >= rank[required];
 }
 
 function memoryProviderDeclarations(
