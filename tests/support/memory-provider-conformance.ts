@@ -45,9 +45,8 @@ export type MemoryProviderConformanceRequestProbe = {
   addText?: string;
   addSourceReferenceIds?: readonly string[];
   capturedUserMessage?: string;
-  healthCheckedAt?: string;
-  healthHasDeadline?: boolean;
-  healthHasSignal?: boolean;
+  /** Verbs that received a live deadline and cancellation signal. */
+  scopedVerbs?: Record<string, boolean>;
 };
 
 export type MemoryProviderConformanceScenario = {
@@ -101,7 +100,10 @@ export function runMemoryProviderConformanceSuite(
     });
 
     it('declares exactly the capability-matched plugin surface', async () => {
-      const plugin = await adapter.createPlugin({});
+      // Registered like every other case, so whatever the adapter opened
+      // during construction is closed with the rest.
+      const plugin = await conformancePlugin(adapter, {});
+
       const declared = plugin.manifest.declaredPlugins;
       const toolCapable = has('search') || has('add');
 
@@ -181,12 +183,16 @@ export function runMemoryProviderConformanceSuite(
         // drops it persists memories with no conversation provenance.
         expect(requestProbe.addSourceReferenceIds).toContain('evt_memory');
       }
-      if (has('health')) {
-        // An adapter that drops the scope leaves its backend running after
-        // the host has given up on the check.
-        expect(requestProbe.healthCheckedAt).toBe(conformanceTimestamp);
-        expect(requestProbe.healthHasDeadline).toBe(true);
-        expect(requestProbe.healthHasSignal).toBe(true);
+      // Cancellation and the deadline are what stop backend work: a verb
+      // that drops them leaves its request running after the host gave up.
+      for (const verb of [
+        ...(has('recall') ? ['recall'] : []),
+        ...(has('captureTurn') ? ['captureTurn'] : []),
+        ...(has('search') ? ['search'] : []),
+        ...(has('add') ? ['add'] : []),
+        ...(has('health') ? ['health'] : []),
+      ]) {
+        expect(requestProbe.scopedVerbs?.[verb]).toBe(true);
       }
     });
 
@@ -663,11 +669,18 @@ export function runMemoryProviderConformanceSuite(
   });
 }
 
-async function conformanceHost(
+async function conformancePlugin(
   adapter: MemoryProviderConformanceAdapter,
   scenario: MemoryProviderConformanceScenario,
-) {
+): Promise<RuntimePlugin> {
   const plugin = await adapter.createPlugin(scenario);
+
+  registerConformanceHost(plugin);
+
+  return plugin;
+}
+
+function registerConformanceHost(plugin: RuntimePlugin) {
   const host = createRuntimePluginHost({
     plugins: [plugin],
     enabledPluginIds: [plugin.manifest.id],
@@ -678,6 +691,13 @@ async function conformanceHost(
   openConformanceHosts.push(host);
 
   return host;
+}
+
+async function conformanceHost(
+  adapter: MemoryProviderConformanceAdapter,
+  scenario: MemoryProviderConformanceScenario,
+) {
+  return registerConformanceHost(await adapter.createPlugin(scenario));
 }
 
 const openConformanceHosts: {shutdown(context: unknown): Promise<unknown>}[] =

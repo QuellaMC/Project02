@@ -407,21 +407,19 @@ function addResultSourceReferences(options: {
   readonly id: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 }): readonly RuntimePluginSourceReference[] {
-  if (
-    options.sourceReferences.some(
-      reference => reference.kind === 'memory' && reference.id === options.id,
-    )
-  ) {
-    return options.sourceReferences;
-  }
+  const identifying = options.sourceReferences.find(
+    reference => reference.kind === 'memory' && reference.id === options.id,
+  );
 
+  // The row this write created leads the list: a record bounded to what it
+  // can carry must not lose the one reference naming what was stored.
   return Object.freeze([
-    ...options.sourceReferences,
-    {
+    identifying ?? {
       kind: 'memory',
       id: options.id,
       title: 'Persisted memory item',
     },
+    ...options.sourceReferences.filter(reference => reference !== identifying),
   ] satisfies RuntimePluginSourceReference[]);
 }
 
@@ -464,24 +462,16 @@ function captureTurnEvidenceSummary(options: {
 }
 
 /**
- * Producers append the reference that identifies what they just wrote, so
- * the tail survives truncation: a record that cannot name the row it
- * created describes nothing.
+ * Callers order references by what a reader cannot do without -- the turn
+ * it came from, then the row it became, then everything else -- so a list
+ * longer than one record may carry loses only the ancillary tail.
  */
 function boundedSourceReferences(
   references: readonly RuntimePluginSourceReference[] | undefined,
 ): readonly RuntimePluginSourceReference[] | undefined {
-  if (
-    references === undefined ||
-    references.length <= runtimePluginSourceReferenceLimit
-  ) {
-    return references;
-  }
-
-  return Object.freeze([
-    ...references.slice(0, runtimePluginSourceReferenceLimit - 1),
-    ...references.slice(-1),
-  ]);
+  return references === undefined
+    ? references
+    : references.slice(0, runtimePluginSourceReferenceLimit);
 }
 
 function memoryEvidence(options: {

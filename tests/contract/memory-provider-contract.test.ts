@@ -33,6 +33,7 @@ function createReferenceProvider(
     recall(request) {
       if (scenario.requestProbe !== undefined) {
         recordSessionRouting(scenario, 'recall', request.sessionId);
+        recordOperationScope(scenario, 'recall', request);
         scenario.requestProbe.recallQuery = request.currentUserMessage;
       }
 
@@ -41,6 +42,7 @@ function createReferenceProvider(
     captureTurn(turn) {
       if (scenario.requestProbe !== undefined) {
         recordSessionRouting(scenario, 'captureTurn', turn.sessionId);
+        recordOperationScope(scenario, 'captureTurn', turn);
         scenario.requestProbe.capturedUserMessage = turn.userMessage;
       }
 
@@ -51,6 +53,7 @@ function createReferenceProvider(
     search(request) {
       if (scenario.requestProbe !== undefined) {
         recordSessionRouting(scenario, 'search', request.sessionId);
+        recordOperationScope(scenario, 'search', request);
         scenario.requestProbe.searchQuery = request.query;
       }
 
@@ -59,6 +62,7 @@ function createReferenceProvider(
     add(request) {
       if (scenario.requestProbe !== undefined) {
         recordSessionRouting(scenario, 'add', request.sessionId);
+        recordOperationScope(scenario, 'add', request);
         scenario.requestProbe.addText = request.text;
         scenario.requestProbe.addSourceReferenceIds =
           request.sourceReferences.map(reference => reference.id);
@@ -70,11 +74,7 @@ function createReferenceProvider(
     },
     health(request) {
       if (scenario.requestProbe !== undefined) {
-        scenario.requestProbe.healthCheckedAt = request.checkedAt;
-        scenario.requestProbe.healthHasDeadline =
-          typeof request.deadlineAt === 'number';
-        scenario.requestProbe.healthHasSignal =
-          request.signal instanceof AbortSignal;
+        recordOperationScope(scenario, 'health', request);
       }
 
       return Promise.resolve(
@@ -93,6 +93,23 @@ function createReferenceProvider(
 
       return Promise.resolve();
     },
+  };
+}
+
+function recordOperationScope(
+  scenario: MemoryProviderConformanceScenario,
+  verb: string,
+  scope: {readonly deadlineAt: number; readonly signal: AbortSignal},
+): void {
+  if (scenario.requestProbe === undefined) {
+    return;
+  }
+
+  scenario.requestProbe.scopedVerbs = {
+    ...scenario.requestProbe.scopedVerbs,
+    [verb]:
+      typeof scope.deadlineAt === 'number' &&
+      scope.signal instanceof AbortSignal,
   };
 }
 
