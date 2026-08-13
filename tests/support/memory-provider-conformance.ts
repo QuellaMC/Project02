@@ -1,3 +1,4 @@
+import {boundedMemoryToolName} from '../../src/plugins/builtin/memory-provider/index.ts';
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from './character-fixtures.ts';
@@ -64,8 +65,6 @@ export type MemoryProviderConformanceAdapter = {
    * Only the reference adapter proves them; translation cases run for all.
    */
   readonly provesSeamGuarantees?: boolean;
-  /** true when createPlugin wires scenario.requestProbe at its boundary. */
-  readonly requestProbeSupported?: boolean;
   createPlugin(
     scenario: MemoryProviderConformanceScenario,
   ): RuntimePlugin | Promise<RuntimePlugin>;
@@ -78,8 +77,10 @@ export function runMemoryProviderConformanceSuite(
     adapter.capabilities.has(capability);
   const seam = adapter.provesSeamGuarantees === true;
   const namespace = adapter.toolNamespace ?? adapter.pluginId;
-  const searchToolName = `${namespace}.search`;
-  const addToolName = `${namespace}.add`;
+  // The factory bounds long namespaces, so the kit must ask it for the
+  // names rather than assume the unbounded form and miss the real tools.
+  const searchToolName = boundedMemoryToolName(namespace, 'search');
+  const addToolName = boundedMemoryToolName(namespace, 'add');
 
   describe(`memory provider conformance: ${adapter.name}`, () => {
     it('declares exactly the capability-matched plugin surface', async () => {
@@ -114,43 +115,40 @@ export function runMemoryProviderConformanceSuite(
       );
     });
 
-    it.runIf(adapter.requestProbeSupported === true)(
-      'delivers the caller request to each provider verb',
-      async () => {
-        const requestProbe: MemoryProviderConformanceRequestProbe = {};
-        const host = await conformanceHost(adapter, {requestProbe});
+    it('delivers the caller request to each provider verb', async () => {
+      const requestProbe: MemoryProviderConformanceRequestProbe = {};
+      const host = await conformanceHost(adapter, {requestProbe});
 
-        await host.beforeRoleModelCall(conformanceContext());
-        await host.afterTurnCommitted(conformanceAfterTurnContext());
-        if (has('search')) {
-          await host.handleToolCall(
-            conformanceToolCall(adapter, searchToolName, {query: 'prior'}),
-            conformanceContext(),
-          );
-        }
-        if (has('add')) {
-          await host.handleToolCall(
-            conformanceToolCall(adapter, addToolName, {text: 'New memory.'}),
-            conformanceContext(),
-          );
-        }
+      await host.beforeRoleModelCall(conformanceContext());
+      await host.afterTurnCommitted(conformanceAfterTurnContext());
+      if (has('search')) {
+        await host.handleToolCall(
+          conformanceToolCall(adapter, searchToolName, {query: 'prior'}),
+          conformanceContext(),
+        );
+      }
+      if (has('add')) {
+        await host.handleToolCall(
+          conformanceToolCall(adapter, addToolName, {text: 'New memory.'}),
+          conformanceContext(),
+        );
+      }
 
-        // An adapter that dropped the query or text would still return the
-        // seeded result, so the payload itself has to be asserted.
-        if (has('recall')) {
-          expect(requestProbe.recallQuery).toBe('remember this');
-        }
-        if (has('captureTurn')) {
-          expect(requestProbe.capturedUserMessage).toContain('remember this');
-        }
-        if (has('search')) {
-          expect(requestProbe.searchQuery).toBe('prior');
-        }
-        if (has('add')) {
-          expect(requestProbe.addText).toBe('New memory.');
-        }
-      },
-    );
+      // An adapter that dropped the query or text would still return the
+      // seeded result, so the payload itself has to be asserted.
+      if (has('recall')) {
+        expect(requestProbe.recallQuery).toBe('remember this');
+      }
+      if (has('captureTurn')) {
+        expect(requestProbe.capturedUserMessage).toContain('remember this');
+      }
+      if (has('search')) {
+        expect(requestProbe.searchQuery).toBe('prior');
+      }
+      if (has('add')) {
+        expect(requestProbe.addText).toBe('New memory.');
+      }
+    });
 
     if (has('recall')) {
       it('provides bounded, source-backed recall context items', async () => {
@@ -424,7 +422,17 @@ export function runMemoryProviderConformanceSuite(
           return;
         }
 
-        expect(search.output).toMatchObject({items: [{id: 'result-1'}]});
+        // The model reads the output, not the evidence: an adapter that
+        // returned ids without text would leave it with no memory to use.
+        expect(search.output).toMatchObject({
+          items: [
+            {
+              id: 'result-1',
+              text: 'Prior session detail.',
+              sourceReferences: [{kind: 'memory', id: 'result-1'}],
+            },
+          ],
+        });
         expect(search.evidence[0]).toMatchObject({
           evidenceKind: 'tool_invocation',
           status: 'accepted',
