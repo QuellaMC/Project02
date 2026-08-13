@@ -56,12 +56,14 @@ export type CharacterMemoryAppliedRecord = CharacterMemoryCallIdentity & {
  * the last, or a delayed retry re-applies against a store another session
  * has since changed.
  *
- * The window is bounded by the retry lifetime, not by how many unrelated
- * updates followed: a busy sibling window must not evict an identity that
- * can still come back. The count is only a floor so a burst inside one
- * moment cannot drop a record either.
+ * Records expire by the retry lifetime rather than by how many unrelated
+ * updates followed, so a busy sibling window cannot evict an identity that
+ * can still come back. The count is the ceiling the store file can hold:
+ * one document holds the memory entries too, and a window that outgrows
+ * the shared JSON limits would fail every later write instead of losing
+ * the oldest retry protection.
  */
-export const characterMemoryAppliedRecordLimit = 16;
+export const characterMemoryAppliedRecordLimit = 64;
 export const characterMemoryAppliedRecordTtlMs = 15 * 60 * 1_000;
 
 export type CharacterMemoryStoreDocument = {
@@ -100,11 +102,7 @@ export function withCharacterMemoryAppliedRecord(
     );
   });
 
-  return Object.freeze(
-    recent.length >= characterMemoryAppliedRecordLimit
-      ? recent
-      : next.slice(-characterMemoryAppliedRecordLimit),
-  );
+  return Object.freeze(recent.slice(-characterMemoryAppliedRecordLimit));
 }
 
 export type CharacterMemoryOperation =
