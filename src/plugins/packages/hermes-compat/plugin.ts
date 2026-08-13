@@ -40,10 +40,10 @@ export async function createProject02Plugin(
     storeRoot: input.storeRoot,
   });
 
-  return createMemoryProviderRuntimePlugin(wrapHermesMemoryProvider(foreign), {
-    manifest: input.manifest,
-    toolNamespace: hermesCompatPluginId,
-  });
+  return createMemoryProviderRuntimePlugin(
+    await wrapHermesMemoryProvider(foreign),
+    {manifest: input.manifest, toolNamespace: hermesCompatPluginId},
+  );
 }
 
 function configuredStringValue(

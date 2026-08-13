@@ -31,18 +31,6 @@
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
-        },
-        {
-          "name": "interfaceVersion",
-          "description": "Pinned compat interface version this adapter validates the module against.",
-          "required": false,
-          "secret": false,
-          "valueType": "string",
-          "allowedValues": ["1"],
-          "defaultValueSummary": "1",
-          "agentMutable": false,
-          "redactionLabels": [],
-          "reloadRequired": true
         }
       ]
     },

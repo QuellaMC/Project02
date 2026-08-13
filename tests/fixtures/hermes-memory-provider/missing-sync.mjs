@@ -1,4 +1,7 @@
-export default function createProvider() {
+import {writeFileSync} from 'node:fs';
+import {join} from 'node:path';
+
+export default function createProvider({dataDir}) {
   return {
     prefetch() {
       return {items: []};
@@ -6,6 +9,8 @@ export default function createProvider() {
     search() {
       return [];
     },
-    shutdown() {},
+    shutdown() {
+      writeFileSync(join(dataDir, 'shutdown.marker'), 'released');
+    },
   };
 }

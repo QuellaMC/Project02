@@ -1,7 +1,9 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
+import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {createRuntimeEventIdentity} from '../../src/core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
@@ -32,9 +34,9 @@ runMemoryProviderConformanceSuite({
   name: 'hermes-compat wrapper over a scenario-backed module',
   pluginId: hermesCompatPluginId,
   capabilities: new Set(['recall', 'captureTurn', 'search', 'close']),
-  createPlugin(scenario) {
+  async createPlugin(scenario) {
     return createMemoryProviderRuntimePlugin(
-      wrapHermesMemoryProvider(scenarioForeignProvider(scenario)),
+      await wrapHermesMemoryProvider(scenarioForeignProvider(scenario)),
       {toolNamespace: hermesCompatPluginId},
     );
   },
@@ -94,6 +96,33 @@ describe('Hermes memory-provider compat plugin', () => {
     ).rejects.toThrow('unsupported result shape');
   });
 
+  it('rejects a row shape it cannot read instead of dropping the memory', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'skewed-rows.mjs')),
+    );
+
+    // A version-skewed row is a contract failure; filtering it out would
+    // report an empty memory for a provider that returned one.
+    await expect(
+      plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext()),
+    ).rejects.toThrow('without a readable id and text');
+  });
+
+  it('shuts down a provider that fails interface validation', async () => {
+    const storeRoot = createTestTempRoot('project02-hermes-compat-');
+
+    await expect(
+      createProject02Plugin({
+        ...compatFactoryInput(join(fixturesRoot, 'missing-sync.mjs')),
+        storeRoot,
+      }),
+    ).rejects.toThrow('does not implement pinned v1 member "syncTurn"');
+
+    // The factory already opened whatever the provider owns; a rejected
+    // construction that leaves it running leaks one instance per attempt.
+    expect(existsSync(join(storeRoot, 'shutdown.marker'))).toBe(true);
+  });
+
   it('gives each host its own provider instance', async () => {
     const first = await createProject02Plugin(
       compatFactoryInput(join(fixturesRoot, 'provider.mjs')),
@@ -126,6 +155,11 @@ describe('Hermes memory-provider compat plugin', () => {
         compatFactoryInput(join(fixturesRoot, 'shared-object.mjs')),
       ),
     ).rejects.toThrow('must default-export a factory');
+    await expect(
+      createProject02Plugin(
+        compatFactoryInput(join(fixturesRoot, 'no-such-provider.mjs')),
+      ),
+    ).rejects.toThrow('could not import the configured module');
     await expect(
       createProject02Plugin(compatFactoryInput('relative/provider.mjs')),
     ).rejects.toThrow('must be an absolute path');

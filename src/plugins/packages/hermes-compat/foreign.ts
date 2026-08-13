@@ -1,9 +1,6 @@
-import {createRequire} from 'node:module';
-import {isAbsolute} from 'node:path';
-import {pathToFileURL} from 'node:url';
-
 import {isRecord} from '../../api/validation-primitives.ts';
 import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
+import {importOperatorConfiguredModule} from '../../package-loader/native-import.ts';
 import type {
   MemoryRecallItem,
   Project02MemoryProvider,
@@ -26,31 +23,14 @@ type HermesMemoryProviderV1 = {
   shutdown(): unknown;
 };
 
-const nativeImportModule: unknown = createRequire(import.meta.url)(
-  '../../package-loader/native-import.cjs',
-);
-
 export async function loadHermesMemoryProviderModule(options: {
   readonly modulePath: string;
   readonly storeRoot: string;
 }): Promise<unknown> {
-  if (!isAbsolute(options.modulePath)) {
-    throw new RuntimePluginConstructionError(
-      'hermes-compat modulePath must be an absolute path to the provider module.',
-    );
-  }
-
-  if (typeof nativeImportModule !== 'function') {
-    throw new TypeError('Native import bridge is unavailable.');
-  }
-
-  // Importing the configured module executes operator-trusted code, the
-  // same trust an installed operator package already gets.
-  const imported: unknown = await Promise.resolve(
-    Reflect.apply(nativeImportModule, undefined, [
-      pathToFileURL(options.modulePath).href,
-    ]),
-  );
+  const imported = await importOperatorConfiguredModule({
+    subject: 'hermes-compat',
+    modulePath: options.modulePath,
+  });
   const exported = isRecord(imported) ? imported['default'] : undefined;
 
   // A factory is required: the module namespace is cached per process, so
@@ -69,10 +49,23 @@ export async function loadHermesMemoryProviderModule(options: {
   return built;
 }
 
-export function wrapHermesMemoryProvider(
+/**
+ * The factory has already allocated whatever the provider owns -- database
+ * handles, workers, locks -- by the time its shape can be checked, so a
+ * rejected provider is shut down before the failure propagates; a repeated
+ * construction attempt would otherwise leak one instance per try.
+ */
+export async function wrapHermesMemoryProvider(
   foreignValue: unknown,
-): Project02MemoryProvider {
-  const foreign = pinnedForeignProvider(foreignValue);
+): Promise<Project02MemoryProvider> {
+  let foreign;
+
+  try {
+    foreign = pinnedForeignProvider(foreignValue);
+  } catch (error: unknown) {
+    await shutdownRejectedForeignProvider(foreignValue);
+    throw error;
+  }
 
   return {
     id: hermesCompatPluginId,
@@ -129,6 +122,20 @@ export function wrapHermesMemoryProvider(
       await Promise.resolve(foreign.shutdown());
     },
   };
+}
+
+async function shutdownRejectedForeignProvider(value: unknown): Promise<void> {
+  const shutdown = isRecord(value) ? value['shutdown'] : undefined;
+
+  if (typeof shutdown !== 'function') {
+    return;
+  }
+
+  try {
+    await Promise.resolve(Reflect.apply(shutdown, value, []));
+  } catch {
+    // Best effort: the validation failure is what the operator must see.
+  }
 }
 
 function pinnedForeignProvider(value: unknown): HermesMemoryProviderV1 {
@@ -211,38 +218,32 @@ function memoryItemsFromRows(
   }
 
   return Object.freeze(
-    list.slice(0, maxItems).flatMap((row: unknown) => {
-      if (!isRecord(row)) {
-        return [];
-      }
+    list.slice(0, maxItems).map((row: unknown) => {
+      const id = isRecord(row) ? stringValue(row['id']) : undefined;
+      const text = isRecord(row)
+        ? (stringValue(row['text']) ?? stringValue(row['memory']))
+        : undefined;
 
-      const id = stringValue(row['id']);
-      const text = stringValue(row['text']) ?? stringValue(row['memory']);
-
-      if (id === undefined || text === undefined) {
-        return [];
+      if (!isRecord(row) || id === undefined || text === undefined) {
+        throw new TypeError(
+          'hermes-compat provider returned a row without a readable id and text; the configured module no longer matches pinned interface v1.',
+        );
       }
 
       const sources = sourceReferencesFromForeign(row['sources']);
       const confidence = confidenceValue(row['confidence'] ?? row['score']);
 
-      return [
-        Object.freeze({
-          id,
-          text,
-          sourceReferences:
-            sources.length > 0
-              ? sources
-              : Object.freeze([
-                  {
-                    kind: 'memory' as const,
-                    id,
-                    title: 'Memory provider row',
-                  },
-                ]),
-          ...(confidence === undefined ? {} : {confidence}),
-        } satisfies MemoryRecallItem),
-      ];
+      return Object.freeze({
+        id,
+        text,
+        sourceReferences:
+          sources.length > 0
+            ? sources
+            : Object.freeze([
+                {kind: 'memory' as const, id, title: 'Memory provider row'},
+              ]),
+        ...(confidence === undefined ? {} : {confidence}),
+      } satisfies MemoryRecallItem);
     }),
   );
 }
