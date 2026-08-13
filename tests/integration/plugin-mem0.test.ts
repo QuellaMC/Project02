@@ -239,6 +239,14 @@ function conformanceServerFetch(
   let searchRequests = 0;
 
   return (url, init) => {
+    if (scenario.failBackend === true) {
+      return Promise.resolve({
+        ok: false,
+        status: 503,
+        json: () => Promise.resolve({}),
+      });
+    }
+
     const body =
       init.body === undefined
         ? {}
@@ -248,6 +256,8 @@ function conformanceServerFetch(
             readonly messages?: readonly {readonly content?: string}[];
             readonly metadata?: unknown;
             readonly run_id?: string;
+            readonly top_k?: number;
+            readonly limit?: number;
           });
 
     if (url.endsWith('/search')) {
@@ -264,9 +274,15 @@ function conformanceServerFetch(
       }
 
       if (scenario.requestProbe !== undefined && body.query !== undefined) {
-        scenario.requestProbe[
-          searchRequests === 1 ? 'recallQuery' : 'searchQuery'
-        ] = body.query;
+        const verb = searchRequests === 1 ? 'recall' : 'search';
+
+        const requestedLimit = body.limit ?? body.top_k;
+
+        scenario.requestProbe[`${verb}Query`] = body.query;
+
+        if (requestedLimit !== undefined) {
+          scenario.requestProbe[`${verb}MaxItems`] = requestedLimit;
+        }
       }
 
       return jsonResponse({
@@ -304,6 +320,8 @@ function conformanceServerFetch(
           );
         } else {
           scenario.requestProbe.capturedUserMessage = requestedText;
+          scenario.requestProbe.capturedSourceReferenceIds =
+            sourceIdsFromMetadata(body.metadata);
         }
       }
 
