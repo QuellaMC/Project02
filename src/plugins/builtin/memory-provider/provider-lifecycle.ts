@@ -407,11 +407,10 @@ function addResultSourceReferences(options: {
   readonly id: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 }): readonly RuntimePluginSourceReference[] {
-  if (
-    options.sourceReferences.some(
-      reference => reference.kind === 'memory' && reference.id === options.id,
-    )
-  ) {
+  // Only a provider that reported no provenance at all gets a synthesized
+  // one: a provider that described its write another way (a queued job,
+  // say) must not have a "persisted memory" claim invented for it.
+  if (options.sourceReferences.length > 0) {
     return options.sourceReferences;
   }
 

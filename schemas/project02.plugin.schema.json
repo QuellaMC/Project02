@@ -228,6 +228,10 @@
           "type": "boolean",
           "description": "true lets the model propose approval-gated updates via runtime.plugin.config.update."
         },
+        "globalOnly": {
+          "type": "boolean",
+          "description": "true keeps the field out of character overlays; use it for values that decide where a credential is sent."
+        },
         "reloadRequired": {
           "type": "boolean",
           "description": "Whether a committed change to this field requires a runtime reload before taking effect."

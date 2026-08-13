@@ -108,6 +108,7 @@ export function createConfiguredRuntimePluginReloader(options: {
           pluginId: entry.manifest.id,
           manifest: entry.manifest,
           storeRoot: authoredState.runtimeLocation.characterScope.dataRoot,
+          characterId: authoredState.runtimeLocation.characterScope.characterId,
           resolvedConfig:
             ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ??
             {},

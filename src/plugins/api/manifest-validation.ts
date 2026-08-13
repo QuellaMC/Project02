@@ -538,6 +538,10 @@ function requiredConfigField(
     value['agentMutable'] === undefined
       ? accept(undefined)
       : requiredBoolean(value['agentMutable'], 'agentMutable');
+  const globalOnly =
+    value['globalOnly'] === undefined
+      ? accept(undefined)
+      : requiredBoolean(value['globalOnly'], 'globalOnly');
   const reloadRequired =
     value['reloadRequired'] === undefined
       ? accept(undefined)
@@ -555,6 +559,7 @@ function requiredConfigField(
   if (envVar.status === 'rejected') return envVar;
   if (allowedValues.status === 'rejected') return allowedValues;
   if (agentMutable.status === 'rejected') return agentMutable;
+  if (globalOnly.status === 'rejected') return globalOnly;
   if (reloadRequired.status === 'rejected') return reloadRequired;
   if (redactionLabels.status === 'rejected') return redactionLabels;
 
@@ -575,6 +580,7 @@ function requiredConfigField(
     envVar: envVar.value,
     allowedValues: allowedValues.value,
     agentMutable: agentMutable.value,
+    globalOnly: globalOnly.value,
     reloadRequired: reloadRequired.value,
     redactionLabels: redactionLabels.value,
   });
@@ -590,6 +596,7 @@ function acceptRuntimePluginConfigField(options: {
   readonly envVar: string | undefined;
   readonly allowedValues: readonly string[] | undefined;
   readonly agentMutable: boolean | undefined;
+  readonly globalOnly: boolean | undefined;
   readonly reloadRequired: boolean | undefined;
   readonly redactionLabels: readonly string[];
 }): RuntimePluginValidationResult<RuntimePluginConfigField> {
@@ -614,6 +621,9 @@ function acceptRuntimePluginConfigField(options: {
       ...(options.agentMutable === undefined
         ? {}
         : {agentMutable: options.agentMutable}),
+      ...(options.globalOnly === undefined
+        ? {}
+        : {globalOnly: options.globalOnly}),
       ...(options.reloadRequired === undefined
         ? {}
         : {reloadRequired: options.reloadRequired}),

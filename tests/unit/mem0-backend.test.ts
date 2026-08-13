@@ -201,6 +201,37 @@ describe('mem0 backend transports', () => {
     });
   });
 
+  it('reports an unreadable success body instead of an empty result set', async () => {
+    const brokenBody: Mem0FetchFunction = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.reject(new SyntaxError('Unexpected token <')),
+      });
+    const backend = createMem0ServerBackend({
+      baseUrl: 'http://127.0.0.1:8765',
+      fetchFn: brokenBody,
+    });
+
+    // An operator must be able to tell a broken deployment from an empty
+    // memory store.
+    await expect(
+      backend.search({
+        query: 'tea',
+        userId: 'user-1',
+        agentId: 'mira',
+        limit: 5,
+        signal: abortSignal,
+      }),
+    ).rejects.toMatchObject({
+      failureKind: 'malformed_response',
+      message:
+        'mem0 search failed: backend returned an unreadable response body.',
+    });
+    // Health only needs the status line, so it tolerates an empty body.
+    await expect(backend.ping({signal: abortSignal})).resolves.toBeUndefined();
+  });
+
   it('translates failures into bounded errors that never carry the credential', async () => {
     const httpFailure = recordingFetch({detail: 'nope'}, 401);
     const backend = createMem0PlatformBackend({

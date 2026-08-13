@@ -59,6 +59,17 @@ export function runtimePluginScopeViolation(options: {
     });
   }
 
+  if (options.authoredScope === 'character' && field.globalOnly === true) {
+    return Object.freeze({
+      fieldName: field.name,
+      code: 'runtime_config_global_only_field_character_scoped',
+      path,
+      message:
+        `Config field "${field.name}" for plugin "${options.manifest.id}" is ` +
+        'global-only; a character config cannot set it.',
+    });
+  }
+
   if (
     options.authoredScope === 'global' &&
     options.manifest.config.scope === 'character_only' &&
