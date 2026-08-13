@@ -404,11 +404,19 @@ function searchSourceReferences(options: {
 }
 
 function addResultSourceReferences(options: {
-  readonly id: string;
+  readonly id?: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 }): readonly RuntimePluginSourceReference[] {
+  const storedId = options.id;
+
+  // A provider that described its write another way -- a queued job, say --
+  // stored no row yet, so nothing may claim one for it.
+  if (storedId === undefined) {
+    return options.sourceReferences;
+  }
+
   const identifying = options.sourceReferences.find(
-    reference => reference.kind === 'memory' && reference.id === options.id,
+    reference => reference.kind === 'memory' && reference.id === storedId,
   );
 
   // The row this write created leads the list: a record bounded to what it
@@ -416,7 +424,7 @@ function addResultSourceReferences(options: {
   return Object.freeze([
     identifying ?? {
       kind: 'memory',
-      id: options.id,
+      id: storedId,
       title: 'Persisted memory item',
     },
     ...options.sourceReferences.filter(reference => reference !== identifying),
