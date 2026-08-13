@@ -5,12 +5,16 @@ import type {
   RuntimeConfigInspectShape,
   RuntimeConfigEffectiveSource,
   RuntimeConfigFieldScope,
-  RuntimePluginConfigActivationInspectShape,
+  RuntimePluginActivationStatusShape,
   RuntimePluginConfigInspectShape,
   RuntimeConfigValue,
 } from './types.ts';
 import type {LayeredProject02RuntimeConfigSnapshot} from './resolve-layered.ts';
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
+import {
+  runtimePluginScopeViolation,
+  type RuntimePluginScopeOperation,
+} from './plugin-scope.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {redactRuntimeConfigValue} from './redact.ts';
 import {runtimeConfigDiagnosticMatchesPlugin} from './resolve.ts';
@@ -33,7 +37,7 @@ export function createRuntimePluginConfigInspectShape(options: {
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
   readonly fingerprint: string;
-  readonly activation?: RuntimePluginConfigActivationInspectShape;
+  readonly activation?: RuntimePluginActivationStatusShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
   const targetConfig =
@@ -75,13 +79,16 @@ export function createRuntimePluginConfigInspectShape(options: {
         }),
     ),
   );
-  const activation = runtimePluginConfigActivationInspection({
-    configuredEnabled,
-    diagnostics,
-    manifest: options.manifest,
-    ...(options.activation === undefined
-      ? {}
-      : {activation: options.activation}),
+  const activation = Object.freeze({
+    ...runtimePluginConfigActivationInspection({
+      configuredEnabled,
+      diagnostics,
+      manifest: options.manifest,
+      ...(options.activation === undefined
+        ? {}
+        : {activation: options.activation}),
+    }),
+    editableInScope: scopeAllowsAuthoring(options, {kind: 'activation'}),
   });
 
   return Object.freeze({
@@ -119,6 +126,12 @@ export function createRuntimePluginConfigInspectShape(options: {
             ? {}
             : {allowedValues: Object.freeze([...field.allowedValues])}),
           agentMutable: field.agentMutable === true && !field.secret,
+          // Asked of the one rule that decides it, so an offered setting
+          // and an accepted save can never disagree.
+          editableInScope: scopeAllowsAuthoring(options, {
+            kind: 'field',
+            fieldName: field.name,
+          }),
           reloadRequired: field.reloadRequired !== false,
           authored: Object.freeze({
             configured: authoredValue !== undefined,
@@ -181,12 +194,32 @@ function authoredPluginConfigField(
   );
 }
 
+/**
+ * Asks the one rule that decides authoring, so an offered setting and an
+ * accepted save can never disagree.
+ */
+function scopeAllowsAuthoring(
+  options: {
+    readonly manifest: RuntimePluginManifest;
+    readonly targetScope: RuntimeConfigFieldScope;
+  },
+  operation: RuntimePluginScopeOperation,
+): boolean {
+  return (
+    runtimePluginScopeViolation({
+      manifest: options.manifest,
+      authoredScope: options.targetScope,
+      operation,
+    }) === undefined
+  );
+}
+
 function runtimePluginConfigActivationInspection(options: {
   readonly configuredEnabled: boolean;
   readonly diagnostics: RuntimePluginConfigInspectShape['diagnostics'];
   readonly manifest: RuntimePluginManifest;
-  readonly activation?: RuntimePluginConfigActivationInspectShape;
-}): RuntimePluginConfigActivationInspectShape {
+  readonly activation?: RuntimePluginActivationStatusShape;
+}): RuntimePluginActivationStatusShape {
   if (options.activation !== undefined) {
     return Object.freeze({
       enabled: options.activation.enabled,

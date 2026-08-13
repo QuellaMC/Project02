@@ -213,6 +213,11 @@ export type RuntimePluginConfigFieldInspectShape = {
   readonly defaultValueSummary?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable: boolean;
+  /**
+   * false when this scope may not author the field, so a console never
+   * offers a setting whose save the scope rules would reject.
+   */
+  readonly editableInScope: boolean;
   readonly reloadRequired: boolean;
   /** Value authored in the inspection's explicit mutation target only. */
   readonly authored: {
@@ -223,11 +228,18 @@ export type RuntimePluginConfigFieldInspectShape = {
   readonly effective: RedactedRuntimeConfigField;
 };
 
-export type RuntimePluginConfigActivationInspectShape = {
+/** What the activation plan decided; carries no scope-authoring judgement. */
+export type RuntimePluginActivationStatusShape = {
   readonly enabled: boolean;
   readonly status: 'active' | 'disabled' | 'blocked';
   readonly reasons: readonly string[];
 };
+
+export type RuntimePluginConfigActivationInspectShape =
+  RuntimePluginActivationStatusShape & {
+    /** false when this scope may not turn the plugin on or off. */
+    readonly editableInScope: boolean;
+  };
 
 export type RuntimePluginConfigInspectShape = {
   readonly pluginId: string;

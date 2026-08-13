@@ -24,6 +24,19 @@ export function runtimePluginScopeViolation(options: {
   readonly operation: RuntimePluginScopeOperation;
 }): RuntimePluginScopeViolation | undefined {
   if (options.operation.kind === 'activation') {
+    if (
+      options.authoredScope === 'character' &&
+      options.manifest.activation.globalOnly === true
+    ) {
+      return Object.freeze({
+        code: 'runtime_config_global_only_plugin_enabled_by_character',
+        path: `plugins.${options.manifest.id}.enabled`,
+        message:
+          `Plugin "${options.manifest.id}" can only be enabled in the global ` +
+          'config; a character cannot turn it on.',
+      });
+    }
+
     return options.authoredScope === 'global' &&
       options.manifest.config.scope === 'character_only'
       ? Object.freeze({

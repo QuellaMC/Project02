@@ -137,6 +137,7 @@ export {
   type SelectedLoadedProject02RuntimeConfig,
   type RuntimeConfigMutationOperation,
   type RuntimeConfigValue,
+  type RuntimePluginActivationStatusShape,
   type RuntimePluginConfigActivationInspectShape,
   type RuntimePluginConfigFieldInspectShape,
   type RuntimePluginConfigInspectShape,

@@ -153,6 +153,53 @@ export function characterOnlyConfigPlugin(id: string) {
   });
 }
 
+export function globalOnlyConfigPlugin(id: string) {
+  const plugin = requiredSecretPlugin(id);
+
+  return createRuntimePlugin({
+    manifest: {
+      ...plugin.manifest,
+      description: 'Test plugin whose endpoint and activation are global-only.',
+      config: {
+        scope: 'global_with_character_overrides',
+        fields: [
+          {
+            name: 'note',
+            description: 'Character-tunable note.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+            agentMutable: true,
+          },
+          {
+            name: 'backend',
+            description: 'Endpoint selector that decides where the key goes.',
+            required: false,
+            secret: false,
+            valueType: 'string',
+            redactionLabels: [],
+            globalOnly: true,
+          },
+          {
+            name: 'apiKey',
+            description: 'Shared API key.',
+            required: false,
+            secret: true,
+            valueType: 'secret',
+            redactionLabels: ['secret'],
+          },
+        ],
+      },
+      activation: {
+        defaultEnabled: false,
+        globalOnly: true,
+        reasons: ['test_global_only'],
+      },
+    },
+  });
+}
+
 export function memoryProviderPlugin(id: string) {
   return createMemoryProviderRuntimePlugin({
     id,

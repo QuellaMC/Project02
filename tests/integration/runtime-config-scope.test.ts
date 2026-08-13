@@ -15,6 +15,7 @@ import {describe, expect, it} from 'vitest';
 
 import {
   characterOnlyConfigPlugin,
+  globalOnlyConfigPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
@@ -806,6 +807,73 @@ describe('plugin manifest config scope policy', () => {
           diagnostic.code.includes('scope'),
       ),
     ).toBe(false);
+  });
+
+  it('offers a character scope only the settings that scope can save', async () => {
+    const {homeRoot, dataRoot} = seededHome();
+    const plugin = globalOnlyConfigPlugin('scope.global-only');
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
+    const base = {
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+      manifest: plugin.manifest,
+      pluginManifests: [plugin.manifest],
+      env: {},
+    };
+    const characterView = inspectRuntimePluginConfig({
+      ...base,
+      targetScope: 'character',
+    });
+    const globalView = inspectRuntimePluginConfig({
+      ...base,
+      targetScope: 'global',
+    });
+    const editableFields = (
+      inspected: ReturnType<typeof inspectRuntimePluginConfig>,
+    ) =>
+      inspected.fields
+        .filter(field => field.editableInScope)
+        .map(field => field.name);
+    const characterTarget = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: base.runtimeLocation,
+      env: {},
+      scope: 'character',
+    });
+
+    // A console renders from this shape, so anything it offers must save.
+    expect(editableFields(characterView)).toEqual(['note']);
+    expect(characterView.activation.editableInScope).toBe(false);
+    expect(editableFields(globalView)).toEqual(['note', 'backend', 'apiKey']);
+    expect(globalView.activation.editableInScope).toBe(true);
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target: characterTarget,
+        request: {
+          kind: 'plugin_config',
+          manifest: plugin.manifest,
+          actor: 'operator',
+          fieldOperation: {
+            kind: 'set',
+            fieldName: 'backend',
+            value: 'server',
+          },
+        },
+      }),
+    ).toThrow('global-only');
+    expect(() =>
+      applyRuntimeConfigControlOperation({
+        target: characterTarget,
+        request: {
+          kind: 'plugin_activation',
+          manifest: plugin.manifest,
+          enabled: true,
+        },
+      }),
+    ).toThrow('can only be enabled in the global config');
   });
 
   it('uses the same policy for manifest-aware activation and field controls', async () => {

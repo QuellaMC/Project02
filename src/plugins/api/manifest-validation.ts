@@ -756,14 +756,23 @@ function requiredActivationMetadata(
     'defaultEnabled',
   );
   const reasons = requiredStringArray(value['reasons'], 'reasons');
+  const globalOnly =
+    value['globalOnly'] === undefined
+      ? accept(undefined)
+      : requiredBoolean(value['globalOnly'], 'globalOnly');
 
-  if (defaultEnabled.status === 'rejected' || reasons.status === 'rejected') {
-    return firstRejected([defaultEnabled, reasons]);
+  if (
+    defaultEnabled.status === 'rejected' ||
+    reasons.status === 'rejected' ||
+    globalOnly.status === 'rejected'
+  ) {
+    return firstRejected([defaultEnabled, reasons, globalOnly]);
   }
 
   return accept(
     Object.freeze({
       defaultEnabled: defaultEnabled.value,
+      ...(globalOnly.value === undefined ? {} : {globalOnly: globalOnly.value}),
       reasons: freezeRedactedStrings(reasons.value),
     } satisfies RuntimePluginActivationMetadata),
   );

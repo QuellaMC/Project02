@@ -82,6 +82,7 @@
     },
     "activation": {
       "defaultEnabled": false,
+      "globalOnly": true,
       "reasons": ["memory_provider_package"]
     },
     "requestedAccess": {
