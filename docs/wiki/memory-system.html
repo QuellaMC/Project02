@@ -161,6 +161,9 @@
     <p class="rule">
       Compat packages import the module the operator configures, which executes
       operator-trusted code — the same trust an installed operator package already gets.
+      Enablement and the settings that choose that code stay in the global config, so
+      selecting a character can never start exporting the conversation to an engine the
+      operator did not approve.
       Both compat surfaces are version-pinned: when the foreign interface moves, construction
       fails with the exact mismatch instead of guessing.
     </p>
