@@ -52,7 +52,12 @@ export type MemoryAddRequest = MemoryOperationScope & {
 };
 
 export type MemoryAddResult = {
-  readonly id: string;
+  /**
+   * The stored memory's id. Absent when the backend only acknowledged the
+   * write: a queue receipt is not a memory, and reporting it as one tells
+   * the model a fact is saved that a backend may still reject.
+   */
+  readonly id?: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 };
 

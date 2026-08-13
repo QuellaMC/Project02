@@ -193,6 +193,28 @@ describe('plugin package descriptor schema parity', () => {
       },
     ],
     [
+      'a character-only plugin that only a global scope could enable',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+
+        return {
+          ...descriptor,
+          manifest: {
+            ...manifest,
+            config: {
+              ...(manifest['config'] as Record<string, unknown>),
+              scope: 'character_only',
+            },
+            activation: {
+              ...(manifest['activation'] as Record<string, unknown>),
+              defaultEnabled: false,
+              globalOnly: true,
+            },
+          },
+        };
+      },
+    ],
+    [
       'a secret agent-mutable config field',
       (descriptor: Record<string, unknown>) => {
         const manifest = descriptor['manifest'] as Record<string, unknown>;

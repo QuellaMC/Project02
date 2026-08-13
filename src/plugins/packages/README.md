@@ -52,10 +52,16 @@ construction, never inside an already discovered host.
 ## The factory contract
 
 `createProject02Plugin(input: RuntimePluginFactoryInput)` receives
-`{pluginId, manifest, storeRoot, resolvedConfig, redactedConfig}` and
-returns a `RuntimePlugin`. It runs when the configured host is constructed
-at session start. The returned plugin's manifest must equal the discovered
-one — build it from `input.manifest`, never a second copy.
+`{pluginId, manifest, storeRoot, characterId, resolvedConfig,
+redactedConfig}` and returns a `RuntimePlugin`. It runs when the configured
+host is constructed at session start. The returned plugin's manifest must
+equal the discovered one — build it from `input.manifest`, never a second
+copy.
+
+`characterId` is the character this host serves, and it is the identity to
+namespace external state by. It is absent when no character is active, so
+fall back to a constant of your own; never derive an identity from
+`storeRoot`, whose layout is the runtime's to change.
 
 Bundled packages import host helpers directly, an installed package cannot:
 its captured artifact resolves only its own files, so a memory provider
@@ -115,7 +121,13 @@ resolution, the operator console, and the model-facing
   enablement and non-secret settings plus character overrides.
 - `config.scope: "character_only"` keeps enablement and non-secret
   settings in character packages and overlays. Its
-  `activation.defaultEnabled` must be `false`.
+  `activation.defaultEnabled` must be `false`, and it cannot be
+  `activation.globalOnly` — no scope could then enable it.
+- `globalOnly: true` on a field keeps it out of character overlays even
+  under `global_with_character_overrides`. Required for any field that
+  decides where a credential goes — a backend selector, a base URL, a
+  module path — because config merges per field: a character that changes
+  only the destination keeps the operator's key and sends it there.
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
 - `secret: true` fields accept only `{"$env": "VAR"}` references in config;
@@ -131,7 +143,14 @@ resolution, the operator console, and the model-facing
 
 `activation.defaultEnabled: true` activates the package on every store with
 no configuration; use it only for product-essential
-`global_with_character_overrides` plugins. Character-only, demo, and
+`global_with_character_overrides` plugins.
+
+`activation.globalOnly: true` keeps enablement with the operator: a
+character package or overlay can no longer turn the plugin on. Required
+whenever merely selecting a character would start sending the user's
+conversation somewhere — an external memory backend, a bridge, any
+integration that exports turn content — since a downloaded character
+otherwise enables it with the operator's inherited credentials. Character-only, demo, and
 optional plugins ship `false` and are enabled per store:
 `pnpm runtime-config ui` → Plugins → your plugin → Enable. A
 character-only plugin is enabled with `--character <id>` or by that

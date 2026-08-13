@@ -234,15 +234,19 @@ async function runMemoryAddTool(
   }
 
   const persistedSourceReferences = addResultSourceReferences(result);
+  const storedId = result.id;
 
   return acceptedToolResult({
     context,
     pluginId: options.pluginId,
-    output: {
-      id: result.id,
-      sourceReferences: persistedSourceReferences,
-    },
-    summary: 'Added one memory item.',
+    output:
+      storedId === undefined
+        ? {queued: true, sourceReferences: persistedSourceReferences}
+        : {id: storedId, sourceReferences: persistedSourceReferences},
+    summary:
+      storedId === undefined
+        ? 'Queued one memory item for the backend to store.'
+        : 'Added one memory item.',
     sourceReferences: [...inputSourceReferences, ...persistedSourceReferences],
   });
 }
