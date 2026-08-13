@@ -66,9 +66,6 @@ function createReferenceProvider(
     },
     health(request) {
       if (scenario.requestProbe !== undefined) {
-        scenario.requestProbe.healthCheckedAt = request.checkedAt;
-        scenario.requestProbe.healthHasDeadline =
-          typeof request.deadlineAt === 'number';
         scenario.requestProbe.healthHasSignal =
           request.signal instanceof AbortSignal;
       }

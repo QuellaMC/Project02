@@ -230,7 +230,7 @@
       },
       "then": {
         "type": "object",
-        "description": "A character-only plugin is enabled in a character package or character config: not by the manifest default, and not global-only, which no character scope could ever turn on.",
+        "description": "A character-only plugin is enabled and configured in a character package or character config: not by the manifest default, not global-only to enable, and without global-only non-secret fields, which no scope could then set.",
         "properties": {
           "activation": {
             "type": "object",
@@ -240,6 +240,28 @@
               },
               "globalOnly": {
                 "const": false
+              }
+            }
+          },
+          "config": {
+            "type": "object",
+            "properties": {
+              "fields": {
+                "type": "array",
+                "items": {
+                  "not": {
+                    "type": "object",
+                    "required": ["globalOnly", "secret"],
+                    "properties": {
+                      "globalOnly": {
+                        "const": true
+                      },
+                      "secret": {
+                        "const": false
+                      }
+                    }
+                  }
+                }
               }
             }
           }

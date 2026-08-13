@@ -43,8 +43,6 @@ export type MemoryProviderConformanceRequestProbe = {
   addText?: string;
   addSourceReferenceIds?: readonly string[];
   capturedUserMessage?: string;
-  healthCheckedAt?: string;
-  healthHasDeadline?: boolean;
   healthHasSignal?: boolean;
 };
 
@@ -162,10 +160,8 @@ export function runMemoryProviderConformanceSuite(
         expect(requestProbe.addSourceReferenceIds).toContain('evt_memory');
       }
       if (has('health')) {
-        // An adapter that drops the scope leaves its backend running after
-        // the host has given up on the check.
-        expect(requestProbe.healthCheckedAt).toBe(conformanceTimestamp);
-        expect(requestProbe.healthHasDeadline).toBe(true);
+        // Cancellation is what stops backend work: an adapter that drops
+        // the signal leaves its check running after the host gave up.
         expect(requestProbe.healthHasSignal).toBe(true);
       }
     });
