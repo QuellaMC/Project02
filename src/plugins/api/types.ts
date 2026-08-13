@@ -92,6 +92,12 @@ export type RuntimePluginRuntimePolicy = {
 
 export type RuntimePluginActivationMetadata = {
   readonly defaultEnabled: boolean;
+  /**
+   * true keeps enablement in the global config. A character that could
+   * enable an integration could start exporting the conversation to it
+   * on the operator's credential, without the operator ever choosing it.
+   */
+  readonly globalOnly?: boolean;
   readonly reasons: readonly string[];
 };
 

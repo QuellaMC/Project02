@@ -149,6 +149,10 @@
               "type": "boolean",
               "description": "Bundled packages with true activate without config; demo/test plugins should stay false and be enabled per store."
             },
+            "globalOnly": {
+              "type": "boolean",
+              "description": "true keeps enablement in the global config, for integrations whose activation exports conversation data or spends an operator credential."
+            },
             "reasons": {"$ref": "#/definitions/stringArray"}
           }
         },

@@ -29,7 +29,7 @@ import type {
   RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
-  RuntimePluginConfigActivationInspectShape,
+  RuntimePluginActivationStatusShape,
   RuntimePluginConfigInspectShape,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
@@ -89,7 +89,7 @@ export function inspectRuntimePluginConfig(options: {
   readonly targetScope: 'global' | 'character';
   readonly manifest: RuntimePluginManifest;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
-  readonly activation?: RuntimePluginConfigActivationInspectShape;
+  readonly activation?: RuntimePluginActivationStatusShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);

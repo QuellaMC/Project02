@@ -122,7 +122,7 @@ export function createMem0PlatformBackend(options: {
         signal: searchOptions.signal,
       });
 
-      return memoryHitsFromResponse(response);
+      return memoryHitsFromResponse(response, 'search');
     },
     async add(addOptions) {
       const response = await mem0Request({
@@ -142,7 +142,7 @@ export function createMem0PlatformBackend(options: {
         signal: addOptions.signal,
       });
 
-      return addReferencesFromResponse(response);
+      return addReferencesFromResponse(response, 'add');
     },
     async ping(pingOptions) {
       await mem0Request({
@@ -188,7 +188,7 @@ export function createMem0ServerBackend(options: {
         signal: searchOptions.signal,
       });
 
-      return memoryHitsFromResponse(response);
+      return memoryHitsFromResponse(response, 'search');
     },
     async add(addOptions) {
       const response = await mem0Request({
@@ -208,7 +208,7 @@ export function createMem0ServerBackend(options: {
         signal: addOptions.signal,
       });
 
-      return addReferencesFromResponse(response);
+      return addReferencesFromResponse(response, 'add');
     },
     async ping(pingOptions) {
       await mem0Request({
@@ -294,8 +294,11 @@ async function mem0Request(options: {
   }
 }
 
-function memoryHitsFromResponse(value: unknown): readonly Mem0MemoryHit[] {
-  const rows = resultRows(value);
+function memoryHitsFromResponse(
+  value: unknown,
+  operation: string,
+): readonly Mem0MemoryHit[] {
+  const rows = requiredResultRows(value, operation);
 
   return Object.freeze(
     rows.flatMap(row => {
@@ -325,6 +328,7 @@ function memoryHitsFromResponse(value: unknown): readonly Mem0MemoryHit[] {
 
 function addReferencesFromResponse(
   value: unknown,
+  operation: string,
 ): readonly RuntimePluginSourceReference[] {
   if (isRecord(value)) {
     const eventId = stringId(value['event_id']);
@@ -343,7 +347,7 @@ function addReferencesFromResponse(
   }
 
   return Object.freeze(
-    resultRows(value).flatMap(row => {
+    requiredResultRows(value, operation).flatMap(row => {
       const id = isRecord(row) ? stringId(row['id']) : undefined;
 
       return id === undefined
@@ -353,20 +357,27 @@ function addReferencesFromResponse(
   );
 }
 
-function resultRows(value: unknown): readonly unknown[] {
+/**
+ * A 2xx body that decodes but carries no result array (an error envelope
+ * from a proxy, say) is a broken deployment: treating it as "no memories"
+ * would hide the failure behind an ordinary empty answer.
+ */
+function requiredResultRows(
+  value: unknown,
+  operation: string,
+): readonly unknown[] {
   if (Array.isArray(value)) {
     return value;
   }
 
-  if (isRecord(value)) {
-    const results = value['results'];
-
-    if (Array.isArray(results)) {
-      return results;
-    }
+  if (isRecord(value) && Array.isArray(value['results'])) {
+    return value['results'];
   }
 
-  return Object.freeze([]);
+  throw new Mem0RequestError({
+    operation,
+    failureKind: 'malformed_response',
+  });
 }
 
 function stringId(value: unknown): string | undefined {
