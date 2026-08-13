@@ -233,7 +233,13 @@ async function runMemoryAddTool(
     throw new TypeError('Memory provider add hook is unavailable.');
   }
 
-  const persistedSourceReferences = addResultSourceReferences(result);
+  // Both surfaces are bounded from the same ordered list, so the row this
+  // write created leads each of them: the tool output goes through the
+  // JSON container limit, which would reject an oversized array only
+  // after the backend had already stored the memory.
+  const persistedSourceReferences = boundedSourceReferences(
+    addResultSourceReferences(result),
+  );
   const storedId = result.id;
 
   // Without a stored id, a queued write is only credible if the backend
@@ -503,11 +509,9 @@ function itemSourceReferences(
 }
 
 function boundedSourceReferences(
-  references: readonly RuntimePluginSourceReference[] | undefined,
-): readonly RuntimePluginSourceReference[] | undefined {
-  return references === undefined
-    ? references
-    : references.slice(0, runtimePluginSourceReferenceLimit);
+  references: readonly RuntimePluginSourceReference[],
+): readonly RuntimePluginSourceReference[] {
+  return references.slice(0, runtimePluginSourceReferenceLimit);
 }
 
 function memoryEvidence(options: {
@@ -526,7 +530,8 @@ function memoryEvidence(options: {
     (options.sourceItems === undefined
       ? undefined
       : itemSourceReferences(options.sourceItems));
-  const sourceReferences = boundedSourceReferences(collected);
+  const sourceReferences =
+    collected === undefined ? undefined : boundedSourceReferences(collected);
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,

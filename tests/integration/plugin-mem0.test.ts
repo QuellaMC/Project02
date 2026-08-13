@@ -103,9 +103,21 @@ describe('mem0 plugin package', () => {
       mem0Context(),
     );
 
-    // The rows are already stored; a hook that threw over its evidence
-    // budget would report the write as failed.
+    // The rows are already stored; a hook that threw over its evidence or
+    // output budget would report the completed write as failed.
     expect(add?.status).toBe('accepted');
+    if (add?.status !== 'accepted') {
+      return;
+    }
+
+    // The stored row leads the bounded list, so what the write created
+    // survives the trim.
+    const outputReferences = JSON.stringify(add.output);
+
+    expect(outputReferences.match(/"kind":"memory"/gu)).toHaveLength(32);
+    expect(outputReferences).toContain(
+      '"sourceReferences":[{"kind":"memory","id":"stored-0"',
+    );
   });
 
   it('reports a synchronous add that stored nothing instead of calling it queued', async () => {
