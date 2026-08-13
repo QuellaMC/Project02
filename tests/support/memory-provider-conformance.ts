@@ -1,4 +1,7 @@
-import {boundedMemoryToolName} from '../../src/plugins/builtin/memory-provider/index.ts';
+import {
+  boundedMemoryToolName,
+  memoryProviderMaxItems,
+} from '../../src/plugins/builtin/memory-provider/index.ts';
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from './character-fixtures.ts';
@@ -38,7 +41,11 @@ export type MemoryProviderConformanceRequestProbe = {
   recallQuery?: string;
   searchQuery?: string;
   addText?: string;
+  addSourceReferenceIds?: readonly string[];
   capturedUserMessage?: string;
+  healthCheckedAt?: string;
+  healthHasDeadline?: boolean;
+  healthHasSignal?: boolean;
 };
 
 export type MemoryProviderConformanceScenario = {
@@ -133,6 +140,9 @@ export function runMemoryProviderConformanceSuite(
           conformanceContext(),
         );
       }
+      if (has('health')) {
+        await host.health(conformanceContext());
+      }
 
       // An adapter that dropped the query or text would still return the
       // seeded result, so the payload itself has to be asserted.
@@ -147,6 +157,16 @@ export function runMemoryProviderConformanceSuite(
       }
       if (has('add')) {
         expect(requestProbe.addText).toBe('New memory.');
+        // The host supplies the turn a memory came from; an adapter that
+        // drops it persists memories with no conversation provenance.
+        expect(requestProbe.addSourceReferenceIds).toContain('evt_memory');
+      }
+      if (has('health')) {
+        // An adapter that drops the scope leaves its backend running after
+        // the host has given up on the check.
+        expect(requestProbe.healthCheckedAt).toBe(conformanceTimestamp);
+        expect(requestProbe.healthHasDeadline).toBe(true);
+        expect(requestProbe.healthHasSignal).toBe(true);
       }
     });
 
@@ -177,7 +197,10 @@ export function runMemoryProviderConformanceSuite(
           sourceReferences: [{kind: 'memory', id: 'memory-1'}],
           confidence: 0.8,
         });
-        expect(result.contextItems[0]?.text.length).toBeLessThanOrEqual(600);
+        // The exact bounded text, not just its length: an adapter that
+        // substitutes a different string of legal length hands the model
+        // a memory nobody stored.
+        expect(result.contextItems[0]?.text).toBe(`${'A'.repeat(597)}...`);
         expect(result.evidence).toContainEqual(
           expect.objectContaining({
             pluginId: adapter.pluginId,
@@ -185,6 +208,31 @@ export function runMemoryProviderConformanceSuite(
             status: 'accepted',
           }),
         );
+      });
+
+      it('exposes no more than the bounded number of memory items', async () => {
+        const host = await conformanceHost(adapter, {
+          recallItems: Array.from(
+            {length: memoryProviderMaxItems + 3},
+            (_unused, index) => ({
+              id: `row-${String(index)}`,
+              text: `Short memory ${String(index)}.`,
+              sourceReferences: [
+                {kind: 'memory' as const, id: `row-${String(index)}`},
+              ],
+            }),
+          ),
+        });
+        const result = await host.beforeRoleModelCall(conformanceContext());
+
+        expect(result.status).toBe('completed');
+        if (result.status !== 'completed') {
+          return;
+        }
+
+        // Many short rows pass the per-item bound and would still crowd
+        // out the rest of the prompt.
+        expect(result.contextItems).toHaveLength(memoryProviderMaxItems);
       });
 
       it('normalizes provider recall IDs into stable context item ids', async () => {
@@ -326,6 +374,9 @@ export function runMemoryProviderConformanceSuite(
         const sessionEnd = await host.onSessionEnd(conformanceContext());
 
         expect(lifecycleProbe.endedSessions).toEqual(['session-memory']);
+        // A provider shut down at the end of one session cannot serve the
+        // next one that opens against the same host.
+        expect(lifecycleProbe.closeCalls).toBe(0);
         expect(sessionEnd).toMatchObject({
           status: 'completed',
           evidence: [
@@ -619,11 +670,13 @@ function conformanceToolCall(
   };
 }
 
+const conformanceTimestamp = '2026-06-21T00:00:00.000Z';
+
 function conformanceContext() {
   return createRuntimePluginContext({
     eventId: 'evt_memory',
     traceId: 'trace_memory',
-    createdAt: '2026-06-21T00:00:00.000Z',
+    createdAt: conformanceTimestamp,
     sessionId: 'session-memory',
     eventType: 'USER_MESSAGE',
     currentUserMessage: 'remember this',
