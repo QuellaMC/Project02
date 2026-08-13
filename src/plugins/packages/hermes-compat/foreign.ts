@@ -1,4 +1,7 @@
-import {isRecord} from '../../api/validation-primitives.ts';
+import {
+  isRecord,
+  runtimePluginSourceReferenceLimit,
+} from '../../api/validation-primitives.ts';
 import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
 import {importOperatorConfiguredModule} from '../../package-loader/native-import.ts';
 import type {
@@ -37,6 +40,8 @@ export async function loadHermesMemoryProviderModule(options: {
   // a plain exported object would be shared by every character and
   // session host, and one host's shutdown would break the others.
   if (typeof exported !== 'function') {
+    // Evaluating the module may already have opened what the object owns.
+    await shutdownRejectedForeignProvider(exported);
     throw new RuntimePluginConstructionError(
       'hermes-compat module must default-export a factory returning a provider instance; a plain exported object would be shared across hosts.',
     );
@@ -82,7 +87,15 @@ export async function wrapHermesMemoryProvider(
         foreign.syncTurn(turn.userMessage, turn.characterMessage ?? ''),
       );
       const record = isRecord(result) ? result : {};
-      const captured = record['captured'] !== false;
+      const capturedFlag = record['captured'];
+
+      if (capturedFlag !== undefined && typeof capturedFlag !== 'boolean') {
+        throw new TypeError(
+          'hermes-compat provider returned a non-boolean captured flag; the configured module no longer matches pinned interface v1.',
+        );
+      }
+
+      const captured = capturedFlag !== false;
       const summary =
         typeof record['summary'] === 'string' && record['summary'].length > 0
           ? record['summary']
@@ -256,27 +269,27 @@ function sourceReferencesFromForeign(
   }
 
   return Object.freeze(
-    value.flatMap((entry: unknown) => {
+    value.slice(0, runtimePluginSourceReferenceLimit).map((entry: unknown) => {
       if (typeof entry === 'string' && entry.length > 0) {
-        return [{kind: 'memory' as const, id: entry}];
+        return {kind: 'memory' as const, id: entry};
       }
 
-      if (!isRecord(entry)) {
-        return [];
+      const id = isRecord(entry) ? stringValue(entry['id']) : undefined;
+      const title = isRecord(entry) ? stringValue(entry['title']) : undefined;
+
+      // Dropping an entry this adapter cannot read would let the runtime
+      // invent provenance for a provider whose contract has moved.
+      if (id === undefined) {
+        throw new TypeError(
+          'hermes-compat provider returned a source without a readable id; the configured module no longer matches pinned interface v1.',
+        );
       }
 
-      const id = stringValue(entry['id']);
-      const title = stringValue(entry['title']);
-
-      return id === undefined
-        ? []
-        : [
-            {
-              kind: 'memory' as const,
-              id,
-              ...(title === undefined ? {} : {title}),
-            },
-          ];
+      return {
+        kind: 'memory' as const,
+        id,
+        ...(title === undefined ? {} : {title}),
+      };
     }),
   );
 }

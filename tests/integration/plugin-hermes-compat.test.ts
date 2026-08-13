@@ -142,6 +142,38 @@ describe('Hermes memory-provider compat plugin', () => {
     expect(secondRecall?.contextItems[0]?.text).toContain('after 0 synced');
   });
 
+  it('rejects a source entry it cannot read instead of inventing provenance', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'skewed-sources.mjs')),
+    );
+
+    // Dropping the entry would let the runtime synthesize a reference and
+    // record accepted evidence for a provider whose contract has moved.
+    await expect(
+      plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext()),
+    ).rejects.toThrow('without a readable id');
+  });
+
+  it('rejects a captured flag the pinned interface does not define', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'string-captured.mjs')),
+    );
+
+    await expect(
+      plugin.lifecycleHooks.afterTurnCommitted?.(
+        createRuntimePluginAfterTurnCommittedContext({
+          ...testIdentity(),
+          sessionId: 'session-hermes-compat',
+          eventType: 'USER_MESSAGE',
+          currentUserMessage: 'remember this',
+          character: testCharacterProfile,
+          committedAt: '2026-08-10T00:00:01.000Z',
+          visibleMessages: [],
+        }),
+      ),
+    ).rejects.toThrow('non-boolean captured flag');
+  });
+
   it('keeps the imported module and activation with the operator', () => {
     const manifest = createHermesCompatPluginManifest();
     const modulePath = manifest.config.fields.find(
