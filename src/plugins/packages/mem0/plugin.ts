@@ -85,6 +85,22 @@ function configuredMem0Backend(
   });
 }
 
+function isAbsoluteHttpOrigin(value: string): boolean {
+  try {
+    const url = new URL(value);
+
+    // Endpoint paths are appended as text, so a query or fragment would
+    // silently move where every request lands.
+    return (
+      (url.protocol === 'http:' || url.protocol === 'https:') &&
+      url.search === '' &&
+      url.hash === ''
+    );
+  } catch {
+    return false;
+  }
+}
+
 function configuredStringValue(
   input: RuntimePluginFactoryInput,
   fieldName: string,

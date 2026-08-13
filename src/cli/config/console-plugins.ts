@@ -12,6 +12,7 @@ import {
   type RuntimeConfigValue,
   type RuntimePluginActivationStatusShape,
   type RuntimePluginConfigFieldInspectShape,
+  type RuntimePluginConfigInspectShape,
   type RuntimePluginScopeOperation,
 } from '../../runtime/config/index.ts';
 import {prepareConfiguredProject02PluginActivation} from '../../app/index.ts';
@@ -117,18 +118,10 @@ export async function runPluginConfigSection(
   }
 
   if (item === 1) {
-    if (!inspected.activation.editableInScope) {
-      writeScopeRestriction(context, manifest, snapshot.scope, {
-        kind: 'activation',
-      });
-      return;
-    }
-
-    const change = await stagePluginActivationChange(
+    const change = await stageActivationChoice(
       context,
       manifest,
-      inspected.enabled,
-      inspected.fingerprint,
+      inspected,
       snapshot,
     );
 
@@ -170,6 +163,79 @@ export async function runPluginConfigSection(
   if (change !== undefined) {
     await previewAndCommitChange(context, change);
   }
+}
+
+/**
+ * A scope that may not decide this activation can still remove a value its
+ * document already holds; deciding it stays refused.
+ */
+async function stageActivationChoice(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  inspected: RuntimePluginConfigInspectShape,
+  snapshot: RuntimeConfigConsoleSnapshot,
+): Promise<StagedRuntimeConfigChange | undefined> {
+  if (inspected.activation.editableInScope) {
+    return await stagePluginActivationChange(
+      context,
+      manifest,
+      inspected.enabled,
+      inspected.fingerprint,
+      snapshot,
+    );
+  }
+
+  writeScopeRestriction(context, manifest, snapshot.scope, {
+    kind: 'activation',
+  });
+
+  return await stageActivationScopeRepair(
+    context,
+    manifest,
+    inspected.enabled,
+    inspected.fingerprint,
+    snapshot,
+  );
+}
+
+async function stageActivationScopeRepair(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  inspectedEnabled: boolean,
+  fingerprint: string,
+  snapshot: RuntimeConfigConsoleSnapshot,
+): Promise<StagedRuntimeConfigChange | undefined> {
+  writeLine(context.stdout, "1) Remove this scope's enabled value");
+  writeLine(context.stdout, '2) Cancel');
+
+  const action = await askForNumber(context, 'Choose an action: ', 2);
+
+  if (action !== 1) {
+    writeLine(context.stdout, 'Change cancelled.');
+    return undefined;
+  }
+
+  return {
+    target: `plugins.${manifest.id}.enabled`,
+    oldValue: inspectedEnabled,
+    newValue: undefined,
+    reloadRequired: true,
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
+      });
+      applyRuntimeConfigControlOperation({
+        target: resolveRuntimeConfigScopeTarget({
+          runtimeLocation: snapshot.runtimeLocation,
+          ...(context.env === undefined ? {} : {env: context.env}),
+          scope: snapshot.scope,
+        }),
+        expectedFingerprint: fingerprint,
+        request: {kind: 'plugin_activation', manifest},
+      });
+    },
+  };
 }
 
 async function stagePluginActivationChange(

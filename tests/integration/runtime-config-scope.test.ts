@@ -874,6 +874,23 @@ describe('plugin manifest config scope policy', () => {
         },
       }),
     ).toThrow('can only be enabled in the global config');
+
+    // A document already holding a forbidden value must be repairable:
+    // the console offers Unset, and the rule allows exactly that -- for
+    // an enabled flag this scope may not decide as well.
+    applyRuntimeConfigControlOperation({
+      target: characterTarget,
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'operator',
+        fieldOperation: {kind: 'unset', fieldName: 'backend'},
+      },
+    });
+    applyRuntimeConfigControlOperation({
+      target: characterTarget,
+      request: {kind: 'plugin_activation', manifest: plugin.manifest},
+    });
   });
 
   it('uses the same policy for manifest-aware activation and field controls', async () => {

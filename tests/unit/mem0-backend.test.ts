@@ -12,6 +12,7 @@ type RecordedRequest = {
   readonly method: string;
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: unknown;
+  readonly redirect: string;
 };
 
 function recordingFetch(response: unknown, status = 200) {
@@ -21,6 +22,7 @@ function recordingFetch(response: unknown, status = 200) {
       url,
       method: init.method,
       headers: init.headers,
+      redirect: init.redirect,
       ...(init.body === undefined ? {} : {body: JSON.parse(init.body)}),
     });
 
@@ -41,12 +43,32 @@ function errorMessageOf(error: unknown): string {
 }
 
 describe('mem0 backend transports', () => {
+  it('refuses to follow a redirect away from the configured origin', async () => {
+    const {requests, fetchFn} = recordingFetch({results: []});
+
+    await createMem0ServerBackend({
+      baseUrl: 'http://127.0.0.1:8765',
+      apiKey: 'm0sk_user_key',
+      fetchFn,
+    }).search({
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 5,
+      signal: abortSignal,
+    });
+
+    // An X-API-Key header survives a redirect where Authorization would
+    // not, and a 307 resends the body: following one would hand another
+    // origin the credential and the conversation together.
+    expect(requests[0]?.redirect).toBe('error');
+  });
+
   it('speaks the platform v3 wire contract with Token auth', async () => {
     const {requests, fetchFn} = recordingFetch({
       results: [
         {id: 'row-1', memory: 'Prefers tea.', score: 0.83},
         {id: 42, memory: 'Numeric id row.'},
-        {id: 'no-text-row'},
       ],
     });
     const backend = createMem0PlatformBackend({
@@ -76,6 +98,25 @@ describe('mem0 backend transports', () => {
       {id: 'row-1', text: 'Prefers tea.', score: 0.83},
       {id: '42', text: 'Numeric id row.'},
     ]);
+  });
+
+  it('reports a row it cannot read instead of an empty result', async () => {
+    const {fetchFn} = recordingFetch({
+      results: [{error: 'schema mismatch'}],
+    });
+    const backend = createMem0PlatformBackend({apiKey: 'k', fetchFn});
+
+    // A backend whose rows have moved must not look like a memory store
+    // with nothing to match.
+    await expect(
+      backend.search({
+        query: 'tea',
+        userId: 'user-1',
+        agentId: 'mira',
+        limit: 5,
+        signal: abortSignal,
+      }),
+    ).rejects.toMatchObject({failureKind: 'malformed_response'});
   });
 
   it('maps the platform async add acknowledgement to a queued-write reference', async () => {

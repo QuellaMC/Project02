@@ -271,6 +271,10 @@ export type RuntimeConfigMutationOperation =
       readonly pluginId: string;
     }
   | {
+      readonly kind: 'plugin_activation_clear';
+      readonly pluginId: string;
+    }
+  | {
       readonly kind: 'default_memory_provider';
       readonly pluginId?: string;
     }

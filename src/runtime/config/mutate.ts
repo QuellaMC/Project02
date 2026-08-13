@@ -468,6 +468,8 @@ function mutateConfig(
       return setPluginEnabled(config, operation.pluginId, true);
     case 'plugin_disable':
       return setPluginEnabled(config, operation.pluginId, false);
+    case 'plugin_activation_clear':
+      return clearPluginEnabled(config, operation.pluginId);
     case 'default_memory_provider':
       return operation.pluginId === undefined
         ? unsetConfigPath(config, 'project02.defaultMemoryProvider')
@@ -541,6 +543,30 @@ function setPluginEnabled(
     ...currentPlugin,
     enabled,
   });
+
+  return freezeJsonObject({...config, plugins: freezeJsonObject(nextPlugins)});
+}
+
+/** Removes the authored flag, leaving the rest of the plugin's entry. */
+function clearPluginEnabled(
+  config: JsonBoundaryObject,
+  pluginId: string,
+): JsonBoundaryObject {
+  const plugins = authoredObjectValue(config['plugins'], 'plugins') ?? {};
+  const currentPlugin = authoredObjectValue(
+    ownJsonRecordValue(plugins, pluginId),
+    `plugins.${pluginId}`,
+  );
+
+  if (currentPlugin === undefined) {
+    return config;
+  }
+
+  const {enabled: removedEnabled, ...rest} = currentPlugin;
+  const nextPlugins = {...plugins};
+
+  void removedEnabled;
+  nextPlugins[pluginId] = freezeJsonObject(rest);
 
   return freezeJsonObject({...config, plugins: freezeJsonObject(nextPlugins)});
 }

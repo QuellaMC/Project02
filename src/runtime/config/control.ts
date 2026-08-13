@@ -158,14 +158,26 @@ export function runtimePluginConfigControlMutation(options: {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
-  const field = validateRuntimePluginConfigControlOperation(options);
   const scopeViolation = runtimePluginScopeViolation({
     manifest: options.manifest,
     authoredScope: options.authoredScope ?? 'global',
-    operation: {kind: 'field', fieldName: field.name},
+    operation: {
+      kind: 'field',
+      fieldName: fieldNameOf(options.operation),
+    },
+  });
+  // Unsetting is how a document already holding a value this scope may
+  // not author gets repaired -- including a required field, whose value
+  // this scope was never the place for; refusing it would leave the
+  // operator editing JSON by hand.
+  const scopeRepair =
+    scopeViolation !== undefined && options.operation.kind === 'unset';
+  const field = validateRuntimePluginConfigControlOperation({
+    ...options,
+    ...(scopeRepair ? {allowRequiredUnset: true} : {}),
   });
 
-  if (scopeViolation !== undefined) {
+  if (scopeViolation !== undefined && !scopeRepair) {
     throw new TypeError(scopeViolation.message);
   }
 
@@ -183,6 +195,12 @@ export function runtimePluginConfigControlMutation(options: {
       });
     },
   };
+}
+
+function fieldNameOf(
+  operation: RuntimePluginConfigFieldControlOperation,
+): string {
+  return operation.fieldName;
 }
 
 function runtimePluginConfigMutationOperation(
@@ -252,6 +270,8 @@ export function validateRuntimePluginConfigControlOperation(options: {
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
+  /** Set only for a scope repair: removing a value this scope may not hold. */
+  readonly allowRequiredUnset?: boolean;
 }): RuntimePluginConfigField {
   const field = options.manifest.config.fields.find(
     candidate => candidate.name === options.operation.fieldName,
@@ -294,7 +314,11 @@ export function validateRuntimePluginConfigControlOperation(options: {
     );
   }
 
-  if (options.operation.kind === 'unset' && field.required) {
+  if (
+    options.operation.kind === 'unset' &&
+    field.required &&
+    options.allowRequiredUnset !== true
+  ) {
     throw new TypeError(
       `Required plugin config field "${field.name}" cannot be unset.`,
     );

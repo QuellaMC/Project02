@@ -206,6 +206,41 @@ describe('mem0 plugin package', () => {
     }
   });
 
+  it('names a malformed base URL instead of reporting the backend unreachable', async () => {
+    const plugin = createMem0PluginFromInput({
+      ...mem0FactoryInput('server'),
+      resolvedConfig: resolvedConfig({
+        backend: 'server',
+        baseUrl: 'localhost:8765',
+      }),
+    });
+
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+
+    // An origin without a scheme fails inside fetch, where every verb
+    // would blame the network for a field the operator can fix.
+    expect(health).toMatchObject({
+      status: 'unavailable',
+      summary: expect.stringContaining(
+        'absolute http:// or https:// origin',
+      ) as string,
+    });
+
+    // Endpoint paths are appended as text, so a query or fragment moves
+    // where every request lands.
+    const withFragment = createMem0PluginFromInput({
+      ...mem0FactoryInput('server'),
+      resolvedConfig: resolvedConfig({
+        backend: 'server',
+        baseUrl: 'https://mem0.example/#/admin',
+      }),
+    });
+
+    expect(
+      await withFragment.lifecycleHooks.health?.(mem0Context()),
+    ).toMatchObject({status: 'unavailable'});
+  });
+
   it('reports missing configuration through health instead of pretending memory works', async () => {
     const plugin = createMem0PluginFromInput({
       ...mem0FactoryInput('server'),

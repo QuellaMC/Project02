@@ -58,7 +58,8 @@ export type RuntimeConfigControlRequest =
   | {
       readonly kind: 'plugin_activation';
       readonly manifest: RuntimePluginManifest;
-      readonly enabled: boolean;
+      /** Absent clears the authored value instead of deciding it. */
+      readonly enabled?: boolean;
     }
   | {
       readonly kind: 'plugin_config';
@@ -275,15 +276,20 @@ function normalizedControlMutation(
       operation: {kind: 'activation'},
     });
 
-    if (violation !== undefined) {
+    // Clearing is how a document that already decides an activation this
+    // scope may not decide gets repaired; deciding it stays refused.
+    if (violation !== undefined && request.enabled !== undefined) {
       throw new RuntimeConfigMutationError(violation.message);
     }
 
     return {
-      operation: {
-        kind: request.enabled ? 'plugin_enable' : 'plugin_disable',
-        pluginId: request.manifest.id,
-      },
+      operation:
+        request.enabled === undefined
+          ? {kind: 'plugin_activation_clear', pluginId: request.manifest.id}
+          : {
+              kind: request.enabled ? 'plugin_enable' : 'plugin_disable',
+              pluginId: request.manifest.id,
+            },
     };
   }
 

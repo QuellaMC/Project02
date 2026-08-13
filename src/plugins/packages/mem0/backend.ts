@@ -51,6 +51,13 @@ export type Mem0FetchFunction = (
     readonly headers: Readonly<Record<string, string>>;
     readonly body?: string;
     readonly signal: AbortSignal;
+    /**
+     * Always 'error'. An X-API-Key header is not stripped on redirect the
+     * way Authorization is, and a 307 resends the body, so a redirect
+     * would hand another origin both the credential and the
+     * conversation.
+     */
+    readonly redirect: 'error';
   },
 ) => Promise<{
   readonly ok: boolean;
@@ -274,6 +281,7 @@ async function mem0Request(options: {
         ? {}
         : {body: JSON.stringify(options.body)}),
       signal: options.signal,
+      redirect: 'error',
     });
   } catch {
     // Never rethrow transport errors: their messages can embed URLs and
@@ -317,27 +325,28 @@ function memoryHitsFromResponse(
   const rows = requiredResultRows(value, operation);
 
   return Object.freeze(
-    rows.flatMap(row => {
-      if (!isRecord(row)) {
-        return [];
-      }
+    rows.map(row => {
+      const id = isRecord(row) ? stringId(row['id']) : undefined;
+      const text = isRecord(row)
+        ? firstString(row['memory'], row['text'])
+        : undefined;
 
-      const id = stringId(row['id']);
-      const text = firstString(row['memory'], row['text']);
-
+      // Dropping a row this adapter cannot read would leave an
+      // incompatible backend indistinguishable from an empty store.
       if (id === undefined || text === undefined) {
-        return [];
+        throw new Mem0RequestError({
+          operation,
+          failureKind: 'malformed_response',
+        });
       }
 
-      const score = row['score'];
+      const score = isRecord(row) ? row['score'] : undefined;
 
-      return [
-        Object.freeze({
-          id,
-          text,
-          ...(typeof score === 'number' ? {score} : {}),
-        } satisfies Mem0MemoryHit),
-      ];
+      return Object.freeze({
+        id,
+        text,
+        ...(typeof score === 'number' ? {score} : {}),
+      } satisfies Mem0MemoryHit);
     }),
   );
 }
