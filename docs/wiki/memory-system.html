@@ -60,7 +60,7 @@
         <td>Written by</td>
         <td>The model, through <code>memory.update</code></td>
         <td>Recorded automatically</td>
-        <td>Per-turn capture (backend extracts) + explicit adds</td>
+        <td>Per-turn capture (the backend extracts), plus explicit adds where the provider offers an add tool &mdash; mem0 does; the compat adapters do not</td>
       </tr>
       <tr>
         <td>Prompt placement</td>
@@ -99,8 +99,11 @@
     <h2>Session search</h2>
 
     <p>
-      Everything said in past sessions is recorded and indexed; the character recovers exact
-      conversations with <code>sessions.search</code> and <code>sessions.read</code>. Curated
+      Everything said in past sessions is recorded and indexed; the character reads back
+      windows of those transcripts with <code>sessions.search</code> and
+      <code>sessions.read</code>. The windows are bounded &mdash; a matched message comes
+      back trimmed to 200 characters, and reading a session raises that to 400 &mdash; so a
+      long message arrives shortened, never in full. Curated
       memory holds what must always be known; session search recovers what was merely said.
       A fact worth keeping gets promoted by the model from a transcript into
       <code>memory.update</code>.
@@ -135,7 +138,7 @@
       <tr>
         <td><code>openclaw-compat</code></td>
         <td>An OpenClaw context-engine plugin module</td>
-        <td>Pinned interface v1: assembly becomes recall, turns are ingested. No tools — the engine surface has no row-backed search or add.</td>
+        <td>Pinned interface v1: assembly becomes recall, turns are ingested. No tools — the engine surface has no row-backed search or add. A module that registers several engines needs <code>engineId</code>; a credentialed engine takes its key from the secret <code>engineApiKey</code> field, not from <code>engineConfig</code>.</td>
       </tr>
       <tr>
         <td><code>hermes-compat</code></td>
