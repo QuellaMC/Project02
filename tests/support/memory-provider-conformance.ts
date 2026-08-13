@@ -153,12 +153,23 @@ export function runMemoryProviderConformanceSuite(
 
     if (has('search') || has('add')) {
       it('rejects tool input its contract does not accept', async () => {
-        const host = await conformanceHost(adapter, {});
+        const requestProbe: MemoryProviderConformanceRequestProbe = {};
+        const host = await conformanceHost(adapter, {requestProbe});
         const malformed = [
           ...(has('search')
-            ? [{toolName: searchToolName, input: {query: ''}}]
+            ? [
+                {toolName: searchToolName, input: {query: ''}},
+                {toolName: searchToolName, input: {}},
+                {toolName: searchToolName, input: {query: 7}},
+              ]
             : []),
-          ...(has('add') ? [{toolName: addToolName, input: {text: ''}}] : []),
+          ...(has('add')
+            ? [
+                {toolName: addToolName, input: {text: ''}},
+                {toolName: addToolName, input: {}},
+                {toolName: addToolName, input: {text: 7}},
+              ]
+            : []),
         ];
 
         // Validation is what stands between a permissive backend and a
@@ -171,6 +182,11 @@ export function runMemoryProviderConformanceSuite(
 
           expect(result.status).toBe('rejected');
         }
+
+        // Rejected input must not have reached the provider at all: what
+        // gets past validation is what reaches durable memory.
+        expect(requestProbe.searchQuery).toBeUndefined();
+        expect(requestProbe.addText).toBeUndefined();
       });
     }
 
@@ -194,6 +210,12 @@ export function runMemoryProviderConformanceSuite(
       }
       if (has('health')) {
         await host.health(conformanceContext());
+      }
+      if (has('endSession')) {
+        await host.onSessionEnd(conformanceContext());
+      }
+      if (has('close')) {
+        await host.shutdown(conformanceContext());
       }
 
       // An adapter that dropped the query or text would still return the
@@ -243,6 +265,8 @@ export function runMemoryProviderConformanceSuite(
         ...(has('search') ? ['search'] : []),
         ...(has('add') ? ['add'] : []),
         ...(has('health') ? ['health'] : []),
+        ...(has('endSession') ? ['endSession'] : []),
+        ...(has('close') ? ['close'] : []),
       ]) {
         expect(requestProbe.scopedVerbs?.[verb]).toBe(true);
       }
@@ -331,6 +355,36 @@ export function runMemoryProviderConformanceSuite(
             status: 'accepted',
           }),
         );
+      });
+
+      it('bounds the provenance a single recalled row carries', async () => {
+        const host = await conformanceHost(adapter, {
+          recallItems: [
+            {
+              id: 'busy-row',
+              text: 'A row with more provenance than one item may carry.',
+              sourceReferences: Array.from({length: 40}, (_unused, index) => ({
+                kind: 'memory' as const,
+                id: `source-${String(index)}`,
+              })),
+            },
+          ],
+        });
+        const result = await host.beforeRoleModelCall(conformanceContext());
+
+        // Past the host's ceiling, context-item validation rejects the
+        // whole recall rather than the surplus.
+        expect(result.status).toBe('completed');
+        if (result.status !== 'completed') {
+          return;
+        }
+
+        expect(
+          result.contextItems[0]?.sourceReferences.length ?? 0,
+        ).toBeLessThanOrEqual(32);
+        expect(result.contextItems[0]?.sourceReferences[0]).toMatchObject({
+          id: 'source-0',
+        });
       });
 
       it('exposes no more than the bounded number of memory items', async () => {
@@ -674,6 +728,33 @@ export function runMemoryProviderConformanceSuite(
         }
       });
 
+      it('bounds the text of a search result the model reads', async () => {
+        const host = await conformanceHost(adapter, {
+          searchItems: [
+            {
+              id: 'long-hit',
+              text: 'C'.repeat(700),
+              sourceReferences: [{kind: 'memory', id: 'long-hit'}],
+            },
+          ],
+        });
+        const search = await host.handleToolCall(
+          conformanceToolCall(adapter, searchToolName, {query: 'prior'}),
+          conformanceContext(),
+        );
+
+        expect(search.status).toBe('accepted');
+        if (search.status !== 'accepted') {
+          return;
+        }
+
+        // A long stored memory answered in full crowds the model's
+        // context out of one tool result.
+        expect(search.output).toMatchObject({
+          items: [{id: 'long-hit', text: `${'C'.repeat(597)}...`}],
+        });
+      });
+
       it('returns no more than the bounded number of search results', async () => {
         const host = await conformanceHost(adapter, {
           searchItems: Array.from(
@@ -783,6 +864,18 @@ export function runMemoryProviderConformanceSuite(
         });
       });
 
+      it('reports a failed write instead of inventing a stored memory', async () => {
+        const host = await conformanceHost(adapter, {failBackend: true});
+        const add = await host.handleToolCall(
+          conformanceToolCall(adapter, addToolName, {text: 'New memory.'}),
+          conformanceContext(),
+        );
+
+        // Telling the model a memory was stored when the backend refused
+        // it puts a fact in the conversation that nothing holds.
+        expect(add.status).toBe('rejected');
+      });
+
       it('hands the provider the bounded add text, not the raw input', async () => {
         const requestProbe: MemoryProviderConformanceRequestProbe = {};
         const host = await conformanceHost(adapter, {requestProbe});
@@ -880,7 +973,7 @@ const openConformanceHosts: {shutdown(context: unknown): Promise<unknown>}[] =
 function conformanceToolCall(
   adapter: MemoryProviderConformanceAdapter,
   toolName: string,
-  input: Readonly<Record<string, string>>,
+  input: Readonly<Record<string, string | number>>,
 ) {
   return {
     eventId: 'evt_memory',

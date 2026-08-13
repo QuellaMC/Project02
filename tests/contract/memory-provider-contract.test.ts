@@ -80,6 +80,10 @@ function createReferenceProvider(
           request.sourceReferences.map(reference => reference.id);
       }
 
+      if (scenario.failBackend === true) {
+        return Promise.reject(new Error('Reference backend is unavailable.'));
+      }
+
       return Promise.resolve(
         scenario.addResult ?? {id: 'reference-add', sourceReferences: []},
       );
@@ -93,12 +97,15 @@ function createReferenceProvider(
         scenario.healthResult ?? {status: 'ok', summary: 'Reference ready.'},
       );
     },
-    endSession(sessionId) {
+    endSession(sessionId, scope) {
+      recordOperationScope(scenario, 'endSession', scope);
       scenario.lifecycleProbe?.endedSessions.push(sessionId);
 
       return Promise.resolve();
     },
-    close() {
+    close(scope) {
+      recordOperationScope(scenario, 'close', scope);
+
       if (scenario.lifecycleProbe !== undefined) {
         scenario.lifecycleProbe.closeCalls += 1;
       }
