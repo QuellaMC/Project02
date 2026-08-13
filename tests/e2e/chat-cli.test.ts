@@ -9,6 +9,7 @@ import {PassThrough, Readable} from 'node:stream';
 import {describe, expect, it, vi} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {RuntimePluginConstructionError} from '../../src/plugins/api/construction-error.ts';
 import {
   writeRuntimeConfig,
   runtimeLocationForTest,
@@ -2005,8 +2006,8 @@ describe('chat CLI plugin lifecycle', () => {
               createSessionEndPlugin(() => {
                 cleanupCalls += 1;
               });
-              throw new Error(
-                'manifest-backed factory failed during construction',
+              throw new RuntimePluginConstructionError(
+                'Configured plugin needs its modulePath set to an absolute path.',
               );
             },
           },
@@ -2021,6 +2022,9 @@ describe('chat CLI plugin lifecycle', () => {
     expect(stderr).toContain(
       'Configured plugin construction failed before creating a durable session.',
     );
+    // A startup that only says construction failed leaves the operator
+    // with nothing to fix; the package's declared-safe message survives.
+    expect(stderr).toContain('modulePath set to an absolute path');
     // The marker owns the directory before plugin factories may touch it, so
     // it is not evidence of a durable session.
     expect(

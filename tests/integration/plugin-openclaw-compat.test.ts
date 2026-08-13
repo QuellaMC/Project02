@@ -1,7 +1,9 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
+import {existsSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
+import {createTestTempRoot} from '../support/temp-root.ts';
 import {createRuntimeEventIdentity} from '../../src/core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
@@ -167,6 +169,58 @@ describe('OpenClaw context-engine compat plugin', () => {
     await expect(
       plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext()),
     ).rejects.toThrow('no longer matches pinned interface v1');
+  });
+
+  it('reports an ingestion the engine declined instead of claiming capture', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'declining-ingest.mjs')),
+    );
+
+    // Persisting accepted evidence for a message the engine refused would
+    // record a memory nothing holds.
+    await expect(
+      plugin.lifecycleHooks.afterTurnCommitted?.(
+        createRuntimePluginAfterTurnCommittedContext({
+          ...testIdentity(),
+          sessionId: 'session-openclaw-compat',
+          eventType: 'USER_MESSAGE',
+          currentUserMessage: 'remember this',
+          character: testCharacterProfile,
+          committedAt: '2026-08-10T00:00:01.000Z',
+          visibleMessages: [],
+        }),
+      ),
+    ).rejects.toThrow('declined the ingested message');
+  });
+
+  it('disposes an engine that fails pinned-interface validation', async () => {
+    const storeRoot = createTestTempRoot('project02-openclaw-compat-');
+
+    await expect(
+      createProject02Plugin({
+        ...compatFactoryInput(join(fixturesRoot, 'leaky-missing-ingest.mjs')),
+        storeRoot,
+      }),
+    ).rejects.toThrow('does not implement pinned v1 member "ingest"');
+
+    // The factory already opened whatever the engine holds; a rejected
+    // construction that leaves it running can outlive the failed startup.
+    expect(existsSync(join(storeRoot, 'disposed.marker'))).toBe(true);
+  });
+
+  it('keeps executable engine selection and activation with the operator', () => {
+    const manifest = createOpenClawCompatPluginManifest();
+    const operatorOwned = manifest.config.fields.filter(field =>
+      ['modulePath', 'engineId', 'engineConfig'].includes(field.name),
+    );
+
+    // Selecting a character must not choose which code the runtime imports,
+    // nor start exporting the conversation on inherited credentials.
+    expect(manifest.activation.globalOnly).toBe(true);
+    expect(operatorOwned).toHaveLength(3);
+    for (const field of operatorOwned) {
+      expect(field.globalOnly).toBe(true);
+    }
   });
 
   it('rejects modules that do not satisfy the pinned v1 interface', async () => {

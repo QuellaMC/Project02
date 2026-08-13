@@ -485,7 +485,9 @@ describe('runtime config activation checks and construction', () => {
         }),
         sessionId,
       }),
-    ).rejects.toThrow('later manifest-backed factory failed');
+    ).rejects.toThrow(
+      `Runtime plugin package "${failingPlugin.manifest.id}" factory failed during construction.`,
+    );
 
     expect(cleanupContexts).toHaveLength(1);
     expect(cleanupContexts[0]).toMatchObject({
@@ -564,7 +566,9 @@ describe('runtime config activation checks and construction', () => {
           }),
         }),
       }),
-    ).rejects.toThrow('later manifest-backed factory failed');
+    ).rejects.toThrow(
+      `Runtime plugin package "${failingPlugin.manifest.id}" factory failed during construction.`,
+    );
 
     const cleanupContext = cleanupContexts[0];
 
@@ -652,7 +656,9 @@ describe('runtime config activation checks and construction', () => {
         }),
         sessionId,
       }),
-    ).rejects.toThrow('later manifest-backed factory failed');
+    ).rejects.toThrow(
+      `Runtime plugin package "${failingPlugin.manifest.id}" factory failed during construction.`,
+    );
 
     expect(cleanupReads).toEqual([
       {

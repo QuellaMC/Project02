@@ -100,7 +100,29 @@ export async function loadOpenClawContextEngine(options: {
     ]),
   );
 
-  return pinnedContextEngine(engineId, engine);
+  try {
+    return pinnedContextEngine(engineId, engine);
+  } catch (error: unknown) {
+    // The factory has already opened whatever the engine holds -- a
+    // database, a worker, a socket -- and a rejected engine that keeps
+    // them can outlive the failed startup.
+    await disposeRejectedEngine(engine);
+    throw error;
+  }
+}
+
+async function disposeRejectedEngine(engine: unknown): Promise<void> {
+  const dispose = isRecord(engine) ? engine['dispose'] : undefined;
+
+  if (typeof dispose !== 'function') {
+    return;
+  }
+
+  try {
+    await Promise.resolve(Reflect.apply(dispose, engine, []));
+  } catch {
+    // Best effort: the validation failure is what the operator must see.
+  }
 }
 
 function pinnedContextEngine(

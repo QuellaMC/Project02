@@ -11,4 +11,9 @@ export {
   runtimePluginPackageDescriptorFormat,
 } from '../api/package-descriptor.ts';
 export {discoverRuntimePluginPackages} from './discovery.ts';
-export {acceptRuntimePluginPackageCandidate} from './load.ts';
+export {
+  acceptRuntimePluginPackageCandidate,
+  constructRuntimePluginPackage,
+  isRuntimePluginPackageConstructionFailure,
+  runtimePluginPackageConstructionFailureName,
+} from './load.ts';

@@ -144,7 +144,12 @@ async function importRuntimePluginPackageFactory(options: {
     Reflect.apply(createProject02Plugin, undefined, [input]) as unknown;
 }
 
-async function constructRuntimePluginPackage(options: {
+/**
+ * The one place a package factory is called: every source -- an imported
+ * entry module or a host-supplied definition -- gets the same sanitized
+ * failure, so an operator sees the same message either way.
+ */
+export async function constructRuntimePluginPackage(options: {
   readonly factory: RuntimePluginPackageFactory;
   readonly manifest: RuntimePluginManifest;
   readonly input: RuntimePluginFactoryInput;
@@ -159,11 +164,11 @@ async function constructRuntimePluginPackage(options: {
   try {
     factoryOutput = await options.factory(factoryInput);
   } catch (error: unknown) {
-    // The cause stays attached for diagnostics; only a declared-safe
-    // message reaches the operator-visible text.
-    throw new TypeError(
+    // The caught error is deliberately dropped rather than attached as a
+    // cause: arbitrary factory text can embed a resolved secret, and
+    // ordinary error inspection prints nested causes.
+    throw runtimePluginPackageConstructionFailure(
       `Runtime plugin package "${options.manifest.id}" factory failed during construction.${constructionFailureDetail(error)}`,
-      {cause: error},
     );
   }
 
@@ -189,6 +194,30 @@ async function constructRuntimePluginPackage(options: {
  * Arbitrary factory text can carry resolved secrets, so only a failure
  * the package declared safe reaches the operator.
  */
+/**
+ * Names a construction failure whose whole message the loader composed
+ * from the manifest and declared-safe package text, so an operator-facing
+ * surface may show it verbatim.
+ */
+export const runtimePluginPackageConstructionFailureName =
+  'RuntimePluginPackageConstructionFailure';
+
+export function isRuntimePluginPackageConstructionFailure(
+  error: unknown,
+): error is Error {
+  return (
+    error instanceof Error &&
+    error.name === runtimePluginPackageConstructionFailureName
+  );
+}
+
+function runtimePluginPackageConstructionFailure(message: string): TypeError {
+  const failure = new TypeError(message);
+  failure.name = runtimePluginPackageConstructionFailureName;
+
+  return failure;
+}
+
 function constructionFailureDetail(error: unknown): string {
   return isRuntimePluginConstructionError(error) &&
     error instanceof Error &&
