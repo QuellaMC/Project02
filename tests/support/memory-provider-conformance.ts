@@ -359,6 +359,25 @@ export function runMemoryProviderConformanceSuite(
         },
       );
 
+      it('degrades evidence for a capture the provider declined', async () => {
+        const host = await conformanceHost(adapter, {
+          captureResult: {captured: false, summary: 'Backend declined.'},
+        });
+        const result = await host.afterTurnCommitted(
+          conformanceAfterTurnContext(),
+        );
+
+        // Recording an accepted capture for a turn the backend refused
+        // tells the operator memory holds what it does not.
+        expect(result.evidence).toContainEqual(
+          expect.objectContaining({
+            pluginId: adapter.pluginId,
+            evidenceKind: 'after_turn_committed',
+            status: 'degraded',
+          }),
+        );
+      });
+
       it('preserves provider capture source references as accepted evidence', async () => {
         const host = await conformanceHost(adapter, {
           captureResult: {
@@ -517,23 +536,25 @@ export function runMemoryProviderConformanceSuite(
         });
       });
 
-      it.runIf(seam)(
-        'accepts no-hit search results with a runtime no-results reference',
-        async () => {
-          const host = await conformanceHost(adapter, {searchItems: []});
-          const search = await host.handleToolCall(
-            conformanceToolCall(adapter, searchToolName, {
-              query: 'missing memory',
-            }),
-            conformanceContext(),
-          );
+      it('accepts a no-hit search instead of failing the call', async () => {
+        const host = await conformanceHost(adapter, {searchItems: []});
+        const search = await host.handleToolCall(
+          conformanceToolCall(adapter, searchToolName, {
+            query: 'missing memory',
+          }),
+          conformanceContext(),
+        );
 
-          expect(search.status).toBe('accepted');
-          if (search.status !== 'accepted') {
-            return;
-          }
+        // A backend with nothing to match is an ordinary answer; an
+        // adapter that throws or invents rows here fails the model.
+        expect(search.status).toBe('accepted');
+        if (search.status !== 'accepted') {
+          return;
+        }
 
-          expect(search.output).toEqual({items: []});
+        expect(search.output).toEqual({items: []});
+
+        if (seam) {
           expect(search.evidence[0]).toMatchObject({
             evidenceKind: 'tool_invocation',
             status: 'accepted',
@@ -544,8 +565,41 @@ export function runMemoryProviderConformanceSuite(
               },
             ],
           });
-        },
-      );
+        }
+      });
+
+      it('returns no more than the bounded number of search results', async () => {
+        const host = await conformanceHost(adapter, {
+          searchItems: Array.from(
+            {length: memoryProviderMaxItems + 3},
+            (_unused, index) => ({
+              id: `hit-${String(index)}`,
+              text: `Short hit ${String(index)}.`,
+              sourceReferences: [
+                {kind: 'memory' as const, id: `hit-${String(index)}`},
+              ],
+            }),
+          ),
+        });
+        const search = await host.handleToolCall(
+          conformanceToolCall(adapter, searchToolName, {query: 'prior'}),
+          conformanceContext(),
+        );
+
+        expect(search.status).toBe('accepted');
+        if (search.status !== 'accepted') {
+          return;
+        }
+
+        // Many short rows pass the per-item bound and would still fill the
+        // model's context with one tool result.
+        expect(search.output).toMatchObject({
+          items: Array.from(
+            {length: memoryProviderMaxItems},
+            (_unused, index) => ({id: `hit-${String(index)}`}),
+          ),
+        });
+      });
 
       it.runIf(seam)(
         'omits source-less search items before accepting the result',
@@ -621,6 +675,20 @@ export function runMemoryProviderConformanceSuite(
             expect.objectContaining({kind: 'memory', id: 'persisted-memory-1'}),
           ]) as unknown,
         });
+      });
+
+      it('hands the provider the bounded add text, not the raw input', async () => {
+        const requestProbe: MemoryProviderConformanceRequestProbe = {};
+        const host = await conformanceHost(adapter, {requestProbe});
+
+        await host.handleToolCall(
+          conformanceToolCall(adapter, addToolName, {text: 'B'.repeat(700)}),
+          conformanceContext(),
+        );
+
+        // The tool schema sets no maximum, so an adapter that forwards the
+        // model's text unbounded persists whatever it was handed.
+        expect(requestProbe.addText).toBe(`${'B'.repeat(597)}...`);
       });
 
       it.runIf(seam)(
