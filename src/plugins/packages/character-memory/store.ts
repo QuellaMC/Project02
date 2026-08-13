@@ -1,4 +1,5 @@
 import {containsForbiddenControlCharacter} from '../../api/curated-context.ts';
+import {defaultJsonBoundaryLimits} from '../../../shared/json-boundary.ts';
 import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
@@ -22,6 +23,10 @@ export const characterMemoryCapChars: Readonly<
 
 const characterMemoryEntrySeparator = '\n§\n';
 
+/** What one target array can hold and still encode into the store file. */
+export const characterMemoryEntryLimit =
+  defaultJsonBoundaryLimits.maxEntriesPerContainer;
+
 export type CharacterMemoryStore = {
   readonly notes: readonly string[];
   readonly userProfile: readonly string[];
@@ -37,6 +42,12 @@ export type CharacterMemoryCallIdentity = {
 export type CharacterMemoryAppliedRecord = CharacterMemoryCallIdentity & {
   readonly inputDigest: string;
   readonly output: RuntimePluginJsonObject;
+  /**
+   * When the write committed, which is what the retry window measures. The
+   * identity's createdAt is the user event, and a long model loop can put
+   * many minutes between the two.
+   */
+  readonly appliedAt: string;
 };
 
 /**
@@ -73,12 +84,15 @@ export function characterMemoryAppliedRecordFor(
 
 export function withCharacterMemoryAppliedRecord(
   records: readonly CharacterMemoryAppliedRecord[],
-  record: CharacterMemoryAppliedRecord,
+  record: Omit<CharacterMemoryAppliedRecord, 'appliedAt'>,
   now: number = Date.now(),
 ): readonly CharacterMemoryAppliedRecord[] {
-  const next = [...records, record];
+  const next = [
+    ...records,
+    {...record, appliedAt: new Date(now).toISOString()},
+  ];
   const recent = next.filter(candidate => {
-    const appliedAt = Date.parse(candidate.createdAt);
+    const appliedAt = Date.parse(candidate.appliedAt);
 
     return (
       Number.isNaN(appliedAt) ||
@@ -255,6 +269,20 @@ export function planCharacterMemoryOperations(options: {
   for (const target of characterMemoryTargetValues) {
     const usedChars = characterMemoryUsedChars(working[target]);
     const capChars = characterMemoryCapChars[target];
+    const entryCount = working[target].length;
+
+    // Many tiny entries stay under the character cap but exceed what the
+    // durable encoder will write, and that must be an actionable rejection
+    // here rather than a write failure after the batch is accepted.
+    if (entryCount > characterMemoryEntryLimit) {
+      return Object.freeze({
+        status: 'rejected',
+        reason: 'memory_capacity_exceeded',
+        details: `${target} would hold ${String(entryCount)}/${String(
+          characterMemoryEntryLimit,
+        )} entries; merge or remove entries first.`,
+      });
+    }
 
     if (usedChars > capChars) {
       return Object.freeze({
@@ -345,6 +373,7 @@ function encodeAppliedRecord(
     traceId: record.traceId,
     ...(record.toolCallId === undefined ? {} : {toolCallId: record.toolCallId}),
     createdAt: record.createdAt,
+    appliedAt: record.appliedAt,
     inputDigest: record.inputDigest,
     output: record.output,
   });
@@ -358,6 +387,7 @@ function decodeAppliedRecord(
     typeof value['eventId'] !== 'string' ||
     typeof value['traceId'] !== 'string' ||
     typeof value['createdAt'] !== 'string' ||
+    typeof value['appliedAt'] !== 'string' ||
     typeof value['inputDigest'] !== 'string' ||
     !isJsonObject(value['output']) ||
     (value['toolCallId'] !== undefined &&
@@ -375,6 +405,7 @@ function decodeAppliedRecord(
       ? {}
       : {toolCallId: value['toolCallId']}),
     createdAt: value['createdAt'],
+    appliedAt: value['appliedAt'],
     inputDigest: value['inputDigest'],
     output: value['output'],
   });
