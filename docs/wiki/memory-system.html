@@ -102,9 +102,10 @@
       Everything said is recorded and indexed &mdash; past sessions and the parts of the
       current one that have scrolled out of the model's recent-message window alike; the
       character reads back windows of those transcripts with <code>sessions.search</code>
-      and <code>sessions.read</code>. The windows are bounded &mdash; a matched message comes
-      back trimmed to 200 characters, and reading a session raises that to 400 &mdash; so a
-      long message arrives shortened, never in full. Curated
+      and <code>sessions.read</code>. Each tool bounds what it returns: a search hit comes
+      back as the first 200 characters of the message plus a 160-character snippet centered
+      on the match, and reading a session returns each message up to 400 characters. A
+      message longer than the tool's bound arrives shortened. Curated
       memory holds what must always be known; session search recovers what was merely said.
       A fact worth keeping gets promoted by the model from a transcript into
       <code>memory.update</code>.
@@ -134,7 +135,7 @@
       <tr>
         <td><code>mem0</code></td>
         <td>Mem0 platform API or a self-hosted Mem0 server</td>
-        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores the text as given, trimmed to 600 characters like every other memory the runtime carries.</td>
+        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores the text as given, trimmed to the 600 characters a provider memory item carries.</td>
       </tr>
     </table>
 
