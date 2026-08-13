@@ -26,20 +26,52 @@ export type CharacterMemoryStore = {
   readonly userProfile: readonly string[];
 };
 
-export type CharacterMemoryLastApplied = {
-  readonly version: typeof characterMemoryStoreVersion;
+export type CharacterMemoryCallIdentity = {
   readonly eventId: string;
   readonly traceId: string;
   readonly toolCallId?: string;
   readonly createdAt: string;
+};
+
+export type CharacterMemoryAppliedRecord = CharacterMemoryCallIdentity & {
   readonly inputDigest: string;
   readonly output: RuntimePluginJsonObject;
 };
 
+/**
+ * Concurrent sessions interleave updates, so a retry is not always the
+ * latest operation: keep a window of applied identities rather than only
+ * the last, or a delayed retry re-applies against a store another session
+ * has since changed.
+ */
+export const characterMemoryAppliedRecordLimit = 16;
+
 export type CharacterMemoryStoreDocument = {
   readonly store: CharacterMemoryStore;
-  readonly lastApplied?: CharacterMemoryLastApplied;
+  readonly appliedRecords: readonly CharacterMemoryAppliedRecord[];
 };
+
+export function characterMemoryAppliedRecordFor(
+  document: CharacterMemoryStoreDocument,
+  identity: CharacterMemoryCallIdentity,
+): CharacterMemoryAppliedRecord | undefined {
+  return document.appliedRecords.find(
+    record =>
+      record.eventId === identity.eventId &&
+      record.traceId === identity.traceId &&
+      record.createdAt === identity.createdAt &&
+      record.toolCallId === identity.toolCallId,
+  );
+}
+
+export function withCharacterMemoryAppliedRecord(
+  records: readonly CharacterMemoryAppliedRecord[],
+  record: CharacterMemoryAppliedRecord,
+): readonly CharacterMemoryAppliedRecord[] {
+  return Object.freeze(
+    [...records, record].slice(-characterMemoryAppliedRecordLimit),
+  );
+}
 
 export type CharacterMemoryOperation =
   | {
@@ -176,12 +208,26 @@ export function planCharacterMemoryOperations(options: {
       return invalidEntryRejection(operation.target);
     }
 
-    entries[selected.index] = text;
+    // Replacing an entry with another entry's exact text would leave two
+    // identical entries, and every old_text selecting one would then
+    // select both: the store could never be repaired through the tool.
+    // Collapsing onto the existing copy keeps entries unique by
+    // construction.
+    const duplicateIndex = entries.findIndex(
+      (entry, index) => entry === text && index !== selected.index,
+    );
+
+    if (duplicateIndex === -1) {
+      entries[selected.index] = text;
+    } else {
+      entries.splice(selected.index, 1);
+    }
+
     appliedChanges.push(
       Object.freeze({
         action: 'replace',
         target: operation.target,
-        status: 'applied',
+        status: duplicateIndex === -1 ? 'applied' : 'duplicate',
       }),
     );
   }
@@ -219,9 +265,9 @@ export function encodeCharacterMemoryStoreDocument(
     formatVersion: characterMemoryStoreVersion,
     notes: Object.freeze([...document.store.notes]),
     userProfile: Object.freeze([...document.store.userProfile]),
-    ...(document.lastApplied === undefined
-      ? {}
-      : {lastApplied: encodeLastApplied(document.lastApplied)}),
+    appliedRecords: Object.freeze(
+      document.appliedRecords.map(encodeAppliedRecord),
+    ),
   });
 }
 
@@ -229,7 +275,10 @@ export function decodeCharacterMemoryStoreDocument(
   value: RuntimePluginJsonValue | undefined,
 ): CharacterMemoryStoreDocument {
   if (value === undefined) {
-    return Object.freeze({store: emptyCharacterMemoryStore()});
+    return Object.freeze({
+      store: emptyCharacterMemoryStore(),
+      appliedRecords: Object.freeze([]),
+    });
   }
 
   if (
@@ -246,38 +295,46 @@ export function decodeCharacterMemoryStoreDocument(
     notes: decodeEntryList(value['notes'], 'notes'),
     userProfile: decodeEntryList(value['userProfile'], 'userProfile'),
   });
-  const lastApplied = value['lastApplied'];
-
   return Object.freeze({
     store,
-    ...(lastApplied === undefined
-      ? {}
-      : {lastApplied: decodeLastApplied(lastApplied)}),
+    appliedRecords: decodeAppliedRecords(value['appliedRecords']),
   });
 }
 
-function encodeLastApplied(
-  lastApplied: CharacterMemoryLastApplied,
+function decodeAppliedRecords(
+  value: RuntimePluginJsonValue | undefined,
+): readonly CharacterMemoryAppliedRecord[] {
+  if (value === undefined) {
+    return Object.freeze([]);
+  }
+
+  if (!Array.isArray(value)) {
+    throw new TypeError(
+      'Stored character memory appliedRecords must be an array.',
+    );
+  }
+
+  return Object.freeze(value.map(decodeAppliedRecord));
+}
+
+function encodeAppliedRecord(
+  record: CharacterMemoryAppliedRecord,
 ): RuntimePluginJsonObject {
   return Object.freeze({
-    version: lastApplied.version,
-    eventId: lastApplied.eventId,
-    traceId: lastApplied.traceId,
-    ...(lastApplied.toolCallId === undefined
-      ? {}
-      : {toolCallId: lastApplied.toolCallId}),
-    createdAt: lastApplied.createdAt,
-    inputDigest: lastApplied.inputDigest,
-    output: lastApplied.output,
+    eventId: record.eventId,
+    traceId: record.traceId,
+    ...(record.toolCallId === undefined ? {} : {toolCallId: record.toolCallId}),
+    createdAt: record.createdAt,
+    inputDigest: record.inputDigest,
+    output: record.output,
   });
 }
 
-function decodeLastApplied(
+function decodeAppliedRecord(
   value: RuntimePluginJsonValue,
-): CharacterMemoryLastApplied {
+): CharacterMemoryAppliedRecord {
   if (
     !isJsonObject(value) ||
-    value['version'] !== characterMemoryStoreVersion ||
     typeof value['eventId'] !== 'string' ||
     typeof value['traceId'] !== 'string' ||
     typeof value['createdAt'] !== 'string' ||
@@ -292,7 +349,6 @@ function decodeLastApplied(
   }
 
   return Object.freeze({
-    version: characterMemoryStoreVersion,
     eventId: value['eventId'],
     traceId: value['traceId'],
     ...(value['toolCallId'] === undefined

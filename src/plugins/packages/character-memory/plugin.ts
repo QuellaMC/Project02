@@ -29,16 +29,17 @@ import type {
   RuntimePluginToolCallResult,
 } from '../../api/types.ts';
 import {
+  characterMemoryAppliedRecordFor,
   characterMemoryCapChars,
   characterMemoryOperationLimit,
   characterMemoryStorePath,
-  characterMemoryStoreVersion,
   characterMemoryTargetValues,
   characterMemoryUsedChars,
   decodeCharacterMemoryStoreDocument,
   encodeCharacterMemoryStoreDocument,
   planCharacterMemoryOperations,
   renderCharacterMemoryEntries,
+  withCharacterMemoryAppliedRecord,
   type CharacterMemoryOperation,
   type CharacterMemoryStoreDocument,
   type CharacterMemoryTarget,
@@ -282,16 +283,16 @@ function appliedCharacterMemoryUpdateCall(
     fileStore.readJson(characterMemoryStorePath),
   );
   const inputDigest = characterMemoryInputDigest(call.input);
-  const lastApplied = document.lastApplied;
+  const identity = {
+    eventId: call.eventId,
+    traceId: call.traceId,
+    ...(call.toolCallId === undefined ? {} : {toolCallId: call.toolCallId}),
+    createdAt: call.createdAt,
+  };
+  const applied = characterMemoryAppliedRecordFor(document, identity);
 
-  if (
-    lastApplied !== undefined &&
-    lastApplied.eventId === call.eventId &&
-    lastApplied.traceId === call.traceId &&
-    lastApplied.createdAt === call.createdAt &&
-    lastApplied.toolCallId === call.toolCallId
-  ) {
-    if (lastApplied.inputDigest !== inputDigest) {
+  if (applied !== undefined) {
+    if (applied.inputDigest !== inputDigest) {
       const message =
         'memory.update identity was already committed with different input.';
 
@@ -312,7 +313,7 @@ function appliedCharacterMemoryUpdateCall(
 
     return {
       status: 'accepted',
-      output: Object.freeze({...lastApplied.output, idempotent: true}),
+      output: Object.freeze({...applied.output, idempotent: true}),
       evidence: [
         createPluginToolEvidence({
           context,
@@ -359,12 +360,8 @@ function appliedCharacterMemoryUpdateCall(
   } satisfies RuntimePluginJsonObject);
   const nextDocument: CharacterMemoryStoreDocument = Object.freeze({
     store: result.after,
-    lastApplied: Object.freeze({
-      version: characterMemoryStoreVersion,
-      eventId: call.eventId,
-      traceId: call.traceId,
-      ...(call.toolCallId === undefined ? {} : {toolCallId: call.toolCallId}),
-      createdAt: call.createdAt,
+    appliedRecords: withCharacterMemoryAppliedRecord(document.appliedRecords, {
+      ...identity,
       inputDigest,
       output,
     }),
