@@ -1,9 +1,6 @@
-import {createRequire} from 'node:module';
-import {isAbsolute} from 'node:path';
-import {pathToFileURL} from 'node:url';
-
 import {isRecord} from '../../api/validation-primitives.ts';
 import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
+import {importOperatorConfiguredModule} from '../../package-loader/native-import.ts';
 
 /**
  * Pinned v1 of the OpenClaw context-engine plugin surface this compat
@@ -36,41 +33,16 @@ export type OpenClawContextEngineV1 = {
   dispose?(): unknown;
 };
 
-const nativeImportModule: unknown = createRequire(import.meta.url)(
-  '../../package-loader/native-import.cjs',
-);
-
-function nativeImport(specifier: string): Promise<unknown> {
-  if (typeof nativeImportModule !== 'function') {
-    throw new RuntimePluginConstructionError(
-      'Native import bridge is unavailable.',
-    );
-  }
-
-  const result: unknown = Reflect.apply(nativeImportModule, undefined, [
-    specifier,
-  ]);
-
-  return Promise.resolve(result);
-}
-
 export async function loadOpenClawContextEngine(options: {
   readonly modulePath: string;
   readonly engineId?: string;
   readonly engineConfig?: Readonly<Record<string, unknown>>;
   readonly storeRoot: string;
 }): Promise<OpenClawContextEngineV1> {
-  if (!isAbsolute(options.modulePath)) {
-    throw new RuntimePluginConstructionError(
-      'openclaw-compat modulePath must be an absolute path to the plugin module.',
-    );
-  }
-
-  // Importing the configured module executes operator-trusted code, the
-  // same trust an installed operator package already gets.
-  const moduleNamespace = await nativeImport(
-    pathToFileURL(options.modulePath).href,
-  );
+  const moduleNamespace = await importOperatorConfiguredModule({
+    subject: 'openclaw-compat',
+    modulePath: options.modulePath,
+  });
   const register = isRecord(moduleNamespace)
     ? moduleNamespace['default']
     : undefined;
@@ -92,6 +64,14 @@ export async function loadOpenClawContextEngine(options: {
       },
     },
   ]);
+
+  if (options.engineId === undefined && factories.size > 1) {
+    throw new RuntimePluginConstructionError(
+      `openclaw-compat module registered ${String(factories.size)} context ` +
+        `engines (${[...factories.keys()].join(', ')}); set the engineId ` +
+        'config field to choose one.',
+    );
+  }
 
   const engineId = options.engineId ?? [...factories.keys()][0];
   const factory = engineId === undefined ? undefined : factories.get(engineId);
@@ -190,17 +170,34 @@ function pinnedContextEngine(
 /**
  * An engine may carry its assembly in the prompt addition, in the
  * assembled messages, or in both; dropping either half would silently
- * discard the engine's primary output.
+ * discard the engine's primary output. A result that does not match the
+ * pinned shape fails loudly, because an incompatible engine reporting no
+ * recall is indistinguishable from an engine with nothing to say.
  */
-export function assembledContextText(result: unknown): string | undefined {
-  if (!isRecord(result)) {
-    return undefined;
+export function assembledContextText(options: {
+  readonly result: unknown;
+  readonly suppliedContents: readonly string[];
+}): string | undefined {
+  if (!isRecord(options.result)) {
+    throw new TypeError(
+      'openclaw-compat engine returned a non-object assembly; the configured module no longer matches pinned interface v1.',
+    );
   }
 
-  const addition = result['systemPromptAddition'];
+  const addition = options.result['systemPromptAddition'];
+
+  if (addition !== undefined && typeof addition !== 'string') {
+    throw new TypeError(
+      'openclaw-compat engine returned a non-string systemPromptAddition; the configured module no longer matches pinned interface v1.',
+    );
+  }
+
   const parts = [
     ...(typeof addition === 'string' ? [addition] : []),
-    ...assembledMessageTexts(result['messages']),
+    ...assembledMessageTexts(
+      options.result['messages'],
+      options.suppliedContents,
+    ),
   ]
     .map(part => part.trim())
     .filter(part => part.length > 0);
@@ -208,18 +205,32 @@ export function assembledContextText(result: unknown): string | undefined {
   return parts.length === 0 ? undefined : parts.join('\n');
 }
 
-function assembledMessageTexts(value: unknown): readonly string[] {
-  if (!Array.isArray(value)) {
+function assembledMessageTexts(
+  value: unknown,
+  suppliedContents: readonly string[],
+): readonly string[] {
+  if (value === undefined) {
     return [];
   }
 
+  if (!Array.isArray(value)) {
+    throw new TypeError(
+      'openclaw-compat engine returned a non-array message assembly; the configured module no longer matches pinned interface v1.',
+    );
+  }
+
   return value.flatMap((entry: unknown) => {
-    if (!isRecord(entry)) {
-      return [];
+    if (!isRecord(entry) || typeof entry['content'] !== 'string') {
+      throw new TypeError(
+        'openclaw-compat engine returned an assembled message without string content; the configured module no longer matches pinned interface v1.',
+      );
     }
 
     const content = entry['content'];
 
-    return typeof content === 'string' && content.length > 0 ? [content] : [];
+    // The engine assembles around the message it was handed; returning
+    // that echo as memory would spend the recall budget re-telling the
+    // model the prompt it already has.
+    return suppliedContents.includes(content.trim()) ? [] : [content];
   });
 }

@@ -1,5 +1,3 @@
-import {createRequire} from 'node:module';
-
 import type {
   RuntimePluginFactoryFunction,
   RuntimePluginFactoryInput,
@@ -22,6 +20,7 @@ import {
   activateRuntimePluginPackageArtifact,
   type RuntimePluginPackageArtifact,
 } from './artifact.ts';
+import {requireNativeDynamicImport} from './native-import.ts';
 
 type RuntimePluginPackageFactory = (
   input: RuntimePluginFactoryInput,
@@ -37,31 +36,6 @@ type RuntimePluginPackageLoaderSource =
       readonly artifact: RuntimePluginPackageArtifact;
       readonly entryRelativePath: string;
     };
-
-type NativeDynamicImport = (specifier: string) => Promise<unknown>;
-
-let nativeDynamicImport: NativeDynamicImport | undefined;
-
-function requireNativeDynamicImport(): NativeDynamicImport {
-  if (nativeDynamicImport !== undefined) {
-    return nativeDynamicImport;
-  }
-  const nativeImportModule: unknown = createRequire(import.meta.url)(
-    './native-import.cjs',
-  );
-
-  if (typeof nativeImportModule !== 'function') {
-    throw new TypeError('Native runtime plugin importer is unavailable.');
-  }
-  nativeDynamicImport = specifier => {
-    const result: unknown = Reflect.apply(nativeImportModule, undefined, [
-      specifier,
-    ]);
-
-    return Promise.resolve(result);
-  };
-  return nativeDynamicImport;
-}
 
 export function createRuntimePluginPackageLoader(options: {
   readonly manifest: RuntimePluginManifest;

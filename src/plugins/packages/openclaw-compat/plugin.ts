@@ -84,7 +84,10 @@ function createOpenClawCompatProvider(
         availableTools: [],
         citationsMode: 'off',
       });
-      const addition = assembledContextText(assembled);
+      const addition = assembledContextText({
+        result: assembled,
+        suppliedContents: [request.currentUserMessage.trim()],
+      });
 
       if (addition === undefined) {
         return {items: []};
@@ -138,12 +141,21 @@ function createOpenClawCompatProvider(
   };
 }
 
+/**
+ * The credential arrives through a secret field so it lives in the
+ * environment file, and reaches the engine on the one config argument its
+ * factory already takes.
+ */
 function configuredEngineConfig(
   input: RuntimePluginFactoryInput,
 ): Readonly<Record<string, unknown>> {
   const value = input.resolvedConfig['engineConfig']?.value;
+  const settings = isRecord(value) ? value : {};
+  const apiKey = configuredStringValue(input, 'engineApiKey');
 
-  return isRecord(value) ? value : Object.freeze({});
+  return Object.freeze(
+    apiKey === undefined ? {...settings} : {...settings, apiKey},
+  );
 }
 
 function configuredStringValue(

@@ -123,17 +123,50 @@ describe('OpenClaw context-engine compat plugin', () => {
     );
   });
 
-  it('forwards configured engine settings to the factory', async () => {
+  it('forwards configured engine settings and the secret credential to the factory', async () => {
     const plugin = await createProject02Plugin(
       compatFactoryInput(join(fixturesRoot, 'engine.mjs'), {
         engineConfig: {label: 'configured'},
+        engineApiKey: 'engine-secret',
       }),
     );
 
     const result =
       await plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext());
+    const text = result?.contextItems[0]?.text ?? '';
 
-    expect(result?.contextItems[0]?.text).toContain('label:configured');
+    // The credential reaches the engine without ever being written to the
+    // config file, and never travels back out in recalled text.
+    expect(text).toContain('label:configured');
+    expect(text).toContain('credential:present');
+    expect(text).not.toContain('engine-secret');
+  });
+
+  it('keeps the prompt it handed the engine out of recalled memory', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'echoing.mjs')),
+    );
+
+    const result =
+      await plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext());
+
+    // An engine returns the assembled message list, input included;
+    // recalling the echo would spend the budget on the current prompt.
+    expect(result?.contextItems[0]?.text).toBe(
+      'Recalled: they take tea black.',
+    );
+  });
+
+  it('reports an assembly that drifted from the pinned shape instead of recalling nothing', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'malformed-assembly.mjs')),
+    );
+
+    // An incompatible engine must not read as an engine with nothing to
+    // say; the host degrades the turn and records why.
+    await expect(
+      plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext()),
+    ).rejects.toThrow('no longer matches pinned interface v1');
   });
 
   it('rejects modules that do not satisfy the pinned v1 interface', async () => {
@@ -154,6 +187,16 @@ describe('OpenClaw context-engine compat plugin', () => {
         }),
       ),
     ).rejects.toThrow('registered no context engine "no-such-engine"');
+    await expect(
+      createProject02Plugin(
+        compatFactoryInput(join(fixturesRoot, 'two-engines.mjs')),
+      ),
+    ).rejects.toThrow('set the engineId config field to choose one');
+    await expect(
+      createProject02Plugin(
+        compatFactoryInput(join(fixturesRoot, 'no-such-module.mjs')),
+      ),
+    ).rejects.toThrow('could not import the configured module');
     await expect(
       createProject02Plugin(compatFactoryInput('relative/path.mjs')),
     ).rejects.toThrow('must be an absolute path');

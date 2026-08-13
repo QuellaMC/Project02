@@ -12,6 +12,7 @@ export default function register(api) {
       assemble(params) {
         const prompt = params.messages.at(-1)?.content ?? '';
         const label = ctx.config?.label;
+        const credential = ctx.config?.apiKey === undefined ? '' : ' credential:present';
 
         return {
           messages:
@@ -19,7 +20,7 @@ export default function register(api) {
           estimatedTokens: 8,
           systemPromptAddition: `Engine brief for "${prompt}" after ${String(
             ingested.length,
-          )} ingested message(s). budget=${String(params.tokenBudget)}`,
+          )} ingested message(s). budget=${String(params.tokenBudget)}${credential}`,
         };
       },
       ingest(params) {
