@@ -171,6 +171,20 @@ describe('character memory store', () => {
         operations: [{action: 'add', target: 'notes', text: 'tab\tembedded'}],
       }),
     ).toMatchObject({status: 'rejected', reason: 'memory_entry_invalid'});
+
+    // Storing what the trusted frame would refuse at render time would
+    // drop the whole snapshot on the next launch.
+    for (const text of [
+      'next line \u0085 stays out',
+      'line separator \u2028 stays out',
+    ]) {
+      expect(
+        planCharacterMemoryOperations({
+          store: emptyCharacterMemoryStore(),
+          operations: [{action: 'add', target: 'notes', text}],
+        }),
+      ).toMatchObject({status: 'rejected', reason: 'memory_entry_invalid'});
+    }
   });
 
   it('measures capacity on the rendered join, separators included', () => {
@@ -238,6 +252,49 @@ describe('character memory store', () => {
     expect(window.at(0)?.eventId).toBe(
       `evt_${String(total - characterMemoryAppliedRecordLimit)}`,
     );
+  });
+
+  it('keeps a retriable identity that later updates would have evicted', () => {
+    const recent = '2026-08-10T00:00:00.000Z';
+    let window: readonly CharacterMemoryAppliedRecord[] = [];
+
+    for (
+      let index = 0;
+      index < characterMemoryAppliedRecordLimit + 8;
+      index += 1
+    ) {
+      window = withCharacterMemoryAppliedRecord(
+        window,
+        {
+          eventId: `evt_${String(index)}`,
+          traceId: 'trace',
+          createdAt: recent,
+          inputDigest: `sha256:${String(index)}`,
+          output: {status: 'accepted'},
+        },
+        Date.parse(recent) + 1_000,
+      );
+    }
+
+    // A busy sibling window must not evict an identity whose retry can
+    // still arrive; only elapsed time may.
+    expect(window.at(0)?.eventId).toBe('evt_0');
+    expect(window).toHaveLength(characterMemoryAppliedRecordLimit + 8);
+
+    const aged = withCharacterMemoryAppliedRecord(
+      window,
+      {
+        eventId: 'evt_new',
+        traceId: 'trace',
+        createdAt: '2026-08-10T01:00:00.000Z',
+        inputDigest: 'sha256:new',
+        output: {status: 'accepted'},
+      },
+      Date.parse('2026-08-10T01:00:00.000Z'),
+    );
+
+    expect(aged.map(record => record.eventId)).toContain('evt_new');
+    expect(aged).toHaveLength(characterMemoryAppliedRecordLimit);
   });
 
   it('round-trips a document with an idempotency record through the codec', () => {

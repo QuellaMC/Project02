@@ -27,6 +27,7 @@ import {
   characterPluginDataDirPath,
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout,
+  LocalRuntimeStorageContractError,
 } from '../layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLocksSync,
@@ -150,9 +151,23 @@ function withDurablePluginStoreMutations<T>(
   }
 
   try {
+    // Acquiring a free lock says nothing about the clock: if the deadline
+    // passed while earlier setup ran, committing now would land after the
+    // host has already reported this hook as timed out.
+    assertMutationDeadlineRemaining(options.deadlineAt);
+
     return operation();
   } finally {
     lease.release();
+  }
+}
+
+function assertMutationDeadlineRemaining(deadlineAt: number | undefined): void {
+  if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+    throw new LocalRuntimeStorageContractError(
+      'storage_busy',
+      'Plugin store mutation deadline elapsed before the write could start.',
+    );
   }
 }
 
