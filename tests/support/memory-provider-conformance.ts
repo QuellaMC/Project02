@@ -138,6 +138,10 @@ export function runMemoryProviderConformanceSuite(
           ? {model_input: 'write'}
           : {}),
       });
+      // Host-generated timeout and failure evidence takes its labels from
+      // the manifest, so a provider without this one persists backend
+      // errors -- private by nature -- unclassified.
+      expect(plugin.manifest.runtimePolicy.redactionLabels).toContain('memory');
       // Memory reads may overlap; a write to it may not overlap itself.
       expect(
         plugin.providedTools.map(tool => [tool.name, tool.concurrency]),
@@ -318,6 +322,15 @@ export function runMemoryProviderConformanceSuite(
         }
 
         expect(result.contextItems).toEqual([]);
+        // Degrade evidence here would mean the adapter threw on an empty
+        // backend, which the policy hides behind the same host result.
+        expect(result.evidence).toContainEqual(
+          expect.objectContaining({
+            pluginId: adapter.pluginId,
+            evidenceKind: 'before_role_model_call',
+            status: 'accepted',
+          }),
+        );
       });
 
       it('exposes no more than the bounded number of memory items', async () => {
@@ -555,12 +568,20 @@ export function runMemoryProviderConformanceSuite(
         });
         const degraded = await degradedHost.health(conformanceContext());
 
+        // The summary is the operator's explanation of the status, so it
+        // has to carry the backend's own words; only the reference
+        // adapter can be seeded with the exact text.
         expect(healthy.snapshots).toContainEqual(
           expect.objectContaining({
             pluginId: adapter.pluginId,
             status: 'ok',
+            summary: expect.stringMatching(/\S/u) as string,
           }),
         );
+        if (seam) {
+          expect(healthy.snapshots[0]?.summary).toContain('Backend reachable.');
+          expect(degraded.snapshots[0]?.summary).toContain('Backend degraded.');
+        }
         expect(healthy.evidence).toEqual([]);
         // A degraded backend must reach the operator as evidence rather
         // than passing silently through the health boundary.
@@ -568,6 +589,7 @@ export function runMemoryProviderConformanceSuite(
           expect.objectContaining({
             pluginId: adapter.pluginId,
             status: 'degraded',
+            summary: expect.stringMatching(/\S/u) as string,
           }),
         );
         expect(degraded.evidence).toContainEqual(
