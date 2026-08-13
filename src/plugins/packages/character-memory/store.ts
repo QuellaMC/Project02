@@ -1,3 +1,4 @@
+import {containsForbiddenControlCharacter} from '../../api/curated-context.ts';
 import type {
   RuntimePluginJsonObject,
   RuntimePluginJsonValue,
@@ -43,8 +44,14 @@ export type CharacterMemoryAppliedRecord = CharacterMemoryCallIdentity & {
  * latest operation: keep a window of applied identities rather than only
  * the last, or a delayed retry re-applies against a store another session
  * has since changed.
+ *
+ * The window is bounded by the retry lifetime, not by how many unrelated
+ * updates followed: a busy sibling window must not evict an identity that
+ * can still come back. The count is only a floor so a burst inside one
+ * moment cannot drop a record either.
  */
 export const characterMemoryAppliedRecordLimit = 16;
+export const characterMemoryAppliedRecordTtlMs = 15 * 60 * 1_000;
 
 export type CharacterMemoryStoreDocument = {
   readonly store: CharacterMemoryStore;
@@ -67,9 +74,22 @@ export function characterMemoryAppliedRecordFor(
 export function withCharacterMemoryAppliedRecord(
   records: readonly CharacterMemoryAppliedRecord[],
   record: CharacterMemoryAppliedRecord,
+  now: number = Date.now(),
 ): readonly CharacterMemoryAppliedRecord[] {
+  const next = [...records, record];
+  const recent = next.filter(candidate => {
+    const appliedAt = Date.parse(candidate.createdAt);
+
+    return (
+      Number.isNaN(appliedAt) ||
+      now - appliedAt < characterMemoryAppliedRecordTtlMs
+    );
+  });
+
   return Object.freeze(
-    [...records, record].slice(-characterMemoryAppliedRecordLimit),
+    recent.length >= characterMemoryAppliedRecordLimit
+      ? recent
+      : next.slice(-characterMemoryAppliedRecordLimit),
   );
 }
 
@@ -405,19 +425,23 @@ function selectCharacterMemoryEntry(
   return Object.freeze({status: 'selected', index: matches[0]?.index ?? 0});
 }
 
-/** Newlines are the only control characters a stored entry may carry. */
+/**
+ * An entry must survive the trusted frame that renders it, so the write
+ * boundary refuses exactly what the render boundary refuses; storing more
+ * would drop the whole snapshot on the next launch, with the offending
+ * text invisible to the model that would have to remove it.
+ */
 function normalizedCharacterMemoryEntry(text: string): string | undefined {
   const normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
-  for (const character of normalized) {
-    const codePoint = character.codePointAt(0) ?? 0;
-
-    if ((codePoint < 0x20 && codePoint !== 0x0a) || codePoint === 0x7f) {
-      return undefined;
-    }
+  if (
+    normalized.length === 0 ||
+    containsForbiddenControlCharacter(normalized)
+  ) {
+    return undefined;
   }
 
-  return normalized.length === 0 ? undefined : normalized;
+  return normalized;
 }
 
 function invalidEntryRejection(

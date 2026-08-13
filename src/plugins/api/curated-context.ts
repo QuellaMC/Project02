@@ -22,9 +22,11 @@ export const curatedContextSectionTextCharLimit = 4096;
 /**
  * Newline is the only line break a rendered section may carry: C0/C1
  * controls, DEL, and the Unicode line separators all break the frame's
- * single-line-title and newlines-only contract.
+ * single-line-title and newlines-only contract. Exported so a plugin can
+ * refuse at its write boundary what this frame would refuse at render,
+ * instead of durably storing text it can never show again.
  */
-function containsForbiddenControlCharacter(text: string): boolean {
+export function containsForbiddenControlCharacter(text: string): boolean {
   for (const character of text) {
     const codePoint = character.codePointAt(0) ?? 0;
 

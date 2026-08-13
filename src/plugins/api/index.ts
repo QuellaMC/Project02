@@ -110,6 +110,7 @@ export {
   validateRuntimePluginManifest,
 } from './manifest-validation.ts';
 export {
+  containsForbiddenControlCharacter,
   createRuntimePluginCuratedContextSection,
   curatedContextSectionTextCharLimit,
   curatedContextSectionTitleCharLimit,
