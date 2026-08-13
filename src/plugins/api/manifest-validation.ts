@@ -138,6 +138,20 @@ export function validateRuntimePluginManifest(
     );
   }
 
+  const unconfigurableField = config.value.fields.find(
+    field =>
+      config.value.scope === 'character_only' &&
+      field.globalOnly === true &&
+      !field.secret,
+  );
+
+  if (unconfigurableField !== undefined) {
+    return reject(
+      'malformed_manifest',
+      `Non-secret config field "${unconfigurableField.name}" is global-only on a character-only plugin, so no scope could ever set it.`,
+    );
+  }
+
   const requestedAccess = requiredAccess(
     value['requestedAccess'],
     'Plugin manifest requestedAccess',

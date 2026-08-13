@@ -215,6 +215,39 @@ describe('plugin package descriptor schema parity', () => {
       },
     ],
     [
+      'a character-only plugin with a field no scope could set',
+      (descriptor: Record<string, unknown>) => {
+        const manifest = descriptor['manifest'] as Record<string, unknown>;
+        const config = manifest['config'] as {fields: readonly object[]};
+
+        return {
+          ...descriptor,
+          manifest: {
+            ...manifest,
+            config: {
+              scope: 'character_only',
+              fields: [
+                ...config.fields,
+                {
+                  name: 'endpoint',
+                  description: 'Endpoint no scope could author.',
+                  required: false,
+                  secret: false,
+                  valueType: 'string',
+                  globalOnly: true,
+                  redactionLabels: [],
+                },
+              ],
+            },
+            activation: {
+              ...(manifest['activation'] as Record<string, unknown>),
+              defaultEnabled: false,
+            },
+          },
+        };
+      },
+    ],
+    [
       'a secret agent-mutable config field',
       (descriptor: Record<string, unknown>) => {
         const manifest = descriptor['manifest'] as Record<string, unknown>;

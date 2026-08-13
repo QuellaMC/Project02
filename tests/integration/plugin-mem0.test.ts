@@ -77,6 +77,37 @@ describe('mem0 plugin package', () => {
     });
   });
 
+  it('reports a many-row add instead of failing a completed write', async () => {
+    const fetchFn: Mem0FetchFunction = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () =>
+          Promise.resolve({
+            results: Array.from({length: 40}, (_unused, index) => ({
+              id: `stored-${String(index)}`,
+            })),
+          }),
+      });
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    const add = await plugin.lifecycleHooks.handleToolCall?.(
+      {
+        ...testIdentity(),
+        pluginId: mem0PluginId,
+        toolName: 'mem0.add',
+        input: {text: 'User prefers tea.'},
+      },
+      mem0Context(),
+    );
+
+    // The rows are already stored; a hook that threw over its evidence
+    // budget would report the write as failed.
+    expect(add?.status).toBe('accepted');
+  });
+
   it('keeps a queued platform write out of the persisted-memory claim', async () => {
     const fetchFn: Mem0FetchFunction = () =>
       Promise.resolve({
@@ -176,6 +207,7 @@ function conformanceServerFetch(
             readonly query?: string;
             readonly infer?: boolean;
             readonly messages?: readonly {readonly content?: string}[];
+            readonly metadata?: unknown;
           });
 
     if (url.endsWith('/search')) {
@@ -204,6 +236,9 @@ function conformanceServerFetch(
       if (scenario.requestProbe !== undefined && requestedText !== undefined) {
         if (body.infer === false) {
           scenario.requestProbe.addText = requestedText;
+          scenario.requestProbe.addSourceReferenceIds = sourceIdsFromMetadata(
+            body.metadata,
+          );
         } else {
           scenario.requestProbe.capturedUserMessage = requestedText;
         }
@@ -221,6 +256,13 @@ function conformanceServerFetch(
       });
     }
 
+    if (scenario.requestProbe !== undefined) {
+      // The transport types the signal as required, so what this records
+      // is that a live signal reached the ping.
+      scenario.requestProbe.healthHasSignal =
+        init.signal instanceof AbortSignal;
+    }
+
     // The server backend pings its root; a seeded non-ok health surfaces
     // as an HTTP failure the provider maps to degraded.
     if (
@@ -236,6 +278,19 @@ function conformanceServerFetch(
 
     return jsonResponse({});
   };
+}
+
+function sourceIdsFromMetadata(metadata: unknown): readonly string[] {
+  const sources =
+    typeof metadata === 'object' && metadata !== null
+      ? (metadata as {readonly project02_sources?: unknown})[
+          'project02_sources'
+        ]
+      : undefined;
+
+  return Array.isArray(sources)
+    ? sources.filter((id): id is string => typeof id === 'string')
+    : [];
 }
 
 function jsonResponse(value: unknown) {
