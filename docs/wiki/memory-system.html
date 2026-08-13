@@ -115,8 +115,9 @@
     <p>
       Retrieval-driven long-term memory rides the <code>memory_provider</code> plugin kind:
       per-turn recall items enter the untrusted plugin frame (source-referenced, bounded,
-      budget-capped), turns are captured for backend-side extraction, and a provider exposes
-      whichever namespaced tools its backend supports. Providers are disabled by default;
+      budget-capped), each committed turn is handed to the provider to do with as its
+      backend decides &mdash; mem0 asks its backend to extract facts from it &mdash; and a
+      provider exposes whichever namespaced tools its backend supports. Providers are disabled by default;
       enable one and, when several are enabled, select it with
       <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation
       keeps at most one selected, so by default an external provider runs <em>alongside</em>
@@ -144,8 +145,10 @@
       entries are validated and capped at write time, sections are typed and screened at
       render time, and the <code>curated_context</code> access that feeds the frame is granted
       only to bundled packages by catalog provenance — a manifest flag alone never earns it.
-      External provider content stays in the untrusted plugin frame under the shared token
-      budget, and recall items without source references are dropped rather than shown.
+      Automatic per-turn recall from an external provider stays in the untrusted plugin
+      frame under the shared token budget, and recall items without source references are
+      dropped rather than shown. A provider's own search tool answers where every tool
+      answers, in a tool result, which that budget does not cover.
     </p>
 
     <h2>Picking a setup</h2>
