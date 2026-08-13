@@ -35,6 +35,11 @@ function createReferenceProvider(
         recordSessionRouting(scenario, 'recall', request.sessionId);
         recordOperationScope(scenario, 'recall', request);
         scenario.requestProbe.recallQuery = request.currentUserMessage;
+        scenario.requestProbe.recallMaxItems = request.maxItems;
+      }
+
+      if (scenario.failBackend === true) {
+        return Promise.reject(new Error('Reference backend is unavailable.'));
       }
 
       return Promise.resolve({items: scenario.recallItems ?? []});
@@ -44,6 +49,8 @@ function createReferenceProvider(
         recordSessionRouting(scenario, 'captureTurn', turn.sessionId);
         recordOperationScope(scenario, 'captureTurn', turn);
         scenario.requestProbe.capturedUserMessage = turn.userMessage;
+        scenario.requestProbe.capturedSourceReferenceIds =
+          turn.sourceReferences.map(reference => reference.id);
       }
 
       return Promise.resolve(
@@ -55,6 +62,7 @@ function createReferenceProvider(
         recordSessionRouting(scenario, 'search', request.sessionId);
         recordOperationScope(scenario, 'search', request);
         scenario.requestProbe.searchQuery = request.query;
+        scenario.requestProbe.searchMaxItems = request.maxItems;
       }
 
       return Promise.resolve({items: scenario.searchItems ?? []});

@@ -41,10 +41,13 @@ export type MemoryProviderConformanceRequestProbe = {
   /** Session each stateful verb was routed to; wrong routing crosses conversations. */
   sessionIds?: Record<string, string>;
   recallQuery?: string;
+  recallMaxItems?: number;
   searchQuery?: string;
+  searchMaxItems?: number;
   addText?: string;
   addSourceReferenceIds?: readonly string[];
   capturedUserMessage?: string;
+  capturedSourceReferenceIds?: readonly string[];
   /** Verbs that received a live deadline and cancellation signal. */
   scopedVerbs?: Record<string, boolean>;
 };
@@ -52,6 +55,8 @@ export type MemoryProviderConformanceRequestProbe = {
 export type MemoryProviderConformanceScenario = {
   /** Records what each verb actually received at the provider boundary. */
   readonly requestProbe?: MemoryProviderConformanceRequestProbe;
+  /** Makes the adapter's backend fail, the way an outage would. */
+  readonly failBackend?: boolean;
   readonly recallItems?: readonly MemoryRecallItem[];
   readonly searchItems?: readonly MemoryRecallItem[];
   readonly addResult?: MemoryAddResult;
@@ -134,6 +139,29 @@ export function runMemoryProviderConformanceSuite(
       );
     });
 
+    if (has('search') || has('add')) {
+      it('rejects tool input its contract does not accept', async () => {
+        const host = await conformanceHost(adapter, {});
+        const malformed = [
+          ...(has('search')
+            ? [{toolName: searchToolName, input: {query: ''}}]
+            : []),
+          ...(has('add') ? [{toolName: addToolName, input: {text: ''}}] : []),
+        ];
+
+        // Validation is what stands between a permissive backend and a
+        // durable write of whatever the model happened to emit.
+        for (const call of malformed) {
+          const result = await host.handleToolCall(
+            conformanceToolCall(adapter, call.toolName, call.input),
+            conformanceContext(),
+          );
+
+          expect(result.status).toBe('rejected');
+        }
+      });
+    }
+
     it('delivers the caller request to each provider verb', async () => {
       const requestProbe: MemoryProviderConformanceRequestProbe = {};
       const host = await conformanceHost(adapter, {requestProbe});
@@ -160,12 +188,19 @@ export function runMemoryProviderConformanceSuite(
       // seeded result, so the payload itself has to be asserted.
       if (has('recall')) {
         expect(requestProbe.recallQuery).toBe('remember this');
+        // An adapter that reads everything and trims locally still pays
+        // for the oversized backend read on every turn.
+        expect(requestProbe.recallMaxItems).toBe(memoryProviderMaxItems);
       }
       if (has('captureTurn')) {
         expect(requestProbe.capturedUserMessage).toContain('remember this');
+        // The turn a memory came from travels with the capture too, not
+        // only with an explicit add.
+        expect(requestProbe.capturedSourceReferenceIds).toContain('evt_memory');
       }
       if (has('search')) {
         expect(requestProbe.searchQuery).toBe('prior');
+        expect(requestProbe.searchMaxItems).toBe(memoryProviderMaxItems);
       }
       // A verb that drops or hard-codes the session reads and writes
       // another conversation's memory.
@@ -197,6 +232,28 @@ export function runMemoryProviderConformanceSuite(
     });
 
     if (has('recall')) {
+      it('degrades the turn when its backend fails', async () => {
+        const host = await conformanceHost(adapter, {failBackend: true});
+        const result = await host.beforeRoleModelCall(conformanceContext());
+
+        // An outage costs the turn its memory, never the turn itself: the
+        // factory declares degrade, and a packaged manifest that declared
+        // otherwise would reject the user's message instead.
+        expect(result.status).toBe('completed');
+        if (result.status !== 'completed') {
+          return;
+        }
+
+        expect(result.contextItems).toEqual([]);
+        expect(result.evidence).toContainEqual(
+          expect.objectContaining({
+            pluginId: adapter.pluginId,
+            evidenceKind: 'before_role_model_call',
+            status: 'degraded',
+          }),
+        );
+      });
+
       it('provides bounded, source-backed recall context items', async () => {
         const host = await conformanceHost(adapter, {
           recallItems: [

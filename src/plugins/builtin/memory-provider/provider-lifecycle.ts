@@ -386,12 +386,10 @@ function searchSourceReferences(options: {
   readonly items: readonly MemoryRecallItem[];
   readonly searchToolName: string;
 }): readonly RuntimePluginSourceReference[] {
-  const itemSourceReferences = options.items.flatMap(
-    item => item.sourceReferences,
-  );
+  const references = itemSourceReferences(options.items);
 
-  if (itemSourceReferences.length > 0) {
-    return itemSourceReferences;
+  if (references.length > 0) {
+    return references;
   }
 
   return Object.freeze([
@@ -466,6 +464,21 @@ function captureTurnEvidenceSummary(options: {
  * it came from, then the row it became, then everything else -- so a list
  * longer than one record may carry loses only the ancillary tail.
  */
+/**
+ * One reference per returned item first, then the rest: flattening in
+ * item order would let an early item's long list push every later item's
+ * provenance past the bound, while the model still reads those memories
+ * in the output.
+ */
+function itemSourceReferences(
+  items: readonly MemoryRecallItem[],
+): readonly RuntimePluginSourceReference[] {
+  return [
+    ...items.flatMap(item => item.sourceReferences.slice(0, 1)),
+    ...items.flatMap(item => item.sourceReferences.slice(1)),
+  ];
+}
+
 function boundedSourceReferences(
   references: readonly RuntimePluginSourceReference[] | undefined,
 ): readonly RuntimePluginSourceReference[] | undefined {
@@ -485,10 +498,12 @@ function memoryEvidence(options: {
 }): RuntimePluginEvidenceSnapshot {
   // A backend that names many rows must not turn a completed write into a
   // failed hook: evidence records what fits, the write already happened.
-  const sourceReferences = boundedSourceReferences(
+  const collected =
     options.sourceReferences ??
-      options.sourceItems?.flatMap(item => item.sourceReferences),
-  );
+    (options.sourceItems === undefined
+      ? undefined
+      : itemSourceReferences(options.sourceItems));
+  const sourceReferences = boundedSourceReferences(collected);
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,

@@ -8,10 +8,7 @@ import {
   type RuntimePluginAccessMap,
   type RuntimePluginDeclaration,
 } from '../../api/contract.ts';
-import {
-  runtimePluginAccessAllows,
-  runtimePluginAccessFor,
-} from '../../policy/access-control.ts';
+import {runtimePluginAccessFor} from '../../policy/access-control.ts';
 import type {
   RuntimePlugin,
   RuntimePluginManifest,
@@ -144,21 +141,15 @@ function consistentSuppliedManifest(
       accessName,
     );
 
-    if (
-      requiredLevel !== undefined &&
-      !runtimePluginAccessAllows(requestedLevel, requiredLevel)
-    ) {
+    // Exact, not "at least": a wider grant than the verbs use is a
+    // capability the host must satisfy and the provider never exercises,
+    // and a level nothing needs fails an unrelated startup where the host
+    // has no such provider to hand out.
+    if (requestedLevel !== (requiredLevel ?? 'none')) {
       throw new TypeError(
-        `Memory provider manifest "${manifest.id}" must request ${accessName} "${requiredLevel}" for the implemented provider methods.`,
-      );
-    }
-
-    // A memory provider works through its own backend: access no provider
-    // method needs is a capability the host would have to satisfy anyway,
-    // and a missing file-store provider then fails an unrelated startup.
-    if (requiredLevel === undefined && requestedLevel !== 'none') {
-      throw new TypeError(
-        `Memory provider manifest "${manifest.id}" requests ${accessName} access that no provider method needs.`,
+        requiredLevel === undefined
+          ? `Memory provider manifest "${manifest.id}" requests ${accessName} access that no provider method needs.`
+          : `Memory provider manifest "${manifest.id}" must request ${accessName} "${requiredLevel}" for the implemented provider methods, not "${requestedLevel}".`,
       );
     }
   }
