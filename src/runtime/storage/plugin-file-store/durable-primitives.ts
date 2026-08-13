@@ -91,6 +91,7 @@ export function withDurablePluginStoreMutation<T>(
     readonly storeRoot: string;
     readonly root: string;
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly deadlineAt?: number;
   },
   operation: () => T,
 ): T {
@@ -104,6 +105,9 @@ export function withDurablePluginStoreMutation<T>(
       ...(options.ownerToken === undefined
         ? {}
         : {ownerToken: options.ownerToken}),
+      ...(options.deadlineAt === undefined
+        ? {}
+        : {deadlineAt: options.deadlineAt}),
     },
     operation,
   );
@@ -115,6 +119,7 @@ function withDurablePluginStoreMutations<T>(
     readonly storeRoot: string;
     readonly roots: readonly string[];
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly deadlineAt?: number;
   },
   operation: () => T,
 ): T {
@@ -130,10 +135,12 @@ function withDurablePluginStoreMutations<T>(
   try {
     // Character-scoped stores are shared by concurrent sessions of one
     // character, and every guarded operation is a short write: wait
-    // briefly instead of failing the sibling's turn outright.
+    // briefly instead of failing the sibling's turn outright. Never wait
+    // past the caller's deadline, or the write commits after the hook that
+    // asked for it has already been reported as timed out.
     lease = acquireLocalRuntimeMutationLocksSync({
       targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
-      waitTimeoutMs: 2_000,
+      waitTimeoutMs: boundedMutationWaitMs(options.deadlineAt),
       ...(options.ownerToken === undefined
         ? {}
         : {ownerToken: options.ownerToken}),
@@ -147,6 +154,19 @@ function withDurablePluginStoreMutations<T>(
   } finally {
     lease.release();
   }
+}
+
+const durablePluginStoreMutationWaitMs = 2_000;
+
+function boundedMutationWaitMs(deadlineAt: number | undefined): number {
+  if (deadlineAt === undefined) {
+    return durablePluginStoreMutationWaitMs;
+  }
+
+  return Math.max(
+    0,
+    Math.min(durablePluginStoreMutationWaitMs, deadlineAt - Date.now()),
+  );
 }
 
 export function durablePluginStoreMutationResourceKey(root: string): string {

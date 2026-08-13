@@ -72,7 +72,14 @@ export function createDurableRuntimePluginFileStore(
 
   function withStoreLease<T>(operation: () => T): T {
     return withDurablePluginStoreMutation(
-      {storeRoot: durableOptions.storeRoot, root, ownerToken},
+      {
+        storeRoot: durableOptions.storeRoot,
+        root,
+        ownerToken,
+        ...(durableOptions.deadlineAt === undefined
+          ? {}
+          : {deadlineAt: durableOptions.deadlineAt}),
+      },
       () => {
         recoverInterruptedWrite();
         return operation();

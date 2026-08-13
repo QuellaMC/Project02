@@ -140,6 +140,47 @@ describe('Character Memory plugin', () => {
     });
   });
 
+  it('replays a retry that another session committed past', async () => {
+    const {plugin, context, fileStore} = createCharacterMemoryHarness(
+      'session-character-memory-interleaved',
+    );
+    const removal = {
+      operations: [{action: 'remove', target: 'notes', old_text: 'tea'}],
+    };
+
+    await callMemoryUpdate(plugin, context, {
+      operations: [
+        {action: 'add', target: 'notes', text: 'Prefers tea over coffee.'},
+      ],
+    });
+    await callMemoryUpdate(plugin, context, removal, {eventId: 'evt_remove'});
+    // A second window adds the entry back before the first window retries.
+    await callMemoryUpdate(
+      plugin,
+      context,
+      {
+        operations: [
+          {action: 'add', target: 'notes', text: 'Prefers tea over coffee.'},
+        ],
+      },
+      {eventId: 'evt_other_session'},
+    );
+
+    const retry = await callMemoryUpdate(plugin, context, removal, {
+      eventId: 'evt_remove',
+    });
+
+    expect(retry).toMatchObject({
+      status: 'accepted',
+      output: {idempotent: true},
+    });
+    // The retry replays its recorded result; it must not delete what the
+    // other session committed in between.
+    expect(fileStore.readJson(characterMemoryStorePath)).toMatchObject({
+      notes: ['Prefers tea over coffee.'],
+    });
+  });
+
   it('freezes the curated snapshot per plugin instance until the next launch', async () => {
     const {plugin, context, fileStore} = createCharacterMemoryHarness(
       'session-character-memory-snapshot',
