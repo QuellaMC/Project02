@@ -33,7 +33,16 @@ export type MemoryProviderConformanceLifecycleProbe = {
  * host-observable behavior, so how an adapter honors the seed (in-memory
  * map, fake transport, wrapped foreign module) is its own business.
  */
+export type MemoryProviderConformanceRequestProbe = {
+  recallQuery?: string;
+  searchQuery?: string;
+  addText?: string;
+  capturedUserMessage?: string;
+};
+
 export type MemoryProviderConformanceScenario = {
+  /** Records what each verb actually received at the provider boundary. */
+  readonly requestProbe?: MemoryProviderConformanceRequestProbe;
   readonly recallItems?: readonly MemoryRecallItem[];
   readonly searchItems?: readonly MemoryRecallItem[];
   readonly addResult?: MemoryAddResult;
@@ -55,6 +64,8 @@ export type MemoryProviderConformanceAdapter = {
    * Only the reference adapter proves them; translation cases run for all.
    */
   readonly provesSeamGuarantees?: boolean;
+  /** true when createPlugin wires scenario.requestProbe at its boundary. */
+  readonly requestProbeSupported?: boolean;
   createPlugin(
     scenario: MemoryProviderConformanceScenario,
   ): RuntimePlugin | Promise<RuntimePlugin>;
@@ -91,13 +102,55 @@ export function runMemoryProviderConformanceSuite(
         ...(has('search') ? [searchToolName] : []),
         ...(has('add') ? [addToolName] : []),
       ]);
-      // Providers own their storage behind the provider interface, so they
-      // never touch the host file stores.
-      expect(plugin.manifest.requestedAccess.file_store).toBeUndefined();
-      expect(
-        plugin.manifest.requestedAccess.character_file_store,
-      ).toBeUndefined();
+      // A memory provider works through its own backend, so anything
+      // beyond the turn text it reads and the model input it writes is
+      // access the interface cannot justify.
+      expect(Object.keys(plugin.manifest.requestedAccess).sort()).toEqual(
+        ['model_input', 'turn_context'].filter(name =>
+          name === 'turn_context'
+            ? has('recall') || has('captureTurn')
+            : has('recall') || has('search') || has('add'),
+        ),
+      );
     });
+
+    it.runIf(adapter.requestProbeSupported === true)(
+      'delivers the caller request to each provider verb',
+      async () => {
+        const requestProbe: MemoryProviderConformanceRequestProbe = {};
+        const host = await conformanceHost(adapter, {requestProbe});
+
+        await host.beforeRoleModelCall(conformanceContext());
+        await host.afterTurnCommitted(conformanceAfterTurnContext());
+        if (has('search')) {
+          await host.handleToolCall(
+            conformanceToolCall(adapter, searchToolName, {query: 'prior'}),
+            conformanceContext(),
+          );
+        }
+        if (has('add')) {
+          await host.handleToolCall(
+            conformanceToolCall(adapter, addToolName, {text: 'New memory.'}),
+            conformanceContext(),
+          );
+        }
+
+        // An adapter that dropped the query or text would still return the
+        // seeded result, so the payload itself has to be asserted.
+        if (has('recall')) {
+          expect(requestProbe.recallQuery).toBe('remember this');
+        }
+        if (has('captureTurn')) {
+          expect(requestProbe.capturedUserMessage).toContain('remember this');
+        }
+        if (has('search')) {
+          expect(requestProbe.searchQuery).toBe('prior');
+        }
+        if (has('add')) {
+          expect(requestProbe.addText).toBe('New memory.');
+        }
+      },
+    );
 
     if (has('recall')) {
       it('provides bounded, source-backed recall context items', async () => {
@@ -468,7 +521,14 @@ export function runMemoryProviderConformanceSuite(
           return;
         }
 
-        expect(add.output).toMatchObject({id: 'persisted-memory-1'});
+        expect(add.output).toMatchObject({
+          id: 'persisted-memory-1',
+          // Callers read the tool output, so provenance has to be there
+          // and not only in evidence.
+          sourceReferences: expect.arrayContaining([
+            expect.objectContaining({id: 'persisted-memory-1'}),
+          ]) as unknown,
+        });
         expect(add.evidence[0]).toMatchObject({
           evidenceKind: 'tool_invocation',
           status: 'accepted',
