@@ -54,7 +54,7 @@
         <td>Retrieval</td>
         <td>Always injected, whole store</td>
         <td>On-demand via <code>sessions.search</code> / <code>sessions.read</code></td>
-        <td>Per-turn recall plus <code>&lt;provider&gt;.search</code> / <code>&lt;provider&gt;.add</code></td>
+        <td>Per-turn recall plus whichever <code>&lt;provider&gt;.*</code> tools that provider offers</td>
       </tr>
       <tr>
         <td>Written by</td>
@@ -111,12 +111,14 @@
     <p>
       Retrieval-driven long-term memory rides the <code>memory_provider</code> plugin kind:
       per-turn recall items enter the untrusted plugin frame (source-referenced, bounded,
-      budget-capped), turns are captured for backend-side extraction, and each provider
-      exposes namespaced search/add tools. Providers are disabled by default; enable one and,
-      when several are enabled, select it with
-      <code>runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation keeps at
-      most one selected, so an external provider always runs <em>alongside</em> curated
-      memory, never instead of it.
+      budget-capped), turns are captured for backend-side extraction, and a provider exposes
+      whichever namespaced tools its backend supports — see the table below, since the compat
+      packages expose fewer than <code>mem0</code> does. Providers are disabled by default;
+      enable one and, when several are enabled, select it with
+      <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation
+      keeps at most one selected, so by default an external provider runs <em>alongside</em>
+      curated memory rather than replacing it; an operator who explicitly disables
+      <code>character-memory</code> can run a provider on its own.
     </p>
 
     <table>
@@ -133,12 +135,12 @@
       <tr>
         <td><code>openclaw-compat</code></td>
         <td>An OpenClaw context-engine plugin module</td>
-        <td>Pinned interface v1: assembly becomes recall, turns are ingested; no tool surface.</td>
+        <td>Pinned interface v1: assembly becomes recall, turns are ingested. No tools — the engine surface has no row-backed search or add.</td>
       </tr>
       <tr>
         <td><code>hermes-compat</code></td>
         <td>A Hermes memory-provider module (JS binding)</td>
-        <td>Pinned interface v1: prefetch/syncTurn/search/shutdown; one search tool.</td>
+        <td>Pinned interface v1: prefetch/syncTurn/search/shutdown. One tool, <code>hermes-compat.search</code>; no add tool.</td>
       </tr>
     </table>
 
@@ -173,11 +175,11 @@
       </tr>
       <tr>
         <td>Large semantic long-term memory</td>
-        <td>Enable <code>mem0</code>, set <code>MEM0_API_KEY</code> (or point <code>baseUrl</code> at a self-hosted server).</td>
+        <td>Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a self-hosted server set <code>backend</code> to <code>server</code> and <code>baseUrl</code> to its origin, where the key is then optional.</td>
       </tr>
       <tr>
         <td>Reuse a memory plugin from another ecosystem</td>
-        <td>Enable the matching compat package and set its <code>modulePath</code>.</td>
+        <td>Enable the matching compat package and set its <code>modulePath</code> to an absolute path.</td>
       </tr>
     </table>
   </main>
