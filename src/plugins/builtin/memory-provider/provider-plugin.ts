@@ -26,10 +26,13 @@ export type CreateMemoryProviderRuntimePluginOptions = {
   readonly version?: string;
   readonly toolNamespace?: string;
   /**
-   * Descriptor manifest for packaged providers. Package loading requires the
-   * returned manifest to equal the descriptor, so the factory adopts it
-   * wholesale after consistency checks; hooks and tools still derive from
-   * the provider.
+   * Descriptor manifest for bundled packages, which import this helper
+   * directly. Package loading requires the returned manifest to equal the
+   * descriptor, so the factory adopts it wholesale after consistency
+   * checks; hooks and tools still derive from the provider. An installed
+   * operator package cannot reach this module -- its captured artifact
+   * resolves only its own files -- and builds its RuntimePlugin itself
+   * until a host-injected seam exists.
    */
   readonly manifest?: RuntimePluginManifest;
 };

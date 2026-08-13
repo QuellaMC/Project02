@@ -463,6 +463,27 @@ function captureTurnEvidenceSummary(options: {
   );
 }
 
+/**
+ * Producers append the reference that identifies what they just wrote, so
+ * the tail survives truncation: a record that cannot name the row it
+ * created describes nothing.
+ */
+function boundedSourceReferences(
+  references: readonly RuntimePluginSourceReference[] | undefined,
+): readonly RuntimePluginSourceReference[] | undefined {
+  if (
+    references === undefined ||
+    references.length <= runtimePluginSourceReferenceLimit
+  ) {
+    return references;
+  }
+
+  return Object.freeze([
+    ...references.slice(0, runtimePluginSourceReferenceLimit - 1),
+    ...references.slice(-1),
+  ]);
+}
+
 function memoryEvidence(options: {
   readonly context: RuntimePluginContext;
   readonly pluginId: string;
@@ -474,10 +495,10 @@ function memoryEvidence(options: {
 }): RuntimePluginEvidenceSnapshot {
   // A backend that names many rows must not turn a completed write into a
   // failed hook: evidence records what fits, the write already happened.
-  const sourceReferences = (
+  const sourceReferences = boundedSourceReferences(
     options.sourceReferences ??
-    options.sourceItems?.flatMap(item => item.sourceReferences)
-  )?.slice(0, runtimePluginSourceReferenceLimit);
+      options.sourceItems?.flatMap(item => item.sourceReferences),
+  );
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,

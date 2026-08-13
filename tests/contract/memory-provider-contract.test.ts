@@ -32,6 +32,7 @@ function createReferenceProvider(
     displayName: 'Reference Memory Provider',
     recall(request) {
       if (scenario.requestProbe !== undefined) {
+        recordSessionRouting(scenario, 'recall', request.sessionId);
         scenario.requestProbe.recallQuery = request.currentUserMessage;
       }
 
@@ -39,6 +40,7 @@ function createReferenceProvider(
     },
     captureTurn(turn) {
       if (scenario.requestProbe !== undefined) {
+        recordSessionRouting(scenario, 'captureTurn', turn.sessionId);
         scenario.requestProbe.capturedUserMessage = turn.userMessage;
       }
 
@@ -48,6 +50,7 @@ function createReferenceProvider(
     },
     search(request) {
       if (scenario.requestProbe !== undefined) {
+        recordSessionRouting(scenario, 'search', request.sessionId);
         scenario.requestProbe.searchQuery = request.query;
       }
 
@@ -55,6 +58,7 @@ function createReferenceProvider(
     },
     add(request) {
       if (scenario.requestProbe !== undefined) {
+        recordSessionRouting(scenario, 'add', request.sessionId);
         scenario.requestProbe.addText = request.text;
         scenario.requestProbe.addSourceReferenceIds =
           request.sourceReferences.map(reference => reference.id);
@@ -89,6 +93,21 @@ function createReferenceProvider(
 
       return Promise.resolve();
     },
+  };
+}
+
+function recordSessionRouting(
+  scenario: MemoryProviderConformanceScenario,
+  verb: string,
+  sessionId: string,
+): void {
+  if (scenario.requestProbe === undefined) {
+    return;
+  }
+
+  scenario.requestProbe.sessionIds = {
+    ...scenario.requestProbe.sessionIds,
+    [verb]: sessionId,
   };
 }
 

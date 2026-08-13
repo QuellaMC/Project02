@@ -2,7 +2,7 @@ import {
   boundedMemoryToolName,
   memoryProviderMaxItems,
 } from '../../src/plugins/builtin/memory-provider/index.ts';
-import {describe, expect, it} from 'vitest';
+import {afterEach, describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from './character-fixtures.ts';
 import {
@@ -38,6 +38,8 @@ export type MemoryProviderConformanceLifecycleProbe = {
  * map, fake transport, wrapped foreign module) is its own business.
  */
 export type MemoryProviderConformanceRequestProbe = {
+  /** Session each stateful verb was routed to; wrong routing crosses conversations. */
+  sessionIds?: Record<string, string>;
   recallQuery?: string;
   searchQuery?: string;
   addText?: string;
@@ -90,6 +92,14 @@ export function runMemoryProviderConformanceSuite(
   const addToolName = boundedMemoryToolName(namespace, 'add');
 
   describe(`memory provider conformance: ${adapter.name}`, () => {
+    afterEach(async () => {
+      const hosts = openConformanceHosts.splice(0);
+
+      for (const host of hosts) {
+        await host.shutdown(conformanceContext());
+      }
+    });
+
     it('declares exactly the capability-matched plugin surface', async () => {
       const plugin = await adapter.createPlugin({});
       const declared = plugin.manifest.declaredPlugins;
@@ -154,6 +164,16 @@ export function runMemoryProviderConformanceSuite(
       }
       if (has('search')) {
         expect(requestProbe.searchQuery).toBe('prior');
+      }
+      // A verb that drops or hard-codes the session reads and writes
+      // another conversation's memory.
+      for (const verb of [
+        ...(has('recall') ? ['recall'] : []),
+        ...(has('captureTurn') ? ['captureTurn'] : []),
+        ...(has('search') ? ['search'] : []),
+        ...(has('add') ? ['add'] : []),
+      ]) {
+        expect(requestProbe.sessionIds?.[verb]).toBe('session-memory');
       }
       if (has('add')) {
         expect(requestProbe.addText).toBe('New memory.');
@@ -648,12 +668,20 @@ async function conformanceHost(
   scenario: MemoryProviderConformanceScenario,
 ) {
   const plugin = await adapter.createPlugin(scenario);
-
-  return createRuntimePluginHost({
+  const host = createRuntimePluginHost({
     plugins: [plugin],
     enabledPluginIds: [plugin.manifest.id],
   });
+
+  // Every case builds its own host, and an adapter that holds a database,
+  // a worker, or a timer keeps it until its shutdown hook runs.
+  openConformanceHosts.push(host);
+
+  return host;
 }
+
+const openConformanceHosts: {shutdown(context: unknown): Promise<unknown>}[] =
+  [];
 
 function conformanceToolCall(
   adapter: MemoryProviderConformanceAdapter,
