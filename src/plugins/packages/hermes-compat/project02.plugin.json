@@ -30,7 +30,8 @@
           "valueType": "path",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true
+          "reloadRequired": true,
+          "globalOnly": true
         }
       ]
     },
@@ -46,7 +47,8 @@
     },
     "activation": {
       "defaultEnabled": false,
-      "reasons": ["memory_provider_package"]
+      "reasons": ["memory_provider_package"],
+      "globalOnly": true
     },
     "requestedAccess": {
       "turn_context": "read",

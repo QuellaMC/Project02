@@ -142,6 +142,18 @@ describe('Hermes memory-provider compat plugin', () => {
     expect(secondRecall?.contextItems[0]?.text).toContain('after 0 synced');
   });
 
+  it('keeps the imported module and activation with the operator', () => {
+    const manifest = createHermesCompatPluginManifest();
+    const modulePath = manifest.config.fields.find(
+      field => field.name === 'modulePath',
+    );
+
+    // Selecting a character must not choose which code the runtime
+    // imports, nor start exporting the conversation to it.
+    expect(manifest.activation.globalOnly).toBe(true);
+    expect(modulePath?.globalOnly).toBe(true);
+  });
+
   it('rejects modules that do not satisfy the pinned v1 interface', async () => {
     await expect(
       createProject02Plugin(
@@ -174,10 +186,18 @@ describe('Hermes memory-provider compat plugin', () => {
 
 function scenarioForeignProvider(scenario: MemoryProviderConformanceScenario) {
   return {
-    prefetch() {
+    prefetch(query: string) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.recallQuery = query;
+      }
+
       return {items: foreignRows(scenario.recallItems ?? [])};
     },
-    syncTurn() {
+    syncTurn(userMessage: string) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.capturedUserMessage = userMessage;
+      }
+
       const capture = scenario.captureResult;
 
       if (capture === undefined || !capture.captured) {
@@ -192,7 +212,11 @@ function scenarioForeignProvider(scenario: MemoryProviderConformanceScenario) {
         })),
       };
     },
-    search() {
+    search(query: string) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.searchQuery = query;
+      }
+
       return {items: foreignRows(scenario.searchItems ?? [])};
     },
     shutdown() {
