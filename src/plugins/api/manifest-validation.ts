@@ -128,6 +128,16 @@ export function validateRuntimePluginManifest(
     );
   }
 
+  if (
+    config.value.scope === 'character_only' &&
+    activation.value.globalOnly === true
+  ) {
+    return reject(
+      'malformed_manifest',
+      'A character-only plugin cannot also be global-only to enable: no scope could ever turn it on.',
+    );
+  }
+
   const requestedAccess = requiredAccess(
     value['requestedAccess'],
     'Plugin manifest requestedAccess',

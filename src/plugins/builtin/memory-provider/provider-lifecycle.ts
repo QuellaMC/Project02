@@ -234,15 +234,19 @@ async function runMemoryAddTool(
   }
 
   const persistedSourceReferences = addResultSourceReferences(result);
+  const storedId = result.id;
 
   return acceptedToolResult({
     context,
     pluginId: options.pluginId,
-    output: {
-      id: result.id,
-      sourceReferences: persistedSourceReferences,
-    },
-    summary: 'Added one memory item.',
+    output:
+      storedId === undefined
+        ? {queued: true, sourceReferences: persistedSourceReferences}
+        : {id: storedId, sourceReferences: persistedSourceReferences},
+    summary:
+      storedId === undefined
+        ? 'Queued one memory item for the backend to store.'
+        : 'Added one memory item.',
     sourceReferences: [...inputSourceReferences, ...persistedSourceReferences],
   });
 }
@@ -404,21 +408,23 @@ function searchSourceReferences(options: {
 }
 
 function addResultSourceReferences(options: {
-  readonly id: string;
+  readonly id?: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 }): readonly RuntimePluginSourceReference[] {
-  // Only a provider that reported no provenance at all gets a synthesized
-  // one: a provider that described its write another way (a queued job,
-  // say) must not have a "persisted memory" claim invented for it.
-  if (options.sourceReferences.length > 0) {
+  const storedId = options.id;
+
+  // Only a provider that stored a memory and reported no provenance for it
+  // gets a synthesized one: a provider that described its write another
+  // way -- a queued job, say -- must not have a "persisted memory" claim
+  // invented for it.
+  if (options.sourceReferences.length > 0 || storedId === undefined) {
     return options.sourceReferences;
   }
 
   return Object.freeze([
-    ...options.sourceReferences,
     {
       kind: 'memory',
-      id: options.id,
+      id: storedId,
       title: 'Persisted memory item',
     },
   ] satisfies RuntimePluginSourceReference[]);
