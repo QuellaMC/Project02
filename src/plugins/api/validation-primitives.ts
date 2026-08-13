@@ -45,6 +45,9 @@ export function requiredContextBudget(
   );
 }
 
+/** What one evidence record may carry, and what every producer bounds to. */
+export const runtimePluginSourceReferenceLimit = 32;
+
 export function requiredSourceReferences(
   value: unknown,
 ): RuntimePluginValidationResult<readonly RuntimePluginSourceReference[]> {
@@ -55,10 +58,10 @@ export function requiredSourceReferences(
     );
   }
 
-  if (value.length > 32) {
+  if (value.length > runtimePluginSourceReferenceLimit) {
     return reject(
       'malformed_context_item',
-      'Plugin sourceReferences exceed the 32-record limit.',
+      `Plugin sourceReferences exceed the ${String(runtimePluginSourceReferenceLimit)}-record limit.`,
     );
   }
 
