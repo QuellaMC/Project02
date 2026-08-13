@@ -74,6 +74,9 @@ export function createMem0MemoryProvider(options: {
         messages: [{role: 'user', content: request.text}],
         userId,
         agentId,
+        // The turn a memory came from is provenance the backend keeps with
+        // it; an add that drops it stores a fact nothing traces back.
+        sourceIds: request.sourceReferences.map(reference => reference.id),
         // Store the supplied text directly instead of extracting from it.
         infer: false,
         signal: request.signal,

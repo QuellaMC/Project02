@@ -26,6 +26,8 @@ export type Mem0AddOptions = {
   readonly agentId: string;
   readonly runId?: string;
   readonly infer: boolean;
+  /** Turn provenance the backend keeps as metadata beside the memory. */
+  readonly sourceIds?: readonly string[];
   readonly signal: AbortSignal;
 };
 
@@ -138,6 +140,7 @@ export function createMem0PlatformBackend(options: {
           agent_id: addOptions.agentId,
           ...(addOptions.runId === undefined ? {} : {run_id: addOptions.runId}),
           infer: addOptions.infer,
+          ...mem0SourceMetadata(addOptions.sourceIds),
         },
         signal: addOptions.signal,
       });
@@ -204,6 +207,7 @@ export function createMem0ServerBackend(options: {
           agent_id: addOptions.agentId,
           ...(addOptions.runId === undefined ? {} : {run_id: addOptions.runId}),
           infer: addOptions.infer,
+          ...mem0SourceMetadata(addOptions.sourceIds),
         },
         signal: addOptions.signal,
       });
@@ -221,6 +225,15 @@ export function createMem0ServerBackend(options: {
       });
     },
   } satisfies Mem0Backend);
+}
+
+/** Where a memory came from, kept beside it as the backend's own metadata. */
+function mem0SourceMetadata(
+  sourceIds: readonly string[] | undefined,
+): Readonly<Record<string, unknown>> {
+  return sourceIds === undefined || sourceIds.length === 0
+    ? {}
+    : {metadata: {project02_sources: [...sourceIds]}};
 }
 
 /** Server keys prefixed m0sk_ are per-user API keys; anything else is a JWT. */
