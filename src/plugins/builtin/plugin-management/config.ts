@@ -169,6 +169,11 @@ function modelVisiblePluginConfigInspection(
 ): RuntimePluginJsonObject {
   return {
     ...inspection,
+    activation: {
+      enabled: inspection.activation.enabled,
+      status: inspection.activation.status,
+      reasons: inspection.activation.reasons,
+    },
     fields: inspection.fields.map(field => ({
       name: field.name,
       description: field.description,
@@ -181,7 +186,7 @@ function modelVisiblePluginConfigInspection(
       ...(field.allowedValues === undefined
         ? {}
         : {allowedValues: field.allowedValues}),
-      agentMutable: field.agentMutable && !field.secret,
+      agentMutable: field.agentMutable && field.editableInScope,
       reloadRequired: field.reloadRequired,
       authored: field.authored,
       effectiveSource: field.effectiveSource,

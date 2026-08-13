@@ -7,9 +7,12 @@ import {
   inspectRuntimePluginConfig,
   redactRuntimeConfigValue,
   resolveRuntimeConfigScopeTarget,
+  runtimePluginScopeViolation,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
-  type RuntimePluginConfigActivationInspectShape,
+  type RuntimePluginActivationStatusShape,
   type RuntimePluginConfigFieldInspectShape,
+  type RuntimePluginScopeOperation,
 } from '../../runtime/config/index.ts';
 import {prepareConfiguredProject02PluginActivation} from '../../app/index.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
@@ -36,7 +39,7 @@ type RuntimeConfigConsolePluginEntry = {
 type RuntimeConfigConsolePluginCatalog = {
   readonly entries: readonly RuntimeConfigConsolePluginEntry[];
   readonly activationByPluginId: Readonly<
-    Record<string, RuntimePluginConfigActivationInspectShape>
+    Record<string, RuntimePluginActivationStatusShape>
   >;
   readonly defaultEnabledPluginIds: readonly string[];
 };
@@ -89,11 +92,16 @@ export async function runPluginConfigSection(
 
   writeLine(context.stdout, '');
   writeLine(context.stdout, `${inspected.displayName} (${inspected.pluginId})`);
-  writeLine(context.stdout, `1) Enabled: ${String(inspected.enabled)}`);
+  writeLine(
+    context.stdout,
+    `1) Enabled: ${String(inspected.enabled)}` +
+      readOnlyMarker(inspected.activation.editableInScope),
+  );
   inspected.fields.forEach((field, index) => {
     writeLine(
       context.stdout,
-      `${String(index + 2)}) ${field.name}: ${formatInspectedFieldValue(field)}`,
+      `${String(index + 2)}) ${field.name}: ${formatInspectedFieldValue(field)}` +
+        readOnlyMarker(field.editableInScope),
     );
   });
   writeDiagnostics(context.stdout, inspected.diagnostics);
@@ -109,6 +117,13 @@ export async function runPluginConfigSection(
   }
 
   if (item === 1) {
+    if (!inspected.activation.editableInScope) {
+      writeScopeRestriction(context, manifest, snapshot.scope, {
+        kind: 'activation',
+      });
+      return;
+    }
+
     const change = await stagePluginActivationChange(
       context,
       manifest,
@@ -130,8 +145,16 @@ export async function runPluginConfigSection(
     return;
   }
 
-  if (field.secret) {
+  if (field.secret && snapshot.scope === 'global') {
     writeSecretConfigInstructions(context, manifest, field);
+    return;
+  }
+
+  if (!inspectedField.editableInScope) {
+    writeScopeRestriction(context, manifest, snapshot.scope, {
+      kind: 'field',
+      fieldName: field.name,
+    });
     return;
   }
 
@@ -379,6 +402,30 @@ function writePluginEntries(
       );
     }
   }
+}
+
+/** Read-only here means another scope owns the setting, not that it is fixed. */
+function readOnlyMarker(editableInScope: boolean): string {
+  return editableInScope ? '' : ' (read-only in this scope)';
+}
+
+function writeScopeRestriction(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  scope: RuntimeConfigFieldScope,
+  operation: RuntimePluginScopeOperation,
+): void {
+  const violation = runtimePluginScopeViolation({
+    manifest,
+    authoredScope: scope,
+    operation,
+  });
+
+  writeLine(context.stdout, '');
+  writeLine(
+    context.stdout,
+    violation?.message ?? 'This setting cannot be changed in this scope.',
+  );
 }
 
 function writeSecretConfigInstructions(
