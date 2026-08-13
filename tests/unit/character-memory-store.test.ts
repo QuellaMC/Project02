@@ -239,7 +239,11 @@ describe('character memory store', () => {
     };
     const document = {
       store: emptyCharacterMemoryStore(),
-      appliedRecords: withCharacterMemoryAppliedRecord([older], newer),
+      appliedRecords: withCharacterMemoryAppliedRecord(
+        [older],
+        newer,
+        Date.parse('2026-08-10T00:00:02.000Z'),
+      ),
     };
 
     // A second session committing in between must not make the first
@@ -261,8 +265,8 @@ describe('character memory store', () => {
     ).toBeUndefined();
   });
 
-  it('bounds the applied-record window so the document cannot grow forever', () => {
-    const total = characterMemoryAppliedRecordLimit + 4;
+  it('drops applied records once their retry lifetime has passed', () => {
+    const total = 20;
     const base = Date.parse('2026-08-10T00:00:00.000Z');
     let window: readonly CharacterMemoryAppliedRecord[] = [];
 
@@ -280,11 +284,11 @@ describe('character memory store', () => {
       );
     }
 
-    expect(window).toHaveLength(characterMemoryAppliedRecordLimit);
+    // Spaced a minute apart, only those written inside the retry lifetime
+    // survive the last write.
+    expect(window).toHaveLength(15);
     expect(window.at(-1)?.eventId).toBe(`evt_${String(total - 1)}`);
-    expect(window.at(0)?.eventId).toBe(
-      `evt_${String(total - characterMemoryAppliedRecordLimit)}`,
-    );
+    expect(window.at(0)?.eventId).toBe('evt_5');
   });
 
   it('measures the retry window from the write, not from the user event', () => {
@@ -320,13 +324,44 @@ describe('character memory store', () => {
     expect(later.map(record => record.eventId)).toContain('evt_slow');
   });
 
+  it('keeps the retry window inside what the store file can hold', () => {
+    const base = Date.parse('2026-08-10T00:00:00.000Z');
+    let window: readonly CharacterMemoryAppliedRecord[] = [];
+
+    for (
+      let index = 0;
+      index < characterMemoryAppliedRecordLimit + 40;
+      index += 1
+    ) {
+      window = withCharacterMemoryAppliedRecord(
+        window,
+        {
+          eventId: `evt_${String(index)}`,
+          traceId: 'trace',
+          createdAt: '2026-08-10T00:00:00.000Z',
+          inputDigest: `sha256:${String(index)}`,
+          output: {status: 'accepted'},
+        },
+        base + 1_000,
+      );
+    }
+
+    // Every record here is inside its retry lifetime, but the document
+    // holds the memory entries too: a window that outgrew the shared JSON
+    // limits would fail every later write, not just lose old retries.
+    expect(window).toHaveLength(characterMemoryAppliedRecordLimit);
+    expect(window.at(-1)?.eventId).toBe(
+      `evt_${String(characterMemoryAppliedRecordLimit + 39)}`,
+    );
+  });
+
   it('keeps a retriable identity that later updates would have evicted', () => {
     const recent = '2026-08-10T00:00:00.000Z';
     let window: readonly CharacterMemoryAppliedRecord[] = [];
 
     for (
       let index = 0;
-      index < characterMemoryAppliedRecordLimit + 8;
+      index < characterMemoryAppliedRecordLimit - 8;
       index += 1
     ) {
       window = withCharacterMemoryAppliedRecord(
@@ -343,9 +378,9 @@ describe('character memory store', () => {
     }
 
     // A busy sibling window must not evict an identity whose retry can
-    // still arrive; only elapsed time may.
+    // still arrive; only elapsed time, or the document's own capacity, may.
     expect(window.at(0)?.eventId).toBe('evt_0');
-    expect(window).toHaveLength(characterMemoryAppliedRecordLimit + 8);
+    expect(window).toHaveLength(characterMemoryAppliedRecordLimit - 8);
 
     const aged = withCharacterMemoryAppliedRecord(
       window,
@@ -359,8 +394,7 @@ describe('character memory store', () => {
       Date.parse('2026-08-10T01:00:00.000Z'),
     );
 
-    expect(aged.map(record => record.eventId)).toContain('evt_new');
-    expect(aged).toHaveLength(characterMemoryAppliedRecordLimit);
+    expect(aged.map(record => record.eventId)).toEqual(['evt_new']);
   });
 
   it('round-trips a document with an idempotency record through the codec', () => {
