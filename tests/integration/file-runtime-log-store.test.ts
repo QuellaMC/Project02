@@ -22,6 +22,7 @@ import {
 } from '../../src/core/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
 import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
+import {createTurnEvidence} from '../../src/runtime/evidence/turn-projection.ts';
 import {
   defaultRoleModelProviderCapabilities,
   type RoleModelAdapter,
@@ -498,6 +499,54 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
       LocalRuntimeStorageContractError,
     );
+  });
+
+  it('round-trips curated context sections through the persisted envelope', () => {
+    const sessionId = 'curated-context-round-trip';
+    const storedRecord = patchCompletedEvent(sessionId) as {
+      roleModelIOSnapshot: {
+        inputEnvelope: {
+          decisionContext: Record<string, unknown>;
+        };
+      };
+    };
+    const sections = [
+      {
+        pluginId: 'character-memory',
+        id: 'notes',
+        title: 'Character notes',
+        text: 'Prefers tea over coffee.',
+        capChars: 2200,
+        usedChars: 24,
+      },
+    ];
+
+    storedRecord.roleModelIOSnapshot.inputEnvelope.decisionContext[
+      'curatedContextSections'
+    ] = sections;
+
+    const decoded = decodeRawEventLogRecord(JSON.stringify(storedRecord));
+
+    // Trusted memory that shaped the recorded model input must survive
+    // reopening the log, or the record understates what the model saw.
+    expect(
+      decoded.roleModelIOSnapshot?.inputEnvelope.decisionContext
+        .curatedContextSections,
+    ).toEqual(sections);
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(patchCompletedEvent(sessionId)))
+        .roleModelIOSnapshot?.inputEnvelope.decisionContext
+        .curatedContextSections,
+    ).toEqual([]);
+    // ...and reach inspect, so an operator auditing a turn sees the whole
+    // dynamic model context, not just its untrusted half.
+    expect(
+      createTurnEvidence({
+        conversationMessages: [],
+        rawEvents: [decoded],
+        traceEntries: [],
+      })[0]?.modelRounds[0]?.roleModelEvidence.input?.curatedContextSections,
+    ).toEqual(sections);
   });
 
   it('round-trips supported persisted plugin tool schemas unchanged', () => {
