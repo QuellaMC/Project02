@@ -58,7 +58,8 @@ export type Mem0FetchFunction = (
   json(): Promise<unknown>;
 }>;
 
-export type Mem0RequestFailureKind = 'http' | 'network' | 'malformed_response';
+export type Mem0RequestFailureKind =
+  'http' | 'network' | 'malformed_response' | 'nothing_stored';
 
 export class Mem0RequestError extends Error {
   readonly failureKind: Mem0RequestFailureKind;
@@ -86,6 +87,8 @@ function mem0RequestErrorMessage(options: {
       return `mem0 ${options.operation} failed: backend returned an unreadable response body.`;
     case 'network':
       return `mem0 ${options.operation} failed: backend unreachable.`;
+    case 'nothing_stored':
+      return `mem0 ${options.operation} failed: the backend created no memory for it.`;
   }
 }
 

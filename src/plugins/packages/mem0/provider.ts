@@ -85,6 +85,15 @@ export function createMem0MemoryProvider(options: {
         signal: request.signal,
       });
 
+      // A synchronous backend that created nothing has rejected or
+      // deduplicated the write; there is no queue behind it to wait for.
+      if (references.length === 0) {
+        throw new Mem0RequestError({
+          operation: 'add',
+          failureKind: 'nothing_stored',
+        });
+      }
+
       // The platform acknowledges asynchronously with an event id, which
       // is a receipt for a queued write and not a memory id.
       const stored = references.find(reference => reference.kind === 'memory');

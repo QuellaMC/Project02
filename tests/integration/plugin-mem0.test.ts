@@ -108,6 +108,33 @@ describe('mem0 plugin package', () => {
     expect(add?.status).toBe('accepted');
   });
 
+  it('reports a synchronous add that stored nothing instead of calling it queued', async () => {
+    const fetchFn: Mem0FetchFunction = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: []}),
+      });
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    // The server backend has no queue behind this call: a response that
+    // created nothing must not read as a memory still on its way, so the
+    // tool fails and the host applies the plugin's degrade policy.
+    await expect(
+      plugin.lifecycleHooks.handleToolCall?.(
+        {
+          ...testIdentity(),
+          pluginId: mem0PluginId,
+          toolName: 'mem0.add',
+          input: {text: 'User prefers tea.'},
+        },
+        mem0Context(),
+      ),
+    ).rejects.toThrow('created no memory for it');
+  });
+
   it('keeps a queued platform write out of the persisted-memory claim', async () => {
     const fetchFn: Mem0FetchFunction = () =>
       Promise.resolve({
@@ -216,6 +243,14 @@ function conformanceServerFetch(
 
       searchRequests += 1;
 
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.scopedVerbs = {
+          ...scenario.requestProbe.scopedVerbs,
+          [searchRequests === 1 ? 'recall' : 'search']:
+            init.signal instanceof AbortSignal,
+        };
+      }
+
       if (scenario.requestProbe !== undefined && body.query !== undefined) {
         scenario.requestProbe[
           searchRequests === 1 ? 'recallQuery' : 'searchQuery'
@@ -241,6 +276,14 @@ function conformanceServerFetch(
 
       const requestedText = body.messages?.[0]?.content;
 
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.scopedVerbs = {
+          ...scenario.requestProbe.scopedVerbs,
+          [body.infer === false ? 'add' : 'captureTurn']:
+            init.signal instanceof AbortSignal,
+        };
+      }
+
       if (scenario.requestProbe !== undefined && requestedText !== undefined) {
         if (body.infer === false) {
           scenario.requestProbe.addText = requestedText;
@@ -265,10 +308,10 @@ function conformanceServerFetch(
     }
 
     if (scenario.requestProbe !== undefined) {
-      // The transport types the signal as required, so what this records
-      // is that a live signal reached the ping.
-      scenario.requestProbe.healthHasSignal =
-        init.signal instanceof AbortSignal;
+      scenario.requestProbe.scopedVerbs = {
+        ...scenario.requestProbe.scopedVerbs,
+        health: init.signal instanceof AbortSignal,
+      };
     }
 
     // The server backend pings its root; a seeded non-ok health surfaces

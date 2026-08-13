@@ -236,6 +236,15 @@ async function runMemoryAddTool(
   const persistedSourceReferences = addResultSourceReferences(result);
   const storedId = result.id;
 
+  // Without a stored id, a queued write is only credible if the backend
+  // handed back a receipt for it; neither one means the memory was never
+  // taken, and saying "queued" would tell the model it may yet appear.
+  if (storedId === undefined && persistedSourceReferences.length === 0) {
+    throw new TypeError(
+      'Memory provider add reported neither a stored memory nor a queued write.',
+    );
+  }
+
   return acceptedToolResult({
     context,
     pluginId: options.pluginId,
