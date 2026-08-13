@@ -450,6 +450,42 @@ describe('runtime plugin curated context sections', () => {
         pluginId: 'memory.fixture',
         id: 'notes',
         title: 'Notes',
+        text: 'next line \u0085 stays out',
+      },
+      'control characters',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Notes',
+        text: 'line separator \u2028 stays out',
+      },
+      'control characters',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Notes',
+        text: 'paragraph separator \u2029 stays out',
+      },
+      'control characters',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Title with \u2028 separator',
+        text: 'x',
+      },
+      'single line',
+    ],
+    [
+      {
+        pluginId: 'memory.fixture',
+        id: 'notes',
+        title: 'Notes',
         text: 'x'.repeat(curatedContextSectionTextCharLimit + 1),
       },
       'character limit',

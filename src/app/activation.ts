@@ -200,14 +200,24 @@ export function discoverRuntimePluginCatalog(options: {
       ? {}
       : {factories: options.factoryOverrides}),
   });
+  const overriddenPluginIds = new Set(
+    Object.values(options.factoryOverrides ?? {}).map(
+      definition => definition.manifest.id,
+    ),
+  );
 
   return Object.freeze({
     storeRoot: options.storeRoot,
     catalogEntries: composition.catalogEntries,
     defaultEnabledPluginIds: composition.defaultEnabledPluginIds,
+    // Provenance describes the entry that won the catalog: a factory
+    // override displaces the discovered package, so the displaced
+    // package's origin must not travel with the override.
     packageProvenanceByPluginId: Object.freeze(
       Object.fromEntries(
-        ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
+        ordinaryPackages
+          .filter(item => !overriddenPluginIds.has(item.manifest.id))
+          .map(item => [item.manifest.id, item.provenance]),
       ),
     ),
     packageDiagnostics: discovery.diagnostics,

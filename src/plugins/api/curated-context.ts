@@ -19,12 +19,21 @@ export type {RuntimePluginCuratedContextSection} from './types.ts';
 export const curatedContextSectionTitleCharLimit = 64;
 export const curatedContextSectionTextCharLimit = 4096;
 
-/** Newlines are the only control characters a rendered section may carry. */
+/**
+ * Newline is the only line break a rendered section may carry: C0/C1
+ * controls, DEL, and the Unicode line separators all break the frame's
+ * single-line-title and newlines-only contract.
+ */
 function containsForbiddenControlCharacter(text: string): boolean {
   for (const character of text) {
     const codePoint = character.codePointAt(0) ?? 0;
 
-    if ((codePoint < 0x20 && codePoint !== 0x0a) || codePoint === 0x7f) {
+    if (
+      (codePoint < 0x20 && codePoint !== 0x0a) ||
+      (codePoint >= 0x7f && codePoint <= 0x9f) ||
+      codePoint === 0x2028 ||
+      codePoint === 0x2029
+    ) {
       return true;
     }
   }
