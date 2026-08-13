@@ -10,11 +10,18 @@ import type {RuntimePlugin} from '../../src/plugins/api/index.ts';
 import type {
   MemoryAddResult,
   MemoryCaptureResult,
+  MemoryHealthResult,
   MemoryRecallItem,
 } from '../../src/plugins/builtin/memory-provider/index.ts';
 
 export type MemoryProviderConformanceCapability =
-  'recall' | 'captureTurn' | 'search' | 'add' | 'endSession' | 'close';
+  | 'recall'
+  | 'captureTurn'
+  | 'search'
+  | 'add'
+  | 'health'
+  | 'endSession'
+  | 'close';
 
 export type MemoryProviderConformanceLifecycleProbe = {
   readonly endedSessions: string[];
@@ -31,6 +38,7 @@ export type MemoryProviderConformanceScenario = {
   readonly searchItems?: readonly MemoryRecallItem[];
   readonly addResult?: MemoryAddResult;
   readonly captureResult?: MemoryCaptureResult;
+  readonly healthResult?: MemoryHealthResult;
   readonly lifecycleProbe?: MemoryProviderConformanceLifecycleProbe;
 };
 
@@ -76,6 +84,7 @@ export function runMemoryProviderConformanceSuite(
       );
       expect(declared.includes('tool_provider')).toBe(toolCapable);
       expect(declared.includes('handle_tool_call')).toBe(toolCapable);
+      expect(declared.includes('health')).toBe(has('health'));
       expect(declared.includes('on_session_end')).toBe(has('endSession'));
       expect(declared.includes('on_shutdown')).toBe(has('close'));
       expect(plugin.providedTools.map(tool => tool.name)).toEqual([
@@ -256,19 +265,16 @@ export function runMemoryProviderConformanceSuite(
       });
     }
 
-    if (has('endSession') && has('close')) {
-      it('ends the provider session and shuts down exactly once', async () => {
+    if (has('endSession')) {
+      it('ends only the provider session on the session-end lifecycle', async () => {
         const lifecycleProbe: MemoryProviderConformanceLifecycleProbe = {
           endedSessions: [],
           closeCalls: 0,
         };
         const host = await conformanceHost(adapter, {lifecycleProbe});
         const sessionEnd = await host.onSessionEnd(conformanceContext());
-        const shutdown = await host.shutdown(conformanceContext());
-        const repeatedShutdown = await host.shutdown(conformanceContext());
 
         expect(lifecycleProbe.endedSessions).toEqual(['session-memory']);
-        expect(lifecycleProbe.closeCalls).toBe(1);
         expect(sessionEnd).toMatchObject({
           status: 'completed',
           evidence: [
@@ -279,6 +285,20 @@ export function runMemoryProviderConformanceSuite(
             },
           ],
         });
+      });
+    }
+
+    if (has('close')) {
+      it('shuts the provider down exactly once however often asked', async () => {
+        const lifecycleProbe: MemoryProviderConformanceLifecycleProbe = {
+          endedSessions: [],
+          closeCalls: 0,
+        };
+        const host = await conformanceHost(adapter, {lifecycleProbe});
+        const shutdown = await host.shutdown(conformanceContext());
+        const repeatedShutdown = await host.shutdown(conformanceContext());
+
+        expect(lifecycleProbe.closeCalls).toBe(1);
         expect(shutdown).toMatchObject({
           status: 'completed',
           evidence: [
@@ -290,6 +310,41 @@ export function runMemoryProviderConformanceSuite(
           ],
         });
         expect(repeatedShutdown).toBe(shutdown);
+      });
+    }
+
+    if (has('health')) {
+      it('reports provider health through the host health boundary', async () => {
+        const host = await conformanceHost(adapter, {
+          healthResult: {status: 'ok', summary: 'Backend reachable.'},
+        });
+        const healthy = await host.health(conformanceContext());
+        const degradedHost = await conformanceHost(adapter, {
+          healthResult: {status: 'degraded', summary: 'Backend degraded.'},
+        });
+        const degraded = await degradedHost.health(conformanceContext());
+
+        expect(healthy.snapshots).toContainEqual(
+          expect.objectContaining({
+            pluginId: adapter.pluginId,
+            status: 'ok',
+          }),
+        );
+        expect(healthy.evidence).toEqual([]);
+        // A degraded backend must reach the operator as evidence rather
+        // than passing silently through the health boundary.
+        expect(degraded.snapshots).toContainEqual(
+          expect.objectContaining({
+            pluginId: adapter.pluginId,
+            status: 'degraded',
+          }),
+        );
+        expect(degraded.evidence).toContainEqual(
+          expect.objectContaining({
+            pluginId: adapter.pluginId,
+            evidenceKind: 'health',
+          }),
+        );
       });
     }
 

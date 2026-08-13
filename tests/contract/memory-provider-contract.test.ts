@@ -45,6 +45,11 @@ function createReferenceProvider(
         scenario.addResult ?? {id: 'reference-add', sourceReferences: []},
       );
     },
+    health() {
+      return Promise.resolve(
+        scenario.healthResult ?? {status: 'ok', summary: 'Reference ready.'},
+      );
+    },
     endSession(sessionId) {
       scenario.lifecycleProbe?.endedSessions.push(sessionId);
 
@@ -68,6 +73,7 @@ runMemoryProviderConformanceSuite({
     'captureTurn',
     'search',
     'add',
+    'health',
     'endSession',
     'close',
   ]),
