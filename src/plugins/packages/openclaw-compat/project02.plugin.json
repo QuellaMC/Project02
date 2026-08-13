@@ -42,12 +42,23 @@
         },
         {
           "name": "engineConfig",
-          "description": "Settings object handed to the context-engine factory as its config argument.",
+          "description": "Non-secret settings object handed to the context-engine factory as its config argument. It is stored as written in the config file, so a credential belongs in engineApiKey instead.",
           "required": false,
           "secret": false,
           "valueType": "object",
           "agentMutable": false,
           "redactionLabels": [],
+          "reloadRequired": true
+        },
+        {
+          "name": "engineApiKey",
+          "description": "Credential the engine factory receives as config.apiKey. Held as a secret so it stays in the environment file rather than the config.",
+          "required": false,
+          "secret": true,
+          "valueType": "string",
+          "envVar": "OPENCLAW_ENGINE_API_KEY",
+          "agentMutable": false,
+          "redactionLabels": ["memory"],
           "reloadRequired": true
         },
         {
