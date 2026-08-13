@@ -22,6 +22,7 @@ import {
   sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginManifest} from '../../src/plugins/api/manifest-validation.ts';
+import {runtimePluginConstructionErrorName} from '../../src/plugins/api/construction-error.ts';
 import {demoConfigPluginId} from '../../src/plugins/packages/demo-config/plugin.ts';
 import {mem0PluginId} from '../../src/plugins/packages/mem0/plugin.ts';
 import {openClawCompatPluginId} from '../../src/plugins/packages/openclaw-compat/plugin.ts';
@@ -147,6 +148,40 @@ describe('configured runtime plugin package activation', () => {
         pluginId: characterStatePluginId,
       }),
     );
+  });
+
+  it('reports why a package factory failed, not just that it failed', async () => {
+    const storeRoot = createTestTempRoot('project02-package-factory-detail-');
+    const manifest = testPackageManifest('operator.factory-detail', {
+      defaultEnabled: true,
+    });
+
+    writeOperatorPackage({
+      storeRoot,
+      manifest,
+      entrySource:
+        'export function createProject02Plugin() {\n' +
+        "  const error = new Error('modulePath must be an absolute path.');\n" +
+        `  error.name = '${runtimePluginConstructionErrorName}';\n` +
+        '  throw error;\n' +
+        '}\n',
+    });
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      plugins: {[manifest.id]: {enabled: true}},
+    });
+
+    await initializeCharacterDataForHost(storeRoot);
+
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
+      }),
+    });
+
+    // An operator needs the failing requirement, not just "it failed".
+    await expect(
+      createConfiguredProject02PluginHostFromPlan({activationPlan}),
+    ).rejects.toThrow('modulePath must be an absolute path.');
   });
 
   it('keeps an operator package disabled without evaluating its entry', async () => {

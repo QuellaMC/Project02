@@ -11,6 +11,7 @@ import {
   runtimePluginLifecycleHookDeclarations,
 } from '../api/constructors.ts';
 import {isRecord} from '../api/validation-primitives.ts';
+import {isRuntimePluginConstructionError} from '../api/construction-error.ts';
 import type {
   RuntimePlugin,
   RuntimePluginLifecycleHooks,
@@ -183,9 +184,12 @@ async function constructRuntimePluginPackage(options: {
 
   try {
     factoryOutput = await options.factory(factoryInput);
-  } catch {
+  } catch (error: unknown) {
+    // The cause stays attached for diagnostics; only a declared-safe
+    // message reaches the operator-visible text.
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" factory failed during construction.`,
+      `Runtime plugin package "${options.manifest.id}" factory failed during construction.${constructionFailureDetail(error)}`,
+      {cause: error},
     );
   }
 
@@ -197,13 +201,26 @@ async function constructRuntimePluginPackage(options: {
     }
 
     plugin = createRuntimePlugin(factoryOutput);
-  } catch {
+  } catch (error: unknown) {
     throw new TypeError(
-      `Runtime plugin package "${options.manifest.id}" factory returned an invalid plugin definition.`,
+      `Runtime plugin package "${options.manifest.id}" factory returned an invalid plugin definition.${constructionFailureDetail(error)}`,
+      {cause: error},
     );
   }
 
   return plugin;
+}
+
+/**
+ * Arbitrary factory text can carry resolved secrets, so only a failure
+ * the package declared safe reaches the operator.
+ */
+function constructionFailureDetail(error: unknown): string {
+  return isRuntimePluginConstructionError(error) &&
+    error instanceof Error &&
+    error.message.trim().length > 0
+    ? ` ${error.message}`
+    : '';
 }
 
 type RuntimePluginFactoryOutput = {
