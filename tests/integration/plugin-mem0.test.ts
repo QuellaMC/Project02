@@ -105,8 +105,10 @@ describe('mem0 plugin package', () => {
     }
 
     // The platform acknowledges asynchronously, so nothing may claim the
-    // memory is already persisted.
+    // memory is already persisted -- including the memory id the tool
+    // output would otherwise carry.
     expect(add.output).toMatchObject({
+      queued: true,
       sourceReferences: [
         {
           kind: 'external_contract',
@@ -116,6 +118,8 @@ describe('mem0 plugin package', () => {
       ],
     });
     expect(JSON.stringify(add.output)).not.toContain('Persisted memory item');
+    expect(add.output).not.toHaveProperty('id');
+    expect(JSON.stringify(add.evidence)).toContain('Queued one memory item');
   });
 
   it('keeps credential-bearing endpoint fields out of character overlays', () => {
@@ -160,9 +164,30 @@ describe('mem0 plugin package', () => {
 function conformanceServerFetch(
   scenario: MemoryProviderConformanceScenario,
 ): Mem0FetchFunction {
+  // Recall and search reach the same endpoint, and the conformance run
+  // drives recall first, so order names the verb behind each request.
+  let searchRequests = 0;
+
   return (url, init) => {
+    const body =
+      init.body === undefined
+        ? {}
+        : (JSON.parse(init.body) as {
+            readonly query?: string;
+            readonly infer?: boolean;
+            readonly messages?: readonly {readonly content?: string}[];
+          });
+
     if (url.endsWith('/search')) {
       const items = scenario.recallItems ?? scenario.searchItems ?? [];
+
+      searchRequests += 1;
+
+      if (scenario.requestProbe !== undefined && body.query !== undefined) {
+        scenario.requestProbe[
+          searchRequests === 1 ? 'recallQuery' : 'searchQuery'
+        ] = body.query;
+      }
 
       return jsonResponse({
         results: items.map(item => ({
@@ -174,10 +199,16 @@ function conformanceServerFetch(
     }
 
     if (url.endsWith('/memories')) {
-      const body =
-        init.body === undefined
-          ? {}
-          : (JSON.parse(init.body) as {readonly infer?: boolean});
+      const requestedText = body.messages?.[0]?.content;
+
+      if (scenario.requestProbe !== undefined && requestedText !== undefined) {
+        if (body.infer === false) {
+          scenario.requestProbe.addText = requestedText;
+        } else {
+          scenario.requestProbe.capturedUserMessage = requestedText;
+        }
+      }
+
       const references =
         body.infer === false
           ? (scenario.addResult?.sourceReferences ?? [])

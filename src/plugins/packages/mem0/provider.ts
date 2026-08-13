@@ -79,8 +79,12 @@ export function createMem0MemoryProvider(options: {
         signal: request.signal,
       });
 
+      // The platform acknowledges asynchronously with an event id, which
+      // is a receipt for a queued write and not a memory id.
+      const stored = references.find(reference => reference.kind === 'memory');
+
       return {
-        id: references[0]?.id ?? 'mem0-add',
+        ...(stored === undefined ? {} : {id: stored.id}),
         sourceReferences: references,
       };
     },
