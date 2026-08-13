@@ -208,6 +208,7 @@ function conformanceServerFetch(
             readonly infer?: boolean;
             readonly messages?: readonly {readonly content?: string}[];
             readonly metadata?: unknown;
+            readonly run_id?: string;
           });
 
     if (url.endsWith('/search')) {
@@ -231,6 +232,13 @@ function conformanceServerFetch(
     }
 
     if (url.endsWith('/memories')) {
+      if (scenario.requestProbe !== undefined && body.run_id !== undefined) {
+        scenario.requestProbe.sessionIds = {
+          ...scenario.requestProbe.sessionIds,
+          captureTurn: body.run_id,
+        };
+      }
+
       const requestedText = body.messages?.[0]?.content;
 
       if (scenario.requestProbe !== undefined && requestedText !== undefined) {

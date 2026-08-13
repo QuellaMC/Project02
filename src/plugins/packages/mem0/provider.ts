@@ -43,6 +43,9 @@ export function createMem0MemoryProvider(options: {
         userId,
         agentId,
         runId: turn.sessionId,
+        // Same provenance an explicit add carries: a memory extracted
+        // from a turn must be traceable to it too.
+        sourceIds: turn.sourceReferences.map(reference => reference.id),
         // The backend owns extraction: it decides what becomes memory.
         infer: true,
         signal: turn.signal,
