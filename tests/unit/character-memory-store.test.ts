@@ -4,6 +4,7 @@ import {
   characterMemoryAppliedRecordFor,
   characterMemoryAppliedRecordLimit,
   characterMemoryCapChars,
+  characterMemoryEntryLimit,
   characterMemoryUsedChars,
   decodeCharacterMemoryStoreDocument,
   emptyCharacterMemoryStore,
@@ -152,6 +153,32 @@ describe('character memory store', () => {
     );
   });
 
+  it('rejects a batch whose entry count would not encode into the store file', () => {
+    const result = planCharacterMemoryOperations({
+      store: storeWith({
+        notes: Array.from({length: characterMemoryEntryLimit}, (_, index) =>
+          String(index),
+        ),
+      }),
+      operations: [{action: 'add', target: 'notes', text: 'one too many'}],
+    });
+
+    // Short entries stay far under the character cap while exceeding what
+    // the durable encoder accepts; the model needs that told as capacity,
+    // not as a write that failed after the batch was accepted.
+    expect(result).toMatchObject({
+      status: 'rejected',
+      reason: 'memory_capacity_exceeded',
+    });
+    if (result.status !== 'rejected') {
+      return;
+    }
+
+    expect(result.details).toContain(
+      `/${String(characterMemoryEntryLimit)} entries`,
+    );
+  });
+
   it('normalizes carriage returns and rejects other control characters', () => {
     const normalized = planCharacterMemoryOperations({
       store: emptyCharacterMemoryStore(),
@@ -199,6 +226,7 @@ describe('character memory store', () => {
       eventId: 'evt_a',
       traceId: 'trace_a',
       createdAt: '2026-08-10T00:00:00.000Z',
+      appliedAt: '2026-08-10T00:00:00.500Z',
       inputDigest: 'sha256:a',
       output: {status: 'accepted'},
     };
@@ -235,16 +263,21 @@ describe('character memory store', () => {
 
   it('bounds the applied-record window so the document cannot grow forever', () => {
     const total = characterMemoryAppliedRecordLimit + 4;
+    const base = Date.parse('2026-08-10T00:00:00.000Z');
     let window: readonly CharacterMemoryAppliedRecord[] = [];
 
     for (let index = 0; index < total; index += 1) {
-      window = withCharacterMemoryAppliedRecord(window, {
-        eventId: `evt_${String(index)}`,
-        traceId: 'trace',
-        createdAt: '2026-08-10T00:00:00.000Z',
-        inputDigest: `sha256:${String(index)}`,
-        output: {status: 'accepted'},
-      });
+      window = withCharacterMemoryAppliedRecord(
+        window,
+        {
+          eventId: `evt_${String(index)}`,
+          traceId: 'trace',
+          createdAt: '2026-08-10T00:00:00.000Z',
+          inputDigest: `sha256:${String(index)}`,
+          output: {status: 'accepted'},
+        },
+        base + index * 60_000,
+      );
     }
 
     expect(window).toHaveLength(characterMemoryAppliedRecordLimit);
@@ -252,6 +285,39 @@ describe('character memory store', () => {
     expect(window.at(0)?.eventId).toBe(
       `evt_${String(total - characterMemoryAppliedRecordLimit)}`,
     );
+  });
+
+  it('measures the retry window from the write, not from the user event', () => {
+    const eventAt = '2026-08-10T00:00:00.000Z';
+    const committedAt = Date.parse(eventAt) + 40 * 60_000;
+    const window = withCharacterMemoryAppliedRecord(
+      [],
+      {
+        eventId: 'evt_slow',
+        traceId: 'trace',
+        createdAt: eventAt,
+        inputDigest: 'sha256:slow',
+        output: {status: 'accepted'},
+      },
+      committedAt,
+    );
+
+    // A long model loop can commit an update many minutes after the event
+    // it belongs to; expiring from the event would drop the record before
+    // its retry could ever arrive.
+    const later = withCharacterMemoryAppliedRecord(
+      window,
+      {
+        eventId: 'evt_next',
+        traceId: 'trace',
+        createdAt: eventAt,
+        inputDigest: 'sha256:next',
+        output: {status: 'accepted'},
+      },
+      committedAt + 60_000,
+    );
+
+    expect(later.map(record => record.eventId)).toContain('evt_slow');
   });
 
   it('keeps a retriable identity that later updates would have evicted', () => {
@@ -309,6 +375,7 @@ describe('character memory store', () => {
           traceId: 'trace_memory',
           toolCallId: 'call_memory',
           createdAt: '2026-08-10T00:00:00.000Z',
+          appliedAt: '2026-08-10T00:05:00.000Z',
           inputDigest: 'sha256:abc',
           output: {status: 'accepted'},
         },
