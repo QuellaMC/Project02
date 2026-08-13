@@ -56,13 +56,23 @@ function createReferenceProvider(
     add(request) {
       if (scenario.requestProbe !== undefined) {
         scenario.requestProbe.addText = request.text;
+        scenario.requestProbe.addSourceReferenceIds =
+          request.sourceReferences.map(reference => reference.id);
       }
 
       return Promise.resolve(
         scenario.addResult ?? {id: 'reference-add', sourceReferences: []},
       );
     },
-    health() {
+    health(request) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.healthCheckedAt = request.checkedAt;
+        scenario.requestProbe.healthHasDeadline =
+          typeof request.deadlineAt === 'number';
+        scenario.requestProbe.healthHasSignal =
+          request.signal instanceof AbortSignal;
+      }
+
       return Promise.resolve(
         scenario.healthResult ?? {status: 'ok', summary: 'Reference ready.'},
       );
@@ -308,6 +318,19 @@ describe('memory provider runtime plugin factory', () => {
         }),
       }),
     ).toThrow('for provider methods it does not implement');
+    // Access nothing needs still has to be satisfied by the host, so a
+    // missing file-store provider would fail an unrelated startup.
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          requestedAccess: {
+            turn_context: 'read',
+            model_input: 'write',
+            file_store: 'read',
+          },
+        }),
+      }),
+    ).toThrow('requests file_store access that no provider method needs');
   });
 });
 

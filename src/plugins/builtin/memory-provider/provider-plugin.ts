@@ -136,16 +136,26 @@ function consistentSuppliedManifest(
 
   for (const accessName of runtimePluginAccessNameValues) {
     const requiredLevel = derivedAccess[accessName];
+    const requestedLevel = runtimePluginAccessFor(
+      manifest.requestedAccess,
+      accessName,
+    );
 
     if (
       requiredLevel !== undefined &&
-      !runtimePluginAccessAllows(
-        runtimePluginAccessFor(manifest.requestedAccess, accessName),
-        requiredLevel,
-      )
+      !runtimePluginAccessAllows(requestedLevel, requiredLevel)
     ) {
       throw new TypeError(
         `Memory provider manifest "${manifest.id}" must request ${accessName} "${requiredLevel}" for the implemented provider methods.`,
+      );
+    }
+
+    // A memory provider works through its own backend: access no provider
+    // method needs is a capability the host would have to satisfy anyway,
+    // and a missing file-store provider then fails an unrelated startup.
+    if (requiredLevel === undefined && requestedLevel !== 'none') {
+      throw new TypeError(
+        `Memory provider manifest "${manifest.id}" requests ${accessName} access that no provider method needs.`,
       );
     }
   }

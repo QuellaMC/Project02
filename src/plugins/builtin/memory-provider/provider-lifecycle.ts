@@ -1,3 +1,4 @@
+import {runtimePluginSourceReferenceLimit} from '../../api/validation-primitives.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
@@ -471,9 +472,12 @@ function memoryEvidence(options: {
   readonly sourceItems?: readonly MemoryRecallItem[];
   readonly sourceReferences?: readonly RuntimePluginSourceReference[];
 }): RuntimePluginEvidenceSnapshot {
-  const sourceReferences =
+  // A backend that names many rows must not turn a completed write into a
+  // failed hook: evidence records what fits, the write already happened.
+  const sourceReferences = (
     options.sourceReferences ??
-    options.sourceItems?.flatMap(item => item.sourceReferences);
+    options.sourceItems?.flatMap(item => item.sourceReferences)
+  )?.slice(0, runtimePluginSourceReferenceLimit);
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,
