@@ -236,6 +236,20 @@ export function runMemoryProviderConformanceSuite(
         );
       });
 
+      it('completes an empty recall instead of degrading the turn', async () => {
+        const host = await conformanceHost(adapter, {recallItems: []});
+        const result = await host.beforeRoleModelCall(conformanceContext());
+
+        // A new store, or a query nothing matches, is the ordinary case an
+        // adapter meets first; throwing there costs the turn its memory.
+        expect(result.status).toBe('completed');
+        if (result.status !== 'completed') {
+          return;
+        }
+
+        expect(result.contextItems).toEqual([]);
+      });
+
       it('exposes no more than the bounded number of memory items', async () => {
         const host = await conformanceHost(adapter, {
           recallItems: Array.from(
