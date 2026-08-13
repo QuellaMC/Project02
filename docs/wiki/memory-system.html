@@ -52,7 +52,7 @@
       </tr>
       <tr>
         <td>Retrieval</td>
-        <td>Always injected, whole store</td>
+        <td>Whatever it holds, injected whole; nothing while it is empty</td>
         <td>On-demand via <code>sessions.search</code> / <code>sessions.read</code></td>
         <td>Per-turn recall plus whichever <code>&lt;provider&gt;.*</code> tools that provider offers</td>
       </tr>
@@ -66,7 +66,7 @@
         <td>Prompt placement</td>
         <td>Trusted curated-context frame</td>
         <td>Tool results</td>
-        <td>Untrusted plugin-context frame, budget-capped</td>
+        <td>Untrusted plugin-context frame, budget-capped (automatic recall; a provider's own tool answers in a tool result)</td>
       </tr>
       <tr>
         <td>Default</td>
