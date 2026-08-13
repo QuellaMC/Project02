@@ -204,6 +204,7 @@ describe('character memory store', () => {
     for (const text of [
       'next line \u0085 stays out',
       'line separator \u2028 stays out',
+      '   \n  ',
     ]) {
       expect(
         planCharacterMemoryOperations({

@@ -463,8 +463,10 @@ function selectCharacterMemoryEntry(
 function normalizedCharacterMemoryEntry(text: string): string | undefined {
   const normalized = text.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
 
+  // Trimmed-empty is what the render validator rejects, so accepting it
+  // here would drop the whole snapshot on the next launch.
   if (
-    normalized.length === 0 ||
+    normalized.trim().length === 0 ||
     containsForbiddenControlCharacter(normalized)
   ) {
     return undefined;
