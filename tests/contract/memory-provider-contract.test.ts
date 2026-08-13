@@ -184,6 +184,33 @@ describe('memory provider runtime plugin factory', () => {
     ]);
   });
 
+  it('refuses to call an add queued without a receipt for it', async () => {
+    const plugin = createMemoryProviderRuntimePlugin({
+      id: 'memory.receiptless',
+      displayName: 'Receiptless Provider',
+      add() {
+        // Provenance for the turn, but nothing acknowledging a write.
+        return Promise.resolve({
+          sourceReferences: [{kind: 'conversation', id: 'evt_memory'}],
+        });
+      },
+    });
+
+    await expect(
+      plugin.lifecycleHooks.handleToolCall?.(
+        {
+          eventId: 'evt_memory',
+          traceId: 'trace_memory',
+          createdAt: '2026-06-21T00:00:00.000Z',
+          pluginId: 'memory.receiptless',
+          toolName: 'memory.receiptless.add',
+          input: {text: 'Remember this.'},
+        },
+        testContext(),
+      ),
+    ).rejects.toThrow('nor a queued-write receipt');
+  });
+
   it('rejects supplied manifests that diverge from the provider', () => {
     const provider: Project02MemoryProvider = {
       id: 'memory.packaged',

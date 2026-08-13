@@ -243,11 +243,17 @@ async function runMemoryAddTool(
   const storedId = result.id;
 
   // Without a stored id, a queued write is only credible if the backend
-  // handed back a receipt for it; neither one means the memory was never
-  // taken, and saying "queued" would tell the model it may yet appear.
-  if (storedId === undefined && persistedSourceReferences.length === 0) {
+  // handed back a receipt for it -- provenance for the turn is not one.
+  // Neither means the memory was never taken, and saying "queued" would
+  // tell the model it may yet appear.
+  if (
+    storedId === undefined &&
+    !persistedSourceReferences.some(
+      reference => reference.kind === 'external_contract',
+    )
+  ) {
     throw new TypeError(
-      'Memory provider add reported neither a stored memory nor a queued write.',
+      'Memory provider add reported neither a stored memory nor a queued-write receipt.',
     );
   }
 
