@@ -3,6 +3,7 @@ import {isAbsolute} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {isRecord} from '../../api/validation-primitives.ts';
+import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
 import type {
   MemoryRecallItem,
   Project02MemoryProvider,
@@ -34,7 +35,7 @@ export async function loadHermesMemoryProviderModule(options: {
   readonly storeRoot: string;
 }): Promise<unknown> {
   if (!isAbsolute(options.modulePath)) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       'hermes-compat modulePath must be an absolute path to the provider module.',
     );
   }
@@ -52,15 +53,20 @@ export async function loadHermesMemoryProviderModule(options: {
   );
   const exported = isRecord(imported) ? imported['default'] : undefined;
 
-  if (typeof exported === 'function') {
-    const built: unknown = await Promise.resolve(
-      Reflect.apply(exported, undefined, [{dataDir: options.storeRoot}]),
+  // A factory is required: the module namespace is cached per process, so
+  // a plain exported object would be shared by every character and
+  // session host, and one host's shutdown would break the others.
+  if (typeof exported !== 'function') {
+    throw new RuntimePluginConstructionError(
+      'hermes-compat module must default-export a factory returning a provider instance; a plain exported object would be shared across hosts.',
     );
-
-    return built;
   }
 
-  return exported;
+  const built: unknown = await Promise.resolve(
+    Reflect.apply(exported, undefined, [{dataDir: options.storeRoot}]),
+  );
+
+  return built;
 }
 
 export function wrapHermesMemoryProvider(
@@ -126,13 +132,13 @@ export function wrapHermesMemoryProvider(
 }
 
 function pinnedForeignProvider(value: unknown): HermesMemoryProviderV1 {
-  const missing = (member: string): TypeError =>
-    new TypeError(
+  const missing = (member: string): RuntimePluginConstructionError =>
+    new RuntimePluginConstructionError(
       `hermes-compat module does not implement pinned v1 member "${member}".`,
     );
 
   if (!isRecord(value)) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       'hermes-compat module does not export a memory provider object.',
     );
   }
@@ -189,11 +195,20 @@ function memoryItemsFromRows(
   rows: unknown,
   maxItems: number,
 ): readonly MemoryRecallItem[] {
+  // A shape this adapter cannot read is a contract violation, not an
+  // empty memory: reporting zero results would hide a version skew that
+  // silently loses every memory.
   const list = Array.isArray(rows)
     ? rows
     : isRecord(rows) && Array.isArray(rows['items'])
       ? rows['items']
-      : [];
+      : undefined;
+
+  if (list === undefined) {
+    throw new TypeError(
+      'hermes-compat provider returned an unsupported result shape; expected an array or {items: array}.',
+    );
+  }
 
   return Object.freeze(
     list.slice(0, maxItems).flatMap((row: unknown) => {

@@ -3,7 +3,10 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {createRuntimeEventIdentity} from '../../src/core/index.ts';
-import {createRuntimePluginContext} from '../../src/plugins/api/index.ts';
+import {
+  createRuntimePluginAfterTurnCommittedContext,
+  createRuntimePluginContext,
+} from '../../src/plugins/api/index.ts';
 import type {RuntimePluginFactoryInput} from '../../src/plugins/api/factory.ts';
 import type {ResolvedPluginRuntimeConfig} from '../../src/runtime/config/index.ts';
 import {createMemoryProviderRuntimePlugin} from '../../src/plugins/builtin/memory-provider/index.ts';
@@ -79,12 +82,50 @@ describe('Hermes memory-provider compat plugin', () => {
     });
   });
 
+  it('surfaces an unreadable result shape instead of reporting no memories', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'bad-shape.mjs')),
+    );
+
+    // Silently reporting zero results would hide a version skew that
+    // loses every memory.
+    await expect(
+      plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext()),
+    ).rejects.toThrow('unsupported result shape');
+  });
+
+  it('gives each host its own provider instance', async () => {
+    const first = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'provider.mjs')),
+    );
+    const second = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'provider.mjs')),
+    );
+
+    await first.lifecycleHooks.afterTurnCommitted?.(compatAfterTurnContext());
+    const firstRecall =
+      await first.lifecycleHooks.beforeRoleModelCall?.(compatContext());
+    const secondRecall =
+      await second.lifecycleHooks.beforeRoleModelCall?.(compatContext());
+
+    // One host's synced turns must not appear in another host's recall.
+    expect(firstRecall?.contextItems[0]?.text).toContain('after 1 synced');
+    expect(secondRecall?.contextItems[0]?.text).toContain('after 0 synced');
+  });
+
   it('rejects modules that do not satisfy the pinned v1 interface', async () => {
     await expect(
       createProject02Plugin(
         compatFactoryInput(join(fixturesRoot, 'missing-sync.mjs')),
       ),
     ).rejects.toThrow('does not implement pinned v1 member "syncTurn"');
+    // A plain exported object is cached per process, so every host would
+    // share one provider and one shutdown would break the others.
+    await expect(
+      createProject02Plugin(
+        compatFactoryInput(join(fixturesRoot, 'shared-object.mjs')),
+      ),
+    ).rejects.toThrow('must default-export a factory');
     await expect(
       createProject02Plugin(compatFactoryInput('relative/provider.mjs')),
     ).rejects.toThrow('must be an absolute path');
@@ -120,7 +161,11 @@ function scenarioForeignProvider(scenario: MemoryProviderConformanceScenario) {
     search() {
       return {items: foreignRows(scenario.searchItems ?? [])};
     },
-    shutdown() {},
+    shutdown() {
+      if (scenario.lifecycleProbe !== undefined) {
+        scenario.lifecycleProbe.closeCalls += 1;
+      }
+    },
   };
 }
 
@@ -168,6 +213,26 @@ function hermesCompatResolvedConfig(
       resolved: true,
       value: modulePath,
     }),
+  });
+}
+
+function compatAfterTurnContext() {
+  return createRuntimePluginAfterTurnCommittedContext({
+    ...testIdentity(),
+    sessionId: 'session-hermes-compat',
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: 'remember this',
+    character: testCharacterProfile,
+    committedAt: '2026-08-10T00:00:01.000Z',
+    visibleMessages: [
+      {
+        id: 'visible-character',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'noted',
+      },
+    ],
   });
 }
 

@@ -1,5 +1,6 @@
 import {createMemoryProviderRuntimePlugin} from '../../builtin/memory-provider/index.ts';
 import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
+import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
 import type {RuntimePlugin, RuntimePluginManifest} from '../../api/types.ts';
 import {
@@ -29,7 +30,7 @@ export async function createProject02Plugin(
   const modulePath = configuredStringValue(input, 'modulePath');
 
   if (modulePath === undefined) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       'hermes-compat needs the modulePath config field pointing at the provider module.',
     );
   }
