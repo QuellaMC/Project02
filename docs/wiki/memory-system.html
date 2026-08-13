@@ -36,7 +36,7 @@
         <th></th>
         <th>Curated memory (<code>character-memory</code>)</th>
         <th>Session search (<code>session-history</code>)</th>
-        <th>External provider (<code>mem0</code>, compat packages)</th>
+        <th>External provider (<code>mem0</code>)</th>
       </tr>
       <tr>
         <td>Storage</td>
@@ -60,7 +60,7 @@
         <td>Written by</td>
         <td>The model, through <code>memory.update</code></td>
         <td>Recorded automatically</td>
-        <td>Per-turn capture (the backend extracts), plus explicit adds where the provider offers an add tool &mdash; mem0 does; the compat adapters do not</td>
+        <td>Per-turn capture (the backend extracts), plus explicit adds where the provider offers an add tool</td>
       </tr>
       <tr>
         <td>Prompt placement</td>
@@ -116,8 +116,7 @@
       Retrieval-driven long-term memory rides the <code>memory_provider</code> plugin kind:
       per-turn recall items enter the untrusted plugin frame (source-referenced, bounded,
       budget-capped), turns are captured for backend-side extraction, and a provider exposes
-      whichever namespaced tools its backend supports — see the table below, since the compat
-      packages expose fewer than <code>mem0</code> does. Providers are disabled by default;
+      whichever namespaced tools its backend supports. Providers are disabled by default;
       enable one and, when several are enabled, select it with
       <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation
       keeps at most one selected, so by default an external provider runs <em>alongside</em>
@@ -136,16 +135,6 @@
         <td>Mem0 platform API or a self-hosted Mem0 server</td>
         <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores the text as given, trimmed to 600 characters like every other memory the runtime carries.</td>
       </tr>
-      <tr>
-        <td><code>openclaw-compat</code></td>
-        <td>An OpenClaw context-engine plugin module</td>
-        <td>Pinned interface v1: assembly becomes recall, turns are ingested. No tools — the engine surface has no row-backed search or add. A module that registers several engines needs <code>engineId</code>; a credentialed engine takes its key from the secret <code>engineApiKey</code> field, not from <code>engineConfig</code>.</td>
-      </tr>
-      <tr>
-        <td><code>hermes-compat</code></td>
-        <td>A Hermes memory-provider module (JS binding)</td>
-        <td>Pinned interface v1: prefetch/syncTurn/search/shutdown. One tool, <code>hermes-compat.search</code>; no add tool.</td>
-      </tr>
     </table>
 
     <h2>Trust model</h2>
@@ -157,18 +146,6 @@
       only to bundled packages by catalog provenance — a manifest flag alone never earns it.
       External provider content stays in the untrusted plugin frame under the shared token
       budget, and recall items without source references are dropped rather than shown.
-    </p>
-
-    <p class="rule">
-      Compat packages import the module the operator configures, which executes
-      operator-trusted code — the same trust an installed operator package already gets.
-      Enablement and the settings that choose that code stay in the global config, so
-      selecting a character can never start exporting the conversation to an engine the
-      operator did not approve.
-      Both compat surfaces are version-pinned. A module missing a pinned method fails at
-      construction, naming the member; a module that keeps its methods but changes what
-      they return fails on the call that reads it, which degrades that recall or capture
-      and records the mismatch rather than reporting an empty memory.
     </p>
 
     <h2>Picking a setup</h2>
@@ -185,10 +162,6 @@
       <tr>
         <td>Large semantic long-term memory</td>
         <td>Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a self-hosted server set <code>backend</code> to <code>server</code> and <code>baseUrl</code> to its origin, where the key is then optional.</td>
-      </tr>
-      <tr>
-        <td>Reuse a memory plugin from another ecosystem</td>
-        <td>Enable the matching compat package and set its <code>modulePath</code> to an absolute path.</td>
       </tr>
     </table>
   </main>
