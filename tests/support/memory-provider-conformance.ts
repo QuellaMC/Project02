@@ -47,6 +47,7 @@ export type MemoryProviderConformanceRequestProbe = {
   addText?: string;
   addSourceReferenceIds?: readonly string[];
   capturedUserMessage?: string;
+  capturedCharacterMessage?: string;
   capturedSourceReferenceIds?: readonly string[];
   /** Verbs that received a live deadline and cancellation signal. */
   scopedVerbs?: Record<string, boolean>;
@@ -129,14 +130,21 @@ export function runMemoryProviderConformanceSuite(
       ]);
       // A memory provider works through its own backend, so anything
       // beyond the turn text it reads and the model input it writes is
-      // access the interface cannot justify.
-      expect(Object.keys(plugin.manifest.requestedAccess).sort()).toEqual(
-        ['model_input', 'turn_context'].filter(name =>
-          name === 'turn_context'
-            ? has('recall') || has('captureTurn')
-            : has('recall') || has('search') || has('add'),
-        ),
-      );
+      // access the interface cannot justify -- at the level each verb
+      // uses, since a wider grant is one the host must satisfy.
+      expect(plugin.manifest.requestedAccess).toEqual({
+        ...(has('recall') || has('captureTurn') ? {turn_context: 'read'} : {}),
+        ...(has('recall') || has('search') || has('add')
+          ? {model_input: 'write'}
+          : {}),
+      });
+      // Memory reads may overlap; a write to it may not overlap itself.
+      expect(
+        plugin.providedTools.map(tool => [tool.name, tool.concurrency]),
+      ).toEqual([
+        ...(has('search') ? [[searchToolName, 'shared']] : []),
+        ...(has('add') ? [[addToolName, 'exclusive']] : []),
+      ]);
     });
 
     if (has('search') || has('add')) {
@@ -194,6 +202,11 @@ export function runMemoryProviderConformanceSuite(
       }
       if (has('captureTurn')) {
         expect(requestProbe.capturedUserMessage).toContain('remember this');
+        // Half a turn is not a turn: what the character answered is where
+        // most of what is worth remembering actually lives.
+        expect(requestProbe.capturedCharacterMessage).toContain(
+          'noted for later',
+        );
         // The turn a memory came from travels with the capture too, not
         // only with an explicit add.
         expect(requestProbe.capturedSourceReferenceIds).toContain('evt_memory');
@@ -887,7 +900,7 @@ function conformanceAfterTurnContext() {
         role: 'character',
         speakerId: 'mira',
         speakerName: 'Mira',
-        text: 'done',
+        text: 'noted for later',
       },
     ],
   });

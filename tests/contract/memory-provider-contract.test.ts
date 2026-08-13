@@ -49,6 +49,10 @@ function createReferenceProvider(
         recordSessionRouting(scenario, 'captureTurn', turn.sessionId);
         recordOperationScope(scenario, 'captureTurn', turn);
         scenario.requestProbe.capturedUserMessage = turn.userMessage;
+        if (turn.characterMessage !== undefined) {
+          scenario.requestProbe.capturedCharacterMessage =
+            turn.characterMessage;
+        }
         scenario.requestProbe.capturedSourceReferenceIds =
           turn.sourceReferences.map(reference => reference.id);
       }
