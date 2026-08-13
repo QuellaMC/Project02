@@ -1,5 +1,7 @@
 const project02IdentifierPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
 
+export const project02IdentifierMaxLength = 128;
+
 export function isProject02Identifier(value: unknown): boolean {
   return typeof value === 'string' && project02IdentifierPattern.test(value);
 }

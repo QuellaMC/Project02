@@ -1,4 +1,5 @@
 import {createRuntimePlugin} from '../../api/constructors.ts';
+import {project02IdentifierMaxLength} from '../../../shared/identifier.ts';
 import {
   runtimePluginAccessNameValues,
   runtimePluginContractVersion,
@@ -38,8 +39,8 @@ export function createMemoryProviderRuntimePlugin(
   const suppliedManifest = consistentSuppliedManifest(provider, options);
   const pluginId = suppliedManifest?.id ?? options.pluginId ?? provider.id;
   const toolNamespace = options.toolNamespace ?? provider.id;
-  const searchToolName = `${toolNamespace}.search`;
-  const addToolName = `${toolNamespace}.add`;
+  const searchToolName = boundedMemoryToolName(toolNamespace, 'search');
+  const addToolName = boundedMemoryToolName(toolNamespace, 'add');
   return createRuntimePlugin({
     manifest: suppliedManifest ?? {
       id: pluginId,
@@ -131,7 +132,27 @@ function consistentSuppliedManifest(
     }
   }
 
+  // Host-generated failure evidence carries the manifest's labels, so a
+  // descriptor without the memory label would persist provider failures
+  // without the redaction metadata every other memory record carries.
+  if (!manifest.runtimePolicy.redactionLabels.includes('memory')) {
+    throw new TypeError(
+      `Memory provider manifest "${manifest.id}" must declare the "memory" redaction label in runtimePolicy.`,
+    );
+  }
+
   return manifest;
+}
+
+/**
+ * A provider id may use the whole identifier budget, and the derived tool
+ * name still has to be a valid identifier: trim the namespace rather than
+ * failing construction for an id the manifest itself accepts.
+ */
+function boundedMemoryToolName(namespace: string, verb: string): string {
+  const suffix = `.${verb}`;
+
+  return `${namespace.slice(0, project02IdentifierMaxLength - suffix.length)}${suffix}`;
 }
 
 function memoryProviderDeclarations(

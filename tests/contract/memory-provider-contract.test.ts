@@ -29,18 +29,34 @@ function createReferenceProvider(
   return {
     id: referencePluginId,
     displayName: 'Reference Memory Provider',
-    recall() {
+    recall(request) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.recallQuery = request.currentUserMessage;
+      }
+
       return Promise.resolve({items: scenario.recallItems ?? []});
     },
-    captureTurn() {
+    captureTurn(turn) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.capturedUserMessage = turn.userMessage;
+      }
+
       return Promise.resolve(
         scenario.captureResult ?? {captured: false, summary: 'Nothing.'},
       );
     },
-    search() {
+    search(request) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.searchQuery = request.query;
+      }
+
       return Promise.resolve({items: scenario.searchItems ?? []});
     },
-    add() {
+    add(request) {
+      if (scenario.requestProbe !== undefined) {
+        scenario.requestProbe.addText = request.text;
+      }
+
       return Promise.resolve(
         scenario.addResult ?? {id: 'reference-add', sourceReferences: []},
       );
@@ -78,6 +94,7 @@ runMemoryProviderConformanceSuite({
     'close',
   ]),
   provesSeamGuarantees: true,
+  requestProbeSupported: true,
   createPlugin(scenario) {
     return createMemoryProviderRuntimePlugin(createReferenceProvider(scenario));
   },
