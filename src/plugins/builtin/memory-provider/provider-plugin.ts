@@ -1,3 +1,5 @@
+import {createHash} from 'node:crypto';
+
 import {createRuntimePlugin} from '../../api/constructors.ts';
 import {project02IdentifierMaxLength} from '../../../shared/identifier.ts';
 import {
@@ -31,6 +33,9 @@ export type CreateMemoryProviderRuntimePluginOptions = {
    */
   readonly manifest?: RuntimePluginManifest;
 };
+
+/** Long enough that trimmed namespaces do not collide in practice. */
+const memoryToolNamespaceDigestLength = 8;
 
 export function createMemoryProviderRuntimePlugin(
   provider: Project02MemoryProvider,
@@ -114,6 +119,19 @@ function consistentSuppliedManifest(
     );
   }
 
+  const derivedDeclarations = memoryProviderDeclarations(provider);
+  const surplus = manifest.declaredPlugins.filter(
+    declaration => !derivedDeclarations.includes(declaration),
+  );
+
+  // A descriptor that advertises a hook the provider does not implement
+  // loads a package promising behavior nothing can deliver.
+  if (surplus.length > 0) {
+    throw new TypeError(
+      `Memory provider manifest "${manifest.id}" declares ${surplus.join(', ')} for provider methods it does not implement.`,
+    );
+  }
+
   const derivedAccess = memoryProviderRequestedAccess(provider);
 
   for (const accessName of runtimePluginAccessNameValues) {
@@ -147,12 +165,24 @@ function consistentSuppliedManifest(
 /**
  * A provider id may use the whole identifier budget, and the derived tool
  * name still has to be a valid identifier: trim the namespace rather than
- * failing construction for an id the manifest itself accepts.
+ * failing construction for an id the manifest itself accepts. Two ids
+ * sharing a long prefix would then collide into one tool name and block
+ * both providers, so a trimmed namespace carries a digest of the whole.
  */
-function boundedMemoryToolName(namespace: string, verb: string): string {
+export function boundedMemoryToolName(namespace: string, verb: string): string {
   const suffix = `.${verb}`;
+  const budget = project02IdentifierMaxLength - suffix.length;
 
-  return `${namespace.slice(0, project02IdentifierMaxLength - suffix.length)}${suffix}`;
+  if (namespace.length <= budget) {
+    return `${namespace}${suffix}`;
+  }
+
+  const digest = createHash('sha256')
+    .update(namespace)
+    .digest('hex')
+    .slice(0, memoryToolNamespaceDigestLength);
+
+  return `${namespace.slice(0, budget - digest.length - 1)}-${digest}${suffix}`;
 }
 
 function memoryProviderDeclarations(

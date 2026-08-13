@@ -10,6 +10,7 @@ import {
   createRuntimePluginManifest,
   runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
+import {project02IdentifierMaxLength} from '../../src/shared/identifier.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimePluginAfterTurnCommittedContext} from '../../src/plugins/api/index.ts';
 import {
@@ -94,7 +95,6 @@ runMemoryProviderConformanceSuite({
     'close',
   ]),
   provesSeamGuarantees: true,
-  requestProbeSupported: true,
   createPlugin(scenario) {
     return createMemoryProviderRuntimePlugin(createReferenceProvider(scenario));
   },
@@ -160,6 +160,20 @@ describe('memory provider runtime plugin factory', () => {
         toolNamespace: 'memory',
       }).providedTools.map(tool => tool.name),
     ).toEqual(['memory.search', 'memory.add']);
+
+    // Two ids that fill the identifier budget and share a long prefix must
+    // not collapse into one tool name, which would stop the host from
+    // enabling both providers at once.
+    const [first, second] = ['a', 'b'].map(tail =>
+      createMemoryProviderRuntimePlugin(provider, {
+        toolNamespace: `${'n'.repeat(project02IdentifierMaxLength - 1)}${tail}`,
+      }).providedTools.map(tool => tool.name),
+    );
+
+    expect(first?.[0]?.length).toBeLessThanOrEqual(
+      project02IdentifierMaxLength,
+    );
+    expect(first).not.toEqual(second);
   });
 
   it('hands the provider the turn scope and source references', async () => {
@@ -279,6 +293,21 @@ describe('memory provider runtime plugin factory', () => {
         }),
       }),
     ).toThrow(/declare/u);
+    // A descriptor promising a hook the provider does not implement would
+    // load a package advertising behavior nothing can deliver.
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          declaredPlugins: [
+            'plugin_discovery',
+            'before_role_model_call',
+            'tool_provider',
+            'handle_tool_call',
+            'health',
+          ],
+        }),
+      }),
+    ).toThrow('for provider methods it does not implement');
   });
 });
 
