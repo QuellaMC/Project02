@@ -31,6 +31,7 @@
           "allowedValues": ["platform", "server"],
           "defaultValueSummary": "platform",
           "agentMutable": false,
+          "globalOnly": true,
           "redactionLabels": [],
           "reloadRequired": true
         },
@@ -47,11 +48,12 @@
         },
         {
           "name": "baseUrl",
-          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend.",
+          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. Global-only: it decides where the credential is sent.",
           "required": false,
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
+          "globalOnly": true,
           "redactionLabels": [],
           "reloadRequired": true
         },

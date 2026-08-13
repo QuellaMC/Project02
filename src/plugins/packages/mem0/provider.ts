@@ -92,7 +92,8 @@ export function createMem0MemoryProvider(options: {
       } catch (error: unknown) {
         if (error instanceof Mem0RequestError) {
           return {
-            status: error.failureKind === 'http' ? 'degraded' : 'unavailable',
+            status:
+              error.failureKind === 'network' ? 'unavailable' : 'degraded',
             summary: error.message,
           };
         }

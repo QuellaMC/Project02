@@ -56,21 +56,34 @@ export type Mem0FetchFunction = (
   json(): Promise<unknown>;
 }>;
 
+export type Mem0RequestFailureKind = 'http' | 'network' | 'malformed_response';
+
 export class Mem0RequestError extends Error {
-  readonly failureKind: 'http' | 'network';
+  readonly failureKind: Mem0RequestFailureKind;
 
   constructor(options: {
     readonly operation: string;
-    readonly failureKind: 'http' | 'network';
+    readonly failureKind: Mem0RequestFailureKind;
     readonly status?: number;
   }) {
-    super(
-      options.failureKind === 'http'
-        ? `mem0 ${options.operation} failed: HTTP ${String(options.status ?? 0)}.`
-        : `mem0 ${options.operation} failed: backend unreachable.`,
-    );
+    super(mem0RequestErrorMessage(options));
     this.name = 'Mem0RequestError';
     this.failureKind = options.failureKind;
+  }
+}
+
+function mem0RequestErrorMessage(options: {
+  readonly operation: string;
+  readonly failureKind: Mem0RequestFailureKind;
+  readonly status?: number;
+}): string {
+  switch (options.failureKind) {
+    case 'http':
+      return `mem0 ${options.operation} failed: HTTP ${String(options.status ?? 0)}.`;
+    case 'malformed_response':
+      return `mem0 ${options.operation} failed: backend returned an unreadable response body.`;
+    case 'network':
+      return `mem0 ${options.operation} failed: backend unreachable.`;
   }
 }
 
@@ -96,6 +109,7 @@ export function createMem0PlatformBackend(options: {
         operation: 'search',
         url: `${baseUrl}/v3/memories/search/`,
         method: 'POST',
+        requiresDocument: true,
         headers,
         body: {
           query: searchOptions.query,
@@ -116,6 +130,7 @@ export function createMem0PlatformBackend(options: {
         operation: 'add',
         url: `${baseUrl}/v3/memories/add/`,
         method: 'POST',
+        requiresDocument: true,
         headers,
         body: {
           messages: addOptions.messages,
@@ -162,6 +177,7 @@ export function createMem0ServerBackend(options: {
         operation: 'search',
         url: `${baseUrl}/search`,
         method: 'POST',
+        requiresDocument: true,
         headers,
         body: {
           query: searchOptions.query,
@@ -180,6 +196,7 @@ export function createMem0ServerBackend(options: {
         operation: 'add',
         url: `${baseUrl}/memories`,
         method: 'POST',
+        requiresDocument: true,
         headers,
         body: {
           messages: addOptions.messages,
@@ -229,6 +246,7 @@ async function mem0Request(options: {
   readonly headers: Readonly<Record<string, string>>;
   readonly body?: Readonly<Record<string, unknown>>;
   readonly signal: AbortSignal;
+  readonly requiresDocument?: boolean;
 }): Promise<unknown> {
   let response;
 
@@ -261,7 +279,18 @@ async function mem0Request(options: {
   try {
     return await response.json();
   } catch {
-    return undefined;
+    // Health only needs the status line, but a search or add that answers
+    // 2xx with an unreadable body is a broken deployment: reporting it as
+    // an empty result would read as "no memories".
+    if (options.requiresDocument !== true) {
+      return undefined;
+    }
+
+    throw new Mem0RequestError({
+      operation: options.operation,
+      failureKind: 'malformed_response',
+      status: response.status,
+    });
   }
 }
 

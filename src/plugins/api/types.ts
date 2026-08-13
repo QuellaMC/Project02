@@ -64,6 +64,12 @@ export type RuntimePluginConfigField = {
   readonly envVar?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable?: boolean;
+  /**
+   * true keeps the field out of character overlays. Fields that select
+   * where a credential is sent must stay global, or enabling a character
+   * would be enough to redirect authenticated traffic.
+   */
+  readonly globalOnly?: boolean;
   readonly reloadRequired?: boolean;
   readonly redactionLabels: readonly string[];
 };
