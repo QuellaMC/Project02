@@ -32,6 +32,7 @@ export {
   preparedRuntimePluginConfigEffectHasApprovalEvidence,
 } from './api/constructors.ts';
 export {validateRuntimePluginManifest} from './api/manifest-validation.ts';
+export {isRuntimePluginPackageConstructionFailure} from './package-loader/index.ts';
 export {
   characterMemoryPluginId,
   characterMemoryUpdateToolName,

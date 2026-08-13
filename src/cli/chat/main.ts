@@ -52,9 +52,7 @@ import {
   type RuntimePluginToolConfirmationRequest,
 } from '../../plugins/index.ts';
 import {
-  createConfiguredProject02PluginHostFromPlan,
   resolveRuntimeCliStartup,
-  type PreparedProject02PluginActivationPlan,
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
 import {
@@ -88,12 +86,15 @@ import {
   selectChatProvider,
   type ChatProviderName,
 } from '../../role-model/index.ts';
-import {
-  runBestEffortPluginSessionEnd,
-  runBestEffortPluginShutdown,
-} from '../../plugins/host/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {writeJson} from '../shared/output.ts';
+import {
+  cleanupConfiguredChatPluginHostAfterFatalExit,
+  cleanupConfiguredChatPluginHostAfterStartupFailure,
+  createConfiguredChatPluginHostBeforeSession,
+  shutdownConfiguredChatPluginHost,
+  type ConfiguredChatPluginHost,
+} from './plugin-host-lifecycle.ts';
 
 type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -143,10 +144,6 @@ type RejectedChatRuntimeTurn = {
 
 type ChatRuntimeTurn = CompletedChatRuntimeTurn | RejectedChatRuntimeTurn;
 
-type ConfiguredChatPluginHost = Awaited<
-  ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
->;
-
 type ChatToolConfirmationBridge = {
   readonly handler: RuntimePluginToolConfirmationHandler;
   installTerminalHandler(
@@ -163,13 +160,6 @@ const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 function promptTextFor(session: ConversationSession): string {
   return `${session.userSpeaker.displayName}: `;
 }
-const startupFailurePluginCleanupMessage =
-  'chat startup failed before opening a durable session';
-const fatalFailurePluginCleanupMessage =
-  'chat turn failed before normal /exit cleanup';
-const configuredPluginShutdownMessage =
-  'chat configured plugin host lifetime ended';
-
 function requiredChatCharacterProfile(
   characterProfile: CharacterProfile | undefined,
 ): CharacterProfile {
@@ -476,7 +466,8 @@ async function runChatCliAfterConfiguredHost(options: {
     if (options.configuredHost !== undefined) {
       await cleanupConfiguredChatPluginHostAfterStartupFailure({
         configuredHost: options.configuredHost,
-        args: options.runtimeArgs,
+        sessionId:
+          options.runtimeArgs.newSessionId ?? options.runtimeArgs.sessionId,
         character: options.characterProfile,
       });
     }
@@ -513,71 +504,12 @@ async function runChatCliAfterConfiguredHost(options: {
     return exitCode;
   } finally {
     if (options.configuredHost !== undefined) {
-      const decisionContext = buildUserTurnDecisionContext({
+      await shutdownConfiguredChatPluginHost({
+        configuredHost: options.configuredHost,
         session: durableRuntime.session,
-      });
-
-      await runBestEffortPluginShutdown({
-        pluginHost: options.configuredHost.host,
-        sessionId: decisionContext.sessionId,
-        currentUserMessage: configuredPluginShutdownMessage,
-        character: decisionContext.characterSnapshot,
       });
     }
     await durableRuntime.writerLease.release();
-  }
-}
-
-async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
-  readonly configuredHost: ConfiguredChatPluginHost;
-  readonly session: ConversationSession;
-}): Promise<void> {
-  const decisionContext = buildUserTurnDecisionContext({
-    session: options.session,
-  });
-
-  await runBestEffortPluginSessionEnd({
-    pluginHost: options.configuredHost.host,
-    sessionId: decisionContext.sessionId,
-    currentUserMessage: fatalFailurePluginCleanupMessage,
-    character: decisionContext.characterSnapshot,
-  });
-}
-
-async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
-  readonly configuredHost: ConfiguredChatPluginHost;
-  readonly args: ChatCliArgs;
-  readonly character: CharacterProfile;
-}): Promise<void> {
-  await runBestEffortPluginSessionEnd({
-    pluginHost: options.configuredHost.host,
-    sessionId: normalizeLocalRuntimeSessionId(
-      options.args.newSessionId ?? options.args.sessionId,
-    ),
-    currentUserMessage: startupFailurePluginCleanupMessage,
-    character: options.character,
-    hookOptions: {allowFileStoreWrites: false},
-  });
-  await runBestEffortPluginShutdown({
-    pluginHost: options.configuredHost.host,
-    sessionId: normalizeLocalRuntimeSessionId(
-      options.args.newSessionId ?? options.args.sessionId,
-    ),
-    currentUserMessage: configuredPluginShutdownMessage,
-    character: options.character,
-  });
-}
-
-async function createConfiguredChatPluginHostBeforeSession(options: {
-  readonly activationPlan: PreparedProject02PluginActivationPlan;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
-}): Promise<ConfiguredChatPluginHost> {
-  try {
-    return await createConfiguredProject02PluginHostFromPlan(options);
-  } catch {
-    throw new ChatCliStartupError(
-      'Configured plugin construction failed before creating a durable session.',
-    );
   }
 }
 

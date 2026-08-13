@@ -110,16 +110,14 @@ function createOpenClawCompatProvider(
       };
     },
     async captureTurn(turn) {
-      await engine.ingest({
-        sessionId: turn.sessionId,
-        message: {role: 'user', content: turn.userMessage},
-        isHeartbeat: false,
+      await ingestMessage(engine, turn.sessionId, {
+        role: 'user',
+        content: turn.userMessage,
       });
       if (turn.characterMessage !== undefined) {
-        await engine.ingest({
-          sessionId: turn.sessionId,
-          message: {role: 'assistant', content: turn.characterMessage},
-          isHeartbeat: false,
+        await ingestMessage(engine, turn.sessionId, {
+          role: 'assistant',
+          content: turn.characterMessage,
         });
       }
 
@@ -139,6 +137,31 @@ function createOpenClawCompatProvider(
       await engine.dispose?.();
     },
   };
+}
+
+/**
+ * An engine reports a declined ingestion -- an authentication, quota, or
+ * persistence rejection -- in its result, so a turn is only captured when
+ * the engine says it took it.
+ */
+async function ingestMessage(
+  engine: OpenClawContextEngineV1,
+  sessionId: string,
+  message: {readonly role: 'user' | 'assistant'; readonly content: string},
+): Promise<void> {
+  const result: unknown = await Promise.resolve(
+    engine.ingest({sessionId, message, isHeartbeat: false}),
+  );
+
+  if (result === undefined || result === null) {
+    return;
+  }
+
+  if (!isRecord(result) || result['ok'] === false) {
+    throw new TypeError(
+      'openclaw-compat engine declined the ingested message; the turn was not captured.',
+    );
+  }
 }
 
 /**

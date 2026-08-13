@@ -28,7 +28,8 @@
           "valueType": "path",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true
+          "reloadRequired": true,
+          "globalOnly": true
         },
         {
           "name": "engineId",
@@ -38,7 +39,8 @@
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true
+          "reloadRequired": true,
+          "globalOnly": true
         },
         {
           "name": "engineConfig",
@@ -48,7 +50,8 @@
           "valueType": "object",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true
+          "reloadRequired": true,
+          "globalOnly": true
         },
         {
           "name": "engineApiKey",
@@ -75,7 +78,8 @@
     },
     "activation": {
       "defaultEnabled": false,
-      "reasons": ["memory_provider_package"]
+      "reasons": ["memory_provider_package"],
+      "globalOnly": true
     },
     "requestedAccess": {
       "turn_context": "read",

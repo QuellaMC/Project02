@@ -7,7 +7,10 @@ import {
   type RuntimePluginPackageCatalogEntry,
 } from '../plugins/index.ts';
 import type {DiscoveredRuntimePluginPackage} from '../plugins/package-loader/index.ts';
-import {acceptRuntimePluginPackageCandidate} from '../plugins/package-loader/index.ts';
+import {
+  acceptRuntimePluginPackageCandidate,
+  constructRuntimePluginPackage,
+} from '../plugins/package-loader/index.ts';
 
 export type {RuntimePluginFactoryDefinition};
 
@@ -38,7 +41,11 @@ export function composeRuntimePluginCatalog(options: {
           load: async (input, loadOptions) =>
             acceptRuntimePluginPackageCandidate({
               manifest: definition.manifest,
-              candidate: await definition.create(input),
+              candidate: await constructRuntimePluginPackage({
+                factory: definition.create,
+                manifest: definition.manifest,
+                input,
+              }),
               ...(loadOptions?.retainRejectedCandidate === undefined
                 ? {}
                 : {
