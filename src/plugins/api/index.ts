@@ -118,6 +118,11 @@ export {
 } from './curated-context.ts';
 export {isRuntimePluginCredentialKey} from './validation-primitives.ts';
 export {
+  isRuntimePluginConstructionError,
+  runtimePluginConstructionErrorName,
+  RuntimePluginConstructionError,
+} from './construction-error.ts';
+export {
   isApprovalGatedRuntimePluginTool,
   isModelFacingRuntimePluginTool,
   validateRuntimePluginModelFacingToolAccess,

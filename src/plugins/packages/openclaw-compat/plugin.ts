@@ -1,10 +1,15 @@
-import {createMemoryProviderRuntimePlugin} from '../../builtin/memory-provider/index.ts';
+import {
+  createMemoryProviderRuntimePlugin,
+  memoryProviderMaxTextLength,
+} from '../../builtin/memory-provider/index.ts';
 import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
+import {isRecord} from '../../api/validation-primitives.ts';
+import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
 import type {RuntimePlugin, RuntimePluginManifest} from '../../api/types.ts';
 import type {Project02MemoryProvider} from '../../builtin/memory-provider/index.ts';
 import {
-  assembledSystemPromptAddition,
+  assembledContextText,
   loadOpenClawContextEngine,
   type OpenClawContextEngineV1,
 } from './engine.ts';
@@ -16,7 +21,14 @@ const openClawCompatPluginDescriptorUrl = new URL(
   './project02.plugin.json',
   import.meta.url,
 );
-const openClawCompatAssembleTokenBudget = 512;
+/**
+ * What one recall item can actually carry downstream: bounding at 600
+ * characters, the engine is told the truth about its budget instead of
+ * selecting context this path would silently truncate.
+ */
+const openClawCompatAssembleTokenBudget = Math.floor(
+  memoryProviderMaxTextLength / 4,
+);
 
 export function createOpenClawCompatPluginManifest(): RuntimePluginManifest {
   return readRuntimePluginPackageDescriptor({
@@ -31,15 +43,17 @@ export async function createProject02Plugin(
   const modulePath = configuredStringValue(input, 'modulePath');
 
   if (modulePath === undefined) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       'openclaw-compat needs the modulePath config field pointing at the plugin module.',
     );
   }
 
   const engineId = configuredStringValue(input, 'engineId');
+  const engineConfig = configuredEngineConfig(input);
   const engine = await loadOpenClawContextEngine({
     modulePath,
     ...(engineId === undefined ? {} : {engineId}),
+    engineConfig,
     storeRoot: input.storeRoot,
   });
 
@@ -70,7 +84,7 @@ function createOpenClawCompatProvider(
         availableTools: [],
         citationsMode: 'off',
       });
-      const addition = assembledSystemPromptAddition(assembled);
+      const addition = assembledContextText(assembled);
 
       if (addition === undefined) {
         return {items: []};
@@ -122,6 +136,14 @@ function createOpenClawCompatProvider(
       await engine.dispose?.();
     },
   };
+}
+
+function configuredEngineConfig(
+  input: RuntimePluginFactoryInput,
+): Readonly<Record<string, unknown>> {
+  const value = input.resolvedConfig['engineConfig']?.value;
+
+  return isRecord(value) ? value : Object.freeze({});
 }
 
 function configuredStringValue(

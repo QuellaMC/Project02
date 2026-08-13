@@ -3,6 +3,7 @@ import {isAbsolute} from 'node:path';
 import {pathToFileURL} from 'node:url';
 
 import {isRecord} from '../../api/validation-primitives.ts';
+import {RuntimePluginConstructionError} from '../../api/construction-error.ts';
 
 /**
  * Pinned v1 of the OpenClaw context-engine plugin surface this compat
@@ -41,7 +42,9 @@ const nativeImportModule: unknown = createRequire(import.meta.url)(
 
 function nativeImport(specifier: string): Promise<unknown> {
   if (typeof nativeImportModule !== 'function') {
-    throw new TypeError('Native import bridge is unavailable.');
+    throw new RuntimePluginConstructionError(
+      'Native import bridge is unavailable.',
+    );
   }
 
   const result: unknown = Reflect.apply(nativeImportModule, undefined, [
@@ -54,10 +57,11 @@ function nativeImport(specifier: string): Promise<unknown> {
 export async function loadOpenClawContextEngine(options: {
   readonly modulePath: string;
   readonly engineId?: string;
+  readonly engineConfig?: Readonly<Record<string, unknown>>;
   readonly storeRoot: string;
 }): Promise<OpenClawContextEngineV1> {
   if (!isAbsolute(options.modulePath)) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       'openclaw-compat modulePath must be an absolute path to the plugin module.',
     );
   }
@@ -72,7 +76,7 @@ export async function loadOpenClawContextEngine(options: {
     : undefined;
 
   if (typeof register !== 'function') {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       'openclaw-compat module does not export a default register function.',
     );
   }
@@ -93,7 +97,7 @@ export async function loadOpenClawContextEngine(options: {
   const factory = engineId === undefined ? undefined : factories.get(engineId);
 
   if (engineId === undefined || factory === undefined) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       options.engineId === undefined
         ? 'openclaw-compat module registered no context engines.'
         : `openclaw-compat module registered no context engine "${options.engineId}".`,
@@ -101,7 +105,7 @@ export async function loadOpenClawContextEngine(options: {
   }
 
   if (typeof factory !== 'function') {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       `openclaw-compat engine "${engineId}" factory is not a function.`,
     );
   }
@@ -109,7 +113,7 @@ export async function loadOpenClawContextEngine(options: {
   const engine: unknown = await Promise.resolve(
     Reflect.apply(factory, undefined, [
       {
-        config: {},
+        config: options.engineConfig ?? {},
         agentDir: options.storeRoot,
         workspaceDir: options.storeRoot,
       },
@@ -123,13 +127,13 @@ function pinnedContextEngine(
   engineId: string,
   engine: unknown,
 ): OpenClawContextEngineV1 {
-  const missing = (member: string): TypeError =>
-    new TypeError(
+  const missing = (member: string): RuntimePluginConstructionError =>
+    new RuntimePluginConstructionError(
       `openclaw-compat engine "${engineId}" does not implement pinned v1 member "${member}".`,
     );
 
   if (!isRecord(engine)) {
-    throw new TypeError(
+    throw new RuntimePluginConstructionError(
       `openclaw-compat engine "${engineId}" factory did not return an engine object.`,
     );
   }
@@ -183,16 +187,39 @@ function pinnedContextEngine(
   } satisfies OpenClawContextEngineV1);
 }
 
-export function assembledSystemPromptAddition(
-  result: unknown,
-): string | undefined {
+/**
+ * An engine may carry its assembly in the prompt addition, in the
+ * assembled messages, or in both; dropping either half would silently
+ * discard the engine's primary output.
+ */
+export function assembledContextText(result: unknown): string | undefined {
   if (!isRecord(result)) {
     return undefined;
   }
 
   const addition = result['systemPromptAddition'];
+  const parts = [
+    ...(typeof addition === 'string' ? [addition] : []),
+    ...assembledMessageTexts(result['messages']),
+  ]
+    .map(part => part.trim())
+    .filter(part => part.length > 0);
 
-  return typeof addition === 'string' && addition.trim().length > 0
-    ? addition
-    : undefined;
+  return parts.length === 0 ? undefined : parts.join('\n');
+}
+
+function assembledMessageTexts(value: unknown): readonly string[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((entry: unknown) => {
+    if (!isRecord(entry)) {
+      return [];
+    }
+
+    const content = entry['content'];
+
+    return typeof content === 'string' && content.length > 0 ? [content] : [];
+  });
 }

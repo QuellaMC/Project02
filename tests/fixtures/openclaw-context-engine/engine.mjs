@@ -1,5 +1,5 @@
 export default function register(api) {
-  api.registerContextEngine('fixture-engine', () => {
+  api.registerContextEngine('fixture-engine', ctx => {
     const ingested = [];
 
     return {
@@ -11,13 +11,15 @@ export default function register(api) {
       },
       assemble(params) {
         const prompt = params.messages.at(-1)?.content ?? '';
+        const label = ctx.config?.label;
 
         return {
-          messages: [],
+          messages:
+            label === undefined ? [] : [{role: 'user', content: `label:${label}`}],
           estimatedTokens: 8,
           systemPromptAddition: `Engine brief for "${prompt}" after ${String(
             ingested.length,
-          )} ingested message(s).`,
+          )} ingested message(s). budget=${String(params.tokenBudget)}`,
         };
       },
       ingest(params) {

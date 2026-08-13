@@ -8,7 +8,10 @@ import {
   createRuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import type {RuntimePluginFactoryInput} from '../../src/plugins/api/factory.ts';
-import type {ResolvedPluginRuntimeConfig} from '../../src/runtime/config/index.ts';
+import type {
+  ResolvedPluginRuntimeConfig,
+  RuntimeConfigValue,
+} from '../../src/runtime/config/index.ts';
 import {createProject02Plugin} from '../../src/plugins/packages/openclaw-compat/index.ts';
 import {
   createOpenClawCompatPluginManifest,
@@ -54,7 +57,7 @@ describe('OpenClaw context-engine compat plugin', () => {
     expect(result?.contextItems[0]).toMatchObject({
       pluginId: openClawCompatPluginId,
       kind: 'memory',
-      text: 'Engine brief for "remember this" after 0 ingested message(s).',
+      text: 'Engine brief for "remember this" after 0 ingested message(s). budget=150',
       sourceReferences: [
         {
           kind: 'external_contract',
@@ -100,9 +103,37 @@ describe('OpenClaw context-engine compat plugin', () => {
         {kind: 'external_contract', id: 'fixture-engine.ingest'},
       ],
     });
-    expect(recallAfter?.contextItems[0]?.text).toBe(
-      'Engine brief for "remember this" after 2 ingested message(s).',
+    expect(recallAfter?.contextItems[0]?.text).toContain(
+      'after 2 ingested message(s).',
     );
+  });
+
+  it('recalls an assembly carried only in the engine messages', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'messages-only.mjs')),
+    );
+
+    const result =
+      await plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext());
+
+    // The messages are the engine's primary output; discarding them would
+    // report no recall for a working engine.
+    expect(result?.contextItems[0]?.text).toBe(
+      'Assembled without a prompt addition.',
+    );
+  });
+
+  it('forwards configured engine settings to the factory', async () => {
+    const plugin = await createProject02Plugin(
+      compatFactoryInput(join(fixturesRoot, 'engine.mjs'), {
+        engineConfig: {label: 'configured'},
+      }),
+    );
+
+    const result =
+      await plugin.lifecycleHooks.beforeRoleModelCall?.(compatContext());
+
+    expect(result?.contextItems[0]?.text).toContain('label:configured');
   });
 
   it('rejects modules that do not satisfy the pinned v1 interface', async () => {
@@ -137,7 +168,7 @@ describe('OpenClaw context-engine compat plugin', () => {
 
 function compatFactoryInput(
   modulePath: string,
-  extras: Readonly<Record<string, string>> = {},
+  extras: Readonly<Record<string, RuntimeConfigValue>> = {},
 ): RuntimePluginFactoryInput {
   return {
     pluginId: openClawCompatPluginId,
@@ -150,7 +181,7 @@ function compatFactoryInput(
 }
 
 function resolvedConfig(
-  values: Readonly<Record<string, string>>,
+  values: Readonly<Record<string, RuntimeConfigValue>>,
 ): ResolvedPluginRuntimeConfig {
   return Object.freeze(
     Object.fromEntries(

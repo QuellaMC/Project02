@@ -41,6 +41,16 @@
           "reloadRequired": true
         },
         {
+          "name": "engineConfig",
+          "description": "Settings object handed to the context-engine factory as its config argument.",
+          "required": false,
+          "secret": false,
+          "valueType": "object",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true
+        },
+        {
           "name": "interfaceVersion",
           "description": "Pinned compat interface version this adapter validates the module against.",
           "required": false,
