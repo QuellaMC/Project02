@@ -80,9 +80,10 @@
 
     <p>
       The <code>character-memory</code> package keeps two capped stores per character:
-      character notes and a user profile. The whole store is injected every session as a
-      <em>Curated memory</em> block with capacity headers, so the character never has to
-      search for what it must always know. The snapshot is frozen per launch: writes land on
+      character notes and a user profile. Whatever the store holds is injected every
+      session as a <em>Curated memory</em> block with capacity headers, so the character
+      never has to search for what it must always know; until the character writes its
+      first entry the store is empty and no block appears at all. The snapshot is frozen per launch: writes land on
       disk immediately and reach the prompt at the next launch, keeping the prompt prefix
       byte-stable for provider caching.
     </p>
@@ -135,7 +136,7 @@
       <tr>
         <td><code>mem0</code></td>
         <td>Mem0 platform API or a self-hosted Mem0 server</td>
-        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract, <code>mem0.add</code> stores the text as given, trimmed to the 600 characters a provider memory item carries.</td>
+        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract. <code>mem0.add</code> submits the text as given, trimmed to the 600 characters a provider memory item carries: a self-hosted server stores it and answers with the row, while the hosted platform answers with a queue receipt and stores it asynchronously, which the tool reports as queued rather than saved.</td>
       </tr>
     </table>
 
