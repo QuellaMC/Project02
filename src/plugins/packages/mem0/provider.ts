@@ -46,10 +46,12 @@ export function createMem0MemoryProvider(options: {
   // must be able to stop a stalled request instead of waiting forever.
   const backgroundWork = new AbortController();
   let pendingCaptures = 0;
-  // A queued capture has no retry, so a failure is a turn that was never
-  // stored: the count is a running total for the provider's lifetime, not
-  // a streak a later success can clear.
-  let lostCaptures = 0;
+  // A queued capture has no retry, so a capture that did not complete is
+  // a turn memory may not hold: the count is a running total for the
+  // provider's lifetime, not a streak a later success can clear. What
+  // exactly happened to the most recent one is in its own message --
+  // refused, rejected, or abandoned with its outcome unknown.
+  let incompleteCaptures = 0;
   let lastLossSummary: string | undefined;
 
   return {
@@ -91,8 +93,8 @@ export function createMem0MemoryProvider(options: {
       // behind. Past the backlog limit the turn is refused outright, which
       // the summary and health both say, rather than queued forever.
       if (pendingCaptures >= mem0MaxPendingCaptures) {
-        lostCaptures += 1;
-        lastLossSummary = `${String(lostCaptures)} capture(s) never stored; most recent: extraction backlog is full (${String(mem0MaxPendingCaptures)} queued).`;
+        incompleteCaptures += 1;
+        lastLossSummary = `${String(incompleteCaptures)} capture(s) did not complete; most recent: extraction backlog is full (${String(mem0MaxPendingCaptures)} queued), so the turn was never sent.`;
 
         return Promise.resolve({
           captured: false,
@@ -143,8 +145,8 @@ export function createMem0MemoryProvider(options: {
                 ? 'Queued the last captured turn with the backend.'
                 : `Stored ${String(stored)} memory item(s) from the last captured turn.`;
         } catch (error: unknown) {
-          lostCaptures += 1;
-          lastLossSummary = `${String(lostCaptures)} capture(s) never stored; most recent: ${captureFailureMessage(error)}`;
+          incompleteCaptures += 1;
+          lastLossSummary = `${String(incompleteCaptures)} capture(s) did not complete; most recent: ${captureFailureMessage(error)}`;
         } finally {
           pendingCaptures -= 1;
         }
@@ -156,9 +158,9 @@ export function createMem0MemoryProvider(options: {
         // reports them too, but a reload builds a fresh provider and its
         // count starts over, while the turn record does not.
         summary:
-          lostCaptures === 0
+          incompleteCaptures === 0
             ? 'Queued turn for memory extraction.'
-            : `Queued turn for memory extraction. ${String(lostCaptures)} earlier capture(s) were never stored.`,
+            : `Queued turn for memory extraction. ${String(incompleteCaptures)} earlier capture(s) did not complete.`,
         sourceReferences: [
           {
             kind: 'external_contract',
@@ -219,10 +221,10 @@ export function createMem0MemoryProvider(options: {
             ? ''
             : ` ${String(pendingCaptures)} capture(s) still running.`;
 
-        // A failed background capture means a user turn was never stored;
-        // health is the lifecycle surface that has to say so, and no later
-        // success brings that turn back.
-        if (lostCaptures > 0) {
+        // A background capture that did not complete means a user turn
+        // memory may not hold; health is the lifecycle surface that has
+        // to say so, and no later success brings that turn back.
+        if (incompleteCaptures > 0) {
           return {
             status: 'degraded',
             summary: `${summary} ${lastLossSummary ?? ''}${backlog}`.trim(),
@@ -290,8 +292,17 @@ export function createMem0MemoryProvider(options: {
  * Every backend bounds its own failures at the third-party boundary --
  * the REST transports and the embedded engine alike -- so a message that
  * arrives here is already safe to show and to persist.
+ *
+ * A cancelled write is reported as what it is: the deadline or shutdown
+ * abandoned it, and an in-process engine cannot be called back, so the
+ * memory may exist. Calling that a lost turn would assert data loss the
+ * runtime cannot see.
  */
 function captureFailureMessage(error: unknown): string {
+  if (error instanceof Mem0RequestError && error.failureKind === 'cancelled') {
+    return 'the write was abandoned before the backend answered; whether it stored the turn is unknown.';
+  }
+
   return error instanceof Error && error.message.length > 0
     ? error.message
     : 'the memory backend rejected the write.';

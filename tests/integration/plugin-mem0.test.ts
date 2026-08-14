@@ -595,10 +595,10 @@ describe('mem0 plugin package', () => {
     const health = await plugin.lifecycleHooks.health?.(mem0Context());
 
     expect(addCalls).toBe(1);
-    // A capture that never stored the turn must not read as healthy.
+    // A capture that did not complete must not read as healthy.
     expect(health).toMatchObject({
       status: 'degraded',
-      summary: expect.stringContaining('never stored') as string,
+      summary: expect.stringContaining('did not complete') as string,
     });
   });
 
@@ -687,7 +687,7 @@ describe('mem0 plugin package', () => {
     expect(addCalls).toBe(2);
     expect(health).toMatchObject({
       status: 'degraded',
-      summary: expect.stringContaining('never stored') as string,
+      summary: expect.stringContaining('did not complete') as string,
     });
 
     // A reload builds a fresh provider whose count starts over, so the
@@ -697,7 +697,7 @@ describe('mem0 plugin package', () => {
     );
 
     expect(JSON.stringify(later?.evidence ?? [])).toContain(
-      'earlier capture(s) were never stored',
+      'earlier capture(s) did not complete',
     );
   });
 

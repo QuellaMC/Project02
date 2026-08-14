@@ -202,7 +202,7 @@ export function mem0OssSettingsFromInput(
     if (value !== undefined && !isAbsoluteHttpOrigin(value)) {
       return {
         status: 'rejected',
-        message: `Mem0 OSS ${field} must be an absolute http:// or https:// origin, not "${value}".`,
+        message: invalidEndpointMessage(field),
       };
     }
   }

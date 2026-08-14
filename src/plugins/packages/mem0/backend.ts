@@ -680,21 +680,11 @@ export function createDefaultMem0OssEngineLoader(
     }
 
     assertRealMem0OssStorageDir(settings.storageDir);
-    // The engine creates these databases itself, with the process umask;
-    // they hold the same private conversation material as the runtime's
-    // own stores, which are owner-only. The database entries are checked
-    // too: a symlinked one would have the engine write -- and the
-    // permission pass chmod -- whatever file the link points at.
-    for (const entry of ['vectors.db', 'history.db']) {
-      const kind = describeRealEntry(join(settings.storageDir, entry)).kind;
-
-      if (kind !== 'absent' && kind !== 'file') {
-        throw new TypeError(
-          `Mem0 embedded storage entry "${entry}" must be a regular file inside the character store.`,
-        );
-      }
-    }
     makeDirectorySync(settings.storageDir, {recursive: true, mode: 0o700});
+    // Before the engine opens anything: a linked entry here would have it
+    // write through the link, and the permission pass chmod whatever the
+    // link points at.
+    restrictMem0OssStorageEntries(settings.storageDir);
 
     // The constructor already wires provider clients with the key and
     // endpoints in hand, so its failures are third-party content too --
@@ -718,7 +708,7 @@ export function createDefaultMem0OssEngineLoader(
       throw new Mem0RequestError({operation: 'load', failureKind: 'engine'});
     }
 
-    restrictMem0OssStorageMode(settings.storageDir);
+    restrictMem0OssStorageEntries(settings.storageDir);
 
     return pinnedMem0OssEngine(engine);
   };
@@ -746,12 +736,26 @@ function assertRealMem0OssStorageDir(storageDir: string): void {
   }
 }
 
-/** Owner-only, matching the runtime's own SQLite views and transcripts. */
-function restrictMem0OssStorageMode(storageDir: string): void {
+/**
+ * Owner-only, matching the runtime's own SQLite views and transcripts.
+ * Every entry is checked as it is locked down, under one rule rather
+ * than a list of expected names: chmod follows a link, so an entry that
+ * is not a regular file would carry these permissions -- and the engine's
+ * writes -- to a file outside the character store.
+ */
+function restrictMem0OssStorageEntries(storageDir: string): void {
   chmodPathSync(storageDir, 0o700);
 
   for (const entry of listDirectoryNamesSync(storageDir)) {
-    chmodPathSync(join(storageDir, entry), 0o600);
+    const path = join(storageDir, entry);
+
+    if (describeRealEntry(path).kind !== 'file') {
+      throw new TypeError(
+        `Mem0 embedded storage entry "${entry}" must be a regular file inside the character store.`,
+      );
+    }
+
+    chmodPathSync(path, 0o600);
   }
 }
 
