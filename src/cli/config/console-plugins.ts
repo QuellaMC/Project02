@@ -19,6 +19,7 @@ import {prepareConfiguredProject02PluginActivation} from '../../app/index.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {
+  consoleCatalogManifests,
   askForFieldValue,
   askForNumber,
   cancelled,
@@ -233,6 +234,7 @@ async function stageActivationScopeRepair(
           ...(context.env === undefined ? {} : {env: context.env}),
           scope: snapshot.scope,
         }),
+        pluginManifests: consoleCatalogManifests(context),
         expectedFingerprint: fingerprint,
         request: {kind: 'plugin_activation', manifest},
       });
@@ -286,6 +288,7 @@ async function stagePluginActivationChange(
 
       applyRuntimeConfigControlOperation({
         target,
+        pluginManifests: consoleCatalogManifests(context),
         expectedFingerprint: fingerprint,
         request: {
           kind: 'plugin_activation',
@@ -375,6 +378,7 @@ async function stagePluginFieldChange(
 
       applyRuntimeConfigControlOperation({
         target,
+        pluginManifests: consoleCatalogManifests(context),
         expectedFingerprint: fingerprint,
         request: {
           kind: 'plugin_config',

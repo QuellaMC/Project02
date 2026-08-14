@@ -1700,6 +1700,7 @@ describe('runtime config CLI mutation and storage', () => {
     mkdirSync(configTempPath);
 
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
@@ -1744,6 +1745,7 @@ describe('runtime config CLI mutation and storage', () => {
     });
 
     const setResult = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
@@ -1769,6 +1771,7 @@ describe('runtime config CLI mutation and storage', () => {
     );
 
     const unsetResult = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           configPath: configPath,
@@ -1803,6 +1806,7 @@ describe('runtime config CLI mutation and storage', () => {
       process.chdir(configRoot);
 
       const result = applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: resolveRuntimeConfigScopeTarget({
           runtimeLocation: runtimeLocationForTest({
             configPath: paddedConfigPath,

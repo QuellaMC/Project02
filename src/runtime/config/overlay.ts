@@ -31,6 +31,7 @@ import {
   type RuntimeConfigValue,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
+import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 
 export type LoadedProject02CharacterOverlayConfig = {
   readonly scope: 'character';
@@ -272,13 +273,18 @@ export function layeredRuntimeConfigFingerprintForScope(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
 }): string {
   return options.characterScope === undefined || options.overlay === undefined
-    ? createRuntimeConfigFingerprint(options.globalConfig)
+    ? createRuntimeConfigFingerprint(
+        options.globalConfig,
+        options.pluginManifests,
+      )
     : createLayeredRuntimeConfigFingerprint({
         globalConfig: options.globalConfig,
         characterId: options.characterScope.characterId,
         overlayConfig: characterOverlayFingerprintLayer(options.overlay),
+        pluginManifests: options.pluginManifests,
       });
 }
 

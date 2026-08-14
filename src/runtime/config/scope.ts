@@ -90,6 +90,7 @@ type RuntimePluginConfigControlRequest = Extract<
 
 export function applyRuntimeConfigControlOperation(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly expectedFingerprint?: string;
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
@@ -122,6 +123,7 @@ export function applyRuntimeConfigControlOperation(options: {
 
   const transaction = applyRuntimeConfigControlTransaction({
     target,
+    pluginManifests: options.pluginManifests,
     ...(options.expectedFingerprint === undefined
       ? {}
       : {expectedFingerprint: options.expectedFingerprint}),
@@ -160,6 +162,7 @@ export type SimulatedCharacterOverlayCandidate =
  */
 export function simulateCharacterOverlayCandidate(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request?: RuntimeConfigControlRequest;
   readonly characterMaterialization?: RuntimeConfigCharacterMaterialization;
 }): SimulatedCharacterOverlayCandidate {
@@ -177,6 +180,7 @@ export function simulateCharacterOverlayCandidate(options: {
     const prepared = prepareScopedRuntimeConfigControlCandidate({
       target,
       snapshot: readRuntimeConfigControlSnapshot(target, {
+        pluginManifests: options.pluginManifests,
         requireCharacterMarker: false,
       }),
       ...(mutation.operation === undefined
@@ -210,6 +214,7 @@ export function simulateCharacterOverlayCandidate(options: {
 
 export function prepareRuntimeConfigControlOperation(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request: RuntimePluginConfigControlRequest;
   readonly expectedFingerprint: string;
 }): {
@@ -225,7 +230,9 @@ export function prepareRuntimeConfigControlOperation(options: {
     );
   }
 
-  const snapshot = readRuntimeConfigControlSnapshot(target);
+  const snapshot = readRuntimeConfigControlSnapshot(target, {
+    pluginManifests: options.pluginManifests,
+  });
   verifyRuntimeConfigControlExpectation(snapshot, options.expectedFingerprint);
   const prepared = prepareScopedRuntimeConfigControlCandidate({
     operation: mutation.operation,
@@ -445,6 +452,7 @@ function scopedPreparedCandidateFingerprint(options: {
       globalConfig: options.snapshot.globalDocument,
       characterId: options.target.runtimeLocation.characterScope.characterId,
       overlayConfig: options.candidate,
+      pluginManifests: options.snapshot.pluginManifests,
     });
   }
 
@@ -452,6 +460,7 @@ function scopedPreparedCandidateFingerprint(options: {
     globalConfig: options.candidate,
     characterScope: options.snapshot.characterRuntimeLocation?.characterScope,
     overlay: options.snapshot.characterOverlay?.overlay,
+    pluginManifests: options.snapshot.pluginManifests,
   });
 }
 

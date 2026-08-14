@@ -335,6 +335,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
       globalConfig: globalMutationBase,
       characterScope,
       overlay: overlayConfig,
+      pluginManifests,
     }),
     pluginConfigControl: Object.freeze({
       pluginManifests,

@@ -1890,6 +1890,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       reconcileConfigEffect(effect) {
         if (!driftApplied) {
           applyRuntimeConfigControlOperation({
+            pluginManifests: [],
             target: resolveRuntimeConfigScopeTarget({
               runtimeLocation: runtimeLocationForTest({
                 configPath: fixture.configPath,

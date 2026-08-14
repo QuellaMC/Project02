@@ -105,11 +105,15 @@ function isAbsoluteHttpOrigin(value: string): boolean {
     const url = new URL(value);
 
     // Endpoint paths are appended as text, so a query or fragment would
-    // silently move where every request lands.
+    // silently move where every request lands. URL userinfo is rejected
+    // too: Node's fetch refuses such requests, which would surface as a
+    // fake outage instead of the field to fix.
     return (
       (url.protocol === 'http:' || url.protocol === 'https:') &&
       url.search === '' &&
-      url.hash === ''
+      url.hash === '' &&
+      url.username === '' &&
+      url.password === ''
     );
   } catch {
     return false;

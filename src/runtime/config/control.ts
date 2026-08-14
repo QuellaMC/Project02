@@ -134,6 +134,7 @@ export function inspectRuntimePluginConfig(options: {
       globalConfig: mutationBase,
       characterScope,
       overlayConfig,
+      pluginManifests: manifests,
     }),
   });
 }
@@ -143,11 +144,13 @@ function layeredControlFingerprint(options: {
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlayConfig:
     ReturnType<typeof readCharacterOverlayForScope>['overlay'] | undefined;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
 }): string {
   return layeredRuntimeConfigFingerprintForScope({
     globalConfig: options.globalConfig,
     characterScope: options.characterScope,
     overlay: options.overlayConfig,
+    pluginManifests: options.pluginManifests,
   });
 }
 

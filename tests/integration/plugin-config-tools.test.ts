@@ -162,6 +162,7 @@ describe('host-owned runtime plugin management tools', () => {
       scope: 'global',
     });
     const prepared = prepareRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: before.fingerprint,
       request: {
@@ -1667,6 +1668,7 @@ describe('host-owned runtime plugin management tools', () => {
       }),
       toolConfirmationHandler: () => {
         applyRuntimeConfigControlOperation({
+          pluginManifests: [],
           target: resolveRuntimeConfigScopeTarget({
             runtimeLocation: runtimeLocationForTest({
               configPath: configPath,

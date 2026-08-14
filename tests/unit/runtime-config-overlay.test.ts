@@ -45,6 +45,7 @@ function loadCharacterOverlay(
 
 function overlayFingerprint(dataRoot: string, characterId = 'mira'): string {
   return layeredRuntimeConfigFingerprintForScope({
+    pluginManifests: [],
     globalConfig: {version: runtimeConfigVersion},
     characterScope: {characterId, dataRoot},
     overlay: loadCharacterOverlay(dataRoot, characterId),

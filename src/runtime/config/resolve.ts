@@ -188,6 +188,7 @@ export function resolveEffectiveProject02RuntimeConfig(
         userDisplayName,
         redactedPluginConfigs: pluginResolution.redactedPluginConfigs,
       }),
+      options.pluginManifests ?? [],
     ),
   } satisfies ResolvedProject02RuntimeConfig);
 }

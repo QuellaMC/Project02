@@ -32,6 +32,7 @@ import {
   writeRuntimeConfig,
   runtimeLocationForTest,
 } from '../support/runtime-config.ts';
+import {characterOnlyConfigPlugin} from '../support/runtime-config-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 function expectations(
@@ -266,6 +267,32 @@ describe('first-selection materialization through startup', () => {
     });
   });
 
+  it('refuses a package that ships a credential for a secret field', () => {
+    const plugin = characterOnlyConfigPlugin('scope.package-secret');
+    const plan = planCharacterPackagePluginMaterialization({
+      expectations: {
+        required: [],
+        recommended: ['scope.package-secret'],
+        config: {
+          'scope.package-secret': {apiKey: 'shipped-credential'},
+        },
+      },
+      pluginManifests: [plugin.manifest],
+    });
+
+    // A package is distributed: a credential inside one would be handed
+    // to every installer, so it never materializes.
+    expect(plan.status).toBe('invalid');
+    if (plan.status !== 'invalid') {
+      return;
+    }
+    expect(plan.diagnostics.map(diagnostic => diagnostic.message)).toEqual([
+      expect.stringContaining(
+        'plugins.scope.package-secret.config.apiKey',
+      ) as string,
+    ]);
+  });
+
   it('reports a broken character secrets env instead of silently reading nothing', async () => {
     const homeRoot = homeWithCharacter({characterId: 'seeded'});
     const dataRoot = characterDataDirPath(homeRoot, 'seeded');
@@ -454,6 +481,7 @@ describe('first-selection materialization through startup', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'document',

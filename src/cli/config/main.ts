@@ -1,3 +1,4 @@
+import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
   characterSecretsEnvPath,
@@ -340,6 +341,9 @@ async function runRuntimeConfigDocumentCommand(
   });
   const result = applyRuntimeConfigControlOperation({
     target,
+    // Document commands run before plugin discovery and round-trip no
+    // expectation, so there are no manifests to redact against here.
+    pluginManifests: [],
     request: {
       kind: 'document',
       operation: parsed.command.operation,
@@ -348,6 +352,12 @@ async function runRuntimeConfigDocumentCommand(
 
   writeRuntimeConfigMutationResult(options.stdout, result);
   return 0;
+}
+
+function catalogManifests(
+  catalogEntries: Readonly<Record<string, RuntimePluginCatalogEntry>>,
+): readonly RuntimePluginManifest[] {
+  return Object.values(catalogEntries).map(entry => entry.manifest);
 }
 
 function isPluginActivationOperation(
@@ -401,6 +411,7 @@ async function runManifestAwarePluginActivation(options: {
   });
   const result = applyRuntimeConfigControlOperation({
     target,
+    pluginManifests: catalogManifests(startup.activationPlan.catalogEntries),
     request: {
       kind: 'plugin_activation',
       manifest: definition.manifest,
@@ -684,6 +695,7 @@ function applyRuntimePluginSecretSetCommand(options: {
 
   return applyRuntimeConfigControlOperation({
     target,
+    pluginManifests: catalogManifests(options.catalogEntries),
     request: {
       kind: 'plugin_config',
       manifest: definition.manifest,

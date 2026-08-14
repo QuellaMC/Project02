@@ -99,6 +99,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'plugin_config',
@@ -148,6 +149,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'plugin_config',
@@ -190,6 +192,7 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: globalTarget,
       request: {
         kind: 'document',
@@ -220,6 +223,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: secretTarget,
         request: {
           kind: 'plugin_config',
@@ -274,6 +278,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'document',
@@ -313,6 +318,7 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'document',
@@ -364,6 +370,7 @@ describe('scope-aware runtime config mutations', () => {
     symlinkSync(secondHome, authoredHome);
 
     const result = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'plugin_config',
@@ -422,6 +429,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'document',
@@ -459,6 +467,7 @@ describe('scope-aware runtime config mutations', () => {
       scope: 'character',
     });
     const result = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'document',
@@ -494,6 +503,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(result.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
+        pluginManifests: [],
         globalConfig,
         characterId: 'mira',
         overlayConfig: result.config,
@@ -519,6 +529,7 @@ describe('scope-aware runtime config mutations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'document',
@@ -530,6 +541,7 @@ describe('scope-aware runtime config mutations', () => {
     // A character's credential lands beside its overlay, never in the
     // shared home env, so two characters can hold different accounts.
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'plugin_config',
@@ -570,6 +582,7 @@ describe('scope-aware runtime config mutations', () => {
     };
 
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'plugin_config',
@@ -616,7 +629,11 @@ describe('scope-aware runtime config mutations', () => {
       },
     };
 
-    applyRuntimeConfigControlOperation({target, request: secretSet});
+    applyRuntimeConfigControlOperation({
+      pluginManifests: [],
+      target,
+      request: secretSet,
+    });
 
     expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
       'ENV_TARGET_KEY="character-value"',
@@ -631,7 +648,11 @@ describe('scope-aware runtime config mutations', () => {
     );
 
     expect(() =>
-      applyRuntimeConfigControlOperation({target, request: secretSet}),
+      applyRuntimeConfigControlOperation({
+        pluginManifests: [],
+        target,
+        request: secretSet,
+      }),
     ).toThrow('must be a regular file');
   });
 
@@ -647,6 +668,7 @@ describe('scope-aware runtime config mutations', () => {
     // The marker is proof that the guarded initializer ran.
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'document',
@@ -676,6 +698,7 @@ describe('scope-aware runtime config mutations', () => {
     });
 
     const freshExpected = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       request: {
         kind: 'document',
@@ -688,6 +711,7 @@ describe('scope-aware runtime config mutations', () => {
     }).fingerprint;
 
     const committed = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: freshExpected,
       request: {
@@ -703,6 +727,7 @@ describe('scope-aware runtime config mutations', () => {
     expect(committed.config.project02?.['userDisplayName']).toBe('Second');
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: freshExpected,
         request: {
@@ -743,6 +768,7 @@ describe('scope-aware runtime config mutations', () => {
       scope: 'character',
     });
     const result = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: expected,
       request: {
@@ -780,6 +806,7 @@ describe('scope-aware runtime config mutations', () => {
     });
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: bareTarget,
         expectedFingerprint: resolveScopedExpected(bareHome),
         request: {
@@ -957,6 +984,7 @@ describe('plugin manifest config scope policy', () => {
     expect(characterViewOfShared.activation.editableInScope).toBe(true);
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: globalTarget,
         request: {
           kind: 'plugin_config',
@@ -974,6 +1002,7 @@ describe('plugin manifest config scope policy', () => {
     // A document already holding a forbidden value must be repairable:
     // the console offers Unset, and the rule allows exactly that.
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: globalTarget,
       request: {
         kind: 'plugin_config',
@@ -983,6 +1012,7 @@ describe('plugin manifest config scope policy', () => {
       },
     });
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: globalTarget,
       request: {kind: 'plugin_activation', manifest: characterOnly.manifest},
     });
@@ -1128,6 +1158,7 @@ describe('plugin manifest config scope policy', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: globalTarget,
         request: {
           kind: 'plugin_activation',
@@ -1138,6 +1169,7 @@ describe('plugin manifest config scope policy', () => {
     ).toThrow('character-only');
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: globalTarget,
         request: {
           kind: 'plugin_config',
@@ -1154,6 +1186,7 @@ describe('plugin manifest config scope policy', () => {
     expect(readFileSync(configPath, 'utf8')).toBe(globalBefore);
 
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: characterTarget,
       request: {
         kind: 'plugin_activation',
@@ -1162,6 +1195,7 @@ describe('plugin manifest config scope policy', () => {
       },
     });
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: characterTarget,
       request: {
         kind: 'plugin_config',
@@ -1197,6 +1231,7 @@ function resolveScopedExpected(homeRoot: string): string {
   }
 
   return createLayeredRuntimeConfigFingerprint({
+    pluginManifests: [],
     globalConfig: loaded.config,
     characterId: 'mira',
     overlayConfig: null,
@@ -1249,6 +1284,7 @@ describe('character-scoped plugin control capability', () => {
     });
     const prepared = capability.prepareOperation({
       target,
+      pluginManifests: [],
       expectedFingerprint: fingerprint,
       request: {
         kind: 'plugin_config',
@@ -1268,6 +1304,7 @@ describe('character-scoped plugin control capability', () => {
 
     const applied = capability.applyOperation({
       target,
+      pluginManifests: [],
       expectedFingerprint: fingerprint,
       request: {
         kind: 'plugin_config',
@@ -1359,6 +1396,7 @@ describe('plugin inspection target authorship', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: inspectRuntimePluginConfig({
         ...base,
@@ -1462,6 +1500,7 @@ describe('scoped writes over a broken global layer', () => {
         scope: 'character',
       });
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'document',
@@ -1493,6 +1532,7 @@ describe('stale global expectations', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: 'stale-fingerprint',
         request: {
@@ -1548,8 +1588,10 @@ describe('character targets bound to an activated runtime', () => {
     });
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: miraTarget,
         expectedFingerprint: createLayeredRuntimeConfigFingerprint({
+          pluginManifests: [],
           globalConfig: originalGlobalConfig,
           characterId: 'mira',
           overlayConfig: null,
@@ -1567,6 +1609,7 @@ describe('character targets bound to an activated runtime', () => {
     expect(existsSync(characterOverlayConfigPath(miraDataRoot))).toBe(false);
 
     const result = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: miraTarget,
       request: {
         kind: 'document',
@@ -1607,6 +1650,7 @@ describe('global writes that move the character selection', () => {
       scope: 'character',
     });
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: novaTarget,
       request: {
         kind: 'document',
@@ -1626,6 +1670,7 @@ describe('global writes that move the character selection', () => {
     }
 
     const expected = createLayeredRuntimeConfigFingerprint({
+      pluginManifests: [],
       globalConfig: globalDocument,
       characterId: 'mira',
       overlayConfig: null,
@@ -1637,6 +1682,7 @@ describe('global writes that move the character selection', () => {
       scope: 'global',
     });
     const switched = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: globalTarget,
       expectedFingerprint: expected,
       request: {
@@ -1649,6 +1695,7 @@ describe('global writes that move the character selection', () => {
     // changed authored default must not retarget.
     expect(switched.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
+        pluginManifests: [],
         globalConfig: switched.config,
         characterId: 'mira',
         overlayConfig: null,
