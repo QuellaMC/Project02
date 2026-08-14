@@ -614,6 +614,41 @@ describe('mem0 embedded engine backend', () => {
     expect(errorMessageOf(searchError)).not.toContain('private text');
   });
 
+  it('never starts engine work under an already-aborted signal', async () => {
+    let started = 0;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            started += 1;
+
+            return new Promise<never>(() => {});
+          },
+          search() {
+            started += 1;
+
+            return new Promise<never>(() => {});
+          },
+        }),
+    });
+    const controller = new AbortController();
+
+    controller.abort();
+
+    // A queued job whose scope already expired must settle as cancelled
+    // without touching the model or the store at all.
+    await expect(
+      backend.add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({failureKind: 'cancelled'});
+    expect(started).toBe(0);
+  });
+
   it('retries engine construction after a failed load instead of caching the rejection', async () => {
     let attempts = 0;
     const backend = createMem0OssBackend({

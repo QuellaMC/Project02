@@ -6,7 +6,10 @@ import {
   listDirectoryNamesSync,
   makeDirectorySync,
 } from '../../../shared/file-system.ts';
-import {firstUnacceptableComponent} from '../../../shared/real-path.ts';
+import {
+  describeRealEntry,
+  firstUnacceptableComponent,
+} from '../../../shared/real-path.ts';
 
 import {isRecord} from '../../api/validation-primitives.ts';
 import type {RuntimePluginSourceReference} from '../../api/types.ts';
@@ -679,7 +682,18 @@ export function createDefaultMem0OssEngineLoader(
     assertRealMem0OssStorageDir(settings.storageDir);
     // The engine creates these databases itself, with the process umask;
     // they hold the same private conversation material as the runtime's
-    // own stores, which are owner-only.
+    // own stores, which are owner-only. The database entries are checked
+    // too: a symlinked one would have the engine write -- and the
+    // permission pass chmod -- whatever file the link points at.
+    for (const entry of ['vectors.db', 'history.db']) {
+      const kind = describeRealEntry(join(settings.storageDir, entry)).kind;
+
+      if (kind !== 'absent' && kind !== 'file') {
+        throw new TypeError(
+          `Mem0 embedded storage entry "${entry}" must be a regular file inside the character store.`,
+        );
+      }
+    }
     makeDirectorySync(settings.storageDir, {recursive: true, mode: 0o700});
 
     // The constructor already wires provider clients with the key and
@@ -755,17 +769,20 @@ export function createMem0OssBackend(options: {
       // server it called raises can carry request bodies, endpoint
       // details, conversation text, or parts of a credential -- so only
       // the bounded form leaves, for every verb, not just capture.
-      const loaded = await engine(searchOptions.signal);
       const response: unknown = await settledOrAborted(
-        boundedEngineCall('search', () =>
-          loaded.search(searchOptions.query, {
-            topK: searchOptions.limit,
-            filters: {
-              user_id: searchOptions.userId,
-              agent_id: searchOptions.agentId,
-            },
-          }),
-        ),
+        async () => {
+          const loaded = await engine(searchOptions.signal);
+
+          return boundedEngineCall('search', () =>
+            loaded.search(searchOptions.query, {
+              topK: searchOptions.limit,
+              filters: {
+                user_id: searchOptions.userId,
+                agent_id: searchOptions.agentId,
+              },
+            }),
+          );
+        },
         searchOptions.signal,
         'search',
       );
@@ -776,19 +793,22 @@ export function createMem0OssBackend(options: {
       return hits;
     },
     async add(addOptions) {
-      const loaded = await engine(addOptions.signal);
       const response: unknown = await settledOrAborted(
-        boundedEngineCall('add', () =>
-          loaded.add([...addOptions.messages], {
-            userId: addOptions.userId,
-            agentId: addOptions.agentId,
-            ...(addOptions.runId === undefined
-              ? {}
-              : {runId: addOptions.runId}),
-            infer: addOptions.infer,
-            ...mem0SourceMetadata(addOptions.sourceIds),
-          }),
-        ),
+        async () => {
+          const loaded = await engine(addOptions.signal);
+
+          return boundedEngineCall('add', () =>
+            loaded.add([...addOptions.messages], {
+              userId: addOptions.userId,
+              agentId: addOptions.agentId,
+              ...(addOptions.runId === undefined
+                ? {}
+                : {runId: addOptions.runId}),
+              infer: addOptions.infer,
+              ...mem0SourceMetadata(addOptions.sourceIds),
+            }),
+          );
+        },
         addOptions.signal,
         'add',
       );
@@ -829,23 +849,25 @@ export function createMem0OssBackend(options: {
  * The engine takes no signal of its own, so a stalled model request would
  * outlive the caller that gave up on it: the drain settles when the
  * signal fires, and the abandoned work no longer holds the shutdown.
+ * Taking a thunk keeps an already-cancelled call from starting the
+ * model-backed work at all.
  */
 async function settledOrAborted(
-  work: Promise<unknown>,
+  start: () => Promise<unknown>,
   signal: AbortSignal,
   operation: string,
 ): Promise<unknown> {
+  if (signal.aborted) {
+    throw new Mem0RequestError({operation, failureKind: 'cancelled'});
+  }
+
+  const work = start();
   const aborted = new Promise<never>((_resolve, rejectAborted) => {
     const fail = () => {
       rejectAborted(
         new Mem0RequestError({operation, failureKind: 'cancelled'}),
       );
     };
-
-    if (signal.aborted) {
-      fail();
-      return;
-    }
 
     signal.addEventListener('abort', fail, {once: true});
     // The race already reports this promise's outcome; this derived one
