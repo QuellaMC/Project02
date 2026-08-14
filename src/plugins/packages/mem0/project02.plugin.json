@@ -47,7 +47,7 @@
         },
         {
           "name": "baseUrl",
-          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names.",
+          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
           "valueType": "string",

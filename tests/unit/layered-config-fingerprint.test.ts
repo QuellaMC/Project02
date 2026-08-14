@@ -47,6 +47,29 @@ describe('layered runtime config fingerprint', () => {
     expect(
       createRuntimeConfigFingerprint(withSecret('hunter2'), [manifest]),
     ).not.toBe(createRuntimeConfigFingerprint(withSecret('hunter2'), []));
+
+    // A malformed value at a secret field -- which an inactive plugin's
+    // config never had validated -- is still a value, so only its
+    // presence is hashed.
+    const malformed = (token: string): Project02RuntimeConfig => ({
+      version: runtimeConfigVersion,
+      plugins: {'demo-config': {config: {apiKey: {token}, tone: 'warm'}}},
+    });
+
+    expect(
+      createRuntimeConfigFingerprint(malformed('weak-passcode'), [manifest]),
+    ).toBe(createRuntimeConfigFingerprint(malformed('other'), [manifest]));
+
+    // The variable an env ref names stays in the hash: repointing a
+    // field at another variable is a change an expectation must notice.
+    const withRef = (envVar: string): Project02RuntimeConfig => ({
+      version: runtimeConfigVersion,
+      plugins: {'demo-config': {config: {apiKey: {$env: envVar}}}},
+    });
+
+    expect(
+      createRuntimeConfigFingerprint(withRef('KEY_A'), [manifest]),
+    ).not.toBe(createRuntimeConfigFingerprint(withRef('KEY_B'), [manifest]));
   });
 
   it('never collides with the per-file fingerprint of the same global document', () => {

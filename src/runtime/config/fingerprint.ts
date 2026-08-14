@@ -99,7 +99,7 @@ function redactAuthoredSecretFields(
             config: Object.fromEntries(
               Object.entries(pluginConfig['config']).map(([name, value]) => [
                 name,
-                fields.has(name) && typeof value === 'string'
+                fields.has(name) && !isEnvRefValue(value)
                   ? {$secret: 'authored'}
                   : value,
               ]),
@@ -109,6 +109,19 @@ function redactAuthoredSecretFields(
       }),
     ),
   };
+}
+
+/**
+ * An env ref names a variable, not a credential, and the name has to
+ * stay in the hash: repointing a field at another variable is a change
+ * an expectation must notice. Everything else authored at a secret
+ * field -- a string, or a malformed shape an inactive plugin never had
+ * validated -- is the value itself, and only its presence is hashed.
+ */
+function isEnvRefValue(value: unknown): boolean {
+  return (
+    isPlainRecord(value) && typeof value[secretEnvMarkerField] === 'string'
+  );
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
