@@ -17,6 +17,13 @@ export const mem0PluginId = 'mem0';
  */
 const mem0MaxPendingCaptures = 8;
 
+/**
+ * Per-capture bound. A local model can legitimately take tens of seconds
+ * to extract; past a minute the request is stuck, and settling it is what
+ * lets the queue advance instead of losing every later turn behind it.
+ */
+const mem0CaptureTimeoutMs = 60_000;
+
 /** Node's timer ceiling; beyond it a timeout fires immediately. */
 const maximumDrainWaitMs = 2_147_483_647;
 
@@ -44,9 +51,6 @@ export function createMem0MemoryProvider(options: {
   // a streak a later success can clear.
   let lostCaptures = 0;
   let lastLossSummary: string | undefined;
-  // A backend that has answered real work is proven reachable, whatever
-  // its own readiness check can establish on its own.
-  let backendAnswered = false;
 
   return {
     id: mem0PluginId,
@@ -117,7 +121,13 @@ export function createMem0MemoryProvider(options: {
             sourceIds: turn.sourceReferences.map(reference => reference.id),
             // The backend owns extraction: it decides what becomes memory.
             infer: true,
-            signal: backgroundWork.signal,
+            // Each job gets its own bound: the hook timeout was already
+            // honored at queue time, and one stalled extraction must
+            // settle instead of holding every later capture behind it.
+            signal: AbortSignal.any([
+              backgroundWork.signal,
+              AbortSignal.timeout(mem0CaptureTimeoutMs),
+            ]),
           });
 
           // A queue receipt is an acknowledgement, not a stored memory:
@@ -126,7 +136,6 @@ export function createMem0MemoryProvider(options: {
             reference => reference.kind === 'memory',
           ).length;
 
-          backendAnswered = true;
           lastCaptureSummary =
             references.length === 0
               ? 'No memory extracted from the last captured turn.'
@@ -135,7 +144,7 @@ export function createMem0MemoryProvider(options: {
                 : `Stored ${String(stored)} memory item(s) from the last captured turn.`;
         } catch (error: unknown) {
           lostCaptures += 1;
-          lastLossSummary = `${String(lostCaptures)} capture(s) never stored; most recent: ${boundedCaptureFailure(error)}`;
+          lastLossSummary = `${String(lostCaptures)} capture(s) never stored; most recent: ${captureFailureMessage(error)}`;
         } finally {
           pendingCaptures -= 1;
         }
@@ -221,10 +230,10 @@ export function createMem0MemoryProvider(options: {
         }
 
         return {
-          // A check that contacted nothing cannot report health: the
-          // model endpoint, the key, and the model name are all still
-          // unproven until the first real call.
-          status: readiness.verified || backendAnswered ? 'ok' : 'degraded',
+          // The backend is the authority on what its check proved: a ping
+          // that contacted nothing reports itself unverified until real
+          // work has exercised the model and embedder.
+          status: readiness.verified ? 'ok' : 'degraded',
           summary:
             lastCaptureSummary === undefined
               ? `${summary}${backlog}`.trim()
@@ -278,16 +287,14 @@ export function createMem0MemoryProvider(options: {
 }
 
 /**
- * The REST transports raise bounded errors of their own; an embedded
- * engine raises whatever its SDK or the server it called did, which can
- * carry request bodies, endpoint details, conversation text, or parts of
- * a credential. Health and evidence show this, so only the bounded form
- * travels.
+ * Every backend bounds its own failures at the third-party boundary --
+ * the REST transports and the embedded engine alike -- so a message that
+ * arrives here is already safe to show and to persist.
  */
-function boundedCaptureFailure(error: unknown): string {
-  return error instanceof Mem0RequestError
+function captureFailureMessage(error: unknown): string {
+  return error instanceof Error && error.message.length > 0
     ? error.message
-    : 'the memory engine rejected the write; check its model and embedder settings.';
+    : 'the memory backend rejected the write.';
 }
 
 /**

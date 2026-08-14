@@ -12,9 +12,6 @@
       "better-sqlite3"
     ],
     "peerDependencyRules": {
-      "allowedVersions": {
-        "mem0ai>better-sqlite3": "13"
-      },
       "ignoreMissing": [
         "@cloudflare/workers-types",
         "@types/jest",
@@ -46,7 +43,7 @@
   },
   "dependencies": {
     "ajv": "^8.20.0",
-    "better-sqlite3": "^13.0.3",
+    "better-sqlite3": "^12.11.1",
     "drizzle-orm": "^0.45.2",
     "mem0ai": "^3.1.6",
     "pg": "8.11.3"

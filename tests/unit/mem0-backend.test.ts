@@ -12,6 +12,7 @@ import {
   createMem0ServerBackend,
   mem0OssEmbedderDimsForModel,
   mem0OssDefaultEmbedderModel,
+  mem0OssOpenAiEndpoint,
   mem0OssEngineConfig,
   Mem0RequestError,
   type Mem0FetchFunction,
@@ -377,7 +378,9 @@ describe('mem0 embedded engine backend', () => {
   it('builds the engine config with plugin-scoped storage and cloud defaults', () => {
     const config = mem0OssEngineConfig({
       llmApiKey: 'llm-key',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
       embedderApiKey: 'llm-key',
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
       storageDir: '/store/plugin-data/mem0/oss',
     });
 
@@ -386,11 +389,11 @@ describe('mem0 embedded engine backend', () => {
         'Refer to people by the names used in the conversation; never call anyone "user" or "assistant".',
       llm: {
         provider: 'openai',
-        config: {apiKey: 'llm-key'},
+        config: {apiKey: 'llm-key', baseURL: mem0OssOpenAiEndpoint},
       },
       embedder: {
         provider: 'openai',
-        config: {apiKey: 'llm-key'},
+        config: {apiKey: 'llm-key', baseURL: mem0OssOpenAiEndpoint},
       },
       vectorStore: {
         provider: 'memory',
@@ -418,7 +421,9 @@ describe('mem0 embedded engine backend', () => {
     });
     const overridden = mem0OssEngineConfig({
       llmApiKey: 'k',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
       embedderApiKey: 'k',
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
       embedderModel: 'text-embedding-3-large',
       embedderDims: 999,
       storageDir: '/store/plugin-data/mem0/oss',
@@ -512,6 +517,103 @@ describe('mem0 embedded engine backend', () => {
     ]);
   });
 
+  it('claims readiness only after the model and the embedder have both answered', async () => {
+    let extractNothing = true;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            return Promise.resolve({
+              results: extractNothing ? [] : [{id: 'stored-1'}],
+            });
+          },
+          search() {
+            return Promise.resolve({results: []});
+          },
+        }),
+    });
+    const capture = {
+      messages: [{role: 'user' as const, content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      infer: true,
+      signal: abortSignal,
+    };
+
+    // Construction wires clients without contacting them.
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+
+    // An extraction that stored nothing never reached the embedder, so
+    // health must not call the embedder proven on the strength of it.
+    await backend.add(capture);
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+
+    // A search proves the embedder; with the model already proven above,
+    // readiness is now real work, not inference.
+    await backend.search({
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 4,
+      signal: abortSignal,
+    });
+    extractNothing = false;
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: true,
+    });
+  });
+
+  it('bounds engine failures so third-party errors never leave the adapter', async () => {
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            return Promise.reject(
+              new Error('401 from https://api.openai.com/v1 with sk-secret'),
+            );
+          },
+          search() {
+            return Promise.reject(
+              new Error('response body: {"messages":["private text"]}'),
+            );
+          },
+        }),
+    });
+
+    // SDK errors can carry endpoints, response bodies, conversation text,
+    // or credential fragments; only the bounded form may reach evidence.
+    const addError = await backend
+      .add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: false,
+        signal: abortSignal,
+      })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    const searchError = await backend
+      .search({
+        query: 'tea',
+        userId: 'user-1',
+        agentId: 'mira',
+        limit: 4,
+        signal: abortSignal,
+      })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    expect(addError).toBeInstanceOf(Mem0RequestError);
+    expect(addError).toMatchObject({failureKind: 'engine'});
+    expect(searchError).toBeInstanceOf(Mem0RequestError);
+    expect(errorMessageOf(addError)).not.toContain('sk-secret');
+    expect(errorMessageOf(searchError)).not.toContain('private text');
+  });
+
   it('retries engine construction after a failed load instead of caching the rejection', async () => {
     let attempts = 0;
     const backend = createMem0OssBackend({
@@ -547,7 +649,12 @@ describe('mem0 embedded engine backend', () => {
   });
 
   it('starts a new vector collection when the embedder identity changes', () => {
-    const base = {llmApiKey: 'k', storageDir: '/store'};
+    const base = {
+      llmApiKey: 'k',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
+      storageDir: '/store',
+    };
     const collectionOf = (settings: Record<string, unknown>) => {
       const store = mem0OssEngineConfig({...base, ...settings})[
         'vectorStore'
@@ -614,6 +721,8 @@ describe('mem0 embedded engine backend', () => {
 
     await createDefaultMem0OssEngineLoader({
       llmApiKey: 'k',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
       storageDir,
     })({signal: abortSignal});
 
@@ -632,6 +741,8 @@ describe('mem0 embedded engine backend', () => {
     try {
       const engine = await createDefaultMem0OssEngineLoader({
         llmApiKey: 'k',
+        llmBaseUrl: mem0OssOpenAiEndpoint,
+        embedderBaseUrl: mem0OssOpenAiEndpoint,
         storageDir: createTestTempRoot('mem0-telemetry-'),
       })({signal: abortSignal});
 

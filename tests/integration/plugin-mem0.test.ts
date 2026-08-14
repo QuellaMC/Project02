@@ -450,6 +450,43 @@ describe('mem0 plugin package', () => {
       status: 'rejected',
       message: expect.stringContaining('MEM0_OSS_LLM_API_KEY') as string,
     });
+
+    // Every rule runs on the effective endpoints, so spelling out the
+    // cloud default behaves exactly like leaving it unset.
+    const spelledOutDefault = mem0OssSettingsFromInput(
+      mem0FactoryInput('oss', {
+        ossEmbedderBaseUrl: 'https://api.openai.com/v1',
+      }),
+    );
+    const cloudEmbedderWithoutKey = mem0OssSettingsFromInput({
+      ...mem0FactoryInput('oss'),
+      resolvedConfig: resolvedConfig({
+        backend: 'oss',
+        ossLlmBaseUrl: 'http://localhost:1234/v1',
+        ossEmbedderBaseUrl: 'https://api.openai.com/v1',
+      }),
+    });
+    const schemeless = mem0OssSettingsFromInput({
+      ...mem0FactoryInput('oss'),
+      resolvedConfig: resolvedConfig({
+        backend: 'oss',
+        ossLlmApiKey: 'oss-llm-key',
+        ossLlmBaseUrl: 'localhost:11434/v1',
+      }),
+    });
+
+    expect(spelledOutDefault).toMatchObject({
+      status: 'resolved',
+      value: {embedderApiKey: 'oss-llm-key'},
+    });
+    expect(cloudEmbedderWithoutKey).toMatchObject({
+      status: 'rejected',
+      message: expect.stringContaining('MEM0_OSS_EMBEDDER_API_KEY') as string,
+    });
+    expect(schemeless).toMatchObject({
+      status: 'rejected',
+      message: expect.stringContaining('ossLlmBaseUrl') as string,
+    });
   });
 
   it('captures turns with speaker names instead of role labels', async () => {

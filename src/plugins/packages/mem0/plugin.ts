@@ -12,6 +12,7 @@ import {
   type Mem0Backend,
   type Mem0FetchFunction,
   type Mem0OssEngineLoader,
+  mem0OssOpenAiEndpoint,
   type Mem0OssSettings,
 } from './backend.ts';
 import {
@@ -137,14 +138,7 @@ function invalidEndpointMessage(fieldName: string): string {
  * would withhold the inherited key over a trailing slash and leave the
  * embedder authenticating with nothing.
  */
-function sameEndpoint(
-  first: string | undefined,
-  second: string | undefined,
-): boolean {
-  if (first === undefined || second === undefined) {
-    return first === second;
-  }
-
+function sameEndpoint(first: string, second: string): boolean {
   try {
     const left = new URL(first);
     const right = new URL(second);
@@ -184,17 +178,49 @@ type Mem0OssSettingsResolution =
 
 /**
  * Everything speaks the OpenAI wire format, so the surface is endpoints,
- * optional keys, and model names. An unset endpoint means the OpenAI
- * cloud, which is the one place a key is genuinely required; the embedder
- * reuses the extraction endpoint and key unless given its own.
+ * optional keys, and model names. Every rule below runs on the effective
+ * endpoints -- an unset field resolved to the OpenAI cloud -- so a
+ * spelled-out default behaves exactly like the default: the embedder
+ * reuses the extraction endpoint and key unless given its own, and the
+ * cloud is the one endpoint that requires a key.
  */
 export function mem0OssSettingsFromInput(
   input: RuntimePluginFactoryInput,
 ): Mem0OssSettingsResolution {
-  const llmApiKey = configuredStringValue(input, 'ossLlmApiKey');
-  const llmBaseUrl = configuredStringValue(input, 'ossLlmBaseUrl');
+  const configuredLlmBaseUrl = configuredStringValue(input, 'ossLlmBaseUrl');
+  const configuredEmbedderBaseUrl = configuredStringValue(
+    input,
+    'ossEmbedderBaseUrl',
+  );
 
-  if (llmBaseUrl === undefined && llmApiKey === undefined) {
+  // Same rule as the REST endpoints: a schemeless spelling would fail
+  // inside the SDK on first use, naming nothing the operator can fix.
+  for (const [field, value] of [
+    ['ossLlmBaseUrl', configuredLlmBaseUrl],
+    ['ossEmbedderBaseUrl', configuredEmbedderBaseUrl],
+  ] as const) {
+    if (value !== undefined && !isAbsoluteHttpOrigin(value)) {
+      return {
+        status: 'rejected',
+        message: `Mem0 OSS ${field} must be an absolute http:// or https:// origin, not "${value}".`,
+      };
+    }
+  }
+
+  const llmApiKey = configuredStringValue(input, 'ossLlmApiKey');
+  const llmBaseUrl = configuredLlmBaseUrl ?? mem0OssOpenAiEndpoint;
+  const embedderBaseUrl = configuredEmbedderBaseUrl ?? llmBaseUrl;
+  // The key travels with its endpoint: inheriting it while the embedder
+  // points somewhere else would hand the extraction credential to a
+  // different service.
+  const embedderApiKey =
+    configuredStringValue(input, 'ossEmbedderApiKey') ??
+    (sameEndpoint(embedderBaseUrl, llmBaseUrl) ? llmApiKey : undefined);
+
+  if (
+    sameEndpoint(llmBaseUrl, mem0OssOpenAiEndpoint) &&
+    llmApiKey === undefined
+  ) {
     return {
       status: 'rejected',
       message:
@@ -202,14 +228,17 @@ export function mem0OssSettingsFromInput(
     };
   }
 
-  const embedderBaseUrl =
-    configuredStringValue(input, 'ossEmbedderBaseUrl') ?? llmBaseUrl;
-  // The key travels with its endpoint: inheriting it while the embedder
-  // points somewhere else would hand the extraction credential to a
-  // different service.
-  const embedderApiKey =
-    configuredStringValue(input, 'ossEmbedderApiKey') ??
-    (sameEndpoint(embedderBaseUrl, llmBaseUrl) ? llmApiKey : undefined);
+  if (
+    sameEndpoint(embedderBaseUrl, mem0OssOpenAiEndpoint) &&
+    embedderApiKey === undefined
+  ) {
+    return {
+      status: 'rejected',
+      message:
+        'Mem0 OSS embedding at the OpenAI endpoint needs the ossEmbedderApiKey config field (MEM0_OSS_EMBEDDER_API_KEY).',
+    };
+  }
+
   const llmModel = configuredStringValue(input, 'ossLlmModel');
   const embedderModel = configuredStringValue(input, 'ossEmbedderModel');
   const embedderDims = configuredEmbedderDims(input);
@@ -227,10 +256,10 @@ export function mem0OssSettingsFromInput(
     value: {
       ...(llmModel === undefined ? {} : {llmModel}),
       ...(llmApiKey === undefined ? {} : {llmApiKey}),
-      ...(llmBaseUrl === undefined ? {} : {llmBaseUrl}),
+      llmBaseUrl,
       ...(embedderModel === undefined ? {} : {embedderModel}),
       ...(embedderApiKey === undefined ? {} : {embedderApiKey}),
-      ...(embedderBaseUrl === undefined ? {} : {embedderBaseUrl}),
+      embedderBaseUrl,
       ...(embedderDims === undefined ? {} : {embedderDims}),
       // Mirrors characterPluginDataDirPath; the layout helper lives in
       // runtime storage, which packages cannot import without a cycle.

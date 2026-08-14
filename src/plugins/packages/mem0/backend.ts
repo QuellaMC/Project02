@@ -52,7 +52,6 @@ export type Mem0Backend = {
   add(
     options: Mem0AddOptions,
   ): Promise<readonly RuntimePluginSourceReference[]>;
-  /** Resolves with what readiness was actually established. */
   /**
    * Reports what the check actually established: `verified` false means
    * nothing was contacted, so health must not call the backend healthy on
@@ -89,7 +88,12 @@ export type Mem0FetchFunction = (
 }>;
 
 export type Mem0RequestFailureKind =
-  'http' | 'network' | 'malformed_response' | 'nothing_stored' | 'cancelled';
+  | 'http'
+  | 'network'
+  | 'malformed_response'
+  | 'nothing_stored'
+  | 'cancelled'
+  | 'engine';
 
 export class Mem0RequestError extends Error {
   readonly failureKind: Mem0RequestFailureKind;
@@ -121,6 +125,8 @@ function mem0RequestErrorMessage(options: {
       return `mem0 ${options.operation} failed: the backend created no memory for it.`;
     case 'cancelled':
       return `mem0 ${options.operation} was cancelled before the engine answered.`;
+    case 'engine':
+      return `mem0 ${options.operation} failed inside the embedded engine; check the OSS endpoint, key, and model settings.`;
   }
 }
 
@@ -505,7 +511,9 @@ const mem0OssFallbackEmbedderDims = 1536;
 
 /** What the engine uses when the embedder model and endpoint go unset. */
 export const mem0OssDefaultEmbedderModel = 'text-embedding-3-small';
-const mem0OssDefaultEmbedderEndpoint = 'https://api.openai.com/v1';
+/** The OpenAI cloud, which an unset OSS endpoint means -- and the one
+ * place a key is genuinely required. */
+export const mem0OssOpenAiEndpoint = 'https://api.openai.com/v1';
 
 export function mem0OssEmbedderDimsForModel(model: string | undefined): number {
   if (model === undefined) {
@@ -526,11 +534,12 @@ export function mem0OssEmbedderDimsForModel(model: string | undefined): number {
 export type Mem0OssSettings = {
   readonly llmModel?: string;
   readonly llmApiKey?: string;
-  /** Unset means the OpenAI cloud endpoint, which requires a key. */
-  readonly llmBaseUrl?: string;
+  /** Always effective: an unset config field resolved to the OpenAI cloud. */
+  readonly llmBaseUrl: string;
   readonly embedderModel?: string;
   readonly embedderApiKey?: string;
-  readonly embedderBaseUrl?: string;
+  /** Always effective: an unset config field resolved to the OpenAI cloud. */
+  readonly embedderBaseUrl: string;
   readonly embedderDims?: number;
   /** Engine SQLite files (vectors, history) live under this directory. */
   readonly storageDir: string;
@@ -578,8 +587,10 @@ function mem0OssCollectionName(
   // the model the engine already uses, or the OpenAI endpoint it already
   // calls -- must land in the same collection, or an operator who writes
   // one down loses every memory behind it.
+  // The model id passes through exactly: an endpoint with case-sensitive
+  // ids would otherwise mix two embedding spaces in one collection.
   const identity = [
-    (settings.embedderModel ?? mem0OssDefaultEmbedderModel).toLowerCase(),
+    settings.embedderModel ?? mem0OssDefaultEmbedderModel,
     canonicalEndpoint(settings.embedderBaseUrl),
     String(dimension),
   ].join('\u0000');
@@ -587,11 +598,7 @@ function mem0OssCollectionName(
   return `memories_${createHash('sha256').update(identity).digest('hex').slice(0, 12)}`;
 }
 
-function canonicalEndpoint(baseUrl: string | undefined): string {
-  if (baseUrl === undefined) {
-    return mem0OssDefaultEmbedderEndpoint;
-  }
-
+function canonicalEndpoint(baseUrl: string): string {
   try {
     const url = new URL(baseUrl);
 
@@ -675,9 +682,15 @@ export function createDefaultMem0OssEngineLoader(
     // own stores, which are owner-only.
     makeDirectorySync(settings.storageDir, {recursive: true, mode: 0o700});
 
-    const engine: unknown = Reflect.construct(memoryConstructor, [
-      mem0OssEngineConfig(settings),
-    ]);
+    // The constructor already wires provider clients with the key and
+    // endpoints in hand, so its failures are third-party content too.
+    const engine: unknown = await boundedEngineCall('load', () =>
+      Promise.resolve(
+        Reflect.construct(memoryConstructor, [
+          mem0OssEngineConfig(settings),
+        ]) as unknown,
+      ),
+    );
 
     restrictMem0OssStorageMode(settings.storageDir);
 
@@ -720,6 +733,11 @@ export function createMem0OssBackend(options: {
   readonly loadEngine: Mem0OssEngineLoader;
 }): Mem0Backend {
   let enginePromise: Promise<Mem0OssEngine> | undefined;
+  // Health can only claim what real work has proven: a search exercises
+  // the embedder, an extraction exercises the model, and neither vouches
+  // for the other.
+  let modelAnswered = false;
+  let embedderAnswered = false;
   // A failed construction (bad config, missing peer package) must retry
   // on the next call instead of caching the rejection forever. The signal
   // belongs to whichever call builds it: loading opens the store and its
@@ -732,46 +750,77 @@ export function createMem0OssBackend(options: {
 
   return Object.freeze({
     async search(searchOptions) {
+      // Loading keeps its own actionable failure messages; the engine
+      // CALL is the third-party boundary, where whatever the SDK or the
+      // server it called raises can carry request bodies, endpoint
+      // details, conversation text, or parts of a credential -- so only
+      // the bounded form leaves, for every verb, not just capture.
+      const loaded = await engine(searchOptions.signal);
       const response: unknown = await settledOrAborted(
-        (await engine(searchOptions.signal)).search(searchOptions.query, {
-          topK: searchOptions.limit,
-          filters: {
-            user_id: searchOptions.userId,
-            agent_id: searchOptions.agentId,
-          },
-        }),
+        boundedEngineCall('search', () =>
+          loaded.search(searchOptions.query, {
+            topK: searchOptions.limit,
+            filters: {
+              user_id: searchOptions.userId,
+              agent_id: searchOptions.agentId,
+            },
+          }),
+        ),
         searchOptions.signal,
         'search',
       );
+      const hits = memoryHitsFromResponse(response, 'search');
 
-      return memoryHitsFromResponse(response, 'search');
+      embedderAnswered = true;
+
+      return hits;
     },
     async add(addOptions) {
+      const loaded = await engine(addOptions.signal);
       const response: unknown = await settledOrAborted(
-        (await engine(addOptions.signal)).add([...addOptions.messages], {
-          userId: addOptions.userId,
-          agentId: addOptions.agentId,
-          ...(addOptions.runId === undefined ? {} : {runId: addOptions.runId}),
-          infer: addOptions.infer,
-          ...mem0SourceMetadata(addOptions.sourceIds),
-        }),
+        boundedEngineCall('add', () =>
+          loaded.add([...addOptions.messages], {
+            userId: addOptions.userId,
+            agentId: addOptions.agentId,
+            ...(addOptions.runId === undefined
+              ? {}
+              : {runId: addOptions.runId}),
+            infer: addOptions.infer,
+            ...mem0SourceMetadata(addOptions.sourceIds),
+          }),
+        ),
         addOptions.signal,
         'add',
       );
+      const references = storedAddReferences(response, 'add');
 
-      return addReferencesFromResponse(response, 'add');
+      if (addOptions.infer) {
+        modelAnswered = true;
+      }
+      // An extraction that stored nothing never reached the embedder.
+      if (references.length > 0) {
+        embedderAnswered = true;
+      }
+
+      return references;
     },
     async ping(pingOptions) {
       // Constructing the engine only wires provider clients: neither the
       // extraction model nor the embedder is contacted until real work,
-      // so claiming reachability here would be false comfort.
+      // so reachability is claimed only once both have answered some.
       await engine(pingOptions.signal);
 
-      return {
-        verified: false,
-        summary:
-          'Mem0 engine loaded; its model and embedder are contacted on first capture or recall.',
-      };
+      return modelAnswered && embedderAnswered
+        ? {
+            verified: true,
+            summary:
+              'Mem0 engine loaded; its model and embedder have answered.',
+          }
+        : {
+            verified: false,
+            summary:
+              'Mem0 engine loaded; its model and embedder are contacted on first capture or recall.',
+          };
     },
   } satisfies Mem0Backend);
 }
@@ -844,6 +893,17 @@ function pinnedMem0OssEngine(engine: unknown): Mem0OssEngine {
       return Promise.resolve(result);
     },
   } satisfies Mem0OssEngine);
+}
+
+async function boundedEngineCall(
+  operation: string,
+  call: () => Promise<unknown>,
+): Promise<unknown> {
+  try {
+    return await call();
+  } catch {
+    throw new Mem0RequestError({operation, failureKind: 'engine'});
+  }
 }
 
 function providerConfig(options: {
