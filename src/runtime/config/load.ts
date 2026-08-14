@@ -33,11 +33,7 @@ import {
   type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
 import {canonicalRuntimeConfigPath} from './path.ts';
-import {
-  allowPlaintextSecretMarkerField,
-  plaintextSecretMarkerField,
-  secretEnvMarkerField,
-} from '../../shared/secret-marker.ts';
+import {secretEnvMarkerField} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import {
   project02RuntimeConfigFieldAcceptsValue,
@@ -53,11 +49,6 @@ const project02RuntimeConfigFields = Object.freeze([
 const project02HostConfigFields = project02RuntimeConfigFieldNames();
 const project02RuntimePluginConfigFields = Object.freeze(['enabled', 'config']);
 const runtimeConfigSecretRefFields = Object.freeze([secretEnvMarkerField]);
-const runtimeConfigPlaintextSecretOverrideFields = Object.freeze([
-  plaintextSecretMarkerField,
-  allowPlaintextSecretMarkerField,
-  'justification',
-]);
 
 const maxProject02RuntimeConfigBytes = 256 * 1_024;
 const runtimeConfigJsonBoundaryLimits = Object.freeze({
@@ -798,16 +789,6 @@ function isRuntimeConfigValue(value: unknown): value is RuntimeConfigValue {
       hasOnlyFields(value, runtimeConfigSecretRefFields) &&
       typeof value[secretEnvMarkerField] === 'string' &&
       value[secretEnvMarkerField].trim().length > 0
-    );
-  }
-
-  if (plaintextSecretMarkerField in value) {
-    return (
-      hasOnlyFields(value, runtimeConfigPlaintextSecretOverrideFields) &&
-      typeof value[plaintextSecretMarkerField] === 'string' &&
-      value[allowPlaintextSecretMarkerField] === true &&
-      typeof value['justification'] === 'string' &&
-      value['justification'].trim().length > 0
     );
   }
 

@@ -31,7 +31,6 @@
           "allowedValues": ["platform", "server"],
           "defaultValueSummary": "platform",
           "agentMutable": false,
-          "globalOnly": true,
           "redactionLabels": [],
           "reloadRequired": true
         },
@@ -53,7 +52,6 @@
           "secret": false,
           "valueType": "string",
           "agentMutable": false,
-          "globalOnly": true,
           "redactionLabels": [],
           "reloadRequired": true
         },
@@ -82,7 +80,6 @@
     },
     "activation": {
       "defaultEnabled": false,
-      "globalOnly": true,
       "reasons": ["memory_provider_package"]
     },
     "requestedAccess": {

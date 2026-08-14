@@ -15,7 +15,6 @@ import {describe, expect, it} from 'vitest';
 
 import {
   characterOnlyConfigPlugin,
-  globalOnlyConfigPlugin,
   structuredConfigPlugin,
 } from '../support/runtime-config-fixtures.ts';
 import {requiredSecretPlugin} from '../support/runtime-config-activation-fixtures.ts';
@@ -29,6 +28,9 @@ import {
   applyRuntimeConfigControlOperation,
   bindProject02CharacterRuntimeLocation,
   characterOverlayConfigPath,
+  characterSecretsEnvPath,
+  readCharacterOverlayForScope,
+  resolveLayeredProject02RuntimeConfig,
   createLayeredRuntimeConfigFingerprint,
   createRuntimePluginConfigControlCapability,
   loadProject02RuntimeConfigWithLocation,
@@ -499,8 +501,15 @@ describe('scope-aware runtime config mutations', () => {
     );
   });
 
-  it('rejects global-only fields and secret operations under character scope', () => {
+  it('rejects global-only host fields while secrets stay per character', async () => {
     const {homeRoot, dataRoot} = seededHome();
+    const plugin = characterOnlyConfigPlugin('scope.secrets');
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+
     const target = resolveRuntimeConfigScopeTarget({
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
 
@@ -517,24 +526,35 @@ describe('scope-aware runtime config mutations', () => {
         },
       }),
     ).toThrow('global-only');
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        target,
-        expectedFingerprint: 'unused',
-        request: {
-          kind: 'plugin_config',
-          manifest: structuredConfigPlugin('scope.secrets').manifest,
-          actor: 'operator',
-          fieldOperation: {
-            kind: 'secret_set',
-            fieldName: 'apiKey',
-            envVar: 'X',
-            secretValue: 'y',
-          },
+
+    // A character's credential lands beside its overlay, never in the
+    // shared home env, so two characters can hold different accounts.
+    applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'plugin_config',
+        manifest: plugin.manifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'secret_set',
+          fieldName: 'apiKey',
+          envVar: 'SCOPE_SECRETS_KEY',
+          secretValue: 'character-value',
         },
-      }),
-    ).toThrow('Secrets are shared across characters');
-    expect(existsSync(characterOverlayConfigPath(dataRoot))).toBe(false);
+      },
+    });
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toMatchObject({
+      plugins: {
+        'scope.secrets': {config: {apiKey: {$env: 'SCOPE_SECRETS_KEY'}}},
+      },
+    });
+    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
+      'SCOPE_SECRETS_KEY="character-value"',
+    );
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
   });
 
   it('refuses scoped writes into an unmarked data directory', () => {
@@ -809,9 +829,10 @@ describe('plugin manifest config scope policy', () => {
     ).toBe(false);
   });
 
-  it('offers a character scope only the settings that scope can save', async () => {
+  it('offers a scope only the settings that scope can save', async () => {
     const {homeRoot, dataRoot} = seededHome();
-    const plugin = globalOnlyConfigPlugin('scope.global-only');
+    const characterOnly = characterOnlyConfigPlugin('scope.character-owned');
+    const shared = structuredConfigPlugin('scope.shared');
 
     await ensureCharacterDataMarker({
       storageOptions: {storeRoot: dataRoot},
@@ -820,77 +841,176 @@ describe('plugin manifest config scope policy', () => {
 
     const base = {
       runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-      manifest: plugin.manifest,
-      pluginManifests: [plugin.manifest],
       env: {},
     };
-    const characterView = inspectRuntimePluginConfig({
-      ...base,
-      targetScope: 'character',
-    });
-    const globalView = inspectRuntimePluginConfig({
-      ...base,
-      targetScope: 'global',
-    });
     const editableFields = (
       inspected: ReturnType<typeof inspectRuntimePluginConfig>,
     ) =>
       inspected.fields
         .filter(field => field.editableInScope)
         .map(field => field.name);
-    const characterTarget = resolveRuntimeConfigScopeTarget({
+    const globalViewOfCharacterOnly = inspectRuntimePluginConfig({
+      ...base,
+      targetScope: 'global',
+      manifest: characterOnly.manifest,
+      pluginManifests: [characterOnly.manifest],
+    });
+    const characterViewOfShared = inspectRuntimePluginConfig({
+      ...base,
+      targetScope: 'character',
+      manifest: shared.manifest,
+      pluginManifests: [shared.manifest],
+    });
+    const globalTarget = resolveRuntimeConfigScopeTarget({
       runtimeLocation: base.runtimeLocation,
       env: {},
-      scope: 'character',
+      scope: 'global',
     });
 
-    // A console renders from this shape, so anything it offers must save.
-    expect(editableFields(characterView)).toEqual(['note']);
-    expect(characterView.activation.editableInScope).toBe(false);
-    expect(editableFields(globalView)).toEqual(['note', 'backend', 'apiKey']);
-    expect(globalView.activation.editableInScope).toBe(true);
+    // A console renders from this shape, so anything it offers must save:
+    // a character-only plugin belongs wholly to its character, secrets
+    // included, and a shared plugin is now fully character-tunable too.
+    expect(editableFields(globalViewOfCharacterOnly)).toEqual([]);
+    expect(globalViewOfCharacterOnly.activation.editableInScope).toBe(false);
+    expect(editableFields(characterViewOfShared)).toEqual([
+      'settings',
+      'endpoints',
+    ]);
+    expect(characterViewOfShared.activation.editableInScope).toBe(true);
     expect(() =>
       applyRuntimeConfigControlOperation({
-        target: characterTarget,
+        target: globalTarget,
         request: {
           kind: 'plugin_config',
-          manifest: plugin.manifest,
+          manifest: characterOnly.manifest,
           actor: 'operator',
           fieldOperation: {
             kind: 'set',
-            fieldName: 'backend',
-            value: 'server',
+            fieldName: 'setting',
+            value: 'global-nope',
           },
         },
       }),
-    ).toThrow('global-only');
-    expect(() =>
-      applyRuntimeConfigControlOperation({
-        target: characterTarget,
-        request: {
-          kind: 'plugin_activation',
-          manifest: plugin.manifest,
-          enabled: true,
-        },
-      }),
-    ).toThrow('can only be enabled in the global config');
+    ).toThrow('character-only');
 
     // A document already holding a forbidden value must be repairable:
-    // the console offers Unset, and the rule allows exactly that -- for
-    // an enabled flag this scope may not decide as well.
+    // the console offers Unset, and the rule allows exactly that.
     applyRuntimeConfigControlOperation({
-      target: characterTarget,
+      target: globalTarget,
       request: {
         kind: 'plugin_config',
-        manifest: plugin.manifest,
+        manifest: characterOnly.manifest,
         actor: 'operator',
-        fieldOperation: {kind: 'unset', fieldName: 'backend'},
+        fieldOperation: {kind: 'unset', fieldName: 'setting'},
       },
     });
     applyRuntimeConfigControlOperation({
-      target: characterTarget,
-      request: {kind: 'plugin_activation', manifest: plugin.manifest},
+      target: globalTarget,
+      request: {kind: 'plugin_activation', manifest: characterOnly.manifest},
     });
+  });
+
+  it('merges the character env over the shared env for secret refs', async () => {
+    const {homeRoot, configPath, dataRoot} = seededHome();
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    const plugin = structuredConfigPlugin('scope.layered-secrets');
+    const manifest = {
+      ...plugin.manifest,
+      config: {
+        scope: 'global_with_character_overrides' as const,
+        fields: [
+          ...plugin.manifest.config.fields,
+          {
+            name: 'apiKey',
+            description: 'Account credential.',
+            required: false,
+            secret: true,
+            valueType: 'secret' as const,
+            redactionLabels: ['secret'],
+          },
+        ],
+      },
+    };
+
+    writeRuntimeConfig(configPath, {
+      plugins: {
+        'scope.layered-secrets': {
+          enabled: true,
+          config: {
+            settings: {from: 'global'},
+            endpoints: ['global'],
+            apiKey: {$env: 'LAYERED_KEY'},
+          },
+        },
+      },
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {
+        'scope.layered-secrets': {config: {apiKey: {$env: 'LAYERED_KEY'}}},
+      },
+    });
+    writeFileSync(
+      characterSecretsEnvPath(dataRoot),
+      'LAYERED_KEY="character-account"\n',
+    );
+
+    const env = {LAYERED_KEY: 'operator-account'};
+    const runtimeLocation = runtimeLocationForTest({
+      loadedConfig: loadRuntimeConfigForTest({
+        configPath,
+        storeRoot: homeRoot,
+        env,
+      }),
+      configPath,
+      storeRoot: homeRoot,
+      env,
+    });
+    const layered = resolveLayeredProject02RuntimeConfig({
+      runtimeLocation,
+      loadedConfig: loadRuntimeConfigForTest({
+        configPath,
+        storeRoot: homeRoot,
+        env,
+      }),
+      overlayConfig: readCharacterOverlayForScope(
+        runtimeLocation.characterScope,
+      ).overlay,
+      pluginManifests: [manifest],
+      env,
+    });
+    const fields = layered.pluginConfigs['scope.layered-secrets'] ?? {};
+
+    // Same variable in both envs: the character's own value wins, the same
+    // way a character overlay wins over the global config.
+    expect(fields['apiKey']).toMatchObject({
+      resolved: true,
+      value: 'character-account',
+    });
+
+    // When the character's file lacks the value, the shared env fills it --
+    // one account for every character until one keeps its own.
+    writeFileSync(characterSecretsEnvPath(dataRoot), '');
+    const fallthrough = resolveLayeredProject02RuntimeConfig({
+      runtimeLocation,
+      loadedConfig: loadRuntimeConfigForTest({
+        configPath,
+        storeRoot: homeRoot,
+        env,
+      }),
+      overlayConfig: readCharacterOverlayForScope(
+        runtimeLocation.characterScope,
+      ).overlay,
+      pluginManifests: [manifest],
+      env,
+    });
+
+    expect(
+      fallthrough.pluginConfigs['scope.layered-secrets']?.['apiKey'],
+    ).toMatchObject({resolved: true, value: 'operator-account'});
   });
 
   it('uses the same policy for manifest-aware activation and field controls', async () => {

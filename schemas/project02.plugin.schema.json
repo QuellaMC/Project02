@@ -176,10 +176,6 @@
               "type": "boolean",
               "description": "Bundled packages with true activate without config; demo/test plugins should stay false and be enabled per store."
             },
-            "globalOnly": {
-              "type": "boolean",
-              "description": "true keeps enablement in the global config, for integrations whose activation exports conversation data or spends an operator credential."
-            },
             "reasons": {
               "$ref": "#/definitions/stringArray"
             }
@@ -230,38 +226,13 @@
       },
       "then": {
         "type": "object",
-        "description": "A character-only plugin is enabled and configured in a character package or character config: not by the manifest default, not global-only to enable, and without global-only non-secret fields, which no scope could then set.",
+        "description": "Character-only plugins cannot be enabled by the manifest default; enable them in a character package or character config.",
         "properties": {
           "activation": {
             "type": "object",
             "properties": {
               "defaultEnabled": {
                 "const": false
-              },
-              "globalOnly": {
-                "const": false
-              }
-            }
-          },
-          "config": {
-            "type": "object",
-            "properties": {
-              "fields": {
-                "type": "array",
-                "items": {
-                  "not": {
-                    "type": "object",
-                    "required": ["globalOnly", "secret"],
-                    "properties": {
-                      "globalOnly": {
-                        "const": true
-                      },
-                      "secret": {
-                        "const": false
-                      }
-                    }
-                  }
-                }
               }
             }
           }
@@ -319,10 +290,6 @@
         "agentMutable": {
           "type": "boolean",
           "description": "true lets the model propose approval-gated updates via runtime.plugin.config.update."
-        },
-        "globalOnly": {
-          "type": "boolean",
-          "description": "true keeps the field out of character overlays; use it for values that decide where a credential is sent."
         },
         "reloadRequired": {
           "type": "boolean",

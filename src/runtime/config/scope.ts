@@ -293,16 +293,6 @@ function normalizedControlMutation(
     };
   }
 
-  if (
-    request.fieldOperation.kind === 'secret_set' &&
-    target.scope === 'character'
-  ) {
-    throw new RuntimeConfigMutationError(
-      'Secrets are shared across characters; run the secret command ' +
-        'without --character.',
-    );
-  }
-
   return runtimePluginConfigControlMutation({
     manifest: request.manifest,
     actor: request.actor,

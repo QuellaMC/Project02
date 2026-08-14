@@ -27,6 +27,7 @@ import {
   configuredProject02CharacterId,
   defaultDotEnvForRuntimeLocation,
   diagnosticsHaveErrors,
+  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
   loadProject02RuntimeConfigWithLocation,
   loadRuntimeConfigEnvFile,
@@ -703,13 +704,17 @@ function simulateCharacterMaterialization(
 
   return Object.freeze({
     status: 'valid',
-    // This overlay describes a file that has not been written yet.
+    // This overlay describes a file that has not been written yet; the
+    // secrets env is the real one already on disk, if any.
     overlay: Object.freeze({
       scope: 'character',
       characterId,
       source: 'overlay',
       path: input.runtimeLocation.overlayPath,
       config: simulated.document,
+      secretsEnv: loadCharacterSecretsEnv(
+        input.runtimeLocation.characterScope.dataRoot,
+      ).env,
       diagnostics: Object.freeze([]),
     } satisfies LoadedProject02CharacterOverlayConfig),
   });

@@ -1,5 +1,6 @@
 import {
   applyRuntimeConfigControlOperation,
+  characterSecretsEnvPath,
   assertGlobalConfigLoadableForCharacterScope,
   assertResolvedProject02HomeAdoptable,
   assertSelectedProject02HomeAdoptable,
@@ -250,6 +251,7 @@ async function runRuntimePluginSecretSetCommand(
       startup.status === 'resolved' ? startup.runtimeEnv : startup.configEnv,
     catalogEntries: startup.activationPlan.catalogEntries,
     operation: command.operation,
+    scope: parsedArgs.location.character === undefined ? 'global' : 'character',
   });
 
   writeRuntimeConfigMutationResult(options.stdout, result);
@@ -421,12 +423,24 @@ async function runCharacterScopedRuntimeConfigCommand(
     throw new TypeError('Character-scoped command routing drifted.');
   }
 
-  assertCharacterScopedRawCommandAllowed(parsedArgs.commandArgs);
+  // Secret set reads env while parsing, so it routes before parsing.
+  if (
+    parsedArgs.commandArgs[0] === 'secret' &&
+    parsedArgs.commandArgs[1] === 'set'
+  ) {
+    return await runRuntimePluginSecretSetCommand(
+      parsedArgs,
+      options,
+      runtimeConfigCwdDotEnvModeForCommand(
+        parsedArgs,
+        options.env ?? process.env,
+      ),
+    );
+  }
 
   // No remaining verb reads env while parsing, so this parses before startup.
   const command = parseRuntimeConfigCommand(parsedArgs.commandArgs);
 
-  assertCharacterScopedParsedCommandAllowed(command);
   // Every scoped verb materializes character data, so reads consent too.
   await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
   const characterConfigRequest =
@@ -463,29 +477,6 @@ async function runCharacterScopedRuntimeConfigCommand(
     startup,
     target,
   });
-}
-
-function assertCharacterScopedRawCommandAllowed(
-  commandArgs: readonly string[],
-): void {
-  // Secret set reads env while parsing, so scope rejection comes first.
-  if (commandArgs[0] === 'secret' && commandArgs[1] === 'set') {
-    throw new CliUsageError(
-      'Secrets are shared across characters; run the secret command ' +
-        'without --character.',
-    );
-  }
-}
-
-function assertCharacterScopedParsedCommandAllowed(
-  command: RuntimeConfigCliArgs['command'],
-): void {
-  if (command.kind === 'env_path') {
-    throw new CliUsageError(
-      'The secrets env file is shared across characters; run env-path ' +
-        'without --character.',
-    );
-  }
 }
 
 function characterConfigStartupRequestForCommand(
@@ -527,6 +518,13 @@ function writeCharacterScopedRuntimeConfigResult(options: {
 
   if (command.kind === 'path') {
     options.stdout.write(`${target.configPath}\n`);
+    return 0;
+  }
+
+  if (command.kind === 'env_path') {
+    options.stdout.write(
+      `${characterSecretsEnvPath(target.runtimeLocation.characterScope.dataRoot)}\n`,
+    );
     return 0;
   }
 
@@ -661,6 +659,7 @@ function applyRuntimePluginSecretSetCommand(options: {
     RuntimeConfigCliArgs['command'],
     {readonly kind: 'secret_set'}
   >['operation'];
+  readonly scope: 'global' | 'character';
 }) {
   const definition = installedRuntimePluginCatalogEntry(
     options.catalogEntries,
@@ -680,7 +679,7 @@ function applyRuntimePluginSecretSetCommand(options: {
   const target = resolveRuntimeConfigScopeTarget({
     runtimeLocation: options.runtimeLocation,
     env: runtimeEnv,
-    scope: 'global',
+    scope: options.scope,
   });
 
   return applyRuntimeConfigControlOperation({

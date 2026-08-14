@@ -89,6 +89,22 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   });
   const source = loadedConfig.source;
   const path = loadedConfig.path;
+  // The character's env layers over the shared env exactly as its config
+  // layers over the global config: same names, character wins; anything
+  // it lacks falls through to the shared value.
+  const characterEnvEntries = Object.entries(
+    overlayConfig?.secretsEnv ?? {},
+  ).filter(([, value]) => value !== undefined);
+  const resolutionOptions =
+    characterEnvEntries.length === 0
+      ? effectiveOptions
+      : {
+          ...effectiveOptions,
+          env: {
+            ...(effectiveOptions.env ?? process.env),
+            ...Object.fromEntries(characterEnvEntries),
+          },
+        };
 
   // With no overlay this must equal the global resolve, fingerprint included.
   if (
@@ -99,7 +115,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
     return Object.freeze({
       layeredConfig,
       resolvedConfig: resolveEffectiveProject02RuntimeConfig({
-        ...effectiveOptions,
+        ...resolutionOptions,
         config: layeredConfig.effective.config,
         source,
         ...(path === undefined ? {} : {path}),
@@ -131,7 +147,7 @@ export function resolveLayeredProject02RuntimeConfigWithSnapshot(
   return Object.freeze({
     layeredConfig,
     resolvedConfig: resolveEffectiveProject02RuntimeConfig({
-      ...effectiveOptions,
+      ...resolutionOptions,
       config: layeredConfig.effective.config,
       source,
       ...(path === undefined ? {} : {path}),

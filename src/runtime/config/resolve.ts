@@ -28,7 +28,6 @@ import {
 } from '../../shared/json-boundary.ts';
 import {
   nestedSecretMarkerPath,
-  plaintextSecretMarkerField,
   secretEnvMarkerField,
 } from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
@@ -349,93 +348,59 @@ function resolveSecretField(options: {
   readonly validateConfig: boolean;
   readonly validateReadiness: boolean;
 }): ResolvedRuntimeConfigField {
-  const envRef =
-    options.rawValue === undefined && options.field.envVar !== undefined
-      ? {$env: options.field.envVar}
-      : isSecretRef(options.rawValue)
-        ? options.rawValue
-        : undefined;
+  const authoredRef = isSecretRef(options.rawValue)
+    ? options.rawValue
+    : undefined;
+  const plaintext =
+    typeof options.rawValue === 'string' && options.rawValue.trim().length > 0
+      ? options.rawValue
+      : undefined;
 
-  if (envRef !== undefined) {
-    if (isRuntimeControlEnvVarName(envRef.$env)) {
-      if (options.validateConfig) {
-        options.diagnostics.push(
-          createRuntimeConfigDiagnostic(
-            'error',
-            'runtime_config_reserved_control_env_var',
-            `Secret config field "${options.field.name}" for plugin "${options.manifest.id}" cannot use reserved Project02 runtime control env var "${envRef.$env}".`,
-            options.path,
-            pluginConfigDiagnosticMetadata(options),
-          ),
-        );
-      }
-
-      return fieldResult({
-        field: options.field,
-        source: `env:${envRef.$env}`,
-        resolved: false,
-      });
-    }
-
-    const secretValue = options.env[envRef.$env];
-    const resolved = secretValue !== undefined && secretValue.length > 0;
-
-    if (!resolved && options.field.required && options.validateReadiness) {
-      options.diagnostics.push(
-        createRuntimeConfigDiagnostic(
-          'error',
-          'runtime_config_required_secret_missing',
-          `Required secret "${options.field.name}" for plugin "${options.manifest.id}" is missing from env:${envRef.$env}.`,
-          options.path,
-          pluginConfigDiagnosticMetadata(options),
-        ),
-      );
-    }
-
-    return fieldResult({
-      field: options.field,
-      source: `env:${envRef.$env}`,
-      resolved,
-      ...(resolved ? {value: secretValue} : {}),
-    });
-  }
-
-  if (isPlaintextSecretOverride(options.rawValue)) {
+  // An authored shape that is neither a ref nor a plain value is an error
+  // even when an env var could cover the field: silently ignoring what the
+  // operator wrote would leave a landmine in the config.
+  if (
+    options.rawValue !== undefined &&
+    authoredRef === undefined &&
+    plaintext === undefined
+  ) {
     if (options.validateConfig) {
       options.diagnostics.push(
         createRuntimeConfigDiagnostic(
           'error',
-          'runtime_config_plaintext_secret_rejected',
-          `Plaintext secret override for "${options.field.name}" is not allowed.`,
+          'runtime_config_secret_value_invalid',
+          `Secret config field "${options.field.name}" must be a plain string value or an {"$env": "VAR"} reference.`,
           options.path,
           pluginConfigDiagnosticMetadata(options),
         ),
       );
     }
 
-    return fieldResult({
-      field: options.field,
-      source: 'plaintext_override',
-      resolved: false,
-    });
-  }
-
-  if (options.rawValue !== undefined) {
-    if (options.validateConfig) {
-      options.diagnostics.push(
-        createRuntimeConfigDiagnostic(
-          'error',
-          'runtime_config_plaintext_secret_rejected',
-          `Secret config field "${options.field.name}" must use an env ref.`,
-          options.path,
-          pluginConfigDiagnosticMetadata(options),
-        ),
-      );
-    }
     return fieldResult({
       field: options.field,
       source: 'config',
       resolved: false,
+    });
+  }
+
+  // The env is consulted even over an authored plain value: the env file
+  // is the convenient place for keys, so it wins where both exist.
+  const envRef =
+    authoredRef ??
+    (options.field.envVar !== undefined
+      ? {$env: options.field.envVar}
+      : undefined);
+
+  if (envRef !== undefined) {
+    return resolveSecretFieldFromEnv({...options, envRef, plaintext});
+  }
+
+  if (plaintext !== undefined) {
+    return fieldResult({
+      field: options.field,
+      source: 'config',
+      resolved: true,
+      value: plaintext,
     });
   }
 
@@ -455,6 +420,78 @@ function resolveSecretField(options: {
     field: options.field,
     source: 'missing',
     resolved: !options.field.required,
+  });
+}
+
+function resolveSecretFieldFromEnv(options: {
+  readonly manifest: RuntimePluginManifest;
+  readonly field: RuntimePluginConfigField;
+  readonly envRef: RuntimeConfigSecretRef;
+  readonly plaintext: string | undefined;
+  readonly env: NodeJS.ProcessEnv;
+  readonly diagnostics: RuntimeConfigDiagnostic[];
+  readonly path: string;
+  readonly validateConfig: boolean;
+  readonly validateReadiness: boolean;
+}): ResolvedRuntimeConfigField {
+  const envName = options.envRef.$env;
+
+  if (isRuntimeControlEnvVarName(envName)) {
+    if (options.validateConfig) {
+      options.diagnostics.push(
+        createRuntimeConfigDiagnostic(
+          'error',
+          'runtime_config_reserved_control_env_var',
+          `Secret config field "${options.field.name}" for plugin "${options.manifest.id}" cannot use reserved Project02 runtime control env var "${envName}".`,
+          options.path,
+          pluginConfigDiagnosticMetadata(options),
+        ),
+      );
+    }
+
+    return fieldResult({
+      field: options.field,
+      source: `env:${envName}`,
+      resolved: false,
+    });
+  }
+
+  const secretValue = options.env[envName];
+
+  if (secretValue !== undefined && secretValue.length > 0) {
+    return fieldResult({
+      field: options.field,
+      source: `env:${envName}`,
+      resolved: true,
+      value: secretValue,
+    });
+  }
+
+  if (options.plaintext !== undefined) {
+    return fieldResult({
+      field: options.field,
+      source: 'config',
+      resolved: true,
+      value: options.plaintext,
+    });
+  }
+
+  if (options.field.required && options.validateReadiness) {
+    options.diagnostics.push(
+      createRuntimeConfigDiagnostic(
+        'error',
+        'runtime_config_required_secret_missing',
+        `Required secret "${options.field.name}" for plugin "${options.manifest.id}" is missing from env:${envName}.`,
+        options.path,
+        pluginConfigDiagnosticMetadata(options),
+      ),
+    );
+  }
+
+  return fieldResult({
+    field: options.field,
+    source: `env:${envName}`,
+    resolved: false,
   });
 }
 
@@ -590,12 +627,6 @@ function isSecretRef(
     secretEnvMarkerField in value &&
     typeof value[secretEnvMarkerField] === 'string'
   );
-}
-
-function isPlaintextSecretOverride(
-  value: RuntimeConfigValue | undefined,
-): boolean {
-  return isJsonRecord(value) && plaintextSecretMarkerField in value;
 }
 
 function effectiveFingerprintInput(options: {

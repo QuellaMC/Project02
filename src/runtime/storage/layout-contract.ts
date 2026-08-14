@@ -62,11 +62,14 @@ export type Project02HomeLayout = {
   readonly characterDataRoot: string;
 };
 
-// Deliberately has no envPath or package roots, so shared concerns cannot
-// be derived from a data root by accident.
+// Deliberately has no package roots, so installable concerns cannot be
+// derived from a data root by accident. Secrets are per-character: each
+// data root carries its own env file, so one character's credentials are
+// never another character's to read.
 export type LocalRuntimeStorageLayout = {
   readonly storeRoot: string;
   readonly configPath: string;
+  readonly envPath: string;
   readonly schemaPath: string;
   readonly locksRoot: string;
   readonly sessionCatalogPath: string;
@@ -246,6 +249,7 @@ export function createLocalRuntimeStorageLayout(
   return Object.freeze({
     storeRoot,
     configPath: join(storeRoot, configFileName),
+    envPath: join(storeRoot, envFileName),
     schemaPath: join(storeRoot, schemaFileName),
     locksRoot: join(storeRoot, locksDirectoryName),
     sessionCatalogPath: join(storeRoot, sessionCatalogFileName),

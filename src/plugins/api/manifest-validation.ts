@@ -128,30 +128,6 @@ export function validateRuntimePluginManifest(
     );
   }
 
-  if (
-    config.value.scope === 'character_only' &&
-    activation.value.globalOnly === true
-  ) {
-    return reject(
-      'malformed_manifest',
-      'A character-only plugin cannot also be global-only to enable: no scope could ever turn it on.',
-    );
-  }
-
-  const unconfigurableField = config.value.fields.find(
-    field =>
-      config.value.scope === 'character_only' &&
-      field.globalOnly === true &&
-      !field.secret,
-  );
-
-  if (unconfigurableField !== undefined) {
-    return reject(
-      'malformed_manifest',
-      `Non-secret config field "${unconfigurableField.name}" is global-only on a character-only plugin, so no scope could ever set it.`,
-    );
-  }
-
   const requestedAccess = requiredAccess(
     value['requestedAccess'],
     'Plugin manifest requestedAccess',
@@ -562,10 +538,6 @@ function requiredConfigField(
     value['agentMutable'] === undefined
       ? accept(undefined)
       : requiredBoolean(value['agentMutable'], 'agentMutable');
-  const globalOnly =
-    value['globalOnly'] === undefined
-      ? accept(undefined)
-      : requiredBoolean(value['globalOnly'], 'globalOnly');
   const reloadRequired =
     value['reloadRequired'] === undefined
       ? accept(undefined)
@@ -583,7 +555,6 @@ function requiredConfigField(
   if (envVar.status === 'rejected') return envVar;
   if (allowedValues.status === 'rejected') return allowedValues;
   if (agentMutable.status === 'rejected') return agentMutable;
-  if (globalOnly.status === 'rejected') return globalOnly;
   if (reloadRequired.status === 'rejected') return reloadRequired;
   if (redactionLabels.status === 'rejected') return redactionLabels;
 
@@ -604,7 +575,6 @@ function requiredConfigField(
     envVar: envVar.value,
     allowedValues: allowedValues.value,
     agentMutable: agentMutable.value,
-    globalOnly: globalOnly.value,
     reloadRequired: reloadRequired.value,
     redactionLabels: redactionLabels.value,
   });
@@ -620,7 +590,6 @@ function acceptRuntimePluginConfigField(options: {
   readonly envVar: string | undefined;
   readonly allowedValues: readonly string[] | undefined;
   readonly agentMutable: boolean | undefined;
-  readonly globalOnly: boolean | undefined;
   readonly reloadRequired: boolean | undefined;
   readonly redactionLabels: readonly string[];
 }): RuntimePluginValidationResult<RuntimePluginConfigField> {
@@ -645,9 +614,6 @@ function acceptRuntimePluginConfigField(options: {
       ...(options.agentMutable === undefined
         ? {}
         : {agentMutable: options.agentMutable}),
-      ...(options.globalOnly === undefined
-        ? {}
-        : {globalOnly: options.globalOnly}),
       ...(options.reloadRequired === undefined
         ? {}
         : {reloadRequired: options.reloadRequired}),
@@ -780,23 +746,14 @@ function requiredActivationMetadata(
     'defaultEnabled',
   );
   const reasons = requiredStringArray(value['reasons'], 'reasons');
-  const globalOnly =
-    value['globalOnly'] === undefined
-      ? accept(undefined)
-      : requiredBoolean(value['globalOnly'], 'globalOnly');
 
-  if (
-    defaultEnabled.status === 'rejected' ||
-    reasons.status === 'rejected' ||
-    globalOnly.status === 'rejected'
-  ) {
-    return firstRejected([defaultEnabled, reasons, globalOnly]);
+  if (defaultEnabled.status === 'rejected' || reasons.status === 'rejected') {
+    return firstRejected([defaultEnabled, reasons]);
   }
 
   return accept(
     Object.freeze({
       defaultEnabled: defaultEnabled.value,
-      ...(globalOnly.value === undefined ? {} : {globalOnly: globalOnly.value}),
       reasons: freezeRedactedStrings(reasons.value),
     } satisfies RuntimePluginActivationMetadata),
   );

@@ -57,6 +57,8 @@ export {assertGlobalConfigLoadableForCharacterScope} from './control-transaction
 export {
   characterOverlayConfigPath,
   layeredRuntimeConfigFingerprintForScope,
+  characterSecretsEnvPath,
+  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
   type LoadedProject02CharacterOverlayConfig,
   type RuntimeConfigCharacterOverlaySnapshot,

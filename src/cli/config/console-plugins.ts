@@ -138,8 +138,8 @@ export async function runPluginConfigSection(
     return;
   }
 
-  if (field.secret && snapshot.scope === 'global') {
-    writeSecretConfigInstructions(context, manifest, field);
+  if (field.secret) {
+    writeSecretConfigInstructions(context, manifest, field, snapshot);
     return;
   }
 
@@ -498,9 +498,20 @@ function writeSecretConfigInstructions(
   context: RuntimeConfigConsoleContext,
   manifest: RuntimePluginManifest,
   field: RuntimePluginConfigField,
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): void {
   const envVar = field.envVar ?? suggestedSecretEnvVar(manifest.id, field.name);
   const commandArgs = [
+    // At character scope the value lands in this character's own secrets
+    // file, so two characters can hold different accounts for one plugin.
+    ...(snapshot.scope === 'character'
+      ? [
+          '--character',
+          shellQuoteCommandArgument(
+            snapshot.runtimeLocation.characterScope.characterId,
+          ),
+        ]
+      : []),
     'secret',
     'set',
     shellQuoteCommandArgument(manifest.id),

@@ -249,17 +249,14 @@ describe('mem0 plugin package', () => {
     });
   });
 
-  it('keeps credential-bearing endpoint fields out of character overlays', () => {
+  it('keeps every credential-routing field out of the model\u2019s reach', () => {
     const manifest = createMem0PluginManifest();
-    const endpointFields = manifest.config.fields.filter(field =>
-      ['backend', 'baseUrl'].includes(field.name),
-    );
 
-    // A downloaded character must not be able to point authenticated
-    // traffic at an origin of its choosing.
-    expect(endpointFields).toHaveLength(2);
-    for (const field of endpointFields) {
-      expect(field.globalOnly).toBe(true);
+    // agentMutable is what lets the model propose a value, so a field that
+    // decides where a credential or the conversation goes -- an endpoint, a
+    // backend selector, a billed model -- must not be one.
+    for (const field of manifest.config.fields) {
+      expect(field.agentMutable ?? false).toBe(false);
     }
   });
 

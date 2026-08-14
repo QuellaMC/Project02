@@ -12,6 +12,7 @@ import {
   type LocalRuntimeMutationLocksLeaseSync,
 } from '../storage/mutation-lock.ts';
 import {runtimeConfigEnvPathForLocation} from './env-file.ts';
+import {characterSecretsEnvPath} from './overlay.ts';
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
   assertSelectedRuntimeConfigStillBound,
@@ -146,9 +147,7 @@ export function applyRuntimeConfigControlTransaction<T>(
     assertRuntimeConfigEffectiveHomeAvailable(target, options.secretMutation);
     const loadedConfig = loadSelectedGlobalConfig(target);
     assertReloadedGlobalConfigUsesBoundHome(target, loadedConfig);
-    const currentEnvPath = runtimeConfigEnvPathForLocation(
-      target.runtimeLocation,
-    );
+    const currentEnvPath = runtimeConfigEnvPathForTarget(target);
     const currentCanonicalEnvPath =
       canonicalRuntimeConfigMutationPath(currentEnvPath);
 
@@ -181,7 +180,12 @@ export function applyRuntimeConfigControlTransaction<T>(
       candidate: preparation.preparedCandidate.config,
       operation: preparation.operation,
     });
-    const candidateEnvPath = runtimeConfigEnvPathForLocation(candidateHome);
+    // A character's env rides its bound data root, which the re-verified
+    // target pins; only a global secret follows the candidate home.
+    const candidateEnvPath =
+      target.scope === 'character'
+        ? currentEnvPath
+        : runtimeConfigEnvPathForLocation(candidateHome);
     const canonicalCandidateEnvPath =
       canonicalRuntimeConfigMutationPath(candidateEnvPath);
 
@@ -533,7 +537,7 @@ function createRuntimeConfigControlLockPlan(
     target.runtimeLocation.selectedConfig.canonicalPath;
   const displayGlobalConfigPath = target.runtimeLocation.selectedConfig.path;
   const displayEnvPath = secretMutation
-    ? runtimeConfigEnvPathForLocation(target.runtimeLocation)
+    ? runtimeConfigEnvPathForTarget(target)
     : undefined;
   const canonicalEnvPath =
     displayEnvPath === undefined
@@ -567,6 +571,15 @@ function createRuntimeConfigControlLockPlan(
     ...(overlay === undefined ? {} : {overlay}),
     targets: Object.freeze(targets),
   });
+}
+
+/** Where this target's secrets live: per character, or the shared home. */
+function runtimeConfigEnvPathForTarget(
+  target: ResolvedRuntimeConfigScopeTarget,
+): string {
+  return target.scope === 'character'
+    ? characterSecretsEnvPath(target.runtimeLocation.characterScope.dataRoot)
+    : runtimeConfigEnvPathForLocation(target.runtimeLocation);
 }
 
 function acquireRuntimeConfigControlLocks(

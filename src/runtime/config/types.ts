@@ -24,11 +24,6 @@ export type RuntimeConfigValue =
   | boolean
   | null
   | RuntimeConfigSecretRef
-  | {
-      readonly $plaintextSecret: string;
-      readonly allowPlaintextSecret: true;
-      readonly justification: string;
-    }
   | readonly RuntimeConfigValue[]
   | {readonly [key: string]: RuntimeConfigValue};
 
@@ -149,8 +144,7 @@ export type SelectedLoadedProject02RuntimeConfig =
     readonly selectedConfig: SelectedProject02RuntimeConfigLocation;
   };
 
-type RuntimeConfigFieldSource =
-  'config' | 'missing' | 'plaintext_override' | `env:${string}`;
+type RuntimeConfigFieldSource = 'config' | 'missing' | `env:${string}`;
 
 /** Distinct from RuntimeConfigFieldSource, which says how a field resolves. */
 export type RuntimeConfigEffectiveSource = 'default' | RuntimeConfigFieldScope;

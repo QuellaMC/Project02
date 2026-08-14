@@ -64,12 +64,6 @@ export type RuntimePluginConfigField = {
   readonly envVar?: string;
   readonly allowedValues?: readonly string[];
   readonly agentMutable?: boolean;
-  /**
-   * true keeps the field out of character overlays. Fields that select
-   * where a credential is sent must stay global, or enabling a character
-   * would be enough to redirect authenticated traffic.
-   */
-  readonly globalOnly?: boolean;
   readonly reloadRequired?: boolean;
   readonly redactionLabels: readonly string[];
 };
@@ -92,12 +86,6 @@ export type RuntimePluginRuntimePolicy = {
 
 export type RuntimePluginActivationMetadata = {
   readonly defaultEnabled: boolean;
-  /**
-   * true keeps enablement in the global config. A character that could
-   * enable an integration could start exporting the conversation to it
-   * on the operator's credential, without the operator ever choosing it.
-   */
-  readonly globalOnly?: boolean;
   readonly reasons: readonly string[];
 };
 

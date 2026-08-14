@@ -118,24 +118,23 @@ resolution, the operator console, and the model-facing
 `runtime.plugin.config` tools.
 
 - `config.scope: "global_with_character_overrides"` allows global
-  enablement and non-secret settings plus character overrides.
-- `config.scope: "character_only"` keeps enablement and non-secret
-  settings in character packages and overlays. Its
-  `activation.defaultEnabled` must be `false`, and it cannot be
-  `activation.globalOnly` — no scope could then enable it.
-- `globalOnly: true` on a field keeps it out of character overlays even
-  under `global_with_character_overrides`. Required for any field that
-  decides where a credential goes — a backend selector, a base URL, a
-  module path — because config merges per field: a character that changes
-  only the destination keeps the operator's key and sends it there.
+  settings with per-character overrides; `"character_only"` keeps the
+  plugin's settings wholly per character (its `activation.defaultEnabled`
+  must be `false`).
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
-- `secret: true` fields accept only `{"$env": "VAR"}` references in config;
-  reads always show them redacted. Secret fields cannot be `agentMutable`.
+- `secret: true` fields hold credentials. The preferred home is an env
+  file — the manifest's `envVar` or an authored `{"$env": "VAR"}` ref —
+  and each character's own env file (set with `runtime-config --character
+  <id> secret set`) merges over the home `.env`, so two characters can
+  hold different accounts for one plugin. A plain string typed into
+  config also works; the env wins whenever it holds the variable. Reads
+  always show secret fields redacted, and they cannot be `agentMutable`.
 - `agentMutable: true` lets the model propose updates through
-  `runtime.plugin.config.update`; each one still requires explicit user
-  approval, and enabling/disabling the plugin itself is never
-  agent-mutable.
+  `runtime.plugin.config.update` (each still requires explicit user
+  approval). Every other field is out of the model's reach — that is what
+  keeps the agent away from credentials and from the settings that decide
+  where they go.
 - `reloadRequired` states whether a committed change needs a runtime
   reload before it takes effect.
 
@@ -145,12 +144,11 @@ resolution, the operator console, and the model-facing
 no configuration; use it only for product-essential
 `global_with_character_overrides` plugins.
 
-`activation.globalOnly: true` keeps enablement with the operator: a
-character package or overlay can no longer turn the plugin on. Required
-whenever merely selecting a character would start sending the user's
-conversation somewhere — an external memory backend, a bridge, any
-integration that exports turn content — since a downloaded character
-otherwise enables it with the operator's inherited credentials. Character-only, demo, and
+A character package may request enablement (`required`/`recommended`) and
+ship config values, so its character works right after install with no
+setup. Materialization only fills what is missing: a field the operator
+has set keeps the operator's value, on first install and on every package
+update. Character-only, demo, and
 optional plugins ship `false` and are enabled per store:
 `pnpm runtime-config ui` → Plugins → your plugin → Enable. A
 character-only plugin is enabled with `--character <id>` or by that
