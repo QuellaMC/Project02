@@ -19,9 +19,9 @@
 
     <p>
       A character has three ways to know something that happened before this turn, and each
-      lives in its own layer with its own trust story: a tiny curated memory that is always
-      in the prompt, session history it can search on demand, and at most one external
-      retrieval-driven provider running alongside them.
+      lives in its own layer with its own trust story: a tiny curated memory injected whole
+      into every prompt once it holds anything, session history it can search on demand, and
+      optionally one external retrieval-driven provider beside them.
     </p>
 
     <p class="rule">
@@ -46,9 +46,9 @@
       </tr>
       <tr>
         <td>Size</td>
-        <td>Small and capped, per character; the runtime tells the model its remaining room</td>
+        <td>Small and capped, per character; a section that holds anything carries its remaining room, and a write that would overflow is refused with the numbers</td>
         <td>Every session</td>
-        <td>Unbounded, provider-owned</td>
+        <td>No runtime cap; the backend's own quota applies</td>
       </tr>
       <tr>
         <td>Retrieval</td>
@@ -92,9 +92,11 @@
       The model maintains the store through one atomic tool, <code>memory.update</code>:
       <code>add</code> appends an entry, <code>replace</code> and <code>remove</code> select
       exactly one existing entry by a unique <code>old_text</code> substring, and a batch
-      either fully commits or fully rejects. Capacity overflows reject with usage numbers so
-      the model compresses or prunes instead of silently losing entries. There is no read
-      tool and no automatic extraction.
+      either fully commits or fully rejects. Entries are unique per store: an
+      <code>add</code> of text already present reports a no-op, and a <code>replace</code>
+      whose new text duplicates another entry collapses the two. Capacity overflows reject
+      with usage numbers so the model compresses or prunes instead of silently losing
+      entries. There is no read tool and no automatic extraction.
     </p>
 
     <h2>Session search</h2>
@@ -104,8 +106,7 @@
       current one that have scrolled out of the model's recent-message window alike; the
       character reads back windows of those transcripts with <code>sessions.search</code>
       and <code>sessions.read</code>. Each tool bounds what it returns, so a long message
-      comes back shortened rather than whole; the tool contracts carry the current limits.
-      Curated
+      comes back shortened rather than whole. Curated
       memory holds what must always be known; session search recovers what was merely said.
       A fact worth keeping gets promoted by the model from a transcript into
       <code>memory.update</code>.
@@ -116,8 +117,9 @@
     <p>
       Retrieval-driven long-term memory rides the <code>memory_provider</code> plugin kind:
       per-turn recall items enter the untrusted plugin frame (source-referenced, bounded,
-      budget-capped), each committed turn is handed to the provider to do with as its
-      backend decides &mdash; mem0 asks its backend to extract facts from it &mdash; and a
+      budget-capped), each committed turn's user message and final reply are handed to
+      the provider to do with as its
+      backend decides &mdash; mem0 asks its backend to extract facts from them &mdash; and a
       provider exposes whichever namespaced tools its backend supports. Providers are disabled by default;
       enable one and, when several are enabled, select it with
       <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation
@@ -135,7 +137,7 @@
       <tr>
         <td><code>mem0</code></td>
         <td>Mem0 platform API or a self-hosted Mem0 server</td>
-        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract. <code>mem0.add</code> submits the text the model supplies, bounded like every provider memory item; a self-hosted server or the embedded engine answers with the stored row, while the hosted platform answers with a receipt and stores asynchronously, which the tool reports as queued rather than saved.</td>
+        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract. <code>mem0.add</code> submits the text the model supplies, bounded like every provider memory item; a self-hosted server answers with the stored row, while the hosted platform answers with a receipt and stores asynchronously, which the tool reports as queued rather than saved.</td>
       </tr>
     </table>
 
@@ -153,10 +155,14 @@
     </p>
 
     <p class="rule">
-      Installing a character package is the trust decision: the package may fill any
-      setting the operator has not set, so its character works right after install. What
-      the operator has set always wins — on first install and on every package update.
-      The model is the fenced writer: it may propose changes only to
+      Installing a character package is the trust decision: within its character's own
+      overlay, the package may enable plugins and fill any non-secret plugin setting the
+      operator has not set — a credential inside a package is refused outright, since a
+      package is shared and its secrets would be too — enablement included, so a required provider can come on for that
+      character even where the global config disables it. Host settings are out of its
+      reach; a package carries plugin enablement and plugin config, nothing else. What
+      the operator has set in that overlay always wins — on first install and on every
+      package update. The model is the fenced writer: it may propose changes only to
       <code>agentMutable</code> fields, and credentials are never among them. Credentials
       prefer env files; each character's own file, set with <code>--character</code>,
       merges over the shared one, so two characters can hold different accounts for the
@@ -176,7 +182,7 @@
       </tr>
       <tr>
         <td>Large semantic long-term memory</td>
-        <td>Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a self-hosted server set <code>backend</code> to <code>server</code> and <code>baseUrl</code> to its origin, where the key is then optional.</td>
+        <td>Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a self-hosted server set <code>backend</code> to <code>server</code> and <code>baseUrl</code> to its origin, where the key is then optional. Use an <code>https://</code> origin unless the server runs on this machine — over <code>http://</code> the conversation and the key cross the network in the clear.</td>
       </tr>
     </table>
   </main>
