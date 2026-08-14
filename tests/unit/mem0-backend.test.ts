@@ -43,7 +43,7 @@ function errorMessageOf(error: unknown): string {
 }
 
 describe('mem0 backend transports', () => {
-  it('refuses to follow a redirect away from the configured origin', async () => {
+  it('refuses a redirect and reports it as its own HTTP status', async () => {
     const {requests, fetchFn} = recordingFetch({results: []});
 
     await createMem0ServerBackend({
@@ -61,7 +61,21 @@ describe('mem0 backend transports', () => {
     // An X-API-Key header survives a redirect where Authorization would
     // not, and a 307 resends the body: following one would hand another
     // origin the credential and the conversation together.
-    expect(requests[0]?.redirect).toBe('error');
+    expect(requests[0]?.redirect).toBe('manual');
+
+    // The endpoint answered, so the operator hears the 301 -- pointing at
+    // the URL to fix -- rather than a fake outage.
+    const redirecting = recordingFetch(undefined, 301);
+
+    await expect(
+      createMem0ServerBackend({
+        baseUrl: 'http://127.0.0.1:8765',
+        fetchFn: redirecting.fetchFn,
+      }).ping({signal: abortSignal}),
+    ).rejects.toMatchObject({
+      failureKind: 'http',
+      message: 'mem0 ping failed: HTTP 301.',
+    });
   });
 
   it('speaks the platform v3 wire contract with Token auth', async () => {
@@ -190,6 +204,43 @@ describe('mem0 backend transports', () => {
       {kind: 'memory', id: 'stored-1', title: 'Mem0 memory'},
       {kind: 'memory', id: 'stored-2', title: 'Mem0 memory'},
     ]);
+  });
+
+  it('accepts only its own backend’s answer shape for an add', async () => {
+    // A platform answer without a receipt proves no queue; a server answer
+    // with a receipt (or an unreadable row) is a wrong deployment. Either
+    // way the write must not be reported as saved or on its way.
+    const platform = createMem0PlatformBackend({
+      apiKey: 'k',
+      fetchFn: recordingFetch({results: [{id: 'stored-1'}]}).fetchFn,
+    });
+    const serverWithReceipt = createMem0ServerBackend({
+      baseUrl: 'http://127.0.0.1:8765',
+      fetchFn: recordingFetch({event_id: 'evt-1'}).fetchFn,
+    });
+    const serverWithBrokenRow = createMem0ServerBackend({
+      baseUrl: 'http://127.0.0.1:8765',
+      fetchFn: recordingFetch({
+        results: [{id: 'stored-1'}, {error: 'schema mismatch'}],
+      }).fetchFn,
+    });
+    const add = {
+      messages: [{role: 'user' as const, content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      infer: false,
+      signal: abortSignal,
+    };
+
+    await expect(platform.add(add)).rejects.toMatchObject({
+      failureKind: 'malformed_response',
+    });
+    await expect(serverWithReceipt.add(add)).rejects.toMatchObject({
+      failureKind: 'malformed_response',
+    });
+    await expect(serverWithBrokenRow.add(add)).rejects.toMatchObject({
+      failureKind: 'malformed_response',
+    });
   });
 
   it('selects X-API-Key auth for m0sk_ server keys and accepts bare-array responses', async () => {

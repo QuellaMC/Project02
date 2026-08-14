@@ -52,12 +52,13 @@ export type Mem0FetchFunction = (
     readonly body?: string;
     readonly signal: AbortSignal;
     /**
-     * Always 'error'. An X-API-Key header is not stripped on redirect the
-     * way Authorization is, and a 307 resends the body, so a redirect
-     * would hand another origin both the credential and the
-     * conversation.
+     * Always 'manual'. An X-API-Key header is not stripped on redirect the
+     * way Authorization is, and a 307 resends the body, so a redirect must
+     * never be followed. Refusing it as the 3xx response it is -- rather
+     * than a rejected fetch -- reports the endpoint's real status instead
+     * of a fake outage.
      */
-    readonly redirect: 'error';
+    readonly redirect: 'manual';
   },
 ) => Promise<{
   readonly ok: boolean;
@@ -155,7 +156,7 @@ export function createMem0PlatformBackend(options: {
         signal: addOptions.signal,
       });
 
-      return addReferencesFromResponse(response, 'add');
+      return queuedAddReference(response, 'add');
     },
     async ping(pingOptions) {
       await mem0Request({
@@ -222,7 +223,7 @@ export function createMem0ServerBackend(options: {
         signal: addOptions.signal,
       });
 
-      return addReferencesFromResponse(response, 'add');
+      return storedAddReferences(response, 'add');
     },
     async ping(pingOptions) {
       await mem0Request({
@@ -281,7 +282,7 @@ async function mem0Request(options: {
         ? {}
         : {body: JSON.stringify(options.body)}),
       signal: options.signal,
-      redirect: 'error',
+      redirect: 'manual',
     });
   } catch {
     // Never rethrow transport errors: their messages can embed URLs and
@@ -351,33 +352,54 @@ function memoryHitsFromResponse(
   );
 }
 
-function addReferencesFromResponse(
+/**
+ * The platform acknowledges adds asynchronously: only an event receipt
+ * proves a queue exists, and stored memory ids only exist after
+ * server-side processing.
+ */
+function queuedAddReference(
   value: unknown,
   operation: string,
 ): readonly RuntimePluginSourceReference[] {
-  if (isRecord(value)) {
-    const eventId = stringId(value['event_id']);
+  const eventId = isRecord(value) ? stringId(value['event_id']) : undefined;
 
-    // The platform add API acknowledges asynchronously with an event id;
-    // stored memory ids only exist after server-side processing.
-    if (eventId !== undefined) {
-      return Object.freeze([
-        {
-          kind: 'external_contract',
-          id: eventId,
-          title: 'Queued mem0 memory write',
-        },
-      ]);
-    }
+  if (eventId === undefined) {
+    throw new Mem0RequestError({
+      operation,
+      failureKind: 'malformed_response',
+    });
   }
 
+  return Object.freeze([
+    {
+      kind: 'external_contract',
+      id: eventId,
+      title: 'Queued mem0 memory write',
+    },
+  ]);
+}
+
+/**
+ * The server stores synchronously, so every row must name what it stored.
+ * A receipt-shaped or unreadable row here is a wrong deployment, and
+ * dropping it would leave that indistinguishable from a smaller store.
+ */
+function storedAddReferences(
+  value: unknown,
+  operation: string,
+): readonly RuntimePluginSourceReference[] {
   return Object.freeze(
-    requiredResultRows(value, operation).flatMap(row => {
+    requiredResultRows(value, operation).map(row => {
       const id = isRecord(row) ? stringId(row['id']) : undefined;
 
-      return id === undefined
-        ? []
-        : [{kind: 'memory' as const, id, title: 'Mem0 memory'}];
+      if (id === undefined) {
+        throw new Mem0RequestError({
+          operation,
+          failureKind: 'malformed_response',
+        });
+      }
+
+      return {kind: 'memory' as const, id, title: 'Mem0 memory'};
     }),
   );
 }
