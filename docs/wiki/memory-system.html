@@ -46,7 +46,7 @@
       </tr>
       <tr>
         <td>Size</td>
-        <td>Tiny: 2,200 chars of notes + 1,375 chars of user profile per character</td>
+        <td>Small and capped, per character; the runtime tells the model its remaining room</td>
         <td>Every session</td>
         <td>Unbounded, provider-owned</td>
       </tr>
@@ -103,10 +103,9 @@
       Everything said is recorded and indexed &mdash; past sessions and the parts of the
       current one that have scrolled out of the model's recent-message window alike; the
       character reads back windows of those transcripts with <code>sessions.search</code>
-      and <code>sessions.read</code>. Each tool bounds what it returns: a search hit comes
-      back as the first 200 characters of the message plus a 160-character snippet centered
-      on the match, and reading a session returns each message up to 400 characters. A
-      message longer than the tool's bound arrives shortened. Curated
+      and <code>sessions.read</code>. Each tool bounds what it returns, so a long message
+      comes back shortened rather than whole; the tool contracts carry the current limits.
+      Curated
       memory holds what must always be known; session search recovers what was merely said.
       A fact worth keeping gets promoted by the model from a transcript into
       <code>memory.update</code>.
@@ -136,7 +135,7 @@
       <tr>
         <td><code>mem0</code></td>
         <td>Mem0 platform API or a self-hosted Mem0 server</td>
-        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract. <code>mem0.add</code> submits the text as given, trimmed to the 600 characters a provider memory item carries: a self-hosted server stores it and answers with the row, while the hosted platform answers with a queue receipt and stores it asynchronously, which the tool reports as queued rather than saved.</td>
+        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract. <code>mem0.add</code> submits the text the model supplies, bounded like every provider memory item; a self-hosted server or the embedded engine answers with the stored row, while the hosted platform answers with a receipt and stores asynchronously, which the tool reports as queued rather than saved.</td>
       </tr>
     </table>
 
