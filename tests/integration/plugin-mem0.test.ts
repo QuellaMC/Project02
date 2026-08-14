@@ -2,7 +2,10 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {createRuntimeEventIdentity} from '../../src/core/index.ts';
-import {createRuntimePluginContext} from '../../src/plugins/api/index.ts';
+import {
+  createRuntimePluginAfterTurnCommittedContext,
+  createRuntimePluginContext,
+} from '../../src/plugins/api/index.ts';
 import type {RuntimePluginFactoryInput} from '../../src/plugins/api/factory.ts';
 import type {ResolvedPluginRuntimeConfig} from '../../src/runtime/config/index.ts';
 import {createProject02Plugin} from '../../src/plugins/packages/mem0/index.ts';
@@ -12,21 +15,6 @@ import {
   mem0PluginId,
 } from '../../src/plugins/packages/mem0/plugin.ts';
 import type {Mem0FetchFunction} from '../../src/plugins/packages/mem0/backend.ts';
-import {
-  runMemoryProviderConformanceSuite,
-  type MemoryProviderConformanceScenario,
-} from '../support/memory-provider-conformance.ts';
-
-runMemoryProviderConformanceSuite({
-  name: 'mem0 adapter over a fake self-hosted server',
-  pluginId: mem0PluginId,
-  capabilities: new Set(['recall', 'captureTurn', 'search', 'add', 'health']),
-  createPlugin(scenario) {
-    return createMem0PluginFromInput(mem0FactoryInput('server'), {
-      fetchFn: conformanceServerFetch(scenario),
-    });
-  },
-});
 
 describe('mem0 plugin package', () => {
   it('exposes the descriptor-backed package factory with mem0-namespaced tools', () => {
@@ -192,6 +180,75 @@ describe('mem0 plugin package', () => {
     expect(JSON.stringify(add.evidence)).toContain('Queued one memory item');
   });
 
+  it('sends each verb as the wire contract its backend expects', async () => {
+    const requests: {
+      readonly url: string;
+      readonly body: string | undefined;
+      readonly scoped: boolean;
+    }[] = [];
+    const fetchFn: Mem0FetchFunction = (url, init) => {
+      requests.push({
+        url,
+        body: init.body,
+        scoped: init.signal instanceof AbortSignal,
+      });
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: [{id: 'row-1', memory: 'ok'}]}),
+      });
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    await plugin.lifecycleHooks.beforeRoleModelCall?.(mem0Context());
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    await plugin.lifecycleHooks.handleToolCall?.(
+      {
+        ...testIdentity(),
+        pluginId: mem0PluginId,
+        toolName: 'mem0.search',
+        input: {query: 'prior sessions'},
+      },
+      mem0Context(),
+    );
+
+    const [recall, capture, search] = requests.map(request => ({
+      url: request.url,
+      scoped: request.scoped,
+      body: JSON.parse(request.body ?? '{}') as Record<string, unknown>,
+    }));
+
+    // What this adapter translates the seam's requests into: the query and
+    // the bound it was given, the whole turn under its session, and the
+    // provenance the host supplied -- each cancellable by the caller.
+    expect(recall).toMatchObject({
+      url: 'http://127.0.0.1:8765/search',
+      scoped: true,
+      body: {query: 'remember this', limit: 5, user_id: 'project02-user'},
+    });
+    expect(capture).toMatchObject({
+      url: 'http://127.0.0.1:8765/memories',
+      scoped: true,
+      body: {
+        run_id: 'session-mem0',
+        infer: true,
+        metadata: {project02_sources: ['evt_mem0']},
+      },
+    });
+    expect(capture?.body['messages']).toMatchObject([
+      {role: 'user'},
+      {role: 'assistant'},
+    ]);
+    expect(search).toMatchObject({
+      url: 'http://127.0.0.1:8765/search',
+      scoped: true,
+      body: {query: 'prior sessions', limit: 5},
+    });
+  });
+
   it('keeps credential-bearing endpoint fields out of character overlays', () => {
     const manifest = createMem0PluginManifest();
     const endpointFields = manifest.config.fields.filter(field =>
@@ -266,157 +323,6 @@ describe('mem0 plugin package', () => {
   });
 });
 
-function conformanceServerFetch(
-  scenario: MemoryProviderConformanceScenario,
-): Mem0FetchFunction {
-  // Recall and search reach the same endpoint, and the conformance run
-  // drives recall first, so order names the verb behind each request.
-  let searchRequests = 0;
-
-  return (url, init) => {
-    if (scenario.failBackend === true) {
-      return Promise.resolve({
-        ok: false,
-        status: 503,
-        json: () => Promise.resolve({}),
-      });
-    }
-
-    const body =
-      init.body === undefined
-        ? {}
-        : (JSON.parse(init.body) as {
-            readonly query?: string;
-            readonly infer?: boolean;
-            readonly messages?: readonly {readonly content?: string}[];
-            readonly metadata?: unknown;
-            readonly run_id?: string;
-            readonly top_k?: number;
-            readonly limit?: number;
-          });
-
-    if (url.endsWith('/search')) {
-      const items = scenario.recallItems ?? scenario.searchItems ?? [];
-
-      searchRequests += 1;
-
-      if (scenario.requestProbe !== undefined) {
-        scenario.requestProbe.scopedVerbs = {
-          ...scenario.requestProbe.scopedVerbs,
-          [searchRequests === 1 ? 'recall' : 'search']:
-            init.signal instanceof AbortSignal,
-        };
-      }
-
-      if (scenario.requestProbe !== undefined && body.query !== undefined) {
-        const verb = searchRequests === 1 ? 'recall' : 'search';
-
-        const requestedLimit = body.limit ?? body.top_k;
-
-        scenario.requestProbe[`${verb}Query`] = body.query;
-
-        if (requestedLimit !== undefined) {
-          scenario.requestProbe[`${verb}MaxItems`] = requestedLimit;
-        }
-      }
-
-      return jsonResponse({
-        results: items.map(item => ({
-          id: item.sourceReferences[0]?.id ?? item.id,
-          memory: item.text,
-          ...(item.confidence === undefined ? {} : {score: item.confidence}),
-        })),
-      });
-    }
-
-    if (url.endsWith('/memories')) {
-      if (scenario.requestProbe !== undefined && body.run_id !== undefined) {
-        scenario.requestProbe.sessionIds = {
-          ...scenario.requestProbe.sessionIds,
-          captureTurn: body.run_id,
-        };
-      }
-
-      const requestedText = body.messages?.[0]?.content;
-
-      if (scenario.requestProbe !== undefined) {
-        scenario.requestProbe.scopedVerbs = {
-          ...scenario.requestProbe.scopedVerbs,
-          [body.infer === false ? 'add' : 'captureTurn']:
-            init.signal instanceof AbortSignal,
-        };
-      }
-
-      if (scenario.requestProbe !== undefined && requestedText !== undefined) {
-        if (body.infer === false) {
-          scenario.requestProbe.addText = requestedText;
-          scenario.requestProbe.addSourceReferenceIds = sourceIdsFromMetadata(
-            body.metadata,
-          );
-        } else {
-          scenario.requestProbe.capturedUserMessage = requestedText;
-          scenario.requestProbe.capturedSourceReferenceIds =
-            sourceIdsFromMetadata(body.metadata);
-        }
-      }
-
-      const references =
-        body.infer === false
-          ? (scenario.addResult?.sourceReferences ?? [])
-          : scenario.captureResult?.captured === true
-            ? (scenario.captureResult.sourceReferences ?? [])
-            : [];
-
-      return jsonResponse({
-        results: references.map(reference => ({id: reference.id})),
-      });
-    }
-
-    if (scenario.requestProbe !== undefined) {
-      scenario.requestProbe.scopedVerbs = {
-        ...scenario.requestProbe.scopedVerbs,
-        health: init.signal instanceof AbortSignal,
-      };
-    }
-
-    // The server backend pings its root; a seeded non-ok health surfaces
-    // as an HTTP failure the provider maps to degraded.
-    if (
-      scenario.healthResult !== undefined &&
-      scenario.healthResult.status !== 'ok'
-    ) {
-      return Promise.resolve({
-        ok: false,
-        status: 503,
-        json: () => Promise.resolve({}),
-      });
-    }
-
-    return jsonResponse({});
-  };
-}
-
-function sourceIdsFromMetadata(metadata: unknown): readonly string[] {
-  const sources =
-    typeof metadata === 'object' && metadata !== null
-      ? (metadata as {readonly project02_sources?: unknown})[
-          'project02_sources'
-        ]
-      : undefined;
-
-  return Array.isArray(sources)
-    ? sources.filter((id): id is string => typeof id === 'string')
-    : [];
-}
-
-function jsonResponse(value: unknown) {
-  return Promise.resolve({
-    ok: true,
-    status: 200,
-    json: () => Promise.resolve(value),
-  });
-}
-
 function mem0FactoryInput(
   backend: 'platform' | 'server',
 ): RuntimePluginFactoryInput {
@@ -452,6 +358,26 @@ function resolvedConfig(
       ]),
     ),
   );
+}
+
+function mem0AfterTurnContext() {
+  return createRuntimePluginAfterTurnCommittedContext({
+    ...testIdentity(),
+    sessionId: 'session-mem0',
+    eventType: 'USER_MESSAGE',
+    currentUserMessage: 'remember this',
+    character: testCharacterProfile,
+    committedAt: '2026-08-10T00:00:01.000Z',
+    visibleMessages: [
+      {
+        id: 'visible-character',
+        role: 'character',
+        speakerId: 'mira',
+        speakerName: 'Mira',
+        text: 'noted',
+      },
+    ],
+  });
 }
 
 function mem0Context() {

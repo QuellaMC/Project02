@@ -65,6 +65,15 @@ function configuredMem0Backend(
       );
     }
 
+    // Without this, "localhost:8765" reaches fetch as a bad URL and every
+    // verb reports the backend unreachable, naming nothing the operator
+    // can fix.
+    if (!isAbsoluteHttpOrigin(baseUrl)) {
+      return createMisconfiguredMem0Backend(
+        `Mem0 baseUrl must be an absolute http:// or https:// origin, not "${baseUrl}".`,
+      );
+    }
+
     return createMem0ServerBackend({
       baseUrl,
       ...(apiKey === undefined ? {} : {apiKey}),
@@ -75,6 +84,12 @@ function configuredMem0Backend(
   if (apiKey === undefined) {
     return createMisconfiguredMem0Backend(
       'Mem0 platform backend needs the apiKey config field (MEM0_API_KEY).',
+    );
+  }
+
+  if (baseUrl !== undefined && !isAbsoluteHttpOrigin(baseUrl)) {
+    return createMisconfiguredMem0Backend(
+      `Mem0 baseUrl must be an absolute http:// or https:// origin, not "${baseUrl}".`,
     );
   }
 
