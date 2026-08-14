@@ -15,6 +15,7 @@ import type {RuntimePlugin} from '../../src/plugins/api/index.ts';
 import type {
   MemoryAddResult,
   MemoryCaptureResult,
+  MemoryCloseResult,
   MemoryHealthResult,
   MemoryRecallItem,
   Project02MemoryProvider,
@@ -107,7 +108,7 @@ function createReferenceProvider(
         scenario.lifecycleProbe.closeCalls += 1;
       }
 
-      return backendAnswer(scenario, undefined);
+      return backendAnswer(scenario, scenario.closeResult);
     },
   };
 }
@@ -190,6 +191,7 @@ type MemoryProviderConformanceScenario = {
   readonly addResult?: MemoryAddResult;
   readonly captureResult?: MemoryCaptureResult;
   readonly healthResult?: MemoryHealthResult;
+  readonly closeResult?: MemoryCloseResult;
   readonly lifecycleProbe?: MemoryProviderConformanceLifecycleProbe;
 };
 
@@ -671,6 +673,28 @@ export function runMemoryProviderSeamContract(): void {
           pluginId: referenceMemoryProviderId,
           evidenceKind: 'session_end',
           status: 'failed',
+        }),
+      );
+    });
+
+    it('records work a provider could not finish while closing', async () => {
+      const host = conformanceHost({
+        closeResult: {
+          drained: false,
+          summary: 'Closed memory provider. 1 capture(s) did not complete.',
+        },
+      });
+      const shutdown = await host.shutdown(conformanceContext());
+
+      // Nothing runs after shutdown: no later turn, no health call, and
+      // the next launch builds a fresh provider. An accepted record here
+      // would be the last word on work that never landed.
+      expect(shutdown.evidence).toContainEqual(
+        expect.objectContaining({
+          pluginId: referenceMemoryProviderId,
+          evidenceKind: 'shutdown',
+          status: 'degraded',
+          summary: 'Closed memory provider. 1 capture(s) did not complete.',
         }),
       );
     });

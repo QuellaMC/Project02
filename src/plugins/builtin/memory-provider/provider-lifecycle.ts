@@ -289,7 +289,7 @@ function createShutdownHook(
   options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['onShutdown']> {
   return async context => {
-    await options.provider.close?.({
+    const result = await options.provider.close?.({
       deadlineAt: context.deadlineAt,
       signal: context.signal,
     });
@@ -298,7 +298,8 @@ function createShutdownHook(
       context,
       options.pluginId,
       'shutdown',
-      'Closed memory provider.',
+      result?.summary ?? 'Closed memory provider.',
+      result?.drained === false ? 'degraded' : 'accepted',
     );
   };
 }
@@ -308,6 +309,7 @@ function completedLifecycleResult(
   pluginId: string,
   evidenceKind: Extract<RuntimePluginEvidenceKind, 'session_end' | 'shutdown'>,
   summary: string,
+  status: 'accepted' | 'degraded' = 'accepted',
 ): ReturnType<NonNullable<RuntimePluginLifecycleHooks['onSessionEnd']>> {
   return {
     status: 'completed',
@@ -316,7 +318,7 @@ function completedLifecycleResult(
         context,
         pluginId,
         evidenceKind,
-        status: 'accepted',
+        status,
         summary,
       }),
     ],

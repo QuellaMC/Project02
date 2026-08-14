@@ -117,7 +117,7 @@ describe('memory provider runtime plugin factory', () => {
         closeDeadlineAt = scope.deadlineAt;
         closeSignal = scope.signal;
 
-        return Promise.resolve();
+        return Promise.resolve(undefined);
       },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
