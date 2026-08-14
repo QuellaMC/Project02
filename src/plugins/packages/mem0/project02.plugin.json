@@ -75,8 +75,7 @@
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true,
-          "globalOnly": true
+          "reloadRequired": true
         },
         {
           "name": "ossLlmApiKey",
@@ -97,8 +96,7 @@
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true,
-          "globalOnly": true
+          "reloadRequired": true
         },
         {
           "name": "ossEmbedderModel",
@@ -108,8 +106,7 @@
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true,
-          "globalOnly": true
+          "reloadRequired": true
         },
         {
           "name": "ossEmbedderApiKey",
@@ -130,8 +127,7 @@
           "valueType": "string",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true,
-          "globalOnly": true
+          "reloadRequired": true
         },
         {
           "name": "ossEmbedderDims",
@@ -141,8 +137,7 @@
           "valueType": "number",
           "agentMutable": false,
           "redactionLabels": [],
-          "reloadRequired": true,
-          "globalOnly": true
+          "reloadRequired": true
         }
       ]
     },
