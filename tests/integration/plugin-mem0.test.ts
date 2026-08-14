@@ -747,6 +747,73 @@ describe('mem0 plugin package', () => {
     expect(shutdown?.evidence[0]?.summary).toContain('did not complete');
   });
 
+  it('keeps capture losses in health while the outage itself persists', async () => {
+    const controller = new AbortController();
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      // Every request fails: the capture that was lost and the ping that
+      // would report it are down for the same reason.
+      fetchFn: () => Promise.reject(new Error('socket closed')),
+    });
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+    const health = await plugin.lifecycleHooks.health?.({
+      ...mem0Context(),
+      signal: controller.signal,
+    });
+
+    // The ping failing is exactly when the loss matters most; the
+    // unreachable message must not displace it.
+    expect(health).toMatchObject({
+      status: 'unavailable',
+      summary: expect.stringContaining('did not complete') as string,
+    });
+    expect(health?.summary).toContain('unreachable');
+  });
+
+  it('keeps the unknown-outcome warning inside the bounded health summary', async () => {
+    const fetchFn: Mem0FetchFunction = (url, init) => {
+      // The capture write hangs until abandoned; everything else -- the
+      // ping health leads with -- answers normally.
+      if (url.endsWith('/memories')) {
+        return new Promise((_resolve, reject) => {
+          init.signal.addEventListener(
+            'abort',
+            () => {
+              reject(new Error('aborted'));
+            },
+            {once: true},
+          );
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: []}),
+      });
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    // A shutdown whose deadline already passed abandons the capture
+    // mid-flight, which is what records the unknown-outcome loss.
+    await plugin.lifecycleHooks.onShutdown?.({
+      ...mem0Context(),
+      deadlineAt: Date.now() - 1,
+    });
+
+    // The host caps health summaries at 160 characters; leading with the
+    // loss keeps the warning whole where trailing it cut it to "whe...",
+    // and a truncated warning invites the retry that stores a duplicate.
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+    const bounded = health?.summary.slice(0, 160) ?? '';
+
+    expect(bounded).toContain('whether it completed is unknown');
+  });
+
   it('captures under the name the session was recorded with', async () => {
     const bodies: unknown[] = [];
     const fetchFn: Mem0FetchFunction = (_url, init) => {

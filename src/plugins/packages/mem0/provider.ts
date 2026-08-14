@@ -213,21 +213,24 @@ export function createMem0MemoryProvider(options: {
       };
     },
     async health(request) {
+      // A capture that did not complete means a user turn memory may not
+      // hold, and no later success brings it back -- least of all a
+      // failing ping during the very outage that caused it. It leads on
+      // every path, because the host bounds this summary and the outcome
+      // warning is the part an operator must not lose to the trim.
+      const losses = lastLossSummary === undefined ? '' : `${lastLossSummary} `;
+
       try {
         const readiness = await backend.ping({signal: request.signal});
-        const summary = readiness.summary;
         const backlog =
           pendingCaptures === 0
             ? ''
             : ` ${String(pendingCaptures)} capture(s) still running.`;
 
-        // A background capture that did not complete means a user turn
-        // memory may not hold; health is the lifecycle surface that has
-        // to say so, and no later success brings that turn back.
         if (incompleteCaptures > 0) {
           return {
             status: 'degraded',
-            summary: `${summary} ${lastLossSummary ?? ''}${backlog}`.trim(),
+            summary: `${losses}${readiness.summary}${backlog}`.trim(),
           };
         }
 
@@ -238,25 +241,26 @@ export function createMem0MemoryProvider(options: {
           status: readiness.verified ? 'ok' : 'degraded',
           summary:
             lastCaptureSummary === undefined
-              ? `${summary}${backlog}`.trim()
-              : `${summary} ${lastCaptureSummary}${backlog}`,
+              ? `${readiness.summary}${backlog}`.trim()
+              : `${readiness.summary} ${lastCaptureSummary}${backlog}`,
         };
       } catch (error: unknown) {
         if (error instanceof Mem0RequestError) {
           return {
             status:
               error.failureKind === 'network' ? 'unavailable' : 'degraded',
-            summary: error.message,
+            summary: `${losses}${error.message}`.trim(),
           };
         }
 
         // Misconfiguration surfaces its own actionable message here.
         return {
           status: 'unavailable',
-          summary:
+          summary: `${losses}${
             error instanceof Error && error.message.length > 0
               ? error.message
-              : 'Mem0 backend unreachable.',
+              : 'Mem0 backend unreachable.'
+          }`.trim(),
         };
       }
     },
