@@ -109,10 +109,17 @@ function createCaptureTurnHook(
     const lastCharacterMessage = context.committedTurn.visibleMessages
       .filter(message => message.role === 'character')
       .at(-1)?.text;
+    // The turn's own speaker, which a reopened session restores from its
+    // first recorded message rather than from current global config.
+    const userName = context.committedTurn.visibleMessages.find(
+      message => message.role === 'user',
+    )?.speakerName;
     const inputSourceReferences = currentTurnSourceReferences(context);
     const result = await options.provider.captureTurn?.({
       sessionId: context.sessionId,
       userMessage: context.currentUserMessage,
+      characterName: context.character.displayName,
+      ...(userName === undefined ? {} : {userName}),
       sourceReferences: inputSourceReferences,
       deadlineAt: context.deadlineAt,
       signal: context.signal,

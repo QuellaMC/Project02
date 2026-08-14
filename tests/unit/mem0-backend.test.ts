@@ -1,10 +1,21 @@
 import {describe, expect, it} from 'vitest';
 
+import {readdirSync, statSync} from 'node:fs';
+import {join} from 'node:path';
+
+import {createTestTempRoot} from '../support/temp-root.ts';
+
 import {
+  createDefaultMem0OssEngineLoader,
+  createMem0OssBackend,
   createMem0PlatformBackend,
   createMem0ServerBackend,
+  mem0OssEmbedderDimsForModel,
+  mem0OssDefaultEmbedderModel,
+  mem0OssEngineConfig,
   Mem0RequestError,
   type Mem0FetchFunction,
+  type Mem0OssEngine,
 } from '../../src/plugins/packages/mem0/backend.ts';
 
 type RecordedRequest = {
@@ -321,7 +332,10 @@ describe('mem0 backend transports', () => {
         'mem0 search failed: backend returned an unreadable response body.',
     });
     // Health only needs the status line, so it tolerates an empty body.
-    await expect(backend.ping({signal: abortSignal})).resolves.toBeUndefined();
+    await expect(backend.ping({signal: abortSignal})).resolves.toMatchObject({
+      verified: true,
+      summary: expect.stringContaining('Mem0 server reachable') as string,
+    });
   });
 
   it('translates failures into bounded errors that never carry the credential', async () => {
@@ -356,5 +370,279 @@ describe('mem0 backend transports', () => {
     });
     expect(errorMessageOf(httpError)).not.toContain('super-secret-key');
     expect(errorMessageOf(networkError)).not.toContain('super-secret-key');
+  });
+});
+
+describe('mem0 embedded engine backend', () => {
+  it('builds the engine config with plugin-scoped storage and cloud defaults', () => {
+    const config = mem0OssEngineConfig({
+      llmApiKey: 'llm-key',
+      embedderApiKey: 'llm-key',
+      storageDir: '/store/plugin-data/mem0/oss',
+    });
+
+    expect(config).toEqual({
+      customInstructions:
+        'Refer to people by the names used in the conversation; never call anyone "user" or "assistant".',
+      llm: {
+        provider: 'openai',
+        config: {apiKey: 'llm-key'},
+      },
+      embedder: {
+        provider: 'openai',
+        config: {apiKey: 'llm-key'},
+      },
+      vectorStore: {
+        provider: 'memory',
+        config: {
+          collectionName: 'memories_a370387dd58d',
+          dimension: 1536,
+          dbPath: '/store/plugin-data/mem0/oss/vectors.db',
+        },
+      },
+      historyStore: {
+        provider: 'sqlite',
+        config: {historyDbPath: '/store/plugin-data/mem0/oss/history.db'},
+      },
+      disableHistory: false,
+    });
+  });
+
+  it('serves keyless local endpoints with a placeholder key and model-derived dimensions', () => {
+    const local = mem0OssEngineConfig({
+      llmModel: 'llama3.2',
+      llmBaseUrl: 'http://localhost:1234/v1',
+      embedderModel: 'text-embedding-nomic-embed-text-v1.5',
+      embedderBaseUrl: 'http://localhost:1234/v1',
+      storageDir: '/store/plugin-data/mem0/oss',
+    });
+    const overridden = mem0OssEngineConfig({
+      llmApiKey: 'k',
+      embedderApiKey: 'k',
+      embedderModel: 'text-embedding-3-large',
+      embedderDims: 999,
+      storageDir: '/store/plugin-data/mem0/oss',
+    });
+
+    expect(local).toMatchObject({
+      llm: {
+        provider: 'openai',
+        config: {
+          model: 'llama3.2',
+          baseURL: 'http://localhost:1234/v1',
+          apiKey: 'no-key-required',
+        },
+      },
+      vectorStore: {config: {dimension: 768}},
+    });
+    expect(overridden).toMatchObject({
+      embedder: {config: {model: 'text-embedding-3-large'}},
+      vectorStore: {config: {dimension: 999}},
+    });
+    expect(mem0OssEmbedderDimsForModel('text-embedding-3-large')).toBe(3072);
+    expect(mem0OssEmbedderDimsForModel('mxbai-embed-large')).toBe(1024);
+    expect(mem0OssEmbedderDimsForModel('all-minilm')).toBe(384);
+    expect(mem0OssEmbedderDimsForModel(undefined)).toBe(1536);
+    expect(mem0OssEmbedderDimsForModel('unknown-model')).toBe(1536);
+  });
+
+  it('translates search and add through the engine with one memoized construction', async () => {
+    let constructions = 0;
+    const calls: unknown[] = [];
+    const engine: Mem0OssEngine = {
+      add(messages, options) {
+        calls.push({kind: 'add', messages, options});
+
+        return Promise.resolve({results: [{id: 'stored-1'}]});
+      },
+      search(query, options) {
+        calls.push({kind: 'search', query, options});
+
+        return Promise.resolve({
+          results: [{id: 'row-1', memory: 'Prefers tea.', score: 0.7}],
+        });
+      },
+    };
+    const backend = createMem0OssBackend({
+      loadEngine: () => {
+        constructions += 1;
+
+        return Promise.resolve(engine);
+      },
+    });
+
+    await backend.ping({signal: abortSignal});
+    const hits = await backend.search({
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 4,
+      signal: abortSignal,
+    });
+    const references = await backend.add({
+      messages: [{role: 'user', content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      runId: 'session-1',
+      infer: true,
+      signal: abortSignal,
+    });
+
+    expect(constructions).toBe(1);
+    expect(calls).toEqual([
+      {
+        kind: 'search',
+        query: 'tea',
+        options: {topK: 4, filters: {user_id: 'user-1', agent_id: 'mira'}},
+      },
+      {
+        kind: 'add',
+        messages: [{role: 'user', content: 'remember this'}],
+        options: {
+          userId: 'user-1',
+          agentId: 'mira',
+          runId: 'session-1',
+          infer: true,
+        },
+      },
+    ]);
+    expect(hits).toEqual([{id: 'row-1', text: 'Prefers tea.', score: 0.7}]);
+    expect(references).toEqual([
+      {kind: 'memory', id: 'stored-1', title: 'Mem0 memory'},
+    ]);
+  });
+
+  it('retries engine construction after a failed load instead of caching the rejection', async () => {
+    let attempts = 0;
+    const backend = createMem0OssBackend({
+      loadEngine: () => {
+        attempts += 1;
+
+        if (attempts === 1) {
+          return Promise.reject(
+            new TypeError('mem0ai/oss Memory did not construct an engine.'),
+          );
+        }
+
+        return Promise.resolve({
+          add: () => Promise.resolve({results: []}),
+          search: () => Promise.resolve({results: []}),
+        });
+      },
+    });
+
+    await expect(backend.ping({signal: abortSignal})).rejects.toThrow(
+      'did not construct',
+    );
+    // Health must not claim reachability the engine never established.
+    // Nothing was contacted, so the check cannot report the engine
+    // healthy on its own.
+    await expect(backend.ping({signal: abortSignal})).resolves.toMatchObject({
+      verified: false,
+      summary: expect.stringContaining(
+        'contacted on first capture or recall',
+      ) as string,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it('starts a new vector collection when the embedder identity changes', () => {
+    const base = {llmApiKey: 'k', storageDir: '/store'};
+    const collectionOf = (settings: Record<string, unknown>) => {
+      const store = mem0OssEngineConfig({...base, ...settings})[
+        'vectorStore'
+      ] as {readonly config: {readonly collectionName: string}};
+
+      return store.config.collectionName;
+    };
+
+    // Writing down a default must not move the collection: the effective
+    // embedder is what names it.
+    expect(collectionOf({})).toBe(
+      collectionOf({
+        embedderModel: mem0OssDefaultEmbedderModel,
+        embedderBaseUrl: 'https://api.openai.com/v1/',
+      }),
+    );
+
+    // Vectors only compare within the embedder that made them, and the
+    // embedder is reloadable: mixing two spaces in one collection ranks
+    // nonsense, and a width change breaks inserts outright.
+    expect(collectionOf({embedderModel: 'text-embedding-3-small'})).not.toBe(
+      collectionOf({embedderModel: 'text-embedding-3-large'}),
+    );
+    expect(collectionOf({embedderDims: 768})).not.toBe(
+      collectionOf({embedderDims: 1536}),
+    );
+    expect(
+      collectionOf({embedderBaseUrl: 'http://127.0.0.1:11434/v1'}),
+    ).not.toBe(collectionOf({}));
+  });
+
+  it('stops waiting on the engine when the caller gives up', async () => {
+    const controller = new AbortController();
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add: () => new Promise(() => undefined),
+          search: () => new Promise(() => undefined),
+        }),
+    });
+
+    const write = backend.add({
+      messages: [{role: 'user', content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      infer: true,
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    // The engine takes no signal of its own, so a stalled model request
+    // would otherwise hold the shutdown that abandoned it.
+    await expect(write).rejects.toMatchObject({failureKind: 'cancelled'});
+  });
+
+  it('keeps the engine databases owner-only', async () => {
+    const storageDir = join(
+      createTestTempRoot('mem0-oss-perms-'),
+      'plugin-data',
+      'mem0',
+      'oss',
+    );
+
+    await createDefaultMem0OssEngineLoader({
+      llmApiKey: 'k',
+      storageDir,
+    })({signal: abortSignal});
+
+    // The engine writes these with the process umask; they hold the same
+    // private material as the runtime's own owner-only stores.
+    expect(statSync(storageDir).mode & 0o777).toBe(0o700);
+    for (const entry of readdirSync(storageDir)) {
+      expect(statSync(join(storageDir, entry)).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it('defaults the engine analytics off before the module loads', async () => {
+    const previous = process.env['MEM0_TELEMETRY'];
+    delete process.env['MEM0_TELEMETRY'];
+
+    try {
+      const engine = await createDefaultMem0OssEngineLoader({
+        llmApiKey: 'k',
+        storageDir: createTestTempRoot('mem0-telemetry-'),
+      })({signal: abortSignal});
+
+      expect(process.env['MEM0_TELEMETRY']).toBe('false');
+      expect(typeof engine.search).toBe('function');
+    } finally {
+      if (previous === undefined) {
+        delete process.env['MEM0_TELEMETRY'];
+      } else {
+        process.env['MEM0_TELEMETRY'] = previous;
+      }
+    }
   });
 });

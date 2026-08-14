@@ -136,8 +136,8 @@
       </tr>
       <tr>
         <td><code>mem0</code></td>
-        <td>Mem0 platform API or a self-hosted Mem0 server</td>
-        <td>REST via fetch; secret key from <code>MEM0_API_KEY</code>; capture lets the backend extract. <code>mem0.add</code> submits the text the model supplies, bounded like every provider memory item; a self-hosted server answers with the stored row, while the hosted platform answers with a receipt and stores asynchronously, which the tool reports as queued rather than saved.</td>
+        <td>Mem0 platform API, a self-hosted Mem0 server, or the embedded engine on this device (<code>backend: oss</code>)</td>
+        <td>Platform and server speak REST; the embedded engine runs in-process against any OpenAI-compatible endpoint and keeps its files under the plugin's data directory. Capture lets the backend extract. <code>mem0.add</code> submits the text the model supplies, bounded like every provider memory item; a self-hosted server or the embedded engine answers with the stored row, while the hosted platform answers with a receipt and stores asynchronously, which the tool reports as queued rather than saved.</td>
       </tr>
     </table>
 
@@ -183,6 +183,10 @@
       <tr>
         <td>Large semantic long-term memory</td>
         <td>Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a self-hosted server set <code>backend</code> to <code>server</code> and <code>baseUrl</code> to its origin, where the key is then optional. Use an <code>https://</code> origin unless the server runs on this machine — over <code>http://</code> the conversation and the key cross the network in the clear.</td>
+      </tr>
+      <tr>
+        <td>Semantic memory fully on this device, no account</td>
+        <td>Enable <code>mem0</code>, set <code>backend</code> to <code>oss</code> and point <code>ossLlmBaseUrl</code> at your local OpenAI-compatible server (LM Studio <code>http://localhost:1234/v1</code>, Ollama <code>http://localhost:11434/v1</code>) plus the model names — no key needed. Or leave the endpoint unset for the OpenAI cloud and set <code>ossLlmApiKey</code>.</td>
       </tr>
     </table>
   </main>

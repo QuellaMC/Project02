@@ -1,16 +1,23 @@
+import {join} from 'node:path';
+
 import {createMemoryProviderRuntimePlugin} from '../../builtin/memory-provider/index.ts';
 import {readRuntimePluginPackageDescriptor} from '../../api/package-descriptor.ts';
 import type {RuntimePluginFactoryInput} from '../../api/factory.ts';
 import type {RuntimePlugin, RuntimePluginManifest} from '../../api/types.ts';
 import {
+  createDefaultMem0OssEngineLoader,
+  createMem0OssBackend,
   createMem0PlatformBackend,
   createMem0ServerBackend,
   type Mem0Backend,
   type Mem0FetchFunction,
+  type Mem0OssEngineLoader,
+  type Mem0OssSettings,
 } from './backend.ts';
 import {
   createMem0MemoryProvider,
   createMisconfiguredMem0Backend,
+  mem0PluginId,
 } from './provider.ts';
 
 export {mem0PluginId} from './provider.ts';
@@ -21,6 +28,11 @@ const mem0PluginDescriptorUrl = new URL(
   import.meta.url,
 );
 const mem0DefaultUserId = 'project02-user';
+
+export type Mem0PluginTransport = {
+  readonly fetchFn?: Mem0FetchFunction;
+  readonly ossEngineLoader?: Mem0OssEngineLoader;
+};
 
 export function createMem0PluginManifest(): RuntimePluginManifest {
   return readRuntimePluginPackageDescriptor({
@@ -37,12 +49,13 @@ export function createProject02Plugin(
 
 export function createMem0PluginFromInput(
   input: RuntimePluginFactoryInput,
-  transport: {readonly fetchFn?: Mem0FetchFunction} = {},
+  transport: Mem0PluginTransport = {},
 ): RuntimePlugin {
   const provider = createMem0MemoryProvider({
     backend: configuredMem0Backend(input, transport),
     userId: configuredStringValue(input, 'userId') ?? mem0DefaultUserId,
     agentId: input.characterId ?? 'default',
+    userName: input.userDisplayName ?? 'You',
   });
 
   return createMemoryProviderRuntimePlugin(provider, {
@@ -52,11 +65,25 @@ export function createMem0PluginFromInput(
 
 function configuredMem0Backend(
   input: RuntimePluginFactoryInput,
-  transport: {readonly fetchFn?: Mem0FetchFunction},
+  transport: Mem0PluginTransport,
 ): Mem0Backend {
   const backendKind = configuredStringValue(input, 'backend') ?? 'platform';
   const apiKey = configuredStringValue(input, 'apiKey');
   const baseUrl = configuredStringValue(input, 'baseUrl');
+
+  if (backendKind === 'oss') {
+    const settings = mem0OssSettingsFromInput(input);
+
+    if (settings.status === 'rejected') {
+      return createMisconfiguredMem0Backend(settings.message);
+    }
+
+    return createMem0OssBackend({
+      loadEngine:
+        transport.ossEngineLoader ??
+        createDefaultMem0OssEngineLoader(settings.value),
+    });
+  }
 
   if (backendKind === 'server') {
     if (baseUrl === undefined) {
@@ -105,6 +132,32 @@ function invalidEndpointMessage(fieldName: string): string {
   return `Mem0 ${fieldName} must be an absolute http:// or https:// origin with no embedded credentials, query, or fragment.`;
 }
 
+/**
+ * Two spellings of one endpoint are one endpoint: comparing raw strings
+ * would withhold the inherited key over a trailing slash and leave the
+ * embedder authenticating with nothing.
+ */
+function sameEndpoint(
+  first: string | undefined,
+  second: string | undefined,
+): boolean {
+  if (first === undefined || second === undefined) {
+    return first === second;
+  }
+
+  try {
+    const left = new URL(first);
+    const right = new URL(second);
+
+    return (
+      left.origin === right.origin &&
+      left.pathname.replace(/\/+$/u, '') === right.pathname.replace(/\/+$/u, '')
+    );
+  } catch {
+    return first === second;
+  }
+}
+
 function isAbsoluteHttpOrigin(value: string): boolean {
   try {
     const url = new URL(value);
@@ -123,6 +176,88 @@ function isAbsoluteHttpOrigin(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+type Mem0OssSettingsResolution =
+  | {readonly status: 'resolved'; readonly value: Mem0OssSettings}
+  | {readonly status: 'rejected'; readonly message: string};
+
+/**
+ * Everything speaks the OpenAI wire format, so the surface is endpoints,
+ * optional keys, and model names. An unset endpoint means the OpenAI
+ * cloud, which is the one place a key is genuinely required; the embedder
+ * reuses the extraction endpoint and key unless given its own.
+ */
+export function mem0OssSettingsFromInput(
+  input: RuntimePluginFactoryInput,
+): Mem0OssSettingsResolution {
+  const llmApiKey = configuredStringValue(input, 'ossLlmApiKey');
+  const llmBaseUrl = configuredStringValue(input, 'ossLlmBaseUrl');
+
+  if (llmBaseUrl === undefined && llmApiKey === undefined) {
+    return {
+      status: 'rejected',
+      message:
+        'Mem0 OSS extraction needs the ossLlmApiKey config field (MEM0_OSS_LLM_API_KEY), or an ossLlmBaseUrl pointing at an OpenAI-compatible server such as LM Studio or Ollama.',
+    };
+  }
+
+  const embedderBaseUrl =
+    configuredStringValue(input, 'ossEmbedderBaseUrl') ?? llmBaseUrl;
+  // The key travels with its endpoint: inheriting it while the embedder
+  // points somewhere else would hand the extraction credential to a
+  // different service.
+  const embedderApiKey =
+    configuredStringValue(input, 'ossEmbedderApiKey') ??
+    (sameEndpoint(embedderBaseUrl, llmBaseUrl) ? llmApiKey : undefined);
+  const llmModel = configuredStringValue(input, 'ossLlmModel');
+  const embedderModel = configuredStringValue(input, 'ossEmbedderModel');
+  const embedderDims = configuredEmbedderDims(input);
+
+  if (embedderDims === 'invalid') {
+    return {
+      status: 'rejected',
+      message:
+        'Mem0 OSS ossEmbedderDims must be a positive whole number matching the embedding model width.',
+    };
+  }
+
+  return {
+    status: 'resolved',
+    value: {
+      ...(llmModel === undefined ? {} : {llmModel}),
+      ...(llmApiKey === undefined ? {} : {llmApiKey}),
+      ...(llmBaseUrl === undefined ? {} : {llmBaseUrl}),
+      ...(embedderModel === undefined ? {} : {embedderModel}),
+      ...(embedderApiKey === undefined ? {} : {embedderApiKey}),
+      ...(embedderBaseUrl === undefined ? {} : {embedderBaseUrl}),
+      ...(embedderDims === undefined ? {} : {embedderDims}),
+      // Mirrors characterPluginDataDirPath; the layout helper lives in
+      // runtime storage, which packages cannot import without a cycle.
+      storageDir: join(input.storeRoot, 'plugin-data', mem0PluginId, 'oss'),
+    },
+  };
+}
+
+/**
+ * A width that cannot describe a vector is a configuration error, not a
+ * reason to fall back to a default that mismatches at the first search,
+ * so an authored-but-unusable value is distinguished from an absent one.
+ */
+function configuredEmbedderDims(
+  input: RuntimePluginFactoryInput,
+): number | undefined | 'invalid' {
+  const field = input.resolvedConfig['ossEmbedderDims'];
+
+  if (field === undefined || !field.resolved || field.value === undefined) {
+    return undefined;
+  }
+
+  const value = field.value;
+
+  return typeof value === 'number' && Number.isInteger(value) && value > 0
+    ? value
+    : 'invalid';
 }
 
 function configuredStringValue(

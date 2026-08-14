@@ -52,8 +52,8 @@ construction, never inside an already discovered host.
 ## The factory contract
 
 `createProject02Plugin(input: RuntimePluginFactoryInput)` receives
-`{pluginId, manifest, storeRoot, characterId, resolvedConfig,
-redactedConfig}` and returns a `RuntimePlugin`. It runs when the configured
+`{pluginId, manifest, storeRoot, characterId, userDisplayName,
+resolvedConfig, redactedConfig}` and returns a `RuntimePlugin`. It runs when the configured
 host is constructed at session start. The returned plugin's manifest must
 equal the discovered one — build it from `input.manifest`, never a second
 copy.
@@ -62,6 +62,10 @@ copy.
 namespace external state by. It is absent when no character is active, so
 fall back to a constant of your own; never derive an identity from
 `storeRoot`, whose layout is the runtime's to change.
+
+`userDisplayName` is what the user is called in this store, for a package
+that records or shows who spoke. It is absent until the store sets one, so
+carry your own fallback rather than a second copy of the setting.
 
 Bundled packages import host helpers directly, an installed package cannot:
 its captured artifact resolves only its own files, so a memory provider

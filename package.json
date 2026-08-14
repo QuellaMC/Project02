@@ -10,7 +10,19 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3"
-    ]
+    ],
+    "peerDependencyRules": {
+      "allowedVersions": {
+        "mem0ai>better-sqlite3": "13"
+      },
+      "ignoreMissing": [
+        "@cloudflare/workers-types",
+        "@types/jest",
+        "@types/pg",
+        "compromise",
+        "natural"
+      ]
+    }
   },
   "exports": {
     ".": "./src/index.ts"
@@ -35,7 +47,9 @@
   "dependencies": {
     "ajv": "^8.20.0",
     "better-sqlite3": "^13.0.3",
-    "drizzle-orm": "^0.45.2"
+    "drizzle-orm": "^0.45.2",
+    "mem0ai": "^3.1.6",
+    "pg": "8.11.3"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

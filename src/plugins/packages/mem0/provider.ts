@@ -10,12 +10,43 @@ import {
 
 export const mem0PluginId = 'mem0';
 
+/**
+ * How many turns may wait on extraction at once. Deep enough to ride out
+ * a slow local model, shallow enough that a session cannot grow a queue
+ * it will never finish.
+ */
+const mem0MaxPendingCaptures = 8;
+
+/** Node's timer ceiling; beyond it a timeout fires immediately. */
+const maximumDrainWaitMs = 2_147_483_647;
+
 export function createMem0MemoryProvider(options: {
   readonly backend: Mem0Backend;
   readonly userId: string;
   readonly agentId: string;
+  /** Display name spoken in captured turns, so memories name the person. */
+  readonly userName: string;
 }): Project02MemoryProvider {
-  const {backend, userId, agentId} = options;
+  const {backend, userId, agentId, userName} = options;
+  // Capture runs behind the turn: the next prompt never needs the memory
+  // that is still being extracted, so the hook only queues. Work chains
+  // serially, close() drains it, and health carries the last outcome so
+  // background failures stay observable.
+  let captureQueue: Promise<void> = Promise.resolve();
+  let lastCaptureSummary: string | undefined;
+  // Background work outlives the hook that queued it, so it needs its own
+  // cancellation: the turn's signal is already abandoned, and close()
+  // must be able to stop a stalled request instead of waiting forever.
+  const backgroundWork = new AbortController();
+  let pendingCaptures = 0;
+  // A queued capture has no retry, so a failure is a turn that was never
+  // stored: the count is a running total for the provider's lifetime, not
+  // a streak a later success can clear.
+  let lostCaptures = 0;
+  let lastLossSummary: string | undefined;
+  // A backend that has answered real work is proven reachable, whatever
+  // its own readiness check can establish on its own.
+  let backendAnswered = false;
 
   return {
     id: mem0PluginId,
@@ -31,35 +62,102 @@ export function createMem0MemoryProvider(options: {
 
       return {items: hits.map(memoryItemFromHit)};
     },
-    async captureTurn(turn) {
+    captureTurn(turn) {
+      // Extraction names entities from the conversation text, so speakers
+      // introduce themselves; role labels alone would surface as memories
+      // about "user" and "assistant", which mean nothing in roleplay.
+      const characterName = turn.characterName ?? 'The character';
+      // The session's own speaker wins: a reopened session keeps the name
+      // its transcript was recorded under, whatever the config now says.
+      const speaker = turn.userName ?? userName;
       const messages: Mem0ChatMessage[] = [
-        {role: 'user', content: turn.userMessage},
+        {role: 'user', content: `${speaker}: ${turn.userMessage}`},
         ...(turn.characterMessage === undefined
           ? []
-          : [{role: 'assistant' as const, content: turn.characterMessage}]),
+          : [
+              {
+                role: 'assistant' as const,
+                content: `${characterName}: ${turn.characterMessage}`,
+              },
+            ]),
       ];
-      const references = await backend.add({
-        messages,
-        userId,
-        agentId,
-        runId: turn.sessionId,
-        // Same provenance an explicit add carries: a memory extracted
-        // from a turn must be traceable to it too.
-        sourceIds: turn.sourceReferences.map(reference => reference.id),
-        // The backend owns extraction: it decides what becomes memory.
-        infer: true,
-        signal: turn.signal,
-      });
 
-      if (references.length === 0) {
-        return {captured: false, summary: 'No memory extracted.'};
+      // Extraction can be slower than the user types, and an unbounded
+      // chain would grow for the whole session while recall fell further
+      // behind. Past the backlog limit the turn is refused outright, which
+      // the summary and health both say, rather than queued forever.
+      if (pendingCaptures >= mem0MaxPendingCaptures) {
+        lostCaptures += 1;
+        lastLossSummary = `${String(lostCaptures)} capture(s) never stored; most recent: extraction backlog is full (${String(mem0MaxPendingCaptures)} queued).`;
+
+        return Promise.resolve({
+          captured: false,
+          summary:
+            'Memory extraction is behind; this turn was not queued for capture.',
+        });
       }
 
-      return {
+      pendingCaptures += 1;
+      captureQueue = captureQueue.then(async () => {
+        // The turn is committed and the user is waiting on the reply, not
+        // on extraction: yielding here keeps the hook's own return ahead
+        // of any backend work, whatever shape that backend has.
+        await new Promise(resolve => {
+          setImmediate(resolve);
+        });
+
+        try {
+          const references = await backend.add({
+            messages,
+            userId,
+            agentId,
+            runId: turn.sessionId,
+            // Same provenance an explicit add carries: a memory extracted
+            // from a turn must be traceable to it too.
+            sourceIds: turn.sourceReferences.map(reference => reference.id),
+            // The backend owns extraction: it decides what becomes memory.
+            infer: true,
+            signal: backgroundWork.signal,
+          });
+
+          // A queue receipt is an acknowledgement, not a stored memory:
+          // the platform may still reject what it accepted.
+          const stored = references.filter(
+            reference => reference.kind === 'memory',
+          ).length;
+
+          backendAnswered = true;
+          lastCaptureSummary =
+            references.length === 0
+              ? 'No memory extracted from the last captured turn.'
+              : stored === 0
+                ? 'Queued the last captured turn with the backend.'
+                : `Stored ${String(stored)} memory item(s) from the last captured turn.`;
+        } catch (error: unknown) {
+          lostCaptures += 1;
+          lastLossSummary = `${String(lostCaptures)} capture(s) never stored; most recent: ${boundedCaptureFailure(error)}`;
+        } finally {
+          pendingCaptures -= 1;
+        }
+      });
+
+      return Promise.resolve({
         captured: true,
-        summary: 'Captured turn for memory extraction.',
-        sourceReferences: references,
-      };
+        // Losses ride along into this turn's durable evidence: health
+        // reports them too, but a reload builds a fresh provider and its
+        // count starts over, while the turn record does not.
+        summary:
+          lostCaptures === 0
+            ? 'Queued turn for memory extraction.'
+            : `Queued turn for memory extraction. ${String(lostCaptures)} earlier capture(s) were never stored.`,
+        sourceReferences: [
+          {
+            kind: 'external_contract',
+            id: `${mem0PluginId}.capture_queue`,
+            title: 'Queued memory capture',
+          },
+        ],
+      });
     },
     async search(request) {
       const hits = await backend.search({
@@ -105,9 +203,33 @@ export function createMem0MemoryProvider(options: {
     },
     async health(request) {
       try {
-        await backend.ping({signal: request.signal});
+        const readiness = await backend.ping({signal: request.signal});
+        const summary = readiness.summary;
+        const backlog =
+          pendingCaptures === 0
+            ? ''
+            : ` ${String(pendingCaptures)} capture(s) still running.`;
 
-        return {status: 'ok', summary: 'Mem0 backend reachable.'};
+        // A failed background capture means a user turn was never stored;
+        // health is the lifecycle surface that has to say so, and no later
+        // success brings that turn back.
+        if (lostCaptures > 0) {
+          return {
+            status: 'degraded',
+            summary: `${summary} ${lastLossSummary ?? ''}${backlog}`.trim(),
+          };
+        }
+
+        return {
+          // A check that contacted nothing cannot report health: the
+          // model endpoint, the key, and the model name are all still
+          // unproven until the first real call.
+          status: readiness.verified || backendAnswered ? 'ok' : 'degraded',
+          summary:
+            lastCaptureSummary === undefined
+              ? `${summary}${backlog}`.trim()
+              : `${summary} ${lastCaptureSummary}${backlog}`,
+        };
       } catch (error: unknown) {
         if (error instanceof Mem0RequestError) {
           return {
@@ -127,7 +249,45 @@ export function createMem0MemoryProvider(options: {
         };
       }
     },
+    async close(scope) {
+      // Drain queued captures so a clean exit never drops an extraction,
+      // but abort them when the shutdown deadline passes: one stalled
+      // request must not hold the process open.
+      const drainDeadline = setTimeout(
+        () => {
+          backgroundWork.abort();
+        },
+        // Clamped to the timer's range: a far-future deadline would
+        // overflow and fire immediately, aborting healthy work.
+        Math.min(
+          maximumDrainWaitMs,
+          Math.max(0, scope.deadlineAt - Date.now()),
+        ),
+      );
+      scope.signal.addEventListener('abort', () => {
+        backgroundWork.abort();
+      });
+
+      try {
+        await captureQueue;
+      } finally {
+        clearTimeout(drainDeadline);
+      }
+    },
   };
+}
+
+/**
+ * The REST transports raise bounded errors of their own; an embedded
+ * engine raises whatever its SDK or the server it called did, which can
+ * carry request bodies, endpoint details, conversation text, or parts of
+ * a credential. Health and evidence show this, so only the bounded form
+ * travels.
+ */
+function boundedCaptureFailure(error: unknown): string {
+  return error instanceof Mem0RequestError
+    ? error.message
+    : 'the memory engine rejected the write; check its model and embedder settings.';
 }
 
 /**

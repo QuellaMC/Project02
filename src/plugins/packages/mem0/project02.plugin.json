@@ -7,7 +7,7 @@
     "displayName": "Mem0 Memory",
     "version": "1.0.0",
     "kind": "memory_provider",
-    "description": "Retrieval-driven long-term memory backed by a Mem0 platform account or self-hosted Mem0 server, spoken over its REST API.",
+    "description": "Retrieval-driven long-term memory backed by a Mem0 platform account, a self-hosted Mem0 server, or the embedded Mem0 engine running on this device with its own extraction model and embedder.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "compatibility": {
       "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
@@ -17,18 +17,19 @@
       "after_turn_committed",
       "tool_provider",
       "handle_tool_call",
-      "health"
+      "health",
+      "on_shutdown"
     ],
     "config": {
       "scope": "global_with_character_overrides",
       "fields": [
         {
           "name": "backend",
-          "description": "Which Mem0 deployment to talk to: the hosted platform API or a self-hosted server.",
+          "description": "Which Mem0 deployment to talk to: the hosted platform API, a self-hosted server, or the embedded engine on this device (oss).",
           "required": false,
           "secret": false,
           "valueType": "string",
-          "allowedValues": ["platform", "server"],
+          "allowedValues": ["platform", "server", "oss"],
           "defaultValueSummary": "platform",
           "agentMutable": false,
           "redactionLabels": [],
@@ -65,6 +66,83 @@
           "agentMutable": false,
           "redactionLabels": [],
           "reloadRequired": true
+        },
+        {
+          "name": "ossLlmModel",
+          "description": "Embedded engine only: extraction model name; unset uses the engine default (gpt-5-mini). Some models return empty extractions for the engine's prompt even though the API works; test yours, and prefer small instruction-following models.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true,
+          "globalOnly": true
+        },
+        {
+          "name": "ossLlmApiKey",
+          "description": "Embedded engine only: API key for the extraction endpoint. Required when ossLlmBaseUrl is unset (the OpenAI cloud); local servers ignore keys.",
+          "required": false,
+          "secret": true,
+          "valueType": "string",
+          "envVar": "MEM0_OSS_LLM_API_KEY",
+          "agentMutable": false,
+          "redactionLabels": ["memory"],
+          "reloadRequired": true
+        },
+        {
+          "name": "ossLlmBaseUrl",
+          "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true,
+          "globalOnly": true
+        },
+        {
+          "name": "ossEmbedderModel",
+          "description": "Embedded engine only: embedding model name; unset uses the engine default (text-embedding-3-small).",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true,
+          "globalOnly": true
+        },
+        {
+          "name": "ossEmbedderApiKey",
+          "description": "Embedded engine only: API key for the embedding endpoint; unset reuses ossLlmApiKey.",
+          "required": false,
+          "secret": true,
+          "valueType": "string",
+          "envVar": "MEM0_OSS_EMBEDDER_API_KEY",
+          "agentMutable": false,
+          "redactionLabels": ["memory"],
+          "reloadRequired": true
+        },
+        {
+          "name": "ossEmbedderBaseUrl",
+          "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true,
+          "globalOnly": true
+        },
+        {
+          "name": "ossEmbedderDims",
+          "description": "Embedded engine only: embedding vector width; unset is derived from the model name (nomic 768, mxbai 1024, text-embedding-3-small 1536, text-embedding-3-large 3072; otherwise 1536). Must match the embedding model.",
+          "required": false,
+          "secret": false,
+          "valueType": "number",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true,
+          "globalOnly": true
         }
       ]
     },

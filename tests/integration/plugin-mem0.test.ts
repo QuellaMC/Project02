@@ -12,10 +12,13 @@ import {createProject02Plugin} from '../../src/plugins/packages/mem0/index.ts';
 import {
   createMem0PluginFromInput,
   createMem0PluginManifest,
+  mem0OssSettingsFromInput,
   mem0PluginId,
 } from '../../src/plugins/packages/mem0/plugin.ts';
-import type {Mem0FetchFunction} from '../../src/plugins/packages/mem0/backend.ts';
-
+import type {
+  Mem0FetchFunction,
+  Mem0OssEngine,
+} from '../../src/plugins/packages/mem0/backend.ts';
 describe('mem0 plugin package', () => {
   it('exposes the descriptor-backed package factory with mem0-namespaced tools', () => {
     const manifest = createMem0PluginManifest();
@@ -214,8 +217,11 @@ describe('mem0 plugin package', () => {
       },
       mem0Context(),
     );
+    // Capture runs behind the turn, so the drain is what settles what the
+    // backend was sent.
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
 
-    const [recall, capture, search] = requests.map(request => ({
+    const [recall, search, capture] = requests.map(request => ({
       url: request.url,
       scoped: request.scoped,
       body: JSON.parse(request.body ?? '{}') as Record<string, unknown>,
@@ -258,6 +264,50 @@ describe('mem0 plugin package', () => {
     for (const field of manifest.config.fields) {
       expect(field.agentMutable ?? false).toBe(false);
     }
+  });
+
+  it('hands the embedded engine the same requests as the REST transports', async () => {
+    const calls: {readonly verb: string; readonly payload: unknown}[] = [];
+    const engine: Mem0OssEngine = {
+      search(query, searchOptions) {
+        calls.push({verb: 'search', payload: {query, ...searchOptions}});
+
+        return Promise.resolve({results: []});
+      },
+      add(messages, addOptions) {
+        calls.push({verb: 'add', payload: {messages, ...addOptions}});
+
+        return Promise.resolve({results: [{id: 'stored-1'}]});
+      },
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('oss'), {
+      ossEngineLoader: () => Promise.resolve(engine),
+    });
+
+    await plugin.lifecycleHooks.beforeRoleModelCall?.(mem0Context());
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+
+    // The engine takes the identities and the bound in its own shape, and
+    // the captured turn carries the host's provenance as its metadata.
+    expect(calls[0]).toMatchObject({
+      verb: 'search',
+      payload: {
+        query: 'remember this',
+        topK: 5,
+        filters: {user_id: 'project02-user', agent_id: 'mira'},
+      },
+    });
+    expect(calls[1]).toMatchObject({
+      verb: 'add',
+      payload: {
+        userId: 'project02-user',
+        agentId: 'mira',
+        runId: 'session-mem0',
+        infer: true,
+        metadata: {project02_sources: ['evt_mem0']},
+      },
+    });
   });
 
   it('names a malformed base URL instead of reporting the backend unreachable', async () => {
@@ -332,10 +382,331 @@ describe('mem0 plugin package', () => {
       summary: expect.stringContaining('MEM0_API_KEY') as string,
     });
   });
+
+  it('resolves embedded-engine settings around one rule: the cloud default needs a key', () => {
+    const inherited = mem0OssSettingsFromInput(
+      mem0FactoryInput('oss', {
+        ossLlmBaseUrl: 'https://gateway.example/v1',
+        ossEmbedderDims: 3072,
+      }),
+    );
+    const ownEmbedderEndpoint = mem0OssSettingsFromInput(
+      mem0FactoryInput('oss', {
+        ossEmbedderBaseUrl: 'http://localhost:11434/v1',
+        ossEmbedderModel: 'nomic-embed-text',
+      }),
+    );
+    const trailingSlash = mem0OssSettingsFromInput({
+      ...mem0FactoryInput('oss'),
+      resolvedConfig: resolvedConfig({
+        backend: 'oss',
+        ossLlmApiKey: 'oss-llm-key',
+        ossLlmBaseUrl: 'https://gateway.example/v1',
+        ossEmbedderBaseUrl: 'https://gateway.example/v1/',
+      }),
+    });
+    const keylessLocal = mem0OssSettingsFromInput({
+      ...mem0FactoryInput('oss'),
+      resolvedConfig: resolvedConfig({
+        backend: 'oss',
+        ossLlmBaseUrl: 'http://localhost:1234/v1',
+      }),
+    });
+    const cloudWithoutKey = mem0OssSettingsFromInput({
+      ...mem0FactoryInput('oss'),
+      resolvedConfig: resolvedConfig({backend: 'oss'}),
+    });
+
+    expect(inherited).toMatchObject({
+      status: 'resolved',
+      value: {
+        embedderApiKey: 'oss-llm-key',
+        embedderBaseUrl: 'https://gateway.example/v1',
+        embedderDims: 3072,
+        storageDir: expect.stringContaining('plugin-data/mem0/oss') as string,
+      },
+    });
+    // Two spellings of one endpoint are one endpoint; withholding the key
+    // over a trailing slash would leave the embedder unauthenticated.
+    expect(trailingSlash).toMatchObject({
+      status: 'resolved',
+      value: {embedderApiKey: 'oss-llm-key'},
+    });
+    expect(ownEmbedderEndpoint).toMatchObject({
+      status: 'resolved',
+      value: {
+        embedderBaseUrl: 'http://localhost:11434/v1',
+        embedderModel: 'nomic-embed-text',
+      },
+    });
+    expect(keylessLocal).toMatchObject({status: 'resolved'});
+    if (keylessLocal.status === 'resolved') {
+      expect(keylessLocal.value.llmApiKey).toBeUndefined();
+      expect(keylessLocal.value.embedderBaseUrl).toBe(
+        'http://localhost:1234/v1',
+      );
+    }
+    expect(cloudWithoutKey).toMatchObject({
+      status: 'rejected',
+      message: expect.stringContaining('MEM0_OSS_LLM_API_KEY') as string,
+    });
+  });
+
+  it('captures turns with speaker names instead of role labels', async () => {
+    const added: unknown[] = [];
+    const plugin = createMem0PluginFromInput(
+      {...mem0FactoryInput('oss'), userDisplayName: 'Mike'},
+      {
+        ossEngineLoader: () =>
+          Promise.resolve({
+            add(messages) {
+              added.push(messages);
+
+              return Promise.resolve({results: []});
+            },
+            search() {
+              return Promise.resolve({results: []});
+            },
+          }),
+      },
+    );
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(
+      mem0AfterTurnContext('Mike'),
+    );
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+
+    expect(added[0]).toEqual([
+      {role: 'user', content: 'Mike: remember this'},
+      {role: 'assistant', content: 'Mira: noted'},
+    ]);
+  });
+
+  it('queues capture behind the turn and drains it on shutdown', async () => {
+    let resolveAdd: (value: {results: {id: string}[]}) => void = () => {};
+    let addCalls = 0;
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('oss'), {
+      ossEngineLoader: () =>
+        Promise.resolve({
+          add() {
+            addCalls += 1;
+
+            return new Promise(resolve => {
+              resolveAdd = resolve;
+            });
+          },
+          search() {
+            return Promise.resolve({results: []});
+          },
+        }),
+    });
+
+    const capture = await plugin.lifecycleHooks.afterTurnCommitted?.(
+      mem0AfterTurnContext(),
+    );
+
+    // The hook returned while the backend add had not even started.
+    expect(capture?.status).toBe('completed');
+    expect(capture?.evidence[0]).toMatchObject({
+      status: 'accepted',
+      summary: expect.stringContaining('Queued') as string,
+      sourceReferences: [expect.objectContaining({kind: 'external_contract'})],
+    });
+    expect(addCalls).toBe(0);
+
+    // One macrotask flush lets the queued work reach the backend.
+    await new Promise(resolve => setImmediate(resolve));
+    expect(addCalls).toBe(1);
+
+    resolveAdd({results: [{id: 'stored-late'}]});
+    const shutdown = await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+
+    expect(shutdown?.status).toBe('completed');
+    expect(health).toMatchObject({
+      status: 'ok',
+      summary: expect.stringContaining('Stored 1 memory item(s)') as string,
+    });
+  });
+
+  it('degrades health while a background capture has failed', async () => {
+    let addCalls = 0;
+    const fetchFn: Mem0FetchFunction = url => {
+      if (url.endsWith('/memories')) {
+        addCalls += 1;
+
+        return Promise.resolve({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({}),
+        });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: []}),
+      });
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    // Draining the queue is what makes the background outcome observable.
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+
+    expect(addCalls).toBe(1);
+    // A capture that never stored the turn must not read as healthy.
+    expect(health).toMatchObject({
+      status: 'degraded',
+      summary: expect.stringContaining('never stored') as string,
+    });
+  });
+
+  it('refuses a turn once the extraction backlog is full', async () => {
+    let releaseAdds: (() => void) | undefined;
+    const held = new Promise<void>(resolve => {
+      releaseAdds = resolve;
+    });
+    const fetchFn: Mem0FetchFunction = async url => {
+      if (url.endsWith('/memories')) {
+        await held;
+      }
+
+      return {
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: [{id: 'stored-1'}]}),
+      };
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+    const captures = [];
+
+    for (let index = 0; index < 10; index += 1) {
+      captures.push(
+        await plugin.lifecycleHooks.afterTurnCommitted?.(
+          mem0AfterTurnContext(),
+        ),
+      );
+    }
+
+    releaseAdds?.();
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+
+    // Extraction slower than the user types must not grow a queue for the
+    // whole session; the refused turns say so where a turn is recorded.
+    const refused = captures.filter(result =>
+      JSON.stringify(result?.evidence ?? []).includes('not queued for capture'),
+    );
+
+    expect(refused.length).toBeGreaterThan(0);
+    expect(health).toMatchObject({
+      status: 'degraded',
+      summary: expect.stringContaining('backlog is full') as string,
+    });
+  });
+
+  it('keeps a lost capture visible after a later one succeeds', async () => {
+    let addCalls = 0;
+    const fetchFn: Mem0FetchFunction = url => {
+      if (url.endsWith('/memories')) {
+        addCalls += 1;
+
+        return addCalls === 1
+          ? Promise.resolve({
+              ok: false,
+              status: 500,
+              json: () => Promise.resolve({}),
+            })
+          : Promise.resolve({
+              ok: true,
+              status: 200,
+              json: () => Promise.resolve({results: [{id: 'stored-1'}]}),
+            });
+      }
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: []}),
+      });
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+
+    // A queued capture has no retry, so the turn it lost stays lost; a
+    // later success is not evidence that memory is whole.
+    expect(addCalls).toBe(2);
+    expect(health).toMatchObject({
+      status: 'degraded',
+      summary: expect.stringContaining('never stored') as string,
+    });
+
+    // A reload builds a fresh provider whose count starts over, so the
+    // loss also rides into the next turn's durable evidence.
+    const later = await plugin.lifecycleHooks.afterTurnCommitted?.(
+      mem0AfterTurnContext(),
+    );
+
+    expect(JSON.stringify(later?.evidence ?? [])).toContain(
+      'earlier capture(s) were never stored',
+    );
+  });
+
+  it('captures under the name the session was recorded with', async () => {
+    const bodies: unknown[] = [];
+    const fetchFn: Mem0FetchFunction = (_url, init) => {
+      bodies.push(init.body === undefined ? undefined : JSON.parse(init.body));
+
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => Promise.resolve({results: [{id: 'stored-1'}]}),
+      });
+    };
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(
+      mem0AfterTurnContext('Recorded Name'),
+    );
+    await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+
+    // The transcript's speaker wins over whatever the config now says, so
+    // extraction attributes memories to one identity.
+    expect(JSON.stringify(bodies[0])).toContain('Recorded Name:');
+  });
+
+  it('reports embedded-engine misconfiguration through health', async () => {
+    const plugin = createMem0PluginFromInput({
+      ...mem0FactoryInput('oss'),
+      resolvedConfig: resolvedConfig({backend: 'oss'}),
+    });
+
+    const health = await plugin.lifecycleHooks.health?.(mem0Context());
+
+    expect(health).toMatchObject({
+      status: 'unavailable',
+      summary: expect.stringContaining('MEM0_OSS_LLM_API_KEY') as string,
+    });
+  });
 });
 
 function mem0FactoryInput(
-  backend: 'platform' | 'server',
+  backend: 'platform' | 'server' | 'oss',
+  extraConfig: Readonly<Record<string, string | number>> = {},
 ): RuntimePluginFactoryInput {
   return {
     pluginId: mem0PluginId,
@@ -344,16 +715,17 @@ function mem0FactoryInput(
     characterId: 'mira',
     resolvedConfig: resolvedConfig({
       backend,
-      ...(backend === 'server'
-        ? {baseUrl: 'http://127.0.0.1:8765'}
-        : {apiKey: 'platform-key'}),
+      ...(backend === 'server' ? {baseUrl: 'http://127.0.0.1:8765'} : {}),
+      ...(backend === 'platform' ? {apiKey: 'platform-key'} : {}),
+      ...(backend === 'oss' ? {ossLlmApiKey: 'oss-llm-key'} : {}),
+      ...extraConfig,
     }),
     redactedConfig: {},
   };
 }
 
 function resolvedConfig(
-  values: Readonly<Record<string, string>>,
+  values: Readonly<Record<string, string | number>>,
 ): ResolvedPluginRuntimeConfig {
   return Object.freeze(
     Object.fromEntries(
@@ -361,7 +733,7 @@ function resolvedConfig(
         name,
         Object.freeze({
           name,
-          secret: name === 'apiKey',
+          secret: name.toLowerCase().includes('apikey'),
           source: 'config' as const,
           resolved: true,
           value,
@@ -371,7 +743,7 @@ function resolvedConfig(
   );
 }
 
-function mem0AfterTurnContext() {
+function mem0AfterTurnContext(userSpeakerName = 'Configured Name') {
   return createRuntimePluginAfterTurnCommittedContext({
     ...testIdentity(),
     sessionId: 'session-mem0',
@@ -380,6 +752,13 @@ function mem0AfterTurnContext() {
     character: testCharacterProfile,
     committedAt: '2026-08-10T00:00:01.000Z',
     visibleMessages: [
+      {
+        id: 'visible-user',
+        role: 'user',
+        speakerId: 'user',
+        speakerName: userSpeakerName,
+        text: 'remember this',
+      },
       {
         id: 'visible-character',
         role: 'character',

@@ -72,6 +72,7 @@ export async function instantiateRuntimePluginPackages(options: {
           manifest: entry.manifest,
           storeRoot: options.runtimeLocation.characterScope.dataRoot,
           characterId: options.runtimeLocation.characterScope.characterId,
+          userDisplayName: options.resolvedConfig.project02.userDisplayName,
           resolvedConfig:
             ownJsonRecordValue(
               options.resolvedConfig.pluginConfigs,
