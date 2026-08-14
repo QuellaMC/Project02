@@ -305,6 +305,36 @@ describe('mem0 backend transports', () => {
     });
   });
 
+  it('reports a body abandoned mid-read as cancelled, not as unreadable', async () => {
+    const controller = new AbortController();
+    const stalledBody: Mem0FetchFunction = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => {
+          // The headers arrived; the body stalls until the deadline.
+          controller.abort();
+
+          return Promise.reject(new Error('aborted'));
+        },
+      });
+
+    // The request may already have committed remotely, so an abandoned
+    // read must not read as a broken deployment.
+    await expect(
+      createMem0ServerBackend({
+        baseUrl: 'http://127.0.0.1:8765',
+        fetchFn: stalledBody,
+      }).add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({failureKind: 'cancelled'});
+  });
+
   it('reports an unreadable success body instead of an empty result set', async () => {
     const brokenBody: Mem0FetchFunction = () =>
       Promise.resolve({
@@ -636,7 +666,8 @@ describe('mem0 embedded engine backend', () => {
     controller.abort();
 
     // A queued job whose scope already expired must settle as cancelled
-    // without touching the model or the store at all.
+    // without touching the model or the store at all -- health included,
+    // which opens the store on its way to loading the engine.
     await expect(
       backend.add({
         messages: [{role: 'user', content: 'remember this'}],
@@ -645,6 +676,9 @@ describe('mem0 embedded engine backend', () => {
         infer: true,
         signal: controller.signal,
       }),
+    ).rejects.toMatchObject({failureKind: 'cancelled'});
+    await expect(
+      backend.ping({signal: controller.signal}),
     ).rejects.toMatchObject({failureKind: 'cancelled'});
     expect(started).toBe(0);
   });

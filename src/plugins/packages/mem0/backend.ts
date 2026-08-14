@@ -309,6 +309,13 @@ async function mem0Request(options: {
   readonly signal: AbortSignal;
   readonly requiresDocument?: boolean;
 }): Promise<unknown> {
+  // A request this caller abandoned is not an unreachable backend and
+  // not a broken one: it may have arrived and committed, at any stage
+  // from the connection to the body still being read.
+  const abandonedOr = (
+    failureKind: Mem0RequestFailureKind,
+  ): Mem0RequestFailureKind =>
+    options.signal.aborted ? 'cancelled' : failureKind;
   let response;
 
   try {
@@ -323,13 +330,10 @@ async function mem0Request(options: {
     });
   } catch {
     // Never rethrow transport errors: their messages can embed URLs and
-    // headers, and the api key must not leak into evidence. A request
-    // this caller abandoned is not an unreachable backend either -- it
-    // may have arrived and committed -- so the deadline and shutdown
-    // cases keep their own kind.
+    // headers, and the api key must not leak into evidence.
     throw new Mem0RequestError({
       operation: options.operation,
-      failureKind: options.signal.aborted ? 'cancelled' : 'network',
+      failureKind: abandonedOr('network'),
     });
   }
 
@@ -353,7 +357,7 @@ async function mem0Request(options: {
 
     throw new Mem0RequestError({
       operation: options.operation,
-      failureKind: 'malformed_response',
+      failureKind: abandonedOr('malformed_response'),
       status: response.status,
     });
   }
@@ -664,7 +668,7 @@ export function mem0OssEngineConfig(
 export function createDefaultMem0OssEngineLoader(
   settings: Mem0OssSettings,
 ): Mem0OssEngineLoader {
-  return async () => {
+  return async ({signal}) => {
     // The engine ships third-party analytics on by default, read from this
     // env var when its module first loads. Nobody running a character
     // consented to that, so it defaults off here — before the only import
@@ -680,6 +684,12 @@ export function createDefaultMem0OssEngineLoader(
       throw new TypeError(
         'mem0ai/oss does not export the Memory engine; reinstall the mem0ai dependency.',
       );
+    }
+
+    // The import is the long pole; past it the loader starts creating
+    // directories and databases, which an abandoned load must not do.
+    if (signal.aborted) {
+      throw new Mem0RequestError({operation: 'load', failureKind: 'cancelled'});
     }
 
     assertRealMem0OssStorageDir(settings.storageDir);
@@ -844,10 +854,18 @@ export function createMem0OssBackend(options: {
       return references;
     },
     async ping(pingOptions) {
+      // Loading opens the store and its clients, so it runs under the
+      // same abort race as the other verbs: a check the host gave up on
+      // must not keep building a provider it no longer wants.
+      await settledOrAborted(
+        () => engine(pingOptions.signal),
+        pingOptions.signal,
+        'ping',
+      );
+
       // Constructing the engine only wires provider clients: neither the
       // extraction model nor the embedder is contacted until real work,
       // so reachability is claimed only once both have answered some.
-      await engine(pingOptions.signal);
 
       return modelAnswered && embedderAnswered
         ? {
