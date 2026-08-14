@@ -555,6 +555,84 @@ describe('scope-aware runtime config mutations', () => {
       'SCOPE_SECRETS_KEY="character-value"',
     );
     expect(existsSync(join(homeRoot, '.env'))).toBe(false);
+
+    // A later scoped edit validates against the same merged env the
+    // runtime resolves with, so the credential above satisfies a
+    // required secret even though the process env never held it.
+    const requiredSecretManifest = {
+      ...plugin.manifest,
+      config: {
+        ...plugin.manifest.config,
+        fields: plugin.manifest.config.fields.map(field =>
+          field.name === 'apiKey' ? {...field, required: true} : field,
+        ),
+      },
+    };
+
+    applyRuntimeConfigControlOperation({
+      target,
+      request: {
+        kind: 'plugin_config',
+        manifest: requiredSecretManifest,
+        actor: 'operator',
+        fieldOperation: {kind: 'set', fieldName: 'setting', value: 'tuned'},
+      },
+    });
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toMatchObject({
+      plugins: {'scope.secrets': {config: {setting: 'tuned'}}},
+    });
+  });
+
+  it('guards the env file a character secret write targets, not the home one', async () => {
+    const {homeRoot, dataRoot} = seededHome();
+    const plugin = characterOnlyConfigPlugin('scope.env-target');
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    // The home env being a symlink is irrelevant to a write that only
+    // touches the character's own file.
+    symlinkSync(join(homeRoot, 'elsewhere.env'), join(homeRoot, '.env'));
+
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
+      env: {},
+      scope: 'character',
+    });
+    const secretSet = {
+      kind: 'plugin_config' as const,
+      manifest: plugin.manifest,
+      actor: 'operator' as const,
+      fieldOperation: {
+        kind: 'secret_set' as const,
+        fieldName: 'apiKey',
+        envVar: 'ENV_TARGET_KEY',
+        secretValue: 'character-value',
+      },
+    };
+
+    applyRuntimeConfigControlOperation({target, request: secretSet});
+
+    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
+      'ENV_TARGET_KEY="character-value"',
+    );
+
+    // The file it does write must be real: a symlink would carry the
+    // credential outside the character-data directory.
+    unlinkSync(characterSecretsEnvPath(dataRoot));
+    symlinkSync(
+      join(homeRoot, 'elsewhere.env'),
+      characterSecretsEnvPath(dataRoot),
+    );
+
+    expect(() =>
+      applyRuntimeConfigControlOperation({target, request: secretSet}),
+    ).toThrow('must be a regular file');
   });
 
   it('refuses scoped writes into an unmarked data directory', () => {

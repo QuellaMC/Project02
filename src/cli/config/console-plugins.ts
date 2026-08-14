@@ -138,16 +138,18 @@ export async function runPluginConfigSection(
     return;
   }
 
-  if (field.secret) {
-    writeSecretConfigInstructions(context, manifest, field, snapshot);
-    return;
-  }
-
+  // Scope first: a secret command printed for the wrong scope would be
+  // rejected the moment the operator ran it.
   if (!inspectedField.editableInScope) {
     writeScopeRestriction(context, manifest, snapshot.scope, {
       kind: 'field',
       fieldName: field.name,
     });
+    return;
+  }
+
+  if (field.secret) {
+    writeSecretConfigInstructions(context, manifest, field, snapshot);
     return;
   }
 

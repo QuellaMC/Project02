@@ -3,6 +3,7 @@
  * Selector drift conflicts; the transaction never retargets or restarts.
  */
 import {pathExistsSync} from '../../shared/file-system.ts';
+import {describeRealEntry} from '../../shared/real-path.ts';
 import {dirname} from 'node:path';
 
 import {
@@ -408,9 +409,17 @@ function assertRuntimeConfigEffectiveHomeAvailable(
 ): void {
   try {
     if (secretMutation || target.scope === 'character') {
+      // The real-file requirement guards the env file this mutation
+      // writes: the home env for a global secret, the character's own
+      // file -- checked below -- for a character secret.
       assertResolvedProject02HomeAdoptable(target.runtimeLocation, {
-        requireRealEnvFile: secretMutation,
+        requireRealEnvFile: secretMutation && target.scope === 'global',
       });
+
+      if (secretMutation && target.scope === 'character') {
+        assertRealCharacterEnvFile(target);
+      }
+
       return;
     }
 
@@ -423,6 +432,24 @@ function assertRuntimeConfigEffectiveHomeAvailable(
     }
 
     throw error;
+  }
+}
+
+/**
+ * The loader refuses a non-regular character env, so a secret written
+ * through one would never load -- and a symlink would carry it outside
+ * the character-data directory.
+ */
+function assertRealCharacterEnvFile(
+  target: ResolvedRuntimeConfigScopeTarget,
+): void {
+  const envPath = runtimeConfigEnvPathForTarget(target);
+  const entry = describeRealEntry(envPath);
+
+  if (entry.kind !== 'absent' && entry.kind !== 'file') {
+    throw new RuntimeConfigMutationError(
+      `Character secrets env "${envPath}" must be a regular file inside the character-data directory.`,
+    );
   }
 }
 

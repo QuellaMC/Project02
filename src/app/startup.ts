@@ -702,20 +702,30 @@ function simulateCharacterMaterialization(
     return simulated;
   }
 
+  // This overlay describes a file that has not been written yet; the
+  // secrets env is the real one already on disk, broken-file diagnostics
+  // included, so a reader sees what a real load would see.
+  const secrets = loadCharacterSecretsEnv(
+    input.runtimeLocation.characterScope.dataRoot,
+  );
+
   return Object.freeze({
     status: 'valid',
-    // This overlay describes a file that has not been written yet; the
-    // secrets env is the real one already on disk, if any.
     overlay: Object.freeze({
       scope: 'character',
       characterId,
       source: 'overlay',
       path: input.runtimeLocation.overlayPath,
       config: simulated.document,
-      secretsEnv: loadCharacterSecretsEnv(
-        input.runtimeLocation.characterScope.dataRoot,
-      ).env,
-      diagnostics: Object.freeze([]),
+      secretsEnv: secrets.env,
+      diagnostics: Object.freeze(
+        secrets.diagnostics.map(diagnostic =>
+          withRuntimeConfigDiagnosticOrigin(diagnostic, {
+            scope: 'character',
+            characterId,
+          }),
+        ),
+      ),
     } satisfies LoadedProject02CharacterOverlayConfig),
   });
 }

@@ -18,6 +18,7 @@ import {
 import {runtimeConfigVersion} from '../../src/runtime/config/index.ts';
 import type {RuntimePluginFactoryDefinition} from '../../src/app/index.ts';
 import {
+  characterOnlyConfigPlugin,
   createInitializedTestStoreRoot,
   requiredDottedConfigPlugin,
   requiredSecretPluginWithManifestEnvVar,
@@ -767,6 +768,38 @@ describe('runtime config console UI', () => {
     );
     expect(stdout).not.toContain('must-never-appear');
     expect(readFileSync(configPath, 'utf8')).toBe(before);
+  });
+
+  it('shows the scope restriction, not a doomed secret command, out of scope', async () => {
+    const storeRoot = createTestTempRoot(
+      'project02-config-console-secret-scope-',
+    );
+    const plugin = characterOnlyConfigPlugin('memory.character-secret');
+    let stdout = '';
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {plugins: {}});
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'ui'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        factories: factoriesFor(plugin),
+        prompt: scriptedPrompt([
+          '2',
+          selectPluginStep(() => stdout, 'memory.character-secret'),
+          '3',
+        ]),
+      },
+    );
+
+    // A character-only secret is set in the character's own scope; a
+    // global secret set command printed here would only be rejected.
+    expect(exitCode).toBe(0);
+    expect(stdout).not.toContain('secret set');
+    expect(stdout).toContain('character');
   });
 
   it('suggests a deterministic environment name when secret metadata omits one', async () => {

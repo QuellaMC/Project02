@@ -1,6 +1,7 @@
 import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
+  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
 } from './overlay.ts';
 import {
@@ -8,7 +9,10 @@ import {
   loadProject02RuntimeConfigForLocation,
   type ResolvedProject02RuntimeLocation,
 } from './location.ts';
-import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
+import {
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
+  runtimeConfigEnvWithCharacterSecrets,
+} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
@@ -249,7 +253,14 @@ function assertRuntimePluginConfigCandidateValid(options: {
     runtimeLocation: options.runtimeLocation,
     pluginManifests: [options.manifest],
     skipPluginScopeValidation: true,
-    ...(options.env === undefined ? {} : {env: options.env}),
+    // The runtime resolves this document with the character's env
+    // overlaid; validating a write against anything narrower would
+    // reject an edit the runtime itself accepts.
+    env: runtimeConfigEnvWithCharacterSecrets(
+      options.env,
+      loadCharacterSecretsEnv(options.runtimeLocation.characterScope.dataRoot)
+        .env,
+    ),
     validateInactivePluginConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(
