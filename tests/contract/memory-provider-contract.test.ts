@@ -78,6 +78,15 @@ describe('memory provider runtime plugin factory', () => {
       }).providedTools.map(tool => tool.name),
     ).toEqual(['memory.search', 'memory.add']);
 
+    // The registered identity names the tools, not the identity the
+    // adapter was written with: one adapter mounted twice under
+    // different ids must not advertise the same tool names.
+    expect(
+      createMemoryProviderRuntimePlugin(provider, {
+        pluginId: 'mem-fixture.second',
+      }).providedTools.map(tool => tool.name),
+    ).toEqual(['mem-fixture.second.search', 'mem-fixture.second.add']);
+
     // Two ids that fill the identifier budget and share a long prefix must
     // not collapse into one tool name, which would stop the host from
     // enabling both providers at once.

@@ -43,7 +43,10 @@ export function createMemoryProviderRuntimePlugin(
 ): RuntimePlugin {
   const suppliedManifest = consistentSuppliedManifest(provider, options);
   const pluginId = suppliedManifest?.id ?? options.pluginId ?? provider.id;
-  const toolNamespace = options.toolNamespace ?? provider.id;
+  // The identity the plugin is registered under, not the one the adapter
+  // was written with: two instances of one adapter under different ids
+  // would otherwise advertise the same tool names and collide.
+  const toolNamespace = options.toolNamespace ?? pluginId;
   const searchToolName = boundedMemoryToolName(toolNamespace, 'search');
   const addToolName = boundedMemoryToolName(toolNamespace, 'add');
   return createRuntimePlugin({

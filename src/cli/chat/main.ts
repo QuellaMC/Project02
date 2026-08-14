@@ -10,6 +10,7 @@ import {
   RuntimeEventInputError,
 } from '../../core/index.ts';
 import {buildUserTurnDecisionContext} from '../../role-model/index.ts';
+import {shutdownConfiguredChatPluginHost} from './plugin-host-shutdown.ts';
 import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
@@ -88,10 +89,7 @@ import {
   selectChatProvider,
   type ChatProviderName,
 } from '../../role-model/index.ts';
-import {
-  runBestEffortPluginSessionEnd,
-  runBestEffortPluginShutdown,
-} from '../../plugins/host/index.ts';
+import {runBestEffortPluginSessionEnd} from '../../plugins/host/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {writeJson} from '../shared/output.ts';
 
@@ -167,8 +165,6 @@ const startupFailurePluginCleanupMessage =
   'chat startup failed before opening a durable session';
 const fatalFailurePluginCleanupMessage =
   'chat turn failed before normal /exit cleanup';
-const configuredPluginShutdownMessage =
-  'chat configured plugin host lifetime ended';
 
 function requiredChatCharacterProfile(
   characterProfile: CharacterProfile | undefined,
@@ -478,6 +474,7 @@ async function runChatCliAfterConfiguredHost(options: {
         configuredHost: options.configuredHost,
         args: options.runtimeArgs,
         character: options.characterProfile,
+        stderr: options.options.stderr,
       });
     }
 
@@ -517,11 +514,11 @@ async function runChatCliAfterConfiguredHost(options: {
         session: durableRuntime.session,
       });
 
-      await runBestEffortPluginShutdown({
+      await shutdownConfiguredChatPluginHost({
         pluginHost: options.configuredHost.host,
         sessionId: decisionContext.sessionId,
-        currentUserMessage: configuredPluginShutdownMessage,
         character: decisionContext.characterSnapshot,
+        stderr: options.options.stderr,
       });
     }
     await durableRuntime.writerLease.release();
@@ -548,6 +545,7 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
   readonly args: ChatCliArgs;
   readonly character: CharacterProfile;
+  readonly stderr: NodeJS.WritableStream;
 }): Promise<void> {
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
@@ -558,13 +556,13 @@ async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
     character: options.character,
     hookOptions: {allowFileStoreWrites: false},
   });
-  await runBestEffortPluginShutdown({
+  await shutdownConfiguredChatPluginHost({
     pluginHost: options.configuredHost.host,
     sessionId: normalizeLocalRuntimeSessionId(
       options.args.newSessionId ?? options.args.sessionId,
     ),
-    currentUserMessage: configuredPluginShutdownMessage,
     character: options.character,
+    stderr: options.stderr,
   });
 }
 
