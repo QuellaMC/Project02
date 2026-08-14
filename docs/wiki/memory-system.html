@@ -152,6 +152,17 @@
       answers, in a tool result, which that budget does not cover.
     </p>
 
+    <p class="rule">
+      Installing a character package is the trust decision: the package may fill any
+      setting the operator has not set, so its character works right after install. What
+      the operator has set always wins — on first install and on every package update.
+      The model is the fenced writer: it may propose changes only to
+      <code>agentMutable</code> fields, and credentials are never among them. Credentials
+      prefer env files; each character's own file, set with <code>--character</code>,
+      merges over the shared one, so two characters can hold different accounts for the
+      same memory service while a shared account covers the rest.
+    </p>
+
     <h2>Picking a setup</h2>
 
     <table>
