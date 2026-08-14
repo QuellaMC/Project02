@@ -110,7 +110,7 @@
         },
         {
           "name": "ossEmbedderApiKey",
-          "description": "Embedded engine only: API key for the embedding endpoint; unset reuses ossLlmApiKey.",
+          "description": "Embedded engine only: API key for the embedding endpoint; unset reuses ossLlmApiKey only while the embedding endpoint matches the extraction endpoint -- a separate endpoint needs its own key.",
           "required": false,
           "secret": true,
           "valueType": "string",

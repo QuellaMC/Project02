@@ -697,14 +697,26 @@ export function createDefaultMem0OssEngineLoader(
     makeDirectorySync(settings.storageDir, {recursive: true, mode: 0o700});
 
     // The constructor already wires provider clients with the key and
-    // endpoints in hand, so its failures are third-party content too.
-    const engine: unknown = await boundedEngineCall('load', () =>
-      Promise.resolve(
-        Reflect.construct(memoryConstructor, [
-          mem0OssEngineConfig(settings),
-        ]) as unknown,
-      ),
-    );
+    // endpoints in hand, so its failures are third-party content too --
+    // except its SQLite store errors, whose messages carry no config and
+    // name what actually broke (a full disk, a held lock): those must
+    // reach the operator, since no endpoint or key change repairs them.
+    let engine: unknown;
+
+    try {
+      engine = Reflect.construct(memoryConstructor, [
+        mem0OssEngineConfig(settings),
+      ]) as unknown;
+    } catch (error: unknown) {
+      if (error instanceof Error && error.name === 'SqliteError') {
+        throw new TypeError(
+          `Mem0 embedded storage failed to open: ${error.message}`,
+          {cause: error},
+        );
+      }
+
+      throw new Mem0RequestError({operation: 'load', failureKind: 'engine'});
+    }
 
     restrictMem0OssStorageMode(settings.storageDir);
 
