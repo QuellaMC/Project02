@@ -642,6 +642,37 @@ describe('mem0 embedded engine backend', () => {
     expect(searchError).toBeInstanceOf(Mem0RequestError);
     expect(errorMessageOf(addError)).not.toContain('sk-secret');
     expect(errorMessageOf(searchError)).not.toContain('private text');
+
+    // A SQLite failure names itself instead: its message carries no
+    // config, and no endpoint or key change repairs a full disk or a
+    // held lock -- at operation time exactly as at load time.
+    const diskFull = Object.assign(
+      new Error('SQLITE_FULL: database or disk is full'),
+      {name: 'SqliteError'},
+    );
+    const storageError = await createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            return Promise.reject(diskFull);
+          },
+          search() {
+            return Promise.reject(diskFull);
+          },
+        }),
+    })
+      .add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: false,
+        signal: abortSignal,
+      })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    expect(errorMessageOf(storageError)).toContain('database or disk is full');
+    expect(errorMessageOf(storageError)).not.toContain('endpoint');
   });
 
   it('never starts engine work under an already-aborted signal', async () => {

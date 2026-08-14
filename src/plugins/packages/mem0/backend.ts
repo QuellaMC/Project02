@@ -718,27 +718,15 @@ export function createDefaultMem0OssEngineLoader(
     // link points at.
     restrictMem0OssStorageEntries(settings.storageDir);
 
-    // The constructor already wires provider clients with the key and
-    // endpoints in hand, so its failures are third-party content too --
-    // except its SQLite store errors, whose messages carry no config and
-    // name what actually broke (a full disk, a held lock): those must
-    // reach the operator, since no endpoint or key change repairs them.
-    let engine: unknown;
-
-    try {
-      engine = Reflect.construct(memoryConstructor, [
-        mem0OssEngineConfig(settings),
-      ]) as unknown;
-    } catch (error: unknown) {
-      if (error instanceof Error && error.name === 'SqliteError') {
-        throw new TypeError(
-          `Mem0 embedded storage failed to open: ${error.message}`,
-          {cause: error},
-        );
-      }
-
-      throw new Mem0RequestError({operation: 'load', failureKind: 'engine'});
-    }
+    // The constructor wires provider clients with the key and endpoints
+    // in hand, so it classifies through the same boundary as every verb.
+    const engine = await boundedEngineCall('load', () =>
+      Promise.resolve(
+        Reflect.construct(memoryConstructor, [
+          mem0OssEngineConfig(settings),
+        ]) as unknown,
+      ),
+    );
 
     restrictMem0OssStorageEntries(settings.storageDir);
 
@@ -967,13 +955,26 @@ function pinnedMem0OssEngine(engine: unknown): Mem0OssEngine {
   } satisfies Mem0OssEngine);
 }
 
+/**
+ * One classification for everything the engine raises, at load time and
+ * on every verb: a SQLite failure names itself, since its message
+ * carries no config and no endpoint or key change repairs a full disk
+ * or a held lock; everything else stays bounded, because it can carry
+ * the credential.
+ */
 async function boundedEngineCall(
   operation: string,
   call: () => Promise<unknown>,
 ): Promise<unknown> {
   try {
     return await call();
-  } catch {
+  } catch (error: unknown) {
+    if (error instanceof Error && error.name === 'SqliteError') {
+      throw new TypeError(`Mem0 embedded storage failed: ${error.message}`, {
+        cause: error,
+      });
+    }
+
     throw new Mem0RequestError({operation, failureKind: 'engine'});
   }
 }
