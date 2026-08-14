@@ -59,6 +59,10 @@ function createReferenceProvider(
           turn.sourceReferences.map(reference => reference.id);
       }
 
+      if (scenario.failBackend === true) {
+        return Promise.reject(new Error('Reference backend is unavailable.'));
+      }
+
       return Promise.resolve(
         scenario.captureResult ?? {captured: false, summary: 'Nothing.'},
       );
@@ -214,8 +218,11 @@ export function runMemoryProviderSeamContract(): void {
 
     it('declares the surface its implemented verbs imply', () => {
       // Registered like every other case, so whatever construction opened
-      // is closed with the rest.
+      // is closed with the rest -- in exactly one host, since a second
+      // would run the provider's close twice.
       const plugin = conformancePlugin({});
+
+      registerConformanceHost(plugin);
 
       // The factory derives the whole surface from the implemented verbs,
       // so a provider that implements all of them declares all of them.
@@ -592,6 +599,30 @@ export function runMemoryProviderSeamContract(): void {
       );
     });
 
+    it('degrades evidence when the capture backend fails outright', async () => {
+      const host = conformanceHost({failBackend: true});
+      const result = await host.afterTurnCommitted(
+        conformanceAfterTurnContext(),
+      );
+
+      // An adapter that swallowed the outage and reported an accepted
+      // capture would record a conversation as persisted when it was not.
+      expect(result.status).toBe('completed_with_failures');
+      expect(result.evidence).toContainEqual(
+        expect.objectContaining({
+          pluginId: referenceMemoryProviderId,
+          evidenceKind: 'after_turn_committed',
+          status: expect.stringMatching(/degraded|failed/u) as unknown,
+        }),
+      );
+      expect(result.evidence).not.toContainEqual(
+        expect.objectContaining({
+          evidenceKind: 'after_turn_committed',
+          status: 'accepted',
+        }),
+      );
+    });
+
     it('preserves provider capture source references as accepted evidence', async () => {
       const host = conformanceHost({
         captureResult: {
@@ -717,6 +748,7 @@ export function runMemoryProviderSeamContract(): void {
             id: 'result-1',
             text: 'Prior session detail.',
             sourceReferences: [{kind: 'memory', id: 'result-1'}],
+            confidence: 0.6,
           },
         ],
       });
@@ -731,13 +763,16 @@ export function runMemoryProviderSeamContract(): void {
       }
 
       // The model reads the output, not the evidence: an adapter that
-      // returned ids without text would leave it with no memory to use.
+      // returned ids without text would leave it with no memory to use,
+      // and one that dropped confidence would erase the signal separating
+      // weak matches from strong ones.
       expect(search.output).toMatchObject({
         items: [
           {
             id: 'result-1',
             text: 'Prior session detail.',
             sourceReferences: [{kind: 'memory', id: 'result-1'}],
+            confidence: 0.6,
           },
         ],
       });
@@ -980,13 +1015,7 @@ export function runMemoryProviderSeamContract(): void {
 function conformancePlugin(
   scenario: MemoryProviderConformanceScenario,
 ): RuntimePlugin {
-  const plugin = createMemoryProviderRuntimePlugin(
-    createReferenceProvider(scenario),
-  );
-
-  registerConformanceHost(plugin);
-
-  return plugin;
+  return createMemoryProviderRuntimePlugin(createReferenceProvider(scenario));
 }
 
 function registerConformanceHost(plugin: RuntimePlugin) {
