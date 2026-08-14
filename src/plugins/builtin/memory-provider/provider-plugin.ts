@@ -164,15 +164,22 @@ function consistentSuppliedManifest(
   }
 
   // The seam contract: an outage costs the turn its memory, never the
-  // turn itself. A packaged manifest declaring reject_turn would turn an
-  // ordinary recall exception into a rejected user message.
-  if (
-    provider.recall !== undefined &&
-    manifest.runtimePolicy.failureBehavior.beforeRoleModelCall === 'reject_turn'
-  ) {
-    throw new TypeError(
-      `Memory provider manifest "${manifest.id}" must not declare beforeRoleModelCall: "reject_turn"; memory failures degrade the turn's memory, not the turn.`,
-    );
+  // turn itself. A packaged manifest declaring reject_turn would fail the
+  // user's message on an ordinary recall exception or a degraded backend.
+  for (const hook of ['beforeRoleModelCall', 'health'] as const) {
+    const implemented =
+      hook === 'beforeRoleModelCall'
+        ? provider.recall !== undefined
+        : provider.health !== undefined;
+
+    if (
+      implemented &&
+      manifest.runtimePolicy.failureBehavior[hook] === 'reject_turn'
+    ) {
+      throw new TypeError(
+        `Memory provider manifest "${manifest.id}" must not declare ${hook}: "reject_turn"; memory failures degrade the turn's memory, not the turn.`,
+      );
+    }
   }
 
   return manifest;

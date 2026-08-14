@@ -228,6 +228,35 @@ describe('memory provider runtime plugin factory', () => {
         }),
       }),
     ).toThrow('must not declare beforeRoleModelCall: "reject_turn"');
+    expect(() =>
+      createMemoryProviderRuntimePlugin(
+        {
+          ...provider,
+          health() {
+            return Promise.resolve({status: 'ok' as const, summary: 'Ready.'});
+          },
+        },
+        {
+          manifest: packagedProviderManifest({
+            declaredPlugins: [
+              'before_role_model_call',
+              'tool_provider',
+              'handle_tool_call',
+              'health',
+            ],
+            runtimePolicy: {
+              timeoutMs: 8000,
+              redactionLabels: ['memory'],
+              failureBehavior: {
+                beforeRoleModelCall: 'degrade',
+                handleToolCall: 'degrade',
+                health: 'reject_turn',
+              },
+            },
+          }),
+        },
+      ),
+    ).toThrow('must not declare health: "reject_turn"');
     // A descriptor promising a hook the provider does not implement would
     // load a package advertising behavior nothing can deliver.
     expect(() =>
