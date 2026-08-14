@@ -701,6 +701,26 @@ describe('mem0 plugin package', () => {
     );
   });
 
+  it('reports a capture the shutdown drain could not finish', async () => {
+    const fetchFn: Mem0FetchFunction = () =>
+      Promise.reject(new Error('socket closed'));
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn,
+    });
+
+    await plugin.lifecycleHooks.afterTurnCommitted?.(mem0AfterTurnContext());
+    const shutdown = await plugin.lifecycleHooks.onShutdown?.(mem0Context());
+
+    // Nothing observes this provider again: no later turn, no health
+    // call, and the next launch counts from zero. An accepted "closed"
+    // record would be the last word on a turn memory never took.
+    expect(shutdown?.evidence[0]).toMatchObject({
+      evidenceKind: 'shutdown',
+      status: 'degraded',
+    });
+    expect(shutdown?.evidence[0]?.summary).toContain('did not complete');
+  });
+
   it('captures under the name the session was recorded with', async () => {
     const bodies: unknown[] = [];
     const fetchFn: Mem0FetchFunction = (_url, init) => {

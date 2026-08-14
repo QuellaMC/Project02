@@ -323,10 +323,13 @@ async function mem0Request(options: {
     });
   } catch {
     // Never rethrow transport errors: their messages can embed URLs and
-    // headers, and the api key must not leak into evidence.
+    // headers, and the api key must not leak into evidence. A request
+    // this caller abandoned is not an unreachable backend either -- it
+    // may have arrived and committed -- so the deadline and shutdown
+    // cases keep their own kind.
     throw new Mem0RequestError({
       operation: options.operation,
-      failureKind: 'network',
+      failureKind: options.signal.aborted ? 'cancelled' : 'network',
     });
   }
 

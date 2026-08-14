@@ -284,6 +284,16 @@ export function createMem0MemoryProvider(options: {
       } finally {
         clearTimeout(drainDeadline);
       }
+
+      // The last word on this provider: no turn and no health check runs
+      // after shutdown, and the next launch counts from zero, so a
+      // capture the drain could not finish is only recorded here.
+      return incompleteCaptures === 0
+        ? undefined
+        : {
+            drained: false,
+            summary: `Closed memory provider. ${lastLossSummary ?? ''}`.trim(),
+          };
     },
   };
 }
