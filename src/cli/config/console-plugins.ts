@@ -146,6 +146,24 @@ export async function runPluginConfigSection(
       kind: 'field',
       fieldName: field.name,
     });
+
+    // A value this scope's document already holds can still be removed
+    // here; that unset is the one repair scope rules permit.
+    if (inspectedField.authored.configured) {
+      const repair = await stageFieldScopeRepair(
+        context,
+        manifest,
+        field.name,
+        inspectedField.authored.value,
+        inspected.fingerprint,
+        snapshot,
+      );
+
+      if (repair !== undefined) {
+        await previewAndCommitChange(context, repair);
+      }
+    }
+
     return;
   }
 
@@ -192,6 +210,15 @@ async function stageActivationChoice(
     kind: 'activation',
   });
 
+  // With nothing authored here there is nothing to remove: offering the
+  // repair would rewrite an unchanged document and report a save.
+  const scopeDocument =
+    snapshot.scope === 'global' ? snapshot.config : snapshot.scopedConfig;
+
+  if (scopeDocument?.plugins?.[manifest.id]?.enabled === undefined) {
+    return undefined;
+  }
+
   return await stageActivationScopeRepair(
     context,
     manifest,
@@ -199,6 +226,53 @@ async function stageActivationChoice(
     inspected.fingerprint,
     snapshot,
   );
+}
+
+async function stageFieldScopeRepair(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  fieldName: string,
+  authoredValue: RuntimeConfigValue | undefined,
+  fingerprint: string,
+  snapshot: RuntimeConfigConsoleSnapshot,
+): Promise<StagedRuntimeConfigChange | undefined> {
+  writeLine(context.stdout, "1) Remove this scope's value");
+  writeLine(context.stdout, '2) Cancel');
+
+  const action = await askForNumber(context, 'Choose an action: ', 2);
+
+  if (action !== 1) {
+    writeLine(context.stdout, 'Change cancelled.');
+    return undefined;
+  }
+
+  return {
+    target: `plugins.${manifest.id}.config.${fieldName}`,
+    oldValue: authoredValue,
+    newValue: undefined,
+    reloadRequired: true,
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
+      });
+      applyRuntimeConfigControlOperation({
+        target: resolveRuntimeConfigScopeTarget({
+          runtimeLocation: snapshot.runtimeLocation,
+          ...(context.env === undefined ? {} : {env: context.env}),
+          scope: snapshot.scope,
+        }),
+        pluginManifests: consoleCatalogManifests(context),
+        expectedFingerprint: fingerprint,
+        request: {
+          kind: 'plugin_config',
+          manifest,
+          actor: 'operator',
+          fieldOperation: {kind: 'unset', fieldName},
+        },
+      });
+    },
+  };
 }
 
 async function stageActivationScopeRepair(
