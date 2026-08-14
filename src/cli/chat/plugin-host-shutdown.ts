@@ -26,9 +26,14 @@ export async function shutdownConfiguredChatPluginHost(options: {
     character: options.character,
   });
 
+  // Named, because several plugins shut down together and their
+  // host-generated summaries read alike: "cleanup failed" without saying
+  // whose leaves the operator nothing to act on.
   for (const evidence of result?.evidence ?? []) {
     if (evidence.status !== 'accepted') {
-      options.stderr.write(`Warning: ${evidence.summary}\n`);
+      options.stderr.write(
+        `Warning: ${evidence.pluginId}: ${evidence.summary}\n`,
+      );
     }
   }
 }
