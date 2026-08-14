@@ -40,9 +40,31 @@ export function normalizeEvidenceSnapshots(options: {
         field: 'evidence',
       });
 
-      return evidence;
+      return stampedConfigFingerprint(evidence, options.plugin.manifest);
     }),
   );
+}
+
+/**
+ * Which configuration produced a record is the host's to state, not each
+ * plugin's to remember: host-generated failure evidence already carries
+ * it, so a plugin's own records carry the same stamp and a persisted
+ * action stays tied to the config version behind it.
+ */
+function stampedConfigFingerprint(
+  evidence: RuntimePluginEvidenceSnapshot,
+  manifest: RuntimePluginManifest,
+): RuntimePluginEvidenceSnapshot {
+  const fingerprint = manifest.config.fingerprint;
+
+  if (fingerprint === undefined || evidence.configFingerprint !== undefined) {
+    return evidence;
+  }
+
+  return createRuntimePluginEvidenceSnapshot({
+    ...evidence,
+    configFingerprint: fingerprint,
+  });
 }
 
 export function createHookFailureEvidence(options: {

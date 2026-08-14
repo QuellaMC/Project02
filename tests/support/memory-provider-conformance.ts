@@ -40,11 +40,7 @@ function createReferenceProvider(
         scenario.requestProbe.recallMaxItems = request.maxItems;
       }
 
-      if (scenario.failBackend === true) {
-        return Promise.reject(new Error('Reference backend is unavailable.'));
-      }
-
-      return Promise.resolve({items: scenario.recallItems ?? []});
+      return backendAnswer(scenario, {items: scenario.recallItems ?? []});
     },
     captureTurn(turn) {
       if (scenario.requestProbe !== undefined) {
@@ -59,11 +55,8 @@ function createReferenceProvider(
           turn.sourceReferences.map(reference => reference.id);
       }
 
-      if (scenario.failBackend === true) {
-        return Promise.reject(new Error('Reference backend is unavailable.'));
-      }
-
-      return Promise.resolve(
+      return backendAnswer(
+        scenario,
         scenario.captureResult ?? {captured: false, summary: 'Nothing.'},
       );
     },
@@ -75,7 +68,7 @@ function createReferenceProvider(
         scenario.requestProbe.searchMaxItems = request.maxItems;
       }
 
-      return Promise.resolve({items: scenario.searchItems ?? []});
+      return backendAnswer(scenario, {items: scenario.searchItems ?? []});
     },
     add(request) {
       if (scenario.requestProbe !== undefined) {
@@ -86,11 +79,8 @@ function createReferenceProvider(
           request.sourceReferences.map(reference => reference.id);
       }
 
-      if (scenario.failBackend === true) {
-        return Promise.reject(new Error('Reference backend is unavailable.'));
-      }
-
-      return Promise.resolve(
+      return backendAnswer(
+        scenario,
         scenario.addResult ?? {id: 'reference-add', sourceReferences: []},
       );
     },
@@ -99,11 +89,8 @@ function createReferenceProvider(
         recordOperationScope(scenario, 'health', request);
       }
 
-      if (scenario.failBackend === true) {
-        return Promise.reject(new Error('Reference backend is unavailable.'));
-      }
-
-      return Promise.resolve(
+      return backendAnswer(
+        scenario,
         scenario.healthResult ?? {status: 'ok', summary: 'Reference ready.'},
       );
     },
@@ -111,7 +98,7 @@ function createReferenceProvider(
       recordOperationScope(scenario, 'endSession', scope);
       scenario.lifecycleProbe?.endedSessions.push(sessionId);
 
-      return Promise.resolve();
+      return backendAnswer(scenario, undefined);
     },
     close(scope) {
       recordOperationScope(scenario, 'close', scope);
@@ -120,9 +107,23 @@ function createReferenceProvider(
         scenario.lifecycleProbe.closeCalls += 1;
       }
 
-      return Promise.resolve();
+      return backendAnswer(scenario, undefined);
     },
   };
+}
+
+/**
+ * Every verb answers through here, so a seeded outage reaches all of
+ * them. A verb that could answer some other way is a verb the contract
+ * would quietly stop testing under failure.
+ */
+function backendAnswer<T>(
+  scenario: MemoryProviderConformanceScenario,
+  value: T,
+): Promise<T> {
+  return scenario.failBackend === true
+    ? Promise.reject(new Error('Reference backend is unavailable.'))
+    : Promise.resolve(value);
 }
 
 function recordOperationScope(
@@ -657,6 +658,23 @@ export function runMemoryProviderSeamContract(): void {
       );
     });
 
+    it('reports a session end its provider could not finish', async () => {
+      const host = conformanceHost({failBackend: true});
+      const sessionEnd = await host.onSessionEnd(conformanceContext());
+
+      // Memory a provider flushes at session end is memory the next
+      // session expects to find: an accepted record for a flush that
+      // threw would say the conversation was kept when it was not.
+      expect(sessionEnd.status).toBe('completed_with_failures');
+      expect(sessionEnd.evidence).toContainEqual(
+        expect.objectContaining({
+          pluginId: referenceMemoryProviderId,
+          evidenceKind: 'session_end',
+          status: 'failed',
+        }),
+      );
+    });
+
     it('ends only the provider session on the session-end lifecycle', async () => {
       const lifecycleProbe: MemoryProviderConformanceLifecycleProbe = {
         endedSessions: [],
@@ -967,16 +985,23 @@ export function runMemoryProviderSeamContract(): void {
       });
     });
 
-    it('reports a failed write instead of inventing a stored memory', async () => {
+    it('reports a failed tool call instead of inventing an answer', async () => {
       const host = conformanceHost({failBackend: true});
       const add = await host.handleToolCall(
         conformanceToolCall(addToolName, {text: 'New memory.'}),
         conformanceContext(),
       );
+      const search = await host.handleToolCall(
+        conformanceToolCall(searchToolName, {query: 'prior'}),
+        conformanceContext(),
+      );
 
       // Telling the model a memory was stored when the backend refused
-      // it puts a fact in the conversation that nothing holds.
+      // it puts a fact in the conversation that nothing holds; answering
+      // a failed search with no hits hides the outage behind an ordinary
+      // empty result.
       expect(add.status).toBe('rejected');
+      expect(search.status).toBe('rejected');
     });
 
     it('hands the provider the bounded add text, not the raw input', async () => {
