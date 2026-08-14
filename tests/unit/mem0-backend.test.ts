@@ -553,21 +553,27 @@ describe('mem0 embedded engine backend', () => {
 
   it('claims readiness only after the model and the embedder have both answered', async () => {
     let extractNothing = true;
-    let failEverything = false;
+    let answer: 'rows' | 'reject' | 'garbage' = 'rows';
+    const answerWith = (rows: unknown) => {
+      switch (answer) {
+        case 'reject':
+          return Promise.reject(new Error('endpoint gone'));
+        case 'garbage':
+          return Promise.resolve({unexpected: true});
+        case 'rows':
+          return Promise.resolve(rows);
+      }
+    };
     const backend = createMem0OssBackend({
       loadEngine: () =>
         Promise.resolve({
           add() {
-            return failEverything
-              ? Promise.reject(new Error('endpoint gone'))
-              : Promise.resolve({
-                  results: extractNothing ? [] : [{id: 'stored-1'}],
-                });
+            return answerWith({
+              results: extractNothing ? [] : [{id: 'stored-1'}],
+            });
           },
           search() {
-            return failEverything
-              ? Promise.reject(new Error('endpoint gone'))
-              : Promise.resolve({results: []});
+            return answerWith({results: []});
           },
         }),
     });
@@ -605,19 +611,36 @@ describe('mem0 embedded engine backend', () => {
       verified: true,
     });
 
-    // Readiness is only as fresh as the last real answer: a dependency
-    // that stops answering un-proves it, so health cannot keep saying ok
-    // on the strength of work that succeeded before the outage.
-    failEverything = true;
-    await expect(
+    // Readiness is only as fresh as the last usable answer: a dependency
+    // that stops answering -- or answers something the adapter cannot
+    // read -- un-proves it, so health cannot keep saying ok on the
+    // strength of work that succeeded before the outage.
+    const searchOnce = () =>
       backend.search({
         query: 'tea',
         userId: 'user-1',
         agentId: 'mira',
         limit: 4,
         signal: abortSignal,
-      }),
-    ).rejects.toMatchObject({failureKind: 'engine'});
+      });
+
+    answer = 'reject';
+    await expect(searchOnce()).rejects.toMatchObject({failureKind: 'engine'});
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+
+    // Re-prove, then break the answer shape instead of the connection.
+    answer = 'rows';
+    await searchOnce();
+    await backend.add(capture);
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: true,
+    });
+    answer = 'garbage';
+    await expect(searchOnce()).rejects.toMatchObject({
+      failureKind: 'malformed_response',
+    });
     expect(await backend.ping({signal: abortSignal})).toMatchObject({
       verified: false,
     });

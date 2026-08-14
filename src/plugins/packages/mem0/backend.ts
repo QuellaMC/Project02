@@ -807,12 +807,13 @@ export function createMem0OssBackend(options: {
   let modelAnswered = false;
   let embedderAnswered = false;
   const retirement = new AbortController();
-  // Readiness is only as fresh as the last real answer: a failed
-  // operation un-proves the dependencies until work succeeds again,
-  // while an abandoned wait proves nothing either way.
-  const provenUntilFailure = async (work: Promise<unknown>) => {
+  // Readiness is only as fresh as the last usable answer: an operation
+  // that failed -- or answered something the adapter cannot read --
+  // un-proves the dependencies until work succeeds again, while an
+  // abandoned wait proves nothing either way.
+  const provenUntilFailure = async <T>(work: () => Promise<T>): Promise<T> => {
     try {
-      return await work;
+      return await work();
     } catch (error: unknown) {
       if (!(
         error instanceof Mem0RequestError && error.failureKind === 'cancelled'
@@ -846,8 +847,8 @@ export function createMem0OssBackend(options: {
       // server it called raises can carry request bodies, endpoint
       // details, conversation text, or parts of a credential -- so only
       // the bounded form leaves, for every verb, not just capture.
-      const response: unknown = await provenUntilFailure(
-        settledOrAborted(
+      const hits = await provenUntilFailure(async () => {
+        const response: unknown = await settledOrAborted(
           async () => {
             const loaded = await engine();
 
@@ -863,9 +864,10 @@ export function createMem0OssBackend(options: {
           },
           searchOptions.signal,
           'search',
-        ),
-      );
-      const hits = memoryHitsFromResponse(response, 'search');
+        );
+
+        return memoryHitsFromResponse(response, 'search');
+      });
 
       embedderAnswered = true;
 
@@ -900,8 +902,8 @@ export function createMem0OssBackend(options: {
               }),
             )
           : run();
-      const response: unknown = await provenUntilFailure(
-        settledOrAborted(
+      const references = await provenUntilFailure(async () => {
+        const response: unknown = await settledOrAborted(
           () => {
             const work = lastWrite.then(startIfStillWanted, startIfStillWanted);
 
@@ -911,9 +913,10 @@ export function createMem0OssBackend(options: {
           },
           addOptions.signal,
           'add',
-        ),
-      );
-      const references = storedAddReferences(response, 'add');
+        );
+
+        return storedAddReferences(response, 'add');
+      });
 
       if (addOptions.infer) {
         modelAnswered = true;
