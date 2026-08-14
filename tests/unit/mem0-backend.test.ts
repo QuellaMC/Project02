@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {readdirSync, statSync} from 'node:fs';
 import {join} from 'node:path';
@@ -553,16 +553,21 @@ describe('mem0 embedded engine backend', () => {
 
   it('claims readiness only after the model and the embedder have both answered', async () => {
     let extractNothing = true;
+    let failEverything = false;
     const backend = createMem0OssBackend({
       loadEngine: () =>
         Promise.resolve({
           add() {
-            return Promise.resolve({
-              results: extractNothing ? [] : [{id: 'stored-1'}],
-            });
+            return failEverything
+              ? Promise.reject(new Error('endpoint gone'))
+              : Promise.resolve({
+                  results: extractNothing ? [] : [{id: 'stored-1'}],
+                });
           },
           search() {
-            return Promise.resolve({results: []});
+            return failEverything
+              ? Promise.reject(new Error('endpoint gone'))
+              : Promise.resolve({results: []});
           },
         }),
     });
@@ -598,6 +603,23 @@ describe('mem0 embedded engine backend', () => {
     extractNothing = false;
     expect(await backend.ping({signal: abortSignal})).toMatchObject({
       verified: true,
+    });
+
+    // Readiness is only as fresh as the last real answer: a dependency
+    // that stops answering un-proves it, so health cannot keep saying ok
+    // on the strength of work that succeeded before the outage.
+    failEverything = true;
+    await expect(
+      backend.search({
+        query: 'tea',
+        userId: 'user-1',
+        agentId: 'mira',
+        limit: 4,
+        signal: abortSignal,
+      }),
+    ).rejects.toMatchObject({failureKind: 'engine'});
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
     });
   });
 
@@ -785,15 +807,26 @@ describe('mem0 embedded engine backend', () => {
         signal,
       });
 
-    // The first caller stops waiting, but the engine cannot cancel the
-    // write: the second must still run after it, never beside it -- an
-    // older turn finishing late must not overwrite a newer one.
+    // The first caller stops waiting mid-write, but the engine cannot
+    // cancel it: the second must still run after it, never beside it --
+    // an older turn finishing late must not overwrite a newer one.
     const first = addOf('first', abandoned.signal);
     const second = addOf('second', abortSignal);
 
+    await vi.waitFor(() => {
+      expect(started).toEqual(['first']);
+    });
     abandoned.abort();
     await expect(first).rejects.toMatchObject({failureKind: 'cancelled'});
     expect(started).toEqual(['first']);
+
+    // A caller that gives up while still WAITING never reaches the
+    // engine at all: its turn is re-checked when it would start.
+    const skipped = new AbortController();
+    const third = addOf('third', skipped.signal);
+
+    skipped.abort();
+    await expect(third).rejects.toMatchObject({failureKind: 'cancelled'});
 
     releaseFirst({results: [{id: 'stored-first'}]});
     await expect(second).resolves.toEqual([

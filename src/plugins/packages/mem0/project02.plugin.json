@@ -90,7 +90,7 @@
         },
         {
           "name": "ossLlmBaseUrl",
-          "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama.",
+          "description": "Embedded engine only: OpenAI-compatible extraction endpoint. Unset means the OpenAI cloud; e.g. http://localhost:1234/v1 for LM Studio or http://localhost:11434/v1 for Ollama. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
           "valueType": "string",
@@ -121,7 +121,7 @@
         },
         {
           "name": "ossEmbedderBaseUrl",
-          "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl.",
+          "description": "Embedded engine only: OpenAI-compatible embedding endpoint; unset reuses ossLlmBaseUrl. Use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
           "required": false,
           "secret": false,
           "valueType": "string",

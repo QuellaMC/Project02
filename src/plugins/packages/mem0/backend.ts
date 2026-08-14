@@ -807,6 +807,23 @@ export function createMem0OssBackend(options: {
   let modelAnswered = false;
   let embedderAnswered = false;
   const retirement = new AbortController();
+  // Readiness is only as fresh as the last real answer: a failed
+  // operation un-proves the dependencies until work succeeds again,
+  // while an abandoned wait proves nothing either way.
+  const provenUntilFailure = async (work: Promise<unknown>) => {
+    try {
+      return await work;
+    } catch (error: unknown) {
+      if (!(
+        error instanceof Mem0RequestError && error.failureKind === 'cancelled'
+      )) {
+        modelAnswered = false;
+        embedderAnswered = false;
+      }
+
+      throw error;
+    }
+  };
   // The engine cannot cancel a write, so a caller that stopped waiting
   // must not let the next write run beside its own: every write chains
   // behind the previous one's real settlement, whatever the callers did,
@@ -829,22 +846,24 @@ export function createMem0OssBackend(options: {
       // server it called raises can carry request bodies, endpoint
       // details, conversation text, or parts of a credential -- so only
       // the bounded form leaves, for every verb, not just capture.
-      const response: unknown = await settledOrAborted(
-        async () => {
-          const loaded = await engine();
+      const response: unknown = await provenUntilFailure(
+        settledOrAborted(
+          async () => {
+            const loaded = await engine();
 
-          return boundedEngineCall('search', () =>
-            loaded.search(searchOptions.query, {
-              topK: searchOptions.limit,
-              filters: {
-                user_id: searchOptions.userId,
-                agent_id: searchOptions.agentId,
-              },
-            }),
-          );
-        },
-        searchOptions.signal,
-        'search',
+            return boundedEngineCall('search', () =>
+              loaded.search(searchOptions.query, {
+                topK: searchOptions.limit,
+                filters: {
+                  user_id: searchOptions.userId,
+                  agent_id: searchOptions.agentId,
+                },
+              }),
+            );
+          },
+          searchOptions.signal,
+          'search',
+        ),
       );
       const hits = memoryHitsFromResponse(response, 'search');
 
@@ -868,16 +887,31 @@ export function createMem0OssBackend(options: {
           }),
         );
       };
-      const response: unknown = await settledOrAborted(
-        () => {
-          const work = lastWrite.then(run, run);
+      // Re-checked when its turn starts, not only when it was queued: a
+      // write that waited behind an uncancellable predecessor must not
+      // touch the engine for a caller that gave up, nor after the
+      // backend was retired under it.
+      const startIfStillWanted = () =>
+        addOptions.signal.aborted || retirement.signal.aborted
+          ? Promise.reject(
+              new Mem0RequestError({
+                operation: 'add',
+                failureKind: 'cancelled',
+              }),
+            )
+          : run();
+      const response: unknown = await provenUntilFailure(
+        settledOrAborted(
+          () => {
+            const work = lastWrite.then(startIfStillWanted, startIfStillWanted);
 
-          lastWrite = work.catch(() => undefined);
+            lastWrite = work.catch(() => undefined);
 
-          return work;
-        },
-        addOptions.signal,
-        'add',
+            return work;
+          },
+          addOptions.signal,
+          'add',
+        ),
       );
       const references = storedAddReferences(response, 'add');
 
