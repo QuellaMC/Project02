@@ -293,6 +293,20 @@ describe('mem0 plugin package', () => {
     expect(
       await withFragment.lifecycleHooks.health?.(mem0Context()),
     ).toMatchObject({status: 'unavailable'});
+
+    // The rejected value itself never travels: health reaches logs and
+    // durable evidence, and a mistyped URL can carry the credential.
+    const withUserinfo = createMem0PluginFromInput({
+      ...mem0FactoryInput('server'),
+      resolvedConfig: resolvedConfig({
+        backend: 'server',
+        baseUrl: 'https://operator:hunter2@mem0.example',
+      }),
+    });
+    const leaked = await withUserinfo.lifecycleHooks.health?.(mem0Context());
+
+    expect(leaked).toMatchObject({status: 'unavailable'});
+    expect(JSON.stringify(leaked)).not.toContain('hunter2');
   });
 
   it('reports missing configuration through health instead of pretending memory works', async () => {

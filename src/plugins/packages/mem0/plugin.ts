@@ -69,9 +69,7 @@ function configuredMem0Backend(
     // verb reports the backend unreachable, naming nothing the operator
     // can fix.
     if (!isAbsoluteHttpOrigin(baseUrl)) {
-      return createMisconfiguredMem0Backend(
-        `Mem0 baseUrl must be an absolute http:// or https:// origin, not "${baseUrl}".`,
-      );
+      return createMisconfiguredMem0Backend(invalidEndpointMessage('baseUrl'));
     }
 
     return createMem0ServerBackend({
@@ -88,9 +86,7 @@ function configuredMem0Backend(
   }
 
   if (baseUrl !== undefined && !isAbsoluteHttpOrigin(baseUrl)) {
-    return createMisconfiguredMem0Backend(
-      `Mem0 baseUrl must be an absolute http:// or https:// origin, not "${baseUrl}".`,
-    );
+    return createMisconfiguredMem0Backend(invalidEndpointMessage('baseUrl'));
   }
 
   return createMem0PlatformBackend({
@@ -98,6 +94,15 @@ function configuredMem0Backend(
     ...(baseUrl === undefined ? {} : {baseUrl}),
     ...(transport.fetchFn === undefined ? {} : {fetchFn: transport.fetchFn}),
   });
+}
+
+/**
+ * Never echoes the value: a rejected endpoint can carry userinfo or a
+ * token in its query, and this message travels through health into logs
+ * and durable evidence. The field name is what the operator needs.
+ */
+function invalidEndpointMessage(fieldName: string): string {
+  return `Mem0 ${fieldName} must be an absolute http:// or https:// origin with no embedded credentials, query, or fragment.`;
 }
 
 function isAbsoluteHttpOrigin(value: string): boolean {
