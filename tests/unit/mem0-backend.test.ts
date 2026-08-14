@@ -998,20 +998,40 @@ describe('mem0 embedded engine backend', () => {
     }
   });
 
-  it('defaults the engine analytics off before the module loads', async () => {
+  it('turns engine analytics off for anything but an explicit opt-in', async () => {
     const previous = process.env['MEM0_TELEMETRY'];
-    delete process.env['MEM0_TELEMETRY'];
+    const loadWith = async (value: string | undefined) => {
+      if (value === undefined) {
+        delete process.env['MEM0_TELEMETRY'];
+      } else {
+        process.env['MEM0_TELEMETRY'] = value;
+      }
 
-    try {
-      const engine = await createDefaultMem0OssEngineLoader({
+      return await createDefaultMem0OssEngineLoader({
         llmApiKey: 'k',
         llmBaseUrl: mem0OssOpenAiEndpoint,
         embedderBaseUrl: mem0OssOpenAiEndpoint,
         storageDir: createTestTempRoot('mem0-telemetry-'),
       })({signal: abortSignal});
+    };
+
+    try {
+      // The engine's own gate is `value === "false" ? off : on`, so a
+      // set-but-empty or mistyped variable would otherwise opt in.
+      const engine = await loadWith(undefined);
 
       expect(process.env['MEM0_TELEMETRY']).toBe('false');
       expect(typeof engine.search).toBe('function');
+
+      await loadWith('');
+      expect(process.env['MEM0_TELEMETRY']).toBe('false');
+
+      await loadWith('1');
+      expect(process.env['MEM0_TELEMETRY']).toBe('false');
+
+      // Only a real opt-in survives.
+      await loadWith('true');
+      expect(process.env['MEM0_TELEMETRY']).toBe('true');
     } finally {
       if (previous === undefined) {
         delete process.env['MEM0_TELEMETRY'];

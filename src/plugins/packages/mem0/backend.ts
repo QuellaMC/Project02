@@ -704,11 +704,14 @@ export function createDefaultMem0OssEngineLoader(
   settings: Mem0OssSettings,
 ): Mem0OssEngineLoader {
   return async ({signal}) => {
-    // The engine ships third-party analytics on by default, read from this
-    // env var when its module first loads. Nobody running a character
-    // consented to that, so it defaults off here — before the only import
-    // — while an explicit MEM0_TELEMETRY=true still opts in.
-    process.env['MEM0_TELEMETRY'] ??= 'false';
+    // The engine ships third-party analytics on by default: its own gate
+    // is `value === "false" ? off : on`, so an empty or mistyped variable
+    // opts in. Nobody running a character consented to that, so anything
+    // except an explicit MEM0_TELEMETRY=true becomes "false" here --
+    // before the only import.
+    if (process.env['MEM0_TELEMETRY']?.toLowerCase() !== 'true') {
+      process.env['MEM0_TELEMETRY'] = 'false';
+    }
 
     const imported = await importMem0OssModule();
 
