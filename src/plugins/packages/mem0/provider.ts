@@ -283,6 +283,10 @@ export function createMem0MemoryProvider(options: {
         await captureQueue;
       } finally {
         clearTimeout(drainDeadline);
+        // Drained or not, nothing may use this backend again: retiring
+        // it stops a still-pending engine load from building stores a
+        // replacement provider is about to open.
+        backend.retire?.();
       }
 
       // The last word on this provider: no turn and no health check runs

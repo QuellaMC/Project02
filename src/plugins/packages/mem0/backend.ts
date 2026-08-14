@@ -61,6 +61,13 @@ export type Mem0Backend = {
    * the strength of it.
    */
   ping(options: {readonly signal: AbortSignal}): Promise<Mem0Readiness>;
+  /**
+   * This backend will never be used again. The embedded backend aborts
+   * its pending engine load so a torn-down provider stops building
+   * stores a replacement is about to open; the REST backends have
+   * nothing to stop.
+   */
+  retire?(): void;
 };
 
 export type Mem0Readiness = {
@@ -584,12 +591,15 @@ export type Mem0OssEngine = {
 };
 
 /**
- * Takes no signal: one engine serves every caller, so binding the load
- * to whichever call happened to need it first would let that call's
- * deadline fail a later one whose own scope is still good. A caller
- * bounds its own wait instead.
+ * The signal is the backend's retirement, never a caller's deadline:
+ * one engine serves every caller, so binding the load to whichever call
+ * happened to need it first would let that call's deadline fail a later
+ * one whose own scope is still good. Callers bound their own waits;
+ * only the end of the backend itself stops the shared load.
  */
-export type Mem0OssEngineLoader = () => Promise<Mem0OssEngine>;
+export type Mem0OssEngineLoader = (options: {
+  readonly signal: AbortSignal;
+}) => Promise<Mem0OssEngine>;
 
 /**
  * Vectors are only comparable within the embedder that produced them, and
@@ -693,7 +703,7 @@ async function importMem0OssModule(): Promise<unknown> {
 export function createDefaultMem0OssEngineLoader(
   settings: Mem0OssSettings,
 ): Mem0OssEngineLoader {
-  return async () => {
+  return async ({signal}) => {
     // The engine ships third-party analytics on by default, read from this
     // env var when its module first loads. Nobody running a character
     // consented to that, so it defaults off here — before the only import
@@ -701,6 +711,14 @@ export function createDefaultMem0OssEngineLoader(
     process.env['MEM0_TELEMETRY'] ??= 'false';
 
     const imported = await importMem0OssModule();
+
+    // The import is the long pole; past it the loader starts creating
+    // directories and opening stores, which a retired backend must not
+    // do while its replacement opens the same files.
+    if (signal.aborted) {
+      throw new Mem0RequestError({operation: 'load', failureKind: 'cancelled'});
+    }
+
     const memoryConstructor = isRecord(imported)
       ? imported['Memory']
       : undefined;
@@ -788,13 +806,21 @@ export function createMem0OssBackend(options: {
   // for the other.
   let modelAnswered = false;
   let embedderAnswered = false;
+  const retirement = new AbortController();
+  // The engine cannot cancel a write, so a caller that stopped waiting
+  // must not let the next write run beside its own: every write chains
+  // behind the previous one's real settlement, whatever the callers did,
+  // and the engine sees them strictly in turn order.
+  let lastWrite: Promise<unknown> = Promise.resolve();
   // A failed construction (bad config, missing peer package) must retry
   // on the next call instead of caching the rejection forever.
   const engine = () =>
-    (enginePromise ??= options.loadEngine().catch((error: unknown) => {
-      enginePromise = undefined;
-      throw error;
-    }));
+    (enginePromise ??= options
+      .loadEngine({signal: retirement.signal})
+      .catch((error: unknown) => {
+        enginePromise = undefined;
+        throw error;
+      }));
 
   return Object.freeze({
     async search(searchOptions) {
@@ -827,21 +853,28 @@ export function createMem0OssBackend(options: {
       return hits;
     },
     async add(addOptions) {
-      const response: unknown = await settledOrAborted(
-        async () => {
-          const loaded = await engine();
+      const run = async () => {
+        const loaded = await engine();
 
-          return boundedEngineCall('add', () =>
-            loaded.add([...addOptions.messages], {
-              userId: addOptions.userId,
-              agentId: addOptions.agentId,
-              ...(addOptions.runId === undefined
-                ? {}
-                : {runId: addOptions.runId}),
-              infer: addOptions.infer,
-              ...mem0SourceMetadata(addOptions.sourceIds),
-            }),
-          );
+        return boundedEngineCall('add', () =>
+          loaded.add([...addOptions.messages], {
+            userId: addOptions.userId,
+            agentId: addOptions.agentId,
+            ...(addOptions.runId === undefined
+              ? {}
+              : {runId: addOptions.runId}),
+            infer: addOptions.infer,
+            ...mem0SourceMetadata(addOptions.sourceIds),
+          }),
+        );
+      };
+      const response: unknown = await settledOrAborted(
+        () => {
+          const work = lastWrite.then(run, run);
+
+          lastWrite = work.catch(() => undefined);
+
+          return work;
         },
         addOptions.signal,
         'add',
@@ -879,6 +912,9 @@ export function createMem0OssBackend(options: {
             summary:
               'Mem0 engine loaded; its model and embedder are contacted on first capture or recall.',
           };
+    },
+    retire() {
+      retirement.abort();
     },
   } satisfies Mem0Backend);
 }

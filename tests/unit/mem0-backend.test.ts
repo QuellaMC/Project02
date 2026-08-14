@@ -54,6 +54,10 @@ function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : '';
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 describe('mem0 backend transports', () => {
   it('refuses a redirect and reports it as its own HTTP status', async () => {
     const {requests, fetchFn} = recordingFetch({results: []});
@@ -746,6 +750,78 @@ describe('mem0 embedded engine backend', () => {
     await expect(second).resolves.toEqual([{id: 'row-1', text: 'ok'}]);
   });
 
+  it('keeps embedded writes in turn order past an abandoned wait', async () => {
+    const started: string[] = [];
+    let releaseFirst: (value: unknown) => void = () => undefined;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add(messages) {
+            const text =
+              Array.isArray(messages) && isRecord(messages[0])
+                ? String(messages[0]['content'])
+                : '';
+
+            started.push(text);
+
+            return text === 'first'
+              ? new Promise(resolve => {
+                  releaseFirst = resolve;
+                })
+              : Promise.resolve({results: [{id: `stored-${text}`}]});
+          },
+          search() {
+            return Promise.resolve({results: []});
+          },
+        }),
+    });
+    const abandoned = new AbortController();
+    const addOf = (content: string, signal: AbortSignal) =>
+      backend.add({
+        messages: [{role: 'user' as const, content}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: true,
+        signal,
+      });
+
+    // The first caller stops waiting, but the engine cannot cancel the
+    // write: the second must still run after it, never beside it -- an
+    // older turn finishing late must not overwrite a newer one.
+    const first = addOf('first', abandoned.signal);
+    const second = addOf('second', abortSignal);
+
+    abandoned.abort();
+    await expect(first).rejects.toMatchObject({failureKind: 'cancelled'});
+    expect(started).toEqual(['first']);
+
+    releaseFirst({results: [{id: 'stored-first'}]});
+    await expect(second).resolves.toEqual([
+      {kind: 'memory', id: 'stored-second', title: 'Mem0 memory'},
+    ]);
+    expect(started).toEqual(['first', 'second']);
+  });
+
+  it('retiring the backend stops a load no caller could', () => {
+    let loaderSignal: AbortSignal | undefined;
+    const backend = createMem0OssBackend({
+      loadEngine: ({signal}) => {
+        loaderSignal = signal;
+
+        return new Promise<Mem0OssEngine>(() => {});
+      },
+    });
+
+    void backend.ping({signal: abortSignal});
+
+    // No caller deadline reaches the shared load; only the end of the
+    // backend itself does, so teardown stops it from building stores a
+    // replacement provider is about to open.
+    expect(loaderSignal?.aborted).toBe(false);
+    backend.retire?.();
+    expect(loaderSignal?.aborted).toBe(true);
+  });
+
   it('retries engine construction after a failed load instead of caching the rejection', async () => {
     let attempts = 0;
     const backend = createMem0OssBackend({
@@ -856,7 +932,7 @@ describe('mem0 embedded engine backend', () => {
       llmBaseUrl: mem0OssOpenAiEndpoint,
       embedderBaseUrl: mem0OssOpenAiEndpoint,
       storageDir,
-    })();
+    })({signal: abortSignal});
 
     // The engine writes these with the process umask; they hold the same
     // private material as the runtime's own owner-only stores.
@@ -876,7 +952,7 @@ describe('mem0 embedded engine backend', () => {
         llmBaseUrl: mem0OssOpenAiEndpoint,
         embedderBaseUrl: mem0OssOpenAiEndpoint,
         storageDir: createTestTempRoot('mem0-telemetry-'),
-      })();
+      })({signal: abortSignal});
 
       expect(process.env['MEM0_TELEMETRY']).toBe('false');
       expect(typeof engine.search).toBe('function');
