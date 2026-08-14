@@ -300,19 +300,11 @@ export function createMem0MemoryProvider(options: {
 
 /**
  * Every backend bounds its own failures at the third-party boundary --
- * the REST transports and the embedded engine alike -- so a message that
- * arrives here is already safe to show and to persist.
- *
- * A cancelled write is reported as what it is: the deadline or shutdown
- * abandoned it, and an in-process engine cannot be called back, so the
- * memory may exist. Calling that a lost turn would assert data loss the
- * runtime cannot see.
+ * the REST transports and the embedded engine alike -- and states what
+ * an abandoned write leaves unknown, so a message that arrives here is
+ * already safe to show, to persist, and to act on.
  */
 function captureFailureMessage(error: unknown): string {
-  if (error instanceof Mem0RequestError && error.failureKind === 'cancelled') {
-    return 'the write was abandoned before the backend answered; whether it stored the turn is unknown.';
-  }
-
   return error instanceof Error && error.message.length > 0
     ? error.message
     : 'the memory backend rejected the write.';

@@ -127,7 +127,11 @@ function mem0RequestErrorMessage(options: {
     case 'nothing_stored':
       return `mem0 ${options.operation} failed: the backend created no memory for it.`;
     case 'cancelled':
-      return `mem0 ${options.operation} was cancelled before the engine answered.`;
+      // Whoever reads this -- a tool result the model may retry, health,
+      // or durable evidence -- has to know the write may exist: a REST
+      // backend can have committed already, and the embedded engine
+      // cannot be called back at all.
+      return `mem0 ${options.operation} was abandoned before the backend answered; whether it completed is unknown.`;
     case 'engine':
       return `mem0 ${options.operation} failed inside the embedded engine; check the OSS endpoint, key, and model settings.`;
   }
@@ -579,9 +583,13 @@ export type Mem0OssEngine = {
   ): Promise<unknown>;
 };
 
-export type Mem0OssEngineLoader = (options: {
-  readonly signal: AbortSignal;
-}) => Promise<Mem0OssEngine>;
+/**
+ * Takes no signal: one engine serves every caller, so binding the load
+ * to whichever call happened to need it first would let that call's
+ * deadline fail a later one whose own scope is still good. A caller
+ * bounds its own wait instead.
+ */
+export type Mem0OssEngineLoader = () => Promise<Mem0OssEngine>;
 
 /**
  * Vectors are only comparable within the embedder that produced them, and
@@ -665,17 +673,34 @@ export function mem0OssEngineConfig(
   });
 }
 
+/**
+ * A missing or half-installed dependency, or a native module this
+ * platform cannot load: the operator reinstalls, and the loader's own
+ * message would only name a path inside node_modules.
+ */
+async function importMem0OssModule(): Promise<unknown> {
+  try {
+    const imported: unknown = await import('mem0ai/oss');
+
+    return imported;
+  } catch {
+    throw new TypeError(
+      'Mem0 embedded engine could not be loaded; reinstall the mem0ai dependency to use backend "oss".',
+    );
+  }
+}
+
 export function createDefaultMem0OssEngineLoader(
   settings: Mem0OssSettings,
 ): Mem0OssEngineLoader {
-  return async ({signal}) => {
+  return async () => {
     // The engine ships third-party analytics on by default, read from this
     // env var when its module first loads. Nobody running a character
     // consented to that, so it defaults off here — before the only import
     // — while an explicit MEM0_TELEMETRY=true still opts in.
     process.env['MEM0_TELEMETRY'] ??= 'false';
 
-    const imported: unknown = await import('mem0ai/oss');
+    const imported = await importMem0OssModule();
     const memoryConstructor = isRecord(imported)
       ? imported['Memory']
       : undefined;
@@ -684,12 +709,6 @@ export function createDefaultMem0OssEngineLoader(
       throw new TypeError(
         'mem0ai/oss does not export the Memory engine; reinstall the mem0ai dependency.',
       );
-    }
-
-    // The import is the long pole; past it the loader starts creating
-    // directories and databases, which an abandoned load must not do.
-    if (signal.aborted) {
-      throw new Mem0RequestError({operation: 'load', failureKind: 'cancelled'});
     }
 
     assertRealMem0OssStorageDir(settings.storageDir);
@@ -782,11 +801,9 @@ export function createMem0OssBackend(options: {
   let modelAnswered = false;
   let embedderAnswered = false;
   // A failed construction (bad config, missing peer package) must retry
-  // on the next call instead of caching the rejection forever. The signal
-  // belongs to whichever call builds it: loading opens the store and its
-  // provider clients, which a caller that gave up should not wait on.
-  const engine = (signal: AbortSignal) =>
-    (enginePromise ??= options.loadEngine({signal}).catch((error: unknown) => {
+  // on the next call instead of caching the rejection forever.
+  const engine = () =>
+    (enginePromise ??= options.loadEngine().catch((error: unknown) => {
       enginePromise = undefined;
       throw error;
     }));
@@ -800,7 +817,7 @@ export function createMem0OssBackend(options: {
       // the bounded form leaves, for every verb, not just capture.
       const response: unknown = await settledOrAborted(
         async () => {
-          const loaded = await engine(searchOptions.signal);
+          const loaded = await engine();
 
           return boundedEngineCall('search', () =>
             loaded.search(searchOptions.query, {
@@ -824,7 +841,7 @@ export function createMem0OssBackend(options: {
     async add(addOptions) {
       const response: unknown = await settledOrAborted(
         async () => {
-          const loaded = await engine(addOptions.signal);
+          const loaded = await engine();
 
           return boundedEngineCall('add', () =>
             loaded.add([...addOptions.messages], {
@@ -857,11 +874,7 @@ export function createMem0OssBackend(options: {
       // Loading opens the store and its clients, so it runs under the
       // same abort race as the other verbs: a check the host gave up on
       // must not keep building a provider it no longer wants.
-      await settledOrAborted(
-        () => engine(pingOptions.signal),
-        pingOptions.signal,
-        'ping',
-      );
+      await settledOrAborted(() => engine(), pingOptions.signal, 'ping');
 
       // Constructing the engine only wires provider clients: neither the
       // extraction model nor the embedder is contacted until real work,

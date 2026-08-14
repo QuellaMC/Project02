@@ -701,6 +701,32 @@ describe('mem0 plugin package', () => {
     );
   });
 
+  it('warns that an abandoned write may have landed', async () => {
+    const controller = new AbortController();
+    const plugin = createMem0PluginFromInput(mem0FactoryInput('server'), {
+      fetchFn: () => {
+        controller.abort();
+
+        return Promise.reject(new Error('aborted'));
+      },
+    });
+
+    // The model reads this and may retry: a write the backend might
+    // already hold must not read as one that simply failed, or the
+    // retry stores the memory twice.
+    await expect(
+      plugin.lifecycleHooks.handleToolCall?.(
+        {
+          ...testIdentity(),
+          pluginId: mem0PluginId,
+          toolName: 'mem0.add',
+          input: {text: 'User prefers tea.'},
+        },
+        {...mem0Context(), signal: controller.signal},
+      ),
+    ).rejects.toThrow('whether it completed is unknown');
+  });
+
   it('reports a capture the shutdown drain could not finish', async () => {
     const fetchFn: Mem0FetchFunction = () =>
       Promise.reject(new Error('socket closed'));

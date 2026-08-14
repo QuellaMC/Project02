@@ -683,6 +683,38 @@ describe('mem0 embedded engine backend', () => {
     expect(started).toBe(0);
   });
 
+  it('keeps one caller\u2019s deadline off another caller\u2019s load', async () => {
+    let releaseLoad: (engine: Mem0OssEngine) => void = () => undefined;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        new Promise<Mem0OssEngine>(resolve => {
+          releaseLoad = resolve;
+        }),
+    });
+    const abandoned = new AbortController();
+    const search = {
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 4,
+    };
+
+    // One engine serves every caller, so the first call's scope expiring
+    // must not fail a second whose own scope is still good.
+    const first = backend.search({...search, signal: abandoned.signal});
+    const second = backend.search({...search, signal: abortSignal});
+
+    abandoned.abort();
+    await expect(first).rejects.toMatchObject({failureKind: 'cancelled'});
+
+    releaseLoad({
+      add: () => Promise.resolve({results: []}),
+      search: () => Promise.resolve({results: [{id: 'row-1', memory: 'ok'}]}),
+    });
+
+    await expect(second).resolves.toEqual([{id: 'row-1', text: 'ok'}]);
+  });
+
   it('retries engine construction after a failed load instead of caching the rejection', async () => {
     let attempts = 0;
     const backend = createMem0OssBackend({
@@ -793,7 +825,7 @@ describe('mem0 embedded engine backend', () => {
       llmBaseUrl: mem0OssOpenAiEndpoint,
       embedderBaseUrl: mem0OssOpenAiEndpoint,
       storageDir,
-    })({signal: abortSignal});
+    })();
 
     // The engine writes these with the process umask; they hold the same
     // private material as the runtime's own owner-only stores.
@@ -813,7 +845,7 @@ describe('mem0 embedded engine backend', () => {
         llmBaseUrl: mem0OssOpenAiEndpoint,
         embedderBaseUrl: mem0OssOpenAiEndpoint,
         storageDir: createTestTempRoot('mem0-telemetry-'),
-      })({signal: abortSignal});
+      })();
 
       expect(process.env['MEM0_TELEMETRY']).toBe('false');
       expect(typeof engine.search).toBe('function');
