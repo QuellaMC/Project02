@@ -121,7 +121,7 @@
           "properties": {
             "scope": {
               "enum": ["global_with_character_overrides", "character_only"],
-              "description": "Whether enablement and non-secret settings may be authored globally with character overrides, or only in character/package config. Secrets always remain global."
+              "description": "Whether enablement and settings may be authored globally with character overrides, or only in character/package config. Secret fields follow the same scope."
             },
             "fields": {
               "type": "array",
@@ -264,7 +264,7 @@
         },
         "secret": {
           "type": "boolean",
-          "description": "Secret values are env references only and are redacted in every read; secret fields cannot be agentMutable."
+          "description": "Secret values resolve from an env file first -- the manifest envVar or an authored {\"$env\"} reference -- and a plain string in config is accepted as a fallback. Reads are always redacted, and secret fields cannot be agentMutable."
         },
         "valueType": {
           "enum": [

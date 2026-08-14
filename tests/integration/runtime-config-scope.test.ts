@@ -938,7 +938,7 @@ describe('scope-aware runtime config mutations', () => {
 });
 
 describe('plugin manifest config scope policy', () => {
-  it('rejects global character-only enablement and non-secret fields while allowing global secret refs', () => {
+  it('rejects every globally authored setting of a character-only plugin', () => {
     const plugin = characterOnlyConfigPlugin('scope.character-only');
     const configPath = join(
       createTestTempRoot('project02-config-scope-policy-'),
@@ -984,13 +984,14 @@ describe('plugin manifest config scope policy', () => {
         }),
       ]),
     );
-    expect(
-      resolved.diagnostics.some(
-        diagnostic =>
-          diagnostic.path === `plugins.${plugin.manifest.id}.config.apiKey` &&
-          diagnostic.code.includes('scope'),
-      ),
-    ).toBe(false);
+    // Secrets included: a character-only plugin is self-contained, and
+    // its credential belongs beside its overlay, not in the home config.
+    expect(resolved.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'runtime_config_character_only_plugin_field_globally',
+        path: `plugins.${plugin.manifest.id}.config.apiKey`,
+      }),
+    );
   });
 
   it('offers a scope only the settings that scope can save', async () => {

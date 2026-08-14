@@ -119,9 +119,10 @@
     </table>
 
     <p>
-      Secret fields and <code>$env</code> references are always global-only. A character-only plugin
-      may read a global secret reference, but its enablement and non-secret settings stay with the
-      character. <code>character-state</code> uses this policy.
+      Secret fields follow their plugin's scope like any other setting. A character-only plugin
+      keeps its credential with the character too: each character's own env file, written by
+      <code>secret set --character &lt;id&gt;</code>, merges over the shared one, so two characters
+      can hold different accounts for one plugin. <code>character-state</code> uses this policy.
     </p>
 
     <p>

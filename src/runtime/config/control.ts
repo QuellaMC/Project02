@@ -325,7 +325,13 @@ export function validateRuntimePluginConfigControlOperation(options: {
     return field;
   }
 
-  if (field.secret) {
+  // Removing a pointer is not managing a credential, and it is the one
+  // repair a scope violation leaves the operator; writing one still goes
+  // through the secret command.
+  const operatorClearingSecret =
+    options.operation.kind === 'unset' && options.actor === 'operator';
+
+  if (field.secret && !operatorClearingSecret) {
     throw new TypeError(
       `Plugin config field "${field.name}" is secret and must be managed through the dedicated secret command.`,
     );
