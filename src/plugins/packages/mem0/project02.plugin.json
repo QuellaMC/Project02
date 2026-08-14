@@ -47,7 +47,7 @@
         },
         {
           "name": "baseUrl",
-          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. Global-only: it decides where the credential is sent.",
+          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names.",
           "required": false,
           "secret": false,
           "valueType": "string",

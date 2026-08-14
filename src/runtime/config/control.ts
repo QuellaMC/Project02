@@ -198,6 +198,7 @@ export function runtimePluginConfigControlMutation(options: {
         config,
         manifest: options.manifest,
         runtimeLocation: options.runtimeLocation,
+        operation: options.operation,
         ...(options.env === undefined ? {} : {env: options.env}),
       });
     },
@@ -243,6 +244,7 @@ function assertRuntimePluginConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly operation: RuntimePluginConfigFieldControlOperation;
   readonly env?: NodeJS.ProcessEnv;
 }): void {
   const loadedConfig: LoadedProject02RuntimeConfig = Object.freeze({
@@ -258,12 +260,19 @@ function assertRuntimePluginConfigCandidateValid(options: {
     skipPluginScopeValidation: true,
     // The runtime resolves this document with the character's env
     // overlaid; validating a write against anything narrower would
-    // reject an edit the runtime itself accepts.
-    env: runtimeConfigEnvWithCharacterSecrets(
-      options.env,
-      loadCharacterSecretsEnv(options.runtimeLocation.characterScope.dataRoot)
-        .env,
-    ),
+    // reject an edit the runtime itself accepts. The pending secret sits
+    // on top of both: the file this is validated against is the one this
+    // mutation is about to write.
+    env: {
+      ...runtimeConfigEnvWithCharacterSecrets(
+        options.env,
+        loadCharacterSecretsEnv(options.runtimeLocation.characterScope.dataRoot)
+          .env,
+      ),
+      ...(options.operation.kind === 'secret_set'
+        ? {[options.operation.envVar]: options.operation.secretValue}
+        : {}),
+    },
     validateInactivePluginConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(

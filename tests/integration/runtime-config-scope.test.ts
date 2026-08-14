@@ -599,6 +599,65 @@ describe('scope-aware runtime config mutations', () => {
     });
   });
 
+  it('repairs a blank character secret instead of refusing the write', async () => {
+    const {homeRoot, dataRoot} = seededHome();
+    const plugin = characterOnlyConfigPlugin('scope.secret-repair');
+    const requiredSecretManifest = {
+      ...plugin.manifest,
+      config: {
+        ...plugin.manifest.config,
+        fields: plugin.manifest.config.fields.map(field =>
+          field.name === 'apiKey' ? {...field, required: true} : field,
+        ),
+      },
+    };
+
+    await ensureCharacterDataMarker({
+      storageOptions: {storeRoot: dataRoot},
+      characterId: 'mira',
+    });
+    writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
+      plugins: {
+        'scope.secret-repair': {
+          enabled: true,
+          config: {apiKey: {$env: 'SECRET_REPAIR_KEY'}},
+        },
+      },
+    });
+    // The value the operator is fixing: present but empty, which the
+    // resolver reads as missing.
+    writeFileSync(characterSecretsEnvPath(dataRoot), 'SECRET_REPAIR_KEY=""\n');
+
+    const target = resolveRuntimeConfigScopeTarget({
+      runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
+
+      env: {},
+      scope: 'character',
+    });
+
+    // Validation judges the file this write is about to produce, so the
+    // pending value satisfies the required secret it supplies.
+    applyRuntimeConfigControlOperation({
+      target,
+      pluginManifests: [requiredSecretManifest],
+      request: {
+        kind: 'plugin_config',
+        manifest: requiredSecretManifest,
+        actor: 'operator',
+        fieldOperation: {
+          kind: 'secret_set',
+          fieldName: 'apiKey',
+          envVar: 'SECRET_REPAIR_KEY',
+          secretValue: 'repaired-value',
+        },
+      },
+    });
+
+    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
+      'SECRET_REPAIR_KEY="repaired-value"',
+    );
+  });
+
   it('guards the env file a character secret write targets, not the home one', async () => {
     const {homeRoot, dataRoot} = seededHome();
     const plugin = characterOnlyConfigPlugin('scope.env-target');
