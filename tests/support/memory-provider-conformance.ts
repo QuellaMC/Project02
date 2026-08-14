@@ -99,6 +99,10 @@ function createReferenceProvider(
         recordOperationScope(scenario, 'health', request);
       }
 
+      if (scenario.failBackend === true) {
+        return Promise.reject(new Error('Reference backend is unavailable.'));
+      }
+
       return Promise.resolve(
         scenario.healthResult ?? {status: 'ok', summary: 'Reference ready.'},
       );
@@ -732,6 +736,25 @@ export function runMemoryProviderSeamContract(): void {
         }),
       );
       expect(degraded.evidence).toContainEqual(
+        expect.objectContaining({
+          pluginId: referenceMemoryProviderId,
+          evidenceKind: 'health',
+        }),
+      );
+
+      // A health backend that throws is the outage itself: reporting the
+      // plugin healthy, or nothing at all, would hide it from the
+      // operator's one diagnosis surface.
+      const outageHost = conformanceHost({failBackend: true});
+      const outage = await outageHost.health(conformanceContext());
+
+      expect(outage.snapshots).toContainEqual(
+        expect.objectContaining({
+          pluginId: referenceMemoryProviderId,
+          status: expect.stringMatching(/degraded|unavailable/u) as unknown,
+        }),
+      );
+      expect(outage.evidence).toContainEqual(
         expect.objectContaining({
           pluginId: referenceMemoryProviderId,
           evidenceKind: 'health',

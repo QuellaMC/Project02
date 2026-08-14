@@ -210,6 +210,24 @@ describe('memory provider runtime plugin factory', () => {
         }),
       }),
     ).toThrow(/declare/u);
+    // The seam contract: an outage costs the turn its memory, never the
+    // turn itself — a packaged reject_turn would fail the user's message
+    // on an ordinary recall exception.
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          runtimePolicy: {
+            timeoutMs: 8000,
+            redactionLabels: ['memory'],
+            failureBehavior: {
+              beforeRoleModelCall: 'reject_turn',
+              handleToolCall: 'degrade',
+              health: 'degrade',
+            },
+          },
+        }),
+      }),
+    ).toThrow('must not declare beforeRoleModelCall: "reject_turn"');
     // A descriptor promising a hook the provider does not implement would
     // load a package advertising behavior nothing can deliver.
     expect(() =>
