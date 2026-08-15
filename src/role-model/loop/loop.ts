@@ -60,11 +60,8 @@ import {
   nativeAssistantMessageForAcceptedDecision,
 } from './native-assistant-message.ts';
 import {
-  createPreparedRuntimePluginConfigEffect,
   createRuntimePluginToolCallResultSnapshot,
-  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginToolCall,
-  type RuntimePluginToolCallExecutionResult,
   type RuntimePluginToolCallResult,
   type RuntimePluginContext,
 } from '../../plugins/api/index.ts';
@@ -78,10 +75,6 @@ export type RunRoleModelLoopOptions = {
   readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly pluginToolHost?: RoleModelPluginToolHost;
-  readonly preparedConfigEffectsByToolCallId?: Map<
-    string,
-    PreparedRuntimePluginConfigEffect
-  >;
   readonly maxToolRounds?: number;
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent,
@@ -113,9 +106,7 @@ export type RoleModelPluginToolHost = {
   readonly handleToolCall: (
     call: RuntimePluginToolCall,
     context: RuntimePluginContext,
-  ) =>
-    | RuntimePluginToolCallExecutionResult
-    | Promise<RuntimePluginToolCallExecutionResult>;
+  ) => RuntimePluginToolCallResult | Promise<RuntimePluginToolCallResult>;
 };
 
 export {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
@@ -479,12 +470,6 @@ async function routeRoleModelLoopToolCalls(options: {
     ...(options.options.pluginToolHost === undefined
       ? {}
       : {pluginToolHost: options.options.pluginToolHost}),
-    ...(options.options.preparedConfigEffectsByToolCallId === undefined
-      ? {}
-      : {
-          preparedConfigEffectsByToolCallId:
-            options.options.preparedConfigEffectsByToolCallId,
-        }),
     ...(options.options.runtimePluginContext === undefined
       ? {}
       : {runtimePluginContext: options.options.runtimePluginContext}),
@@ -570,10 +555,6 @@ async function routeExecutableToolCalls(options: {
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   readonly round: number;
   readonly pluginToolHost?: RoleModelPluginToolHost;
-  readonly preparedConfigEffectsByToolCallId?: Map<
-    string,
-    PreparedRuntimePluginConfigEffect
-  >;
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent,
   ) => Promise<void> | void;
@@ -677,7 +658,7 @@ async function routeExecutableToolCalls(options: {
       toolName: toolCall.name,
       mode: executionMode,
       async run() {
-        let hostResult: RuntimePluginToolCallExecutionResult;
+        let hostResult: RuntimePluginToolCallResult;
 
         try {
           hostResult = await pluginToolHost.handleToolCall(
@@ -706,13 +687,6 @@ async function routeExecutableToolCalls(options: {
               call: executionCall,
             }),
             toolName: toolCall.name,
-          });
-
-          capturePreparedConfigEffect({
-            call: executionCall,
-            result: hostResult,
-            routableResult: routableHostResult,
-            effectsByToolCallId: options.preparedConfigEffectsByToolCallId,
           });
 
           return Object.freeze({
@@ -819,42 +793,6 @@ function createSettledToolCallReporter(options: {
 
     return result;
   };
-}
-
-function capturePreparedConfigEffect(options: {
-  readonly call: RuntimePluginToolCall;
-  readonly result: RuntimePluginToolCallExecutionResult;
-  readonly routableResult: RuntimePluginToolCallResult;
-  readonly effectsByToolCallId:
-    Map<string, PreparedRuntimePluginConfigEffect> | undefined;
-}): void {
-  if (
-    options.result.status !== 'accepted' ||
-    options.result.preparedConfigEffect === undefined ||
-    options.routableResult.status !== 'accepted' ||
-    options.effectsByToolCallId === undefined
-  ) {
-    return;
-  }
-
-  const effect = createPreparedRuntimePluginConfigEffect(
-    options.result.preparedConfigEffect,
-  );
-  const toolCallId = options.call.toolCallId;
-
-  if (toolCallId === undefined || effect.effectId !== toolCallId) {
-    throw new TypeError(
-      'Prepared runtime config effect must match its routed tool call id.',
-    );
-  }
-
-  if (options.effectsByToolCallId.has(toolCallId)) {
-    throw new TypeError(
-      'Prepared runtime config effect tool call id must be unique.',
-    );
-  }
-
-  options.effectsByToolCallId.set(toolCallId, effect);
 }
 
 function normalizeRoutablePluginToolResult(options: {

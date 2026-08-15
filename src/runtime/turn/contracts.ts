@@ -4,11 +4,9 @@ import {
   type UserMessageRuntimeEvent,
 } from '../../core/index.ts';
 import type {
-  PreparedRuntimePluginConfigEffect,
   RuntimePluginContext,
   RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
-  RuntimePluginToolCall,
   RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
 import type {
@@ -21,10 +19,7 @@ import type {
   RoleModelDecisionRejectionReason,
   RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
-import type {
-  RoleModelAdapter,
-  RoleModelPluginToolRoutingEvidence,
-} from '../../role-model/index.ts';
+import type {RoleModelAdapter} from '../../role-model/index.ts';
 import type {
   ConversationLogRecord,
   RawEventLogPayloadSummary,
@@ -150,13 +145,7 @@ export type RuntimeTurnState = {
   runtimePluginContextForTurn: RuntimePluginContext | undefined;
   terminalRawEventMayBeDurable: boolean;
   readonly committedVisibleMessages: ConversationLogRecord[];
-  readonly startedPluginToolCalls: Map<string, RuntimePluginToolCall>;
   readonly finishedToolCallIds: string[];
-  readonly finishedPluginToolResults: RoleModelPluginToolRoutingEvidence[];
-  readonly preparedConfigEffectsByToolCallId: Map<
-    string,
-    PreparedRuntimePluginConfigEffect
-  >;
 };
 
 export type AppendVisibleReplyOptions = {

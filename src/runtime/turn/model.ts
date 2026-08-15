@@ -249,7 +249,6 @@ async function runRuntimeModel(
     pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
     pluginToolHost: prepared.pluginHost,
     conversationHistory: prepared.conversationHistory,
-    preparedConfigEffectsByToolCallId: state.preparedConfigEffectsByToolCallId,
     runtimePluginContext: prepared.runtimePluginContext,
     ...(state.options.characterPersonaSections === undefined
       ? {}
@@ -283,7 +282,6 @@ function recordPluginToolCallStarted(
   state: RuntimeTurnState,
   event: RoleModelPluginToolCallStartedEvent,
 ): void {
-  state.startedPluginToolCalls.set(event.callId, event.call);
   appendToolCallStarted(state, {
     callId: event.callId,
     round: event.round,
@@ -297,22 +295,6 @@ async function recordPluginToolCallCompleted(
   state: RuntimeTurnState,
   event: RoleModelPluginToolCallCompletedEvent,
 ): Promise<void> {
-  const call = state.startedPluginToolCalls.get(event.callId);
-
-  if (call === undefined) {
-    throw new Error(
-      `Completed plugin tool call is missing start evidence: ${event.callId}.`,
-    );
-  }
-
-  state.finishedPluginToolResults.push(
-    Object.freeze({
-      callId: event.callId,
-      call,
-      dispatchedToHost: event.dispatchedToHost,
-      result: event.result,
-    } satisfies RoleModelPluginToolRoutingEvidence),
-  );
   appendToolCallFinished(state, {
     callId: event.callId,
     dispatchedToHost: event.dispatchedToHost,

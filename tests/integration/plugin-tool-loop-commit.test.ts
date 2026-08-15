@@ -1,6 +1,6 @@
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {readFileSync, writeFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
 import {createConversationSession} from '../../src/core/index.ts';
@@ -13,10 +13,7 @@ import {
   testRuntimePluginConfigControlCapability,
   testRuntimePluginFileStoreProvider,
 } from '../support/plugin-host-fixtures.ts';
-import {
-  type RuntimePluginHost,
-  type RuntimePluginReloader,
-} from '../../src/plugins/host/index.ts';
+import {type RuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimePlugin} from '../../src/plugins/api/constructors.ts';
 import {runtimePluginConfigUpdateToolName} from '../../src/plugins/api/contract.ts';
 import {
@@ -26,11 +23,7 @@ import {
   firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/index.ts';
-import {
-  applyRuntimeConfigControlOperation,
-  inspectRuntimePluginConfig,
-  resolveRuntimeConfigScopeTarget,
-} from '../../src/runtime/config/index.ts';
+import {inspectRuntimePluginConfig} from '../../src/runtime/config/index.ts';
 import {
   writeRuntimeConfig,
   runtimeLocationForTest,
@@ -207,13 +200,7 @@ function createConfigEffectTestAdapter(options: {
   } satisfies RoleModelAdapter);
 }
 
-async function createLiveReloadLoopFixture(
-  label: string,
-  overrides: {
-    readonly reloader?: RuntimePluginReloader;
-    readonly withSessionScopedNote?: boolean;
-  } = {},
-) {
+async function createLiveReloadLoopFixture(label: string) {
   const fixture = await createConfigEffectTestFixture(`reload-${label}`);
   const manifest = createRuntimePluginManifest({
     ...fixture.targetPlugin.manifest,
@@ -221,46 +208,12 @@ async function createLiveReloadLoopFixture(
     requestedAccess: {model_input: 'write'},
     config: {
       scope: 'global_with_character_overrides',
-      fields: [
-        ...fixture.targetPlugin.manifest.config.fields.map(field =>
-          field.name === 'tone' ? {...field, reloadRequired: false} : field,
-        ),
-        ...(overrides.withSessionScopedNote === true
-          ? [
-              {
-                name: 'note',
-                description: 'Session-scoped note.',
-                required: false,
-                secret: false,
-                valueType: 'string' as const,
-                agentMutable: true,
-                redactionLabels: [],
-              },
-            ]
-          : []),
-      ],
+      fields: fixture.targetPlugin.manifest.config.fields.map(field =>
+        field.name === 'tone' ? {...field, reloadRequired: false} : field,
+      ),
     },
   });
-  let before = fixture.before;
-
-  if (overrides.withSessionScopedNote === true) {
-    writeRuntimeConfig(fixture.configPath, {
-      plugins: {
-        [manifest.id]: {
-          config: {tone: 'cool', note: 'quiet'},
-        },
-      },
-    });
-    before = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: fixture.configPath,
-        storeRoot: fixture.homeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-  }
+  const before = fixture.before;
   const afterCommitLog: string[] = [];
   const stylePlugin = (tone: string) =>
     createRuntimePlugin({
@@ -319,17 +272,6 @@ async function createLiveReloadLoopFixture(
       storeRoot: fixture.storeRoot,
       sessionId: fixture.sessionId,
       sessionIdentity: session,
-      // Mirrors the configured composition root, so recovery can skip rebuilds
-      // the running host already reflects.
-      constructionConfigFingerprint: inspectRuntimePluginConfig({
-        targetScope: 'global',
-        runtimeLocation: runtimeLocationForTest({
-          configPath: fixture.configPath,
-          storeRoot: fixture.homeRoot,
-        }),
-        manifest,
-        pluginManifests: [manifest],
-      }).fingerprint,
       plugins: [stylePlugin(authoredTone())],
       enabledPluginIds: [
         runtimePluginId,
@@ -346,21 +288,19 @@ async function createLiveReloadLoopFixture(
         pluginManifests: [manifest],
       }),
       toolConfirmationHandler: () => ({status: 'approved'}),
-      pluginReloader:
-        overrides.reloader ??
-        Object.freeze({
-          reload: (pluginId: string) => {
-            reloaderInvocations += 1;
-            return Promise.resolve(
-              pluginId === manifest.id
-                ? {
-                    status: 'rebuilt' as const,
-                    plugin: stylePlugin(authoredTone()),
-                  }
-                : {status: 'declined' as const, reason: 'unknown plugin'},
-            );
-          },
-        }),
+      pluginReloader: Object.freeze({
+        reload: (pluginId: string) => {
+          reloaderInvocations += 1;
+          return Promise.resolve(
+            pluginId === manifest.id
+              ? {
+                  status: 'rebuilt' as const,
+                  plugin: stylePlugin(authoredTone()),
+                }
+              : {status: 'declined' as const, reason: 'unknown plugin'},
+          );
+        },
+      }),
     });
   const pluginHost = createPluginHost();
   const capturedContexts: string[][] = [];
@@ -1005,9 +945,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
     ]);
   });
 
-  it('applies an approved config effect only after durable terminal intent', async () => {
-    const fixture = await createConfigEffectTestFixture('durable-success');
+  it('writes an approved config update when the tool executes and tells the model it applied', async () => {
+    const fixture = await createConfigEffectTestFixture('applied-at-execution');
     const messagesByRound: RoleModelChatMessage[][] = [];
+    const toneSeenByRound: string[] = [];
     const session = createConversationSession({
       id: fixture.sessionId,
       character: testCharacterProfile,
@@ -1019,68 +960,75 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId: fixture.sessionId,
     });
     const pluginHost = createConfigEffectTestHost({fixture, session});
+    const adapter = createConfigEffectTestAdapter({
+      fixture,
+      reply: 'Config updated.',
+      messagesByRound,
+    });
     const result = await runLocalUserMessageEvent({
-      event: createTestEvent('update config', 'evt_config_effect_success'),
+      event: createTestEvent('update config', 'evt_config_applied'),
       session,
       logStore,
       pluginHost,
-      roleModelAdapter: createConfigEffectTestAdapter({
-        fixture,
-        reply: 'Config committed.',
-        messagesByRound,
-      }),
+      roleModelAdapter: Object.freeze({
+        invoke(inputEnvelope, invocation) {
+          // The write is visible to the very next round of the same turn.
+          const tone = fixture
+            .inspectTarget()
+            .fields.find(field => field.name === 'tone')?.authored.value;
+
+          toneSeenByRound.push(typeof tone === 'string' ? tone : 'unset');
+          return adapter.invoke(inputEnvelope, invocation);
+        },
+      } satisfies RoleModelAdapter),
     });
-    const after = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: fixture.configPath,
-        storeRoot: fixture.homeRoot,
-      }),
-      manifest: fixture.targetPlugin.manifest,
-      pluginManifests: [fixture.targetPlugin.manifest],
-    });
-    const terminal = logStore
-      .rawEvents()
-      .find(event => event.kind === 'runtime_turn_completed');
-    const effect = terminal?.runtimeConfigEffects?.[0];
-    const marker = logStore
-      .rawEvents()
-      .find(
-        event =>
-          event.kind === 'after_turn_committed' &&
-          event.runtimePluginEvidence?.some(evidence =>
-            evidence.sourceReferences?.some(
-              reference => reference.id === effect?.effectId,
-            ),
-          ),
-      );
+    const after = fixture.inspectTarget();
+    const rawEvents = logStore.rawEvents();
+    const finished = rawEvents.find(
+      event =>
+        event.kind === 'tool_call_finished' &&
+        event.toolName === runtimePluginConfigUpdateToolName,
+    );
     const nativeToolResult = messagesByRound[1]?.find(
       message => message.role === 'tool',
     );
 
     expect(result.status).toBe('completed');
-    expect(terminal).toMatchObject({
-      kind: 'runtime_turn_completed',
-      status: 'completed',
-      runtimeConfigEffects: [
-        {
-          targetPluginId: fixture.targetPlugin.manifest.id,
-          operation: {kind: 'set', value: 'warm'},
-        },
-      ],
-    });
+    expect(toneSeenByRound).toEqual(['cool', 'warm']);
     expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
       {configured: true, value: 'warm'},
     );
-    expect(marker).toMatchObject({
-      kind: 'after_turn_committed',
-      status: 'completed',
+    expect(finished?.toolResult).toMatchObject({
+      status: 'accepted',
+      output: {
+        status: 'applied',
+        appliesTo: 'next_launch',
+        reloadRequired: true,
+        pluginId: fixture.targetPlugin.manifest.id,
+        fieldName: 'tone',
+        operation: 'set',
+        fingerprint: after.fingerprint,
+      },
     });
-    expect(nativeToolResult?.content).toContain(
-      '"status":"approved_pending_commit"',
+    expect(finished?.toolResult?.evidence).toContainEqual(
+      expect.objectContaining({
+        evidenceKind: 'policy',
+        policyOutcome: 'user_approved',
+        configFingerprint: after.fingerprint,
+      }),
     );
+    expect(finished?.toolResult?.evidence).toContainEqual(
+      expect.objectContaining({
+        evidenceKind: 'tool_invocation',
+        status: 'accepted',
+        summary: expect.stringContaining('Applied approved plugin') as string,
+      }),
+    );
+    expect(rawEvents.some(event => event.kind === 'after_turn_committed')).toBe(
+      false,
+    );
+    expect(nativeToolResult?.content).toContain('"status":"applied"');
     expect(nativeToolResult?.content).not.toContain('preparedConfigEffect');
-    expect(nativeToolResult?.content).not.toContain('runtimeConfigEffects');
   });
 
   it('lets the model correct a rejected config update in the same turn', async () => {
@@ -1178,7 +1126,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     );
   });
 
-  it('live-applies an approved reloadRequired:false config update by the next turn', async () => {
+  it('live-applies an approved reloadRequired:false update before the turn ends', async () => {
     const live = await createLiveReloadLoopFixture('live-apply');
     const updateAdapter = createSequencedAdapter([
       {
@@ -1203,15 +1151,29 @@ describe('plugin-driven tool loop commit and rollback', () => {
     }
     expect(updateResult.postCommitFailures).toBeUndefined();
     expect(live.authoredTone()).toBe('warm');
+    expect(live.reloaderCalls()).toBe(1);
 
-    const liveApplyEvidence = live.logStore
+    const finished = live.logStore
       .rawEvents()
-      .filter(event => event.kind === 'after_turn_committed')
-      .flatMap(event => event.runtimePluginEvidence ?? [])
-      .find(evidence => evidence.summary.startsWith('Live-applied'));
+      .find(
+        event =>
+          event.kind === 'tool_call_finished' &&
+          event.toolName === runtimePluginConfigUpdateToolName,
+      );
 
-    expect(liveApplyEvidence).toMatchObject({status: 'accepted'});
-    expect(live.afterCommitLog).toEqual(['after:cool']);
+    expect(finished?.toolResult).toMatchObject({
+      status: 'accepted',
+      output: {status: 'applied', appliesTo: 'now', reloadRequired: false},
+    });
+    expect(finished?.toolResult?.evidence).toContainEqual(
+      expect.objectContaining({
+        status: 'accepted',
+        summary: expect.stringContaining('Live-applied') as string,
+      }),
+    );
+    // The swap happened inside the tool call, so this turn's own after-commit
+    // hook already ran on the rebuilt instance.
+    expect(live.afterCommitLog).toEqual(['after:warm']);
 
     const followupResult = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_live_apply_followup'),
@@ -1223,1153 +1185,6 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
     expect(followupResult.status).toBe('completed');
     expect(live.capturedContexts[0]).toContain('tone:warm');
-    expect(live.afterCommitLog).toEqual(['after:cool', 'after:warm']);
-  });
-
-  it('keeps the old instance and records a post-commit failure when the reload factory throws', async () => {
-    const live = await createLiveReloadLoopFixture('live-fail', {
-      reloader: {
-        reload: () => Promise.reject(new Error('factory exploded')),
-      },
-    });
-    const updateAdapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-        ],
-      },
-      {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
-    ]);
-
-    const updateResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update tone', 'evt_live_fail_update'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: live.pluginHost,
-      roleModelAdapter: updateAdapter,
-    });
-
-    expect(updateResult.status).toBe('completed');
-    if (updateResult.status !== 'completed') {
-      throw new Error('Expected the update turn to complete.');
-    }
-    expect(updateResult.postCommitFailures?.join(' ')).toContain(
-      'factory exploded',
-    );
-    expect(live.authoredTone()).toBe('warm');
-
-    const failedEvidence = live.logStore
-      .rawEvents()
-      .filter(event => event.kind === 'after_turn_committed')
-      .flatMap(event => event.runtimePluginEvidence ?? [])
-      .find(evidence => evidence.summary.startsWith('Live config reload'));
-
-    expect(failedEvidence).toMatchObject({status: 'failed'});
-
-    const failedAfterCommitEvent = live.logStore
-      .rawEvents()
-      .filter(event => event.kind === 'after_turn_committed')
-      .find(event =>
-        event.runtimePluginEvidence?.some(evidence =>
-          evidence.summary.startsWith('Live config reload'),
-        ),
-      );
-
-    expect(failedAfterCommitEvent?.status).toBe('completed_with_failures');
-
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_live_fail_followup'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: live.pluginHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(followupResult.status).toBe('completed');
-    expect(live.capturedContexts[0]).toContain('tone:cool');
-  });
-
-  it('recovers an applied config effect when its commit marker append failed', async () => {
-    const fixture = await createConfigEffectTestFixture('marker-recovery');
-    const session = createConversationSession({
-      id: fixture.sessionId,
-      character: testCharacterProfile,
-    });
-    const fileLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId,
-    });
-    const logStore = createRawEventAppendFailingLogStore({
-      logStore: fileLogStore,
-      matches: record => record.kind === 'after_turn_committed',
-      message: 'after-turn raw event append failed',
-    });
-    const pluginHost = createConfigEffectTestHost({fixture, session});
-    const firstResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update config', 'evt_config_marker_recovery'),
-      session,
-      logStore,
-      pluginHost,
-      roleModelAdapter: createConfigEffectTestAdapter({
-        fixture,
-        reply: 'Config committed before marker failure.',
-      }),
-    });
-    const terminal = fileLogStore
-      .rawEvents()
-      .find(event => event.kind === 'runtime_turn_completed');
-    const effect = terminal?.runtimeConfigEffects?.[0];
-    const afterApply = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: fixture.configPath,
-        storeRoot: fixture.homeRoot,
-      }),
-      manifest: fixture.targetPlugin.manifest,
-      pluginManifests: [fixture.targetPlugin.manifest],
-    });
-
-    expect(firstResult).toMatchObject({
-      status: 'completed',
-      postCommitFailures: ['after-turn raw event append failed'],
-    });
-    expect(afterApply.fingerprint).toBe(effect?.resultFingerprint);
-    expect(
-      fileLogStore
-        .rawEvents()
-        .some(event => event.kind === 'after_turn_committed'),
-    ).toBe(false);
-
-    const reopenedLogStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId,
-    });
-    const restoredSession = createConversationSession({
-      character: testCharacterProfile,
-      id: fixture.sessionId,
-      visibleTranscript: reopenedLogStore.conversationMessages(),
-    });
-    const recoveryHost = createConfigEffectTestHost({
-      fixture,
-      session: restoredSession,
-    });
-
-    expect(
-      await runLocalUserMessageEvent({
-        event: createTestEvent('continue', 'evt_config_marker_followup'),
-        session: restoredSession,
-        logStore: reopenedLogStore,
-        pluginHost: recoveryHost,
-        roleModelAdapter: createSequencedAdapter([
-          {
-            toolCalls: [
-              {
-                name: 'visible_reply',
-                input: {text: 'Recovered marker.'},
-              },
-            ],
-          },
-        ]),
-      }),
-    ).toMatchObject({status: 'completed'});
-    expect(
-      reopenedLogStore
-        .rawEvents()
-        .filter(
-          event =>
-            event.kind === 'after_turn_committed' &&
-            event.runtimePluginEvidence?.some(evidence =>
-              evidence.sourceReferences?.some(
-                reference => reference.id === effect?.effectId,
-              ),
-            ),
-        ),
-    ).toHaveLength(1);
-  });
-
-  it('skips the recovery rebuild when the running host already carries the config', async () => {
-    const live = await createLiveReloadLoopFixture('already-applied');
-    const failingStore = createRawEventAppendFailingLogStore({
-      matches: record => record.kind === 'after_turn_committed',
-      message: 'after-turn raw event append failed',
-      logStore: live.logStore,
-    });
-    const crashResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update tone', 'evt_already_applied_update'),
-      session: live.session,
-      logStore: failingStore,
-      pluginHost: live.pluginHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-          ],
-        },
-        {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
-      ]),
-    });
-
-    expect(crashResult.status).toBe('completed');
-    if (crashResult.status !== 'completed') {
-      throw new Error('Expected the marker-losing turn to complete.');
-    }
-    // The commit applied AND live-applied the change; only the marker died.
-    expect(crashResult.postCommitFailures?.join(' ')).toContain(
-      'append failed',
-    );
-    expect(live.authoredTone()).toBe('warm');
-    expect(live.reloaderCalls()).toBe(1);
-
-    // A restarted host is built from the already-updated config.
-    const restartedHost = live.createPluginHost();
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_already_applied_followup'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: restartedHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(followupResult.status).toBe('completed');
-    expect(live.capturedContexts[0]).toContain('tone:warm');
-    expect(live.reloaderCalls()).toBe(1);
-
-    const recoveryEvents = live.logStore
-      .rawEvents()
-      .filter(
-        event =>
-          event.kind === 'after_turn_committed' &&
-          event.eventId === 'evt_already_applied_update',
-      );
-
-    expect(recoveryEvents).toHaveLength(1);
-    expect(
-      (recoveryEvents[0]?.runtimePluginEvidence ?? []).some(evidence =>
-        evidence.summary.startsWith('Live-applied'),
-      ),
-    ).toBe(false);
-  });
-
-  it('skips the recovery rebuild when the tail effect conflicted at commit', async () => {
-    const live = await createLiveReloadLoopFixture('accepted-final');
-    const failingStore = createRawEventAppendFailingLogStore({
-      matches: record => record.kind === 'after_turn_committed',
-      message: 'after-turn raw event append failed',
-      logStore: live.logStore,
-    });
-    // Two live updates prepared against the same fingerprint: the first applies
-    // at commit and the second conflict-closes.
-    const staleSecondInput = {...live.updateInput, value: 'sharp'};
-    const crashResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update tone twice', 'evt_accepted_final'),
-      session: live.session,
-      logStore: failingStore,
-      pluginHost: live.pluginHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-          ],
-        },
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: staleSecondInput},
-          ],
-        },
-        {toolCalls: [{name: 'visible_reply', input: {text: 'updated'}}]},
-      ]),
-    });
-
-    expect(crashResult.status).toBe('completed');
-    if (crashResult.status !== 'completed') {
-      throw new Error('Expected the marker-losing turn to complete.');
-    }
-    expect(live.authoredTone()).toBe('warm');
-    expect(live.reloaderCalls()).toBe(1);
-
-    // The restarted host is built at the last accepted effect's fingerprint,
-    // while the terminal event's raw tail is the conflicted one.
-    const restartedHost = live.createPluginHost();
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_accepted_final_followup'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: restartedHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(followupResult.status).toBe('completed');
-    expect(live.capturedContexts[0]).toContain('tone:warm');
-    expect(live.reloaderCalls()).toBe(1);
-  });
-
-  it('retries at recovery a reload whose outcome was never made durable', async () => {
-    const live = await createLiveReloadLoopFixture('undurable-reload', {
-      reloader: {
-        reload: () => Promise.reject(new Error('factory exploded')),
-      },
-    });
-    const failingStore = createRawEventAppendFailingLogStore({
-      matches: record => record.kind === 'after_turn_committed',
-      message: 'after-turn raw event append failed',
-      logStore: live.logStore,
-    });
-    const crashResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update tone', 'evt_undurable_reload'),
-      session: live.session,
-      logStore: failingStore,
-      pluginHost: live.pluginHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-          ],
-        },
-        {toolCalls: [{name: 'visible_reply', input: {text: 'tone updated'}}]},
-      ]),
-    });
-
-    expect(crashResult.status).toBe('completed');
-    if (crashResult.status !== 'completed') {
-      throw new Error('Expected the marker-losing turn to complete.');
-    }
-    // The reload failed and the marker append died, so no reload decision is
-    // durable and this process keeps serving the stale instance.
-    expect(crashResult.postCommitFailures?.join(' ')).toContain(
-      'factory exploded',
-    );
-    expect(live.authoredTone()).toBe('warm');
-
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_undurable_reload_followup'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: live.pluginHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(followupResult.status).toBe('completed');
-    expect(live.capturedContexts[0]).toContain('tone:cool');
-
-    // The running host is not current for the committed config, so recovery
-    // re-attempts the reload rather than skipping it.
-    const recoveryEvent = live.logStore
-      .rawEvents()
-      .find(
-        event =>
-          event.kind === 'after_turn_committed' &&
-          event.eventId === 'evt_undurable_reload',
-      );
-
-    expect(recoveryEvent?.status).toBe('completed_with_failures');
-    expect(
-      (recoveryEvent?.runtimePluginEvidence ?? []).some(
-        evidence =>
-          evidence.status === 'failed' &&
-          evidence.summary.startsWith('Live config reload'),
-      ),
-    ).toBe(true);
-  });
-
-  it('includes prior-reconciled effects when recovery groups a reload', async () => {
-    const live = await createLiveReloadLoopFixture('prior-accepted', {
-      withSessionScopedNote: true,
-    });
-    // Turn 1: a transient, non-conflict error on the live field leaves one
-    // effect reconciled and the other pending.
-    const baseHost = live.pluginHost;
-    const flakyHost = Object.freeze({
-      ...baseHost,
-      reconcileConfigEffect(effect) {
-        if (effect.fieldName === 'tone') {
-          throw new Error('io hiccup during reconcile');
-        }
-
-        return baseHost.reconcileConfigEffect(effect);
-      },
-    } satisfies RuntimePluginHost);
-    const noteInput = {
-      pluginId: live.updateInput.pluginId,
-      fieldName: 'note',
-      operation: 'set',
-      value: 'quiet',
-      expectedFingerprint: live.updateInput.expectedFingerprint,
-    };
-    const crashResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update note and tone', 'evt_prior_accepted'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: flakyHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: noteInput},
-          ],
-        },
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-          ],
-        },
-        {toolCalls: [{name: 'visible_reply', input: {text: 'both approved'}}]},
-      ]),
-    });
-
-    expect(crashResult.status).toBe('completed');
-    if (crashResult.status !== 'completed') {
-      throw new Error('Expected the flaky update turn to complete.');
-    }
-    expect(crashResult.postCommitFailures?.join(' ')).toContain('io hiccup');
-    expect(live.authoredTone()).toBe('cool');
-
-    // Turn 2: the replayed group still contains the previously reconciled
-    // session-scoped effect, which the commit path would have deferred.
-    const recoveryHost = live.createPluginHost();
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_prior_accepted_followup'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: recoveryHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(followupResult.status).toBe('completed');
-    expect(live.authoredTone()).toBe('warm');
-    expect(live.capturedContexts[0]).toContain('tone:cool');
-    expect(live.reloaderCalls()).toBe(0);
-
-    const deferredEvidence = live.logStore
-      .rawEvents()
-      .filter(event => event.kind === 'after_turn_committed')
-      .flatMap(event => event.runtimePluginEvidence ?? [])
-      .find(evidence => evidence.status === 'degraded');
-
-    expect(deferredEvidence?.summary).toContain(
-      'mix live and reload-required fields',
-    );
-  });
-
-  it('keeps recovery progress durable when one effect fails to reconcile', async () => {
-    const live = await createLiveReloadLoopFixture('partial-recovery', {
-      withSessionScopedNote: true,
-    });
-    // Turn 1 crashes reconciliation entirely, leaving both effects pending
-    // with the config file untouched.
-    const crashingHost = Object.freeze({
-      ...live.pluginHost,
-      reconcileConfigEffect() {
-        throw new Error('reconcile crashed before applying the group');
-      },
-    } satisfies RuntimePluginHost);
-    const noteInput = {
-      pluginId: live.updateInput.pluginId,
-      fieldName: 'note',
-      operation: 'set',
-      value: 'quiet',
-      expectedFingerprint: live.updateInput.expectedFingerprint,
-    };
-    const crashResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update note and tone', 'evt_partial_recovery'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: crashingHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: noteInput},
-          ],
-        },
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-          ],
-        },
-        {toolCalls: [{name: 'visible_reply', input: {text: 'both approved'}}]},
-      ]),
-    });
-
-    expect(crashResult.status).toBe('completed');
-
-    // Turn 2: recovery replays the note effect but hits a transient error on
-    // the tone effect.
-    const baseRecoveryHost = live.createPluginHost();
-    const flakyRecoveryHost = Object.freeze({
-      ...baseRecoveryHost,
-      reconcileConfigEffect(effect) {
-        if (effect.fieldName === 'tone') {
-          throw new Error('disk hiccup during recovery');
-        }
-
-        return baseRecoveryHost.reconcileConfigEffect(effect);
-      },
-    } satisfies RuntimePluginHost);
-    const secondResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_partial_recovery_second'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: flakyRecoveryHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(secondResult.status).toBe('completed');
-    expect(live.authoredTone()).toBe('cool');
-
-    const partialEvent = live.logStore
-      .rawEvents()
-      .find(
-        event =>
-          event.kind === 'after_turn_committed' &&
-          (event.runtimePluginEvidence ?? []).some(
-            evidence => evidence.status === 'failed',
-          ),
-      );
-
-    expect(partialEvent?.status).toBe('completed_with_failures');
-    expect(
-      (partialEvent?.runtimePluginEvidence ?? []).some(
-        evidence =>
-          evidence.status === 'failed' &&
-          evidence.summary.includes('stays pending'),
-      ),
-    ).toBe(true);
-    expect(
-      (partialEvent?.runtimePluginEvidence ?? []).filter(
-        evidence => evidence.status === 'accepted',
-      ),
-    ).toHaveLength(1);
-
-    // Turn 3: the retry group still includes the reconciled note, so it defers.
-    const thirdResult = await runLocalUserMessageEvent({
-      event: createTestEvent('once more', 'evt_partial_recovery_third'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: live.createPluginHost(),
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(thirdResult.status).toBe('completed');
-    expect(live.authoredTone()).toBe('warm');
-    expect(live.capturedContexts.at(-1)).toContain('tone:cool');
-    expect(
-      live.logStore
-        .rawEvents()
-        .flatMap(event => event.runtimePluginEvidence ?? [])
-        .some(
-          evidence =>
-            evidence.status === 'degraded' &&
-            evidence.summary.includes('mix live and reload-required fields'),
-        ),
-    ).toBe(true);
-  });
-
-  it('defers a mixed pending config group at recovery exactly like the commit path', async () => {
-    const live = await createLiveReloadLoopFixture('mixed-recovery', {
-      withSessionScopedNote: true,
-    });
-    // Crashing between the terminal append and reconciliation leaves both
-    // effects pending.
-    const crashingHost = Object.freeze({
-      ...live.pluginHost,
-      reconcileConfigEffect() {
-        throw new Error('reconcile crashed before applying the group');
-      },
-    } satisfies RuntimePluginHost);
-    const noteInput = {
-      pluginId: live.updateInput.pluginId,
-      fieldName: 'note',
-      operation: 'set',
-      value: 'quiet',
-      expectedFingerprint: live.updateInput.expectedFingerprint,
-    };
-    const crashResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update note and tone', 'evt_mixed_recovery'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: crashingHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: noteInput},
-          ],
-        },
-        {
-          toolCalls: [
-            {name: runtimePluginConfigUpdateToolName, input: live.updateInput},
-          ],
-        },
-        {toolCalls: [{name: 'visible_reply', input: {text: 'both approved'}}]},
-      ]),
-    });
-
-    expect(crashResult.status).toBe('completed');
-    if (crashResult.status !== 'completed') {
-      throw new Error('Expected the crashing update turn to complete.');
-    }
-    expect(crashResult.postCommitFailures?.join(' ')).toContain(
-      'reconcile crashed',
-    );
-    expect(live.authoredTone()).toBe('cool');
-
-    const terminal = live.logStore
-      .rawEvents()
-      .find(
-        event =>
-          event.kind === 'runtime_turn_completed' &&
-          event.eventId === 'evt_mixed_recovery',
-      );
-
-    expect(terminal?.runtimeConfigEffects).toHaveLength(2);
-
-    const recoveryHost = live.createPluginHost();
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and now?', 'evt_mixed_recovery_followup'),
-      session: live.session,
-      logStore: live.logStore,
-      pluginHost: recoveryHost,
-      roleModelAdapter: live.contextCaptureAdapter,
-    });
-
-    expect(followupResult.status).toBe('completed');
-    // The commit path would have deferred this mixed group, so the follow-up
-    // turn still serves the instance built from the pre-update config.
-    expect(live.authoredTone()).toBe('warm');
-    expect(live.capturedContexts[0]).toContain('tone:cool');
-
-    const recoveryEvents = live.logStore
-      .rawEvents()
-      .filter(
-        event =>
-          event.kind === 'after_turn_committed' &&
-          (event.runtimePluginEvidence ?? []).some(evidence =>
-            evidence.sourceReferences?.some(
-              reference => reference.kind === 'runtime',
-            ),
-          ),
-      );
-
-    expect(recoveryEvents).toHaveLength(1);
-    expect(recoveryEvents[0]?.status).toBe('completed');
-
-    const recoveryEvidence = recoveryEvents[0]?.runtimePluginEvidence ?? [];
-
-    expect(
-      recoveryEvidence.filter(evidence => evidence.status === 'accepted'),
-    ).toHaveLength(2);
-    expect(
-      recoveryEvidence.find(evidence => evidence.status === 'degraded'),
-    ).toMatchObject({
-      summary: expect.stringContaining(
-        'mix live and reload-required fields',
-      ) as unknown,
-      configFingerprint:
-        terminal?.runtimeConfigEffects?.at(-1)?.resultFingerprint,
-    });
-  });
-
-  it('closes a conflicted config effect with a rejected record and continues the session', async () => {
-    const fixture = await createConfigEffectTestFixture('fingerprint-drift');
-    const session = createConversationSession({
-      id: fixture.sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot: fixture.storeRoot,
-      sessionId: fixture.sessionId,
-    });
-    const baseHost = createConfigEffectTestHost({fixture, session});
-    let driftApplied = false;
-    const driftHost = Object.freeze({
-      ...baseHost,
-      reconcileConfigEffect(effect) {
-        if (!driftApplied) {
-          applyRuntimeConfigControlOperation({
-            pluginManifests: [],
-            target: resolveRuntimeConfigScopeTarget({
-              runtimeLocation: runtimeLocationForTest({
-                configPath: fixture.configPath,
-                storeRoot: fixture.homeRoot,
-              }),
-              scope: 'global',
-            }),
-            expectedFingerprint: fixture.before.fingerprint,
-            request: {
-              kind: 'plugin_config',
-              manifest: fixture.targetPlugin.manifest,
-              actor: 'operator',
-              fieldOperation: {
-                kind: 'set',
-                fieldName: 'tone',
-                value: 'competing-value',
-              },
-            },
-          });
-          driftApplied = true;
-        }
-
-        return baseHost.reconcileConfigEffect(effect);
-      },
-    } satisfies RuntimePluginHost);
-    const firstResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update config', 'evt_config_effect_drift'),
-      session,
-      logStore,
-      pluginHost: driftHost,
-      roleModelAdapter: createConfigEffectTestAdapter({
-        fixture,
-        reply: 'Config intent committed.',
-      }),
-    });
-    const afterDrift = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: fixture.configPath,
-        storeRoot: fixture.homeRoot,
-      }),
-      manifest: fixture.targetPlugin.manifest,
-      pluginManifests: [fixture.targetPlugin.manifest],
-    });
-    const effectId = logStore
-      .rawEvents()
-      .find(candidate => candidate.kind === 'runtime_turn_completed')
-      ?.runtimeConfigEffects?.[0]?.effectId;
-    const rejectedClosureRecords = () =>
-      logStore
-        .rawEvents()
-        .filter(
-          event =>
-            event.kind === 'after_turn_committed' &&
-            event.runtimePluginEvidence?.some(
-              evidence =>
-                evidence.status === 'rejected' &&
-                evidence.sourceReferences?.some(
-                  reference =>
-                    reference.kind === 'runtime' && reference.id === effectId,
-                ),
-            ),
-        );
-
-    expect(firstResult.status).toBe('completed');
-    expect(
-      firstResult.status === 'completed' ? firstResult.postCommitFailures : [],
-    ).toEqual([
-      expect.stringContaining(
-        'cannot be reconciled because authored config changed',
-      ),
-    ]);
-    expect(
-      afterDrift.fields.find(field => field.name === 'tone')?.authored.value,
-    ).toBe('competing-value');
-    expect(effectId).toBeDefined();
-    expect(rejectedClosureRecords()).toHaveLength(1);
-
-    const restoredSession = createConversationSession({
-      character: testCharacterProfile,
-      id: fixture.sessionId,
-      visibleTranscript: logStore.conversationMessages(),
-    });
-    const recoveryHost = createConfigEffectTestHost({
-      fixture,
-      session: restoredSession,
-    });
-    const followUpResult = await runLocalUserMessageEvent({
-      event: createTestEvent('continue', 'evt_config_drift_followup'),
-      session: restoredSession,
-      logStore,
-      pluginHost: recoveryHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {text: 'Session continues after conflict.'},
-            },
-          ],
-        },
-      ]),
-    });
-    const thirdResult = await runLocalUserMessageEvent({
-      event: createTestEvent('and again', 'evt_config_drift_third'),
-      session: restoredSession,
-      logStore,
-      pluginHost: recoveryHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {text: 'Still healthy.'},
-            },
-          ],
-        },
-      ]),
-    });
-
-    expect(followUpResult.status).toBe('completed');
-    expect(thirdResult.status).toBe('completed');
-    expect(
-      afterDrift.fields.find(field => field.name === 'tone')?.authored.value,
-    ).toBe('competing-value');
-    expect(rejectedClosureRecords()).toHaveLength(1);
-  });
-
-  it('rejects a prepared config effect when durable session evidence is unavailable', async () => {
-    const fixture = await createConfigEffectTestFixture('no-durable-store');
-    const session = createConversationSession({
-      id: fixture.sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-    });
-    const pluginHost = createConfigEffectTestHost({fixture, session});
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent('update config', 'evt_config_no_durable_store'),
-        session,
-        logStore,
-        pluginHost,
-        roleModelAdapter: createConfigEffectTestAdapter({
-          fixture,
-          reply: 'Must not commit.',
-        }),
-      }),
-    ).rejects.toThrow(
-      'Approved runtime config effects require durable local session evidence.',
-    );
-    const after = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: fixture.configPath,
-        storeRoot: fixture.homeRoot,
-      }),
-      manifest: fixture.targetPlugin.manifest,
-      pluginManifests: [fixture.targetPlugin.manifest],
-    });
-
-    expect(after.fingerprint).toBe(fixture.before.fingerprint);
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-    });
-    expect(
-      logStore
-        .rawEvents()
-        .some(event => event.kind === 'runtime_turn_completed'),
-    ).toBe(false);
-  });
-
-  it('refuses a pending config effect whose approval evidence the log does not carry', async () => {
-    const fixture = await createConfigEffectTestFixture('forged');
-    const {sessionId, storeRoot, before, inspectTarget} = fixture;
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-    const interruptedHost = Object.freeze({
-      ...createConfigEffectTestHost({fixture, session}),
-      reconcileConfigEffect() {
-        throw new Error('simulated config reconciliation interruption');
-      },
-    } satisfies RuntimePluginHost);
-
-    await runLocalUserMessageEvent({
-      event: createTestEvent('update config', 'evt_config_effect_forged'),
-      session,
-      logStore,
-      roleModelAdapter: createConfigEffectTestAdapter({
-        fixture,
-        reply: 'Committed.',
-      }),
-      pluginHost: interruptedHost,
-    });
-
-    // The forged effect on the terminal names a result the approved tool call
-    // never produced.
-    const paths = logStore.localRuntimeSessionPaths;
-
-    if (paths === undefined) {
-      throw new Error('Expected file runtime log store session paths.');
-    }
-
-    const forgedLines = readFileSync(paths.rawEventsPath, 'utf8')
-      .split('\n')
-      .filter(line => line.length > 0)
-      .map(line => {
-        const record = JSON.parse(line) as {
-          kind: string;
-          runtimeConfigEffects?: {resultFingerprint: string}[];
-        };
-        const effect = record.runtimeConfigEffects?.[0];
-
-        if (record.kind !== 'runtime_turn_completed' || effect === undefined) {
-          return line;
-        }
-
-        const prefix = effect.resultFingerprint.startsWith('0000')
-          ? 'ffff'
-          : '0000';
-
-        effect.resultFingerprint = `${prefix}${effect.resultFingerprint.slice(4)}`;
-        return JSON.stringify(record);
-      });
-
-    writeFileSync(paths.rawEventsPath, `${forgedLines.join('\n')}\n`, 'utf8');
-
-    const reopenedLogStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-
-    // The tampered log fails closed at the read, before a turn could carry the
-    // instruction forward.
-    expect(() => reopenedLogStore.conversationMessages()).toThrow(
-      /missing matching approved config-update tool evidence/iu,
-    );
-    expect(inspectTarget().fingerprint).toBe(before.fingerprint);
-  });
-
-  it('recovers a durable pending config effect once and records its effect marker', async () => {
-    const fixture = await createConfigEffectTestFixture('recovery');
-    const {sessionId, storeRoot, targetPlugin, before, inspectTarget} = fixture;
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-    const recoveryPendingHost = Object.freeze({
-      ...createConfigEffectTestHost({fixture, session}),
-      reconcileConfigEffect() {
-        throw new Error('simulated config reconciliation interruption');
-      },
-    } satisfies RuntimePluginHost);
-    const firstResult = await runLocalUserMessageEvent({
-      event: createTestEvent('update config', 'evt_config_update_recovery'),
-      session,
-      logStore,
-      roleModelAdapter: createConfigEffectTestAdapter({
-        fixture,
-        reply: 'Config update is committed.',
-      }),
-      pluginHost: recoveryPendingHost,
-    });
-    const terminal = logStore
-      .rawEvents()
-      .find(event => event.kind === 'runtime_turn_completed');
-    const effect = terminal?.runtimeConfigEffects?.[0];
-    const toolFinished = logStore
-      .rawEvents()
-      .find(event => event.kind === 'tool_call_finished');
-    const afterInterruptedCommit = inspectTarget();
-
-    expect(firstResult).toMatchObject({
-      status: 'completed',
-      postCommitFailures: ['simulated config reconciliation interruption'],
-    });
-    expect(effect).toMatchObject({
-      targetPluginId: targetPlugin.manifest.id,
-      fieldName: 'tone',
-      expectedFingerprint: before.fingerprint,
-      operation: {kind: 'set', value: 'warm'},
-    });
-    expect(terminal?.toolCallIds).toContain(effect?.effectId);
-    expect(toolFinished?.toolResult).toMatchObject({
-      status: 'accepted',
-      output: {status: 'approved_pending_commit'},
-    });
-    expect(toolFinished).not.toHaveProperty('runtimeConfigEffects');
-    expect(toolFinished?.toolResult).not.toHaveProperty('preparedConfigEffect');
-    expect(
-      JSON.stringify(
-        terminal?.roleModelIOSnapshot?.inputEnvelope.toolObservations,
-      ),
-    ).not.toContain('preparedConfigEffect');
-    expect(afterInterruptedCommit.fingerprint).toBe(before.fingerprint);
-
-    const reopenedLogStore = createFileRuntimeLogStore({
-      storeRoot,
-      sessionId,
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-    });
-    const restoredSession = createConversationSession({
-      character: testCharacterProfile,
-      id: sessionId,
-      visibleTranscript: reopenedLogStore.conversationMessages(),
-    });
-    const recoveryHost = createConfigEffectTestHost({
-      fixture,
-      session: restoredSession,
-    });
-    const followupResult = await runLocalUserMessageEvent({
-      event: createTestEvent('continue', 'evt_config_update_recovery_followup'),
-      session: restoredSession,
-      logStore: reopenedLogStore,
-      pluginHost: recoveryHost,
-      roleModelAdapter: createSequencedAdapter([
-        {
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {text: 'Recovered.'},
-            },
-          ],
-        },
-      ]),
-    });
-    const afterRecovery = inspectTarget();
-    const effectMarkers = reopenedLogStore
-      .rawEvents()
-      .flatMap(event =>
-        event.kind !== 'after_turn_committed'
-          ? []
-          : (event.runtimePluginEvidence ?? []).filter(evidence =>
-              evidence.sourceReferences?.some(
-                reference =>
-                  reference.kind === 'runtime' &&
-                  reference.id === effect?.effectId,
-              ),
-            ),
-      );
-
-    expect(followupResult.status).toBe('completed');
-    expect(
-      afterRecovery.fields.find(field => field.name === 'tone')?.authored,
-    ).toEqual({configured: true, value: 'warm'});
-    expect(effectMarkers).toHaveLength(1);
-    expect(effectMarkers[0]).toMatchObject({
-      pluginId: runtimePluginId,
-      evidenceKind: 'after_turn_committed',
-      status: 'accepted',
-      configFingerprint: effect?.resultFingerprint,
-    });
-  });
-
-  it('leaves authored config unchanged when config-update finish logging fails', async () => {
-    const fixture = await createConfigEffectTestFixture('finish-log-failure');
-    const {sessionId, storeRoot, before} = fixture;
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createRawEventAppendFailingLogStore({
-      logStore: createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        boundCharacter: testCharacterProfile,
-        characterId: testCharacterProfile.id,
-      }),
-      matches: record => record.kind === 'tool_call_finished',
-      message: 'tool_call_finished raw event append failed',
-    });
-    const pluginHost = createConfigEffectTestHost({fixture, session});
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent(
-          'update config',
-          'evt_config_update_finish_fails',
-        ),
-        session,
-        logStore,
-        roleModelAdapter: createConfigEffectTestAdapter({
-          fixture,
-          reply: 'Config updated.',
-        }),
-        pluginHost,
-      }),
-    ).rejects.toThrow('tool_call_finished raw event append failed');
-
-    const after = fixture.inspectTarget();
-
-    expect(after.fingerprint).toBe(before.fingerprint);
-    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
-      {
-        configured: true,
-        value: 'cool',
-      },
-    );
-    expect(
-      logStore.rawEvents().some(event => event.kind === 'tool_call_finished'),
-    ).toBe(false);
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-    });
-  });
-
-  it('leaves authored config unchanged when the terminal append fails with a prepared effect', async () => {
-    const fixture = await createConfigEffectTestFixture(
-      'terminal-append-failure',
-    );
-    const {sessionId, storeRoot, before} = fixture;
-    const session = createConversationSession({
-      id: sessionId,
-      character: testCharacterProfile,
-    });
-    const logStore = createRawEventAppendFailingLogStore({
-      logStore: createFileRuntimeLogStore({
-        storeRoot,
-        sessionId,
-        boundCharacter: testCharacterProfile,
-        characterId: testCharacterProfile.id,
-      }),
-      matches: record => record.kind === 'runtime_turn_completed',
-      message: 'runtime_turn_completed raw event append failed',
-    });
-    const pluginHost = createConfigEffectTestHost({fixture, session});
-
-    await expect(
-      runLocalUserMessageEvent({
-        event: createTestEvent(
-          'update config',
-          'evt_config_update_terminal_fails',
-        ),
-        session,
-        logStore,
-        roleModelAdapter: createConfigEffectTestAdapter({
-          fixture,
-          reply: 'Config updated.',
-        }),
-        pluginHost,
-      }),
-    ).rejects.toThrow('runtime_turn_completed raw event append failed');
-
-    const after = fixture.inspectTarget();
-
-    expect(after.fingerprint).toBe(before.fingerprint);
-    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
-      {
-        configured: true,
-        value: 'cool',
-      },
-    );
-    expect(
-      logStore
-        .rawEvents()
-        .some(event => event.kind === 'runtime_turn_completed'),
-    ).toBe(false);
-    expect(
-      logStore.rawEvents().some(event => event.kind === 'after_turn_committed'),
-    ).toBe(false);
+    expect(live.afterCommitLog).toEqual(['after:warm', 'after:warm']);
   });
 });

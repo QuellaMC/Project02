@@ -18,7 +18,7 @@
       "fields": [
         {
           "name": "tone",
-          "description": "Reply tone directive injected into every turn. Agent-adjustable; committed changes apply by the next turn.",
+          "description": "Reply tone directive injected into every turn. Agent-adjustable; an approved change takes effect at once.",
           "required": false,
           "secret": false,
           "valueType": "string",
@@ -29,7 +29,7 @@
         },
         {
           "name": "signoff",
-          "description": "Exact signoff the assistant appends to every reply. Agent-adjustable; committed changes apply by the next turn; unset means no signoff.",
+          "description": "Exact signoff the assistant appends to every reply. Agent-adjustable; an approved change takes effect at once; unset means no signoff.",
           "required": false,
           "secret": false,
           "valueType": "string",

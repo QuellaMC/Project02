@@ -1,21 +1,7 @@
-/** Reload problems never fail a committed turn; the old instance stays live. */
-import {
-  createRuntimePluginEvidenceSnapshot,
-  registeredRuntimePluginLifecycleHooks,
-  runtimePluginId,
-} from '../api/index.ts';
-import type {
-  PreparedRuntimePluginConfigEffect,
-  RuntimePlugin,
-  RuntimePluginEvidenceSnapshot,
-  RuntimePluginManifest,
-} from '../api/index.ts';
-import {
-  runtimeEventIdentityKey,
-  type RuntimeEventIdentity,
-} from '../../core/index.ts';
+/** A reload problem never undoes the written change; the old instance keeps serving. */
+import {registeredRuntimePluginLifecycleHooks} from '../api/index.ts';
+import type {RuntimePlugin, RuntimePluginConfigField} from '../api/index.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
-import type {RuntimePluginConfigControlHostState} from '../builtin/plugin-management/index.ts';
 
 export type RuntimePluginReloadResult =
   | {readonly status: 'rebuilt'; readonly plugin: RuntimePlugin}
@@ -35,64 +21,28 @@ export type RuntimePluginReloader = {
   ): Promise<RuntimePluginReloadResult>;
 };
 
-export type RuntimePluginConfigReloadHostResult = {
-  readonly outcome: 'live_applied' | 'deferred' | 'failed' | 'not_eligible';
-  readonly evidence?: RuntimePluginEvidenceSnapshot;
-  readonly failure?: string;
-};
+export type RuntimePluginConfigLiveApplyOutcome =
+  | {readonly status: 'live'}
+  | {readonly status: 'restart_required'}
+  | {readonly status: 'declined'; readonly reason: string}
+  | {readonly status: 'failed'; readonly message: string};
 
-export type ConfirmedRuntimePluginConfigUpdateLog = {
-  readonly note: (result: {
-    readonly status: string;
-    readonly preparedConfigEffect?: PreparedRuntimePluginConfigEffect;
-  }) => void;
-  readonly sessionScopedConfirmed: (
-    identity: RuntimeEventIdentity,
-    pluginId: string,
-  ) => boolean;
-};
+/** Brings a written config change into the running host, or says why not. */
+export type RuntimePluginConfigLiveApply = (change: {
+  readonly pluginId: string;
+  readonly field: RuntimePluginConfigField;
+  /** The authored fingerprint after the write; the reloader rebuilds only against it. */
+  readonly configFingerprint: string;
+}) => Promise<RuntimePluginConfigLiveApplyOutcome>;
 
-/** One record so the appliesTo promise and commit-time reload policy agree. */
-export function createConfirmedRuntimePluginConfigUpdateLog(options: {
-  readonly pluginManifests: readonly RuntimePluginManifest[];
-}): ConfirmedRuntimePluginConfigUpdateLog {
-  let turnKey: string | undefined;
-  const sessionScopedPluginIds = new Set<string>();
-
-  return {
-    note: result => {
-      const effect = result.preparedConfigEffect;
-
-      if (result.status !== 'accepted' || effect === undefined) {
-        return;
-      }
-
-      const key = runtimeEventIdentityKey(effect);
-
-      if (turnKey !== key) {
-        turnKey = key;
-        sessionScopedPluginIds.clear();
-      }
-
-      const field = options.pluginManifests
-        .find(manifest => manifest.id === effect.targetPluginId)
-        ?.config.fields.find(candidate => candidate.name === effect.fieldName);
-
-      // An unknown field cannot be live-reloadable; treat it as session-scoped.
-      if (field?.reloadRequired !== false) {
-        sessionScopedPluginIds.add(effect.targetPluginId);
-      }
-    },
-    sessionScopedConfirmed: (identity, pluginId) =>
-      turnKey === runtimeEventIdentityKey(identity) &&
-      sessionScopedPluginIds.has(pluginId),
-  };
-}
-
-export async function reloadRuntimePluginForCommittedConfig(options: {
-  readonly effects: readonly PreparedRuntimePluginConfigEffect[];
+/**
+ * One per host, for the life of the process: it remembers which plugins took
+ * a restart-only change, because rebuilding one of those live would apply that
+ * change early. It never rejects — a reload problem is an outcome, not an
+ * error, and the write it follows already happened.
+ */
+export function createRuntimePluginConfigLiveApply(options: {
   readonly reloader: RuntimePluginReloader | undefined;
-  readonly pluginConfigControl: RuntimePluginConfigControlHostState | undefined;
   readonly livePlugins: () => readonly RuntimePlugin[];
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
@@ -101,93 +51,76 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
     plugin: RuntimePlugin,
     catalogPluginId: string,
   ) => void;
-  /** Keeps terminal dispatch behind every accepted reload ownership transfer. */
-  readonly trackReloadWork: <T>(work: Promise<T>) => Promise<T>;
-  readonly recordLiveAppliedFingerprint: (
-    pluginId: string,
-    configFingerprint: string,
+  /** Keeps terminal dispatch behind every reload, settled or abandoned. */
+  readonly trackWork: <T>(work: Promise<T>) => Promise<T>;
+}): RuntimePluginConfigLiveApply {
+  const restartPendingPluginIds = new Set<string>();
+
+  return async change => {
+    if (change.field.reloadRequired !== false) {
+      restartPendingPluginIds.add(change.pluginId);
+      return {status: 'restart_required'};
+    }
+
+    if (restartPendingPluginIds.has(change.pluginId)) {
+      return {
+        status: 'declined',
+        reason:
+          'an earlier change to this plugin waits for a restart, and rebuilding it live would apply that change early',
+      };
+    }
+
+    return await options.trackWork(
+      rebuildLivePlugin({
+        ...options,
+        pluginId: change.pluginId,
+        configFingerprint: change.configFingerprint,
+      }),
+    );
+  };
+}
+
+async function rebuildLivePlugin(options: {
+  readonly pluginId: string;
+  readonly configFingerprint: string;
+  readonly reloader: RuntimePluginReloader | undefined;
+  readonly livePlugins: () => readonly RuntimePlugin[];
+  readonly swapEnabledPlugin: (
+    next: RuntimePlugin,
+  ) => RuntimePlugin | undefined;
+  readonly retirePlugin: (
+    plugin: RuntimePlugin,
+    catalogPluginId: string,
   ) => void;
-  /** Multi-plugin turns verify against the whole turn's final fingerprint. */
-  readonly turnResultFingerprint?: string;
-}): Promise<RuntimePluginConfigReloadHostResult> {
-  const [firstEffect] = options.effects;
-
-  if (firstEffect === undefined) {
-    return {outcome: 'not_eligible'};
-  }
-
-  const pluginId = firstEffect.targetPluginId;
-
-  if (options.effects.some(effect => effect.targetPluginId !== pluginId)) {
-    throw new TypeError(
-      'Runtime plugin config reload requires effects for a single plugin.',
-    );
-  }
-
-  const finalEffect =
-    options.effects[options.effects.length - 1] ?? firstEffect;
-  // Effects arrive in apply order, so the last one is this group's result.
-  const authoredResultFingerprint =
-    options.turnResultFingerprint ?? finalEffect.resultFingerprint;
-  const manifest = options.pluginConfigControl?.pluginManifests.find(
-    candidate => candidate.id === pluginId,
-  );
-  const {liveFieldNames, sessionScopedFieldSeen} = groupFieldEligibility(
-    options.effects,
-    manifest,
-  );
-
-  if (liveFieldNames.length === 0) {
-    // No evidence: the update tool already reported future_host_construction.
-    return {outcome: 'not_eligible'};
-  }
-
-  if (sessionScopedFieldSeen) {
-    return deferred(
-      options.effects,
-      pluginId,
-      'the committed effects mix live and reload-required fields',
-      authoredResultFingerprint,
-    );
-  }
-
+  readonly trackWork: <T>(work: Promise<T>) => Promise<T>;
+}): Promise<RuntimePluginConfigLiveApplyOutcome> {
   if (options.reloader === undefined) {
-    return deferred(
-      options.effects,
-      pluginId,
-      'this host has no plugin reloader',
-      authoredResultFingerprint,
-    );
+    return {status: 'declined', reason: 'this host has no plugin reloader'};
   }
 
   const previous = options
     .livePlugins()
-    .find(plugin => plugin.manifest.id === pluginId);
+    .find(plugin => plugin.manifest.id === options.pluginId);
 
   if (previous === undefined) {
-    return deferred(
-      options.effects,
-      pluginId,
-      'the plugin is not enabled',
-      authoredResultFingerprint,
-    );
+    return {status: 'declined', reason: 'the plugin is not enabled'};
   }
-
-  const retireRebuilt = (instance: RuntimePlugin): void => {
-    options.retirePlugin(instance, pluginId);
-  };
 
   let reloaded: RuntimePluginReloadResult;
 
   try {
-    const construction = options.trackReloadWork(
-      options.reloader.reload(pluginId, {
-        expectedFingerprint: authoredResultFingerprint,
-        retainCandidate: retireRebuilt,
-      }),
+    // Tracked on its own too: a factory that outlives the timeout is still
+    // in flight, and quiesce must wait for its candidate to be retired.
+    reloaded = await settleReloadWithinTimeout(
+      options.trackWork(
+        options.reloader.reload(options.pluginId, {
+          expectedFingerprint: options.configFingerprint,
+          retainCandidate: instance => {
+            options.retirePlugin(instance, options.pluginId);
+          },
+        }),
+      ),
     );
-
-    reloaded = await settleReloadWithinTimeout(construction);
   } catch (error: unknown) {
     reloaded = {
       status: 'failed',
@@ -196,62 +129,30 @@ export async function reloadRuntimePluginForCommittedConfig(options: {
   }
 
   if (reloaded.status === 'declined') {
-    return deferred(
-      options.effects,
-      pluginId,
-      reloaded.reason,
-      authoredResultFingerprint,
-    );
+    return {status: 'declined', reason: reloaded.reason};
   }
 
   if (reloaded.status === 'failed') {
-    const failure = `Live config reload for plugin "${pluginId}" failed; the previous instance keeps serving: ${reloaded.message}`;
-
-    return {
-      outcome: 'failed',
-      failure,
-      evidence: reloadEvidence(
-        options.effects,
-        'failed',
-        failure,
-        authoredResultFingerprint,
-      ),
-    };
+    return {status: 'failed', message: reloaded.message};
   }
 
   if (rebuiltPluginChangesFrozenSurface(previous, reloaded.plugin)) {
-    return deferred(
-      options.effects,
-      pluginId,
-      'the rebuilt plugin changed its manifest, hook, or tool surface',
-      authoredResultFingerprint,
-    );
+    return {
+      status: 'declined',
+      reason: 'the rebuilt plugin changed its manifest, hook, or tool surface',
+    };
   }
 
   if (options.swapEnabledPlugin(reloaded.plugin) === undefined) {
-    return deferred(
-      options.effects,
-      pluginId,
-      'the plugin left the host',
-      authoredResultFingerprint,
-    );
+    return {status: 'declined', reason: 'the plugin left the host'};
   }
 
-  options.recordLiveAppliedFingerprint(pluginId, authoredResultFingerprint);
-  return {
-    outcome: 'live_applied',
-    evidence: reloadEvidence(
-      options.effects,
-      'accepted',
-      `Live-applied committed config for plugin "${pluginId}" by rebuilding its instance (fields: ${liveFieldNames.join(', ')}).`,
-      authoredResultFingerprint,
-    ),
-  };
+  return {status: 'live'};
 }
 
 export const runtimePluginReloadTimeoutMs = 10_000;
 
-/** A factory that never settles must not block the turn queue after commit. */
+/** A factory that never settles must not hold the tool call open. */
 async function settleReloadWithinTimeout(
   pending: Promise<RuntimePluginReloadResult>,
 ): Promise<RuntimePluginReloadResult> {
@@ -274,31 +175,6 @@ async function settleReloadWithinTimeout(
   }
 }
 
-function groupFieldEligibility(
-  effects: readonly PreparedRuntimePluginConfigEffect[],
-  manifest: RuntimePluginManifest | undefined,
-): {
-  readonly liveFieldNames: readonly string[];
-  readonly sessionScopedFieldSeen: boolean;
-} {
-  const liveFieldNames: string[] = [];
-  let sessionScopedFieldSeen = false;
-
-  for (const effect of effects) {
-    const field = manifest?.config.fields.find(
-      candidate => candidate.name === effect.fieldName,
-    );
-
-    if (field?.reloadRequired === false) {
-      liveFieldNames.push(field.name);
-    } else {
-      sessionScopedFieldSeen = true;
-    }
-  }
-
-  return {liveFieldNames, sessionScopedFieldSeen};
-}
-
 /** A swap must not strand advertised tools or add unadvertised behavior. */
 function rebuiltPluginChangesFrozenSurface(
   previous: RuntimePlugin,
@@ -312,51 +188,4 @@ function rebuiltPluginChangesFrozenSurface(
       registeredRuntimePluginLifecycleHooks(previous),
     )
   );
-}
-
-function deferred(
-  effects: readonly PreparedRuntimePluginConfigEffect[],
-  pluginId: string,
-  reason: string,
-  configFingerprint: string,
-): RuntimePluginConfigReloadHostResult {
-  return {
-    outcome: 'deferred',
-    evidence: reloadEvidence(
-      effects,
-      'degraded',
-      `Committed config for plugin "${pluginId}" applies at the next host construction instead of live: ${reason}.`,
-      configFingerprint,
-    ),
-  };
-}
-
-function reloadEvidence(
-  effects: readonly PreparedRuntimePluginConfigEffect[],
-  status: 'accepted' | 'degraded' | 'failed',
-  summary: string,
-  configFingerprint: string,
-): RuntimePluginEvidenceSnapshot {
-  const [firstEffect] = effects;
-
-  if (firstEffect === undefined) {
-    throw new TypeError('Runtime plugin reload evidence requires effects.');
-  }
-
-  return createRuntimePluginEvidenceSnapshot({
-    eventId: firstEffect.eventId,
-    traceId: firstEffect.traceId,
-    createdAt: firstEffect.createdAt,
-    kind: 'runtime_plugin_evidence_snapshot',
-    pluginId: runtimePluginId,
-    evidenceKind: 'after_turn_committed',
-    status,
-    summary,
-    sourceReferences: effects.map(effect => ({
-      kind: 'runtime',
-      id: effect.effectId,
-    })),
-    redactionLabels: [],
-    configFingerprint,
-  });
 }

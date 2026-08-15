@@ -479,55 +479,6 @@ export function createPreparedRuntimePluginConfigEffect(
   } satisfies PreparedRuntimePluginConfigEffect);
 }
 
-export function preparedRuntimePluginConfigEffectHasApprovalEvidence(options: {
-  readonly effect: PreparedRuntimePluginConfigEffect;
-  readonly eventIdentity: RuntimeEventIdentity;
-  readonly inputIdentity: RuntimeEventIdentity;
-  readonly inputPluginId: string | undefined;
-  readonly inputToolName: string | undefined;
-  readonly toolCallId: string | undefined;
-  readonly dispatchedToHost: boolean | undefined;
-  readonly pluginId: string | undefined;
-  readonly toolName: string | undefined;
-  readonly result: RuntimePluginToolCallResult | undefined;
-}): boolean {
-  const {effect, result} = options;
-
-  if (
-    options.toolCallId !== effect.effectId ||
-    options.dispatchedToHost !== true ||
-    options.inputPluginId === undefined ||
-    options.inputPluginId !== options.pluginId ||
-    options.inputToolName === undefined ||
-    options.inputToolName !== options.toolName ||
-    options.eventIdentity.eventId !== effect.eventId ||
-    options.eventIdentity.traceId !== effect.traceId ||
-    options.eventIdentity.createdAt !== effect.createdAt ||
-    options.inputIdentity.eventId !== effect.eventId ||
-    options.inputIdentity.traceId !== effect.traceId ||
-    options.inputIdentity.createdAt !== effect.createdAt ||
-    result?.status !== 'accepted'
-  ) {
-    return false;
-  }
-
-  return result.evidence.some(
-    evidence =>
-      evidence.eventId === effect.eventId &&
-      evidence.traceId === effect.traceId &&
-      evidence.createdAt === effect.createdAt &&
-      evidence.pluginId === options.pluginId &&
-      evidence.evidenceKind === 'policy' &&
-      evidence.status === 'accepted' &&
-      evidence.policyOutcome === 'user_approved' &&
-      evidence.sourceReferences?.some(
-        reference =>
-          reference.kind === 'runtime' && reference.id === effect.effectId,
-      ) === true &&
-      evidence.configFingerprint === effect.resultFingerprint,
-  );
-}
-
 export function createRuntimePluginToolCallResultSnapshot(
   value: unknown,
 ): RuntimePluginToolCallResult {

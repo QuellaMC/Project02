@@ -193,7 +193,7 @@
     <ul>
       <li><code>runtime.plugin.list</code> with <code>scope: "all"</code> includes cold disabled or blocked plugins without constructing their code or exposing their tools.</li>
       <li><code>runtime.plugin.config</code> returns one installed plugin's manifest field metadata, redacted authored/effective values, exact host activation state and reasons, diagnostics, and authored fingerprint.</li>
-      <li><code>runtime.plugin.config.update</code> proposes one exact set or unset operation for one agent-mutable field.</li>
+      <li><code>runtime.plugin.config.update</code> applies one exact set or unset operation to one agent-mutable field once the person approves it.</li>
     </ul>
 
     <p>
@@ -213,7 +213,12 @@
       stale approval fails closed. The plugin manifest declares the maximum
       <code>runtime_config_write</code> capability, while list and config inspection retain their
       per-tool <code>runtime_read</code> classification and only config update requires confirmation.
-      Changes affect subsequent plugin construction; this slice does not hot-reload plugins.
+      An approved change is written at once, inside the tool call. A field declared
+      <code>reloadRequired: false</code> takes effect right away: the host rebuilds the plugin from
+      the freshly authored config and swaps the instance before the tool answers. Any other field
+      takes effect at the next launch, and so does a live field of a plugin that already took a
+      restart-only change in this process, since rebuilding it would apply that change early. The
+      tool result tells the model which happened as <code>appliesTo</code>.
     </p>
 
     <p>
@@ -333,7 +338,7 @@
       <li>No plugin marketplace, package-manager installation, dependency resolution, remote loading, signing, or sandbox claim.</li>
       <li>No JSON5 includes, profiles, raw-document model editing, or custom plugin UI code.</li>
       <li>No agent mutation of secrets, activation, permissions, Project02 host settings, or config location.</li>
-      <li>No hot reload, filesystem watcher, or third-party importer implementation in this slice.</li>
+      <li>No filesystem watcher or third-party importer implementation in this slice.</li>
     </ul>
   </main>
 </body>

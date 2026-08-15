@@ -8,7 +8,6 @@ import {
 } from '../../core/index.ts';
 import {
   createRuntimePluginAfterTurnCommittedContext,
-  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCall,
@@ -19,13 +18,6 @@ import type {
   RuntimePluginHealthHostResult,
   RuntimePluginHost,
 } from '../../plugins/index.ts';
-import {
-  applyCompletedRuntimeConfigReloads,
-  assertRuntimeConfigEffectsCanCommit,
-  reconcileCompletedRuntimeConfigEffects,
-  runtimeConfigEffectsForCompletedTurn,
-  runtimePostCommitFailureMessage,
-} from './config-effects.ts';
 import {createRoleModelCommitValidationSnapshot} from '../evidence/records.ts';
 import {
   runtimePluginEvidenceOption,
@@ -251,14 +243,6 @@ export async function completeRuntimeTurn(
   options: CompleteRuntimeTurnOptions,
 ): Promise<LocalRuntimeUserMessageCompletedResult> {
   const {state} = options;
-  const runtimeConfigEffects = runtimeConfigEffectsForCompletedTurn(options);
-
-  assertRuntimeConfigEffectsCanCommit({
-    state,
-    pluginHost: options.pluginHost,
-    effects: runtimeConfigEffects,
-  });
-
   const terminalPluginEvidence = Object.freeze([
     ...options.roleModelPluginEvidence,
     ...options.preCommitHealthResult.evidence,
@@ -266,26 +250,13 @@ export async function completeRuntimeTurn(
   const terminalAppend = appendCompletedTerminalRawEvent({
     ...options,
     terminalPluginEvidence,
-    runtimeConfigEffects,
   });
-  const durability = {
-    postCommitFailures:
-      terminalAppend.terminalAppendFailure === undefined
-        ? []
-        : [terminalAppend.terminalAppendFailure],
-  };
-  const configEffectEvidence = reconcileCompletedRuntimeConfigEffects({
-    pluginHost: options.pluginHost,
-    effects: runtimeConfigEffects,
-    postCommitFailures: durability.postCommitFailures,
-  });
+  const postCommitFailures =
+    terminalAppend.terminalAppendFailure === undefined
+      ? []
+      : [terminalAppend.terminalAppendFailure];
 
-  await recordAfterTurnCommitted(
-    options,
-    durability.postCommitFailures,
-    configEffectEvidence,
-    runtimeConfigEffects,
-  );
+  await recordAfterTurnCommitted(options, postCommitFailures);
 
   return Object.freeze({
     status: 'completed',
@@ -293,18 +264,15 @@ export async function completeRuntimeTurn(
     conversationMessages: Object.freeze([...state.committedVisibleMessages]),
     rawEvent: terminalAppend.rawEvent,
     rawEventLogRecords: Object.freeze([...state.rawEventLogRecords]),
-    ...(durability.postCommitFailures.length === 0
+    ...(postCommitFailures.length === 0
       ? {}
-      : {
-          postCommitFailures: Object.freeze(durability.postCommitFailures),
-        }),
+      : {postCommitFailures: Object.freeze(postCommitFailures)}),
   } satisfies LocalRuntimeUserMessageCompletedResult);
 }
 
 function appendCompletedTerminalRawEvent(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
-    readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
   },
 ): {
   readonly rawEvent: RawEventLogRecord;
@@ -326,7 +294,6 @@ function appendCompletedTerminalRawEvent(
 function createTerminalRawEventInput(
   options: CompleteRuntimeTurnOptions & {
     readonly terminalPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
-    readonly runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[];
   },
 ): RawEventLogRecordInput {
   const {state} = options;
@@ -347,9 +314,6 @@ function createTerminalRawEventInput(
     roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
     parsedRoleModelDecisionSnapshot:
       options.roleModelResult.parsedDecisionSnapshot,
-    ...(options.runtimeConfigEffects.length === 0
-      ? {}
-      : {runtimeConfigEffects: options.runtimeConfigEffects}),
     commitValidation: createRoleModelCommitValidationSnapshot({
       ...state.identity,
       sessionId: options.decisionContext.sessionId,
@@ -416,8 +380,6 @@ function recoverCompletedTerminalRawEvent(
 async function recordAfterTurnCommitted(
   options: CompleteRuntimeTurnOptions,
   postCommitFailures: string[],
-  configEffectEvidence: readonly RuntimePluginEvidenceSnapshot[],
-  runtimeConfigEffects: readonly PreparedRuntimePluginConfigEffect[],
 ): Promise<void> {
   const {state} = options;
   let afterCommitResult:
@@ -447,32 +409,9 @@ async function recordAfterTurnCommitted(
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
   }
 
-  // Reloads run after this turn's own after-commit hooks, so a swapped
-  // instance starts serving strictly at the next turn.
-  const configReload = await applyCompletedRuntimeConfigReloads({
-    pluginHost: options.pluginHost,
-    effects: runtimeConfigEffects,
-    reconcileEvidence: configEffectEvidence,
-  });
-
-  postCommitFailures.push(...configReload.failures);
-
-  const evidence = Object.freeze([
-    ...(afterCommitResult?.evidence ?? []),
-    ...configEffectEvidence,
-    ...configReload.evidence,
-  ]);
-  const status =
-    configReload.failures.length > 0
-      ? 'completed_with_failures'
-      : (afterCommitResult?.status ??
-        (configEffectEvidence.length === 0
-          ? undefined
-          : 'completed_with_failures'));
-
   if (
-    status === undefined ||
-    !shouldRecordAfterTurnCommittedEvent({status, evidence})
+    afterCommitResult === undefined ||
+    !shouldRecordAfterTurnCommittedEvent(afterCommitResult)
   ) {
     return;
   }
@@ -482,15 +421,23 @@ async function recordAfterTurnCommitted(
       ...state.identity,
       kind: 'after_turn_committed',
       eventType: state.event.type,
-      status,
+      status: afterCommitResult.status,
       ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
       toolCallIds: Object.freeze([...state.finishedToolCallIds]),
       payloadSummary: state.payloadSummary,
-      ...runtimePluginEvidenceOption(evidence),
+      ...runtimePluginEvidenceOption(afterCommitResult.evidence),
     });
   } catch (error: unknown) {
     postCommitFailures.push(runtimePostCommitFailureMessage(error));
   }
+}
+
+function runtimePostCommitFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim().length > 0) {
+    return error.message;
+  }
+
+  return 'Runtime post-commit work failed.';
 }
 
 export function visibleMessageIdsForTurnOption(

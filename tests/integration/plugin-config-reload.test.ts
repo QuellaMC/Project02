@@ -14,9 +14,9 @@ import {
   createProject02Plugin as createDemoConfigPlugin,
 } from '../../src/plugins/packages/demo-config/plugin.ts';
 import {
-  createPreparedRuntimePluginConfigEffect,
   createRuntimePlugin,
   createRuntimePluginManifest,
+  runtimePluginConfigUpdateToolName,
   runtimePluginId,
 } from '../../src/plugins/api/index.ts';
 import type {RuntimePlugin} from '../../src/plugins/api/index.ts';
@@ -30,7 +30,10 @@ import {
   loadRuntimeConfigForTest,
 } from '../support/runtime-config.ts';
 import {initializeCharacterDataForHost} from '../support/runtime-config-fixtures.ts';
-import {testPluginContext} from '../support/plugin-host-fixtures.ts';
+import {
+  testIdentity,
+  testPluginContext,
+} from '../support/plugin-host-fixtures.ts';
 
 async function demoConfigContextText(plugin: {
   readonly lifecycleHooks: {
@@ -186,7 +189,7 @@ describe('configured runtime plugin reloader', () => {
     expect(unknown.status).toBe('declined');
   });
 
-  it('keeps the construction stamp, inspection, and reloader on one layered fingerprint across both authored files', async () => {
+  it('keeps inspection and the reloader on one layered fingerprint across both authored files', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-reload-overlay-');
     const configPath = join(storeRoot, 'config.json');
     const overlayPath = join(
@@ -224,15 +227,13 @@ describe('configured runtime plugin reloader', () => {
       env: {},
     });
 
-    // The plan's construction stamp is what inspection hands the model as
-    // expectedFingerprint.
+    // What inspection hands the model as expectedFingerprint is what the
+    // reloader verifies against.
     const inspectedFingerprint = authoredFingerprint({
       activationPlan,
       configPath,
       storeRoot,
     });
-
-    expect(activationPlan.authoredConfigFingerprint).toBe(inspectedFingerprint);
     const configTarget =
       activationPlan.pluginConfigControl.configControl.target;
 
@@ -383,6 +384,11 @@ describe('configured runtime plugin reloader', () => {
       env: {},
     });
     const reloader = createConfiguredRuntimePluginReloader({activationPlan});
+    const approvedFingerprint = authoredFingerprint({
+      activationPlan,
+      configPath,
+      storeRoot,
+    });
 
     // The data dir is rebound to another character after approval.
     writeFileSync(
@@ -397,7 +403,7 @@ describe('configured runtime plugin reloader', () => {
 
     await expect(
       reloader.reload('demo-config', {
-        expectedFingerprint: activationPlan.authoredConfigFingerprint,
+        expectedFingerprint: approvedFingerprint,
         retainCandidate: () => undefined,
       }),
     ).rejects.toThrow('holds history for character "nova"');
@@ -822,35 +828,43 @@ describe('configured runtime plugin reloader', () => {
         },
       },
     });
-    const fingerprint = authoredFingerprint({
-      activationPlan,
-      configPath,
-      storeRoot,
-    });
     const host = createRuntimePluginHost({
       plugins: [trackedPlugin('live')],
-      enabledPluginIds: ['demo-config'],
+      enabledPluginIds: [runtimePluginId, 'demo-config'],
       pluginConfigControl,
       pluginReloader: reloader,
-      constructionConfigFingerprint: fingerprint,
-    });
-    const effect = createPreparedRuntimePluginConfigEffect({
-      eventId: 'event-post-factory-read',
-      traceId: 'trace-post-factory-read',
-      createdAt: '2026-07-25T00:00:00.000Z',
-      kind: 'runtime_plugin_config_effect',
-      effectId: 'effect-post-factory-read',
-      targetPluginId: 'demo-config',
-      targetConfigPath: configPath,
-      fieldName: 'tone',
-      expectedFingerprint: fingerprint,
-      resultFingerprint: fingerprint,
-      operation: {kind: 'set', value: 'warm'},
+      toolConfirmationHandler: () => ({status: 'approved'}),
     });
 
-    const result = await host.reloadPluginForCommittedConfig([effect]);
+    const result = await host.handleToolCall(
+      {
+        ...testIdentity(),
+        toolCallId: 'call-post-factory-read',
+        pluginId: runtimePluginId,
+        toolName: runtimePluginConfigUpdateToolName,
+        input: {
+          pluginId: 'demo-config',
+          fieldName: 'tone',
+          operation: 'set',
+          value: 'formal',
+          expectedFingerprint: authoredFingerprint({
+            activationPlan,
+            configPath,
+            storeRoot,
+          }),
+        },
+      },
+      testPluginContext(),
+    );
 
-    expect(result.outcome).toBe('failed');
+    expect(result).toMatchObject({
+      status: 'accepted',
+      output: {
+        status: 'applied',
+        appliesTo: 'next_launch',
+        appliesToNote: expect.stringContaining('live reload failed') as string,
+      },
+    });
     await host.onSessionEnd(testPluginContext(), {
       allowFileStoreWrites: false,
     });

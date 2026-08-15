@@ -15,7 +15,6 @@ import type {
   RuntimePluginHookResult,
   RuntimePluginJsonValue,
   RuntimePluginProvidedTool,
-  PreparedRuntimePluginConfigEffect,
   RuntimePluginToolCall,
   RuntimePluginToolCallExecutionResult,
   RuntimePluginToolCallResult,
@@ -78,7 +77,6 @@ import {
   createRuntimePluginConfigControlHostStateSnapshot,
   createRuntimePluginInventoryHostStateSnapshot,
   normalizePreparedRuntimePluginConfigEffect,
-  reconcilePreparedRuntimePluginConfigEffect,
   type RuntimePluginConfigControlHostState,
   type RuntimePluginInventoryHostState,
 } from '../builtin/plugin-management/index.ts';
@@ -88,10 +86,8 @@ import {
   type RuntimePluginToolConfirmationHandler,
 } from './tool-confirmation.ts';
 import {
-  createConfirmedRuntimePluginConfigUpdateLog,
-  reloadRuntimePluginForCommittedConfig,
-  type ConfirmedRuntimePluginConfigUpdateLog,
-  type RuntimePluginConfigReloadHostResult,
+  createRuntimePluginConfigLiveApply,
+  type RuntimePluginConfigLiveApply,
   type RuntimePluginReloader,
 } from './reload.ts';
 import {
@@ -130,7 +126,6 @@ export type CreateRuntimePluginHostOptions = {
     RuntimePluginToolConfirmationHandler | undefined;
   readonly fileStore?: RuntimePluginFileStoreProvider;
   readonly pluginReloader?: RuntimePluginReloader;
-  readonly constructionConfigFingerprint?: string;
 };
 
 export type RuntimePluginHookHostResult = {
@@ -172,19 +167,7 @@ export type RuntimePluginHost = {
   handleToolCall(
     call: RuntimePluginToolCall,
     context: RuntimePluginContext,
-  ): Promise<RuntimePluginToolCallExecutionResult>;
-  reconcileConfigEffect(
-    effect: PreparedRuntimePluginConfigEffect,
-  ): RuntimePluginEvidenceSnapshot;
-  /** Recovery skips a rebuild when the live instance reflects this config. */
-  pluginConfigCurrentFor(pluginId: string, configFingerprint: string): boolean;
-  reloadPluginForCommittedConfig(
-    effects: readonly PreparedRuntimePluginConfigEffect[],
-    reloadOptions?: {
-      /** Authored fingerprint after ALL of the turn's accepted effects. */
-      readonly turnResultFingerprint?: string;
-    },
-  ): Promise<RuntimePluginConfigReloadHostResult>;
+  ): Promise<RuntimePluginToolCallResult>;
   afterTurnCommitted(
     context: RuntimePluginAfterTurnCommittedContext,
   ): Promise<RuntimePluginHookHostResult>;
@@ -218,13 +201,6 @@ type RuntimePluginHostState = {
   readonly swapEnabledPlugin: (
     next: RuntimePlugin,
   ) => RuntimePlugin | undefined;
-  readonly recordLiveAppliedFingerprint: (
-    pluginId: string,
-    configFingerprint: string,
-  ) => void;
-  readonly liveAppliedFingerprintFor: (pluginId: string) => string | undefined;
-  readonly confirmedConfigUpdates:
-    ConfirmedRuntimePluginConfigUpdateLog | undefined;
   readonly accessByPluginId: RuntimePluginAccessMapByPluginId;
   readonly registrySnapshot: RuntimePluginRegistrySnapshot;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
@@ -240,9 +216,6 @@ export function createRuntimePluginHost(
     enabledPlugins,
     livePlugins,
     swapEnabledPlugin,
-    recordLiveAppliedFingerprint,
-    liveAppliedFingerprintFor,
-    confirmedConfigUpdates,
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,
@@ -253,7 +226,6 @@ export function createRuntimePluginHost(
     hasFileStoreProvider: options.fileStore !== undefined,
   });
   let shutdownResult: Promise<RuntimePluginHookHostResult> | undefined;
-  let terminalStarted = false;
   const catalogManifestForPluginId = lifecycleCatalogManifestResolver(
     lifecycleCatalogManifestByPluginId({
       enabledPlugins,
@@ -264,6 +236,18 @@ export function createRuntimePluginHost(
     isLive: plugin => livePlugins().includes(plugin),
     swapEnabledPlugin,
     catalogManifestForPluginId,
+  });
+  const liveApply = createRuntimePluginConfigLiveApply({
+    reloader: options.pluginReloader,
+    livePlugins,
+    swapEnabledPlugin: instanceOwnership.replaceLive,
+    retirePlugin: (plugin, catalogPluginId) => {
+      instanceOwnership.retire(
+        plugin,
+        catalogManifestForPluginId(catalogPluginId),
+      );
+    },
+    trackWork: instanceOwnership.track,
   });
 
   return Object.freeze({
@@ -290,7 +274,7 @@ export function createRuntimePluginHost(
       });
     },
     async handleToolCall(call, context) {
-      const result = await runHandleToolCall({
+      return await runHandleToolCall({
         plugins: livePlugins(),
         call,
         context,
@@ -300,58 +284,11 @@ export function createRuntimePluginHost(
         sessionIdentity,
         toolConfirmationHandler: options.toolConfirmationHandler,
         pluginConfigControl,
+        liveApply,
         createFileStore: options.fileStore?.createFileStore,
         sessionHistory: options.sessionHistory,
         openPluginDatabase: options.pluginDatabase?.openPluginDatabase,
       });
-
-      // Settled results pass one choke point; turn log and commit agree.
-      confirmedConfigUpdates?.note(result);
-      return result;
-    },
-    reconcileConfigEffect(effect) {
-      if (pluginConfigControl === undefined) {
-        throw new Error(
-          'Runtime plugin config reconciliation requires configured host control state.',
-        );
-      }
-
-      return reconcilePreparedRuntimePluginConfigEffect({
-        effect,
-        state: pluginConfigControl,
-      });
-    },
-    pluginConfigCurrentFor(pluginId, configFingerprint) {
-      return (
-        (liveAppliedFingerprintFor(pluginId) ??
-          options.constructionConfigFingerprint) === configFingerprint
-      );
-    },
-    async reloadPluginForCommittedConfig(effects, reloadOptions) {
-      if (terminalStarted) {
-        return Object.freeze({outcome: 'deferred'});
-      }
-
-      return await instanceOwnership.track(
-        reloadRuntimePluginForCommittedConfig({
-          effects,
-          reloader: options.pluginReloader,
-          pluginConfigControl,
-          livePlugins,
-          swapEnabledPlugin: instanceOwnership.replaceLive,
-          retirePlugin: (plugin, catalogPluginId) => {
-            instanceOwnership.retire(
-              plugin,
-              catalogManifestForPluginId(catalogPluginId),
-            );
-          },
-          trackReloadWork: instanceOwnership.track,
-          recordLiveAppliedFingerprint,
-          ...(reloadOptions?.turnResultFingerprint === undefined
-            ? {}
-            : {turnResultFingerprint: reloadOptions.turnResultFingerprint}),
-        }),
-      );
     },
     async afterTurnCommitted(context) {
       const hookResult = await runHookPhase({
@@ -397,7 +334,6 @@ export function createRuntimePluginHost(
       });
     },
     shutdown(context) {
-      terminalStarted = true;
       shutdownResult ??= runFinalShutdownPhase({
         instanceOwnership,
         livePlugins,
@@ -459,15 +395,8 @@ function createRuntimePluginHostState(
       : createRuntimePluginInventoryHostStateSnapshot(
           options.pluginInventoryState,
         ));
-  const confirmedConfigUpdates =
-    pluginConfigControl === undefined
-      ? undefined
-      : createConfirmedRuntimePluginConfigUpdateLog({
-          pluginManifests: pluginConfigControl.pluginManifests,
-        });
   let allPlugins: readonly RuntimePlugin[] = [];
   let enabledPlugins: readonly RuntimePlugin[] = [];
-  const liveAppliedFingerprintByPluginId = new Map<string, string>();
   let accessByPluginId: RuntimePluginAccessMapByPluginId = Object.freeze({});
   assertNoCallerSuppliedHostScopedFirstPartyPlugins(configuredPlugins);
   const hostScopedPlugins = createHostScopedFirstPartyRuntimePlugins({
@@ -478,13 +407,6 @@ function createRuntimePluginHostState(
       confirmationAvailable:
         options.toolConfirmationHandler !== undefined &&
         pluginConfigControl !== undefined,
-      liveReloadAvailable: options.pluginReloader !== undefined,
-      ...(confirmedConfigUpdates === undefined
-        ? {}
-        : {
-            sessionScopedConfigUpdateConfirmed:
-              confirmedConfigUpdates.sessionScopedConfirmed,
-          }),
       ...(pluginInventoryState === undefined
         ? {}
         : {installedPluginManifests: pluginInventoryState.pluginManifests}),
@@ -538,7 +460,6 @@ function createRuntimePluginHostState(
     pluginConfigControl,
     enabledIds,
     enabledPlugins,
-    confirmedConfigUpdates,
     livePlugins: () => enabledPlugins,
     swapEnabledPlugin: next => {
       const previous = enabledPlugins.find(
@@ -557,11 +478,6 @@ function createRuntimePluginHostState(
       );
       return previous;
     },
-    recordLiveAppliedFingerprint: (pluginId, configFingerprint) => {
-      liveAppliedFingerprintByPluginId.set(pluginId, configFingerprint);
-    },
-    liveAppliedFingerprintFor: pluginId =>
-      liveAppliedFingerprintByPluginId.get(pluginId),
     accessByPluginId,
     registrySnapshot,
     pluginToolDefinitions,
@@ -689,6 +605,7 @@ type HandleToolCallOptions = {
       RuntimePluginToolConfirmationHandler | undefined;
     readonly pluginConfigControl?:
       RuntimePluginConfigControlHostState | undefined;
+    readonly liveApply: RuntimePluginConfigLiveApply;
   };
 
 type ResolvedRuntimePluginToolExecution = {
@@ -708,12 +625,12 @@ type RuntimePluginToolExecutionResolution =
 
 type RejectedRuntimePluginToolExecution = {
   readonly status: 'rejected';
-  readonly result: RuntimePluginToolCallExecutionResult;
+  readonly result: RuntimePluginToolCallResult;
 };
 
 async function runHandleToolCall(
   options: HandleToolCallOptions,
-): Promise<RuntimePluginToolCallExecutionResult> {
+): Promise<RuntimePluginToolCallResult> {
   const resolution = resolveRuntimePluginToolExecution(options);
 
   if (resolution.status === 'rejected') {
@@ -785,9 +702,7 @@ async function runHandleToolCall(
       result,
       confirmationHandler: options.toolConfirmationHandler,
       pluginConfigControl: options.pluginConfigControl,
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
+      liveApply: options.liveApply,
     });
   } catch (error: unknown) {
     if (error instanceof PluginHookTimeoutError) {
