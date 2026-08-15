@@ -618,13 +618,22 @@ describe('file runtime log store plugin tool event validation', () => {
         ?.promptSize,
     ).toBeUndefined();
 
-    storedRecord.roleModelIOSnapshot['promptSize'] = {
-      ...promptSize,
-      tools: {chars: -1, estimatedTokens: 300},
-    };
-    expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
-      /promptSize/u,
-    );
+    // A frame row exists only for a frame that was sent, so a zero count is
+    // as malformed as a negative measure.
+    for (const malformed of [
+      {...promptSize, tools: {chars: -1, estimatedTokens: 300}},
+      {
+        ...promptSize,
+        frames: [
+          {kind: 'system_protocol', count: 0, chars: 400, estimatedTokens: 100},
+        ],
+      },
+    ]) {
+      storedRecord.roleModelIOSnapshot['promptSize'] = malformed;
+      expect(() =>
+        decodeRawEventLogRecord(JSON.stringify(storedRecord)),
+      ).toThrow(/promptSize/u);
+    }
   });
 
   it('round-trips supported persisted plugin tool schemas unchanged', () => {

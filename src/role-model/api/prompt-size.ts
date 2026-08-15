@@ -30,10 +30,12 @@ export function freezeRoleModelPromptSize(value: unknown): RoleModelPromptSize {
 
   return Object.freeze({
     frames: Object.freeze(value['frames'].map(freezeFrameSize)),
-    tools: freezeMeasure(value['tools'], 'tools'),
+    // Only the tools may weigh nothing: a turn without tools sends none.
+    tools: freezeMeasure(value['tools'], 'tools', 0),
   } satisfies RoleModelPromptSize);
 }
 
+/** A row exists only for frames that were sent, so every figure is at least one. */
 function freezeFrameSize(value: unknown): RoleModelPromptFrameSize {
   if (
     !isJsonRecord(value) ||
@@ -45,32 +47,40 @@ function freezeFrameSize(value: unknown): RoleModelPromptFrameSize {
 
   return Object.freeze({
     kind: value['kind'],
-    count: sizeNumber(value['count'], `${value['kind']}.count`),
-    ...freezeMeasure(value, value['kind']),
+    count: sizeNumber(value['count'], `${value['kind']}.count`, 1),
+    ...freezeMeasure(value, value['kind'], 1),
   } satisfies RoleModelPromptFrameSize);
 }
 
 function freezeMeasure(
   value: unknown,
   field: string,
+  minimum: number,
 ): RoleModelPromptSizeMeasure {
   if (!isJsonRecord(value)) {
     throw new TypeError(`Role-model prompt size ${field} is malformed.`);
   }
 
   return Object.freeze({
-    chars: sizeNumber(value['chars'], `${field}.chars`),
+    chars: sizeNumber(value['chars'], `${field}.chars`, minimum),
     estimatedTokens: sizeNumber(
       value['estimatedTokens'],
       `${field}.estimatedTokens`,
+      minimum,
     ),
   } satisfies RoleModelPromptSizeMeasure);
 }
 
-function sizeNumber(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+function sizeNumber(value: unknown, field: string, minimum: number): number {
+  if (
+    typeof value !== 'number' ||
+    !Number.isSafeInteger(value) ||
+    value < minimum
+  ) {
     throw new TypeError(
-      `Role-model prompt size ${field} must be a non-negative integer.`,
+      `Role-model prompt size ${field} must be an integer of at least ${String(
+        minimum,
+      )}.`,
     );
   }
 
