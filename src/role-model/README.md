@@ -14,3 +14,8 @@ The conversation history the model replays is a list of whole prior turns
 (`api/conversation-history.ts`); `prompt/conversation-history-wire.ts`
 turns each into native chat messages, estimates its cost, and selects the
 newest turns that fit half the context window.
+
+Adapters may also offer `completeText`, a plain completion on the same
+model with no persona or tools; the runtime uses it to condense a
+session's earlier turns when the conversation continues in a new one, and
+falls back to a mechanical summary when an adapter omits it.

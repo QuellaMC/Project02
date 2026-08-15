@@ -1,210 +1,339 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Project02 Memory System</title>
-  <style>
-    body { font-family: system-ui, sans-serif; max-width: 960px; margin: 2rem auto; padding: 0 1rem; line-height: 1.55; color: #17202a; }
-    code, pre { font-family: ui-monospace, monospace; }
-    pre { overflow-x: auto; padding: 1rem; background: #f4f6f7; border-radius: 0.4rem; }
-    table { width: 100%; border-collapse: collapse; }
-    th, td { padding: 0.55rem; border: 1px solid #ccd1d1; text-align: left; vertical-align: top; }
-    .rule { padding: 0.8rem 1rem; border-left: 4px solid #2874a6; background: #ebf5fb; }
-  </style>
-</head>
-<body>
-  <main>
-    <h1>Project02 Memory System</h1>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Project02 Memory System</title>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        max-width: 960px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        line-height: 1.55;
+        color: #17202a;
+      }
+      code,
+      pre {
+        font-family: ui-monospace, monospace;
+      }
+      pre {
+        overflow-x: auto;
+        padding: 1rem;
+        background: #f4f6f7;
+        border-radius: 0.4rem;
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      th,
+      td {
+        padding: 0.55rem;
+        border: 1px solid #ccd1d1;
+        text-align: left;
+        vertical-align: top;
+      }
+      .rule {
+        padding: 0.8rem 1rem;
+        border-left: 4px solid #2874a6;
+        background: #ebf5fb;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Project02 Memory System</h1>
 
-    <p>
-      A character has three ways to know something that happened before this turn, and each
-      lives in its own layer with its own trust story: a tiny curated memory injected whole
-      into every prompt once it holds anything, session history it can search on demand, and
-      optionally one external retrieval-driven provider beside them.
-    </p>
+      <p>
+        A character has three ways to know something that happened before this
+        turn, and each lives in its own layer with its own trust story: a tiny
+        curated memory injected whole into every prompt once it holds anything,
+        session history it can search on demand, and optionally one external
+        retrieval-driven provider beside them.
+      </p>
 
-    <p class="rule">
-      The model curates and proposes; the runtime validates, caps, and commits. No layer lets
-      raw model output or foreign plugin content write the trusted prompt directly.
-    </p>
+      <p class="rule">
+        The model curates and proposes; the runtime validates, caps, and
+        commits. No layer lets raw model output or foreign plugin content write
+        the trusted prompt directly.
+      </p>
 
-    <h2>The three layers</h2>
+      <h2>The three layers</h2>
 
-    <table>
-      <tr>
-        <th></th>
-        <th>Curated memory (<code>character-memory</code>)</th>
-        <th>Session search (<code>session-history</code>)</th>
-        <th>External provider (<code>mem0</code>)</th>
-      </tr>
-      <tr>
-        <td>Storage</td>
-        <td>One JSON document under <code>plugin-data/character-memory/</code></td>
-        <td>Canonical transcripts + a rebuildable SQLite index</td>
-        <td>The provider's own backend</td>
-      </tr>
-      <tr>
-        <td>Size</td>
-        <td>Small and capped, per character; a section that holds anything carries its remaining room, and a write that would overflow is refused with the numbers</td>
-        <td>Every session</td>
-        <td>No runtime cap; the backend's own quota applies</td>
-      </tr>
-      <tr>
-        <td>Retrieval</td>
-        <td>Whatever it holds, injected whole; nothing while it is empty</td>
-        <td>On-demand via <code>sessions.search</code> / <code>sessions.read</code></td>
-        <td>Per-turn recall plus whichever <code>&lt;provider&gt;.*</code> tools that provider offers</td>
-      </tr>
-      <tr>
-        <td>Written by</td>
-        <td>The model, through <code>memory.update</code></td>
-        <td>Recorded automatically</td>
-        <td>Per-turn capture (the backend extracts), plus explicit adds where the provider offers an add tool</td>
-      </tr>
-      <tr>
-        <td>Prompt placement</td>
-        <td>Trusted curated-context frame (system role, addressed to the character as its own notes)</td>
-        <td>Tool results, plus a trusted runtime note that nudges recall</td>
-        <td>A <code>&lt;recalled_memory&gt;</code> block appended to the current user message under its own 1024-token budget (automatic recall); a provider's own tool answers in a tool result</td>
-      </tr>
-      <tr>
-        <td>Default</td>
-        <td>On</td>
-        <td>On</td>
-        <td>Off; enable one</td>
-      </tr>
-    </table>
+      <table>
+        <tr>
+          <th></th>
+          <th>Curated memory (<code>character-memory</code>)</th>
+          <th>Session search (<code>session-history</code>)</th>
+          <th>External provider (<code>mem0</code>)</th>
+        </tr>
+        <tr>
+          <td>Storage</td>
+          <td>
+            One JSON document under <code>plugin-data/character-memory/</code>
+          </td>
+          <td>Canonical transcripts + a rebuildable SQLite index</td>
+          <td>The provider's own backend</td>
+        </tr>
+        <tr>
+          <td>Size</td>
+          <td>
+            Small and capped, per character; a section that holds anything
+            carries its remaining room, and a write that would overflow is
+            refused with the numbers
+          </td>
+          <td>Every session</td>
+          <td>No runtime cap; the backend's own quota applies</td>
+        </tr>
+        <tr>
+          <td>Retrieval</td>
+          <td>Whatever it holds, injected whole; nothing while it is empty</td>
+          <td>
+            On-demand via <code>sessions.search</code> /
+            <code>sessions.read</code>
+          </td>
+          <td>
+            Per-turn recall plus whichever <code>&lt;provider&gt;.*</code> tools
+            that provider offers
+          </td>
+        </tr>
+        <tr>
+          <td>Written by</td>
+          <td>The model, through <code>memory.update</code></td>
+          <td>Recorded automatically</td>
+          <td>
+            Per-turn capture (the backend extracts), plus explicit adds where
+            the provider offers an add tool
+          </td>
+        </tr>
+        <tr>
+          <td>Prompt placement</td>
+          <td>
+            Trusted curated-context frame (system role, addressed to the
+            character as its own notes)
+          </td>
+          <td>Tool results, plus a trusted runtime note that nudges recall</td>
+          <td>
+            A <code>&lt;recalled_memory&gt;</code> block appended to the current
+            user message under its own 1024-token budget (automatic recall); a
+            provider's own tool answers in a tool result
+          </td>
+        </tr>
+        <tr>
+          <td>Default</td>
+          <td>On</td>
+          <td>On</td>
+          <td>Off; enable one</td>
+        </tr>
+      </table>
 
-    <h2>Curated memory</h2>
+      <h2>Curated memory</h2>
 
-    <p>
-      The <code>character-memory</code> package keeps two capped stores per character:
-      notes to itself and what it knows about the person. Whatever the store holds is
-      injected every session as the character's own notes (<em>What you carry between
-      conversations</em>) with capacity headers, so the character never has to search
-      for what it must always know; until the character writes its first entry the
-      store is empty and no block appears at all. The snapshot is frozen per launch:
-      writes land on disk immediately and reach the prompt at the next launch, keeping
-      the prompt prefix byte-stable for provider caching.
-    </p>
+      <p>
+        The <code>character-memory</code> package keeps two capped stores per
+        character: notes to itself and what it knows about the person. Whatever
+        the store holds is injected every session as the character's own notes
+        (<em>What you carry between conversations</em>) with capacity headers,
+        so the character never has to search for what it must always know; until
+        the character writes its first entry the store is empty and no block
+        appears at all. The snapshot is frozen per session: writes land on disk
+        immediately and reach the prompt when the next session begins, keeping
+        the prompt prefix byte-stable for provider caching. A session begins at
+        launch or when the runtime continues a full one (below), so a note
+        written mid-conversation shows up after the next continuation without a
+        restart.
+      </p>
 
-    <p>
-      The model maintains the store through one atomic tool, <code>memory.update</code>:
-      <code>add</code> appends an entry, <code>replace</code> and <code>remove</code> select
-      exactly one existing entry by a unique <code>old_text</code> substring, and a batch
-      either fully commits or fully rejects. Entries are unique per store: an
-      <code>add</code> of text already present reports a no-op, and a <code>replace</code>
-      whose new text duplicates another entry collapses the two. Capacity overflows reject
-      with usage numbers so the model compresses or prunes instead of silently losing
-      entries. There is no read tool and no automatic extraction.
-    </p>
+      <p>
+        The model maintains the store through one atomic tool,
+        <code>memory.update</code>: <code>add</code> appends an entry,
+        <code>replace</code> and <code>remove</code> select exactly one existing
+        entry by a unique <code>old_text</code> substring, and a batch either
+        fully commits or fully rejects. Entries are unique per store: an
+        <code>add</code> of text already present reports a no-op, and a
+        <code>replace</code>
+        whose new text duplicates another entry collapses the two. Capacity
+        overflows reject with usage numbers so the model compresses or prunes
+        instead of silently losing entries. There is no read tool and no
+        automatic extraction.
+      </p>
 
-    <h2>Session search</h2>
+      <h2>Continuing a full session</h2>
 
-    <p>
-      Everything said is recorded and indexed &mdash; past sessions and the parts of the
-      current one that no longer fit the model's history window alike. That window is a
-      token budget over whole prior turns (half of <code>project02.contextWindowTokens</code>),
-      replayed newest-first with each turn's tool calls and results, so older turns fall out
-      whole; the character reads back windows of those transcripts with
-      <code>sessions.search</code> and <code>sessions.read</code>. Each tool bounds what it returns, so a long message
-      comes back shortened rather than whole. Curated
-      memory holds what must always be known; session search recovers what was merely said.
-      A fact worth keeping gets promoted by the model from a transcript into
-      <code>memory.update</code>.
-    </p>
+      <p>
+        The model's history window is a token budget over whole prior turns
+        (half of
+        <code>project02.contextWindowTokens</code>), replayed newest-first with
+        each turn's tool calls and results. When a completed turn no longer fits
+        with the rest, the runtime continues the conversation in a new session:
+        the older turns are condensed into the character's own recollection by
+        the same model the character speaks through (or mechanically when that
+        model offers no plain completion), the newest turns are carried over
+        verbatim, and the new session opens with one record holding both. The
+        closed session's log is complete and untouched; the new one links back
+        to it, so a chain of sessions reads as one conversation. The
+        recollection reaches the model as a system frame between the curated
+        notes and the per-turn context, byte-stable for the session's lifetime.
+      </p>
 
-    <h2>External providers</h2>
+      <p>
+        Opening the chat without naming a session resumes the newest one,
+        wherever the chain is; <code>--session</code> opens exactly the session
+        named, with a note when a later one continues it;
+        <code>--new-session</code> starts a fresh chain.
+      </p>
 
-    <p>
-      Retrieval-driven long-term memory rides the <code>memory_provider</code> plugin kind:
-      per-turn recall items enter the untrusted plugin frame (source-referenced, bounded,
-      budget-capped), each committed turn's user message and final reply are handed to
-      the provider to do with as its
-      backend decides &mdash; mem0 asks its backend to extract facts from them &mdash; and a
-      provider exposes whichever namespaced tools its backend supports. Providers are disabled by default;
-      enable one and, when several are enabled, select it with
-      <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code>. Activation
-      keeps at most one selected, so by default an external provider runs <em>alongside</em>
-      curated memory rather than replacing it; an operator who explicitly disables
-      <code>character-memory</code> can run a provider on its own.
-    </p>
+      <h2>Session search</h2>
 
-    <table>
-      <tr>
-        <th>Package</th>
-        <th>Backend</th>
-        <th>Notes</th>
-      </tr>
-      <tr>
-        <td><code>mem0</code></td>
-        <td>Mem0 platform API, a self-hosted Mem0 server, or the embedded engine on this device (<code>backend: oss</code>)</td>
-        <td>Platform and server speak REST; the embedded engine runs in-process against any OpenAI-compatible endpoint and keeps its files under the plugin's data directory. Capture lets the backend extract. <code>mem0.add</code> submits the text the model supplies, bounded like every provider memory item; a self-hosted server or the embedded engine answers with the stored row, while the hosted platform answers with a receipt and stores asynchronously, which the tool reports as queued rather than saved.</td>
-      </tr>
-    </table>
+      <p>
+        Everything said is recorded and indexed &mdash; past sessions, the
+        earlier segments of the current chain, and the turns of this session
+        that no longer fit the model's history window alike; the character reads
+        back windows of those transcripts with
+        <code>sessions.search</code> and <code>sessions.read</code>. Turns
+        condensed at a continuation stay searchable in the session that holds
+        them, while carried turns are excluded from search results because the
+        model already sees them. Each tool bounds what it returns, so a long
+        message comes back shortened rather than whole. Curated memory holds
+        what must always be known; session search recovers what was merely said.
+        A fact worth keeping gets promoted by the model from a transcript into
+        <code>memory.update</code>.
+      </p>
 
-    <h2>Trust model</h2>
+      <h2>External providers</h2>
 
-    <p>
-      Curated memory renders in a trusted prompt frame because the runtime owns every step:
-      entries are validated and capped at write time, sections are typed and screened at
-      render time, and the <code>trusted_context</code> access that feeds the trusted frames
-      is granted only to bundled packages by catalog provenance — a manifest flag alone
-      never earns it. The same grant lets a bundled plugin add a runtime note to the
-      trusted per-turn frame (the day, the character's own inner state, the recall nudge),
-      cap-checked like curated sections and never budgeted. Automatic per-turn recall from
-      an external provider is appended to the current user message inside a
-      <code>&lt;recalled_memory&gt;</code> fence with its own budget and a preamble that
-      calls it memories, not requests; recall items without source references are dropped
-      rather than shown. Every other plugin item rides the same message inside an
-      <code>&lt;untrusted_plugin_context&gt;</code> fence that names it data, not
-      instructions. A provider's own search tool answers where every tool answers, in a
-      tool result, which neither budget covers.
-    </p>
+      <p>
+        Retrieval-driven long-term memory rides the
+        <code>memory_provider</code> plugin kind: per-turn recall items enter
+        the untrusted plugin frame (source-referenced, bounded, budget-capped),
+        each committed turn's user message and final reply are handed to the
+        provider to do with as its backend decides &mdash; mem0 asks its backend
+        to extract facts from them &mdash; and a provider exposes whichever
+        namespaced tools its backend supports. Providers are disabled by
+        default; enable one and, when several are enabled, select it with
+        <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code
+        >. Activation keeps at most one selected, so by default an external
+        provider runs <em>alongside</em>
+        curated memory rather than replacing it; an operator who explicitly
+        disables
+        <code>character-memory</code> can run a provider on its own.
+      </p>
 
-    <p>
-      Every sentence the runtime itself writes into the prompt speaks to the model as
-      the character — its notes, its memories, how it feels, what its tools handed it —
-      and lives in one module, <code>src/role-model/prompt/prompt-text.ts</code>, so the
-      wording can be tuned in one place without touching how the frames are built.
-    </p>
+      <table>
+        <tr>
+          <th>Package</th>
+          <th>Backend</th>
+          <th>Notes</th>
+        </tr>
+        <tr>
+          <td><code>mem0</code></td>
+          <td>
+            Mem0 platform API, a self-hosted Mem0 server, or the embedded engine
+            on this device (<code>backend: oss</code>)
+          </td>
+          <td>
+            Platform and server speak REST; the embedded engine runs in-process
+            against any OpenAI-compatible endpoint and keeps its files under the
+            plugin's data directory. Capture lets the backend extract.
+            <code>mem0.add</code> submits the text the model supplies, bounded
+            like every provider memory item; a self-hosted server or the
+            embedded engine answers with the stored row, while the hosted
+            platform answers with a receipt and stores asynchronously, which the
+            tool reports as queued rather than saved.
+          </td>
+        </tr>
+      </table>
 
-    <p class="rule">
-      Installing a character package is the trust decision: within its character's own
-      overlay, the package may enable plugins and fill any non-secret plugin setting the
-      operator has not set — a credential inside a package is refused outright, since a
-      package is shared and its secrets would be too — enablement included, so a required provider can come on for that
-      character even where the global config disables it. Host settings are out of its
-      reach; a package carries plugin enablement and plugin config, nothing else. What
-      the operator has set in that overlay always wins — on first install and on every
-      package update. The model is the fenced writer: it may propose changes only to
-      <code>agentMutable</code> fields, and credentials are never among them. Credentials
-      prefer env files; each character's own file, set with <code>--character</code>,
-      merges over the shared one, so two characters can hold different accounts for the
-      same memory service while a shared account covers the rest.
-    </p>
+      <h2>Trust model</h2>
 
-    <h2>Picking a setup</h2>
+      <p>
+        Curated memory renders in a trusted prompt frame because the runtime
+        owns every step: entries are validated and capped at write time,
+        sections are typed and screened at render time, and the
+        <code>trusted_context</code> access that feeds the trusted frames is
+        granted only to bundled packages by catalog provenance — a manifest flag
+        alone never earns it. The same grant lets a bundled plugin add a runtime
+        note to the trusted per-turn frame (the day, the character's own inner
+        state, the recall nudge), cap-checked like curated sections and never
+        budgeted. Automatic per-turn recall from an external provider is
+        appended to the current user message inside a
+        <code>&lt;recalled_memory&gt;</code> fence with its own budget and a
+        preamble that calls it memories, not requests; recall items without
+        source references are dropped rather than shown. Every other plugin item
+        rides the same message inside an
+        <code>&lt;untrusted_plugin_context&gt;</code> fence that names it data,
+        not instructions. A provider's own search tool answers where every tool
+        answers, in a tool result, which neither budget covers. The recollection
+        that opens a continued session is model output too: it is capped, its
+        frame names it as the character's own condensed memory of what happened
+        earlier and not something the person said, and the summariser is asked
+        for plain recollection with no rules or persona in it.
+      </p>
 
-    <table>
-      <tr>
-        <th>Want</th>
-        <th>Do</th>
-      </tr>
-      <tr>
-        <td>Characters that remember preferences and facts out of the box</td>
-        <td>Nothing — curated memory and session search are on by default.</td>
-      </tr>
-      <tr>
-        <td>Large semantic long-term memory</td>
-        <td>Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a self-hosted server set <code>backend</code> to <code>server</code> and <code>baseUrl</code> to its origin, where the key is then optional. Use an <code>https://</code> origin unless the server runs on this machine — over <code>http://</code> the conversation and the key cross the network in the clear.</td>
-      </tr>
-      <tr>
-        <td>Semantic memory fully on this device, no account</td>
-        <td>Enable <code>mem0</code>, set <code>backend</code> to <code>oss</code> and point <code>ossLlmBaseUrl</code> at your local OpenAI-compatible server (LM Studio <code>http://localhost:1234/v1</code>, Ollama <code>http://localhost:11434/v1</code>) plus the model names — no key needed. Or leave the endpoint unset for the OpenAI cloud and set <code>ossLlmApiKey</code>.</td>
-      </tr>
-    </table>
-  </main>
-</body>
+      <p>
+        Every sentence the runtime itself writes into the prompt speaks to the
+        model as the character — its notes, its memories, how it feels, what its
+        tools handed it — and lives in one module,
+        <code>src/role-model/prompt/prompt-text.ts</code>, so the wording can be
+        tuned in one place without touching how the frames are built.
+      </p>
+
+      <p class="rule">
+        Installing a character package is the trust decision: within its
+        character's own overlay, the package may enable plugins and fill any
+        non-secret plugin setting the operator has not set — a credential inside
+        a package is refused outright, since a package is shared and its secrets
+        would be too — enablement included, so a required provider can come on
+        for that character even where the global config disables it. Host
+        settings are out of its reach; a package carries plugin enablement and
+        plugin config, nothing else. What the operator has set in that overlay
+        always wins — on first install and on every package update. The model is
+        the fenced writer: it may propose changes only to
+        <code>agentMutable</code> fields, and credentials are never among them.
+        Credentials prefer env files; each character's own file, set with
+        <code>--character</code>, merges over the shared one, so two characters
+        can hold different accounts for the same memory service while a shared
+        account covers the rest.
+      </p>
+
+      <h2>Picking a setup</h2>
+
+      <table>
+        <tr>
+          <th>Want</th>
+          <th>Do</th>
+        </tr>
+        <tr>
+          <td>Characters that remember preferences and facts out of the box</td>
+          <td>
+            Nothing — curated memory and session search are on by default.
+          </td>
+        </tr>
+        <tr>
+          <td>Large semantic long-term memory</td>
+          <td>
+            Enable <code>mem0</code> and set <code>MEM0_API_KEY</code>; for a
+            self-hosted server set <code>backend</code> to
+            <code>server</code> and <code>baseUrl</code> to its origin, where
+            the key is then optional. Use an <code>https://</code> origin unless
+            the server runs on this machine — over <code>http://</code> the
+            conversation and the key cross the network in the clear.
+          </td>
+        </tr>
+        <tr>
+          <td>Semantic memory fully on this device, no account</td>
+          <td>
+            Enable <code>mem0</code>, set <code>backend</code> to
+            <code>oss</code> and point <code>ossLlmBaseUrl</code> at your local
+            OpenAI-compatible server (LM Studio
+            <code>http://localhost:1234/v1</code>, Ollama
+            <code>http://localhost:11434/v1</code>) plus the model names — no
+            key needed. Or leave the endpoint unset for the OpenAI cloud and set
+            <code>ossLlmApiKey</code>.
+          </td>
+        </tr>
+      </table>
+    </main>
+  </body>
 </html>
