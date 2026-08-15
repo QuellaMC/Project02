@@ -6,6 +6,14 @@ import {describe, expect, it} from 'vitest';
 
 import {createConfiguredRuntimePluginReloader} from '../../src/app/plugin-reload.ts';
 import {
+  createConfiguredProject02PluginHostFromPlan,
+  discoverRuntimePluginCatalog,
+} from '../../src/app/index.ts';
+import {
+  createDemoConfigPluginManifest,
+  createProject02Plugin as createDemoConfigPlugin,
+} from '../../src/plugins/packages/demo-config/plugin.ts';
+import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePlugin,
   createRuntimePluginManifest,
@@ -266,6 +274,75 @@ describe('configured runtime plugin reloader', () => {
       throw new Error(`Expected declined, got ${tampered.status}`);
     }
     expect(tampered.reason).toContain('moved past');
+  });
+
+  it('rebuilds a package under the same identity the first build used', async () => {
+    const storeRoot = createTestTempRoot('project02-reload-identity-');
+    const configPath = join(storeRoot, 'config.json');
+
+    writeRuntimeConfig(configPath, {
+      project02: {userDisplayName: 'Ada'},
+      plugins: {'demo-config': {enabled: true, config: {tone: 'warm'}}},
+    });
+    await initializeCharacterDataForHost(storeRoot);
+
+    const factoryInputs: {readonly userDisplayName?: string}[] = [];
+    const manifest = createDemoConfigPluginManifest();
+    const discovery = discoverRuntimePluginCatalog({
+      storeRoot,
+      factoryOverrides: {
+        'demo-config': {
+          manifest,
+          create(input) {
+            factoryInputs.push(input);
+
+            return createDemoConfigPlugin({...input, manifest});
+          },
+        },
+      },
+    });
+    const activationPlan = prepareConfiguredProject02PluginActivation({
+      runtimeLocation: runtimeLocationForTest({
+        loadedConfig: loadRuntimeConfigForTest({
+          configPath,
+          storeRoot,
+          env: {},
+        }),
+        configPath,
+        storeRoot,
+        env: {},
+      }),
+      loadedConfig: loadRuntimeConfigForTest({configPath, storeRoot, env: {}}),
+      catalogSnapshot: {
+        ...discovery,
+        diagnostics: discovery.reservedIdDiagnostics,
+      },
+      env: {},
+    });
+    const inspectedFingerprint = inspectRuntimePluginConfig({
+      runtimeLocation: activationPlan.runtimeLocation,
+      targetScope: 'global',
+      manifest,
+      pluginManifests: [manifest],
+      env: {},
+    }).fingerprint;
+
+    await createConfiguredProject02PluginHostFromPlan({activationPlan});
+    await createConfiguredRuntimePluginReloader({activationPlan}).reload(
+      'demo-config',
+      {
+        expectedFingerprint: inspectedFingerprint,
+        retainCandidate: () => undefined,
+      },
+    );
+
+    // A reload that omits part of the factory identity silently changes
+    // how the package behaves after an approved setting change.
+    expect(factoryInputs).toHaveLength(2);
+    expect(factoryInputs[1]?.userDisplayName).toBe(
+      factoryInputs[0]?.userDisplayName,
+    );
+    expect(factoryInputs[1]?.userDisplayName).toBe('Ada');
   });
 
   it('refuses to reload from a data directory rebound to another character', async () => {

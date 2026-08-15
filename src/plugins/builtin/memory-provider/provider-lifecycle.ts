@@ -108,17 +108,28 @@ function createCaptureTurnHook(
   return async context => {
     const lastCharacterMessage = context.committedTurn.visibleMessages
       .filter(message => message.role === 'character')
-      .at(-1)?.text;
+      .at(-1);
+    // The turn's own speakers, which a reopened session restores from its
+    // recorded messages rather than from current global config -- a
+    // renamed character must not store memories under a name nothing in
+    // the transcript ever used.
+    const userName = context.committedTurn.visibleMessages.find(
+      message => message.role === 'user',
+    )?.speakerName;
+    const characterName =
+      lastCharacterMessage?.speakerName ?? context.character.displayName;
     const inputSourceReferences = currentTurnSourceReferences(context);
     const result = await options.provider.captureTurn?.({
       sessionId: context.sessionId,
       userMessage: context.currentUserMessage,
+      characterName,
+      ...(userName === undefined ? {} : {userName}),
       sourceReferences: inputSourceReferences,
       deadlineAt: context.deadlineAt,
       signal: context.signal,
       ...(lastCharacterMessage === undefined
         ? {}
-        : {characterMessage: lastCharacterMessage}),
+        : {characterMessage: lastCharacterMessage.text}),
     });
     const providerSourceReferences = nonEmptySourceReferences(
       result?.sourceReferences,
