@@ -55,6 +55,7 @@ export type Project02HostConfig = Readonly<
   readonly userDisplayName?: string;
   readonly defaultMemoryProvider?: string;
   readonly roleModelProvider?: Project02RoleModelProvider;
+  readonly contextWindowTokens?: number;
 };
 
 export type Project02RuntimeConfig = {
@@ -177,6 +178,7 @@ export type ResolvedProject02RuntimeConfig = {
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
+    readonly contextWindowTokens: number;
   };
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
   readonly redactedPluginConfigs: Readonly<
@@ -195,6 +197,7 @@ export type RuntimeConfigInspectShape = {
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
+    readonly contextWindowTokens: number;
   };
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;

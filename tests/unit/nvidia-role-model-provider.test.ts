@@ -697,6 +697,61 @@ describe('NVIDIA role-model provider', () => {
     ).toEqual(['memory_search', 'memory_search_2', 'memory_search_2_2']);
   });
 
+  it("maps replayed tool rounds to provider names and keeps them out of this round's tool results", async () => {
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const historyWithTools: ConversationTurn = {
+      ...nvidiaTestHistoryTurn,
+      toolRounds: [
+        {
+          round: 1,
+          interimReplies: [],
+          toolCalls: [
+            {
+              toolCallId: 'evt_nvidia_previous.round-1.1',
+              pluginId: 'runtime',
+              toolName: 'runtime.plugin.list',
+              input: {},
+              result: {status: 'accepted', output: {plugins: []}},
+            },
+          ],
+        },
+      ],
+    };
+    let capturedBody: unknown;
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient: (_url, request) => {
+        capturedBody = JSON.parse(request.body);
+
+        return Promise.resolve(successfulReplyResponse('captured'));
+      },
+    });
+
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope, {conversationHistory: [historyWithTools]}),
+    );
+    const messages = (capturedBody as CapturedNvidiaRequest).messages;
+    const replayedCall = messages.find(
+      message =>
+        message.role === 'assistant' && message.tool_calls !== undefined,
+    );
+
+    expect(replayedCall).toMatchObject({
+      tool_calls: [
+        {
+          id: 'evt_nvidia_previous.round-1.1',
+          function: {name: 'runtime_plugin_list', arguments: '{}'},
+        },
+      ],
+    });
+    expect(messages.find(message => message.role === 'tool')).toMatchObject({
+      tool_call_id: 'evt_nvidia_previous.round-1.1',
+    });
+    // Replayed history is not this round's own tool feedback.
+    expect(output.providerExchange?.nativeToolResultMessages).toEqual([]);
+  });
+
   it('normalizes final assistant content through visible_reply', async () => {
     let capturedBody: unknown;
     const fetchClient: NvidiaFetchClient = (_url, request) => {

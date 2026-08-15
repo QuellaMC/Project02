@@ -1,6 +1,11 @@
 import type {RuntimeEventIdentity, VisibleMessage} from '../../core/index.ts';
 import type {RuntimePluginJsonObject} from '../../plugins/api/index.ts';
-import type {RoleModelToolObservationResult} from './contracts.ts';
+import type {
+  ConversationHistoryWindow,
+  RoleModelToolObservationResult,
+} from './contracts.ts';
+
+export type {ConversationHistoryWindow} from './contracts.ts';
 
 /** One completed tool call of a prior turn: what the model asked and what came back. */
 export type ConversationToolCall = {
@@ -28,14 +33,6 @@ export type ConversationTurn = RuntimeEventIdentity & {
   readonly userMessage: VisibleMessage;
   readonly toolRounds: readonly ConversationToolRound[];
   readonly finalReplies: readonly VisibleMessage[];
-};
-
-/**
- * What a model turn persists about its history: which turns were replayed,
- * oldest first. The turns themselves are already durable in the session log.
- */
-export type ConversationHistoryWindow = {
-  readonly turnEventIds: readonly string[];
 };
 
 export function conversationTurnVisibleMessages(

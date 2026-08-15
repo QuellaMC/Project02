@@ -559,6 +559,35 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(inspected?.runtimeNotes).toEqual(runtimeNotes);
   });
 
+  it('round-trips the history window and decodes records written before it had one', () => {
+    const sessionId = 'history-window-round-trip';
+    const storedRecord = patchCompletedEvent(sessionId) as {
+      roleModelIOSnapshot: {
+        inputEnvelope: {
+          decisionContext: Record<string, unknown>;
+        };
+      };
+    };
+
+    storedRecord.roleModelIOSnapshot.inputEnvelope.decisionContext[
+      'historyWindow'
+    ] = {turnEventIds: ['evt_1', 'evt_2']};
+
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.inputEnvelope.decisionContext.historyWindow,
+    ).toEqual({turnEventIds: ['evt_1', 'evt_2']});
+
+    delete storedRecord.roleModelIOSnapshot.inputEnvelope.decisionContext[
+      'historyWindow'
+    ];
+
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.inputEnvelope.decisionContext.historyWindow,
+    ).toEqual({turnEventIds: []});
+  });
+
   it('round-trips supported persisted plugin tool schemas unchanged', () => {
     const jsonSchema = supportedPersistedPluginToolJsonSchema();
     const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);

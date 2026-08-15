@@ -6,6 +6,7 @@ import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
 import {isProject02Identifier} from '../../shared/identifier.ts';
 
 import {
+  defaultProject02ContextWindowTokens,
   project02RoleModelProviderValues,
   type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
@@ -122,6 +123,28 @@ const project02ConfigFieldDefinitions = Object.freeze([
     // later. Trimmed because resolution trims before constructing the speaker.
     acceptsValue: value =>
       typeof value === 'string' && isValidSpeakerDisplayName(value.trim()),
+    redactionLabels: Object.freeze([]),
+    scopes: characterScopedFieldScopes,
+    agentMutable: false,
+    reloadRequired: true,
+  } satisfies Project02ConfigFieldDefinition),
+  Object.freeze({
+    path: 'project02.contextWindowTokens',
+    name: 'contextWindowTokens',
+    label: 'Context window tokens',
+    description:
+      'Context size of the role model in tokens; the conversation history ' +
+      'replayed to the model may use half of it. A stopgap until the ' +
+      'provider reports its own limit.',
+    invalidValueCode: 'runtime_config_context_window_tokens_invalid',
+    invalidValueMessage:
+      'Project02 contextWindowTokens must be a positive whole number of tokens.',
+    required: false,
+    secret: false,
+    valueType: 'number',
+    defaultValueSummary: String(defaultProject02ContextWindowTokens),
+    acceptsValue: value =>
+      typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
     redactionLabels: Object.freeze([]),
     scopes: characterScopedFieldScopes,
     agentMutable: false,

@@ -616,6 +616,49 @@ describe('chat CLI provider selection', () => {
     );
   });
 
+  it('sizes the replayed history from project02.contextWindowTokens', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-context-window-');
+    const historyLengthsFor = async (
+      contextWindowTokens: number,
+      sessionId: string,
+    ) => {
+      const historyLengths: number[] = [];
+      const adapter: RoleModelAdapter = {
+        invoke(_inputEnvelope, invocation) {
+          historyLengths.push(invocation.conversationHistory.length);
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+            }),
+          };
+        },
+      };
+
+      writeRuntimeConfig(join(storeRoot, 'config.json'), {
+        project02: {contextWindowTokens},
+      });
+
+      const exitCode = await runChatCliFromArgs(
+        ['--store', storeRoot, '--new-session', sessionId],
+        {
+          stdin: Readable.from(['first\n', 'second\n']),
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          roleModelAdapter: adapter,
+          pluginHost: createRuntimePluginHost({plugins: []}),
+        },
+      );
+
+      expect(exitCode).toBe(0);
+      return historyLengths;
+    };
+
+    // Eight tokens leave no room for a whole prior turn; 4096 replay it.
+    expect(await historyLengthsFor(8, 'tiny-window')).toEqual([0, 0]);
+    expect(await historyLengthsFor(4096, 'roomy-window')).toEqual([0, 1]);
+  });
+
   it('lets the runtime env provider override project02.roleModelProvider', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-env-config-');
     let stderr = '';

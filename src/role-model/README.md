@@ -9,3 +9,8 @@ plugin-independent surface; the top barrel carries everything else.
 `prompt/prompt-text.ts` is the one home of every sentence the runtime
 writes to the model; it speaks to the character in the second person, and
 `prompt/render.ts` only decides frames, roles, and fences.
+
+The conversation history the model replays is a list of whole prior turns
+(`api/conversation-history.ts`); `prompt/conversation-history-wire.ts`
+turns each into native chat messages, estimates its cost, and selects the
+newest turns that fit half the context window.

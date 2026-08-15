@@ -4,7 +4,7 @@ import {
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
 } from '../../core/index.ts';
-import type {ConversationHistoryWindow} from './conversation-history.ts';
+
 import {
   createRuntimePluginContextItem,
   createRuntimePluginCuratedContextSection,
@@ -41,6 +41,7 @@ import {
   type CreateDecisionContextOptions,
   type CreateParsedRoleModelDecisionSnapshotOptions,
   type CreateRoleModelInputEnvelopeOptions,
+  type ConversationHistoryWindow,
   type CreateRoleModelIOSnapshotOptions,
   type DecisionContext,
   type DecisionRuntimeNote,

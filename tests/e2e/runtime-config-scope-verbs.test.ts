@@ -177,6 +177,83 @@ describe('runtime-config --character verbs', () => {
     });
   });
 
+  it('sets, reads, and unsets a numeric host field at the character overlay', async () => {
+    const homeRoot = createTestTempRoot('project02-scope-verbs-number-');
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {project02: {}});
+
+    const set = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.contextWindowTokens',
+      '65536',
+    ]);
+
+    expect(set.code).toBe(0);
+    expect(
+      JSON.parse(
+        readFileSync(
+          characterOverlayConfigPath(
+            characterDataDirPath(realpathSync.native(homeRoot), 'mira'),
+          ),
+          'utf8',
+        ),
+      ),
+    ).toMatchObject({project02: {contextWindowTokens: 65536}});
+
+    const get = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'get',
+      'project02.contextWindowTokens',
+    ]);
+
+    expect(JSON.parse(get.stdout)).toEqual({value: 65536, origin: 'character'});
+
+    const rejected = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'set',
+      'project02.contextWindowTokens',
+      '0',
+    ]);
+
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain('positive whole number of tokens');
+
+    const unset = await runConfigCli([
+      '--store',
+      homeRoot,
+      '--character',
+      'mira',
+      'unset',
+      'project02.contextWindowTokens',
+    ]);
+
+    expect(unset.code).toBe(0);
+    expect(
+      JSON.parse(
+        (
+          await runConfigCli([
+            '--store',
+            homeRoot,
+            '--character',
+            'mira',
+            'get',
+            'project02.contextWindowTokens',
+          ])
+        ).stdout,
+      ),
+    ).toEqual({value: null, origin: 'none'});
+  });
+
   it('rejects global-only host fields while secrets and env-path work per character', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-reject-');
 
