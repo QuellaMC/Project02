@@ -33,6 +33,8 @@ export {
 } from './api/constructors.ts';
 export {validateRuntimePluginManifest} from './api/manifest-validation.ts';
 export {
+  characterMemoryPluginId,
+  characterMemoryUpdateToolName,
   firstPartyModelToolsPluginId,
   runtimePluginConfigReadToolName,
   runtimePluginConfigUpdateToolName,

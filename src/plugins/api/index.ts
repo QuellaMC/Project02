@@ -1,6 +1,8 @@
 /** runtime-plugins-value-via-api: runtime imports plugins only through here. */
 export {
   beforeRoleModelFailureBehaviorValues,
+  characterMemoryPluginId,
+  characterMemoryUpdateToolName,
   characterStatePatchModelToolName,
   characterStatePluginId,
   firstPartyModelToolsPluginId,
@@ -108,6 +110,7 @@ export {
   validateRuntimePluginManifest,
 } from './manifest-validation.ts';
 export {
+  containsForbiddenControlCharacter,
   createRuntimePluginCuratedContextSection,
   curatedContextSectionTextCharLimit,
   curatedContextSectionTitleCharLimit,
