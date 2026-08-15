@@ -7,7 +7,7 @@ import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
-  roleModelInvalidVisibleReplyRejectionReason,
+  roleModelMalformedOutputRejectionReason,
 } from '../../src/role-model/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
@@ -617,13 +617,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: roleModelInvalidVisibleReplyRejectionReason,
+      reason: roleModelMalformedOutputRejectionReason,
     });
     expect(rejectionEvents).toHaveLength(2);
 
     for (const event of rejectionEvents) {
       expect(event).toMatchObject({
-        reason: roleModelInvalidVisibleReplyRejectionReason,
+        reason: roleModelMalformedOutputRejectionReason,
         toolCallIds: [
           'evt_invalid_later_interim_visible.trace_evt_invalid_later_interim_visible.round-1.1.character_state.patch',
         ],

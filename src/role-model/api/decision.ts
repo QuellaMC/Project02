@@ -11,29 +11,23 @@ import {
   type RuntimePluginContextItem,
   type RuntimePluginCuratedContextSection,
 } from '../../plugins/api/index.ts';
-import {freezeModelToolCalls, type ModelToolCall} from './model-tools.ts';
-import {freezeRoleModelPromptSize} from './prompt-size.ts';
 import {
-  hasDuplicateRoleModelAllowedTools,
-  isRoleModelAllowedToolName,
-  isRoleModelToolNameSyntax,
-  requiredRoleModelIdentifier,
-} from './tool-names.ts';
+  builtInModelToolDefinitions,
+  freezeModelToolCalls,
+  freezeModelToolDefinition,
+  type ModelToolCall,
+} from './model-tools.ts';
+import {freezeRoleModelPromptSize} from './prompt-size.ts';
+import {requiredRoleModelIdentifier} from './tool-names.ts';
 import {
   createJsonBoundaryObjectSnapshot,
   createJsonBoundarySnapshot,
 } from '../../shared/json-boundary.ts';
-import type {RoleModelAllowedToolName} from './tool-names.ts';
 import {
   freezeProviderMetadata,
   freezeRoleModelProviderExchangeSnapshot,
 } from './provider-exchange.ts';
-import {
-  createRoleModelPluginToolDefinitions,
-  defaultAllowedToolsForPluginDefinitions,
-  modelToolDefinitionsForPluginToolDefinitions,
-  toolDefinitionsForAllowedTools,
-} from './plugin-tool-definitions.ts';
+import {createRoleModelPluginToolDefinitions} from './plugin-tool-definitions.ts';
 import {
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
@@ -55,7 +49,6 @@ import {
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
-  type RoleModelToolDefinition,
   type RoleModelToolObservation,
   type RoleModelToolObservationResult,
 } from './contracts.ts';
@@ -84,29 +77,29 @@ export function createDecisionContext(
   } satisfies DecisionContext);
 }
 
+/**
+ * The built-in tools come first and are always offered: visible_reply is how
+ * the character speaks, so no configuration can take it away. Plugin tools
+ * follow; a plugin cannot provide a built-in name, so the names are unique.
+ */
 export function createRoleModelInputEnvelope(
   options: CreateRoleModelInputEnvelopeOptions,
 ): RoleModelInputEnvelope {
   const pluginToolDefinitions = createRoleModelPluginToolDefinitions(
     options.pluginToolDefinitions,
   );
-  const modelToolDefinitions = modelToolDefinitionsForPluginToolDefinitions(
-    pluginToolDefinitions,
-  );
-  const allowedTools = freezeAllowedTools(
-    options.allowedTools ??
-      defaultAllowedToolsForPluginDefinitions(pluginToolDefinitions),
-    modelToolDefinitions,
-  );
+  const toolDefinitions = Object.freeze([
+    ...builtInModelToolDefinitions,
+    ...pluginToolDefinitions.map(freezeModelToolDefinition),
+  ]);
 
   return Object.freeze({
     event: freezeUserMessageRuntimeEventSnapshot(options.event),
     decisionContext: createDecisionContext(options.decisionContext),
-    allowedTools,
-    toolDefinitions: toolDefinitionsForAllowedTools({
-      allowedTools,
-      toolDefinitions: modelToolDefinitions,
-    }),
+    allowedTools: Object.freeze(
+      toolDefinitions.map(definition => definition.name),
+    ),
+    toolDefinitions,
     pluginToolDefinitions,
     toolObservations: freezeRoleModelToolObservations(
       options.toolObservations ?? [],
@@ -125,34 +118,27 @@ export function createRoleModelToolObservation(
 
 export function createCharacterDecision(
   toolCalls: readonly ModelToolCall[],
+  text?: string,
 ): CharacterDecision {
   return freezeCharacterDecision({
     version: roleModelDecisionContractVersion,
     toolCalls,
+    ...(text === undefined ? {} : {text}),
   });
 }
 
 export function createAcceptedRoleModelDecisionResult(
   decision: CharacterDecision,
-  options: {
-    readonly nonCommittedText?: string;
-  } = {},
 ): AcceptedRoleModelDecisionResult {
   return Object.freeze({
     status: 'accepted',
     decision: freezeCharacterDecision(decision),
-    ...(options.nonCommittedText === undefined
-      ? {}
-      : {nonCommittedText: options.nonCommittedText}),
   } satisfies AcceptedRoleModelDecisionResult);
 }
 
 export function createRejectedRoleModelDecisionResult(
   reason: RoleModelDecisionRejectionReason,
   details?: string,
-  options: {
-    readonly requestedToolNames?: readonly RoleModelAllowedToolName[];
-  } = {},
 ): RejectedRoleModelDecisionResult {
   return Object.freeze({
     status: 'rejected',
@@ -160,26 +146,7 @@ export function createRejectedRoleModelDecisionResult(
       reason,
       ...(details === undefined ? {} : {details}),
     }),
-    ...(options.requestedToolNames === undefined
-      ? {}
-      : {
-          requestedToolNames: freezeRequestedToolNames(
-            options.requestedToolNames,
-          ),
-        }),
   } satisfies RejectedRoleModelDecisionResult);
-}
-
-function freezeRequestedToolNames(
-  requestedToolNames: readonly RoleModelAllowedToolName[],
-): readonly RoleModelAllowedToolName[] {
-  if (!requestedToolNames.every(isRoleModelAllowedToolName)) {
-    throw new TypeError(
-      'Role-model requestedToolNames must contain only valid tool names.',
-    );
-  }
-
-  return Object.freeze([...requestedToolNames]);
 }
 
 export function createRoleModelIOSnapshot(
@@ -367,36 +334,6 @@ function freezeCuratedContextSections(
   return Object.freeze(sections.map(createRuntimePluginCuratedContextSection));
 }
 
-export function freezeAllowedTools(
-  allowedTools: readonly unknown[],
-  modelToolDefinitions: readonly RoleModelToolDefinition[],
-): readonly RoleModelAllowedToolName[] {
-  if (hasDuplicateRoleModelAllowedTools(allowedTools)) {
-    throw new TypeError('Role-model allowedTools must not contain duplicates.');
-  }
-
-  const validatedTools: RoleModelAllowedToolName[] = [];
-  const supportedToolNames = new Set(
-    modelToolDefinitions.map(definition => definition.name),
-  );
-
-  for (const tool of allowedTools) {
-    if (
-      typeof tool !== 'string' ||
-      !isRoleModelToolNameSyntax(tool) ||
-      !supportedToolNames.has(tool)
-    ) {
-      throw new TypeError(
-        'Role-model allowedTools must contain only supported tools.',
-      );
-    }
-
-    validatedTools.push(tool);
-  }
-
-  return Object.freeze(validatedTools);
-}
-
 function freezeRoleModelOutputContract(
   outputContract: RoleModelOutputContract,
 ): RoleModelOutputContract {
@@ -465,6 +402,7 @@ function freezeCharacterDecision(
   return Object.freeze({
     version: roleModelDecisionContractVersion,
     toolCalls: freezeModelToolCalls(decision.toolCalls),
+    ...(decision.text === undefined ? {} : {text: decision.text}),
   } satisfies CharacterDecision);
 }
 
@@ -481,20 +419,11 @@ function freezeRoleModelDecisionResult(
   result: RoleModelDecisionResult,
 ): RoleModelDecisionResult {
   if (result.status === 'accepted') {
-    return createAcceptedRoleModelDecisionResult(result.decision, {
-      ...(result.nonCommittedText === undefined
-        ? {}
-        : {nonCommittedText: result.nonCommittedText}),
-    });
+    return createAcceptedRoleModelDecisionResult(result.decision);
   }
 
   return createRejectedRoleModelDecisionResult(
     result.rejection.reason,
     result.rejection.details,
-    {
-      ...(result.requestedToolNames === undefined
-        ? {}
-        : {requestedToolNames: result.requestedToolNames}),
-    },
   );
 }

@@ -33,7 +33,6 @@ export const runtimePluginHealthRejectionReason = 'plugin_health_rejected';
 
 export type LocalRuntimeUserMessageRejectionReason =
   | 'input_validation_rejected'
-  | 'character_reply_rejected'
   | typeof runtimePluginHealthRejectionReason
   | 'plugin_before_role_model_call_rejected'
   | RoleModelDecisionRejectionReason;

@@ -15,7 +15,6 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {createConversationSession} from '../../src/core/index.ts';
 import {
   characterStatePluginId,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   sessionHistoryPluginId,
   sessionHistorySearchToolName,
@@ -52,7 +51,6 @@ describe('session history through the tool loop', () => {
       pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
       enabledPluginIds: [
         runtimePluginId,
-        firstPartyModelToolsPluginId,
         characterStatePluginId,
         sessionHistoryPluginId,
       ],
@@ -162,7 +160,6 @@ describe('session history through the tool loop', () => {
       pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
       enabledPluginIds: [
         runtimePluginId,
-        firstPartyModelToolsPluginId,
         characterStatePluginId,
         sessionHistoryPluginId,
       ],
@@ -252,7 +249,6 @@ describe('session history through the tool loop', () => {
       pluginDatabase: createRuntimePluginDatabaseProvider({storeRoot}),
       enabledPluginIds: [
         runtimePluginId,
-        firstPartyModelToolsPluginId,
         characterStatePluginId,
         sessionHistoryPluginId,
       ],

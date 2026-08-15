@@ -10,13 +10,21 @@ plugin-independent surface; the top barrel carries everything else.
 writes to the model; it speaks to the character in the second person, and
 `prompt/render.ts` only decides frames, roles, and fences.
 
-The loop has one rule for a round it cannot use (`loop/round-outcome.ts`,
-`settleRejectedRound`): when the model wrote something the runtime refuses
-— the parser or the visible-reply gate said no — the error goes back to the
-model as part of its next round and the round counts like any other; what
-the model does with it is its own business. When no usable output arrived
-at all — the adapter or the provider failed — there is nothing to hand
-back, and the turn ends. The loop keeps no table of reasons.
+The parser (`loop/decision-parser.ts`) is the only judge of what the model
+wrote: the shape of the decision, the shape of each tool call, a blank
+reply, a round that neither replies nor calls a tool — all of it is
+`malformed_output` with the reason in details. `visible_reply` is built in
+and always offered ahead of the plugin tools; the model's `text` beside its
+tool calls is kept on the decision and never shown to the person.
+
+The loop has one rule for a round the parser refused (`loop/round-outcome.ts`,
+`settleRejectedRound`): the error goes back to the model as part of its next
+round and the round counts like any other; what the model does with it is
+its own business. When no usable output arrived at all — the provider
+failed — there is nothing to hand back, and the turn ends. The loop's only
+refusal of its own is the round budget (`tool_rounds_exhausted`), recorded
+against the commit while the parsed round stays what the model said. The
+loop keeps no table of reasons.
 
 The conversation history the model replays is a list of whole prior turns
 (`api/conversation-history.ts`); `prompt/conversation-history-wire.ts`

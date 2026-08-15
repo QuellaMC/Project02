@@ -8,6 +8,7 @@ import {
   normalizeVisibleMessageText,
   runtimeEventIdentityKey,
 } from '../../core/index.ts';
+import {sameOrderedValues} from '../storage/codec-primitives.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 
@@ -194,14 +195,4 @@ export function visibleMessageEvidenceKey(
   messageId: string,
 ): string {
   return `${runtimeEventIdentityKey(identity)}\u0000${messageId}`;
-}
-
-export function sameOrderedValues(
-  actualValues: readonly string[],
-  expectedValues: readonly string[],
-): boolean {
-  return (
-    actualValues.length === expectedValues.length &&
-    actualValues.every((value, index) => value === expectedValues[index])
-  );
 }

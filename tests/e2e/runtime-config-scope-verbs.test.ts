@@ -7,6 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -120,7 +121,7 @@ describe('runtime-config --character verbs', () => {
       characterId: 'mira',
     });
     expect(marker).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       scope: 'character-data',
       characterId: 'mira',
       materializedCharacterPackageVersion: '1.1.0',
@@ -763,7 +764,7 @@ describe('runtime-config --character verbs', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',

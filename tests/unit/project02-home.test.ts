@@ -6,6 +6,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -24,7 +25,7 @@ describe('project02 home initialization', () => {
     const layout = await ensureInitializedProject02Home({homeRoot});
 
     expect(JSON.parse(readFileSync(layout.schemaPath, 'utf8'))).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       scope: 'home',
     });
 
@@ -154,7 +155,7 @@ describe('project02 home initialization', () => {
     writeFileSync(
       layout.schemaPath,
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         createdAt: '2026-07-22T00:00:00.000Z',
       })}\n`,
@@ -188,7 +189,7 @@ describe('project02 home initialization', () => {
       writeFileSync(
         layout.schemaPath,
         `${JSON.stringify({
-          schemaVersion: 9,
+          schemaVersion: localRuntimeStorageSchemaVersion,
           scope: 'character-data',
           characterId: 'mira',
           createdAt: '2026-07-23T00:00:00.000Z',

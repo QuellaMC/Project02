@@ -6,6 +6,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -196,7 +197,7 @@ describe('first-selection materialization through startup', () => {
         ),
       ),
     ).toMatchObject({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       materializedCharacterPackageVersion: '1.0.0',
     });
   });

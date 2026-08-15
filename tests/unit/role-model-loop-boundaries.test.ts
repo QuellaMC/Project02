@@ -1,15 +1,12 @@
 import {describe, expect, it} from 'vitest';
 import {
-  createDefaultRoleModelPluginToolDefinitions,
   defaultRoleModelProviderCapabilities,
   isRoleModelRawOutputReplayableDecisionEvidence,
   type RoleModelAdapter,
-  roleModelMalformedOutputRejectionReason,
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
-  roleModelTerminalEmptyOutputRejectionDetails,
   runRoleModelLoop,
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
@@ -19,6 +16,7 @@ import {
 } from '../../src/plugins/api/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
+  acceptingPluginToolHost,
   createAcceptedToolCallResult,
   createDegradingRejectedMemorySearchPlugin,
   createProviderMetadataAdapter,
@@ -27,7 +25,6 @@ import {
   createTestEvent,
   createTestPluginContext,
   memorySearchToolDefinition,
-  withVisibleReplyTool,
 } from '../support/role-model-loop-fixtures.ts';
 
 describe('role-model loop evidence and boundary validation', () => {
@@ -58,7 +55,7 @@ describe('role-model loop evidence and boundary validation', () => {
         ],
         () => undefined,
       ),
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolDefinitions: [memorySearchToolDefinition],
       pluginToolHost: Object.freeze({
         handleToolCall(call) {
           dispatchedInput = call.input;
@@ -116,10 +113,7 @@ describe('role-model loop evidence and boundary validation', () => {
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: Object.freeze([
-        ...createDefaultRoleModelPluginToolDefinitions(),
-        ...pluginToolHost.pluginToolDefinitions(),
-      ]),
+      pluginToolDefinitions: pluginToolHost.pluginToolDefinitions(),
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(
         'evt_host_degraded_plugin_tool',
@@ -193,7 +187,7 @@ describe('role-model loop evidence and boundary validation', () => {
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolDefinitions: [memorySearchToolDefinition],
       pluginToolHost,
       runtimePluginContext: createTestPluginContext(eventId),
     });
@@ -234,7 +228,7 @@ describe('role-model loop evidence and boundary validation', () => {
         ],
         () => undefined,
       ),
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolDefinitions: [memorySearchToolDefinition],
       pluginToolHost: Object.freeze({
         handleToolCall() {
           return Object.freeze({
@@ -301,7 +295,7 @@ describe('role-model loop evidence and boundary validation', () => {
         ],
         () => undefined,
       ),
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolDefinitions: [memorySearchToolDefinition],
       pluginToolHost: Object.freeze({
         handleToolCall() {
           return Object.freeze({
@@ -366,7 +360,7 @@ describe('role-model loop evidence and boundary validation', () => {
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolDefinitions: [memorySearchToolDefinition],
       pluginToolHost,
       runtimePluginContext: createTestPluginContext('evt_required_observed'),
     });
@@ -420,7 +414,6 @@ describe('role-model loop evidence and boundary validation', () => {
       decisionContext: createTestDecisionContext(),
       adapter,
       pluginToolDefinitions: Object.freeze([
-        ...createDefaultRoleModelPluginToolDefinitions(),
         memorySearchToolDefinition,
         secondRequiredTool,
       ]),
@@ -438,45 +431,6 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(result.status).toBe('accepted');
     expect(handledTools).toEqual(['memory.search', 'memory.recall']);
     expect(result.rounds).toHaveLength(3);
-  });
-
-  it('rejects a declared tool outside allowedTools as not declared for the turn', async () => {
-    let handledCalls = 0;
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('search memory', 'evt_narrowed_allowlist'),
-      decisionContext: createTestDecisionContext(),
-      adapter: createSequencedAdapter(
-        [
-          {
-            toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
-          },
-          {
-            toolCalls: [
-              {name: visibleReplyModelToolName, input: {text: 'done'}},
-            ],
-          },
-        ],
-        () => undefined,
-      ),
-      allowedTools: [visibleReplyModelToolName],
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-      pluginToolHost: Object.freeze({
-        handleToolCall() {
-          handledCalls += 1;
-          return createAcceptedToolCallResult();
-        },
-      }),
-      runtimePluginContext: createTestPluginContext('evt_narrowed_allowlist'),
-    });
-
-    expect(result.status).toBe('accepted');
-    expect(handledCalls).toBe(0);
-    expect(result.pluginToolResults).toHaveLength(1);
-    expect(result.pluginToolResults[0]).toMatchObject({
-      dispatchedToHost: false,
-      result: {status: 'rejected', reason: 'tool_not_declared'},
-    });
   });
 
   it('hands a blank visible_reply back to the model as its next round', async () => {
@@ -499,7 +453,9 @@ describe('role-model loop evidence and boundary validation', () => {
         ],
         () => undefined,
       ),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
+      pluginToolHost: acceptingPluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_blank_reply_feedback'),
     });
 
     expect(result.status).toBe('accepted');
@@ -512,58 +468,45 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(executionResultVisibleReply(result)).toBe('real reply');
   });
 
-  it('stores a rejected parsed snapshot for terminal empty toolCalls output', async () => {
-    const executionResult = await runRoleModelLoop({
+  it('tool_rounds_exhausted ends the turn and leaves the parsed round accepted', async () => {
+    let handledCalls = 0;
+    const result = await runRoleModelLoop({
       onVisibleReply: () => {},
-      event: createTestEvent('hello', 'evt_empty_tool_calls'),
+      event: createTestEvent('search memory', 'evt_rounds_exhausted'),
       decisionContext: createTestDecisionContext(),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost: Object.freeze({
+        handleToolCall() {
+          handledCalls += 1;
+          return createAcceptedToolCallResult();
+        },
+      }),
+      runtimePluginContext: createTestPluginContext('evt_rounds_exhausted'),
       adapter: createSequencedAdapter(
-        [
-          {
-            toolCalls: [],
-          },
-        ],
+        [{toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}]}],
         () => undefined,
       ),
       maxToolRounds: 0,
     });
-    const result = executionResult;
 
-    expect(executionResult.status).toBe('rejected');
     expect(result).toMatchObject({
       status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: roleModelTerminalEmptyOutputRejectionDetails,
-      },
-      parsedDecisionSnapshot: {
-        result: {
-          status: 'rejected',
-          rejection: {
-            reason: roleModelMalformedOutputRejectionReason,
-            details: roleModelTerminalEmptyOutputRejectionDetails,
-          },
-        },
-      },
+      rejection: {reason: 'tool_rounds_exhausted'},
+      parsedDecisionSnapshot: {result: {status: 'accepted'}},
     });
     if (result.status !== 'rejected') {
-      throw new Error('Expected empty toolCalls output to reject the loop.');
+      throw new Error('Expected the budget to end the turn.');
     }
 
+    // The parser's verdict stands: the round is what the model said, and the
+    // refusal is the runtime's, recorded against the commit.
+    expect(handledCalls).toBe(0);
     expect(result.rounds).toHaveLength(1);
-    expect(result.parsedDecisionSnapshot.result).toEqual(result.decisionResult);
-    expect(result.rounds[0]?.parsedDecisionSnapshot.result).toEqual(
-      result.decisionResult,
-    );
+    expect(result.rounds[0]?.pluginToolResults).toEqual([]);
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
         rawOutputText: result.ioSnapshot.rawOutputText,
-        providerMetadata: result.ioSnapshot.providerMetadata,
         decisionResult: result.parsedDecisionSnapshot.result,
-        allowedTools: result.ioSnapshot.inputEnvelope.allowedTools,
-        pluginToolDefinitions:
-          result.ioSnapshot.inputEnvelope.pluginToolDefinitions,
       }),
     ).toBe(true);
   });
@@ -573,7 +516,11 @@ describe('role-model loop evidence and boundary validation', () => {
       onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_non_finite_provider_metadata'),
       decisionContext: createTestDecisionContext(),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
+      pluginToolHost: acceptingPluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_non_finite_provider_metadata',
+      ),
       adapter: createProviderMetadataAdapter(
         Object.freeze({
           provider: 'nvidia',
@@ -601,7 +548,11 @@ describe('role-model loop evidence and boundary validation', () => {
       onVisibleReply: () => {},
       event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
       decisionContext: createTestDecisionContext(),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
+      pluginToolHost: acceptingPluginToolHost,
+      runtimePluginContext: createTestPluginContext(
+        'evt_malformed_provider_exchange',
+      ),
       adapter: Object.freeze({
         invoke(_inputEnvelope, invocation) {
           const providerExchange: RoleModelProviderExchangeSnapshot = {
@@ -641,7 +592,7 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
+        reason: 'provider_error',
         details: 'Role-model adapter provider exchange is malformed.',
       },
     });

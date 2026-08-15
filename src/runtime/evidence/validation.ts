@@ -14,10 +14,10 @@ import {
   assertCharacterRowsFollowTheirDecision,
   assertSingleLeadingUserMessage,
   assertVisibleMessageCommitEvidence,
-  sameOrderedValues,
   turnModelInputTexts,
   visibleMessageEvidenceKey,
 } from './turn-shape.ts';
+import {sameOrderedValues} from '../storage/codec-primitives.ts';
 import {
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,

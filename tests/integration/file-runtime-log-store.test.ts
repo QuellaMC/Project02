@@ -32,7 +32,6 @@ import {
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
 import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
-import {firstPartyModelToolsPluginId} from '../../src/plugins/index.ts';
 import {
   LocalRuntimeStorageContractError,
   createLocalRuntimeStorageLayout,
@@ -488,16 +487,25 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
-  it('rejects present requested tool names that disagree with raw evidence', async () => {
-    const storedRecord = await persistedDisallowedToolRejectionRecord(
-      'tampered-requested-tool-names',
+  it('reloads a turn that ran out of tool rounds', async () => {
+    const storedRecord = await persistedRoundsExhaustedRecord(
+      'rounds-exhausted-round-trip',
     );
-    const storedDecisionResult = rejectedDecisionResultRecord(storedRecord);
 
-    storedDecisionResult['requestedToolNames'] = [visibleReplyModelToolName];
-
-    expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
-      LocalRuntimeStorageContractError,
+    // The parsed round stays what the model said; the refusal is the
+    // runtime's, on the commit validation.
+    expect(decodeRawEventLogRecord(JSON.stringify(storedRecord))).toMatchObject(
+      {
+        kind: 'runtime_turn_rejected',
+        reason: 'tool_rounds_exhausted',
+        parsedRoleModelDecisionSnapshot: {result: {status: 'accepted'}},
+        commitValidation: {
+          result: {
+            status: 'rejected',
+            rejection: {reason: 'tool_rounds_exhausted'},
+          },
+        },
+      },
     );
   });
 
@@ -691,7 +699,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'malformed_output',
+      reason: 'provider_error',
       message: 'Role-model adapter provider exchange is malformed.',
     });
 
@@ -708,7 +716,7 @@ describe('file runtime log store plugin tool event validation', () => {
         result: {
           status: 'rejected',
           rejection: {
-            reason: 'malformed_output',
+            reason: 'provider_error',
             details: 'Role-model adapter provider exchange is malformed.',
           },
         },
@@ -793,7 +801,7 @@ describe('file runtime log store plugin tool event validation', () => {
     expect(JSON.stringify(rawEvents)).not.toContain(credentialSentinel);
   });
 
-  it('rejects duplicate persisted allowed tools with the storage contract error', () => {
+  it('rejects persisted allowed tools that differ from the offered tools', () => {
     const malformedRecord: unknown = structuredClone(
       patchCompletedEvent('duplicate-persisted-allowed-tools'),
     );
@@ -2385,7 +2393,7 @@ function isTestRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function persistedDisallowedToolRejectionRecord(
+async function persistedRoundsExhaustedRecord(
   sessionId: string,
 ): Promise<Record<string, unknown>> {
   const storeRoot = createStoreRoot();
@@ -2435,29 +2443,14 @@ async function persistedDisallowedToolRejectionRecord(
 
   expect(result).toMatchObject({
     status: 'rejected',
-    reason: 'plugin_tool_rejected',
+    reason: 'tool_rounds_exhausted',
   });
 
   if (!isTestRecord(storedRecord)) {
-    throw new Error('Expected persisted disallowed-tool rejection fixture.');
+    throw new Error('Expected persisted rounds-exhausted fixture.');
   }
 
   return storedRecord;
-}
-
-function rejectedDecisionResultRecord(
-  storedRecord: Record<string, unknown>,
-): Record<string, unknown> {
-  const parsedSnapshot = storedRecord['parsedRoleModelDecisionSnapshot'];
-  const result = isTestRecord(parsedSnapshot)
-    ? parsedSnapshot['result']
-    : undefined;
-
-  if (!isTestRecord(result) || result['status'] !== 'rejected') {
-    throw new Error('Expected persisted rejected decision result fixture.');
-  }
-
-  return result;
 }
 
 function supportedPersistedPluginToolJsonSchema() {
@@ -2571,22 +2564,6 @@ function patchCompletedEvent(sessionId: string): object {
           characterStatePatchModelToolName,
         ],
         pluginToolDefinitions: [
-          {
-            pluginId: firstPartyModelToolsPluginId,
-            name: visibleReplyModelToolName,
-            description: 'Say one message to the user.',
-            inputContract: {
-              type: 'object',
-              properties: {
-                text: {type: 'string', description: 'The message text.'},
-              },
-              required: ['text'],
-              additionalProperties: false,
-            },
-            validationOwner: 'built_in_model_tools',
-            concurrency: 'shared',
-            requiresConfirmation: false,
-          },
           {
             pluginId: 'character-state',
             name: characterStatePatchModelToolName,
@@ -2739,10 +2716,7 @@ function createBeforeCallRejectingPluginHost() {
         },
       }),
     ],
-    enabledPluginIds: [
-      firstPartyModelToolsPluginId,
-      'before-call.reject.fixture',
-    ],
+    enabledPluginIds: ['before-call.reject.fixture'],
   });
 }
 
@@ -2801,7 +2775,7 @@ function createHealthRejectingPluginHost(options?: {
         },
       }),
     ],
-    enabledPluginIds: [firstPartyModelToolsPluginId, 'health.reject.fixture'],
+    enabledPluginIds: ['health.reject.fixture'],
   });
 }
 

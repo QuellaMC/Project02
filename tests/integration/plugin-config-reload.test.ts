@@ -1,4 +1,5 @@
 import {prepareConfiguredProject02PluginActivation} from '../../src/app/index.ts';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
@@ -394,7 +395,7 @@ describe('configured runtime plugin reloader', () => {
     writeFileSync(
       join(dirname(overlayPath), 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

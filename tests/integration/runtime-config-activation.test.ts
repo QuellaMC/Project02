@@ -1,15 +1,8 @@
-import {createRoleModelAdapterFromCharacterAgent} from '../../src/role-model/index.ts';
-import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {existsSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
-import {
-  createConversationSession,
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent,
-} from '../../src/core/index.ts';
 import {
   createConfiguredProject02PluginHostFromPlan,
   initializeProject02CharacterRuntime,
@@ -18,7 +11,6 @@ import {
 import {
   characterMemoryPluginId,
   createMemoryProviderRuntimePlugin,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginListToolName,
   sessionHistoryPluginId,
@@ -28,8 +20,6 @@ import {
   createCharacterStatePlugin,
   createCharacterStatePluginManifest,
 } from '../../src/plugins/packages/character-state/plugin.ts';
-import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
-import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   writeRuntimeConfig,
   runtimeConfigSnapshotForTest,
@@ -154,7 +144,6 @@ describe('runtime config activation planning', () => {
     // enablement CLI startup produces, not manifest defaults.
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
-      firstPartyModelToolsPluginId,
       characterMemoryPluginId,
       characterStatePluginId,
       sessionHistoryPluginId,
@@ -350,85 +339,6 @@ describe('runtime config activation planning', () => {
     });
   });
 
-  it('keeps character-agent output non-committed when config disables visible_reply', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-config-model-tools-disabled-runtime-',
-    );
-    const sessionId = 'session-model-tools-disabled-runtime';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [firstPartyModelToolsPluginId]: {
-          enabled: false,
-        },
-      },
-    });
-
-    await initializeCharacterDataForHost(storeRoot);
-
-    const configured = await createConfiguredProject02PluginHostFromPlan({
-      activationPlan: prepareConfiguredProject02PluginActivation({
-        ...runtimeConfigSnapshotForTest({
-          loadedConfig: loadRuntimeConfigForTest({storeRoot}),
-          storeRoot: storeRoot,
-        }),
-      }),
-      sessionId,
-    });
-    const logStore = createRuntimeLogStore();
-    const result = await runLocalUserMessageEvent({
-      event: createUserMessageRuntimeEvent(
-        'hello',
-        createRuntimeEventIdentity({
-          eventId: 'evt_model_tools_disabled_runtime',
-          traceId: 'trace_model_tools_disabled_runtime',
-          createdAt: '2026-06-15T00:00:00.000Z',
-        }),
-      ),
-      session: createConversationSession({
-        id: sessionId,
-        character: testCharacterProfile,
-      }),
-      logStore,
-      pluginHost: configured.host,
-      roleModelAdapter: createRoleModelAdapterFromCharacterAgent({
-        reply() {
-          return {
-            text: 'Character agent reply.',
-          };
-        },
-      }),
-    });
-
-    expect(configured.activation.enabledPluginIds).not.toContain(
-      firstPartyModelToolsPluginId,
-    );
-    expect(result.status).toBe('completed');
-    if (result.status !== 'completed') {
-      throw new Error('Expected the disabled visible-reply turn to complete.');
-    }
-
-    expect(
-      result.rawEvent.roleModelIOSnapshot?.inputEnvelope.allowedTools,
-    ).not.toContain('visible_reply');
-    expect(
-      result.rawEvent.parsedRoleModelDecisionSnapshot?.result,
-    ).toMatchObject({
-      status: 'accepted',
-      nonCommittedText: 'Character agent reply.',
-      decision: {
-        toolCalls: [],
-      },
-    });
-    // With visible_reply disabled the model's folded text stays non-committed.
-    expect(result.conversationMessages.map(message => message.role)).toEqual([
-      'user',
-    ]);
-    expect(
-      logStore.conversationMessages().map(message => message.role),
-    ).toEqual(['user']);
-  });
-
   it('loads runtime env before reporting mixed check activation diagnostics', async () => {
     const storeRoot = createTestTempRoot('project02-config-check-mixed-env-');
     const plugin = requiredSecretAndEndpointPlugin('memory.mixed-check');
@@ -516,7 +426,6 @@ describe('runtime config activation planning', () => {
     });
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
-      firstPartyModelToolsPluginId,
       plugin.manifest.id,
     ]);
     expect(configured.plugins.map(item => item.manifest.id)).toEqual([
@@ -1078,7 +987,6 @@ describe('runtime config activation planning', () => {
 
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
-      firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id,
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(
@@ -1189,7 +1097,6 @@ describe('runtime config activation planning', () => {
 
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
-      firstPartyModelToolsPluginId,
       selectedPlugin.manifest.id,
     ]);
     expect(configured.activation.defaultMemoryProvider).toBe(

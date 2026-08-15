@@ -3,7 +3,6 @@ import {describe, expect, it} from 'vitest';
 
 import {
   createDecisionContext,
-  createDefaultRoleModelPluginToolDefinitions,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelPluginToolDefinitions,
@@ -12,10 +11,7 @@ import {
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
   roleModelMalformedOutputRejectionReason,
-  roleModelMalformedToolCallRejectionReason,
-  type RoleModelPluginToolDefinition,
-  roleModelTerminalEmptyOutputRejectionDetails,
-  roleModelUnsupportedEffectRejectionReason,
+  roleModelProviderErrorRejectionReason,
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
 import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
@@ -83,25 +79,33 @@ describe('role-model contracts', () => {
     },
   );
 
-  it.each([
-    'Adapter raw output must include string rawOutputText.',
-    'Role-model adapter provider exchange is malformed.',
-    'Adapter rejection must be replayable from rawOutputText.',
-    'Role-model adapter native tool-call argument errors are malformed.',
-  ])('replays malformed adapter evidence detail %s', details => {
+  it('replays a provider error that left no raw output', () => {
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
         rawOutputText: '',
-        providerMetadata: undefined,
         decisionResult: createRejectedRoleModelDecisionResult(
-          roleModelMalformedOutputRejectionReason,
-          details,
+          roleModelProviderErrorRejectionReason,
+          'upstream 503',
         ),
       }),
     ).toBe(true);
   });
 
-  it('keeps the real host default allowed tools unique and ordered', () => {
+  it('does not replay a rejection its raw output re-parses differently', () => {
+    expect(
+      isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText: JSON.stringify({
+          toolCalls: [{name: visibleReplyModelToolName, input: {text: 'hi'}}],
+        }),
+        decisionResult: createRejectedRoleModelDecisionResult(
+          roleModelMalformedOutputRejectionReason,
+          'Adapter output must be valid JSON.',
+        ),
+      }),
+    ).toBe(false);
+  });
+
+  it('offers visible_reply ahead of the host plugin tools', () => {
     const pluginHost = createDefaultProject02PluginHost();
     const identity = createRuntimeEventIdentity({
       eventId: 'evt_default_allowed_tools',
@@ -122,26 +126,32 @@ describe('role-model contracts', () => {
       runtimePluginListToolName,
       characterStatePatchModelToolName,
     ]);
+    expect(
+      inputEnvelope.pluginToolDefinitions.map(definition => definition.name),
+    ).not.toContain(visibleReplyModelToolName);
+    expect(inputEnvelope.toolDefinitions.map(tool => tool.name)).toEqual(
+      inputEnvelope.allowedTools,
+    );
   });
 
-  it('rejects duplicate explicit allowed tools', () => {
-    const identity = createRuntimeEventIdentity({
-      eventId: 'evt_duplicate_allowed_tools',
-      traceId: 'trace_duplicate_allowed_tools',
-      createdAt: '2026-06-15T00:00:00.000Z',
-    });
-
+  it('refuses a plugin tool that takes a built-in name', () => {
     expect(() =>
-      createRoleModelInputEnvelope({
-        event: createUserMessageRuntimeEvent('hello', identity),
-        decisionContext: createDecisionContext({
-          sessionId: 'session-duplicate-allowed-tools',
-          characterSnapshot: testCharacterProfile,
-        }),
-        allowedTools: [visibleReplyModelToolName, visibleReplyModelToolName],
-        pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
-      }),
-    ).toThrow('Role-model allowedTools must not contain duplicates.');
+      createRoleModelPluginToolDefinitions([
+        {
+          pluginId: 'impostor.fixture',
+          name: visibleReplyModelToolName,
+          description: 'A plugin cannot speak for the character.',
+          inputContract: {
+            type: 'object',
+            properties: {},
+            required: [],
+            additionalProperties: false,
+          },
+          validationOwner: 'plugin_host',
+          requiresConfirmation: false,
+        },
+      ]),
+    ).toThrow('is a built-in model tool and cannot be provided by a plugin');
   });
 
   it('accepts several visible replies in one model response', () => {
@@ -227,7 +237,6 @@ describe('role-model contracts', () => {
   });
 
   it('accepts character_state.patch as executable plugin-owned input', () => {
-    const pluginHost = createDefaultProject02PluginHost();
     const result = parseRoleModelDecision(
       JSON.stringify({
         toolCalls: [
@@ -239,8 +248,6 @@ describe('role-model contracts', () => {
           },
         ],
       }),
-      [characterStatePatchModelToolName],
-      pluginHost.pluginToolDefinitions(),
     );
 
     expect(result).toMatchObject({
@@ -258,102 +265,98 @@ describe('role-model contracts', () => {
     });
   });
 
-  it('accepts top-level text only when no tool calls are present', () => {
+  it('keeps the model text next to its tool calls', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
-        toolCalls: [],
-        text: 'folded model note',
+        toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
+        text: 'Let me check what I remember.',
       }),
     );
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       status: 'accepted',
       decision: {
-        toolCalls: [],
-      },
-      nonCommittedText: 'folded model note',
-    });
-  });
-
-  it('rejects empty top-level text when no tool calls are present', () => {
-    const result = parseRoleModelDecision(
-      JSON.stringify({
-        toolCalls: [],
-        text: '',
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: roleModelTerminalEmptyOutputRejectionDetails,
+        version: roleModelDecisionContractVersion,
+        toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
+        text: 'Let me check what I remember.',
       },
     });
   });
 
-  it('rejects whitespace-only top-level text when no tool calls are present', () => {
+  it('drops blank text next to tool calls', () => {
     const result = parseRoleModelDecision(
       JSON.stringify({
-        toolCalls: [],
+        toolCalls: [{name: visibleReplyModelToolName, input: {text: 'hi'}}],
         text: ' \n\t ',
       }),
     );
 
+    expect(result).toMatchObject({status: 'accepted'});
+    expect(
+      result.status === 'accepted' ? result.decision : undefined,
+    ).not.toHaveProperty('text');
+  });
+
+  it('refuses a round that neither replies nor calls a tool', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({toolCalls: [], text: 'folded model note'}),
+    );
+
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
         reason: roleModelMalformedOutputRejectionReason,
-        details: roleModelTerminalEmptyOutputRejectionDetails,
+        details:
+          'Decision toolCalls must not be empty: reply with visible_reply or call a tool.',
       },
     });
   });
 
-  it('replays final visible replies with prior required plugin observations from the input envelope', () => {
-    const requiredToolName = 'memory.lookup';
-    const pluginToolDefinitions = [
-      ...createDefaultRoleModelPluginToolDefinitions(),
-      {
-        pluginId: 'memory',
-        name: requiredToolName,
-        description: 'Look up relevant memory before answering.',
-        inputContract: {
-          type: 'object',
-          properties: {},
-          required: [],
-          additionalProperties: true,
-        },
-        validationOwner: 'plugin_host',
-        requiresConfirmation: false,
-      },
-    ] satisfies readonly RoleModelPluginToolDefinition[];
-    const allowedTools = [visibleReplyModelToolName, requiredToolName];
-    const rawOutputText = JSON.stringify({
-      toolCalls: [
-        {
-          name: visibleReplyModelToolName,
-          input: {
-            text: 'Got it.',
-          },
-        },
-      ],
-    });
-    const decisionResult = parseRoleModelDecision(
-      rawOutputText,
-      allowedTools,
-      pluginToolDefinitions,
+  it('refuses a blank visible_reply', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [{name: visibleReplyModelToolName, input: {text: '   '}}],
+      }),
     );
 
-    expect(decisionResult).toMatchObject({
-      status: 'accepted',
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details: 'visible_reply text must not be empty.',
+      },
     });
+  });
+
+  it('hands a native tool call with non-object arguments back as malformed output', () => {
+    const result = parseRoleModelDecision(
+      JSON.stringify({
+        toolCalls: [{name: 'memory.search', input: '{"query": nope'}],
+      }),
+    );
+
+    expect(result).toMatchObject({
+      status: 'rejected',
+      rejection: {
+        reason: roleModelMalformedOutputRejectionReason,
+        details:
+          'Decision toolCalls[0].input for tool "memory.search" must be a JSON object; the tool call\'s arguments were not one.',
+      },
+    });
+  });
+
+  it('replays an accepted decision from its raw output', () => {
+    const rawOutputText = JSON.stringify({
+      toolCalls: [{name: visibleReplyModelToolName, input: {text: 'Got it.'}}],
+      text: 'a note',
+    });
+    const decisionResult = parseRoleModelDecision(rawOutputText);
+
+    expect(decisionResult).toMatchObject({status: 'accepted'});
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
         rawOutputText,
-        providerMetadata: undefined,
         decisionResult,
-        allowedTools,
-        pluginToolDefinitions,
       }),
     ).toBe(true);
   });
@@ -378,71 +381,9 @@ describe('role-model contracts', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
-        reason: roleModelMalformedToolCallRejectionReason,
+        reason: roleModelMalformedOutputRejectionReason,
         details:
           'Model tool "memory.capture" input exceeds the JSON container entry limit.',
-      },
-    });
-  });
-
-  it('rejects top-level text when tool calls are present', () => {
-    const result = parseRoleModelDecision(
-      JSON.stringify({
-        toolCalls: [
-          {
-            name: visibleReplyModelToolName,
-            input: {
-              text: 'committed reply',
-            },
-          },
-        ],
-        text: 'second non-committed reply',
-      }),
-    );
-
-    expect(result).toMatchObject({
-      status: 'rejected',
-      rejection: {
-        reason: roleModelMalformedOutputRejectionReason,
-        details: 'Decision text is only allowed when toolCalls is empty.',
-      },
-    });
-  });
-
-  it('accepts executable tools omitted from allowedTools; routing enforces the allowlist', () => {
-    const memoryUnknownTool = {
-      pluginId: 'memory',
-      name: 'memory.unknown',
-      description: 'Exercise a defined but unavailable memory tool.',
-      inputContract: {
-        type: 'object',
-        properties: {},
-        required: [],
-        additionalProperties: true,
-      },
-      validationOwner: 'plugin_host',
-      requiresConfirmation: false,
-    } satisfies RoleModelPluginToolDefinition;
-    const result = parseRoleModelDecision(
-      JSON.stringify({
-        version: roleModelDecisionContractVersion,
-        toolCalls: [
-          {
-            name: 'memory.unknown',
-            input: {
-              query: 'Mira',
-            },
-          },
-        ],
-      }),
-      [visibleReplyModelToolName],
-      [...createDefaultRoleModelPluginToolDefinitions(), memoryUnknownTool],
-    );
-
-    expect(result).toMatchObject({
-      status: 'accepted',
-      decision: {
-        toolCalls: [{name: 'memory.unknown', input: {query: 'Mira'}}],
       },
     });
   });
@@ -458,7 +399,7 @@ describe('role-model contracts', () => {
     expect(result).toMatchObject({
       status: 'rejected',
       rejection: {
-        reason: roleModelUnsupportedEffectRejectionReason,
+        reason: roleModelMalformedOutputRejectionReason,
         details: 'Decision includes unsupported fields: sideEffect.',
       },
     });

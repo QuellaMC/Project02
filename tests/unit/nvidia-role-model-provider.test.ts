@@ -4,7 +4,6 @@ import {describe, expect, it, vi} from 'vitest';
 
 import {
   createDecisionContext,
-  createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
   renderRoleModelTurnContext,
   type ConversationTurn,
@@ -250,7 +249,7 @@ describe('NVIDIA role-model provider', () => {
     expect(JSON.parse(output.rawOutputText)).toEqual({toolCalls: []});
   });
 
-  it('carries unparseable visible_reply arguments as an empty reply call', async () => {
+  it('passes native tool arguments that are not a JSON object to the parser as written', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
         ok: true,
@@ -293,12 +292,9 @@ describe('NVIDIA role-model provider', () => {
     );
 
     expect(output.rejection).toBeUndefined();
-    expect(JSON.parse(output.rawOutputText)).toMatchObject({
+    expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
-        {
-          name: visibleReplyModelToolName,
-          input: {text: ''},
-        },
+        {name: visibleReplyModelToolName, input: '{"text": not-json'},
       ],
     });
   });
@@ -828,58 +824,6 @@ describe('NVIDIA role-model provider', () => {
       },
     });
     expect(output.providerExchange?.finishReason).toBe('stop');
-    expect(output.providerExchange?.outputNormalization).toEqual({
-      source: 'terminal_assistant_content',
-      committed: false,
-    });
-  });
-
-  it('keeps terminal assistant content non-committed when visible_reply is unavailable', async () => {
-    let capturedBody: unknown;
-    const fetchClient: NvidiaFetchClient = (_url, request) => {
-      capturedBody = JSON.parse(request.body);
-
-      return Promise.resolve({
-        ok: true,
-        status: 200,
-        json() {
-          return Promise.resolve({
-            choices: [
-              {
-                finish_reason: 'stop',
-                message: {
-                  role: 'assistant',
-                  content: 'Internal terminal model text.',
-                },
-              },
-            ],
-          });
-        },
-        text() {
-          return Promise.resolve('');
-        },
-      });
-    };
-    const adapter = createNvidiaRoleModelProviderAdapter({
-      apiKey: 'secret',
-      fetchClient,
-      model: 'nvidia/test-model',
-    });
-    const inputEnvelope = createNvidiaNoVisibleReplyInputEnvelope();
-    const output = await adapter.invoke(
-      inputEnvelope,
-      testInvocation(inputEnvelope),
-    );
-
-    expect(capturedBody).not.toHaveProperty('tools');
-    expect(JSON.parse(output.rawOutputText)).toEqual({
-      toolCalls: [],
-      text: 'Internal terminal model text.',
-    });
-    expect(output.providerExchange?.outputNormalization).toEqual({
-      source: 'terminal_assistant_content',
-      committed: false,
-    });
   });
 
   it('scrubs leaked think blocks before visible_reply normalization', async () => {
@@ -1148,7 +1092,7 @@ describe('NVIDIA role-model provider', () => {
     expect(output.rawOutputText).toBe('');
   });
 
-  it('normalizes native assistant tool calls and content without top-level text', async () => {
+  it('keeps assistant content next to native tool calls as the decision text', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
         ok: true,
@@ -1213,11 +1157,7 @@ describe('NVIDIA role-model provider', () => {
           },
         },
       ],
-    });
-    expect(rawDecision).not.toHaveProperty('text');
-    expect(output.providerExchange?.outputNormalization).toEqual({
-      source: 'native_tool_calls',
-      committed: false,
+      text: 'Checking the available plugins.',
     });
     expect(output.nativeAssistantMessage?.tool_calls).toMatchObject([
       {
@@ -1237,7 +1177,7 @@ describe('NVIDIA role-model provider', () => {
     ]);
   });
 
-  it('does not duplicate visible_reply when native tool calls already include it', async () => {
+  it('keeps content next to a native visible_reply as text, not as a second reply', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({
         ok: true,
@@ -1289,8 +1229,8 @@ describe('NVIDIA role-model provider', () => {
           },
         },
       ],
+      text: 'Extra assistant content.',
     });
-    expect(rawDecision).not.toHaveProperty('text');
   });
 
   it('carries a non-finite native tool argument through as null', async () => {
@@ -1336,7 +1276,7 @@ describe('NVIDIA role-model provider', () => {
     );
 
     // JSON has no value for the provider's 1e999, so it arrives as null.
-    expect(JSON.parse(output.rawOutputText)).toEqual({
+    expect(JSON.parse(output.rawOutputText)).toMatchObject({
       toolCalls: [
         {
           name: 'runtime.plugin.list',
@@ -1345,7 +1285,6 @@ describe('NVIDIA role-model provider', () => {
       ],
     });
     expect(output.rejection).toBeUndefined();
-    expect(output.nativeToolCallArgumentErrors).toBeUndefined();
     expect(output.providerMetadata?.error).toBeUndefined();
     expect(output.providerMetadata?.response?.status).toBe(200);
   });
@@ -1490,7 +1429,7 @@ function createNvidiaAliasCollisionInputEnvelope() {
       characterSnapshot: testCharacterProfile,
     }),
     pluginToolDefinitions: [
-      ...createDefaultRoleModelPluginToolDefinitions(),
+      ...[],
       createAliasCollisionToolDefinition({
         pluginId: 'memory_alias_dot',
         name: 'memory.search',
@@ -1504,24 +1443,6 @@ function createNvidiaAliasCollisionInputEnvelope() {
         name: 'memory_search_2',
       }),
     ],
-  });
-}
-
-function createNvidiaNoVisibleReplyInputEnvelope() {
-  return createRoleModelInputEnvelope({
-    event: createUserMessageRuntimeEvent(
-      'hello',
-      createRuntimeEventIdentity({
-        eventId: 'evt_nvidia_no_visible_reply',
-        traceId: 'trace_nvidia_no_visible_reply',
-        createdAt: '2026-06-15T00:00:00.000Z',
-      }),
-    ),
-    decisionContext: createDecisionContext({
-      sessionId: 'session-nvidia-no-visible-reply',
-      characterSnapshot: testCharacterProfile,
-    }),
-    pluginToolDefinitions: [],
   });
 }
 

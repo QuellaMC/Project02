@@ -15,9 +15,6 @@ describe('plugin type barrel startup safety', () => {
     const output = `${result.stdout}\n${result.stderr}`;
 
     expect(output).not.toContain('ReferenceError');
-    expect(output).not.toContain(
-      "Cannot access 'roleModelInvalidVisibleReplyRejectionReason' before initialization",
-    );
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Unknown chat option: --help.');
   });
@@ -37,9 +34,6 @@ describe('plugin type barrel startup safety', () => {
     const output = `${result.stdout}\n${result.stderr}`;
 
     expect(output).not.toContain('ReferenceError');
-    expect(output).not.toContain(
-      "Cannot access 'roleModelInvalidVisibleReplyRejectionReason' before initialization",
-    );
     expect(result.status).toBe(0);
   });
 
@@ -47,16 +41,16 @@ describe('plugin type barrel startup safety', () => {
     [
       './src/plugins/api/index.ts',
       './src/plugins/policy/tool-policy.ts',
-      './src/plugins/builtin/model-tools/index.ts',
+      './src/plugins/builtin/plugin-management/index.ts',
     ],
     [
-      './src/plugins/builtin/model-tools/index.ts',
+      './src/plugins/builtin/plugin-management/index.ts',
       './src/plugins/api/index.ts',
       './src/plugins/policy/tool-policy.ts',
     ],
     [
       './src/plugins/policy/tool-policy.ts',
-      './src/plugins/builtin/model-tools/index.ts',
+      './src/plugins/builtin/plugin-management/index.ts',
       './src/plugins/api/index.ts',
     ],
   ])(
