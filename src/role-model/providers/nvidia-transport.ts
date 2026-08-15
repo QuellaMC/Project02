@@ -257,3 +257,37 @@ function providerErrorMessageFromBody(body: unknown): string | undefined {
 
   return undefined;
 }
+
+export function redactProviderSecret(
+  message: string,
+  secret: string | undefined,
+): string {
+  if (secret === undefined || secret.length === 0) {
+    return message;
+  }
+
+  return message.split(secret).join('[redacted]');
+}
+
+export async function defaultFetchClient(
+  url: string,
+  request: NvidiaFetchRequest,
+): Promise<NvidiaFetchResponse> {
+  const response = await fetch(url, {
+    method: request.method,
+    headers: request.headers,
+    body: request.body,
+    signal: request.signal,
+  });
+
+  return Object.freeze({
+    ok: response.ok,
+    status: response.status,
+    async json() {
+      return await response.json();
+    },
+    async text() {
+      return await response.text();
+    },
+  } satisfies NvidiaFetchResponse);
+}

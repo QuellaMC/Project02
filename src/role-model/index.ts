@@ -62,6 +62,8 @@ export {
   createRoleModelAdapterRawOutput,
   type RoleModelAdapter,
   type RoleModelAdapterInvocation,
+  type RoleModelTextCompletionRequest,
+  type RoleModelTextCompletionResult,
   type RoleModelAdapterRawOutput,
   type RoleModelNativeToolCallArgumentError,
 } from './api/adapter.ts';

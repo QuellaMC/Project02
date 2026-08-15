@@ -79,14 +79,15 @@ export {
 } from './nvidia-transport.ts';
 import {
   createNvidiaRequestDeadline,
+  defaultFetchClient,
   normalizeNvidiaRequestTimeoutMs,
   normalizeNvidiaTransportRetryDelays,
   NvidiaRequestTimeoutError,
   performNvidiaTransportRequest,
+  redactProviderSecret,
   type NvidiaFetchClient,
-  type NvidiaFetchRequest,
-  type NvidiaFetchResponse,
 } from './nvidia-transport.ts';
+import {createNvidiaTextCompletion} from './nvidia-completion.ts';
 
 export type CreateNvidiaRoleModelProviderAdapterOptions =
   NvidiaRoleModelProviderConfig & {
@@ -131,6 +132,14 @@ export function createNvidiaRoleModelProviderAdapter(
   );
 
   return Object.freeze({
+    completeText: createNvidiaTextCompletion({
+      ...(options.apiKey === undefined ? {} : {apiKey: options.apiKey}),
+      endpoint,
+      model,
+      fetchClient,
+      requestTimeoutMs,
+      transportRetryDelaysMs,
+    }),
     async invoke(inputEnvelope, invocation) {
       if (options.apiKey === undefined || options.apiKey.length === 0) {
         return createProviderRejectedOutput({
@@ -1010,17 +1019,6 @@ function redactProviderBoundaryJson(value: unknown): RuntimePluginJsonValue {
   });
 }
 
-function redactProviderSecret(
-  message: string,
-  secret: string | undefined,
-): string {
-  if (secret === undefined || secret.length === 0) {
-    return message;
-  }
-
-  return message.split(secret).join('[redacted]');
-}
-
 function optionalNvidiaProviderEnvValue(
   value: string | undefined,
 ): string | undefined {
@@ -1029,27 +1027,4 @@ function optionalNvidiaProviderEnvValue(
   }
 
   return value;
-}
-
-async function defaultFetchClient(
-  url: string,
-  request: NvidiaFetchRequest,
-): Promise<NvidiaFetchResponse> {
-  const response = await fetch(url, {
-    method: request.method,
-    headers: request.headers,
-    body: request.body,
-    signal: request.signal,
-  });
-
-  return Object.freeze({
-    ok: response.ok,
-    status: response.status,
-    async json() {
-      return await response.json();
-    },
-    async text() {
-      return await response.text();
-    },
-  } satisfies NvidiaFetchResponse);
 }

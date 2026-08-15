@@ -30,11 +30,33 @@ export type RoleModelAdapterInvocation = {
   readonly conversationHistory: readonly ConversationTurn[];
 };
 
+export type RoleModelTextCompletionRequest = {
+  readonly instructions: string;
+  readonly input: string;
+  readonly maxOutputChars: number;
+};
+
+export type RoleModelTextCompletionResult =
+  | {
+      readonly status: 'completed';
+      readonly text: string;
+      readonly provider: {readonly name: string; readonly model?: string};
+    }
+  | {readonly status: 'failed'; readonly reason: string};
+
 export type RoleModelAdapter = {
   invoke(
     inputEnvelope: RoleModelInputEnvelope,
     invocation: RoleModelAdapterInvocation,
   ): Promise<RoleModelAdapterRawOutput> | RoleModelAdapterRawOutput;
+  /**
+   * A plain completion on the same model, no tools and no persona; the
+   * runtime uses it to condense conversation. Absent when the provider has no
+   * model to ask. Provider failures come back as a failed result, never a throw.
+   */
+  completeText?(
+    request: RoleModelTextCompletionRequest,
+  ): Promise<RoleModelTextCompletionResult>;
 };
 
 export function createRoleModelAdapterRawOutput(
