@@ -2381,8 +2381,17 @@ describe('chat CLI rejected-turn recovery', () => {
         invoke() {
           invocations += 1;
 
+          // A provider failure is nothing the model can correct, so the turn
+          // ends; the next turn still runs.
           if (invocations === 1) {
-            return {rawOutputText: 'this is not a decision object'};
+            return {
+              rawOutputText: '',
+              providerMetadata: {
+                provider: 'nvidia',
+                error: {code: 'http_error', message: 'upstream 503'},
+              },
+              rejection: {reason: 'provider_error', details: 'upstream 503'},
+            };
           }
 
           return {
@@ -2402,6 +2411,43 @@ describe('chat CLI rejected-turn recovery', () => {
     expect(exitCode).toBe(0);
     expect(stderr).toContain('Error: ');
     expect(stdout).toContain('second turn reply');
+    expect(invocations).toBe(2);
+  });
+
+  it('hands a reply the runtime could not use back to the model within the same turn', async () => {
+    let stdout = '';
+    let stderr = '';
+    let invocations = 0;
+    const exitCode = await runChatCli({
+      characterProfile: testCharacterProfile,
+      pluginHost: createDefaultProject02PluginHost(),
+      stdin: Readable.from(['first\n/exit\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      roleModelAdapter: {
+        invoke() {
+          invocations += 1;
+
+          return invocations === 1
+            ? {rawOutputText: 'this is not a decision object'}
+            : {
+                rawOutputText: JSON.stringify({
+                  toolCalls: [
+                    {name: 'visible_reply', input: {text: 'corrected reply'}},
+                  ],
+                }),
+              };
+        },
+      },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stderr).not.toContain('Error: ');
+    expect(stdout).toContain('corrected reply');
     expect(invocations).toBe(2);
   });
 });

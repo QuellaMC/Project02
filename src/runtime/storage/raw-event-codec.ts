@@ -7,9 +7,7 @@ import {
   VisibleMessageTextValidationError,
 } from '../../core/index.ts';
 import {
-  createAcceptedRoleModelDecisionResult,
   createParsedRoleModelDecisionSnapshot,
-  createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
@@ -23,15 +21,12 @@ import {
   roleModelPluginToolRejectedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
-  roleModelDecisionRejectionReasons,
   roleModelInvalidVisibleReplyRejectionReason,
   type CharacterDecision,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
   type RoleModelAllowedToolName,
-  type RoleModelDecisionRejection,
   type RoleModelDecisionRejectionReason,
-  type RoleModelDecisionResult,
   type RoleModelInputEnvelope,
   type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
@@ -40,12 +35,7 @@ import {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelToolObservation,
 } from '../../role-model/index.ts';
-import {
-  createVisibleReplyModelToolCall,
-  visibleReplyModelToolName,
-  type PluginModelToolCall,
-  type ModelToolCall,
-} from '../../role-model/index.ts';
+import {visibleReplyModelToolName} from '../../role-model/index.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginEvidenceSnapshot,
@@ -55,7 +45,6 @@ import {
   type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginJsonObject,
-  type RuntimePluginJsonValue,
   type RuntimePluginSourceReference,
   type RuntimePluginToolCallResult,
   type RuntimePluginTurnEvidenceSnapshot,
@@ -75,28 +64,23 @@ import {
   isTerminalRawEventLogRecordKind,
   rawEventLogRecordKindValues,
   runtimeTurnStatusValues,
-  type AcceptedRoleModelCommitValidationResult,
   type RawEventLogPayloadSummary,
   type RawEventLogRecord,
   type RawEventLogRecordKind,
-  type RejectedRoleModelCommitValidationResult,
-  type RoleModelCommitValidationResult,
   type RoleModelCommitValidationSnapshot,
   type RuntimeTurnStatus,
 } from '../evidence/records.ts';
-import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-} from '../../shared/json-boundary.ts';
 import {
   isOneOf,
   optionalCommittedMessage,
   optionalRecordBoolean,
   optionalRecordNumber,
   optionalRecordString,
-  optionalRecordStringAllowingEmpty,
+  optionalStringArray,
   requiredArray,
-  requiredNormalizedVisibleMessageText,
+  requiredBoundedJsonObject,
+  requiredBoundedJsonValue,
+  requiredLiteralString,
   requiredRecordNumber,
   requiredRecordStringAllowingEmpty,
   requiredRuntimeEventIdentity,
@@ -104,6 +88,10 @@ import {
   throwMalformedRecord,
 } from './codec-primitives.ts';
 import {requiredDecisionContext} from './decision-context-codec.ts';
+import {
+  requiredRoleModelCommitValidationResult,
+  requiredRoleModelDecisionResult,
+} from './decision-result-codec.ts';
 import {optionalRoleModelProviderMetadataOption} from './provider-metadata-codec.ts';
 import {
   assertSessionContinuationRawEventSemantics,
@@ -379,32 +367,6 @@ function assertTerminalRawEventSemantics(options: {
   if (options.status !== 'rejected') {
     throwMalformedRecord('status');
   }
-}
-
-function optionalStringArray(
-  value: unknown,
-  key: string,
-): readonly string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    throwMalformedRecord(key);
-  }
-
-  const strings: string[] = [];
-  const items = value as readonly unknown[];
-
-  for (const item of items) {
-    if (typeof item !== 'string') {
-      throwMalformedRecord(key);
-    }
-
-    strings.push(item);
-  }
-
-  return Object.freeze(strings);
 }
 
 function optionalRawEventPayloadSummary(
@@ -1383,216 +1345,10 @@ function optionalRoleModelProviderExchangeOption(value: unknown): {
   };
 }
 
-function requiredRoleModelDecisionResult(
-  value: unknown,
-): RoleModelDecisionResult {
-  if (!isRecord(value)) {
-    throwMalformedRecord('roleModelDecisionResult');
-  }
-
-  const status = requiredRecordString(value, 'status', 'malformed_record');
-
-  if (status === 'accepted') {
-    const nonCommittedText = optionalRecordStringAllowingEmpty(
-      value,
-      'nonCommittedText',
-      'malformed_record',
-    );
-
-    return createAcceptedRoleModelDecisionResult(
-      requiredCharacterDecision(value['decision']),
-      {
-        ...(nonCommittedText === undefined ? {} : {nonCommittedText}),
-      },
-    );
-  }
-
-  if (status === 'rejected') {
-    const rejection = requiredRoleModelDecisionRejection(value['rejection']);
-    const requestedToolNames = optionalStringArray(
-      value['requestedToolNames'],
-      'roleModelDecisionResult.requestedToolNames',
-    );
-
-    if (
-      requestedToolNames?.some(
-        toolName => !isRoleModelAllowedToolName(toolName),
-      ) === true
-    ) {
-      throwMalformedRecord('roleModelDecisionResult.requestedToolNames');
-    }
-
-    return createRejectedRoleModelDecisionResult(
-      rejection.reason,
-      rejection.details,
-      {
-        ...(requestedToolNames === undefined ? {} : {requestedToolNames}),
-      },
-    );
-  }
-
-  throwMalformedRecord('status');
-}
-
-function requiredCharacterDecision(value: unknown): CharacterDecision {
-  if (!isRecord(value)) {
-    throwMalformedRecord('decision');
-  }
-
-  if (value['version'] === roleModelDecisionContractVersion) {
-    return Object.freeze({
-      version: roleModelDecisionContractVersion,
-      toolCalls: Object.freeze(
-        requiredArray(value['toolCalls'], 'decision.toolCalls').map(
-          requiredModelToolCall,
-        ),
-      ),
-    } satisfies CharacterDecision);
-  }
-
-  throwMalformedRecord('decision.version');
-}
-
-function requiredModelToolCall(value: unknown): ModelToolCall {
-  if (!isRecord(value)) {
-    throwMalformedRecord('decision.toolCalls');
-  }
-
-  const name = requiredRecordString(value, 'name', 'malformed_record');
-  const input = value['input'];
-
-  if (!isRecord(input)) {
-    throwMalformedRecord('decision.toolCalls.input');
-  }
-
-  if (name === visibleReplyModelToolName) {
-    const text = requiredRecordStringAllowingEmpty(
-      input,
-      'text',
-      'malformed_record',
-    );
-
-    return createVisibleReplyModelToolCall(text);
-  }
-
-  return Object.freeze({
-    name,
-    input: requiredBoundedJsonObject(input, 'decision.toolCalls.input'),
-  } satisfies PluginModelToolCall);
-}
-
 /**
  * Stored JSON is corruption-controlled input, so every decoded value passes
  * the same depth, node, entry, and byte limits a live tool call would.
  */
-function requiredBoundedJsonObject(
-  value: unknown,
-  field: string,
-): RuntimePluginJsonObject {
-  try {
-    return createJsonBoundaryObjectSnapshot(value, {field});
-  } catch (error: unknown) {
-    if (error instanceof TypeError) {
-      throwMalformedRecord(field);
-    }
-
-    throw error;
-  }
-}
-
-function requiredBoundedJsonValue(
-  value: unknown,
-  field: string,
-): RuntimePluginJsonValue {
-  try {
-    return createJsonBoundarySnapshot(value, {field});
-  } catch (error: unknown) {
-    if (error instanceof TypeError) {
-      throwMalformedRecord(field);
-    }
-
-    throw error;
-  }
-}
-
-function requiredRoleModelCommitValidationResult(
-  value: unknown,
-): RoleModelCommitValidationResult {
-  if (!isRecord(value)) {
-    throwMalformedRecord('commitValidation.result');
-  }
-
-  const status = requiredRecordString(value, 'status', 'malformed_record');
-
-  if (status === 'accepted') {
-    const acceptedVisibleReplyText =
-      value['acceptedVisibleReplyText'] === undefined
-        ? undefined
-        : requiredNormalizedVisibleMessageText(
-            value,
-            'acceptedVisibleReplyText',
-          );
-
-    return Object.freeze({
-      status: 'accepted',
-      ...(acceptedVisibleReplyText === undefined
-        ? {}
-        : {acceptedVisibleReplyText}),
-    } satisfies AcceptedRoleModelCommitValidationResult);
-  }
-
-  if (status === 'rejected') {
-    return Object.freeze({
-      status: 'rejected',
-      rejection: requiredRoleModelDecisionRejection(value['rejection']),
-    } satisfies RejectedRoleModelCommitValidationResult);
-  }
-
-  throwMalformedRecord('status');
-}
-
-function requiredRoleModelDecisionRejection(
-  value: unknown,
-): RoleModelDecisionRejection {
-  if (!isRecord(value)) {
-    throwMalformedRecord('rejection');
-  }
-
-  const reason = requiredRoleModelDecisionRejectionReason(value['reason']);
-  const details = optionalRecordStringAllowingEmpty(
-    value,
-    'details',
-    'malformed_record',
-  );
-
-  return Object.freeze({
-    reason,
-    ...(details === undefined ? {} : {details}),
-  } satisfies RoleModelDecisionRejection);
-}
-
-function requiredRoleModelDecisionRejectionReason(
-  value: unknown,
-): RoleModelDecisionRejectionReason {
-  if (isOneOf(value, roleModelDecisionRejectionReasons)) {
-    return value;
-  }
-
-  throwMalformedRecord('rejection.reason');
-}
-
-function requiredLiteralString(
-  record: Record<string, unknown>,
-  key: string,
-  expectedValue: string,
-  errorField: string,
-): void {
-  const value = requiredRecordString(record, key, 'malformed_record');
-
-  if (value !== expectedValue) {
-    throwMalformedRecord(errorField);
-  }
-}
 
 function optionalPayloadSummaryString(
   record: Record<string, unknown>,

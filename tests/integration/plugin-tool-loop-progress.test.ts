@@ -550,8 +550,8 @@ describe('plugin-driven tool loop progress and evidence', () => {
       roleModelAdapter: adapter,
     });
 
-    // An empty visible_reply is a correctable model error, so the loop burns a
-    // feedback round instead of rejecting the turn.
+    // An empty visible_reply is the model's own doing, so the error goes back
+    // to it as another round instead of ending the turn.
     expect(result.status).toBe('completed');
     expect(
       logStore.conversationMessages().map(message => message.text),
