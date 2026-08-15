@@ -69,13 +69,14 @@ declarations or defaults change.
 Plugin manifests declare `config.scope`:
 
 - `global_with_character_overrides` permits global enablement and
-  non-secret settings, with per-character overrides.
-- `character_only` permits enablement and non-secret settings only in a
-  character package or character config.
+  settings, with per-character overrides.
+- `character_only` permits enablement and settings only in a character
+  package or character config -- secrets included, so such a plugin is
+  wholly self-contained.
 
-Secret references are always global-only. A character-only plugin may
-read its secret from the home config, but its enablement and non-secret
-settings belong to the character.
+A package still carries no credentials of its own: secret fields are the
+operator's, set with `runtime-config secret set` (add `--character <id>`
+for a character's own env file, which merges over the shared one).
 
 Rules the loader enforces beyond the schema: the directory name must
 equal `identity.id`, and the same id must not be defined in more than one

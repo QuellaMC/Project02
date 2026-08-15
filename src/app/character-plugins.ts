@@ -88,6 +88,23 @@ export function planCharacterPackagePluginMaterialization(options: {
     );
   }
 
+  // A package is a shareable artifact: a credential inside one would be
+  // distributed to every installer. Secrets stay the operator's to enter,
+  // through their env files or their own config.
+  const shippedSecrets = packagedSecretFieldPaths(
+    validated.config,
+    options.pluginManifests,
+  );
+
+  if (shippedSecrets.length > 0) {
+    return invalidMaterialization(
+      shippedSecrets.map(
+        path =>
+          `Character package must not carry a credential for ${path}; secret fields are the operator's to set.`,
+      ),
+    );
+  }
+
   const resolved = resolveRuntimePluginConfigs({
     config: validated.config,
     pluginManifests: options.pluginManifests,
@@ -112,6 +129,27 @@ export function planCharacterPackagePluginMaterialization(options: {
     status: 'ready',
     document: validated.config,
   });
+}
+
+function packagedSecretFieldPaths(
+  config: Project02RuntimeConfig,
+  manifests: readonly RuntimePluginManifest[],
+): readonly string[] {
+  const secretFieldsByPlugin = new Map(
+    manifests.map(manifest => [
+      manifest.id,
+      manifest.config.fields
+        .filter(field => field.secret)
+        .map(field => field.name),
+    ]),
+  );
+
+  return Object.entries(config.plugins ?? {}).flatMap(
+    ([pluginId, pluginConfig]) =>
+      (secretFieldsByPlugin.get(pluginId) ?? [])
+        .filter(fieldName => pluginConfig.config?.[fieldName] !== undefined)
+        .map(fieldName => `plugins.${pluginId}.config.${fieldName}`),
+  );
 }
 
 function validateMaterializationManifests(

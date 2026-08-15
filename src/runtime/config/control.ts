@@ -1,6 +1,7 @@
 import {createRuntimeConfigAuthoredSnapshot} from './mutate.ts';
 import {
   layeredRuntimeConfigFingerprintForScope,
+  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
 } from './overlay.ts';
 import {
@@ -8,7 +9,10 @@ import {
   loadProject02RuntimeConfigForLocation,
   type ResolvedProject02RuntimeLocation,
 } from './location.ts';
-import {resolveLayeredProject02RuntimeConfigWithSnapshot} from './resolve-layered.ts';
+import {
+  resolveLayeredProject02RuntimeConfigWithSnapshot,
+  runtimeConfigEnvWithCharacterSecrets,
+} from './resolve-layered.ts';
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {createRuntimePluginConfigInspectShape} from './inspect.ts';
 import {resolveProject02RuntimeConfig} from './resolve.ts';
@@ -29,7 +33,7 @@ import type {
   RuntimeConfigCharacterScope,
   RuntimeConfigMutationOperation,
   RuntimeConfigValue,
-  RuntimePluginConfigActivationInspectShape,
+  RuntimePluginActivationStatusShape,
   RuntimePluginConfigInspectShape,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
@@ -89,7 +93,7 @@ export function inspectRuntimePluginConfig(options: {
   readonly targetScope: 'global' | 'character';
   readonly manifest: RuntimePluginManifest;
   readonly pluginManifests?: readonly RuntimePluginManifest[];
-  readonly activation?: RuntimePluginConfigActivationInspectShape;
+  readonly activation?: RuntimePluginActivationStatusShape;
   readonly defaultEnabled?: boolean;
 }): RuntimePluginConfigInspectShape {
   assertResolvedProject02HomeAdoptable(options.runtimeLocation);
@@ -130,6 +134,7 @@ export function inspectRuntimePluginConfig(options: {
       globalConfig: mutationBase,
       characterScope,
       overlayConfig,
+      pluginManifests: manifests,
     }),
   });
 }
@@ -139,11 +144,13 @@ function layeredControlFingerprint(options: {
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlayConfig:
     ReturnType<typeof readCharacterOverlayForScope>['overlay'] | undefined;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
 }): string {
   return layeredRuntimeConfigFingerprintForScope({
     globalConfig: options.globalConfig,
     characterScope: options.characterScope,
     overlay: options.overlayConfig,
+    pluginManifests: options.pluginManifests,
   });
 }
 
@@ -158,14 +165,26 @@ export function runtimePluginConfigControlMutation(options: {
   readonly operation: RuntimeConfigMutationOperation;
   readonly validateCandidate: (config: Project02RuntimeConfig) => void;
 } {
-  const field = validateRuntimePluginConfigControlOperation(options);
   const scopeViolation = runtimePluginScopeViolation({
     manifest: options.manifest,
     authoredScope: options.authoredScope ?? 'global',
-    operation: {kind: 'field', fieldName: field.name},
+    operation: {
+      kind: 'field',
+      fieldName: fieldNameOf(options.operation),
+    },
+  });
+  // Unsetting is how a document already holding a value this scope may
+  // not author gets repaired -- including a required field, whose value
+  // this scope was never the place for; refusing it would leave the
+  // operator editing JSON by hand.
+  const scopeRepair =
+    scopeViolation !== undefined && options.operation.kind === 'unset';
+  const field = validateRuntimePluginConfigControlOperation({
+    ...options,
+    ...(scopeRepair ? {allowRequiredUnset: true} : {}),
   });
 
-  if (scopeViolation !== undefined) {
+  if (scopeViolation !== undefined && !scopeRepair) {
     throw new TypeError(scopeViolation.message);
   }
 
@@ -179,10 +198,17 @@ export function runtimePluginConfigControlMutation(options: {
         config,
         manifest: options.manifest,
         runtimeLocation: options.runtimeLocation,
+        operation: options.operation,
         ...(options.env === undefined ? {} : {env: options.env}),
       });
     },
   };
+}
+
+function fieldNameOf(
+  operation: RuntimePluginConfigFieldControlOperation,
+): string {
+  return operation.fieldName;
 }
 
 function runtimePluginConfigMutationOperation(
@@ -218,6 +244,7 @@ function assertRuntimePluginConfigCandidateValid(options: {
   readonly config: Project02RuntimeConfig;
   readonly manifest: RuntimePluginManifest;
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
+  readonly operation: RuntimePluginConfigFieldControlOperation;
   readonly env?: NodeJS.ProcessEnv;
 }): void {
   const loadedConfig: LoadedProject02RuntimeConfig = Object.freeze({
@@ -231,7 +258,21 @@ function assertRuntimePluginConfigCandidateValid(options: {
     runtimeLocation: options.runtimeLocation,
     pluginManifests: [options.manifest],
     skipPluginScopeValidation: true,
-    ...(options.env === undefined ? {} : {env: options.env}),
+    // The runtime resolves this document with the character's env
+    // overlaid; validating a write against anything narrower would
+    // reject an edit the runtime itself accepts. The pending secret sits
+    // on top of both: the file this is validated against is the one this
+    // mutation is about to write.
+    env: {
+      ...runtimeConfigEnvWithCharacterSecrets(
+        options.env,
+        loadCharacterSecretsEnv(options.runtimeLocation.characterScope.dataRoot)
+          .env,
+      ),
+      ...(options.operation.kind === 'secret_set'
+        ? {[options.operation.envVar]: options.operation.secretValue}
+        : {}),
+    },
     validateInactivePluginConfigs: true,
   });
   const blockingDiagnostic = resolved.diagnostics.find(
@@ -252,6 +293,8 @@ export function validateRuntimePluginConfigControlOperation(options: {
   readonly manifest: RuntimePluginManifest;
   readonly actor: RuntimePluginConfigControlActor;
   readonly operation: RuntimePluginConfigFieldControlOperation;
+  /** Set only for a scope repair: removing a value this scope may not hold. */
+  readonly allowRequiredUnset?: boolean;
 }): RuntimePluginConfigField {
   const field = options.manifest.config.fields.find(
     candidate => candidate.name === options.operation.fieldName,
@@ -282,7 +325,13 @@ export function validateRuntimePluginConfigControlOperation(options: {
     return field;
   }
 
-  if (field.secret) {
+  // Removing a pointer is not managing a credential, and it is the one
+  // repair a scope violation leaves the operator; writing one still goes
+  // through the secret command.
+  const operatorClearingSecret =
+    options.operation.kind === 'unset' && options.actor === 'operator';
+
+  if (field.secret && !operatorClearingSecret) {
     throw new TypeError(
       `Plugin config field "${field.name}" is secret and must be managed through the dedicated secret command.`,
     );
@@ -294,7 +343,11 @@ export function validateRuntimePluginConfigControlOperation(options: {
     );
   }
 
-  if (options.operation.kind === 'unset' && field.required) {
+  if (
+    options.operation.kind === 'unset' &&
+    field.required &&
+    options.allowRequiredUnset !== true
+  ) {
     throw new TypeError(
       `Required plugin config field "${field.name}" cannot be unset.`,
     );

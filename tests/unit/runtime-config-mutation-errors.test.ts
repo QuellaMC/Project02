@@ -74,6 +74,7 @@ describe('runtime config mutation error handling', () => {
       });
 
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: resolveRuntimeConfigScopeTarget({
           runtimeLocation,
           env: {PROJECT02_MEMORY_API_KEY: 'secret-value'},

@@ -8,6 +8,8 @@ export type RuntimePluginFactoryInput = {
   readonly pluginId: string;
   readonly manifest: RuntimePluginManifest;
   readonly storeRoot: string;
+  /** Resolved character scope; absent only for direct factory callers. */
+  readonly characterId?: string;
   readonly resolvedConfig: ResolvedPluginRuntimeConfig;
   readonly redactedConfig: RedactedPluginRuntimeConfig;
 };

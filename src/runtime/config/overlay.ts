@@ -1,3 +1,6 @@
+import {parseEnv} from 'node:util';
+
+import {readTextFileSync} from '../../shared/file-system.ts';
 import {describeRealEntry} from '../../shared/real-path.ts';
 import {
   createLocalRuntimeStorageLayout,
@@ -28,6 +31,7 @@ import {
   type RuntimeConfigValue,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
+import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 
 export type LoadedProject02CharacterOverlayConfig = {
   readonly scope: 'character';
@@ -38,6 +42,12 @@ export type LoadedProject02CharacterOverlayConfig = {
   /** Survives failed validation so control can repair the real document. */
   readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
+  /**
+   * This character's own secrets, from the env file beside the overlay.
+   * They merge over the shared env when this character is active, the same
+   * way the overlay document merges over the global config.
+   */
+  readonly secretsEnv: NodeJS.ProcessEnv;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
 
@@ -45,11 +55,64 @@ export function characterOverlayConfigPath(dataRoot: string): string {
   return createLocalRuntimeStorageLayout({storeRoot: dataRoot}).configPath;
 }
 
+export function characterSecretsEnvPath(dataRoot: string): string {
+  return createLocalRuntimeStorageLayout({storeRoot: dataRoot}).envPath;
+}
+
+/**
+ * A symlink here could point at the operator's global env file and hand
+ * its values to character-authored secret refs, so anything but a regular
+ * file loads as empty with the reason named.
+ */
+export function loadCharacterSecretsEnv(dataRoot: string): {
+  readonly env: NodeJS.ProcessEnv;
+  readonly diagnostics: readonly RuntimeConfigDiagnostic[];
+} {
+  const path = characterSecretsEnvPath(dataRoot);
+  const entry = describeRealEntry(path);
+
+  if (entry.kind === 'absent') {
+    return {env: Object.freeze({}), diagnostics: []};
+  }
+
+  if (entry.kind !== 'file') {
+    return {
+      env: Object.freeze({}),
+      diagnostics: [
+        createRuntimeConfigDiagnostic(
+          'error',
+          'runtime_config_character_env_not_regular',
+          `Character secrets env "${path}" must be a regular file inside the character-data directory.`,
+        ),
+      ],
+    };
+  }
+
+  try {
+    return {
+      env: Object.freeze({...parseEnv(readTextFileSync(path))}),
+      diagnostics: [],
+    };
+  } catch {
+    return {
+      env: Object.freeze({}),
+      diagnostics: [
+        createRuntimeConfigDiagnostic(
+          'error',
+          'runtime_config_character_env_unreadable',
+          `Could not read character secrets env at ${path}.`,
+        ),
+      ],
+    };
+  }
+}
+
 function loadProject02CharacterOverlayConfig(options: {
   readonly dataRoot: string;
   readonly characterId: string;
 }): LoadedProject02CharacterOverlayConfig {
   const path = characterOverlayConfigPath(options.dataRoot);
+  const secrets = loadCharacterSecretsEnv(options.dataRoot);
 
   // A dangling symlink is a non-regular entry here, not an absent overlay.
   const overlayEntry = describeRealEntry(path);
@@ -60,7 +123,15 @@ function loadProject02CharacterOverlayConfig(options: {
       scope: 'character',
       characterId: options.characterId,
       source: 'none',
-      diagnostics: Object.freeze([]),
+      secretsEnv: secrets.env,
+      diagnostics: Object.freeze(
+        secrets.diagnostics.map(diagnostic =>
+          withRuntimeConfigDiagnosticOrigin(diagnostic, {
+            scope: 'character',
+            characterId: options.characterId,
+          }),
+        ),
+      ),
     } satisfies LoadedProject02CharacterOverlayConfig);
   }
 
@@ -76,7 +147,9 @@ function loadProject02CharacterOverlayConfig(options: {
       ...options,
       path,
       origin,
+      secretsEnv: secrets.env,
       diagnostics: [
+        ...secrets.diagnostics,
         createRuntimeConfigDiagnostic(
           'error',
           'runtime_config_overlay_symlink',
@@ -94,7 +167,8 @@ function loadProject02CharacterOverlayConfig(options: {
       ...options,
       path,
       origin,
-      diagnostics: [document.diagnostic],
+      secretsEnv: secrets.env,
+      diagnostics: [...secrets.diagnostics, document.diagnostic],
     });
   }
 
@@ -104,11 +178,13 @@ function loadProject02CharacterOverlayConfig(options: {
     ...options,
     path,
     origin,
+    secretsEnv: secrets.env,
     ...(accepted.authoredDocument === undefined
       ? {}
       : {authoredDocument: accepted.authoredDocument}),
     ...(accepted.config === undefined ? {} : {config: accepted.config}),
     diagnostics: [
+      ...secrets.diagnostics,
       ...accepted.diagnostics,
       ...globalOnlyFieldDiagnostics(document.value),
     ],
@@ -121,6 +197,7 @@ function loadedOverlay(options: {
   readonly origin: RuntimeConfigDiagnosticOrigin;
   readonly authoredDocument?: JsonBoundaryObject;
   readonly config?: Project02RuntimeConfig;
+  readonly secretsEnv: NodeJS.ProcessEnv;
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 }): LoadedProject02CharacterOverlayConfig {
   const hasErrors = options.diagnostics.some(
@@ -132,6 +209,7 @@ function loadedOverlay(options: {
     characterId: options.characterId,
     source: 'overlay',
     path: options.path,
+    secretsEnv: options.secretsEnv,
     ...(options.authoredDocument === undefined
       ? {}
       : {authoredDocument: options.authoredDocument}),
@@ -195,13 +273,18 @@ export function layeredRuntimeConfigFingerprintForScope(options: {
   readonly globalConfig: Project02RuntimeConfig | JsonBoundaryObject;
   readonly characterScope: RuntimeConfigCharacterScope | undefined;
   readonly overlay: LoadedProject02CharacterOverlayConfig | undefined;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
 }): string {
   return options.characterScope === undefined || options.overlay === undefined
-    ? createRuntimeConfigFingerprint(options.globalConfig)
+    ? createRuntimeConfigFingerprint(
+        options.globalConfig,
+        options.pluginManifests,
+      )
     : createLayeredRuntimeConfigFingerprint({
         globalConfig: options.globalConfig,
         characterId: options.characterScope.characterId,
         overlayConfig: characterOverlayFingerprintLayer(options.overlay),
+        pluginManifests: options.pluginManifests,
       });
 }
 

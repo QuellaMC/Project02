@@ -404,14 +404,12 @@ function parseCharacterPlugins(value: unknown): CharacterPluginsParseResult {
     }
 
     const configPath = `plugins.config["${pluginId}"]`;
-    const unsafeSecretPath = nestedSecretMarkerPath(pluginConfig, configPath, {
-      rejectPlaintextAllowanceMarker: true,
-    });
+    const unsafeSecretPath = nestedSecretMarkerPath(pluginConfig, configPath);
 
     if (unsafeSecretPath !== undefined) {
       return rejectedDescriptor(
         'invalid_plugins',
-        `Character package ${unsafeSecretPath} must not contain secret references or plaintext-secret markers.`,
+        `Character package ${unsafeSecretPath} must not contain secret references.`,
       );
     }
 

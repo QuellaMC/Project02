@@ -1,0 +1,90 @@
+{
+  "$schema": "../../../../schemas/project02.plugin.schema.json",
+  "format": "project02.plugin.v1",
+  "entry": "./index.ts",
+  "manifest": {
+    "id": "mem0",
+    "displayName": "Mem0 Memory",
+    "version": "1.0.0",
+    "kind": "memory_provider",
+    "description": "Retrieval-driven long-term memory backed by a Mem0 platform account or self-hosted Mem0 server, spoken over its REST API.",
+    "contractVersion": "mvp-008.runtime_plugin.v2",
+    "compatibility": {
+      "hostContractVersions": ["mvp-008.runtime_plugin.v2"]
+    },
+    "declaredPlugins": [
+      "before_role_model_call",
+      "after_turn_committed",
+      "tool_provider",
+      "handle_tool_call",
+      "health"
+    ],
+    "config": {
+      "scope": "global_with_character_overrides",
+      "fields": [
+        {
+          "name": "backend",
+          "description": "Which Mem0 deployment to talk to: the hosted platform API or a self-hosted server.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "allowedValues": ["platform", "server"],
+          "defaultValueSummary": "platform",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true
+        },
+        {
+          "name": "apiKey",
+          "description": "Mem0 credential: the platform API key, or the server's JWT or m0sk_ API key.",
+          "required": false,
+          "secret": true,
+          "valueType": "string",
+          "envVar": "MEM0_API_KEY",
+          "agentMutable": false,
+          "redactionLabels": ["memory"],
+          "reloadRequired": true
+        },
+        {
+          "name": "baseUrl",
+          "description": "Backend origin. Required for the server backend; overrides https://api.mem0.ai for the platform backend. A character overlay may point its own memory elsewhere; the credential travels to whatever this names, so use https:// for anything off this machine -- http:// sends the conversation and the key in the clear.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true
+        },
+        {
+          "name": "userId",
+          "description": "Mem0 user identity memories are stored under.",
+          "required": false,
+          "secret": false,
+          "valueType": "string",
+          "defaultValueSummary": "project02-user",
+          "agentMutable": false,
+          "redactionLabels": [],
+          "reloadRequired": true
+        }
+      ]
+    },
+    "firstParty": false,
+    "runtimePolicy": {
+      "timeoutMs": 8000,
+      "redactionLabels": ["memory"],
+      "failureBehavior": {
+        "beforeRoleModelCall": "degrade",
+        "handleToolCall": "degrade",
+        "health": "degrade"
+      }
+    },
+    "activation": {
+      "defaultEnabled": false,
+      "reasons": ["memory_provider_package"]
+    },
+    "requestedAccess": {
+      "turn_context": "read",
+      "model_input": "write"
+    }
+  }
+}

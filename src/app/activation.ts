@@ -48,7 +48,7 @@ import {
   type ResolvedProject02RuntimeLocation,
   type ResolvedProject02RuntimeConfig,
   type RuntimeConfigDiagnostic,
-  type RuntimePluginConfigActivationInspectShape,
+  type RuntimePluginActivationStatusShape,
 } from '../runtime/config/index.ts';
 import {createConfiguredRuntimePluginReloader} from './plugin-reload.ts';
 import {
@@ -70,7 +70,7 @@ export type RuntimePluginActivationSnapshot = {
   readonly enabled: boolean;
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly grantedAccess: RuntimePluginAccessMap;
-  readonly activationStatus: RuntimePluginConfigActivationInspectShape['status'];
+  readonly activationStatus: RuntimePluginActivationStatusShape['status'];
   readonly activationReasons: readonly string[];
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
 };
@@ -335,6 +335,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
       globalConfig: globalMutationBase,
       characterScope,
       overlay: overlayConfig,
+      pluginManifests,
     }),
     pluginConfigControl: Object.freeze({
       pluginManifests,
@@ -368,7 +369,7 @@ function activationCatalogComposition(options: {
 
 function runtimePluginConfigActivationByPluginId(
   activation: RuntimePluginActivationResult,
-): Readonly<Record<string, RuntimePluginConfigActivationInspectShape>> {
+): Readonly<Record<string, RuntimePluginActivationStatusShape>> {
   return Object.freeze(
     Object.fromEntries(
       activation.plugins.map(plugin => [
@@ -377,7 +378,7 @@ function runtimePluginConfigActivationByPluginId(
           enabled: plugin.enabled,
           status: plugin.activationStatus,
           reasons: Object.freeze([...plugin.activationReasons]),
-        } satisfies RuntimePluginConfigActivationInspectShape),
+        } satisfies RuntimePluginActivationStatusShape),
       ]),
     ),
   );
@@ -823,7 +824,7 @@ function activationDecision(options: {
   readonly configErrors: boolean;
 }): {
   readonly enabled: boolean;
-  readonly status: RuntimePluginConfigActivationInspectShape['status'];
+  readonly status: RuntimePluginActivationStatusShape['status'];
   readonly reasons: readonly string[];
 } {
   if (options.configuredEnabled === false) {

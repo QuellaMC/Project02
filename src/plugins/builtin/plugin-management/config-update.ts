@@ -140,6 +140,7 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
       options.state,
     ).prepareOperation({
       target,
+      pluginManifests: options.state.pluginManifests,
       expectedFingerprint: options.effect.expectedFingerprint,
       request: {
         kind: 'plugin_config',
@@ -162,6 +163,7 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
       options.state,
     ).applyOperation({
       target,
+      pluginManifests: options.state.pluginManifests,
       expectedFingerprint: options.effect.expectedFingerprint,
       request: {
         kind: 'plugin_config',
@@ -402,6 +404,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
       options.state,
     ).prepareOperation({
       target,
+      pluginManifests: options.state.pluginManifests,
       expectedFingerprint,
       request: {
         kind: 'plugin_config',

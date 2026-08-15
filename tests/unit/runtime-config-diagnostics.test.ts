@@ -25,10 +25,8 @@ describe('runtime config readiness classification', () => {
       'runtime_config_unknown_plugin_config_field',
       'runtime_config_value_type_invalid',
       'runtime_config_secret_ref_for_non_secret',
-      'runtime_config_plaintext_secret_rejected',
+      'runtime_config_secret_value_invalid',
       'runtime_config_reserved_control_env_var',
-      'runtime_config_secret_field_character_scoped',
-      'runtime_config_secret_value_character_scoped',
       'some_future_resolver_error',
     ];
 

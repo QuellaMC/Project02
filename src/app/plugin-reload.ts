@@ -70,6 +70,7 @@ export function createConfiguredRuntimePluginReloader(options: {
             .document,
           characterScope: state.runtimeLocation.characterScope,
           overlay: state.overlay,
+          pluginManifests,
         });
       const authoredState = loadAuthoredState();
       const authoredFingerprint = authoredFingerprintOf(authoredState);
@@ -108,6 +109,7 @@ export function createConfiguredRuntimePluginReloader(options: {
           pluginId: entry.manifest.id,
           manifest: entry.manifest,
           storeRoot: authoredState.runtimeLocation.characterScope.dataRoot,
+          characterId: authoredState.runtimeLocation.characterScope.characterId,
           resolvedConfig:
             ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ??
             {},

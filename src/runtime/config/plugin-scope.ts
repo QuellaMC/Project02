@@ -1,5 +1,4 @@
 import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
-import {nestedSecretMarkerPath} from '../../shared/secret-marker.ts';
 import {createRuntimeConfigDiagnostic} from './diagnostic.ts';
 import type {
   Project02RuntimeConfig,
@@ -47,30 +46,17 @@ export function runtimePluginScopeViolation(options: {
 
   const path = `plugins.${options.manifest.id}.config.${field.name}`;
 
-  if (options.authoredScope === 'character' && field.secret) {
-    return Object.freeze({
-      fieldName: field.name,
-      code: 'runtime_config_secret_field_character_scoped',
-      path,
-      message:
-        `Secret config field "${field.name}" for plugin ` +
-        `"${options.manifest.id}" is global-only; keep its env reference in ` +
-        'the global config.',
-    });
-  }
-
   if (
     options.authoredScope === 'global' &&
-    options.manifest.config.scope === 'character_only' &&
-    !field.secret
+    options.manifest.config.scope === 'character_only'
   ) {
     return Object.freeze({
       fieldName: field.name,
       code: 'runtime_config_character_only_plugin_field_globally',
       path,
       message:
-        `Non-secret config field "${field.name}" for character-only ` +
-        `plugin "${options.manifest.id}" belongs in a character config or ` +
+        `Config field "${field.name}" for character-only plugin ` +
+        `"${options.manifest.id}" belongs in a character config or ` +
         'character package, not the global config.',
     });
   }
@@ -94,14 +80,7 @@ export function runtimePluginScopeDiagnostics(options: {
       }),
     );
 
-  return Object.freeze(
-    options.authoredScope === 'global'
-      ? diagnostics
-      : [
-          ...diagnostics,
-          ...characterSecretValueDiagnostics(options.config, diagnostics),
-        ],
-  );
+  return Object.freeze(diagnostics);
 }
 
 function pluginScopeDiagnosticsForManifest(options: {
@@ -161,46 +140,6 @@ function pluginScopeDiagnosticsForManifest(options: {
           message: violation.message,
         }),
       );
-    }
-  }
-
-  return diagnostics;
-}
-
-function characterSecretValueDiagnostics(
-  config: Project02RuntimeConfig | undefined,
-  existingDiagnostics: readonly RuntimeConfigDiagnostic[],
-): readonly RuntimeConfigDiagnostic[] {
-  const knownSecretFieldPaths = new Set(
-    existingDiagnostics
-      .filter(
-        diagnostic =>
-          diagnostic.code === 'runtime_config_secret_field_character_scoped',
-      )
-      .map(diagnostic => diagnostic.path),
-  );
-  const diagnostics: RuntimeConfigDiagnostic[] = [];
-
-  for (const [pluginId, plugin] of Object.entries(config?.plugins ?? {}).sort(
-    ([left], [right]) => left.localeCompare(right),
-  )) {
-    for (const [fieldName, value] of Object.entries(plugin.config ?? {}).sort(
-      ([left], [right]) => left.localeCompare(right),
-    )) {
-      const fieldPath = `plugins.${pluginId}.config.${fieldName}`;
-      const secretPath = nestedSecretMarkerPath(value, fieldPath);
-
-      if (secretPath !== undefined && !knownSecretFieldPaths.has(fieldPath)) {
-        diagnostics.push(
-          createRuntimeConfigDiagnostic(
-            'error',
-            'runtime_config_secret_value_character_scoped',
-            'Character plugin config must not contain secret references or plaintext-secret markers; keep secrets in the global config.',
-            secretPath,
-            {pluginId, pluginConfigField: fieldName},
-          ),
-        );
-      }
     }
   }
 
