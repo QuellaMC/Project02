@@ -11,7 +11,9 @@ import {
 } from '../../src/runtime/config/index.ts';
 import {runtimeConfigSnapshotForTest} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {memorySearchPluginManifest} from '../support/plugin-host-fixtures.ts';
 import {resolveRuntimePluginActivation} from '../../src/app/index.ts';
+import {createRuntimePluginManifest} from '../../src/plugins/api/index.ts';
 
 describe('runtime config readiness classification', () => {
   it('classifies only the two required-supply codes as readiness failures', () => {
@@ -100,6 +102,68 @@ describe('runtime config diagnostic plugin matching', () => {
         diagnostic: unknownDiagnostic as RuntimeConfigDiagnostic,
         pluginId: 'memory',
       }),
+    ).toBe(false);
+  });
+
+  it('grants curated_context only to provenance-eligible plugins and warns otherwise', () => {
+    const manifest = createRuntimePluginManifest({
+      ...memorySearchPluginManifest('memory.curated.fixture'),
+      declaredPlugins: ['plugin_discovery'],
+      requestedAccess: {curated_context: 'write'},
+    });
+    const configPath = join(
+      createTestTempRoot('project02-runtime-config-curated-'),
+      'config.json',
+    );
+    const loadedConfig = Object.freeze({
+      source: 'path' as const,
+      path: configPath,
+      config: Object.freeze({
+        version: runtimeConfigVersion,
+        plugins: Object.freeze({
+          'memory.curated.fixture': Object.freeze({enabled: true}),
+        }),
+      }),
+      diagnostics: Object.freeze([]),
+    });
+    const resolvedConfig = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({loadedConfig}),
+      pluginManifests: [manifest],
+    });
+    const activationInput = {
+      effectiveConfig: loadedConfig,
+      resolvedConfig,
+      pluginManifests: [manifest],
+    };
+    const withheld = resolveRuntimePluginActivation(activationInput);
+    const granted = resolveRuntimePluginActivation({
+      ...activationInput,
+      curatedContextEligiblePluginIds: new Set(['memory.curated.fixture']),
+    });
+    const withheldSnapshot = withheld.plugins.find(
+      plugin => plugin.pluginId === 'memory.curated.fixture',
+    );
+    const grantedSnapshot = granted.plugins.find(
+      plugin => plugin.pluginId === 'memory.curated.fixture',
+    );
+
+    expect(withheldSnapshot?.requestedAccess).toEqual({
+      curated_context: 'write',
+    });
+    expect(withheldSnapshot?.grantedAccess).toEqual({});
+    expect(withheld.diagnostics).toContainEqual(
+      expect.objectContaining({
+        severity: 'warning',
+        code: 'curated_context_not_first_party',
+        pluginId: 'memory.curated.fixture',
+      }),
+    );
+    expect(grantedSnapshot?.grantedAccess).toEqual({curated_context: 'write'});
+    expect(
+      granted.diagnostics.some(
+        diagnosticItem =>
+          diagnosticItem.code === 'curated_context_not_first_party',
+      ),
     ).toBe(false);
   });
 

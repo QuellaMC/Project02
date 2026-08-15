@@ -12,6 +12,7 @@ import type {RoleModelDecisionResult} from '../../role-model/index.ts';
 import type {RoleModelCommitValidationResult} from './records.ts';
 import type {
   RuntimePluginContextItem,
+  RuntimePluginCuratedContextSection,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
@@ -28,6 +29,7 @@ import type {
   InspectPluginEvidence,
   InspectPluginListing,
   InspectPluginToolListing,
+  InspectCuratedContextSection,
   InspectPluginContextItem,
   InspectPluginToolInvocation,
   InspectPluginToolInvocationResult,
@@ -318,6 +320,9 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
               runtimeNotes: Object.freeze([
                 ...inputEnvelope.decisionContext.runtimeNotes,
               ]),
+              curatedContextSections: curatedContextSectionsFromSnapshots(
+                inputEnvelope.decisionContext.curatedContextSections,
+              ),
               pluginContextItems: pluginContextItemsFromSnapshots(
                 inputEnvelope.decisionContext.pluginContextItems,
               ),
@@ -469,6 +474,25 @@ function pluginListings(
           ? {}
           : {healthStatus: plugin.healthStatus}),
       } satisfies InspectPluginListing),
+    ),
+  );
+}
+
+function curatedContextSectionsFromSnapshots(
+  sections: readonly RuntimePluginCuratedContextSection[],
+): readonly InspectCuratedContextSection[] {
+  return Object.freeze(
+    sections.map(section =>
+      Object.freeze({
+        pluginId: section.pluginId,
+        id: section.id,
+        title: section.title,
+        text: section.text,
+        ...(section.capChars === undefined ? {} : {capChars: section.capChars}),
+        ...(section.usedChars === undefined
+          ? {}
+          : {usedChars: section.usedChars}),
+      } satisfies InspectCuratedContextSection),
     ),
   );
 }

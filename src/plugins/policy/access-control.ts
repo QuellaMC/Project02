@@ -19,6 +19,7 @@ export type RuntimePluginAccessMapByPluginId = Readonly<
 export function resolveRuntimePluginAccessForPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly enabledPluginIds: readonly string[];
+  readonly curatedContextEligiblePluginIds?: ReadonlySet<string>;
 }): RuntimePluginAccessMapByPluginId {
   assertUniqueRuntimePluginIds(options.plugins);
 
@@ -31,6 +32,9 @@ export function resolveRuntimePluginAccessForPlugins(options: {
         resolveRuntimePluginAccessForPlugin({
           plugin,
           enabled: enabledPluginIds.has(plugin.manifest.id),
+          curatedContextEligible:
+            options.curatedContextEligiblePluginIds?.has(plugin.manifest.id) ===
+            true,
         }),
       ]),
     ),
@@ -65,11 +69,13 @@ export function runtimePluginAccessForPluginId(options: {
 function resolveRuntimePluginAccessForPlugin(options: {
   readonly plugin: RuntimePlugin;
   readonly enabled: boolean;
+  readonly curatedContextEligible: boolean;
 }): RuntimePluginAccessSnapshot {
   return runtimePluginAccessSnapshot({
     requestedAccess: options.plugin.manifest.requestedAccess,
     enabled: options.enabled,
     fieldPrefix: options.plugin.manifest.id,
+    curatedContextEligible: options.curatedContextEligible,
   });
 }
 
@@ -77,17 +83,37 @@ export function runtimePluginAccessSnapshot(options: {
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly enabled: boolean;
   readonly fieldPrefix?: string;
+  /**
+   * Provenance decision made by the composition root: only bundled
+   * first-party packages may hold curated_context, whatever the manifest
+   * requests. Defaults closed.
+   */
+  readonly curatedContextEligible?: boolean;
 }): RuntimePluginAccessSnapshot {
   const fieldPrefix = options.fieldPrefix ?? 'plugin';
   const requestedAccess = normalizeRuntimePluginAccessMap(
     options.requestedAccess,
     `${fieldPrefix}.requestedAccess`,
   );
+  const grantedAccess =
+    options.curatedContextEligible === true ||
+    !Object.hasOwn(requestedAccess, 'curated_context')
+      ? requestedAccess
+      : withoutCuratedContextAccess(requestedAccess);
 
   return Object.freeze({
     requestedAccess,
-    grantedAccess: options.enabled ? requestedAccess : Object.freeze({}),
+    grantedAccess: options.enabled ? grantedAccess : Object.freeze({}),
   } satisfies RuntimePluginAccessSnapshot);
+}
+
+function withoutCuratedContextAccess(
+  accessMap: RuntimePluginAccessMap,
+): RuntimePluginAccessMap {
+  const {curated_context: withheld, ...grantable} = accessMap;
+
+  void withheld;
+  return Object.freeze(grantable);
 }
 
 export function runtimePluginGrantsAccess(options: {

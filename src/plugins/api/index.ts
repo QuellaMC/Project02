@@ -62,6 +62,7 @@ export {
   type RuntimePluginContext,
   type RuntimePluginContextBudget,
   type RuntimePluginContextItem,
+  type RuntimePluginCuratedContextSection,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginFileStore,
   type RuntimePluginHealthSnapshot,
@@ -106,6 +107,12 @@ export {
   validateRuntimePluginContextItem,
   validateRuntimePluginManifest,
 } from './manifest-validation.ts';
+export {
+  createRuntimePluginCuratedContextSection,
+  curatedContextSectionTextCharLimit,
+  curatedContextSectionTitleCharLimit,
+  validateRuntimePluginCuratedContextSection,
+} from './curated-context.ts';
 export {isRuntimePluginCredentialKey} from './validation-primitives.ts';
 export {
   isApprovalGatedRuntimePluginTool,

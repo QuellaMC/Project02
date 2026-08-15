@@ -31,6 +31,15 @@ export type InspectToolCallEvent = {
   readonly pluginStoreRevision?: number;
 };
 
+export type InspectCuratedContextSection = {
+  readonly pluginId: string;
+  readonly id: string;
+  readonly title: string;
+  readonly text: string;
+  readonly capChars?: number;
+  readonly usedChars?: number;
+};
+
 export type InspectRoleModelEvidence = {
   readonly input?: {
     readonly sessionId: string;
@@ -39,6 +48,7 @@ export type InspectRoleModelEvidence = {
     readonly currentUserMessage: string;
     readonly recentVisibleMessages: readonly InspectVisibleMessage[];
     readonly runtimeNotes: readonly string[];
+    readonly curatedContextSections: readonly InspectCuratedContextSection[];
     readonly pluginContextItems: readonly InspectPluginContextItem[];
   };
   readonly output?: {

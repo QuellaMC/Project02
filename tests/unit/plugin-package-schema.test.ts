@@ -61,6 +61,29 @@ function validDescriptor(): Record<string, unknown> {
 }
 
 describe('plugin package descriptor schema parity', () => {
+  it('accepts curated_context in requestedAccess through both validators', () => {
+    const descriptor = validDescriptor();
+    const manifest = descriptor['manifest'] as Record<string, unknown>;
+    const withCuratedContext = {
+      ...descriptor,
+      manifest: {
+        ...manifest,
+        requestedAccess: {
+          ...(manifest['requestedAccess'] as Record<string, unknown>),
+          curated_context: 'write',
+        },
+      },
+    };
+
+    expect(
+      validateAgainstSchema(withCuratedContext),
+      JSON.stringify(validateAgainstSchema.errors),
+    ).toBe(true);
+    expect(parseRuntimePluginPackageDescriptor(withCuratedContext).status).toBe(
+      'accepted',
+    );
+  });
+
   it('accepts every bundled descriptor through both the schema and the code validator', () => {
     const paths = bundledDescriptorPaths();
 
