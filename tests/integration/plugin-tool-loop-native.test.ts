@@ -42,13 +42,13 @@ describe('plugin-driven native tool loop routing', () => {
     expect(messagesByRound[0]?.map(message => message.role)).toEqual([
       'system',
       'system',
-      'user',
+      'system',
       'user',
     ]);
     expect(messagesByRound[1]?.map(message => message.role)).toEqual([
       'system',
       'system',
-      'user',
+      'system',
       'user',
       'assistant',
       'tool',
@@ -107,7 +107,7 @@ describe('plugin-driven native tool loop routing', () => {
     expect(messagesByRound[1]?.map(message => message.role)).toEqual([
       'system',
       'system',
-      'user',
+      'system',
       'user',
       'assistant',
       'tool',
@@ -227,7 +227,7 @@ describe('plugin-driven native tool loop routing', () => {
     expect(messagesByRound[1]?.map(message => message.role)).toEqual([
       'system',
       'system',
-      'user',
+      'system',
       'user',
       'assistant',
       'tool',

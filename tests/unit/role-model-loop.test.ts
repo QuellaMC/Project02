@@ -1,4 +1,5 @@
 import {describe, expect, it} from 'vitest';
+import {toolProtocolText} from '../../src/role-model/prompt/prompt-text.ts';
 import {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelAdapterFromCharacterAgent,
@@ -121,14 +122,11 @@ describe('role-model loop routing and policy', () => {
     });
 
     expect(renderedToolNames).toEqual([]);
-    expect(protocol).not.toContain(
-      'Commit user-visible text by calling visible_reply.',
-    );
-    expect(protocol).not.toContain(
-      'call visible_reply with the final response',
-    );
-    expect(protocol).toContain(
-      'Terminal assistant content is non-committed model text and is not shown to the user.',
+    expect(protocol).toBe(
+      toolProtocolText({
+        visibleReplyAvailable: false,
+        supportsParallelToolCalls: true,
+      }),
     );
     expect(result).toMatchObject({
       status: 'rejected',

@@ -63,8 +63,16 @@ describe('runtime config activation checks and construction', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedAccess: {character_file_store: 'write', model_input: 'write'},
-        grantedAccess: {character_file_store: 'write', model_input: 'write'},
+        requestedAccess: {
+          character_file_store: 'write',
+          model_input: 'write',
+          trusted_context: 'write',
+        },
+        grantedAccess: {
+          character_file_store: 'write',
+          model_input: 'write',
+          trusted_context: 'write',
+        },
       }),
     );
   });
@@ -106,8 +114,17 @@ describe('runtime config activation checks and construction', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedAccess: {character_file_store: 'write', model_input: 'write'},
-        grantedAccess: {character_file_store: 'write', model_input: 'write'},
+        requestedAccess: {
+          character_file_store: 'write',
+          model_input: 'write',
+          trusted_context: 'write',
+        },
+        // A caller-supplied factory displaces the bundled package, so its
+        // provenance no longer clears it for the trusted frames.
+        grantedAccess: {
+          character_file_store: 'write',
+          model_input: 'write',
+        },
       }),
     );
   });
@@ -155,8 +172,17 @@ describe('runtime config activation checks and construction', () => {
         pluginId: characterStatePluginId,
         activationStatus: 'active',
         enabled: true,
-        requestedAccess: {character_file_store: 'write', model_input: 'write'},
-        grantedAccess: {character_file_store: 'write', model_input: 'write'},
+        requestedAccess: {
+          character_file_store: 'write',
+          model_input: 'write',
+          trusted_context: 'write',
+        },
+        // A caller-supplied factory displaces the bundled package, so its
+        // provenance no longer clears it for the trusted frames.
+        grantedAccess: {
+          character_file_store: 'write',
+          model_input: 'write',
+        },
       }),
     );
   });

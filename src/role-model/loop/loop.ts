@@ -57,12 +57,16 @@ import {
   type RoleModelToolChatMessage,
 } from '../api/chat-wire.ts';
 import {renderRoleModelTurnContext} from '../prompt/render.ts';
-import {runtimeToolNameForProviderToolName} from '../prompt/tool-wire.ts';
+import {
+  createNativeMissingToolResultContent,
+  createNativeToolResultMessageContent,
+  createNativeVisibleReplyToolResultContent,
+  runtimeToolNameForProviderToolName,
+} from '../prompt/tool-wire.ts';
 import {
   createPreparedRuntimePluginConfigEffect,
   createRuntimePluginToolCallResultSnapshot,
   type PreparedRuntimePluginConfigEffect,
-  type RuntimePluginJsonValue,
   type RuntimePluginToolCall,
   type RuntimePluginToolCallExecutionResult,
   type RuntimePluginToolCallResult,
@@ -102,6 +106,8 @@ export type RunRoleModelLoopOptions = {
   ) => Promise<void> | void;
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly personaSections?: readonly string[];
+  /** The person's name, when configured; the prompt then addresses them by it. */
+  readonly userDisplayName?: string;
   readonly characterRef?: RoleModelCharacterRef;
 };
 
@@ -313,6 +319,9 @@ async function invokeRoleModelLoopRound(options: {
     ...(options.options.personaSections === undefined
       ? {}
       : {personaSections: options.options.personaSections}),
+    ...(options.options.userDisplayName === undefined
+      ? {}
+      : {userDisplayName: options.options.userDisplayName}),
   });
   const rawOutput: unknown = await options.adapter.invoke(inputEnvelope, {
     turnContext,
@@ -750,7 +759,9 @@ function createNativeToolResultMessages(options: {
         Object.freeze({
           role: 'tool',
           tool_call_id: result.callId,
-          content: JSON.stringify(createNativeToolResultMessageContent(result)),
+          content: JSON.stringify(
+            createNativeToolResultMessageContent(nativeToolResultCall(result)),
+          ),
         } satisfies RoleModelToolChatMessage),
       ),
     );
@@ -781,55 +792,25 @@ function createNativeToolResultMessages(options: {
         content: JSON.stringify(
           result === undefined
             ? createNativeMissingToolResultContent(runtimeToolName)
-            : createNativeToolResultMessageContent(result),
+            : createNativeToolResultMessageContent(
+                nativeToolResultCall(result),
+              ),
         ),
       } satisfies RoleModelToolChatMessage);
     }),
   );
 }
 
-function createNativeToolResultMessageContent(
-  result: RoleModelPluginToolRoutingEvidence,
-): Readonly<Record<string, RuntimePluginJsonValue>> {
-  if (result.result.status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      pluginId: result.call.pluginId,
-      toolName: result.call.toolName,
-      output: result.result.output,
-    });
-  }
-
-  return Object.freeze({
-    status: 'rejected',
+function nativeToolResultCall(result: RoleModelPluginToolRoutingEvidence): {
+  readonly pluginId: string;
+  readonly toolName: string;
+  readonly result: RoleModelPluginToolRoutingEvidence['result'];
+} {
+  return {
     pluginId: result.call.pluginId,
     toolName: result.call.toolName,
-    reason: result.result.reason,
-    message: result.result.message,
-  });
-}
-
-function createNativeVisibleReplyToolResultContent(): Readonly<
-  Record<string, RuntimePluginJsonValue>
-> {
-  return Object.freeze({
-    status: 'accepted',
-    toolName: visibleReplyModelToolName,
-    output: Object.freeze({
-      kind: 'visible_reply_delivered',
-    }),
-  });
-}
-
-function createNativeMissingToolResultContent(
-  toolName: string,
-): Readonly<Record<string, RuntimePluginJsonValue>> {
-  return Object.freeze({
-    status: 'rejected',
-    toolName,
-    reason: 'tool_result_missing',
-    message: `No routed plugin result was available for native tool call "${toolName}".`,
-  });
+    result: result.result,
+  };
 }
 
 async function routeExecutableToolCalls(options: {

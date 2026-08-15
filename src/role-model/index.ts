@@ -117,6 +117,7 @@ export {
   renderRoleModelTurnContext,
   type RoleModelTurnContext,
 } from './prompt/render.ts';
+export {createTodayRuntimeNote} from './prompt/prompt-text.ts';
 export {
   createRoleModelProviderToolNameMappings,
   modelToolDefinitionToChatTool,

@@ -41,7 +41,8 @@
       "model_input": "write",
       "session_history": "read",
       "plugin_database": "write",
-      "turn_context": "read"
+      "turn_context": "read",
+      "trusted_context": "write"
     }
   }
 }

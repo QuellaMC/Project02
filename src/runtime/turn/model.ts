@@ -15,9 +15,11 @@ import type {
 import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
+  createTodayRuntimeNote,
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
 } from '../../role-model/index.ts';
+import {localUserSpeaker} from '../../core/index.ts';
 import {
   runRoleModelLoop,
   type RoleModelAdapter,
@@ -193,10 +195,22 @@ async function runRuntimeModel(
     sessionId: prepared.decisionContext.sessionId,
     characterSnapshot: prepared.decisionContext.characterSnapshot,
     recentVisibleMessages: prepared.decisionContext.recentVisibleMessages,
-    runtimeNotes: prepared.decisionContext.runtimeNotes,
+    runtimeNotes: [
+      createTodayRuntimeNote(
+        state.event.createdAt,
+        state.options.timeZone ??
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ),
+      ...prepared.beforeRoleModelCallResult.runtimeNotes.map(item => ({
+        id: item.id,
+        text: item.text,
+        pluginId: item.pluginId,
+      })),
+    ],
     pluginContextItems: prepared.beforeRoleModelCallResult.contextItems,
     curatedContextSections: prepared.beforeRoleModelCallResult.curatedContext,
   });
+  const userDisplayName = state.options.session.userSpeaker.displayName;
   const result = await runRoleModelLoop({
     event: state.event,
     decisionContext: roleModelDecisionContext,
@@ -210,6 +224,10 @@ async function runRuntimeModel(
     ...(state.options.characterPersonaSections === undefined
       ? {}
       : {personaSections: state.options.characterPersonaSections}),
+    // The default label is a transcript speaker, not a name the prompt uses.
+    ...(userDisplayName === localUserSpeaker.displayName
+      ? {}
+      : {userDisplayName}),
     ...(state.options.characterRef === undefined
       ? {}
       : {characterRef: state.options.characterRef}),
