@@ -7,7 +7,22 @@ import type {
 } from '../api/types.ts';
 import {beforeRoleModelFailureRejectsTurn} from '../api/evidence-policy.ts';
 
-const runtimePluginContextEstimatedTokenBudget = 256;
+/**
+ * Each block the model reads has its own estimated-token budget: recalled
+ * memories must not compete with plugin data, and neither may crowd the turn.
+ */
+export const promptContextBlockBudgets = Object.freeze({
+  recalled_memory: 1024,
+  untrusted_plugin_context: 256,
+});
+
+export type PromptContextBlock = keyof typeof promptContextBlockBudgets;
+
+const promptContextBlockLabels: Readonly<Record<PromptContextBlock, string>> =
+  Object.freeze({
+    recalled_memory: 'Recalled-memory budget',
+    untrusted_plugin_context: 'Plugin context budget',
+  });
 
 export type CollectedPluginContextItem = {
   readonly plugin: RuntimePlugin;
@@ -35,10 +50,12 @@ type BoundedPluginPromptContextResult =
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
     };
 
-export function boundPluginPromptContext(options: {
+export function boundPromptContextBlock(options: {
   readonly context: RuntimePluginContext;
+  readonly block: PromptContextBlock;
   readonly contextItems: readonly CollectedPluginContextItem[];
 }): BoundedPluginPromptContextResult {
+  const budget = promptContextBlockBudgets[options.block];
   const candidates = collectedPluginPromptContextCandidates({
     contextItems: options.contextItems,
   });
@@ -47,7 +64,7 @@ export function boundPluginPromptContext(options: {
     0,
   );
 
-  if (totalEstimatedTokens <= runtimePluginContextEstimatedTokenBudget) {
+  if (totalEstimatedTokens <= budget) {
     return Object.freeze({
       status: 'completed',
       contextItems: Object.freeze(
@@ -66,7 +83,7 @@ export function boundPluginPromptContext(options: {
     const nextEstimatedTokens =
       retainedEstimatedTokens + candidate.estimatedTokens;
 
-    if (nextEstimatedTokens > runtimePluginContextEstimatedTokenBudget) {
+    if (nextEstimatedTokens > budget) {
       continue;
     }
 
@@ -86,6 +103,7 @@ export function boundPluginPromptContext(options: {
   );
   const evidence = contextBudgetEvidence({
     context: options.context,
+    block: options.block,
     droppedCandidates,
     retainedEstimatedTokens,
     totalEstimatedTokens,
@@ -97,7 +115,10 @@ export function boundPluginPromptContext(options: {
     return Object.freeze({
       status: 'rejected',
       pluginId: rejectedContextItem.plugin.manifest.id,
-      message: requiredContextBudgetRejectionMessage(rejectedContextItem),
+      message: requiredContextBudgetRejectionMessage(
+        options.block,
+        rejectedContextItem,
+      ),
       evidence,
     });
   }
@@ -136,6 +157,7 @@ function compareCollectedPromptContextPriority(
 
 function contextBudgetEvidence(options: {
   readonly context: RuntimePluginContext;
+  readonly block: PromptContextBlock;
   readonly droppedCandidates: readonly CollectedPluginPromptContext[];
   readonly retainedEstimatedTokens: number;
   readonly totalEstimatedTokens: number;
@@ -173,6 +195,7 @@ function contextBudgetEvidence(options: {
         evidenceKind: 'before_role_model_call',
         status: rejectsTurn ? 'rejected' : 'degraded',
         summary: contextBudgetEvidenceSummary({
+          block: options.block,
           droppedCandidates: entry.dropped,
           retainedEstimatedTokens: options.retainedEstimatedTokens,
           totalEstimatedTokens: options.totalEstimatedTokens,
@@ -192,14 +215,16 @@ function firstDroppedPromptContextThatRejectsTurn(
 }
 
 function requiredContextBudgetRejectionMessage(
+  block: PromptContextBlock,
   candidate: CollectedPluginPromptContext,
 ): string {
   return `Required before-role-model plugin context exceeded the ${String(
-    runtimePluginContextEstimatedTokenBudget,
-  )}-token budget; dropped context item "${candidate.contextItem.item.id}".`;
+    promptContextBlockBudgets[block],
+  )}-token ${block} budget; dropped context item "${candidate.contextItem.item.id}".`;
 }
 
 function contextBudgetEvidenceSummary(options: {
+  readonly block: PromptContextBlock;
   readonly droppedCandidates: readonly CollectedPluginPromptContext[];
   readonly retainedEstimatedTokens: number;
   readonly totalEstimatedTokens: number;
@@ -208,9 +233,9 @@ function contextBudgetEvidenceSummary(options: {
     .map(candidate => candidate.contextItem.item.id)
     .join(', ');
 
-  return `Plugin context budget kept ${String(
+  return `${promptContextBlockLabels[options.block]} kept ${String(
     options.retainedEstimatedTokens,
-  )}/${String(runtimePluginContextEstimatedTokenBudget)} estimated tokens and dropped ${String(
+  )}/${String(promptContextBlockBudgets[options.block])} estimated tokens and dropped ${String(
     options.droppedCandidates.length,
   )} item(s) from ${String(options.totalEstimatedTokens)} estimated tokens${
     droppedIds.length === 0 ? '' : `; dropped ids ${droppedIds}`
