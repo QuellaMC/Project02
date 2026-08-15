@@ -6,6 +6,7 @@ import {
   NvidiaRequestTimeoutError,
   performNvidiaTransportRequest,
   redactProviderSecret,
+  terminalNvidiaFinishReasons,
   type NvidiaFetchClient,
 } from './nvidia-transport.ts';
 
@@ -61,13 +62,13 @@ export function createNvidiaTextCompletion(options: {
         };
       }
 
-      const text = completionText(transport.responseBody);
+      const completion = completionText(transport.responseBody);
 
-      return text === undefined
-        ? {status: 'failed', reason: 'NVIDIA completion returned no text.'}
+      return 'reason' in completion
+        ? {status: 'failed', reason: completion.reason}
         : {
             status: 'completed',
-            text,
+            text: completion.text,
             provider: {
               name: nvidiaTextCompletionProviderName,
               model: options.model,
@@ -90,30 +91,45 @@ export function createNvidiaTextCompletion(options: {
   };
 }
 
-function completionText(responseBody: unknown): string | undefined {
-  if (!isJsonRecord(responseBody) || !Array.isArray(responseBody['choices'])) {
-    return undefined;
-  }
-
-  const choice: unknown = responseBody['choices'][0];
+/**
+ * A completion counts only when it ended whole: a recollection cut off at
+ * the output limit would lose its newest part, which is the part that
+ * matters most, so it is refused rather than stored.
+ */
+function completionText(
+  responseBody: unknown,
+): {readonly text: string} | {readonly reason: string} {
+  const choice: unknown =
+    isJsonRecord(responseBody) && Array.isArray(responseBody['choices'])
+      ? responseBody['choices'][0]
+      : undefined;
 
   if (!isJsonRecord(choice) || !isJsonRecord(choice['message'])) {
-    return undefined;
+    return {reason: 'NVIDIA completion returned no text.'};
+  }
+
+  const finishReason = choice['finish_reason'];
+
+  if (
+    typeof finishReason !== 'string' ||
+    !terminalNvidiaFinishReasons.includes(finishReason)
+  ) {
+    return {
+      reason: `NVIDIA completion ended with finish_reason "${String(
+        finishReason,
+      )}" instead of finishing.`,
+    };
   }
 
   const content = choice['message']['content'];
+  const scrubbed =
+    typeof content === 'string' ? scrubReasoningBlocks(content) : undefined;
+  const text =
+    scrubbed === undefined || scrubbed.status === 'rejected'
+      ? ''
+      : scrubbed.text.trim();
 
-  if (typeof content !== 'string') {
-    return undefined;
-  }
-
-  const scrubbed = scrubReasoningBlocks(content);
-
-  if (scrubbed.status === 'rejected') {
-    return undefined;
-  }
-
-  const text = scrubbed.text.trim();
-
-  return text.length === 0 ? undefined : text;
+  return text.length === 0
+    ? {reason: 'NVIDIA completion returned no text.'}
+    : {text};
 }

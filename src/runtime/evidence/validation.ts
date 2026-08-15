@@ -98,6 +98,18 @@ export function assertIncrementalRawEventAppend(options: {
       );
     }
 
+    if (
+      options.sessionId !== undefined &&
+      record.sessionContinuation?.sessionId !== options.sessionId
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Raw event log session_continued names session "${
+          record.sessionContinuation?.sessionId ?? '?'
+        }" inside session "${options.sessionId}".`,
+      );
+    }
+
     return;
   }
 

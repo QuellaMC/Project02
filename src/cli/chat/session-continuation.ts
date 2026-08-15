@@ -24,6 +24,22 @@ export type ContinueChatSession = (
   plan: SessionContinuationPlan,
 ) => Promise<DurableChatRuntime>;
 
+/** Naming a closed segment opens it, but the person should know it went on. */
+export function writeContinuedSessionNotice(
+  stdout: NodeJS.WritableStream,
+  namedSessionId: string | undefined,
+  durableRuntime: DurableChatRuntime,
+): void {
+  if (
+    namedSessionId !== undefined &&
+    durableRuntime.continuedBy !== undefined
+  ) {
+    stdout.write(
+      `Session ${durableRuntime.session.id} was continued in ${durableRuntime.continuedBy}; opening the one you named.\n`,
+    );
+  }
+}
+
 /** Continues into the same home, character, and speaker the chat opened with. */
 export function durableSessionContinuation(options: {
   readonly homeRoot: string | undefined;
@@ -92,8 +108,12 @@ export async function continueChatSessionIfNeeded(options: {
     return undefined;
   }
 
+  // Closing the old session writes to its log after the new one opened, so
+  // the new one is stamped active last: a flagless launch resumes it, never
+  // the closed segment.
   try {
     await endChatSession({session, logStore, pluginHost: options.pluginHost});
+    await next.markActive();
   } catch (error: unknown) {
     options.stdout.write(
       `[context] Could not close session ${session.id} cleanly: ${

@@ -26,6 +26,7 @@ import {
   LocalRuntimeStorageContractError,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {
+  acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError,
 } from '../../src/runtime/storage/session-store.ts';
@@ -104,12 +105,24 @@ describe('local runtime session store', () => {
     });
 
     const root = await store.createSession({sessionId: 'local-session'});
-    const second = await store.createContinuedSession({
+    const continued = await store.createContinuedSession({
       continuedFrom: 'local-session',
     });
-    const third = await store.createContinuedSession({
+    const second = continued.metadata;
+    // The creator holds the new session's writer lease from the start, so no
+    // other window can open it before its opening record exists.
+    await expect(
+      acquireLocalRuntimeSessionWriterLease({
+        storeRoot,
+        sessionId: second.sessionId,
+      }),
+    ).rejects.toThrow(/busy|lock/iu);
+    await continued.writerLease.release();
+    const continuedAgain = await store.createContinuedSession({
       continuedFrom: second.sessionId,
     });
+    const third = continuedAgain.metadata;
+    await continuedAgain.writerLease.release();
 
     expect(second).toMatchObject({
       sessionId: 'local-session.2',

@@ -384,7 +384,7 @@ export function createRuntimePluginHost(
       await instanceOwnership.quiesce();
 
       return await runRuntimePluginSessionEndHooksForTargets({
-        targets: instanceOwnership.terminalTargets(livePlugins()),
+        targets: instanceOwnership.sessionEndTargets(livePlugins()),
         context,
         accessByPluginId,
         storeRoot: options.storeRoot,

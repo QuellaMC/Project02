@@ -20,8 +20,11 @@ import {
 } from './session-store.ts';
 import {LocalRuntimeStorageContractError} from './layout-contract.ts';
 import {ensureCharacterDataDir} from './character-data.ts';
-import type {LocalRuntimeMutationLockLease} from './mutation-lock.ts';
-import {createLocalRuntimeMutationLockOwnerToken} from './mutation-lock.ts';
+import {
+  createLocalRuntimeMutationLockOwnerToken,
+  type LocalRuntimeMutationLockLease,
+  type LocalRuntimeMutationLockOwnerToken,
+} from './mutation-lock.ts';
 import {acquireLocalRuntimeSessionWriterLease} from './session-store.ts';
 import {
   normalizeLocalRuntimeCharacterId,
@@ -42,6 +45,11 @@ export type DurableChatRuntime = {
   readonly writerLease: LocalRuntimeMutationLockLease;
   /** The session that continued this one, when it was opened by name anyway. */
   readonly continuedBy?: string;
+  /**
+   * Stamps the session as the one the conversation is in, so a flagless
+   * launch resumes it ahead of a session that was merely written to later.
+   */
+  markActive(): Promise<void>;
 };
 
 export type DurableSessionContinuation = {
@@ -63,49 +71,72 @@ export async function createDurableChatRuntime(
       (await store.sessionStore.newestSession())?.sessionId,
   );
 
-  return await openDurableChatRuntime(store, sessionId, async () => {
-    if (args.newSessionId !== undefined) {
-      await store.sessionStore.createSession({sessionId});
-    } else if (args.sessionId !== undefined) {
-      await store.sessionStore.selectSession(sessionId);
-    } else {
-      await selectOrCreateDefaultSession(store.sessionStore, sessionId);
-    }
+  const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+  const writerLease = await acquireLocalRuntimeSessionWriterLease({
+    ...store.storageOptions,
+    sessionId,
+    ownerToken,
+  });
+
+  return await openDurableChatRuntime({
+    store,
+    sessionId,
+    ownerToken,
+    writerLease,
+    prepare: async () => {
+      if (args.newSessionId !== undefined) {
+        await store.sessionStore.createSession({sessionId});
+      } else if (args.sessionId !== undefined) {
+        await store.sessionStore.selectSession(sessionId);
+      } else {
+        await selectOrCreateDefaultSession(store.sessionStore, sessionId);
+      }
+    },
   });
 }
 
 /**
  * Opens the session that continues the plan's source: a chain-named session
  * whose first record carries the summary and the turns brought along, ready
- * for the next turn to build on. A session that could not receive that record
- * is discarded again, so the catalog never resumes into an empty continuation.
+ * for the next turn to build on. Its writer lease is held from the moment the
+ * catalog shows it, and a session that could not receive that record is
+ * discarded again, so no launch ever resumes into an empty continuation.
  */
 export async function createContinuedDurableChatRuntime(
   args: DurableSessionContinuation,
 ): Promise<DurableChatRuntime> {
   const store = await openDurableSessionStore(args);
-  const metadata = await store.sessionStore.createContinuedSession({
-    continuedFrom: args.plan.continuedFrom.sessionId,
-  });
+  const ownerToken = createLocalRuntimeMutationLockOwnerToken();
+  const {metadata, writerLease} =
+    await store.sessionStore.createContinuedSession({
+      continuedFrom: args.plan.continuedFrom.sessionId,
+      writerOwnerToken: ownerToken,
+    });
 
   try {
-    return await openDurableChatRuntime(store, metadata.sessionId, logStore => {
-      const identity = createRuntimeEventIdentity();
+    return await openDurableChatRuntime({
+      store,
+      sessionId: metadata.sessionId,
+      ownerToken,
+      writerLease,
+      prepare: logStore => {
+        const identity = createRuntimeEventIdentity();
 
-      logStore.appendRawEvent({
-        ...identity,
-        kind: 'session_continued',
-        eventType: 'USER_MESSAGE',
-        sessionContinuation: createSessionContinuationSnapshot({
+        logStore.appendRawEvent({
           ...identity,
-          sessionId: metadata.sessionId,
-          continuedFrom: args.plan.continuedFrom,
-          summary: args.plan.summary,
-          summarizedTurnCount: args.plan.summarizedTurnCount,
-          carriedTurns: args.plan.carriedTurns,
-          summarizer: args.plan.summarizer,
-        }),
-      });
+          kind: 'session_continued',
+          eventType: 'USER_MESSAGE',
+          sessionContinuation: createSessionContinuationSnapshot({
+            ...identity,
+            sessionId: metadata.sessionId,
+            continuedFrom: args.plan.continuedFrom,
+            summary: args.plan.summary,
+            summarizedTurnCount: args.plan.summarizedTurnCount,
+            carriedTurns: args.plan.carriedTurns,
+            summarizer: args.plan.summarizer,
+          }),
+        });
+      },
     });
   } catch (error: unknown) {
     try {
@@ -178,18 +209,16 @@ async function openDurableSessionStore(args: {
   };
 }
 
-async function openDurableChatRuntime(
-  store: DurableSessionStore,
-  sessionId: string,
-  prepare: (logStore: RuntimeLogStore) => Promise<void> | void,
-): Promise<DurableChatRuntime> {
+/** Takes ownership of an already-held writer lease: released on any failure. */
+async function openDurableChatRuntime(options: {
+  readonly store: DurableSessionStore;
+  readonly sessionId: string;
+  readonly ownerToken: LocalRuntimeMutationLockOwnerToken;
+  readonly writerLease: LocalRuntimeMutationLockLease;
+  readonly prepare: (logStore: RuntimeLogStore) => Promise<void> | void;
+}): Promise<DurableChatRuntime> {
+  const {store, sessionId, ownerToken, writerLease} = options;
   const {character, boundUserSpeaker, storageOptions, sessionStore} = store;
-  const ownerToken = createLocalRuntimeMutationLockOwnerToken();
-  const writerLease = await acquireLocalRuntimeSessionWriterLease({
-    ...storageOptions,
-    sessionId,
-    ownerToken,
-  });
 
   try {
     const logStore = createFileRuntimeLogStore({
@@ -200,7 +229,7 @@ async function openDurableChatRuntime(
       boundUserSpeaker,
     });
 
-    await prepare(logStore);
+    await options.prepare(logStore);
     const successor = await sessionStore.successorOf(sessionId);
 
     return Object.freeze({
@@ -218,6 +247,9 @@ async function openDurableChatRuntime(
       }),
       logStore,
       writerLease,
+      async markActive() {
+        await sessionStore.selectSession(sessionId);
+      },
     } satisfies DurableChatRuntime);
   } catch (error: unknown) {
     await writerLease.release();

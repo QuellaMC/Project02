@@ -88,12 +88,34 @@ describe('NVIDIA plain text completion', () => {
     expect(
       await withFetch(() =>
         jsonResponse({
-          choices: [{message: {role: 'assistant', content: '   '}}],
+          choices: [
+            {
+              message: {role: 'assistant', content: '   '},
+              finish_reason: 'stop',
+            },
+          ],
         }),
       ),
     ).toEqual({
       status: 'failed',
       reason: 'NVIDIA completion returned no text.',
+    });
+    // A recollection cut off at the output limit lost its newest part.
+    expect(
+      await withFetch(() =>
+        jsonResponse({
+          choices: [
+            {
+              message: {role: 'assistant', content: 'We spoke of'},
+              finish_reason: 'length',
+            },
+          ],
+        }),
+      ),
+    ).toEqual({
+      status: 'failed',
+      reason:
+        'NVIDIA completion ended with finish_reason "length" instead of finishing.',
     });
     expect(
       await withFetch(() => Promise.reject(new Error('boom sk-secret'))),

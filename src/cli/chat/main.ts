@@ -18,6 +18,7 @@ import {
 import {
   continueChatSessionIfNeeded,
   durableSessionContinuation,
+  writeContinuedSessionNotice,
   type ActiveChatSession,
   type ContinueChatSession,
 } from './session-continuation.ts';
@@ -442,7 +443,7 @@ async function runChatCliAfterConfiguredHost(options: {
     });
     writeContinuedSessionNotice(
       options.options.stdout,
-      options.runtimeArgs,
+      options.runtimeArgs.sessionId,
       durableRuntime,
     );
 
@@ -477,6 +478,15 @@ async function runChatCliAfterConfiguredHost(options: {
     throw error;
   }
 
+  // The chat may continue into later sessions; cleanup and shutdown name the
+  // one it was in at the end, which every continuation reports here.
+  const continueSession = durableSessionContinuation({
+    homeRoot: options.runtimeArgs.storeRoot,
+    character: options.characterProfile,
+    userDisplayName: options.userDisplayName,
+  });
+  let activeSession = durableRuntime.session;
+
   try {
     const exitCode = await runChatCli({
       ...options.options,
@@ -492,11 +502,12 @@ async function runChatCliAfterConfiguredHost(options: {
       ...(options.contextWindowTokens === undefined
         ? {}
         : {contextWindowTokens: options.contextWindowTokens}),
-      continueSession: durableSessionContinuation({
-        homeRoot: options.runtimeArgs.storeRoot,
-        character: options.characterProfile,
-        userDisplayName: options.userDisplayName,
-      }),
+      async continueSession(plan) {
+        const next = await continueSession(plan);
+
+        activeSession = next.session;
+        return next;
+      },
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
@@ -507,7 +518,7 @@ async function runChatCliAfterConfiguredHost(options: {
     if (exitCode !== 0 && options.configuredHost !== undefined) {
       await cleanupConfiguredChatPluginHostAfterFatalExit({
         configuredHost: options.configuredHost,
-        session: durableRuntime.session,
+        session: activeSession,
       });
     }
 
@@ -516,28 +527,12 @@ async function runChatCliAfterConfiguredHost(options: {
     if (options.configuredHost !== undefined) {
       await shutdownConfiguredChatPluginHost({
         pluginHost: options.configuredHost.host,
-        sessionId: durableRuntime.session.id,
-        character: durableRuntime.session.character,
+        sessionId: activeSession.id,
+        character: activeSession.character,
         stderr: options.options.stderr,
       });
     }
     await durableRuntime.writerLease.release();
-  }
-}
-
-/** Naming a closed segment opens it, but the person should know it went on. */
-function writeContinuedSessionNotice(
-  stdout: NodeJS.WritableStream,
-  runtimeArgs: ChatCliArgs,
-  durableRuntime: DurableChatRuntime,
-): void {
-  if (
-    runtimeArgs.sessionId !== undefined &&
-    durableRuntime.continuedBy !== undefined
-  ) {
-    stdout.write(
-      `Session ${durableRuntime.session.id} was continued in ${durableRuntime.continuedBy}; opening the one you named.\n`,
-    );
   }
 }
 

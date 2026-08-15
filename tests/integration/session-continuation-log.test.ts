@@ -92,11 +92,23 @@ describe('session continuation records', () => {
     expect(logStore.rawEvents()[0]?.sessionContinuation).toEqual(snapshot);
   });
 
-  it('refuses a continuation anywhere but first, and a mismatched kind or field', () => {
+  it('refuses a continuation anywhere but first, one naming another session, and a mismatched kind or field', () => {
     const logStore = createRuntimeLogStore({
       sessionId: 'first.2',
       boundCharacter: testCharacterProfile,
     });
+    const foreign = continuation('other.2');
+
+    expect(() =>
+      logStore.appendRawEvent({
+        eventId: foreign.eventId,
+        traceId: foreign.traceId,
+        createdAt: foreign.createdAt,
+        kind: 'session_continued',
+        eventType: 'USER_MESSAGE',
+        sessionContinuation: foreign,
+      }),
+    ).toThrow(/names session "other.2" inside session "first.2"/u);
 
     logStore.appendRawEvent({
       eventId: 'evt_first',

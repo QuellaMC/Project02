@@ -297,22 +297,32 @@ describe('runtime plugin host live config reload', () => {
     expect(await contextText(host)).toBe('v1');
   });
 
-  it('keeps reloading live after a session ends, since the chat may continue in the next one', async () => {
+  it('keeps reloading live after a session ends, and ends a retired instance once', async () => {
+    const sessionEndLog: string[] = [];
     const host = reloadHost({
+      initial: reloadFixturePlugin('v1', sessionEndLog),
       reloader: {
         reload: () =>
           Promise.resolve({
             status: 'rebuilt',
-            plugin: reloadFixturePlugin('v2'),
+            plugin: reloadFixturePlugin('v2', sessionEndLog),
           }),
       },
     });
 
+    // The chat may continue in the next session with the same host, so a
+    // session's end is not the host's end.
     await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
     const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
 
     expect(result.outcome).toBe('live_applied');
     expect(await contextText(host)).toBe('v2');
+
+    // v1 served the second session until it was retired and is ended with it;
+    // the third session's end reaches only v2, which is all that served it.
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    expect(sessionEndLog).toEqual(['v1', 'v1', 'v2', 'v2']);
   });
 
   it('defers a group that mixes live and session-scoped fields', async () => {

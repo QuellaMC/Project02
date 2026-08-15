@@ -291,3 +291,9 @@ export async function defaultFetchClient(
     },
   } satisfies NvidiaFetchResponse);
 }
+
+/** Reasons a chat completion ends whole; anything else cut the output short. */
+export const terminalNvidiaFinishReasons = Object.freeze([
+  'stop',
+  'tool_calls',
+]);

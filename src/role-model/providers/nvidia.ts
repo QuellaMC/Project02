@@ -78,6 +78,7 @@ export {
   type NvidiaFetchResponse,
 } from './nvidia-transport.ts';
 import {
+  terminalNvidiaFinishReasons,
   createNvidiaRequestDeadline,
   defaultFetchClient,
   normalizeNvidiaRequestTimeoutMs,
@@ -102,8 +103,6 @@ type NvidiaProviderErrorCode =
   | 'missing_api_key'
   | 'provider_error'
   | 'request_timeout';
-
-const terminalNvidiaFinishReasons = Object.freeze(['stop', 'tool_calls']);
 
 export function createNvidiaRoleModelProviderConfigFromEnv(
   env: NvidiaRoleModelProviderEnvironment = process.env,

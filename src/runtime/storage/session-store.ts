@@ -104,6 +104,14 @@ type CreateLocalRuntimeSessionOptions = {
 type CreateContinuedLocalRuntimeSessionOptions = {
   readonly continuedFrom: string;
   readonly createdAt?: string;
+  /** Owner of the writer lease the new session is handed over with. */
+  readonly writerOwnerToken?: LocalRuntimeMutationLockOwnerToken;
+};
+
+/** A continued session comes with its writer lease already held by its creator. */
+export type ContinuedLocalRuntimeSession = {
+  readonly metadata: LocalRuntimeSessionMetadata;
+  readonly writerLease: LocalRuntimeMutationLockLease;
 };
 
 type SelectLocalRuntimeSessionOptions = {
@@ -119,10 +127,14 @@ type LocalRuntimeSessionStore = {
   createSession(
     options?: CreateLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata>;
-  /** Opens the next segment of a chain under a generated id. */
+  /**
+   * Opens the next segment of a chain under a generated id, holding its
+   * writer lease from the moment the catalog shows it: no other window can
+   * open the session before its opening record is written.
+   */
   createContinuedSession(
     options: CreateContinuedLocalRuntimeSessionOptions,
-  ): Promise<LocalRuntimeSessionMetadata>;
+  ): Promise<ContinuedLocalRuntimeSession>;
   /**
    * Removes a session that never received a record — the rollback for a
    * continuation whose opening record could not be written. A session that
@@ -238,7 +250,7 @@ export function createLocalRuntimeSessionStore(
   // continuing the same chain at once cannot pick one name for two sessions.
   async function createContinuedSession(
     continuation: CreateContinuedLocalRuntimeSessionOptions,
-  ): Promise<LocalRuntimeSessionMetadata> {
+  ): Promise<ContinuedLocalRuntimeSession> {
     const continuedFrom = normalizeLocalRuntimeSessionId(
       continuation.continuedFrom,
     );
@@ -254,12 +266,29 @@ export function createLocalRuntimeSessionStore(
         );
       }
 
-      return await insertSession(layout, sessions, {
-        sessionId: continuationSessionId(sessions, continuedFrom),
-        createdAt,
-        updatedAt: createdAt,
-        continuedFrom,
+      const sessionId = continuationSessionId(sessions, continuedFrom);
+      const writerLease = await acquireLocalRuntimeSessionWriterLease({
+        storeRoot: layout.storeRoot,
+        sessionId,
+        ...(continuation.writerOwnerToken === undefined
+          ? {}
+          : {ownerToken: continuation.writerOwnerToken}),
       });
+
+      try {
+        return {
+          metadata: await insertSession(layout, sessions, {
+            sessionId,
+            createdAt,
+            updatedAt: createdAt,
+            continuedFrom,
+          }),
+          writerLease,
+        };
+      } catch (error: unknown) {
+        await writerLease.release();
+        throw error;
+      }
     });
   }
 

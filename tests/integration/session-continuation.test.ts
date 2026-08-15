@@ -16,7 +16,11 @@ import {
   characterDataDirPath,
 } from '../../src/runtime/storage/index.ts';
 import {planSessionContinuation} from '../../src/runtime/turn/index.ts';
-import {continueChatSessionIfNeeded} from '../../src/cli/chat/session-continuation.ts';
+import {
+  continueChatSessionIfNeeded,
+  durableSessionContinuation,
+} from '../../src/cli/chat/session-continuation.ts';
+import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
 import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -244,6 +248,71 @@ describe('session continuation', () => {
       expect(plan?.summary).toContain('“one” · “two” · “three”');
     } finally {
       await runtime.writerLease.release();
+    }
+  });
+
+  it('keeps the new session newest even though closing the old one writes last', async () => {
+    const homeRoot = createTestTempRoot(
+      'project02-session-continuation-recency-',
+    );
+    const runtime = await createDurableChatRuntime({
+      homeRoot,
+      character: testCharacterProfile,
+      newSessionId: 'first',
+    });
+    const adapter = replyAdapter({});
+    const endedSessions: string[] = [];
+    const probe = createSessionEndFileStoreProbePlugin({
+      pluginId: 'memory.session-end.fixture',
+      requestedAccess: {},
+      onSessionEnd(context) {
+        endedSessions.push(context.sessionId);
+      },
+    });
+    let next;
+
+    try {
+      await talk(runtime, adapter, ['one', 'two', 'three', 'four']);
+      next = await continueChatSessionIfNeeded({
+        current: {
+          session: runtime.session,
+          logStore: runtime.logStore,
+          release: () => runtime.writerLease.release(),
+        },
+        pluginHost: createRuntimePluginHost({
+          plugins: [probe],
+          enabledPluginIds: [probe.manifest.id],
+        }),
+        continueSession: durableSessionContinuation({
+          homeRoot,
+          character: testCharacterProfile,
+          userDisplayName: undefined,
+        }),
+        roleModelAdapter: adapter,
+        contextWindowTokens,
+        stdout: collect(() => {}),
+      });
+    } finally {
+      if (next === undefined) {
+        await runtime.writerLease.release();
+      }
+    }
+
+    try {
+      expect(next?.session.id).toBe('first.2');
+      // The old session's end evidence is the last log write anywhere, yet a
+      // flagless launch must resume the new session, not the closed one.
+      expect(endedSessions).toEqual(['first']);
+      expect(
+        (
+          await createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(homeRoot, testCharacterProfile.id),
+            characterId: testCharacterProfile.id,
+          }).newestSession()
+        )?.sessionId,
+      ).toBe('first.2');
+    } finally {
+      await next?.release();
     }
   });
 

@@ -22,6 +22,7 @@ import {collect} from '../support/streams.ts';
 import {createConversationSession} from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {firstPartyModelToolsPluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {createRuntimePluginManagementPluginManifest} from '../../src/plugins/index.ts';
 import {
@@ -678,6 +679,10 @@ describe('chat CLI provider selection', () => {
       },
     };
     let stdout = '';
+    const endedSessions: string[] = [];
+    const sessionEndPlugin = createSessionEndPlugin(context => {
+      endedSessions.push(context.sessionId);
+    });
 
     // ~21 estimated tokens per turn: a 100-token window replays two turns,
     // so the third completed turn overflows it and the talk continues in a
@@ -686,16 +691,27 @@ describe('chat CLI provider selection', () => {
       project02: {contextWindowTokens: 100},
     });
 
+    // The chat exits right after the continuation, so the closed session's
+    // end evidence is the last write anywhere: the new session must still be
+    // the one a flagless launch resumes.
     const exitCode = await runChatCliFromArgs(
       ['--store', storeRoot, '--new-session', 'long-talk'],
       {
-        stdin: Readable.from(['one\n', 'two\n', 'three\n', 'four\n']),
+        stdin: Readable.from(['one\n', 'two\n', 'three\n']),
         stdout: collect(chunk => {
           stdout += chunk;
         }),
-        stderr: collect(() => {}),
+        stderr: collect(chunk => {
+          stdout += `[stderr] ${chunk}`;
+        }),
         roleModelAdapter: adapter,
-        pluginHost: createRuntimePluginHost({plugins: []}),
+        pluginHost: createRuntimePluginHost({
+          plugins: [sessionEndPlugin],
+          enabledPluginIds: [
+            firstPartyModelToolsPluginId,
+            sessionEndPlugin.manifest.id,
+          ],
+        }),
       },
     );
 
@@ -703,6 +719,17 @@ describe('chat CLI provider selection', () => {
     expect(stdout).toContain(
       'Mira: noted\n[context] Continuing in session long-talk.2: 2 earlier turns condensed into a summary.\nYou: ',
     );
+    // Each segment is closed under its own name: the first at continuation,
+    // the second at exit.
+    expect(endedSessions).toEqual(['long-talk', 'long-talk.2']);
+    expect(
+      (
+        await createLocalRuntimeSessionStore({
+          storeRoot: characterDataDirPath(storeRoot, 'mira'),
+          characterId: 'mira',
+        }).newestSession()
+      )?.sessionId,
+    ).toBe('long-talk.2');
 
     // No session named: the continued segment is where the conversation
     // resumes; the closed one opens on request and says where it went on.
