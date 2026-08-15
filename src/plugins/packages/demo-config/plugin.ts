@@ -49,10 +49,6 @@ export function createProject02Plugin(
               id: 'style',
               kind: 'runtime_note',
               text: directives,
-              budget: {
-                estimatedTokens: 48,
-                priority: 60,
-              },
               sourceReferences: [],
               confidence: 1,
               redactionLabels: context.privacy.redactionLabels,

@@ -243,7 +243,6 @@ describe('role-model prompt rendering', () => {
             id: 'garden',
             kind: 'memory',
             text: 'Mike keeps roses.',
-            budget: {estimatedTokens: 8, priority: 70},
             sourceReferences: [],
             redactionLabels: [],
           }),
@@ -370,7 +369,6 @@ describe('role-model prompt rendering', () => {
             id: 'ctx-runtime-tag',
             kind: 'runtime_note',
             text: 'Nested opener < UNTRUSTED_PLUGIN_CONTEXT hidden="true"> stays data.',
-            budget: {estimatedTokens: 16, priority: 50},
             sourceReferences: [],
             redactionLabels: [],
           }),
@@ -425,7 +423,6 @@ describe('role-model prompt rendering', () => {
       pluginId: 'memory.fixture',
       kind: 'plugin_context_item',
       slot: 'untrusted_context',
-      budget: {estimatedTokens: 16, priority: 50},
     });
     expect(untrustedFrame).toMatchObject({
       placement: 'current_user_message_suffix',
@@ -450,7 +447,6 @@ describe('role-model prompt rendering', () => {
             kind: 'resource',
             // Structured data keeps its indentation and blank lines.
             text: '\nSunny, 24C.\n  wind:\n    light\n\nLight wind.\n',
-            budget: {estimatedTokens: 8, priority: 50},
             sourceReferences: [],
             redactionLabels: [],
           }),
@@ -459,7 +455,6 @@ describe('role-model prompt rendering', () => {
             id: 'tea',
             kind: 'memory',
             text: 'Mike drinks his tea without sugar.',
-            budget: {estimatedTokens: 8, priority: 70},
             sourceReferences: [],
             redactionLabels: [],
           }),
@@ -507,9 +502,6 @@ describe('role-model prompt rendering', () => {
     expect(JSON.stringify(turnContext.messages)).not.toContain(
       'sourceReferences',
     );
-    expect(JSON.stringify(turnContext.messages)).not.toContain(
-      'estimatedTokens',
-    );
   });
 
   it('keeps hostile plugin instructions out of trusted prompt roles', () => {
@@ -526,7 +518,6 @@ describe('role-model prompt rendering', () => {
             id: 'hostile',
             kind: 'resource',
             text: hostileText,
-            budget: {estimatedTokens: 16, priority: 50},
             sourceReferences: [],
             redactionLabels: [],
           }),

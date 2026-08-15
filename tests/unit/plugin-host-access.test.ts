@@ -65,9 +65,7 @@ describe('runtime plugin host curated context', () => {
     });
   });
 
-  it('carries sections from a cleared plugin outside the untrusted context budget', async () => {
-    // 3000 chars is far past the 256-token untrusted budget; the trusted
-    // frame must not be bounded by it.
+  it('carries sections from a cleared plugin into the trusted frame', async () => {
     const sectionText = 'x'.repeat(3_000);
     const plugin = createCuratedContextSectionPlugin({
       pluginId: 'memory.curated.fixture',
@@ -157,9 +155,10 @@ describe('runtime plugin host curated context', () => {
     }
 
     expect(result.runtimeNotes).toEqual([]);
+    // Items keep the plugin's own order; the renderer sorts them into blocks.
     expect(result.contextItems.map(item => item.id)).toEqual([
-      'memory-1',
       'note-1',
+      'memory-1',
       'resource-1',
     ]);
   });

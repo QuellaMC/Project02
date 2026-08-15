@@ -62,7 +62,6 @@ export {
   type RuntimePluginConfigField,
   type RuntimePluginConfigMetadata,
   type RuntimePluginContext,
-  type RuntimePluginContextBudget,
   type RuntimePluginContextItem,
   type RuntimePluginCuratedContextSection,
   type RuntimePluginEvidenceSnapshot,

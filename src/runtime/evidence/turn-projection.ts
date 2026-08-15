@@ -559,10 +559,6 @@ function pluginContextItemsFromSnapshots(
         id: item.id,
         kind: item.kind,
         text: item.text,
-        budget: Object.freeze({
-          estimatedTokens: item.budget.estimatedTokens,
-          priority: item.budget.priority,
-        }),
         sourceReferences: sourceReferences(item.sourceReferences),
         redactionLabels: Object.freeze([...item.redactionLabels]),
         ...(item.confidence === undefined ? {} : {confidence: item.confidence}),

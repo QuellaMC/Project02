@@ -122,17 +122,11 @@ export type RuntimePluginSourceReference = {
   readonly uri?: string;
 };
 
-export type RuntimePluginContextBudget = {
-  readonly estimatedTokens: number;
-  readonly priority: number;
-};
-
 export type RuntimePluginContextItem = {
   readonly pluginId: string;
   readonly id: string;
   readonly kind: RuntimePluginContextItemKind;
   readonly text: string;
-  readonly budget: RuntimePluginContextBudget;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
   readonly confidence?: number;
   readonly redactionLabels: readonly string[];

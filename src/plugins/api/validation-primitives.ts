@@ -11,39 +11,10 @@ import {isProject02Identifier} from '../../shared/identifier.ts';
 import {isJsonBoundaryCredentialKey} from '../../shared/redaction.ts';
 import {runtimePluginSourceKindValues} from './contract.ts';
 import type {
-  RuntimePluginContextBudget,
   RuntimePluginSourceReference,
   RuntimePluginValidationFailureReason,
   RuntimePluginValidationResult,
 } from './types.ts';
-
-export function requiredContextBudget(
-  value: unknown,
-): RuntimePluginValidationResult<RuntimePluginContextBudget> {
-  if (!isRecord(value)) {
-    return reject(
-      'malformed_context_item',
-      'Plugin context budget must be an object.',
-    );
-  }
-
-  const estimatedTokens = requiredPositiveInteger(
-    value['estimatedTokens'],
-    'estimatedTokens',
-  );
-  const priority = requiredPositiveInteger(value['priority'], 'priority');
-
-  if (estimatedTokens.status === 'rejected' || priority.status === 'rejected') {
-    return firstRejected([estimatedTokens, priority]);
-  }
-
-  return accept(
-    Object.freeze({
-      estimatedTokens: estimatedTokens.value,
-      priority: priority.value,
-    } satisfies RuntimePluginContextBudget),
-  );
-}
 
 /** What one evidence record may carry, and what every producer bounds to. */
 export const runtimePluginSourceReferenceLimit = 32;
