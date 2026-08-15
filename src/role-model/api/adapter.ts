@@ -4,7 +4,6 @@ import type {
   RoleModelProviderExchangeSnapshot,
   RoleModelProviderMetadata,
 } from './contracts.ts';
-import type {RoleModelAssistantChatMessage} from './chat-wire.ts';
 import type {RoleModelTurnContext} from '../prompt/render.ts';
 import type {ConversationTurn} from './conversation-history.ts';
 
@@ -13,7 +12,6 @@ export type RoleModelAdapterRawOutput = {
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
   readonly rejection?: RoleModelDecisionRejection;
-  readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
 };
 
 export type RoleModelAdapterInvocation = {

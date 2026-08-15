@@ -113,14 +113,20 @@ describe('plugin-driven Character State tool loop', () => {
         'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
       ],
     });
-    const observations =
-      terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolObservations ?? [];
+    const toolRounds =
+      terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolRounds ?? [];
 
-    expect(observations).toHaveLength(1);
-    expect(observations[0]?.round).toBe(1);
-    expect(observations[0]?.pluginId).toBe('character-state');
-    expect(observations[0]?.toolName).toBe('character_state.patch');
-    expect(observations[0]?.result.status).toBe('accepted');
+    expect(toolRounds).toHaveLength(1);
+    expect(toolRounds[0]?.round).toBe(1);
+    expect(toolRounds[0]?.toolCalls).toMatchObject([
+      {
+        toolCallId:
+          'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
+        pluginId: 'character-state',
+        toolName: 'character_state.patch',
+        result: {status: 'accepted'},
+      },
+    ]);
   });
 
   it('persists role-model evidence on tool-authorizing rounds without interim replies', async () => {
@@ -183,7 +189,7 @@ describe('plugin-driven Character State tool loop', () => {
       toolRound: 1,
       roleModelIOSnapshot: {
         inputEnvelope: {
-          toolObservations: [],
+          toolRounds: [],
         },
       },
       parsedRoleModelDecisionSnapshot: {

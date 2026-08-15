@@ -137,7 +137,6 @@ describe('inspect CLI plugin evidence', () => {
                   readonly renderedMessages: readonly unknown[];
                   readonly renderedTools: readonly unknown[];
                   readonly requestBody: unknown;
-                  readonly nativeToolResultMessages: readonly unknown[];
                 };
               };
               readonly input?: {
@@ -213,8 +212,8 @@ describe('inspect CLI plugin evidence', () => {
         redactionLabels: expect.any(Array) as string[],
       }),
     ]);
-    // The second round replays the first round's call and result natively,
-    // so its prompt size names those frames beside the stable ones.
+    // The second round replays the first round's call and result, so its
+    // prompt size names those frames beside the stable ones.
     expect(
       output.turns[0].modelRounds[1]?.roleModelEvidence.promptSize?.frames.map(
         frame => [frame.kind, frame.count],
@@ -224,8 +223,8 @@ describe('inspect CLI plugin evidence', () => {
       ['developer_protocol', 1],
       ['model_only_runtime_context', 1],
       ['current_user_message', 1],
-      ['native_assistant_message', 1],
-      ['native_tool_result_message', 1],
+      ['tool_round_assistant_message', 1],
+      ['tool_round_result_message', 1],
     ]);
     expect(
       output.turns[0].modelRounds[1]?.roleModelEvidence.promptSize?.total
@@ -246,9 +245,13 @@ describe('inspect CLI plugin evidence', () => {
       provider: 'local-fixture',
     });
     expect(
-      output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
-        ?.nativeToolResultMessages.length,
-    ).toBeGreaterThan(0);
+      output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange?.renderedMessages.some(
+        message =>
+          typeof message === 'object' &&
+          message !== null &&
+          (message as {readonly role?: unknown}).role === 'tool',
+      ),
+    ).toBe(true);
     expect(output.turns[0].toolEvents[0].pluginId).toBe('character-state');
     expect(output.turns[0].pluginEvidence.evidence).toEqual(
       expect.arrayContaining([
@@ -1539,20 +1542,6 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
               },
             ],
           }),
-          nativeAssistantMessage: {
-            role: 'assistant',
-            content: null,
-            tool_calls: [
-              {
-                id: 'call_character_state_patch',
-                type: 'function',
-                function: {
-                  name: 'character_state.patch',
-                  arguments: '{"mood":"curious"}',
-                },
-              },
-            ],
-          },
         };
       }
 
@@ -1583,9 +1572,6 @@ function createPatchThenReplyAdapter(): RoleModelAdapter {
           requestBody: {
             provider: 'local-fixture',
           },
-          nativeToolResultMessages: invocation.turnContext.messages.filter(
-            message => message.role === 'tool',
-          ),
         },
       };
     },

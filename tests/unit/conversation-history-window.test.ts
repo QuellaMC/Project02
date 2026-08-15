@@ -81,12 +81,13 @@ describe('conversation history window', () => {
     }
   });
 
-  it('replays a tool round natively and the replies as plain assistant text', () => {
+  it("replays a tool round as the model's text and interim replies, its calls, and the results", () => {
     const withTools: ConversationTurn = {
       ...turn(1, 'done'),
       toolRounds: [
         {
           round: 1,
+          text: 'let me look',
           interimReplies: [
             {
               id: 's:message-2',
@@ -113,7 +114,7 @@ describe('conversation history window', () => {
       {role: 'user', content: 'question 1'},
       {
         role: 'assistant',
-        content: 'checking',
+        content: 'let me look\n\nchecking',
         tool_calls: [
           {
             id: 'call-1',

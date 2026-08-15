@@ -228,10 +228,10 @@ function requestedDecisionEvidenceKey(
     return undefined;
   }
 
-  // Every executable round appends at least one observation before the next
-  // model invocation, so this pair is a stable key for one decision.
+  // Every executable round appends a tool round before the next model
+  // invocation, so this pair is a stable key for one decision.
   return `${String(
-    roleModelIOSnapshot.inputEnvelope.toolObservations.length,
+    roleModelIOSnapshot.inputEnvelope.toolRounds.length,
   )}:${roleModelIOSnapshot.rawOutputText}`;
 }
 

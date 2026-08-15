@@ -96,9 +96,6 @@ export function freezeRoleModelProviderExchangeSnapshot(
             snapshot.nativeAssistantMessage,
           ),
         }),
-    nativeToolResultMessages: Object.freeze(
-      snapshot.nativeToolResultMessages.map(freezeRoleModelChatMessage),
-    ),
   } satisfies RoleModelProviderExchangeSnapshot);
 }
 
@@ -121,7 +118,6 @@ function isRequiredRoleModelProviderExchangeSnapshot(
   const renderedMessages = value['renderedMessages'];
   const renderedTools = value['renderedTools'];
   const toolNameMappings = value['toolNameMappings'];
-  const nativeToolResultMessages = value['nativeToolResultMessages'];
 
   return (
     isRoleModelProviderExchangeProvider(value['provider']) &&
@@ -133,9 +129,7 @@ function isRequiredRoleModelProviderExchangeSnapshot(
     renderedTools.every(isRoleModelProviderExchangeTool) &&
     Array.isArray(toolNameMappings) &&
     toolNameMappings.every(isRoleModelProviderToolNameMapping) &&
-    value['requestBody'] !== undefined &&
-    Array.isArray(nativeToolResultMessages) &&
-    nativeToolResultMessages.every(isRoleModelProviderExchangeChatMessage)
+    value['requestBody'] !== undefined
   );
 }
 

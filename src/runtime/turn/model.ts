@@ -23,7 +23,7 @@ import {
   type ConversationTurn,
   type DecisionContext,
 } from '../../role-model/index.ts';
-import {localUserSpeaker} from '../../core/index.ts';
+import {localUserSpeaker, type VisibleMessage} from '../../core/index.ts';
 import {conversationHistoryFromRawEvents} from '../evidence/conversation-history.ts';
 import {defaultProject02ContextWindowTokens} from '../config/types.ts';
 import {
@@ -270,7 +270,7 @@ async function runRuntimeModel(
       await recordPluginToolCallsRequested(state, event);
     },
     async onVisibleReply(event) {
-      await commitVisibleReply(state, prepared, event);
+      return await commitVisibleReply(state, prepared, event);
     },
     ...roleModelLoopAdapterOption(state.options),
   });
@@ -326,8 +326,8 @@ async function commitVisibleReply(
   state: RuntimeTurnState,
   prepared: PreparedRuntimeTurn,
   event: RoleModelVisibleReplyEvent,
-): Promise<void> {
-  await appendVisibleReplyForDecision(state, {
+): Promise<VisibleMessage> {
+  return await appendVisibleReplyForDecision(state, {
     runtimePluginEvidence: prepared.beforeRoleModelCallResult.evidence,
     roleModelIOSnapshot: event.ioSnapshot,
     parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,

@@ -38,7 +38,7 @@ import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
-  type RoleModelToolObservation,
+  type ConversationToolRound,
 } from '../../src/role-model/index.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
@@ -976,7 +976,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       sessionId: fixture.sessionId,
     });
     const pluginHost = createConfigEffectTestHost({fixture, session});
-    const observationsByRound: (readonly RoleModelToolObservation[])[] = [];
+    const toolRoundsByRound: (readonly ConversationToolRound[])[] = [];
     const updateInput = {
       pluginId: fixture.targetPlugin.manifest.id,
       fieldName: 'tone',
@@ -987,7 +987,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const adapter = Object.freeze({
       invoke(inputEnvelope) {
         invocationCount += 1;
-        observationsByRound.push(inputEnvelope.toolObservations);
+        toolRoundsByRound.push(inputEnvelope.toolRounds);
 
         if (invocationCount === 1) {
           return {
@@ -1043,9 +1043,9 @@ describe('plugin-driven tool loop commit and rollback', () => {
       manifest: fixture.targetPlugin.manifest,
       pluginManifests: [fixture.targetPlugin.manifest],
     });
-    const rejection = observationsByRound[1]?.find(
-      observation => observation.toolName === runtimePluginConfigUpdateToolName,
-    );
+    const rejection = toolRoundsByRound[1]
+      ?.flatMap(round => round.toolCalls)
+      .find(call => call.toolName === runtimePluginConfigUpdateToolName);
 
     expect(result.status).toBe('completed');
     expect(rejection?.result).toMatchObject({
