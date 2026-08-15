@@ -297,6 +297,24 @@ describe('runtime plugin host live config reload', () => {
     expect(await contextText(host)).toBe('v1');
   });
 
+  it('keeps reloading live after a session ends, since the chat may continue in the next one', async () => {
+    const host = reloadHost({
+      reloader: {
+        reload: () =>
+          Promise.resolve({
+            status: 'rebuilt',
+            plugin: reloadFixturePlugin('v2'),
+          }),
+      },
+    });
+
+    await host.onSessionEnd(testPluginContext(), {allowFileStoreWrites: false});
+    const result = await host.reloadPluginForCommittedConfig([toneEffect()]);
+
+    expect(result.outcome).toBe('live_applied');
+    expect(await contextText(host)).toBe('v2');
+  });
+
   it('defers a group that mixes live and session-scoped fields', async () => {
     const host = reloadHost({
       reloader: {

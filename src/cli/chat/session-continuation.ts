@@ -77,7 +77,20 @@ export async function continueChatSessionIfNeeded(options: {
     return undefined;
   }
 
-  const next = await options.continueSession(plan);
+  // The current session stays current until the next one is open: a failure
+  // here is reported and the plan is simply made again after the next turn.
+  let next: DurableChatRuntime;
+
+  try {
+    next = await options.continueSession(plan);
+  } catch (error: unknown) {
+    options.stdout.write(
+      `[context] Could not continue in a new session, staying in ${session.id}: ${
+        error instanceof Error ? error.message : String(error)
+      }\n`,
+    );
+    return undefined;
+  }
 
   try {
     await endChatSession({session, logStore, pluginHost: options.pluginHost});

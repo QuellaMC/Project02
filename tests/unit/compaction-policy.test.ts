@@ -6,6 +6,7 @@ import {
   mechanicalSummary,
   selectSessionContinuation,
   serializeTurnsForSummarizer,
+  summaryCharsForWindow,
 } from '../../src/runtime/turn/compaction-policy.ts';
 import {maxContextSummaryChars} from '../../src/runtime/evidence/records.ts';
 import type {ConversationTurn} from '../../src/role-model/index.ts';
@@ -58,6 +59,20 @@ describe('session continuation policy', () => {
       'evt_3',
     ]);
     expect(selection?.carried.map(item => item.eventId)).toEqual(['evt_4']);
+
+    // A newest turn too big to carry is summarised too: carried verbatim it
+    // would only be dropped again by the next history window.
+    const oversized = selectSessionContinuation(
+      [turn(1), turn(2), turn(3, 'x'.repeat(400))],
+      {contextWindowTokens: 100},
+    );
+
+    expect(oversized?.summarized.map(item => item.eventId)).toEqual([
+      'evt_1',
+      'evt_2',
+      'evt_3',
+    ]);
+    expect(oversized?.carried).toEqual([]);
   });
 
   it('serialises turns for the summariser with speakers, days, tools, and shortened lines', () => {
@@ -104,11 +119,19 @@ describe('session continuation policy', () => {
     ).toContain('earlier lines omitted');
   });
 
+  it('sizes the recollection to the window between a floor and the record cap', () => {
+    // 5 % of the window in characters: 32768 tokens hits the 6000-char record
+    // cap, 8192 gets 1638, and anything smaller keeps the 1000-char floor.
+    expect(summaryCharsForWindow(32768)).toBe(maxContextSummaryChars);
+    expect(summaryCharsForWindow(8192)).toBe(1638);
+    expect(summaryCharsForWindow(100)).toBe(1000);
+  });
+
   it('caps model summaries at a sentence boundary and treats blank output as none', () => {
-    expect(capSummaryText('   ')).toBeUndefined();
-    expect(capSummaryText(' Short. ')).toBe('Short.');
+    expect(capSummaryText('   ', 100)).toBeUndefined();
+    expect(capSummaryText(' Short. ', 100)).toBe('Short.');
     const long = `${'A sentence here. '.repeat(400)}tail`;
-    const capped = capSummaryText(long) ?? '';
+    const capped = capSummaryText(long, maxContextSummaryChars) ?? '';
 
     expect(capped.length).toBeLessThanOrEqual(maxContextSummaryChars);
     expect(capped.endsWith('.')).toBe(true);
@@ -119,6 +142,7 @@ describe('session continuation policy', () => {
       summarized: [turn(1), turn(2), turn(3)],
       previousSummary: 'p'.repeat(maxContextSummaryChars),
       userDisplayName: 'Mike',
+      maxChars: maxContextSummaryChars,
     });
 
     expect(summary.length).toBeLessThanOrEqual(maxContextSummaryChars);

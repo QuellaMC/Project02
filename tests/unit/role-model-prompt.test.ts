@@ -12,8 +12,9 @@ import {
   type RoleModelPluginToolDefinition,
 } from '../../src/role-model/index.ts';
 import {
-  contextSummaryHeader,
   curatedContextHeader,
+  earlierConversationFenceTag,
+  earlierConversationPreamble,
   recalledMemoryFenceTag,
   recalledMemoryPreamble,
   runtimeContextHeader,
@@ -164,7 +165,7 @@ describe('role-model prompt rendering', () => {
     ]);
   });
 
-  it('renders a continued session summary as a stable frame between the curated notes and the runtime notes', () => {
+  it('renders a continued session summary as a fenced user message ahead of the replayed turns', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('and now?', testIdentity()),
       decisionContext: createDecisionContext({
@@ -191,20 +192,28 @@ describe('role-model prompt rendering', () => {
       frame => frame.kind === 'context_summary',
     );
 
-    expect(kinds.slice(0, 5)).toEqual([
+    expect(kinds).toEqual([
       'system_protocol',
       'developer_protocol',
       'curated_context',
-      'context_summary',
       'model_only_runtime_context',
+      'context_summary',
+      'current_user_message',
     ]);
+    // Model output never earns a trusted role: the recollection is data on
+    // the user side, fenced like recalled memory.
     expect(summaryFrame).toMatchObject({
       placement: 'own_message',
-      role: 'system',
+      role: 'user',
       modelOnly: true,
     });
     expect(summaryFrame?.content).toBe(
-      `${contextSummaryHeader({userDisplayName: 'Mike'})}\nMike is planning a hike; I suggested Ridge Loop.`,
+      [
+        `<${earlierConversationFenceTag}>`,
+        earlierConversationPreamble({userDisplayName: 'Mike'}),
+        'Mike is planning a hike; I suggested Ridge Loop.',
+        `</${earlierConversationFenceTag}>`,
+      ].join('\n'),
     );
     expect(
       renderRoleModelTurnContext(

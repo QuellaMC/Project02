@@ -127,6 +127,27 @@ describe('local runtime session store', () => {
     await expect(
       store.createContinuedSession({continuedFrom: 'never-existed'}),
     ).rejects.toThrow(LocalRuntimeSessionStoreError);
+
+    // Recency follows the last write: a session that kept receiving records
+    // stays the newest over one merely opened later.
+    const rootLog = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: root.sessionId,
+    }).rawEventsPath;
+    await writeFile(rootLog, '{"later": true}\n');
+    expect((await store.newestSession())?.sessionId).toBe(root.sessionId);
+
+    // A session that never received a record can be discarded; one holding
+    // evidence cannot.
+    await store.discardEmptySession(third.sessionId);
+    expect((await store.listSessions()).map(item => item.sessionId)).toEqual([
+      root.sessionId,
+      second.sessionId,
+    ]);
+    await expect(store.discardEmptySession(root.sessionId)).rejects.toThrow(
+      /holds evidence/u,
+    );
+    expect(await store.readSession(root.sessionId)).toEqual(root);
   });
 
   it('creates sessions for a padded character ID instead of mismatching its own marker', async () => {

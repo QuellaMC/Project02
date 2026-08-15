@@ -377,8 +377,10 @@ export function createRuntimePluginHost(
         evidence: hookResult.evidence,
       } satisfies RuntimePluginHookHostResult);
     },
+    // A session's end is not the host's: a chat continues into its next
+    // session with the same host, so reloads stay live; only shutdown is
+    // terminal.
     async onSessionEnd(context, hookOptions) {
-      terminalStarted = true;
       await instanceOwnership.quiesce();
 
       return await runRuntimePluginSessionEndHooksForTargets({

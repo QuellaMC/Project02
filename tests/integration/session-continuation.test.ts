@@ -16,6 +16,8 @@ import {
   characterDataDirPath,
 } from '../../src/runtime/storage/index.ts';
 import {planSessionContinuation} from '../../src/runtime/turn/index.ts';
+import {continueChatSessionIfNeeded} from '../../src/cli/chat/session-continuation.ts';
+import {collect} from '../support/streams.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 const contextWindowTokens = 100;
@@ -143,21 +145,25 @@ describe('session continuation', () => {
         await second.writerLease.release();
       }
 
-      // The new session's first prompt: summary frame, the carried turn
-      // replayed verbatim, then the new message.
-      const summaryFrame = wire.find(
-        message =>
-          message.role === 'system' &&
-          message.content.includes('Mike asked me four things'),
+      // The new session's first prompt: the recollection as a fenced user
+      // message, the carried turn replayed verbatim, then the new message.
+      const conversation = wire.filter(
+        message => message.role === 'user' || message.role === 'assistant',
       );
-      expect(summaryFrame).toBeDefined();
+      expect(conversation[0]?.role).toBe('user');
+      expect(conversation[0]?.content).toContain('Mike asked me four things');
+      expect(conversation.slice(1).map(message => message.content)).toEqual([
+        'four',
+        'noted',
+        'five',
+      ]);
       expect(
-        wire
-          .filter(
-            message => message.role === 'user' || message.role === 'assistant',
-          )
-          .map(message => message.content),
-      ).toEqual(['four', 'noted', 'five']);
+        wire.some(
+          message =>
+            message.role === 'system' &&
+            message.content.includes('Mike asked me four things'),
+        ),
+      ).toBe(false);
     } finally {
       await first.writerLease.release();
     }
@@ -236,6 +242,78 @@ describe('session continuation', () => {
       });
       expect(plan?.summary).toContain('Earlier conversation (3 turns');
       expect(plan?.summary).toContain('“one” · “two” · “three”');
+    } finally {
+      await runtime.writerLease.release();
+    }
+  });
+
+  it('stays in the current session when the next one cannot be opened, and leaves no empty session behind', async () => {
+    const homeRoot = createTestTempRoot(
+      'project02-session-continuation-failure-',
+    );
+    const runtime = await createDurableChatRuntime({
+      homeRoot,
+      character: testCharacterProfile,
+      newSessionId: 'first',
+    });
+    const adapter = replyAdapter({});
+    let stdout = '';
+
+    try {
+      await talk(runtime, adapter, ['one', 'two', 'three', 'four']);
+      const recordsBefore = runtime.logStore.rawEvents().length;
+
+      // The chat loop's guard: an open that throws is reported, the current
+      // session is neither ended nor swapped, and the plan is made again later.
+      const next = await continueChatSessionIfNeeded({
+        current: {
+          session: runtime.session,
+          logStore: runtime.logStore,
+          release: () => Promise.resolve(),
+        },
+        pluginHost: createRuntimePluginHost({plugins: []}),
+        continueSession: () => Promise.reject(new Error('disk full')),
+        roleModelAdapter: adapter,
+        contextWindowTokens,
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+      });
+
+      expect(next).toBeUndefined();
+      expect(stdout).toBe(
+        '[context] Could not continue in a new session, staying in first: disk full\n',
+      );
+      expect(runtime.logStore.rawEvents()).toHaveLength(recordsBefore);
+
+      // The bootstrap's own rollback: a continued session whose opening
+      // record cannot be written is discarded rather than left as the newest.
+      const plan = await planSessionContinuation({
+        sessionId: 'first',
+        logStore: runtime.logStore,
+        roleModelAdapter: adapter,
+        contextWindowTokens,
+        characterName: testCharacterProfile.displayName,
+      });
+      if (plan === undefined) {
+        throw new Error('Expected a continuation plan.');
+      }
+
+      await expect(
+        createContinuedDurableChatRuntime({
+          homeRoot,
+          character: testCharacterProfile,
+          plan: {...plan, summary: ''},
+        }),
+      ).rejects.toThrow();
+      expect(
+        (
+          await createLocalRuntimeSessionStore({
+            storeRoot: characterDataDirPath(homeRoot, testCharacterProfile.id),
+            characterId: testCharacterProfile.id,
+          }).listSessions()
+        ).map(metadata => metadata.sessionId),
+      ).toEqual(['first']);
     } finally {
       await runtime.writerLease.release();
     }

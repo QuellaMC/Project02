@@ -5,10 +5,9 @@ import {
 } from '../../role-model/index.ts';
 import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {conversationHistoryFromRawEvents} from '../evidence/conversation-history.ts';
-import {
-  maxContextSummaryChars,
-  type ContextSummarizer,
-  type SessionContinuationPlan,
+import type {
+  ContextSummarizer,
+  SessionContinuationPlan,
 } from '../evidence/records.ts';
 import {defaultProject02ContextWindowTokens} from '../config/types.ts';
 import {
@@ -16,6 +15,7 @@ import {
   mechanicalSummary,
   selectSessionContinuation,
   serializeTurnsForSummarizer,
+  summaryCharsForWindow,
 } from './compaction-policy.ts';
 
 export type {SessionContinuationPlan} from '../evidence/records.ts';
@@ -85,6 +85,7 @@ async function summarize(options: {
   readonly summary: string;
   readonly summarizer: ContextSummarizer;
 }> {
+  const maxChars = summaryCharsForWindow(options.contextWindowTokens);
   const fallback = (reason: string) => ({
     summary: mechanicalSummary({
       summarized: options.turns,
@@ -94,6 +95,7 @@ async function summarize(options: {
       ...(options.userDisplayName === undefined
         ? {}
         : {userDisplayName: options.userDisplayName}),
+      maxChars,
     }),
     summarizer: {status: 'fallback', reason} as const,
   });
@@ -110,7 +112,7 @@ async function summarize(options: {
         ...(options.userDisplayName === undefined
           ? {}
           : {userDisplayName: options.userDisplayName}),
-        maxOutputChars: maxContextSummaryChars,
+        maxOutputChars: maxChars,
         hasPreviousSummary: options.previousSummary !== undefined,
       }),
       input: serializeTurnsForSummarizer({
@@ -123,14 +125,14 @@ async function summarize(options: {
           : {userDisplayName: options.userDisplayName}),
         contextWindowTokens: options.contextWindowTokens,
       }),
-      maxOutputChars: maxContextSummaryChars,
+      maxOutputChars: maxChars,
     });
 
     if (result.status === 'failed') {
       return fallback(result.reason);
     }
 
-    const summary = capSummaryText(result.text);
+    const summary = capSummaryText(result.text, maxChars);
 
     return summary === undefined
       ? fallback('The summariser returned no text.')

@@ -6,6 +6,7 @@ import {
   readTextFile,
   readTextFileSync,
   removeDirectory,
+  statPathNumericSync,
   type Dirent,
 } from '../../shared/file-system.ts';
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
@@ -49,6 +50,7 @@ import {
 type LocalRuntimeSessionStoreErrorCode =
   | 'conversation_log_reader_unavailable'
   | 'session_already_exists'
+  | 'session_not_empty'
   | 'session_not_found';
 
 export class LocalRuntimeSessionStoreError extends Error {
@@ -97,7 +99,6 @@ type CreateLocalRuntimeSessionOptions = {
   readonly sessionId?: string;
   readonly createdAt?: string;
   readonly updatedAt?: string;
-  readonly continuedFrom?: string;
 };
 
 type CreateContinuedLocalRuntimeSessionOptions = {
@@ -122,8 +123,14 @@ type LocalRuntimeSessionStore = {
   createContinuedSession(
     options: CreateContinuedLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata>;
+  /**
+   * Removes a session that never received a record — the rollback for a
+   * continuation whose opening record could not be written. A session that
+   * holds any evidence is refused.
+   */
+  discardEmptySession(sessionId: string): Promise<void>;
   listSessions(): Promise<readonly LocalRuntimeSessionMetadata[]>;
-  /** The most recently active session, if any exists. */
+  /** The session written to most recently, if any exists. */
   newestSession(): Promise<LocalRuntimeSessionMetadata | undefined>;
   /** The session that continued the given one, if a compaction opened one. */
   successorOf(
@@ -219,69 +226,54 @@ export function createLocalRuntimeSessionStore(
         );
       }
 
-      const metadata = createLocalRuntimeSessionMetadata({
+      return await insertSession(layout, sessions, {
         sessionId,
         createdAt,
         updatedAt: sessionOptions.updatedAt ?? createdAt,
-        ...(sessionOptions.continuedFrom === undefined
-          ? {}
-          : {continuedFrom: sessionOptions.continuedFrom}),
       });
-
-      const sessionDirectory = await createSessionDirectory(layout, sessionId);
-      sessions.set(sessionId, metadata);
-
-      try {
-        rewriteSessionCatalog(layout, sessions);
-      } catch (error: unknown) {
-        if (sessionDirectory.created) {
-          await rollbackCreatedSessionDirectory(sessionDirectory.path, error);
-        }
-
-        throw errorFromUnknown(error);
-      }
-
-      return metadata;
     });
   }
 
+  // The chain name is chosen and written under the same lock, so two windows
+  // continuing the same chain at once cannot pick one name for two sessions.
   async function createContinuedSession(
     continuation: CreateContinuedLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata> {
     const continuedFrom = normalizeLocalRuntimeSessionId(
       continuation.continuedFrom,
     );
-    const sessions = await readSessionCatalog(layout);
+    const createdAt = continuation.createdAt ?? now();
 
-    if (!sessions.has(continuedFrom)) {
-      throw new LocalRuntimeSessionStoreError(
-        'session_not_found',
-        `Local runtime session "${continuedFrom}" does not exist.`,
-      );
-    }
+    return await withSessionCatalogMutationLock(layout, async () => {
+      const sessions = await readSessionCatalog(layout);
 
-    return await createSession({
-      sessionId: continuationSessionId(sessions, continuedFrom),
-      continuedFrom,
-      ...(continuation.createdAt === undefined
-        ? {}
-        : {createdAt: continuation.createdAt}),
+      if (!sessions.has(continuedFrom)) {
+        throw new LocalRuntimeSessionStoreError(
+          'session_not_found',
+          `Local runtime session "${continuedFrom}" does not exist.`,
+        );
+      }
+
+      return await insertSession(layout, sessions, {
+        sessionId: continuationSessionId(sessions, continuedFrom),
+        createdAt,
+        updatedAt: createdAt,
+        continuedFrom,
+      });
     });
+  }
+
+  async function discardEmptySession(sessionId: string): Promise<void> {
+    await discardEmptySessionFromCatalog(
+      layout,
+      normalizeLocalRuntimeSessionId(sessionId),
+    );
   }
 
   async function newestSession(): Promise<
     LocalRuntimeSessionMetadata | undefined
   > {
-    const sessions = await listSessions();
-
-    return sessions.reduce<LocalRuntimeSessionMetadata | undefined>(
-      (newest, candidate) =>
-        newest === undefined ||
-        candidate.updatedAt.localeCompare(newest.updatedAt) > 0
-          ? candidate
-          : newest,
-      undefined,
-    );
+    return newestByLastWrite(layout, await listSessions());
   }
 
   async function successorOf(
@@ -412,6 +404,7 @@ export function createLocalRuntimeSessionStore(
     layout,
     createSession,
     createContinuedSession,
+    discardEmptySession,
     listSessions,
     newestSession,
     successorOf,
@@ -964,6 +957,117 @@ function continuationSessionId(
     if (!sessions.has(candidate)) {
       return candidate;
     }
+  }
+}
+
+async function insertSession(
+  layout: LocalRuntimeStorageLayout,
+  sessions: Map<string, LocalRuntimeSessionMetadata>,
+  entry: {
+    readonly sessionId: string;
+    readonly createdAt: string;
+    readonly updatedAt: string;
+    readonly continuedFrom?: string;
+  },
+): Promise<LocalRuntimeSessionMetadata> {
+  const metadata = createLocalRuntimeSessionMetadata({
+    sessionId: entry.sessionId,
+    createdAt: entry.createdAt,
+    updatedAt: entry.updatedAt,
+    ...(entry.continuedFrom === undefined
+      ? {}
+      : {continuedFrom: entry.continuedFrom}),
+  });
+  const sessionDirectory = await createSessionDirectory(
+    layout,
+    entry.sessionId,
+  );
+  sessions.set(entry.sessionId, metadata);
+
+  try {
+    rewriteSessionCatalog(layout, sessions);
+  } catch (error: unknown) {
+    if (sessionDirectory.created) {
+      await rollbackCreatedSessionDirectory(sessionDirectory.path, error);
+    }
+
+    throw errorFromUnknown(error);
+  }
+
+  return metadata;
+}
+
+async function discardEmptySessionFromCatalog(
+  layout: LocalRuntimeStorageLayout,
+  sessionId: string,
+): Promise<void> {
+  await withSessionCatalogMutationLock(layout, async () => {
+    const sessions = await readSessionCatalog(layout);
+
+    if (!sessions.has(sessionId)) {
+      return;
+    }
+
+    const sessionRoot = createLocalRuntimeSessionPaths({
+      storeRoot: layout.storeRoot,
+      sessionId,
+    }).sessionRoot;
+
+    if (localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot)) {
+      throw new LocalRuntimeSessionStoreError(
+        'session_not_empty',
+        `Local runtime session "${sessionId}" holds evidence and cannot be discarded.`,
+      );
+    }
+
+    sessions.delete(sessionId);
+    rewriteSessionCatalog(layout, sessions);
+    // An empty directory left behind reads as an interrupted start, which
+    // the catalog already tolerates.
+    await removeDirectory(sessionRoot);
+  });
+}
+
+/**
+ * Recency is the last write to the session — the catalog stamp when it was
+ * opened, or the log's own last write once it has one — so a window that
+ * kept talking wins over one that was merely opened later.
+ */
+function newestByLastWrite(
+  layout: LocalRuntimeStorageLayout,
+  sessions: readonly LocalRuntimeSessionMetadata[],
+): LocalRuntimeSessionMetadata | undefined {
+  let newest: {metadata: LocalRuntimeSessionMetadata; at: number} | undefined;
+
+  for (const metadata of sessions) {
+    const at = Math.max(
+      Date.parse(metadata.updatedAt),
+      lastLogWriteMs(layout, metadata.sessionId) ?? Number.NEGATIVE_INFINITY,
+    );
+
+    if (newest === undefined || at > newest.at) {
+      newest = {metadata, at};
+    }
+  }
+
+  return newest?.metadata;
+}
+
+function lastLogWriteMs(
+  layout: LocalRuntimeStorageLayout,
+  sessionId: string,
+): number | undefined {
+  try {
+    return statPathNumericSync(
+      createLocalRuntimeSessionPaths({storeRoot: layout.storeRoot, sessionId})
+        .rawEventsPath,
+    ).mtimeMs;
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return undefined;
+    }
+
+    throw error;
   }
 }
 

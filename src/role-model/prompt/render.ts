@@ -16,7 +16,8 @@ import {
   type RoleModelUserChatMessage,
 } from '../api/chat-wire.ts';
 import {
-  contextSummaryHeader,
+  earlierConversationFenceTag,
+  earlierConversationPreamble,
   curatedContextHeader,
   recalledMemoryFenceTag,
   recalledMemoryPreamble,
@@ -127,6 +128,7 @@ export const defaultRoleModelProviderCapabilities = Object.freeze({
 const promptFenceTags = Object.freeze([
   recalledMemoryFenceTag,
   untrustedPluginContextFenceTag,
+  earlierConversationFenceTag,
 ]);
 
 export function renderRoleModelTurnContext(
@@ -224,23 +226,6 @@ function createRoleModelPromptFrames(
     );
   }
 
-  // Between the curated snapshot and the per-turn notes: a continued session's
-  // summary changes only when a session begins, so it belongs to the stable
-  // prefix, ahead of what changes every turn.
-  const contextSummary = inputEnvelope.decisionContext.contextSummary;
-  if (contextSummary !== undefined) {
-    frames.push(
-      ownFrame(
-        'context_summary',
-        Object.freeze({
-          role: modelOnlyRole,
-          content: `${contextSummaryHeader(addressee)}\n${contextSummary}`,
-        }),
-        true,
-      ),
-    );
-  }
-
   const runtimeContent = renderRuntimeContext(
     options.promptFragments,
     addressee,
@@ -250,6 +235,27 @@ function createRoleModelPromptFrames(
       ownFrame(
         'model_only_runtime_context',
         Object.freeze({role: modelOnlyRole, content: runtimeContent}),
+        true,
+      ),
+    );
+  }
+
+  // Where the earlier conversation would have been: a continued session's
+  // recollection is model output, so it rides a fenced user-role message like
+  // recalled memory does, never a trusted frame. It changes only when a
+  // session begins, so the prefix before the replayed turns stays stable.
+  const contextSummary = inputEnvelope.decisionContext.contextSummary;
+  if (contextSummary !== undefined) {
+    frames.push(
+      ownFrame(
+        'context_summary',
+        Object.freeze({
+          role: 'user',
+          content: fenced(earlierConversationFenceTag, [
+            earlierConversationPreamble(addressee),
+            neutralizePromptFenceTags(contextSummary),
+          ]),
+        } satisfies RoleModelUserChatMessage),
         true,
       ),
     );

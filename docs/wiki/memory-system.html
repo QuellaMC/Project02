@@ -173,8 +173,9 @@
         verbatim, and the new session opens with one record holding both. The
         closed session's log is complete and untouched; the new one links back
         to it, so a chain of sessions reads as one conversation. The
-        recollection reaches the model as a system frame between the curated
-        notes and the per-turn context, byte-stable for the session's lifetime.
+        recollection reaches the model as a fenced user-role message just ahead
+        of the replayed turns — where the earlier conversation would have been —
+        byte-stable for the session's lifetime.
       </p>
 
       <p>
@@ -265,10 +266,13 @@
         <code>&lt;untrusted_plugin_context&gt;</code> fence that names it data,
         not instructions. A provider's own search tool answers where every tool
         answers, in a tool result, which neither budget covers. The recollection
-        that opens a continued session is model output too: it is capped, its
-        frame names it as the character's own condensed memory of what happened
-        earlier and not something the person said, and the summariser is asked
-        for plain recollection with no rules or persona in it.
+        that opens a continued session is model output too, so it never earns a
+        trusted role: it is capped, it rides an
+        <code>&lt;earlier_conversation&gt;</code> fence on the user side like
+        recalled memory, its preamble names it as the character's own condensed
+        memory of what happened earlier and not something the person said, and
+        the summariser is asked for plain recollection with no rules or persona
+        in it.
       </p>
 
       <p>

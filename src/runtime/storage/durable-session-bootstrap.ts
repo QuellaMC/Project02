@@ -77,7 +77,8 @@ export async function createDurableChatRuntime(
 /**
  * Opens the session that continues the plan's source: a chain-named session
  * whose first record carries the summary and the turns brought along, ready
- * for the next turn to build on.
+ * for the next turn to build on. A session that could not receive that record
+ * is discarded again, so the catalog never resumes into an empty continuation.
  */
 export async function createContinuedDurableChatRuntime(
   args: DurableSessionContinuation,
@@ -87,24 +88,38 @@ export async function createContinuedDurableChatRuntime(
     continuedFrom: args.plan.continuedFrom.sessionId,
   });
 
-  return await openDurableChatRuntime(store, metadata.sessionId, logStore => {
-    const identity = createRuntimeEventIdentity();
+  try {
+    return await openDurableChatRuntime(store, metadata.sessionId, logStore => {
+      const identity = createRuntimeEventIdentity();
 
-    logStore.appendRawEvent({
-      ...identity,
-      kind: 'session_continued',
-      eventType: 'USER_MESSAGE',
-      sessionContinuation: createSessionContinuationSnapshot({
+      logStore.appendRawEvent({
         ...identity,
-        sessionId: metadata.sessionId,
-        continuedFrom: args.plan.continuedFrom,
-        summary: args.plan.summary,
-        summarizedTurnCount: args.plan.summarizedTurnCount,
-        carriedTurns: args.plan.carriedTurns,
-        summarizer: args.plan.summarizer,
-      }),
+        kind: 'session_continued',
+        eventType: 'USER_MESSAGE',
+        sessionContinuation: createSessionContinuationSnapshot({
+          ...identity,
+          sessionId: metadata.sessionId,
+          continuedFrom: args.plan.continuedFrom,
+          summary: args.plan.summary,
+          summarizedTurnCount: args.plan.summarizedTurnCount,
+          carriedTurns: args.plan.carriedTurns,
+          summarizer: args.plan.summarizer,
+        }),
+      });
     });
-  });
+  } catch (error: unknown) {
+    try {
+      await store.sessionStore.discardEmptySession(metadata.sessionId);
+    } catch (discardError: unknown) {
+      throw new AggregateError(
+        [error],
+        `Continued session ${metadata.sessionId} could not be opened, and the empty session could not be discarded.`,
+        {cause: discardError},
+      );
+    }
+
+    throw error;
+  }
 }
 
 type DurableSessionStore = {

@@ -13,10 +13,27 @@ import {maxContextSummaryChars} from '../evidence/records.ts';
  * moment its history window would drop a whole turn.
  */
 const carriedHistoryShare = 0.25;
+/**
+ * The recollection's share of the window, in characters: a small window gets
+ * a short recollection, a large one never more than the record can hold, and
+ * anything under the floor would be too thin to continue from.
+ */
+const summaryWindowShare = 0.05;
+const minSummaryChars = 1000;
 const summarizerInputShare = 0.6;
 const summarizerLineHeadChars = 1200;
 const summarizerLineTailChars = 400;
 export const maxFallbackSummaryChars = 2000;
+
+export function summaryCharsForWindow(contextWindowTokens: number): number {
+  return Math.min(
+    maxContextSummaryChars,
+    Math.max(
+      minSummaryChars,
+      Math.floor(contextWindowTokens * 4 * summaryWindowShare),
+    ),
+  );
+}
 
 export type SessionContinuationSelection = {
   /** Oldest first: what the summary must now cover. */
@@ -48,7 +65,9 @@ export function selectSessionContinuation(
 
     const cost = estimateConversationTurnTokens(turn);
 
-    if (carried.length > 0 && used + cost > budget) {
+    // A turn too big for the carry share is summarised like the rest: carried
+    // verbatim it would only be dropped again by the next history window.
+    if (used + cost > budget) {
       break;
     }
 
@@ -140,25 +159,28 @@ export function serializeTurnsForSummarizer(options: {
 }
 
 /** Trims and bounds model output; an empty result means the model gave nothing usable. */
-export function capSummaryText(text: string): string | undefined {
+export function capSummaryText(
+  text: string,
+  maxChars: number,
+): string | undefined {
   const trimmed = text.trim();
 
   if (trimmed.length === 0) {
     return undefined;
   }
 
-  if (trimmed.length <= maxContextSummaryChars) {
+  if (trimmed.length <= maxChars) {
     return trimmed;
   }
 
-  const head = trimmed.slice(0, maxContextSummaryChars);
+  const head = trimmed.slice(0, maxChars);
   const boundary = Math.max(
     head.lastIndexOf('. '),
     head.lastIndexOf('\n'),
     head.lastIndexOf('。'),
   );
 
-  return boundary > maxContextSummaryChars * 0.8
+  return boundary > maxChars * 0.8
     ? head.slice(0, boundary + 1).trim()
     : head.trim();
 }
@@ -171,6 +193,7 @@ export function mechanicalSummary(options: {
   readonly summarized: readonly ConversationTurn[];
   readonly previousSummary?: string;
   readonly userDisplayName?: string;
+  readonly maxChars: number;
 }): string {
   const first = options.summarized[0];
   const last = options.summarized[options.summarized.length - 1];
@@ -197,16 +220,18 @@ export function mechanicalSummary(options: {
       ...(tools.length === 0 ? [] : [`Tools used there: ${tools.join(', ')}.`]),
       'Details from that part are not available in context.',
     ].join(' '),
-    maxFallbackSummaryChars,
+    Math.min(maxFallbackSummaryChars, options.maxChars),
   );
 
   if (options.previousSummary === undefined) {
     return section;
   }
 
-  const room = maxContextSummaryChars - section.length - 2;
+  const room = options.maxChars - section.length - 2;
 
-  return `${shortenTo(options.previousSummary, room)}\n\n${section}`;
+  return room <= 0
+    ? section
+    : `${shortenTo(options.previousSummary, room)}\n\n${section}`;
 }
 
 function speakerLine(name: string, message: VisibleMessage): string {
