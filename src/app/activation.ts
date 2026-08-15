@@ -317,7 +317,7 @@ export function prepareConfiguredProject02PluginActivation(options: {
     // The enablement ladder judges the merged view, not just the global one.
     effectiveConfig: layeredConfig.effective,
     catalogDiagnostics: composition.diagnostics,
-    curatedContextEligiblePluginIds: curatedContextEligiblePluginIds(
+    trustedContextEligiblePluginIds: trustedContextEligiblePluginIds(
       composition.packageProvenanceByPluginId,
     ),
   });
@@ -419,8 +419,8 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
-        curatedContextEligiblePluginIds: [
-          ...curatedContextEligiblePluginIds(
+        trustedContextEligiblePluginIds: [
+          ...trustedContextEligiblePluginIds(
             activationPlan.packageProvenanceByPluginId,
           ),
         ],
@@ -460,8 +460,8 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       plugins,
       lifecycleTargets: instantiated.lifecycleTargets,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
-      curatedContextEligiblePluginIds: [
-        ...curatedContextEligiblePluginIds(
+      trustedContextEligiblePluginIds: [
+        ...trustedContextEligiblePluginIds(
           activationPlan.packageProvenanceByPluginId,
         ),
       ],
@@ -498,8 +498,8 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
   } satisfies Project02ConfiguredPluginHost);
 }
 
-/** Provenance is the gate: only bundled packages may hold curated_context. */
-function curatedContextEligiblePluginIds(
+/** Provenance is the gate: only bundled packages may hold trusted_context. */
+function trustedContextEligiblePluginIds(
   packageProvenanceByPluginId: Readonly<
     Record<string, RuntimePluginPackageProvenance>
   >,
@@ -546,7 +546,7 @@ export function resolveRuntimePluginActivation(options: {
   readonly catalogDiagnostics?: readonly RuntimeConfigDiagnostic[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
-  readonly curatedContextEligiblePluginIds?: ReadonlySet<string>;
+  readonly trustedContextEligiblePluginIds?: ReadonlySet<string>;
 }): RuntimePluginActivationResult {
   const {pluginManifests} = options;
   const config = options.effectiveConfig.config;
@@ -625,24 +625,24 @@ export function resolveRuntimePluginActivation(options: {
         activationConfigErrors &&
         !isRuntimePluginInventoryRecoveryManifest(manifest),
     });
-    const curatedContextEligible =
-      options.curatedContextEligiblePluginIds?.has(manifest.id) === true;
+    const trustedContextEligible =
+      options.trustedContextEligiblePluginIds?.has(manifest.id) === true;
     const access = runtimePluginAccessSnapshot({
       requestedAccess: manifest.requestedAccess,
       enabled: decision.enabled,
       fieldPrefix: manifest.id,
-      curatedContextEligible,
+      trustedContextEligible,
     });
 
     if (
-      !curatedContextEligible &&
-      Object.hasOwn(access.requestedAccess, 'curated_context')
+      !trustedContextEligible &&
+      Object.hasOwn(access.requestedAccess, 'trusted_context')
     ) {
       diagnostics.push(
         createRuntimeConfigDiagnostic(
           'warning',
-          'curated_context_not_first_party',
-          `Plugin "${manifest.id}" requests curated_context access, which only bundled first-party packages can hold.`,
+          'trusted_context_not_first_party',
+          `Plugin "${manifest.id}" requests trusted_context access, which only bundled first-party packages can hold.`,
           `plugins.${manifest.id}`,
           {pluginId: manifest.id},
         ),

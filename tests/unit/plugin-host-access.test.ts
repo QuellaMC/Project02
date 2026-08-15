@@ -38,7 +38,7 @@ import {
 } from '../support/plugin-host-fixtures.ts';
 
 describe('runtime plugin host curated context', () => {
-  it('drops sections and degrades when the host has not cleared the plugin for curated_context', () => {
+  it('drops sections and degrades when the host has not cleared the plugin for trusted_context', () => {
     const plugin = createCuratedContextSectionPlugin({
       pluginId: 'memory.curated.fixture',
     });
@@ -57,7 +57,7 @@ describe('runtime plugin host curated context', () => {
           status: 'degraded',
           policyOutcome: 'optional_degraded',
           summary: expect.stringContaining(
-            'curated_context write access',
+            'trusted_context write access',
           ) as string,
         }),
       );
@@ -74,7 +74,7 @@ describe('runtime plugin host curated context', () => {
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      curatedContextEligiblePluginIds: [plugin.manifest.id],
+      trustedContextEligiblePluginIds: [plugin.manifest.id],
     });
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -100,7 +100,7 @@ describe('runtime plugin host curated context', () => {
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      curatedContextEligiblePluginIds: [plugin.manifest.id],
+      trustedContextEligiblePluginIds: [plugin.manifest.id],
     });
     const result = await host.beforeRoleModelCall(testPluginContext());
 

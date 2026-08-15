@@ -5,12 +5,12 @@ import type {RuntimePluginCuratedContextSection} from '../api/types.ts';
 export const pluginCuratedContextSectionLimit = 4;
 export const pluginCuratedContextTotalCharLimit = 8192;
 
-export function pluginCanContributeCuratedContext(
+export function pluginCanWriteTrustedContext(
   access: RuntimePluginAccessSnapshot,
 ): boolean {
   return runtimePluginGrantsAccess({
     access,
-    accessName: 'curated_context',
+    accessName: 'trusted_context',
     requiredAccess: 'write',
   });
 }

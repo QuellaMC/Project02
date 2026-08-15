@@ -103,11 +103,11 @@ describe('runtime config diagnostic plugin matching', () => {
     ).toBe(false);
   });
 
-  it('grants curated_context only to provenance-eligible plugins and warns otherwise', () => {
+  it('grants trusted_context only to provenance-eligible plugins and warns otherwise', () => {
     const manifest = createRuntimePluginManifest({
       ...memorySearchPluginManifest('memory.curated.fixture'),
       declaredPlugins: ['plugin_discovery'],
-      requestedAccess: {curated_context: 'write'},
+      requestedAccess: {trusted_context: 'write'},
     });
     const configPath = join(
       createTestTempRoot('project02-runtime-config-curated-'),
@@ -136,7 +136,7 @@ describe('runtime config diagnostic plugin matching', () => {
     const withheld = resolveRuntimePluginActivation(activationInput);
     const granted = resolveRuntimePluginActivation({
       ...activationInput,
-      curatedContextEligiblePluginIds: new Set(['memory.curated.fixture']),
+      trustedContextEligiblePluginIds: new Set(['memory.curated.fixture']),
     });
     const withheldSnapshot = withheld.plugins.find(
       plugin => plugin.pluginId === 'memory.curated.fixture',
@@ -146,21 +146,21 @@ describe('runtime config diagnostic plugin matching', () => {
     );
 
     expect(withheldSnapshot?.requestedAccess).toEqual({
-      curated_context: 'write',
+      trusted_context: 'write',
     });
     expect(withheldSnapshot?.grantedAccess).toEqual({});
     expect(withheld.diagnostics).toContainEqual(
       expect.objectContaining({
         severity: 'warning',
-        code: 'curated_context_not_first_party',
+        code: 'trusted_context_not_first_party',
         pluginId: 'memory.curated.fixture',
       }),
     );
-    expect(grantedSnapshot?.grantedAccess).toEqual({curated_context: 'write'});
+    expect(grantedSnapshot?.grantedAccess).toEqual({trusted_context: 'write'});
     expect(
       granted.diagnostics.some(
         diagnosticItem =>
-          diagnosticItem.code === 'curated_context_not_first_party',
+          diagnosticItem.code === 'trusted_context_not_first_party',
       ),
     ).toBe(false);
   });

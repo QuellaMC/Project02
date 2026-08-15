@@ -271,7 +271,7 @@ export function createCuratedContextSectionPlugin(options: {
     manifest: {
       ...memorySearchPluginManifest(options.pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: options.requestedAccess ?? {curated_context: 'write'},
+      requestedAccess: options.requestedAccess ?? {trusted_context: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {

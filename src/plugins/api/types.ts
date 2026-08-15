@@ -256,7 +256,7 @@ export type RuntimePluginCuratedContextSection = {
 
 export type RuntimePluginBeforeRoleModelCallResult = {
   readonly contextItems: readonly RuntimePluginContextItem[];
-  /** Trusted-frame sections; granted only via curated_context write access. */
+  /** Trusted-frame sections; granted only via trusted_context write access. */
   readonly curatedContext?: readonly RuntimePluginCuratedContextSection[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };

@@ -25,8 +25,8 @@ import {
 import {pluginCanWriteModelInput} from '../policy/tool-policy.ts';
 import {
   assertPluginCuratedContextWithinCaps,
-  pluginCanContributeCuratedContext,
-} from '../policy/curated-context.ts';
+  pluginCanWriteTrustedContext,
+} from '../policy/trusted-context.ts';
 import {
   assertSnapshotPluginId,
   createHookFailureEvidence,
@@ -215,11 +215,11 @@ async function runBeforeRoleModelCallPlugin(
 
   const curatedContext = result.value.curatedContext ?? [];
 
-  if (curatedContext.length > 0 && !pluginCanContributeCuratedContext(access)) {
+  if (curatedContext.length > 0 && !pluginCanWriteTrustedContext(access)) {
     return failedBeforeRoleModelCallPlugin({
       plugin,
       context: options.context,
-      message: `Plugin "${plugin.manifest.id}" returned curated context sections without granted curated_context write access.`,
+      message: `Plugin "${plugin.manifest.id}" returned curated context sections without granted trusted_context write access.`,
       acceptedEvidence: result.value.evidence,
     });
   }

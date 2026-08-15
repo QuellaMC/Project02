@@ -38,7 +38,7 @@
     "requestedAccess": {
       "character_file_store": "write",
       "model_input": "write",
-      "curated_context": "write"
+      "trusted_context": "write"
     }
   }
 }

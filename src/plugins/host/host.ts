@@ -117,8 +117,8 @@ export type CreateRuntimePluginHostOptions = {
   /** Catalog-authoritative ownership records for configured plugin instances. */
   readonly lifecycleTargets?: readonly RuntimePluginLifecycleTarget[];
   readonly enabledPluginIds?: readonly string[];
-  /** Bundled-provenance ids the composition root cleared for curated_context. */
-  readonly curatedContextEligiblePluginIds?: readonly string[];
+  /** Bundled-provenance ids the composition root cleared for trusted_context. */
+  readonly trustedContextEligiblePluginIds?: readonly string[];
   readonly storeRoot?: string | undefined;
   readonly sessionId?: string | undefined;
   readonly sessionIdentity?: object | undefined;
@@ -514,8 +514,8 @@ function createRuntimePluginHostState(
   accessByPluginId = resolveRuntimePluginAccessForPlugins({
     plugins,
     enabledPluginIds: enabledIds,
-    curatedContextEligiblePluginIds: new Set(
-      options.curatedContextEligiblePluginIds ?? [],
+    trustedContextEligiblePluginIds: new Set(
+      options.trustedContextEligiblePluginIds ?? [],
     ),
   });
   const registrySnapshot = createRuntimePluginRegistrySnapshot(plugins, {

@@ -146,7 +146,7 @@
     <p>
       Curated memory renders in a trusted prompt frame because the runtime owns every step:
       entries are validated and capped at write time, sections are typed and screened at
-      render time, and the <code>curated_context</code> access that feeds the frame is granted
+      render time, and the <code>trusted_context</code> access that feeds the frame is granted
       only to bundled packages by catalog provenance — a manifest flag alone never earns it.
       Automatic per-turn recall from an external provider stays in the untrusted plugin
       frame under the shared token budget, and recall items without source references are

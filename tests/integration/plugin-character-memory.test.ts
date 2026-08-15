@@ -36,7 +36,7 @@ describe('Character Memory plugin', () => {
     expect(plugin.manifest.requestedAccess).toEqual({
       character_file_store: 'write',
       model_input: 'write',
-      curated_context: 'write',
+      trusted_context: 'write',
     });
     expect(plugin.providedTools.map(tool => tool.name)).toEqual([
       characterMemoryUpdateToolName,
