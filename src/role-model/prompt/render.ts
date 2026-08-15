@@ -552,25 +552,23 @@ function neutralizePromptFenceTags(text: string): string {
   }, text);
 }
 
+/**
+ * One bullet per value; a value's own lines follow indented, blank ones
+ * included, so a note or memory keeps whatever shape it was written in.
+ */
 function bulletLines(values: readonly string[]): readonly string[] {
   return Object.freeze(
     values.flatMap(value => {
-      const [firstLine, ...remainingLines] = trimmedLines(value);
+      const [firstLine, ...remainingLines] = value.trim().split(/\r?\n/u);
 
-      if (firstLine === undefined) {
+      if (firstLine === undefined || firstLine.length === 0) {
         return [];
       }
 
-      return [`- ${firstLine}`, ...remainingLines.map(line => `  ${line}`)];
+      return [
+        `- ${firstLine}`,
+        ...remainingLines.map(line => (line.length === 0 ? '' : `  ${line}`)),
+      ];
     }),
-  );
-}
-
-function trimmedLines(value: string): readonly string[] {
-  return Object.freeze(
-    value
-      .split(/\r?\n/u)
-      .map(line => line.trim())
-      .filter(line => line.length > 0),
   );
 }
