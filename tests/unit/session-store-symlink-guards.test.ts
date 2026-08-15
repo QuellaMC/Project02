@@ -3,18 +3,76 @@ import {
   mkdirSync,
   readdirSync,
   renameSync,
+  rmSync,
   symlinkSync,
+  writeFileSync,
 } from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {listDirectoryNamesSync} from '../../src/shared/file-system.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 describe('local runtime session store symlink guards', () => {
+  it('tolerates Finder metadata in the sessions directory', async () => {
+    const root = createTestTempRoot('project02-session-metadata-');
+    const storeRoot = join(root, 'home', 'character-data', 'mira');
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    });
+
+    await store.createSession({
+      sessionId: 'session-00',
+      createdAt: '2026-08-14T00:00:00.000Z',
+    });
+    writeFileSync(join(store.layout.sessionsRoot, '.DS_Store'), 'finder');
+
+    // Browsing the store in Finder is an ordinary condition, not
+    // corruption: listing and reading must keep working.
+    await expect(store.listSessions()).resolves.toHaveLength(1);
+    await expect(store.readSession('session-00')).resolves.toBeDefined();
+
+    // A stray metadata file alone must not read as durable evidence
+    // demanding a session catalog.
+    rmSync(join(store.layout.sessionsRoot, 'session-00'), {
+      force: true,
+      recursive: true,
+    });
+    rmSync(store.layout.sessionCatalogPath, {force: true});
+    await expect(store.listSessions()).resolves.toHaveLength(0);
+  });
+
+  it('tolerates Finder metadata inside an interrupted session directory', async () => {
+    const root = createTestTempRoot('project02-session-metadata-nested-');
+    const storeRoot = join(root, 'home', 'character-data', 'mira');
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+    });
+
+    await store.createSession({
+      sessionId: 'session-00',
+      createdAt: '2026-08-14T00:00:00.000Z',
+    });
+    rmSync(store.layout.sessionCatalogPath, {force: true});
+
+    const orphan = join(store.layout.sessionsRoot, 'session-00');
+
+    for (const name of listDirectoryNamesSync(orphan)) {
+      rmSync(join(orphan, name), {force: true, recursive: true});
+    }
+    writeFileSync(join(orphan, '.DS_Store'), 'finder');
+
+    // A crash can leave an empty session directory; browsing it in Finder
+    // must not turn a recoverable store into a missing-catalog error.
+    await expect(store.listSessions()).resolves.toHaveLength(0);
+  });
+
   it('refuses a session directory replaced by a symlink outside the store', async () => {
     const root = createTestTempRoot('project02-session-symlink-');
     const storeRoot = join(root, 'home', 'character-data', 'mira');

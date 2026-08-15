@@ -26,6 +26,10 @@ export type MemoryCaptureTurn = MemoryOperationScope & {
   readonly sessionId: string;
   readonly userMessage: string;
   readonly characterMessage?: string;
+  /** Roleplay identity: providers name the speaker, not "assistant". */
+  readonly characterName?: string;
+  /** The turn's own user speaker name, which a reopened session restores. */
+  readonly userName?: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 };
 

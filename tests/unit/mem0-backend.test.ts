@@ -1,10 +1,22 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
+
+import {readdirSync, statSync} from 'node:fs';
+import {join} from 'node:path';
+
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 import {
+  createDefaultMem0OssEngineLoader,
+  createMem0OssBackend,
   createMem0PlatformBackend,
   createMem0ServerBackend,
+  mem0OssEmbedderDimsForModel,
+  mem0OssDefaultEmbedderModel,
+  mem0OssOpenAiEndpoint,
+  mem0OssEngineConfig,
   Mem0RequestError,
   type Mem0FetchFunction,
+  type Mem0OssEngine,
 } from '../../src/plugins/packages/mem0/backend.ts';
 
 type RecordedRequest = {
@@ -40,6 +52,10 @@ const abortSignal = new AbortController().signal;
 
 function errorMessageOf(error: unknown): string {
   return error instanceof Error ? error.message : '';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 describe('mem0 backend transports', () => {
@@ -293,6 +309,36 @@ describe('mem0 backend transports', () => {
     });
   });
 
+  it('reports a body abandoned mid-read as cancelled, not as unreadable', async () => {
+    const controller = new AbortController();
+    const stalledBody: Mem0FetchFunction = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json: () => {
+          // The headers arrived; the body stalls until the deadline.
+          controller.abort();
+
+          return Promise.reject(new Error('aborted'));
+        },
+      });
+
+    // The request may already have committed remotely, so an abandoned
+    // read must not read as a broken deployment.
+    await expect(
+      createMem0ServerBackend({
+        baseUrl: 'http://127.0.0.1:8765',
+        fetchFn: stalledBody,
+      }).add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({failureKind: 'cancelled'});
+  });
+
   it('reports an unreadable success body instead of an empty result set', async () => {
     const brokenBody: Mem0FetchFunction = () =>
       Promise.resolve({
@@ -321,7 +367,10 @@ describe('mem0 backend transports', () => {
         'mem0 search failed: backend returned an unreadable response body.',
     });
     // Health only needs the status line, so it tolerates an empty body.
-    await expect(backend.ping({signal: abortSignal})).resolves.toBeUndefined();
+    await expect(backend.ping({signal: abortSignal})).resolves.toMatchObject({
+      verified: true,
+      summary: expect.stringContaining('Mem0 server reachable') as string,
+    });
   });
 
   it('translates failures into bounded errors that never carry the credential', async () => {
@@ -356,5 +405,639 @@ describe('mem0 backend transports', () => {
     });
     expect(errorMessageOf(httpError)).not.toContain('super-secret-key');
     expect(errorMessageOf(networkError)).not.toContain('super-secret-key');
+  });
+});
+
+describe('mem0 embedded engine backend', () => {
+  it('builds the engine config with plugin-scoped storage and cloud defaults', () => {
+    const config = mem0OssEngineConfig({
+      llmApiKey: 'llm-key',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
+      embedderApiKey: 'llm-key',
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
+      storageDir: '/store/plugin-data/mem0/oss',
+    });
+
+    expect(config).toEqual({
+      customInstructions:
+        'Refer to people by the names used in the conversation; never call anyone "user" or "assistant".',
+      llm: {
+        provider: 'openai',
+        config: {apiKey: 'llm-key', baseURL: mem0OssOpenAiEndpoint},
+      },
+      embedder: {
+        provider: 'openai',
+        config: {apiKey: 'llm-key', baseURL: mem0OssOpenAiEndpoint},
+      },
+      vectorStore: {
+        provider: 'memory',
+        config: {
+          collectionName: 'memories_a370387dd58d',
+          dimension: 1536,
+          dbPath: '/store/plugin-data/mem0/oss/vectors.db',
+        },
+      },
+      historyStore: {
+        provider: 'sqlite',
+        config: {historyDbPath: '/store/plugin-data/mem0/oss/history.db'},
+      },
+      disableHistory: false,
+    });
+  });
+
+  it('serves keyless local endpoints with a placeholder key and model-derived dimensions', () => {
+    const local = mem0OssEngineConfig({
+      llmModel: 'llama3.2',
+      llmBaseUrl: 'http://localhost:1234/v1',
+      embedderModel: 'text-embedding-nomic-embed-text-v1.5',
+      embedderBaseUrl: 'http://localhost:1234/v1',
+      storageDir: '/store/plugin-data/mem0/oss',
+    });
+    const overridden = mem0OssEngineConfig({
+      llmApiKey: 'k',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
+      embedderApiKey: 'k',
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
+      embedderModel: 'text-embedding-3-large',
+      embedderDims: 999,
+      storageDir: '/store/plugin-data/mem0/oss',
+    });
+
+    expect(local).toMatchObject({
+      llm: {
+        provider: 'openai',
+        config: {
+          model: 'llama3.2',
+          baseURL: 'http://localhost:1234/v1',
+          apiKey: 'no-key-required',
+        },
+      },
+      vectorStore: {config: {dimension: 768}},
+    });
+    expect(overridden).toMatchObject({
+      embedder: {config: {model: 'text-embedding-3-large'}},
+      vectorStore: {config: {dimension: 999}},
+    });
+    expect(mem0OssEmbedderDimsForModel('text-embedding-3-large')).toBe(3072);
+    expect(mem0OssEmbedderDimsForModel('mxbai-embed-large')).toBe(1024);
+    expect(mem0OssEmbedderDimsForModel('all-minilm')).toBe(384);
+    expect(mem0OssEmbedderDimsForModel(undefined)).toBe(1536);
+    expect(mem0OssEmbedderDimsForModel('unknown-model')).toBe(1536);
+  });
+
+  it('translates search and add through the engine with one memoized construction', async () => {
+    let constructions = 0;
+    const calls: unknown[] = [];
+    const engine: Mem0OssEngine = {
+      add(messages, options) {
+        calls.push({kind: 'add', messages, options});
+
+        return Promise.resolve({results: [{id: 'stored-1'}]});
+      },
+      search(query, options) {
+        calls.push({kind: 'search', query, options});
+
+        return Promise.resolve({
+          results: [{id: 'row-1', memory: 'Prefers tea.', score: 0.7}],
+        });
+      },
+    };
+    const backend = createMem0OssBackend({
+      loadEngine: () => {
+        constructions += 1;
+
+        return Promise.resolve(engine);
+      },
+    });
+
+    await backend.ping({signal: abortSignal});
+    const hits = await backend.search({
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 4,
+      signal: abortSignal,
+    });
+    const references = await backend.add({
+      messages: [{role: 'user', content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      runId: 'session-1',
+      infer: true,
+      signal: abortSignal,
+    });
+
+    expect(constructions).toBe(1);
+    expect(calls).toEqual([
+      {
+        kind: 'search',
+        query: 'tea',
+        options: {topK: 4, filters: {user_id: 'user-1', agent_id: 'mira'}},
+      },
+      {
+        kind: 'add',
+        messages: [{role: 'user', content: 'remember this'}],
+        options: {
+          userId: 'user-1',
+          agentId: 'mira',
+          runId: 'session-1',
+          infer: true,
+        },
+      },
+    ]);
+    expect(hits).toEqual([{id: 'row-1', text: 'Prefers tea.', score: 0.7}]);
+    expect(references).toEqual([
+      {kind: 'memory', id: 'stored-1', title: 'Mem0 memory'},
+    ]);
+  });
+
+  it('claims readiness only after the model and the embedder have both answered', async () => {
+    let extractNothing = true;
+    let answer: 'rows' | 'reject' | 'garbage' = 'rows';
+    const answerWith = (rows: unknown) => {
+      switch (answer) {
+        case 'reject':
+          return Promise.reject(new Error('endpoint gone'));
+        case 'garbage':
+          return Promise.resolve({unexpected: true});
+        case 'rows':
+          return Promise.resolve(rows);
+      }
+    };
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            return answerWith({
+              results: extractNothing ? [] : [{id: 'stored-1'}],
+            });
+          },
+          search() {
+            return answerWith({results: []});
+          },
+        }),
+    });
+    const capture = {
+      messages: [{role: 'user' as const, content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      infer: true,
+      signal: abortSignal,
+    };
+
+    // Construction wires clients without contacting them.
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+
+    // An extraction that stored nothing never reached the embedder, so
+    // health must not call the embedder proven on the strength of it.
+    await backend.add(capture);
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+
+    // A search proves the embedder; with the model already proven above,
+    // readiness is now real work, not inference.
+    await backend.search({
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 4,
+      signal: abortSignal,
+    });
+    extractNothing = false;
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: true,
+    });
+
+    // Readiness is only as fresh as the last usable answer: a dependency
+    // that stops answering -- or answers something the adapter cannot
+    // read -- un-proves it, so health cannot keep saying ok on the
+    // strength of work that succeeded before the outage.
+    const searchOnce = () =>
+      backend.search({
+        query: 'tea',
+        userId: 'user-1',
+        agentId: 'mira',
+        limit: 4,
+        signal: abortSignal,
+      });
+
+    answer = 'reject';
+    await expect(searchOnce()).rejects.toMatchObject({failureKind: 'engine'});
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+
+    // Re-prove, then break the answer shape instead of the connection.
+    answer = 'rows';
+    await searchOnce();
+    await backend.add(capture);
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: true,
+    });
+    answer = 'garbage';
+    await expect(searchOnce()).rejects.toMatchObject({
+      failureKind: 'malformed_response',
+    });
+    expect(await backend.ping({signal: abortSignal})).toMatchObject({
+      verified: false,
+    });
+  });
+
+  it('bounds engine failures so third-party errors never leave the adapter', async () => {
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            return Promise.reject(
+              new Error('401 from https://api.openai.com/v1 with sk-secret'),
+            );
+          },
+          search() {
+            return Promise.reject(
+              new Error('response body: {"messages":["private text"]}'),
+            );
+          },
+        }),
+    });
+
+    // SDK errors can carry endpoints, response bodies, conversation text,
+    // or credential fragments; only the bounded form may reach evidence.
+    const addError = await backend
+      .add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: false,
+        signal: abortSignal,
+      })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+    const searchError = await backend
+      .search({
+        query: 'tea',
+        userId: 'user-1',
+        agentId: 'mira',
+        limit: 4,
+        signal: abortSignal,
+      })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    expect(addError).toBeInstanceOf(Mem0RequestError);
+    expect(addError).toMatchObject({failureKind: 'engine'});
+    expect(searchError).toBeInstanceOf(Mem0RequestError);
+    expect(errorMessageOf(addError)).not.toContain('sk-secret');
+    expect(errorMessageOf(searchError)).not.toContain('private text');
+
+    // A SQLite failure names itself instead: its message carries no
+    // config, and no endpoint or key change repairs a full disk or a
+    // held lock -- at operation time exactly as at load time.
+    const diskFull = Object.assign(
+      new Error('SQLITE_FULL: database or disk is full'),
+      {name: 'SqliteError'},
+    );
+    const storageError = await createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            return Promise.reject(diskFull);
+          },
+          search() {
+            return Promise.reject(diskFull);
+          },
+        }),
+    })
+      .add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: false,
+        signal: abortSignal,
+      })
+      .then(() => undefined)
+      .catch((error: unknown) => error);
+
+    expect(errorMessageOf(storageError)).toContain('database or disk is full');
+    expect(errorMessageOf(storageError)).not.toContain('endpoint');
+  });
+
+  it('never starts engine work under an already-aborted signal', async () => {
+    let started = 0;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add() {
+            started += 1;
+
+            return new Promise<never>(() => {});
+          },
+          search() {
+            started += 1;
+
+            return new Promise<never>(() => {});
+          },
+        }),
+    });
+    const controller = new AbortController();
+
+    controller.abort();
+
+    // A queued job whose scope already expired must settle as cancelled
+    // without touching the model or the store at all -- health included,
+    // which opens the store on its way to loading the engine.
+    await expect(
+      backend.add({
+        messages: [{role: 'user', content: 'remember this'}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: true,
+        signal: controller.signal,
+      }),
+    ).rejects.toMatchObject({failureKind: 'cancelled'});
+    await expect(
+      backend.ping({signal: controller.signal}),
+    ).rejects.toMatchObject({failureKind: 'cancelled'});
+    expect(started).toBe(0);
+  });
+
+  it('keeps one caller\u2019s deadline off another caller\u2019s load', async () => {
+    let releaseLoad: (engine: Mem0OssEngine) => void = () => undefined;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        new Promise<Mem0OssEngine>(resolve => {
+          releaseLoad = resolve;
+        }),
+    });
+    const abandoned = new AbortController();
+    const search = {
+      query: 'tea',
+      userId: 'user-1',
+      agentId: 'mira',
+      limit: 4,
+    };
+
+    // One engine serves every caller, so the first call's scope expiring
+    // must not fail a second whose own scope is still good.
+    const first = backend.search({...search, signal: abandoned.signal});
+    const second = backend.search({...search, signal: abortSignal});
+
+    abandoned.abort();
+    await expect(first).rejects.toMatchObject({failureKind: 'cancelled'});
+
+    releaseLoad({
+      add: () => Promise.resolve({results: []}),
+      search: () => Promise.resolve({results: [{id: 'row-1', memory: 'ok'}]}),
+    });
+
+    await expect(second).resolves.toEqual([{id: 'row-1', text: 'ok'}]);
+  });
+
+  it('keeps embedded writes in turn order past an abandoned wait', async () => {
+    const started: string[] = [];
+    let releaseFirst: (value: unknown) => void = () => undefined;
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add(messages) {
+            const text =
+              Array.isArray(messages) && isRecord(messages[0])
+                ? String(messages[0]['content'])
+                : '';
+
+            started.push(text);
+
+            return text === 'first'
+              ? new Promise(resolve => {
+                  releaseFirst = resolve;
+                })
+              : Promise.resolve({results: [{id: `stored-${text}`}]});
+          },
+          search() {
+            return Promise.resolve({results: []});
+          },
+        }),
+    });
+    const abandoned = new AbortController();
+    const addOf = (content: string, signal: AbortSignal) =>
+      backend.add({
+        messages: [{role: 'user' as const, content}],
+        userId: 'user-1',
+        agentId: 'mira',
+        infer: true,
+        signal,
+      });
+
+    // The first caller stops waiting mid-write, but the engine cannot
+    // cancel it: the second must still run after it, never beside it --
+    // an older turn finishing late must not overwrite a newer one.
+    const first = addOf('first', abandoned.signal);
+    const second = addOf('second', abortSignal);
+
+    await vi.waitFor(() => {
+      expect(started).toEqual(['first']);
+    });
+    abandoned.abort();
+    await expect(first).rejects.toMatchObject({failureKind: 'cancelled'});
+    expect(started).toEqual(['first']);
+
+    // A caller that gives up while still WAITING never reaches the
+    // engine at all: its turn is re-checked when it would start.
+    const skipped = new AbortController();
+    const third = addOf('third', skipped.signal);
+
+    skipped.abort();
+    await expect(third).rejects.toMatchObject({failureKind: 'cancelled'});
+
+    releaseFirst({results: [{id: 'stored-first'}]});
+    await expect(second).resolves.toEqual([
+      {kind: 'memory', id: 'stored-second', title: 'Mem0 memory'},
+    ]);
+    expect(started).toEqual(['first', 'second']);
+  });
+
+  it('retiring the backend stops a load no caller could', () => {
+    let loaderSignal: AbortSignal | undefined;
+    const backend = createMem0OssBackend({
+      loadEngine: ({signal}) => {
+        loaderSignal = signal;
+
+        return new Promise<Mem0OssEngine>(() => {});
+      },
+    });
+
+    void backend.ping({signal: abortSignal});
+
+    // No caller deadline reaches the shared load; only the end of the
+    // backend itself does, so teardown stops it from building stores a
+    // replacement provider is about to open.
+    expect(loaderSignal?.aborted).toBe(false);
+    backend.retire?.();
+    expect(loaderSignal?.aborted).toBe(true);
+  });
+
+  it('retries engine construction after a failed load instead of caching the rejection', async () => {
+    let attempts = 0;
+    const backend = createMem0OssBackend({
+      loadEngine: () => {
+        attempts += 1;
+
+        if (attempts === 1) {
+          return Promise.reject(
+            new TypeError('mem0ai/oss Memory did not construct an engine.'),
+          );
+        }
+
+        return Promise.resolve({
+          add: () => Promise.resolve({results: []}),
+          search: () => Promise.resolve({results: []}),
+        });
+      },
+    });
+
+    await expect(backend.ping({signal: abortSignal})).rejects.toThrow(
+      'did not construct',
+    );
+    // Health must not claim reachability the engine never established.
+    // Nothing was contacted, so the check cannot report the engine
+    // healthy on its own.
+    await expect(backend.ping({signal: abortSignal})).resolves.toMatchObject({
+      verified: false,
+      summary: expect.stringContaining(
+        'contacted on first capture or recall',
+      ) as string,
+    });
+    expect(attempts).toBe(2);
+  });
+
+  it('starts a new vector collection when the embedder identity changes', () => {
+    const base = {
+      llmApiKey: 'k',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
+      storageDir: '/store',
+    };
+    const collectionOf = (settings: Record<string, unknown>) => {
+      const store = mem0OssEngineConfig({...base, ...settings})[
+        'vectorStore'
+      ] as {readonly config: {readonly collectionName: string}};
+
+      return store.config.collectionName;
+    };
+
+    // Writing down a default must not move the collection: the effective
+    // embedder is what names it.
+    expect(collectionOf({})).toBe(
+      collectionOf({
+        embedderModel: mem0OssDefaultEmbedderModel,
+        embedderBaseUrl: 'https://api.openai.com/v1/',
+      }),
+    );
+
+    // Vectors only compare within the embedder that made them, and the
+    // embedder is reloadable: mixing two spaces in one collection ranks
+    // nonsense, and a width change breaks inserts outright.
+    expect(collectionOf({embedderModel: 'text-embedding-3-small'})).not.toBe(
+      collectionOf({embedderModel: 'text-embedding-3-large'}),
+    );
+    expect(collectionOf({embedderDims: 768})).not.toBe(
+      collectionOf({embedderDims: 1536}),
+    );
+    expect(
+      collectionOf({embedderBaseUrl: 'http://127.0.0.1:11434/v1'}),
+    ).not.toBe(collectionOf({}));
+  });
+
+  it('stops waiting on the engine when the caller gives up', async () => {
+    const controller = new AbortController();
+    const backend = createMem0OssBackend({
+      loadEngine: () =>
+        Promise.resolve({
+          add: () => new Promise(() => undefined),
+          search: () => new Promise(() => undefined),
+        }),
+    });
+
+    const write = backend.add({
+      messages: [{role: 'user', content: 'remember this'}],
+      userId: 'user-1',
+      agentId: 'mira',
+      infer: true,
+      signal: controller.signal,
+    });
+
+    controller.abort();
+
+    // The engine takes no signal of its own, so a stalled model request
+    // would otherwise hold the shutdown that abandoned it.
+    await expect(write).rejects.toMatchObject({failureKind: 'cancelled'});
+  });
+
+  it('keeps the engine databases owner-only', async () => {
+    const storageDir = join(
+      createTestTempRoot('mem0-oss-perms-'),
+      'plugin-data',
+      'mem0',
+      'oss',
+    );
+
+    await createDefaultMem0OssEngineLoader({
+      llmApiKey: 'k',
+      llmBaseUrl: mem0OssOpenAiEndpoint,
+      embedderBaseUrl: mem0OssOpenAiEndpoint,
+      storageDir,
+    })({signal: abortSignal});
+
+    // The engine writes these with the process umask; they hold the same
+    // private material as the runtime's own owner-only stores.
+    expect(statSync(storageDir).mode & 0o777).toBe(0o700);
+    for (const entry of readdirSync(storageDir)) {
+      expect(statSync(join(storageDir, entry)).mode & 0o777).toBe(0o600);
+    }
+  });
+
+  it('turns engine analytics off for anything but an explicit opt-in', async () => {
+    const previous = process.env['MEM0_TELEMETRY'];
+    const loadWith = async (value: string | undefined) => {
+      if (value === undefined) {
+        delete process.env['MEM0_TELEMETRY'];
+      } else {
+        process.env['MEM0_TELEMETRY'] = value;
+      }
+
+      return await createDefaultMem0OssEngineLoader({
+        llmApiKey: 'k',
+        llmBaseUrl: mem0OssOpenAiEndpoint,
+        embedderBaseUrl: mem0OssOpenAiEndpoint,
+        storageDir: createTestTempRoot('mem0-telemetry-'),
+      })({signal: abortSignal});
+    };
+
+    try {
+      // The engine's own gate is `value === "false" ? off : on`, so a
+      // set-but-empty or mistyped variable would otherwise opt in.
+      const engine = await loadWith(undefined);
+
+      expect(process.env['MEM0_TELEMETRY']).toBe('false');
+      expect(typeof engine.search).toBe('function');
+
+      await loadWith('');
+      expect(process.env['MEM0_TELEMETRY']).toBe('false');
+
+      await loadWith('1');
+      expect(process.env['MEM0_TELEMETRY']).toBe('false');
+
+      // Only a real opt-in survives.
+      await loadWith('true');
+      expect(process.env['MEM0_TELEMETRY']).toBe('true');
+    } finally {
+      if (previous === undefined) {
+        delete process.env['MEM0_TELEMETRY'];
+      } else {
+        process.env['MEM0_TELEMETRY'] = previous;
+      }
+    }
   });
 });

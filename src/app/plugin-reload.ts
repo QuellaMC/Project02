@@ -110,6 +110,7 @@ export function createConfiguredRuntimePluginReloader(options: {
           manifest: entry.manifest,
           storeRoot: authoredState.runtimeLocation.characterScope.dataRoot,
           characterId: authoredState.runtimeLocation.characterScope.characterId,
+          userDisplayName: freshResolvedConfig.project02.userDisplayName,
           resolvedConfig:
             ownJsonRecordValue(freshResolvedConfig.pluginConfigs, pluginId) ??
             {},

@@ -553,6 +553,10 @@ async function assertSessionCatalogCoversDurableSessionDirectories(
   }
 
   for (const entry of entries) {
+    if (isOperatingSystemMetadataEntry(entry.name)) {
+      continue;
+    }
+
     const sessionRoot = join(layout.sessionsRoot, entry.name);
 
     if (!entry.isDirectory()) {
@@ -568,6 +572,11 @@ async function assertSessionCatalogCoversDurableSessionDirectories(
   }
 }
 
+/** Finder drops .DS_Store into any browsed directory; it is not evidence. */
+function isOperatingSystemMetadataEntry(name: string): boolean {
+  return name === '.DS_Store';
+}
+
 async function localRuntimeSessionsRootHasDurableEvidence(
   layout: LocalRuntimeStorageLayout,
 ): Promise<boolean> {
@@ -575,6 +584,10 @@ async function localRuntimeSessionsRootHasDurableEvidence(
     const entries = await listDirectoryEntries(layout.sessionsRoot);
 
     for (const entry of entries) {
+      if (isOperatingSystemMetadataEntry(entry.name)) {
+        continue;
+      }
+
       if (!entry.isDirectory()) {
         return true;
       }
@@ -605,7 +618,12 @@ function localRuntimeSessionDirectoryHasDurableEvidence(
   sessionRoot: string,
 ): boolean {
   try {
-    return listDirectoryNamesSync(sessionRoot).length > 0;
+    // The same Finder file can land inside a session directory an
+    // interrupted start left empty; treating it as evidence would block
+    // listing or recreating a session that is otherwise recoverable.
+    return listDirectoryNamesSync(sessionRoot).some(
+      name => !isOperatingSystemMetadataEntry(name),
+    );
   } catch (error: unknown) {
     if (isNodeErrorWithCode(error, 'ENOENT')) {
       return false;

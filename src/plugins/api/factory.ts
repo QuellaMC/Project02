@@ -10,6 +10,8 @@ export type RuntimePluginFactoryInput = {
   readonly storeRoot: string;
   /** Resolved character scope; absent only for direct factory callers. */
   readonly characterId?: string;
+  /** Resolved user display name; absent only for direct factory callers. */
+  readonly userDisplayName?: string;
   readonly resolvedConfig: ResolvedPluginRuntimeConfig;
   readonly redactedConfig: RedactedPluginRuntimeConfig;
 };
