@@ -232,7 +232,9 @@ export function createNvidiaRoleModelProviderAdapter(
 
         return Object.freeze({
           rawOutputText: rawOutput.rawOutputText,
-          nativeAssistantMessage: rawOutput.nativeAssistantMessage,
+          ...(rawOutput.nativeAssistantMessage === undefined
+            ? {}
+            : {nativeAssistantMessage: rawOutput.nativeAssistantMessage}),
           ...nativeToolCallArgumentErrorsOption(
             rawOutput.nativeToolCallArgumentErrors,
           ),
@@ -248,7 +250,9 @@ export function createNvidiaRoleModelProviderAdapter(
               ? {}
               : {finishReason: rawOutput.finishReason}),
             ...(rawOutput.usage === undefined ? {} : {usage: rawOutput.usage}),
-            nativeAssistantMessage: rawOutput.nativeAssistantMessage,
+            ...(rawOutput.nativeAssistantMessage === undefined
+              ? {}
+              : {nativeAssistantMessage: rawOutput.nativeAssistantMessage}),
             ...(rawOutput.outputNormalization === undefined
               ? {}
               : {outputNormalization: rawOutput.outputNormalization}),
@@ -545,7 +549,8 @@ type ParsedNvidiaResponseMessage =
       readonly rawOutputText: string;
       readonly finishReason?: string;
       readonly usage?: unknown;
-      readonly nativeAssistantMessage: RoleModelAssistantChatMessage;
+      /** Absent when the model's reply could not be normalised and goes to the parser as it is. */
+      readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
       readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
       readonly outputNormalization?: RoleModelProviderExchangeSnapshot['outputNormalization'];
     }
@@ -609,6 +614,15 @@ function parseNvidiaResponseMessage(
 
   if (contentResult.status === 'rejected') {
     return contentResult;
+  }
+
+  if (contentResult.status === 'unusable') {
+    return Object.freeze({
+      status: 'accepted',
+      rawOutputText: contentResult.rawOutputText,
+      finishReason: finishReasonResult.finishReason,
+      ...(value['usage'] === undefined ? {} : {usage: value['usage']}),
+    } satisfies ParsedNvidiaResponseMessage);
   }
 
   const toolCallsResult = parseOptionalNvidiaToolCalls(message['tool_calls']);
@@ -683,6 +697,16 @@ type ParsedNvidiaMessageContent =
       readonly status: 'accepted';
       readonly content: string | null;
     }
+  | {
+      /**
+       * The model wrote something the adapter cannot normalise, such as an
+       * unterminated reasoning block. It goes to the parser as it is: the
+       * refusal is then the parser's, and the loop hands it back to the
+       * model rather than ending the turn as it would for a provider fault.
+       */
+      readonly status: 'unusable';
+      readonly rawOutputText: string;
+    }
   | RejectedNvidiaProviderParseResult;
 
 function parseOptionalNvidiaMessageContent(
@@ -705,10 +729,10 @@ function parseOptionalNvidiaMessageContent(
   const scrubbed = scrubReasoningBlocks(value);
 
   if (scrubbed.status === 'rejected') {
-    return rejectResponse(
-      'malformed_response',
-      'NVIDIA response message.content contains an unterminated reasoning block.',
-    );
+    return Object.freeze({
+      status: 'unusable',
+      rawOutputText: value,
+    } satisfies ParsedNvidiaMessageContent);
   }
 
   return Object.freeze({
@@ -847,15 +871,6 @@ function createRawOutputTextFromNvidiaMessage(options: {
       } satisfies NvidiaRawOutputTextResult);
     }
 
-    const scrubbedContent = scrubReasoningBlocks(options.content);
-
-    if (scrubbedContent.status === 'rejected') {
-      return rejectResponse(
-        'malformed_response',
-        'Visible reply contains an unterminated reasoning block.',
-      );
-    }
-
     return Object.freeze({
       status: 'accepted',
       rawOutputText: JSON.stringify(
@@ -865,14 +880,14 @@ function createRawOutputTextFromNvidiaMessage(options: {
                 {
                   name: visibleReplyModelToolName,
                   input: {
-                    text: scrubbedContent.text,
+                    text: options.content,
                   },
                 },
               ],
             }
           : {
               toolCalls: [],
-              text: scrubbedContent.text,
+              text: options.content,
             },
       ),
       outputNormalization: Object.freeze({
