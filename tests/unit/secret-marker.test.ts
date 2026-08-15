@@ -6,17 +6,9 @@ import {
 } from '../../src/shared/secret-marker.ts';
 
 describe('valueIsSecretMarker', () => {
-  it('detects env refs and plaintext markers regardless of value type', () => {
+  it('detects env refs regardless of value type', () => {
     expect(valueIsSecretMarker({$env: 'API_KEY'})).toBe(true);
     expect(valueIsSecretMarker({$env: 123})).toBe(true);
-    expect(
-      valueIsSecretMarker({
-        $plaintextSecret: 'x',
-        allowPlaintextSecret: true,
-        justification: 'test',
-      }),
-    ).toBe(true);
-    expect(valueIsSecretMarker({$plaintextSecret: null})).toBe(true);
   });
 
   it('leaves plain values, arrays, and marker-free objects alone', () => {
@@ -54,21 +46,6 @@ describe('nestedSecretMarkerPath', () => {
     expect(
       nestedSecretMarkerPath({zebra: {$env: 'Z'}, alpha: {$env: 'A'}}, 'field'),
     ).toBe('field.alpha');
-  });
-
-  it('optionally rejects plaintext allowance markers', () => {
-    const value = {
-      nested: {
-        allowPlaintextSecret: false,
-      },
-    };
-
-    expect(nestedSecretMarkerPath(value, 'field')).toBeUndefined();
-    expect(
-      nestedSecretMarkerPath(value, 'field', {
-        rejectPlaintextAllowanceMarker: true,
-      }),
-    ).toBe('field.nested');
   });
 
   it('returns undefined for marker-free structures', () => {

@@ -1,4 +1,7 @@
-import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginConfigField,
+  RuntimePluginManifest,
+} from '../../plugins/api/index.ts';
 import {
   assertGlobalConfigLoadableForCharacterScope,
   assertResolvedProject02HomeAdoptable,
@@ -320,4 +323,11 @@ export function runtimeConfigSecretSetCommandPrefix(options: {
 
 export function writeLine(stdout: NodeJS.WritableStream, value: string): void {
   stdout.write(`${value}\n`);
+}
+export function consoleCatalogManifests(
+  context: RuntimeConfigConsoleContext,
+): readonly RuntimePluginManifest[] {
+  return Object.values(context.catalogSnapshot.catalogEntries).map(
+    entry => entry.manifest,
+  );
 }

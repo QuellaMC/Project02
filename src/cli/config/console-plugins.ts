@@ -7,14 +7,19 @@ import {
   inspectRuntimePluginConfig,
   redactRuntimeConfigValue,
   resolveRuntimeConfigScopeTarget,
+  runtimePluginScopeViolation,
+  type RuntimeConfigFieldScope,
   type RuntimeConfigValue,
-  type RuntimePluginConfigActivationInspectShape,
+  type RuntimePluginActivationStatusShape,
   type RuntimePluginConfigFieldInspectShape,
+  type RuntimePluginConfigInspectShape,
+  type RuntimePluginScopeOperation,
 } from '../../runtime/config/index.ts';
 import {prepareConfiguredProject02PluginActivation} from '../../app/index.ts';
 import {ownJsonRecordValue} from '../../shared/json-boundary.ts';
 import {shellQuoteCommandArgument} from '../../shared/shell-command.ts';
 import {
+  consoleCatalogManifests,
   askForFieldValue,
   askForNumber,
   cancelled,
@@ -36,7 +41,7 @@ type RuntimeConfigConsolePluginEntry = {
 type RuntimeConfigConsolePluginCatalog = {
   readonly entries: readonly RuntimeConfigConsolePluginEntry[];
   readonly activationByPluginId: Readonly<
-    Record<string, RuntimePluginConfigActivationInspectShape>
+    Record<string, RuntimePluginActivationStatusShape>
   >;
   readonly defaultEnabledPluginIds: readonly string[];
 };
@@ -89,11 +94,16 @@ export async function runPluginConfigSection(
 
   writeLine(context.stdout, '');
   writeLine(context.stdout, `${inspected.displayName} (${inspected.pluginId})`);
-  writeLine(context.stdout, `1) Enabled: ${String(inspected.enabled)}`);
+  writeLine(
+    context.stdout,
+    `1) Enabled: ${String(inspected.enabled)}` +
+      readOnlyMarker(inspected.activation.editableInScope),
+  );
   inspected.fields.forEach((field, index) => {
     writeLine(
       context.stdout,
-      `${String(index + 2)}) ${field.name}: ${formatInspectedFieldValue(field)}`,
+      `${String(index + 2)}) ${field.name}: ${formatInspectedFieldValue(field)}` +
+        readOnlyMarker(field.editableInScope),
     );
   });
   writeDiagnostics(context.stdout, inspected.diagnostics);
@@ -109,11 +119,10 @@ export async function runPluginConfigSection(
   }
 
   if (item === 1) {
-    const change = await stagePluginActivationChange(
+    const change = await stageActivationChoice(
       context,
       manifest,
-      inspected.enabled,
-      inspected.fingerprint,
+      inspected,
       snapshot,
     );
 
@@ -130,8 +139,36 @@ export async function runPluginConfigSection(
     return;
   }
 
+  // Scope first: a secret command printed for the wrong scope would be
+  // rejected the moment the operator ran it.
+  if (!inspectedField.editableInScope) {
+    writeScopeRestriction(context, manifest, snapshot.scope, {
+      kind: 'field',
+      fieldName: field.name,
+    });
+
+    // A value this scope's document already holds can still be removed
+    // here; that unset is the one repair scope rules permit.
+    if (inspectedField.authored.configured) {
+      const repair = await stageFieldScopeRepair(
+        context,
+        manifest,
+        field.name,
+        inspectedField.authored.value,
+        inspected.fingerprint,
+        snapshot,
+      );
+
+      if (repair !== undefined) {
+        await previewAndCommitChange(context, repair);
+      }
+    }
+
+    return;
+  }
+
   if (field.secret) {
-    writeSecretConfigInstructions(context, manifest, field);
+    writeSecretConfigInstructions(context, manifest, field, snapshot);
     return;
   }
 
@@ -147,6 +184,136 @@ export async function runPluginConfigSection(
   if (change !== undefined) {
     await previewAndCommitChange(context, change);
   }
+}
+
+/**
+ * A scope that may not decide this activation can still remove a value its
+ * document already holds; deciding it stays refused.
+ */
+async function stageActivationChoice(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  inspected: RuntimePluginConfigInspectShape,
+  snapshot: RuntimeConfigConsoleSnapshot,
+): Promise<StagedRuntimeConfigChange | undefined> {
+  if (inspected.activation.editableInScope) {
+    return await stagePluginActivationChange(
+      context,
+      manifest,
+      inspected.enabled,
+      inspected.fingerprint,
+      snapshot,
+    );
+  }
+
+  writeScopeRestriction(context, manifest, snapshot.scope, {
+    kind: 'activation',
+  });
+
+  // With nothing authored here there is nothing to remove: offering the
+  // repair would rewrite an unchanged document and report a save.
+  const scopeDocument =
+    snapshot.scope === 'global' ? snapshot.config : snapshot.scopedConfig;
+
+  if (scopeDocument?.plugins?.[manifest.id]?.enabled === undefined) {
+    return undefined;
+  }
+
+  return await stageActivationScopeRepair(
+    context,
+    manifest,
+    inspected.enabled,
+    inspected.fingerprint,
+    snapshot,
+  );
+}
+
+async function stageFieldScopeRepair(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  fieldName: string,
+  authoredValue: RuntimeConfigValue | undefined,
+  fingerprint: string,
+  snapshot: RuntimeConfigConsoleSnapshot,
+): Promise<StagedRuntimeConfigChange | undefined> {
+  writeLine(context.stdout, "1) Remove this scope's value");
+  writeLine(context.stdout, '2) Cancel');
+
+  const action = await askForNumber(context, 'Choose an action: ', 2);
+
+  if (action !== 1) {
+    writeLine(context.stdout, 'Change cancelled.');
+    return undefined;
+  }
+
+  return {
+    target: `plugins.${manifest.id}.config.${fieldName}`,
+    oldValue: authoredValue,
+    newValue: undefined,
+    reloadRequired: true,
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
+      });
+      applyRuntimeConfigControlOperation({
+        target: resolveRuntimeConfigScopeTarget({
+          runtimeLocation: snapshot.runtimeLocation,
+          ...(context.env === undefined ? {} : {env: context.env}),
+          scope: snapshot.scope,
+        }),
+        pluginManifests: consoleCatalogManifests(context),
+        expectedFingerprint: fingerprint,
+        request: {
+          kind: 'plugin_config',
+          manifest,
+          actor: 'operator',
+          fieldOperation: {kind: 'unset', fieldName},
+        },
+      });
+    },
+  };
+}
+
+async function stageActivationScopeRepair(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  inspectedEnabled: boolean,
+  fingerprint: string,
+  snapshot: RuntimeConfigConsoleSnapshot,
+): Promise<StagedRuntimeConfigChange | undefined> {
+  writeLine(context.stdout, "1) Remove this scope's enabled value");
+  writeLine(context.stdout, '2) Cancel');
+
+  const action = await askForNumber(context, 'Choose an action: ', 2);
+
+  if (action !== 1) {
+    writeLine(context.stdout, 'Change cancelled.');
+    return undefined;
+  }
+
+  return {
+    target: `plugins.${manifest.id}.enabled`,
+    oldValue: inspectedEnabled,
+    newValue: undefined,
+    reloadRequired: true,
+    async commit() {
+      await ensureConsoleCommitTarget({
+        runtimeLocation: snapshot.runtimeLocation,
+        scope: snapshot.scope,
+      });
+      applyRuntimeConfigControlOperation({
+        target: resolveRuntimeConfigScopeTarget({
+          runtimeLocation: snapshot.runtimeLocation,
+          ...(context.env === undefined ? {} : {env: context.env}),
+          scope: snapshot.scope,
+        }),
+        pluginManifests: consoleCatalogManifests(context),
+        expectedFingerprint: fingerprint,
+        request: {kind: 'plugin_activation', manifest},
+      });
+    },
+  };
 }
 
 async function stagePluginActivationChange(
@@ -195,6 +362,7 @@ async function stagePluginActivationChange(
 
       applyRuntimeConfigControlOperation({
         target,
+        pluginManifests: consoleCatalogManifests(context),
         expectedFingerprint: fingerprint,
         request: {
           kind: 'plugin_activation',
@@ -284,6 +452,7 @@ async function stagePluginFieldChange(
 
       applyRuntimeConfigControlOperation({
         target,
+        pluginManifests: consoleCatalogManifests(context),
         expectedFingerprint: fingerprint,
         request: {
           kind: 'plugin_config',
@@ -381,13 +550,48 @@ function writePluginEntries(
   }
 }
 
+/** Read-only here means another scope owns the setting, not that it is fixed. */
+function readOnlyMarker(editableInScope: boolean): string {
+  return editableInScope ? '' : ' (read-only in this scope)';
+}
+
+function writeScopeRestriction(
+  context: RuntimeConfigConsoleContext,
+  manifest: RuntimePluginManifest,
+  scope: RuntimeConfigFieldScope,
+  operation: RuntimePluginScopeOperation,
+): void {
+  const violation = runtimePluginScopeViolation({
+    manifest,
+    authoredScope: scope,
+    operation,
+  });
+
+  writeLine(context.stdout, '');
+  writeLine(
+    context.stdout,
+    violation?.message ?? 'This setting cannot be changed in this scope.',
+  );
+}
+
 function writeSecretConfigInstructions(
   context: RuntimeConfigConsoleContext,
   manifest: RuntimePluginManifest,
   field: RuntimePluginConfigField,
+  snapshot: RuntimeConfigConsoleSnapshot,
 ): void {
   const envVar = field.envVar ?? suggestedSecretEnvVar(manifest.id, field.name);
   const commandArgs = [
+    // At character scope the value lands in this character's own secrets
+    // file, so two characters can hold different accounts for one plugin.
+    ...(snapshot.scope === 'character'
+      ? [
+          '--character',
+          shellQuoteCommandArgument(
+            snapshot.runtimeLocation.characterScope.characterId,
+          ),
+        ]
+      : []),
     'secret',
     'set',
     shellQuoteCommandArgument(manifest.id),

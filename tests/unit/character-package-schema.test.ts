@@ -300,40 +300,6 @@ describe('character package descriptor schema parity', () => {
       }),
     ],
     [
-      'a nested plaintext-secret marker in plugin defaults',
-      (descriptor: Record<string, unknown>) => ({
-        ...descriptor,
-        plugins: {
-          config: {
-            'demo-config': {
-              nested: {
-                token: {
-                  $plaintextSecret: 'nope',
-                  allowPlaintextSecret: true,
-                  justification: 'still not package-safe',
-                },
-              },
-            },
-          },
-        },
-      }),
-    ],
-    [
-      'a plaintext-secret allowance marker in plugin defaults',
-      (descriptor: Record<string, unknown>) => ({
-        ...descriptor,
-        plugins: {
-          config: {
-            'demo-config': {
-              nested: {
-                allowPlaintextSecret: false,
-              },
-            },
-          },
-        },
-      }),
-    ],
-    [
       'a non-object plugin config entry',
       (descriptor: Record<string, unknown>) => ({
         ...descriptor,

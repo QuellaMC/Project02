@@ -14,6 +14,7 @@ import {describe, expect, it} from 'vitest';
 import {runRuntimeConfigCliFromArgs} from '../../src/cli/config/main.ts';
 import {
   characterOverlayConfigPath,
+  characterSecretsEnvPath,
   runtimeConfigEnvVarName,
   runtimeConfigVersion,
 } from '../../src/runtime/config/index.ts';
@@ -176,7 +177,7 @@ describe('runtime-config --character verbs', () => {
     });
   });
 
-  it('rejects global-only fields, secrets, and env-path while check materializes under --character', async () => {
+  it('rejects global-only host fields while secrets and env-path work per character', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-reject-');
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
@@ -199,20 +200,37 @@ describe('runtime-config --character verbs', () => {
       ),
     ).toBe(false);
 
-    const secret = await runConfigCli([
-      '--store',
-      homeRoot,
-      '--character',
-      'mira',
-      'secret',
-      'set',
-      'demo-config',
-      'apiKey',
-      'MY_SECRET',
-    ]);
+    const secret = await runConfigCli(
+      [
+        '--store',
+        homeRoot,
+        '--character',
+        'mira',
+        'secret',
+        'set',
+        'demo-config',
+        'apiKey',
+        'MY_SECRET',
+      ],
+      {MY_SECRET: 'mira-account'},
+    );
 
-    expect(secret.code).toBe(1);
-    expect(secret.stderr).toContain('Secrets are shared across characters');
+    // The pointer lands in this character's overlay and the value in its
+    // own env file; the shared home env never sees it.
+    if (secret.code !== 0) {
+      throw new Error(`secret set failed: ${secret.stderr}`);
+    }
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+
+    expect(
+      JSON.parse(readFileSync(characterOverlayConfigPath(dataRoot), 'utf8')),
+    ).toMatchObject({
+      plugins: {'demo-config': {config: {apiKey: {$env: 'MY_SECRET'}}}},
+    });
+    expect(readFileSync(characterSecretsEnvPath(dataRoot), 'utf8')).toContain(
+      'MY_SECRET="mira-account"',
+    );
+    expect(existsSync(join(homeRoot, '.env'))).toBe(false);
 
     const envPath = await runConfigCli([
       '--store',
@@ -222,8 +240,10 @@ describe('runtime-config --character verbs', () => {
       'env-path',
     ]);
 
-    expect(envPath.code).toBe(1);
-    expect(envPath.stderr).toContain('shared across characters');
+    if (envPath.code !== 0) {
+      throw new Error(`env-path failed: ${envPath.stderr}`);
+    }
+    expect(envPath.stdout.trim()).toBe(characterSecretsEnvPath(dataRoot));
 
     const check = await runConfigCli([
       '--store',
@@ -259,6 +279,7 @@ describe('runtime-config --character verbs', () => {
       version: 'project02.config.v2',
       plugins: {
         'character-state': {enabled: true},
+        'demo-config': {config: {apiKey: {$env: 'MY_SECRET'}}},
       },
     });
   });
@@ -607,11 +628,14 @@ describe('runtime-config --character verbs', () => {
   it('still rejects a scoped read over an authoring error', async () => {
     const homeRoot = createTestTempRoot('project02-scope-verbs-authoring-');
 
-    // A plaintext secret is an invalid authored document, not an incomplete
-    // environment.
+    // A record under a secret field is an invalid authored document, not an
+    // incomplete environment.
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       plugins: {
-        [secretPlugin.manifest.id]: {enabled: true, config: {apiKey: 'oops'}},
+        [secretPlugin.manifest.id]: {
+          enabled: true,
+          config: {apiKey: {token: 'oops'}},
+        },
       },
     });
 
@@ -622,7 +646,7 @@ describe('runtime-config --character verbs', () => {
     );
 
     expect(rejected.code).toBe(1);
-    expect(rejected.stderr).toContain('must use an env ref');
+    expect(rejected.stderr).toContain('must be a plain string value');
   });
 
   it('rejects a scoped read from a directory marked for another character', async () => {

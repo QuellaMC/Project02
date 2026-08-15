@@ -3,6 +3,7 @@
  * Selector drift conflicts; the transaction never retargets or restarts.
  */
 import {pathExistsSync} from '../../shared/file-system.ts';
+import {describeRealEntry} from '../../shared/real-path.ts';
 import {dirname} from 'node:path';
 
 import {
@@ -12,6 +13,7 @@ import {
   type LocalRuntimeMutationLocksLeaseSync,
 } from '../storage/mutation-lock.ts';
 import {runtimeConfigEnvPathForLocation} from './env-file.ts';
+import {characterSecretsEnvPath} from './overlay.ts';
 import {createLayeredRuntimeConfigFingerprint} from './fingerprint.ts';
 import {
   assertSelectedRuntimeConfigStillBound,
@@ -55,10 +57,13 @@ import type {
   SelectedLoadedProject02RuntimeConfig,
 } from './types.ts';
 import type {JsonBoundaryObject} from '../../shared/json-boundary.ts';
+import type {RuntimePluginManifest} from '../../plugins/api/index.ts';
 
 export type RuntimeConfigControlSnapshot = {
   readonly loadedConfig: LoadedProject02RuntimeConfig;
   readonly globalDocument: JsonBoundaryObject;
+  /** Installed manifests; fingerprints need them to redact secret fields. */
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   /** Validated globalDocument, including the absent-file bootstrap. */
   readonly validatedGlobalConfig?: Project02RuntimeConfig;
   readonly runtimeLocation: ResolvedProject02ConfigLocation;
@@ -104,7 +109,10 @@ type RuntimeConfigControlCandidateHome = {
  */
 export function readRuntimeConfigControlSnapshot(
   target: ResolvedRuntimeConfigScopeTarget,
-  options: {readonly requireCharacterMarker?: boolean} = {},
+  options: {
+    readonly pluginManifests: readonly RuntimePluginManifest[];
+    readonly requireCharacterMarker?: boolean;
+  },
 ): RuntimeConfigControlSnapshot {
   target = requireResolvedRuntimeConfigScopeTarget(target);
   assertRuntimeConfigTargetStillBound(target);
@@ -116,12 +124,14 @@ export function readRuntimeConfigControlSnapshot(
   return snapshotFromLoadedGlobal({
     target,
     loadedConfig,
+    pluginManifests: options.pluginManifests,
     requireCharacterMarker: options.requireCharacterMarker ?? true,
   });
 }
 
 type ApplyRuntimeConfigControlTransactionOptions<T> = {
   readonly target: ResolvedRuntimeConfigScopeTarget;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly expectedFingerprint?: string;
   readonly secretMutation: boolean;
   readonly prepare: (
@@ -146,9 +156,7 @@ export function applyRuntimeConfigControlTransaction<T>(
     assertRuntimeConfigEffectiveHomeAvailable(target, options.secretMutation);
     const loadedConfig = loadSelectedGlobalConfig(target);
     assertReloadedGlobalConfigUsesBoundHome(target, loadedConfig);
-    const currentEnvPath = runtimeConfigEnvPathForLocation(
-      target.runtimeLocation,
-    );
+    const currentEnvPath = runtimeConfigEnvPathForTarget(target);
     const currentCanonicalEnvPath =
       canonicalRuntimeConfigMutationPath(currentEnvPath);
 
@@ -164,6 +172,7 @@ export function applyRuntimeConfigControlTransaction<T>(
     const snapshot = snapshotFromLoadedGlobal({
       target,
       loadedConfig,
+      pluginManifests: options.pluginManifests,
       // A character write lands only in a directory the initializer claimed.
       requireCharacterMarker: true,
     });
@@ -181,7 +190,12 @@ export function applyRuntimeConfigControlTransaction<T>(
       candidate: preparation.preparedCandidate.config,
       operation: preparation.operation,
     });
-    const candidateEnvPath = runtimeConfigEnvPathForLocation(candidateHome);
+    // A character's env rides its bound data root, which the re-verified
+    // target pins; only a global secret follows the candidate home.
+    const candidateEnvPath =
+      target.scope === 'character'
+        ? currentEnvPath
+        : runtimeConfigEnvPathForLocation(candidateHome);
     const canonicalCandidateEnvPath =
       canonicalRuntimeConfigMutationPath(candidateEnvPath);
 
@@ -228,12 +242,14 @@ export function applyRuntimeConfigControlTransaction<T>(
                 globalConfig: snapshot.globalDocument,
                 characterId: target.runtimeLocation.characterScope.characterId,
                 overlayConfig: preparation.preparedCandidate.config,
+                pluginManifests: snapshot.pluginManifests,
               })
             : layeredRuntimeConfigFingerprintForScope({
                 globalConfig: preparation.preparedCandidate.config,
                 characterScope:
                   snapshot.characterRuntimeLocation?.characterScope,
                 overlay: snapshot.characterOverlay?.overlay,
+                pluginManifests: snapshot.pluginManifests,
               }),
       } satisfies RuntimeConfigMutationResult),
       context: preparation.context,
@@ -250,6 +266,7 @@ export function verifyRuntimeConfigControlExpectation(
     | 'runtimeLocation'
     | 'characterRuntimeLocation'
     | 'characterOverlay'
+    | 'pluginManifests'
   >,
   expectedFingerprint: string,
 ): void {
@@ -257,6 +274,7 @@ export function verifyRuntimeConfigControlExpectation(
     globalConfig: snapshot.globalDocument,
     characterScope: snapshot.characterRuntimeLocation?.characterScope,
     overlay: snapshot.characterOverlay?.overlay,
+    pluginManifests: snapshot.pluginManifests,
   });
 
   if (expectedFingerprint !== currentFingerprint) {
@@ -287,6 +305,7 @@ export function assertGlobalConfigLoadableForCharacterScope(
 function snapshotFromLoadedGlobal(options: {
   readonly target: ResolvedRuntimeConfigScopeTarget;
   readonly loadedConfig: LoadedProject02RuntimeConfig;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly requireCharacterMarker: boolean;
 }): RuntimeConfigControlSnapshot {
   if (options.target.scope === 'character') {
@@ -322,6 +341,7 @@ function snapshotFromLoadedGlobal(options: {
   return Object.freeze({
     loadedConfig: options.loadedConfig,
     globalDocument: globalSnapshot.document,
+    pluginManifests: options.pluginManifests,
     ...(globalSnapshot.validatedConfig === undefined
       ? {}
       : {validatedGlobalConfig: globalSnapshot.validatedConfig}),
@@ -404,9 +424,17 @@ function assertRuntimeConfigEffectiveHomeAvailable(
 ): void {
   try {
     if (secretMutation || target.scope === 'character') {
+      // The real-file requirement guards the env file this mutation
+      // writes: the home env for a global secret, the character's own
+      // file -- checked below -- for a character secret.
       assertResolvedProject02HomeAdoptable(target.runtimeLocation, {
-        requireRealEnvFile: secretMutation,
+        requireRealEnvFile: secretMutation && target.scope === 'global',
       });
+
+      if (secretMutation && target.scope === 'character') {
+        assertRealCharacterEnvFile(target);
+      }
+
       return;
     }
 
@@ -419,6 +447,24 @@ function assertRuntimeConfigEffectiveHomeAvailable(
     }
 
     throw error;
+  }
+}
+
+/**
+ * The loader refuses a non-regular character env, so a secret written
+ * through one would never load -- and a symlink would carry it outside
+ * the character-data directory.
+ */
+function assertRealCharacterEnvFile(
+  target: ResolvedRuntimeConfigScopeTarget,
+): void {
+  const envPath = runtimeConfigEnvPathForTarget(target);
+  const entry = describeRealEntry(envPath);
+
+  if (entry.kind !== 'absent' && entry.kind !== 'file') {
+    throw new RuntimeConfigMutationError(
+      `Character secrets env "${envPath}" must be a regular file inside the character-data directory.`,
+    );
   }
 }
 
@@ -533,7 +579,7 @@ function createRuntimeConfigControlLockPlan(
     target.runtimeLocation.selectedConfig.canonicalPath;
   const displayGlobalConfigPath = target.runtimeLocation.selectedConfig.path;
   const displayEnvPath = secretMutation
-    ? runtimeConfigEnvPathForLocation(target.runtimeLocation)
+    ? runtimeConfigEnvPathForTarget(target)
     : undefined;
   const canonicalEnvPath =
     displayEnvPath === undefined
@@ -567,6 +613,15 @@ function createRuntimeConfigControlLockPlan(
     ...(overlay === undefined ? {} : {overlay}),
     targets: Object.freeze(targets),
   });
+}
+
+/** Where this target's secrets live: per character, or the shared home. */
+function runtimeConfigEnvPathForTarget(
+  target: ResolvedRuntimeConfigScopeTarget,
+): string {
+  return target.scope === 'character'
+    ? characterSecretsEnvPath(target.runtimeLocation.characterScope.dataRoot)
+    : runtimeConfigEnvPathForLocation(target.runtimeLocation);
 }
 
 function acquireRuntimeConfigControlLocks(

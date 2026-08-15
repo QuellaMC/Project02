@@ -52,10 +52,16 @@ construction, never inside an already discovered host.
 ## The factory contract
 
 `createProject02Plugin(input: RuntimePluginFactoryInput)` receives
-`{pluginId, manifest, storeRoot, resolvedConfig, redactedConfig}` and
-returns a `RuntimePlugin`. It runs when the configured host is constructed
-at session start. The returned plugin's manifest must equal the discovered
-one — build it from `input.manifest`, never a second copy.
+`{pluginId, manifest, storeRoot, characterId, resolvedConfig,
+redactedConfig}` and returns a `RuntimePlugin`. It runs when the configured
+host is constructed at session start. The returned plugin's manifest must
+equal the discovered one — build it from `input.manifest`, never a second
+copy.
+
+`characterId` is the character this host serves, and it is the identity to
+namespace external state by. It is absent when no character is active, so
+fall back to a constant of your own; never derive an identity from
+`storeRoot`, whose layout is the runtime's to change.
 
 Bundled packages import host helpers directly, an installed package cannot:
 its captured artifact resolves only its own files, so a memory provider
@@ -112,18 +118,23 @@ resolution, the operator console, and the model-facing
 `runtime.plugin.config` tools.
 
 - `config.scope: "global_with_character_overrides"` allows global
-  enablement and non-secret settings plus character overrides.
-- `config.scope: "character_only"` keeps enablement and non-secret
-  settings in character packages and overlays. Its
-  `activation.defaultEnabled` must be `false`.
+  settings with per-character overrides; `"character_only"` keeps the
+  plugin's settings wholly per character (its `activation.defaultEnabled`
+  must be `false`).
 - `valueType` + `allowedValues` are enforced on every write, with the
   expectation named in rejection feedback.
-- `secret: true` fields accept only `{"$env": "VAR"}` references in config;
-  reads always show them redacted. Secret fields cannot be `agentMutable`.
+- `secret: true` fields hold credentials. The preferred home is an env
+  file — the manifest's `envVar` or an authored `{"$env": "VAR"}` ref —
+  and each character's own env file (set with `runtime-config --character
+  <id> secret set`) merges over the home `.env`, so two characters can
+  hold different accounts for one plugin. A plain string typed into
+  config also works; the env wins whenever it holds the variable. Reads
+  always show secret fields redacted, and they cannot be `agentMutable`.
 - `agentMutable: true` lets the model propose updates through
-  `runtime.plugin.config.update`; each one still requires explicit user
-  approval, and enabling/disabling the plugin itself is never
-  agent-mutable.
+  `runtime.plugin.config.update` (each still requires explicit user
+  approval). Every other field is out of the model's reach — that is what
+  keeps the agent away from credentials and from the settings that decide
+  where they go.
 - `reloadRequired` states whether a committed change needs a runtime
   reload before it takes effect.
 
@@ -131,7 +142,13 @@ resolution, the operator console, and the model-facing
 
 `activation.defaultEnabled: true` activates the package on every store with
 no configuration; use it only for product-essential
-`global_with_character_overrides` plugins. Character-only, demo, and
+`global_with_character_overrides` plugins.
+
+A character package may request enablement (`required`/`recommended`) and
+ship config values, so its character works right after install with no
+setup. Materialization only fills what is missing: a field the operator
+has set keeps the operator's value, on first install and on every package
+update. Character-only, demo, and
 optional plugins ship `false` and are enabled per store:
 `pnpm runtime-config ui` → Plugins → your plugin → Enable. A
 character-only plugin is enabled with `--character <id>` or by that

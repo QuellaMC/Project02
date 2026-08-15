@@ -9,6 +9,7 @@ import {
 } from '../../runtime/config/index.ts';
 import {
   askForNumber,
+  consoleCatalogManifests,
   writeDiagnostics,
   writeLine,
   type RuntimeConfigConsoleContext,
@@ -142,6 +143,7 @@ function loadConsoleSnapshot(
       globalConfig: config,
       characterScope: runtimeLocation.characterScope,
       overlay,
+      pluginManifests: consoleCatalogManifests(context),
     }),
     ...(context.scope === 'global'
       ? {}

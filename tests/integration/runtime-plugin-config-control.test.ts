@@ -144,6 +144,7 @@ describe('runtime plugin config control', () => {
       defaultValueSummary: 'local',
       allowedValues: ['local', 'remote'],
       agentMutable: true,
+      editableInScope: true,
       reloadRequired: true,
       authored: {
         configured: true,
@@ -165,6 +166,7 @@ describe('runtime plugin config control', () => {
       secret: true,
       valueType: 'secret',
       agentMutable: false,
+      editableInScope: true,
       reloadRequired: true,
       authored: {
         configured: true,
@@ -181,6 +183,7 @@ describe('runtime plugin config control', () => {
     });
     expect(inspected.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
+        pluginManifests: [],
         globalConfig: authoredConfig,
         characterId: 'mira',
         overlayConfig: null,
@@ -250,6 +253,7 @@ describe('runtime plugin config control', () => {
     });
 
     const setResult = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: fixture.fingerprint,
       request: {
@@ -289,6 +293,7 @@ describe('runtime plugin config control', () => {
     expect(readConfigFile(fixture.configPath)).toEqual(expectedAfterSet);
 
     const unsetResult = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: setResult.fingerprint,
       request: {
@@ -340,6 +345,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -374,6 +380,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -404,6 +411,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -437,6 +445,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -496,6 +505,7 @@ describe('runtime plugin config control', () => {
     ] as const) {
       expect(() =>
         applyRuntimeConfigControlOperation({
+          pluginManifests: [],
           target,
           expectedFingerprint: fixture.fingerprint,
           request: {
@@ -525,6 +535,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -562,6 +573,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -618,8 +630,10 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: createLayeredRuntimeConfigFingerprint({
+          pluginManifests: [],
           globalConfig: invalidConfig,
           characterId: 'mira',
           overlayConfig: null,
@@ -723,6 +737,7 @@ describe('runtime plugin config control', () => {
       scope: 'global',
     });
     const committed = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target,
       expectedFingerprint: fixture.fingerprint,
       request: {
@@ -739,6 +754,7 @@ describe('runtime plugin config control', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         expectedFingerprint: fixture.fingerprint,
         request: {
@@ -782,6 +798,7 @@ describe('runtime plugin config control', () => {
       scope: 'global',
     });
     const options = {
+      pluginManifests: [],
       target,
       expectedFingerprint: fixture.fingerprint,
       request: {
@@ -800,6 +817,7 @@ describe('runtime plugin config control', () => {
 
     expect(prepared.resultFingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
+        pluginManifests: [],
         globalConfig: expectedConfig,
         characterId: 'mira',
         overlayConfig: null,
@@ -837,6 +855,7 @@ describe('runtime plugin config control', () => {
     expect(existsSync(configPath)).toBe(false);
     expect(inspected.fingerprint).toBe(
       createLayeredRuntimeConfigFingerprint({
+        pluginManifests: [],
         globalConfig: bootstrapBase,
         characterId: 'mira',
         overlayConfig: null,
@@ -844,6 +863,7 @@ describe('runtime plugin config control', () => {
     );
 
     const result = applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: runtimeLocationForTest({
           storeRoot: storeRoot,

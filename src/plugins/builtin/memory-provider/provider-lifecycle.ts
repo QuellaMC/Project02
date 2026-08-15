@@ -233,16 +233,41 @@ async function runMemoryAddTool(
     throw new TypeError('Memory provider add hook is unavailable.');
   }
 
-  const persistedSourceReferences = addResultSourceReferences(result);
+  // Both surfaces are bounded from the same ordered list, so the row this
+  // write created leads each of them: the tool output goes through the
+  // JSON container limit, which would reject an oversized array only
+  // after the backend had already stored the memory.
+  const persistedSourceReferences = boundedSourceReferences(
+    addResultSourceReferences(result),
+  );
+  const storedId = result.id;
+
+  // Without a stored id, a queued write is only credible if the backend
+  // handed back a receipt for it -- provenance for the turn is not one.
+  // Neither means the memory was never taken, and saying "queued" would
+  // tell the model it may yet appear.
+  if (
+    storedId === undefined &&
+    !persistedSourceReferences.some(
+      reference => reference.kind === 'external_contract',
+    )
+  ) {
+    throw new TypeError(
+      'Memory provider add reported neither a stored memory nor a queued-write receipt.',
+    );
+  }
 
   return acceptedToolResult({
     context,
     pluginId: options.pluginId,
-    output: {
-      id: result.id,
-      sourceReferences: persistedSourceReferences,
-    },
-    summary: 'Added one memory item.',
+    output:
+      storedId === undefined
+        ? {queued: true, sourceReferences: persistedSourceReferences}
+        : {id: storedId, sourceReferences: persistedSourceReferences},
+    summary:
+      storedId === undefined
+        ? 'Queued one memory item for the backend to store.'
+        : 'Added one memory item.',
     sourceReferences: [...inputSourceReferences, ...persistedSourceReferences],
   });
 }
@@ -404,11 +429,19 @@ function searchSourceReferences(options: {
 }
 
 function addResultSourceReferences(options: {
-  readonly id: string;
+  readonly id?: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 }): readonly RuntimePluginSourceReference[] {
+  const storedId = options.id;
+
+  // A provider that described its write another way -- a queued job, say --
+  // stored no row yet, so nothing may claim one for it.
+  if (storedId === undefined) {
+    return options.sourceReferences;
+  }
+
   const identifying = options.sourceReferences.find(
-    reference => reference.kind === 'memory' && reference.id === options.id,
+    reference => reference.kind === 'memory' && reference.id === storedId,
   );
 
   // The row this write created leads the list: a record bounded to what it
@@ -416,7 +449,7 @@ function addResultSourceReferences(options: {
   return Object.freeze([
     identifying ?? {
       kind: 'memory',
-      id: options.id,
+      id: storedId,
       title: 'Persisted memory item',
     },
     ...options.sourceReferences.filter(reference => reference !== identifying),
@@ -482,11 +515,9 @@ function itemSourceReferences(
 }
 
 function boundedSourceReferences(
-  references: readonly RuntimePluginSourceReference[] | undefined,
-): readonly RuntimePluginSourceReference[] | undefined {
-  return references === undefined
-    ? references
-    : references.slice(0, runtimePluginSourceReferenceLimit);
+  references: readonly RuntimePluginSourceReference[],
+): readonly RuntimePluginSourceReference[] {
+  return references.slice(0, runtimePluginSourceReferenceLimit);
 }
 
 function memoryEvidence(options: {
@@ -505,7 +536,8 @@ function memoryEvidence(options: {
     (options.sourceItems === undefined
       ? undefined
       : itemSourceReferences(options.sourceItems));
-  const sourceReferences = boundedSourceReferences(collected);
+  const sourceReferences =
+    collected === undefined ? undefined : boundedSourceReferences(collected);
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,

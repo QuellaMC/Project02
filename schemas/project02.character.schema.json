@@ -102,9 +102,7 @@
     "packagePluginConfig": {
       "type": "object",
       "properties": {
-        "$env": false,
-        "$plaintextSecret": false,
-        "allowPlaintextSecret": false
+        "$env": false
       },
       "additionalProperties": {
         "$ref": "#/definitions/packageConfigValue"

@@ -121,6 +121,7 @@ describe('runtime config canonical path locking', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'plugin_activation',
@@ -143,6 +144,7 @@ describe('runtime config canonical path locking', () => {
     });
 
     applyRuntimeConfigControlOperation({
+      pluginManifests: [],
       target: resolveRuntimeConfigScopeTarget({
         runtimeLocation: freshRuntimeLocation,
         env: {},
@@ -204,6 +206,7 @@ describe('runtime config canonical path locking', () => {
 
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target,
         request: {
           kind: 'document',
@@ -249,11 +252,14 @@ describe('runtime config canonical path locking', () => {
       canonicalConfigPath: configB,
     };
 
-    expect(() => readRuntimeConfigControlSnapshot(redirectedTarget)).toThrow(
+    expect(() =>
+      readRuntimeConfigControlSnapshot(redirectedTarget, {pluginManifests: []}),
+    ).toThrow(
       'Runtime config scope target must be created by resolveRuntimeConfigScopeTarget()',
     );
     expect(() =>
       applyRuntimeConfigControlOperation({
+        pluginManifests: [],
         target: redirectedTarget,
         request: {
           kind: 'document',

@@ -968,8 +968,9 @@ describe('runtime config loading and resolution', () => {
     );
   });
 
-  it('rejects plaintext secret values by default', () => {
+  it('accepts a plaintext secret in config, with the env overriding it', () => {
     const plugin = createCharacterStatePlugin();
+    const envVar = 'PROJECT02_PLAINTEXT_SECRET_3447588015';
     const loaded = loadRuntimeConfigForTest({
       configPath: writeRuntimeConfig(
         join(createTestTempRoot('project02-config-plaintext-'), 'config.json'),
@@ -985,37 +986,86 @@ describe('runtime config loading and resolution', () => {
         },
       ),
     });
-    const resolved = resolveProject02RuntimeConfig({
-      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
-
-      pluginManifests: [
-        {
-          ...plugin.manifest,
-          config: {
-            scope: 'global_with_character_overrides',
-            fields: [
-              {
-                name: 'apiKey',
-                description: 'API key.',
-                required: true,
-                secret: true,
-                valueType: 'secret' as const,
-                redactionLabels: ['secret'],
-              },
-            ],
-          },
+    const manifests = [
+      {
+        ...plugin.manifest,
+        config: {
+          scope: 'global_with_character_overrides' as const,
+          fields: [
+            {
+              name: 'apiKey',
+              description: 'API key.',
+              required: true,
+              secret: true,
+              envVar,
+              valueType: 'secret' as const,
+              redactionLabels: ['secret'],
+            },
+          ],
         },
-      ],
+      },
+    ];
+    const fromConfig = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
+      pluginManifests: manifests,
+    });
+    const fromEnv = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({loadedConfig: loaded}),
+      pluginManifests: manifests,
+      env: {[envVar]: 'env-secret'},
     });
 
-    expect(resolved.diagnostics).toEqual(
+    // Typing a key into config is acceptable; the env file stays the
+    // preferred home and wins whenever it holds the variable.
+    expect(
+      fromConfig.pluginConfigs[plugin.manifest.id]?.['apiKey'],
+    ).toMatchObject({
+      source: 'config',
+      resolved: true,
+      value: 'plaintext-secret',
+    });
+    expect(fromEnv.pluginConfigs[plugin.manifest.id]?.['apiKey']).toMatchObject(
+      {
+        source: `env:${envVar}`,
+        resolved: true,
+        value: 'env-secret',
+      },
+    );
+    // Redacted views never show the value, wherever it came from.
+    expect(JSON.stringify(fromConfig.redactedPluginConfigs)).not.toContain(
+      'plaintext-secret',
+    );
+
+    // Shapes that are neither a string nor an env ref stay rejected.
+    const invalid = resolveProject02RuntimeConfig({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadRuntimeConfigForTest({
+          configPath: writeRuntimeConfig(
+            join(
+              createTestTempRoot('project02-config-secret-shape-'),
+              'config.json',
+            ),
+            {
+              plugins: {
+                [plugin.manifest.id]: {
+                  enabled: true,
+                  config: {apiKey: {token: 'plaintext-secret'}},
+                },
+              },
+            },
+          ),
+        }),
+      }),
+      pluginManifests: manifests,
+    });
+
+    expect(invalid.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          code: 'runtime_config_plaintext_secret_rejected',
+          code: 'runtime_config_secret_value_invalid',
         }),
       ]),
     );
-    expect(JSON.stringify(resolved)).not.toContain('plaintext-secret');
   });
 
   it('treats empty env values for required secrets as missing', () => {

@@ -9,6 +9,7 @@ import {
   type RuntimeConfigValue,
 } from '../../runtime/config/index.ts';
 import {
+  consoleCatalogManifests,
   askForFieldValue,
   askForNumber,
   cancelled,
@@ -120,6 +121,7 @@ async function stageProject02FieldChange(
 
       applyRuntimeConfigControlOperation({
         target,
+        pluginManifests: consoleCatalogManifests(context),
         expectedFingerprint: snapshot.fingerprint,
         request: {kind: 'document', operation},
       });

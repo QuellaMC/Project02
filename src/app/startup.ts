@@ -16,6 +16,7 @@ import {
 } from './character-plugins.ts';
 import {installedRuntimePluginCatalogEntry} from '../plugins/index.ts';
 import type {CharacterPluginExpectations} from '../characters/index.ts';
+import type {RuntimePluginManifest} from '../plugins/api/index.ts';
 import {
   applyRuntimeConfigControlOperation,
   assertResolvedProject02HomeAdoptable,
@@ -27,6 +28,7 @@ import {
   configuredProject02CharacterId,
   defaultDotEnvForRuntimeLocation,
   diagnosticsHaveErrors,
+  loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
   loadProject02RuntimeConfigWithLocation,
   loadRuntimeConfigEnvFile,
@@ -166,6 +168,7 @@ type PlannedRuntimeCliActivationStartup = {
     diagnostics: PreparedProject02PluginActivationPlan['activation']['diagnostics'],
   ) => NodeJS.ProcessEnv | undefined;
   readonly document: Project02RuntimeConfig;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request?: RuntimeConfigControlRequest;
   /** The overlay the commit would write; a reader finishes from it. */
   readonly simulatedOverlay: LoadedProject02CharacterOverlayConfig;
@@ -465,12 +468,16 @@ function planRuntimeCliActivationStartup(input: {
     throw new TypeError('Character package materialization planning drifted.');
   }
 
+  const materializationManifests = Object.values(
+    preMaterializationState.activationPlanBeforeRuntimeEnv.catalogEntries,
+  ).map(entry => entry.manifest);
   // The overlay as it will be, so later decisions judge the committed state.
   const simulated = simulateCharacterMaterialization({
     runtimeLocation,
     configEnv: input.configEnv,
     characterActivation,
     document: preflight.packagePlan.document,
+    pluginManifests: materializationManifests,
     ...(preflight.request === undefined ? {} : {request: preflight.request}),
   });
 
@@ -526,6 +533,7 @@ function planRuntimeCliActivationStartup(input: {
       buildPreEnvState,
       readRuntimeEnvFileUnlessBlocked,
       document: preflight.packagePlan.document,
+      pluginManifests: materializationManifests,
       simulatedOverlay: simulated.overlay,
       ...(preflight.request === undefined ? {} : {request: preflight.request}),
     }),
@@ -541,6 +549,7 @@ async function commitPlannedRuntimeCliActivationStartup(
     runtimeLocation: plan.runtimeLocation,
     configEnv: plan.configEnv,
     document: plan.document,
+    pluginManifests: plan.pluginManifests,
     ...(plan.request === undefined ? {} : {request: plan.request}),
   });
 
@@ -651,6 +660,7 @@ type CharacterMaterializationInput = {
   readonly runtimeLocation: ResolvedProject02RuntimeLocation;
   readonly configEnv: NodeJS.ProcessEnv;
   readonly document: Project02RuntimeConfig;
+  readonly pluginManifests: readonly RuntimePluginManifest[];
   readonly request?: RuntimeConfigControlRequest;
   readonly characterActivation: Extract<
     Project02CharacterActivation,
@@ -669,6 +679,7 @@ function characterMaterializationOperation(
       env: input.configEnv,
       scope: 'character',
     }),
+    pluginManifests: input.pluginManifests,
     characterMaterialization: {
       document: input.document,
       fillMissingFields:
@@ -701,16 +712,30 @@ function simulateCharacterMaterialization(
     return simulated;
   }
 
+  // This overlay describes a file that has not been written yet; the
+  // secrets env is the real one already on disk, broken-file diagnostics
+  // included, so a reader sees what a real load would see.
+  const secrets = loadCharacterSecretsEnv(
+    input.runtimeLocation.characterScope.dataRoot,
+  );
+
   return Object.freeze({
     status: 'valid',
-    // This overlay describes a file that has not been written yet.
     overlay: Object.freeze({
       scope: 'character',
       characterId,
       source: 'overlay',
       path: input.runtimeLocation.overlayPath,
       config: simulated.document,
-      diagnostics: Object.freeze([]),
+      secretsEnv: secrets.env,
+      diagnostics: Object.freeze(
+        secrets.diagnostics.map(diagnostic =>
+          withRuntimeConfigDiagnosticOrigin(diagnostic, {
+            scope: 'character',
+            characterId,
+          }),
+        ),
+      ),
     } satisfies LoadedProject02CharacterOverlayConfig),
   });
 }
