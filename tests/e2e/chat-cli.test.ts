@@ -659,6 +659,87 @@ describe('chat CLI provider selection', () => {
     expect(await historyLengthsFor(4096, 'roomy-window')).toEqual([0, 1]);
   });
 
+  it('continues into a new session when the history outgrows the window and resumes it next launch', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-continuation-');
+    const adapter: RoleModelAdapter = {
+      invoke() {
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+          }),
+        };
+      },
+      completeText() {
+        return Promise.resolve({
+          status: 'completed',
+          text: 'We spoke of small things and I kept up.',
+          provider: {name: 'nvidia', model: 'test'},
+        });
+      },
+    };
+    let stdout = '';
+
+    // ~21 estimated tokens per turn: a 100-token window replays two turns,
+    // so the third completed turn overflows it and the talk continues in a
+    // new session with the newest turn carried along.
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100},
+    });
+
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'long-talk'],
+      {
+        stdin: Readable.from(['one\n', 'two\n', 'three\n', 'four\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        roleModelAdapter: adapter,
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(
+      'Mira: noted\n[context] Continuing in session long-talk.2: 2 earlier turns condensed into a summary.\nYou: ',
+    );
+
+    // No session named: the continued segment is where the conversation
+    // resumes; the closed one opens on request and says where it went on.
+    let resumedStdout = '';
+    expect(
+      await runChatCliFromArgs(['--store', storeRoot], {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(chunk => {
+          resumedStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        roleModelAdapter: adapter,
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      }),
+    ).toBe(0);
+    expect(resumedStdout).not.toContain('was continued in');
+
+    let reopenedStdout = '';
+    expect(
+      await runChatCliFromArgs(
+        ['--store', storeRoot, '--session', 'long-talk'],
+        {
+          stdin: Readable.from(['/exit\n']),
+          stdout: collect(chunk => {
+            reopenedStdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          roleModelAdapter: adapter,
+          pluginHost: createRuntimePluginHost({plugins: []}),
+        },
+      ),
+    ).toBe(0);
+    expect(reopenedStdout).toContain(
+      'Session long-talk was continued in long-talk.2; opening the one you named.',
+    );
+  });
+
   it('lets the runtime env provider override project02.roleModelProvider', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-env-config-');
     let stderr = '';

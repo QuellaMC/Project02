@@ -181,7 +181,7 @@ describe('Character Memory plugin', () => {
     });
   });
 
-  it('freezes the curated snapshot per plugin instance until the next launch', async () => {
+  it('freezes the curated snapshot for a session and re-reads it for the next one', async () => {
     const {plugin, context, fileStore} = createCharacterMemoryHarness(
       'session-character-memory-snapshot',
     );
@@ -208,14 +208,14 @@ describe('Character Memory plugin', () => {
 
     const secondLook =
       await plugin.lifecycleHooks.beforeRoleModelCall?.(context);
-    const relaunched = createCharacterMemoryHarness(
-      'session-character-memory-snapshot',
-      fileStore,
+    // The same instance serves the continuing session: a new session id is
+    // what refreshes the snapshot, whether a compaction or a launch opened it.
+    const nextSessionLook = await plugin.lifecycleHooks.beforeRoleModelCall?.(
+      createCharacterMemoryContext({
+        sessionId: 'session-character-memory-snapshot.2',
+        fileStore,
+      }),
     );
-    const nextLaunchLook =
-      await relaunched.plugin.lifecycleHooks.beforeRoleModelCall?.(
-        relaunched.context,
-      );
 
     expect(firstLook?.curatedContext).toEqual([
       expect.objectContaining({
@@ -227,10 +227,10 @@ describe('Character Memory plugin', () => {
         usedChars: 24,
       }),
     ]);
-    // The launch snapshot is deliberately stale: the mid-session write does
-    // not reach the prompt until the next launch.
+    // The session snapshot is deliberately stale: the mid-session write does
+    // not reach the prompt until the next session begins.
     expect(secondLook?.curatedContext).toEqual(firstLook?.curatedContext);
-    expect(nextLaunchLook?.curatedContext).toEqual([
+    expect(nextSessionLook?.curatedContext).toEqual([
       expect.objectContaining({id: 'notes'}),
       expect.objectContaining({
         id: 'user-profile',

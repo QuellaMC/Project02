@@ -1,5 +1,7 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {
+  createContinuedDurableChatRuntime,
+  createDurableChatRuntime,
   ensureCharacterDataMarker,
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
@@ -245,6 +247,82 @@ describe('inspect CLI plugin evidence', () => {
     expect(patchTool).toMatchObject({
       concurrency: 'exclusive',
     });
+  });
+
+  it('shows how a continued session opened and the summary its turns saw', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-continued-');
+    const first = await createDurableChatRuntime({
+      homeRoot: storeRoot,
+      character: testCharacterProfile,
+      newSessionId: 'first',
+    });
+    await first.writerLease.release();
+    const continued = await createContinuedDurableChatRuntime({
+      homeRoot: storeRoot,
+      character: testCharacterProfile,
+      plan: {
+        continuedFrom: {sessionId: 'first', lastEventId: 'evt_first_last'},
+        summary: 'We talked about the garden.',
+        summarizedTurnCount: 2,
+        carriedTurns: [],
+        summarizer: {status: 'fallback', reason: 'no summariser'},
+      },
+    });
+
+    try {
+      const result = await runLocalUserMessageEvent({
+        event: createUserMessageRuntimeEvent('and the roses?'),
+        session: continued.session,
+        logStore: continued.logStore,
+        pluginHost: createDefaultProject02PluginHost({
+          storeRoot: characterDataDirPath(storeRoot, 'mira'),
+          sessionId: continued.session.id,
+          sessionIdentity: continued.session,
+        }),
+        roleModelAdapter: createPatchThenReplyAdapter(),
+      });
+
+      expect(result.status).toBe('completed');
+    } finally {
+      await continued.writerLease.release();
+    }
+
+    let stdout = '';
+    const exitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--session', 'first.2'],
+      {
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+      },
+    );
+    const output = JSON.parse(stdout) as {
+      readonly session: {readonly continuedFrom?: string};
+      readonly continuation?: {
+        readonly summary: string;
+        readonly continuedFrom: {readonly sessionId: string};
+        readonly summarizer: {readonly status: string};
+      };
+      readonly turns: readonly {
+        readonly modelRounds: readonly {
+          readonly roleModelEvidence: {
+            readonly input?: {readonly contextSummary?: string};
+          };
+        }[];
+      }[];
+    };
+
+    expect(exitCode).toBe(0);
+    expect(output.session.continuedFrom).toBe('first');
+    expect(output.continuation).toMatchObject({
+      summary: 'We talked about the garden.',
+      continuedFrom: {sessionId: 'first'},
+      summarizer: {status: 'fallback'},
+    });
+    expect(
+      output.turns[0]?.modelRounds[0]?.roleModelEvidence.input?.contextSummary,
+    ).toBe('We talked about the garden.');
   });
 
   it('shows runtime config source and configured plugin activation', async () => {
