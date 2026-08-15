@@ -342,6 +342,9 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
               ),
             }),
           }),
+      ...(rawEvent.roleModelIOSnapshot?.promptSize === undefined
+        ? {}
+        : {promptSize: rawEvent.roleModelIOSnapshot.promptSize}),
       ...(rawEvent.roleModelIOSnapshot === undefined
         ? {}
         : {

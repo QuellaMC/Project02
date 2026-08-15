@@ -124,6 +124,13 @@ describe('inspect CLI plugin evidence', () => {
           readonly modelRounds: readonly {
             readonly rawEventKind: string;
             readonly roleModelEvidence: {
+              readonly promptSize?: {
+                readonly frames: readonly {
+                  readonly kind: string;
+                  readonly count: number;
+                }[];
+                readonly total: {readonly estimatedTokens: number};
+              };
               readonly output?: {
                 readonly rawOutputText: string;
                 readonly providerExchange?: {
@@ -206,6 +213,24 @@ describe('inspect CLI plugin evidence', () => {
         redactionLabels: expect.any(Array) as string[],
       }),
     ]);
+    // The second round replays the first round's call and result natively,
+    // so its prompt size names those frames beside the stable ones.
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.promptSize?.frames.map(
+        frame => [frame.kind, frame.count],
+      ),
+    ).toEqual([
+      ['system_protocol', 1],
+      ['developer_protocol', 1],
+      ['model_only_runtime_context', 1],
+      ['current_user_message', 1],
+      ['native_assistant_message', 1],
+      ['native_tool_result_message', 1],
+    ]);
+    expect(
+      output.turns[0].modelRounds[1]?.roleModelEvidence.promptSize?.total
+        .estimatedTokens,
+    ).toBeGreaterThan(0);
     expect(
       output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
         ?.renderedMessages.length,

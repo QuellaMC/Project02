@@ -7,6 +7,7 @@ import {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
   defaultRoleModelProviderCapabilities,
+  measureRoleModelPromptSize,
   renderRoleModelTurnContext,
   type ConversationTurn,
   type RoleModelPluginToolDefinition,
@@ -227,6 +228,97 @@ describe('role-model prompt rendering', () => {
         }),
       ).frames.map(frame => frame.kind),
     ).not.toContain('context_summary');
+  });
+
+  it('measures the prompt per frame kind in wire order, tools and total included', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('and the roses?', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-prompt-size',
+        characterSnapshot: testCharacterProfile,
+        historyWindow: {turnEventIds: ['evt_prior']},
+        pluginContextItems: [
+          createRuntimePluginContextItem({
+            pluginId: 'memory.fixture',
+            id: 'garden',
+            kind: 'memory',
+            text: 'Mike keeps roses.',
+            budget: {estimatedTokens: 8, priority: 70},
+            sourceReferences: [],
+            redactionLabels: [],
+          }),
+        ],
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const priorTurn: ConversationTurn = {
+      eventId: 'evt_prior',
+      traceId: 'trace_prior',
+      createdAt: '2026-06-15T00:00:00.000Z',
+      userMessage: {
+        id: 's:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'how is the garden?',
+      },
+      toolRounds: [],
+      finalReplies: [
+        {
+          id: 's:message-2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'Blooming.',
+        },
+      ],
+    };
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      conversationHistory: [priorTurn],
+    });
+    const size = measureRoleModelPromptSize(turnContext);
+    const recalledMemoryChars =
+      turnContext.frames.find(frame => frame.kind === 'recalled_memory')
+        ?.content?.length ?? 0;
+
+    expect(size.frames.map(frame => [frame.kind, frame.count])).toEqual([
+      ['system_protocol', 1],
+      ['developer_protocol', 1],
+      ['conversation_history', 2],
+      ['current_user_message', 1],
+      ['recalled_memory', 1],
+    ]);
+    // Own-message frames cost their wire message; a suffix frame costs the
+    // text it adds to the user message.
+    expect(recalledMemoryChars).toBeGreaterThan(0);
+    expect(size.frames.find(frame => frame.kind === 'recalled_memory')).toEqual(
+      {
+        kind: 'recalled_memory',
+        count: 1,
+        chars: recalledMemoryChars,
+        estimatedTokens: Math.ceil(recalledMemoryChars / 4),
+      },
+    );
+    expect(
+      size.frames.find(frame => frame.kind === 'conversation_history')?.chars,
+    ).toBe(
+      conversationTurnToChatMessages(priorTurn).reduce(
+        (sum, message) => sum + JSON.stringify(message).length,
+        0,
+      ),
+    );
+    expect(size.tools.chars).toBe(JSON.stringify(turnContext.tools).length);
+    expect(size.tools.estimatedTokens).toBeGreaterThan(0);
+    expect(size.total).toEqual({
+      chars: size.frames.reduce(
+        (sum, frame) => sum + frame.chars,
+        size.tools.chars,
+      ),
+      estimatedTokens: size.frames.reduce(
+        (sum, frame) => sum + frame.estimatedTokens,
+        size.tools.estimatedTokens,
+      ),
+    });
   });
 
   it('omits the curated context frame when no sections exist', () => {

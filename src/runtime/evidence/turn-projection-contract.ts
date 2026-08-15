@@ -1,5 +1,6 @@
 import type {ConversationLogRecord, RuntimeTurnStatus} from './records.ts';
 import type {RuntimePluginAccessMap} from '../../plugins/api/index.ts';
+import type {RoleModelPromptSize} from '../../role-model/index.ts';
 
 export type InspectTurnEvidence = {
   readonly eventId: string;
@@ -58,6 +59,8 @@ export type InspectRoleModelEvidence = {
     readonly curatedContextSections: readonly InspectCuratedContextSection[];
     readonly pluginContextItems: readonly InspectPluginContextItem[];
   };
+  /** How big the rendered prompt was, per frame kind, beside the reported usage. */
+  readonly promptSize?: RoleModelPromptSize;
   readonly output?: {
     readonly rawOutputText: string;
     readonly providerMetadata?: unknown;

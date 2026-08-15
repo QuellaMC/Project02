@@ -13,6 +13,7 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
+  freezeRoleModelPromptSize,
   getRequiredVisibleReplyText,
   visibleReplyToolCalls,
   hasDuplicateRoleModelAllowedTools,
@@ -35,6 +36,7 @@ import {
   type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
+  type RoleModelPromptSize,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelToolObservation,
 } from '../../role-model/index.ts';
@@ -464,9 +466,24 @@ function optionalRoleModelIOSnapshot(
       'malformed_record',
     ),
     ...optionalRoleModelCharacterRefOption(value['characterRef']),
+    ...optionalRoleModelPromptSizeOption(value['promptSize']),
     ...optionalRoleModelProviderMetadataOption(value['providerMetadata']),
     ...optionalRoleModelProviderExchangeOption(value['providerExchange']),
   });
+}
+
+function optionalRoleModelPromptSizeOption(value: unknown): {
+  readonly promptSize?: RoleModelPromptSize;
+} {
+  if (value === undefined) {
+    return {};
+  }
+
+  try {
+    return {promptSize: freezeRoleModelPromptSize(value)};
+  } catch {
+    throwMalformedRecord('promptSize');
+  }
 }
 
 function optionalRoleModelCharacterRefOption(value: unknown): {

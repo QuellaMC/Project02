@@ -11,6 +11,7 @@ import type {
   RuntimePluginProvidedTool,
 } from '../../plugins/api/index.ts';
 import type {ModelToolCall, ModelToolDefinition} from './model-tools.ts';
+import type {RoleModelPromptSize} from './prompt-size.ts';
 import type {RoleModelAllowedToolName} from './tool-names.ts';
 import type {
   RoleModelChatCompletionTool,
@@ -253,6 +254,7 @@ export type RoleModelIOSnapshot = RuntimeEventIdentity & {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly rawOutputText: string;
   readonly characterRef?: RoleModelCharacterRef;
+  readonly promptSize?: RoleModelPromptSize;
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 };
@@ -262,6 +264,7 @@ export type CreateRoleModelIOSnapshotOptions = RuntimeEventIdentity & {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly rawOutputText: string;
   readonly characterRef?: RoleModelCharacterRef;
+  readonly promptSize?: RoleModelPromptSize;
   readonly providerMetadata?: RoleModelProviderMetadata;
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 };

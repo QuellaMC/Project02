@@ -588,6 +588,46 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toEqual({turnEventIds: []});
   });
 
+  it('round-trips the prompt size, decodes records without one, and rejects a malformed one', () => {
+    const sessionId = 'prompt-size-round-trip';
+    const storedRecord = patchCompletedEvent(sessionId) as {
+      roleModelIOSnapshot: Record<string, unknown>;
+    };
+    const promptSize = {
+      frames: [
+        {kind: 'system_protocol', count: 1, chars: 400, estimatedTokens: 100},
+        {
+          kind: 'conversation_history',
+          count: 4,
+          chars: 800,
+          estimatedTokens: 200,
+        },
+      ],
+      tools: {chars: 1200, estimatedTokens: 300},
+      total: {chars: 2400, estimatedTokens: 600},
+    };
+
+    storedRecord.roleModelIOSnapshot['promptSize'] = promptSize;
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.promptSize,
+    ).toEqual(promptSize);
+
+    delete storedRecord.roleModelIOSnapshot['promptSize'];
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.promptSize,
+    ).toBeUndefined();
+
+    storedRecord.roleModelIOSnapshot['promptSize'] = {
+      ...promptSize,
+      total: {chars: -1, estimatedTokens: 600},
+    };
+    expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
+      /promptSize/u,
+    );
+  });
+
   it('round-trips supported persisted plugin tool schemas unchanged', () => {
     const jsonSchema = supportedPersistedPluginToolJsonSchema();
     const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);

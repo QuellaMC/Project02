@@ -12,6 +12,7 @@ import {
   type RuntimePluginCuratedContextSection,
 } from '../../plugins/api/index.ts';
 import {freezeModelToolCalls, type ModelToolCall} from './model-tools.ts';
+import {freezeRoleModelPromptSize} from './prompt-size.ts';
 import {
   hasDuplicateRoleModelAllowedTools,
   isRoleModelAllowedToolName,
@@ -201,6 +202,9 @@ export function createRoleModelIOSnapshot(
             inputEnvelope.decisionContext.characterSnapshot,
           ),
         }),
+    ...(options.promptSize === undefined
+      ? {}
+      : {promptSize: freezeRoleModelPromptSize(options.promptSize)}),
     ...(options.providerMetadata === undefined
       ? {}
       : {providerMetadata: freezeProviderMetadata(options.providerMetadata)}),
