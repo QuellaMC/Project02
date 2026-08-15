@@ -45,6 +45,7 @@ type PluginHookFileStoreOptions = {
   readonly storeRoot?: string | undefined;
   readonly sessionIdentity?: object | undefined;
   readonly allowFileStoreWrites?: boolean | undefined;
+  readonly deadlineAt?: number | undefined;
   readonly createFileStore?:
     RuntimePluginFileStoreProvider['createFileStore'] | undefined;
 };
@@ -79,6 +80,7 @@ export function createPluginHookContext<
     storeRoot: options.storeRoot,
     sessionIdentity: options.sessionIdentity,
     allowFileStoreWrites: options.allowFileStoreWrites,
+    deadlineAt: options.deadlineAt,
     createFileStore: options.createFileStore,
   };
   const fileStore = grantedRevocableRuntimePluginFileStore(
@@ -160,6 +162,9 @@ function grantedRevocableRuntimePluginFileStore(
       : {sessionIdentity: options.sessionIdentity}),
     pluginId: options.pluginId,
     scope,
+    ...(options.deadlineAt === undefined
+      ? {}
+      : {deadlineAt: options.deadlineAt}),
   });
 
   if (baseFileStore === undefined) {

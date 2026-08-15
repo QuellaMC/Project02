@@ -27,6 +27,7 @@ import {
   characterPluginDataDirPath,
   createLocalRuntimePluginPaths,
   createLocalRuntimeStorageLayout,
+  LocalRuntimeStorageContractError,
 } from '../layout-contract.ts';
 import {
   acquireLocalRuntimeMutationLocksSync,
@@ -91,6 +92,7 @@ export function withDurablePluginStoreMutation<T>(
     readonly storeRoot: string;
     readonly root: string;
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly deadlineAt?: number;
   },
   operation: () => T,
 ): T {
@@ -104,6 +106,9 @@ export function withDurablePluginStoreMutation<T>(
       ...(options.ownerToken === undefined
         ? {}
         : {ownerToken: options.ownerToken}),
+      ...(options.deadlineAt === undefined
+        ? {}
+        : {deadlineAt: options.deadlineAt}),
     },
     operation,
   );
@@ -115,6 +120,7 @@ function withDurablePluginStoreMutations<T>(
     readonly storeRoot: string;
     readonly roots: readonly string[];
     readonly ownerToken?: LocalRuntimeMutationLockOwnerToken;
+    readonly deadlineAt?: number;
   },
   operation: () => T,
 ): T {
@@ -130,10 +136,12 @@ function withDurablePluginStoreMutations<T>(
   try {
     // Character-scoped stores are shared by concurrent sessions of one
     // character, and every guarded operation is a short write: wait
-    // briefly instead of failing the sibling's turn outright.
+    // briefly instead of failing the sibling's turn outright. Never wait
+    // past the caller's deadline, or the write commits after the hook that
+    // asked for it has already been reported as timed out.
     lease = acquireLocalRuntimeMutationLocksSync({
       targets: resourceKeys.map(resourceKey => ({locksRoot, resourceKey})),
-      waitTimeoutMs: 2_000,
+      waitTimeoutMs: boundedMutationWaitMs(options.deadlineAt),
       ...(options.ownerToken === undefined
         ? {}
         : {ownerToken: options.ownerToken}),
@@ -143,10 +151,37 @@ function withDurablePluginStoreMutations<T>(
   }
 
   try {
+    // Acquiring a free lock says nothing about the clock: if the deadline
+    // passed while earlier setup ran, committing now would land after the
+    // host has already reported this hook as timed out.
+    assertMutationDeadlineRemaining(options.deadlineAt);
+
     return operation();
   } finally {
     lease.release();
   }
+}
+
+function assertMutationDeadlineRemaining(deadlineAt: number | undefined): void {
+  if (deadlineAt !== undefined && Date.now() >= deadlineAt) {
+    throw new LocalRuntimeStorageContractError(
+      'storage_busy',
+      'Plugin store mutation deadline elapsed before the write could start.',
+    );
+  }
+}
+
+const durablePluginStoreMutationWaitMs = 2_000;
+
+function boundedMutationWaitMs(deadlineAt: number | undefined): number {
+  if (deadlineAt === undefined) {
+    return durablePluginStoreMutationWaitMs;
+  }
+
+  return Math.max(
+    0,
+    Math.min(durablePluginStoreMutationWaitMs, deadlineAt - Date.now()),
+  );
 }
 
 export function durablePluginStoreMutationResourceKey(root: string): string {

@@ -11,6 +11,12 @@ type RuntimePluginFileStoreIdentity = {
    * the calling session; character-scoped placement does not use it.
    */
   readonly scope?: RuntimePluginFileStoreScope;
+  /**
+   * The calling hook's deadline. A mutation that cannot take the lock in
+   * time must fail before the hook does, or the host reports a timeout for
+   * a write that still committed.
+   */
+  readonly deadlineAt?: number;
 };
 
 type DurableRuntimePluginFileStoreOptions = RuntimePluginFileStoreIdentity & {

@@ -728,21 +728,24 @@ async function runHandleToolCall(
     call,
   } = resolution;
   const executionScope = createPluginHookExecutionScope(plugin.manifest);
-  const hookContext = createPluginHookContext({
-    context: options.context,
-    plugin,
-    access,
-    deadlineAt: executionScope.deadlineAt,
-    signal: executionScope.abortController.signal,
-    storeRoot: options.storeRoot,
-    sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity,
-    createFileStore: options.createFileStore,
-    sessionHistory: options.sessionHistory,
-    openPluginDatabase: options.openPluginDatabase,
-  });
 
   try {
+    // Inside the guarded region: opening a durable store takes its
+    // mutation lease, and a lease this call cannot get must reach the
+    // caller as this hook's failure policy, not as a thrown host error.
+    const hookContext = createPluginHookContext({
+      context: options.context,
+      plugin,
+      access,
+      deadlineAt: executionScope.deadlineAt,
+      signal: executionScope.abortController.signal,
+      storeRoot: options.storeRoot,
+      sessionId: options.sessionId,
+      sessionIdentity: options.sessionIdentity,
+      createFileStore: options.createFileStore,
+      sessionHistory: options.sessionHistory,
+      openPluginDatabase: options.openPluginDatabase,
+    });
     const result = await withPluginHookTimeout({
       pluginId: plugin.manifest.id,
       policyManifest: plugin.manifest,
@@ -1040,31 +1043,30 @@ async function runHookPhase<TContext extends RuntimePluginContext>(
     }
 
     const executionScope = createPluginHookExecutionScope(catalogManifest);
-    const hookContext = createPluginHookContext({
-      context: options.context,
-      plugin,
-      pluginId: catalogPluginId,
-      deadlineAt: executionScope.deadlineAt,
-      signal: executionScope.abortController.signal,
-      access: runtimePluginAccessForPluginId({
-        pluginId: catalogPluginId,
-        accessByPluginId: options.accessByPluginId,
-      }),
-      storeRoot: options.storeRoot,
-      sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity,
-      createFileStore: options.createFileStore,
-      sessionHistory: options.sessionHistory,
-      openPluginDatabase: options.openPluginDatabase,
-      allowFileStoreWrites: options.allowFileStoreWrites,
-    });
     const result = await invokeHook({
       plugin,
       pluginId: catalogPluginId,
       policyManifest: catalogManifest,
-      context: hookContext.context,
       executionScope,
-      revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
+      createHookContext: () =>
+        createPluginHookContext({
+          context: options.context,
+          plugin,
+          pluginId: catalogPluginId,
+          deadlineAt: executionScope.deadlineAt,
+          signal: executionScope.abortController.signal,
+          access: runtimePluginAccessForPluginId({
+            pluginId: catalogPluginId,
+            accessByPluginId: options.accessByPluginId,
+          }),
+          storeRoot: options.storeRoot,
+          sessionId: options.sessionId,
+          sessionIdentity: options.sessionIdentity,
+          createFileStore: options.createFileStore,
+          sessionHistory: options.sessionHistory,
+          openPluginDatabase: options.openPluginDatabase,
+          allowFileStoreWrites: options.allowFileStoreWrites,
+        }),
       hookName: options.hookName,
       hook,
     });
@@ -1350,24 +1352,24 @@ async function runHealth(
     }
 
     const executionScope = createPluginHookExecutionScope(plugin.manifest);
-    const hookContext = createPluginHookContext({
-      context: options.context,
-      plugin,
-      deadlineAt: executionScope.deadlineAt,
-      signal: executionScope.abortController.signal,
-      access: runtimePluginAccessForPlugin({
-        plugin,
-        accessByPluginId: options.accessByPluginId,
-      }),
-      storeRoot: options.storeRoot,
-      sessionId: options.sessionId,
-      sessionIdentity: options.sessionIdentity,
-      createFileStore: options.createFileStore,
-      sessionHistory: options.sessionHistory,
-      openPluginDatabase: options.openPluginDatabase,
-    });
 
     try {
+      const hookContext = createPluginHookContext({
+        context: options.context,
+        plugin,
+        deadlineAt: executionScope.deadlineAt,
+        signal: executionScope.abortController.signal,
+        access: runtimePluginAccessForPlugin({
+          plugin,
+          accessByPluginId: options.accessByPluginId,
+        }),
+        storeRoot: options.storeRoot,
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity,
+        createFileStore: options.createFileStore,
+        sessionHistory: options.sessionHistory,
+        openPluginDatabase: options.openPluginDatabase,
+      });
       const snapshot = await withPluginHookTimeout({
         pluginId: plugin.manifest.id,
         policyManifest: plugin.manifest,
@@ -1478,15 +1480,24 @@ async function invokeHook<TContext extends RuntimePluginContext>(options: {
   readonly plugin: RuntimePlugin;
   readonly pluginId: string;
   readonly policyManifest: RuntimePluginManifest;
-  readonly context: TContext;
   readonly executionScope: PluginHookExecutionScope;
-  readonly revokeFileStoreWrites: () => void;
+  /**
+   * Built here rather than by the caller: opening a durable store takes
+   * its mutation lease, and a lease this hook cannot get must travel the
+   * hook's failure policy like any other failure.
+   */
+  readonly createHookContext: () => {
+    readonly context: TContext;
+    readonly revokeFileStoreWrites: () => void;
+  };
   readonly hookName: 'afterTurnCommitted' | 'onSessionEnd' | 'onShutdown';
   readonly hook: (
     context: TContext,
   ) => RuntimePluginHookResult | Promise<RuntimePluginHookResult>;
 }): Promise<HookInvocationResult> {
   try {
+    const hookContext = options.createHookContext();
+
     return Object.freeze({
       status: 'accepted',
       value: await withPluginHookTimeout({
@@ -1494,14 +1505,14 @@ async function invokeHook<TContext extends RuntimePluginContext>(options: {
         pluginId: options.pluginId,
         hookName: options.hookName,
         executionScope: options.executionScope,
-        revokeFileStoreWrites: options.revokeFileStoreWrites,
+        revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
         operation: async deadlineAt =>
           normalizeHookResult({
             plugin: options.plugin,
             pluginId: options.pluginId,
             policyManifest: options.policyManifest,
-            context: options.context,
-            value: await options.hook(options.context),
+            context: hookContext.context,
+            value: await options.hook(hookContext.context),
             deadlineAt,
             hookName: options.hookName,
           }),

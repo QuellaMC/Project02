@@ -16,6 +16,7 @@ import {
   prepareConfiguredProject02PluginActivation,
 } from '../../src/app/index.ts';
 import {
+  characterMemoryPluginId,
   createMemoryProviderRuntimePlugin,
   firstPartyModelToolsPluginId,
   runtimePluginId,
@@ -154,6 +155,7 @@ describe('runtime config activation planning', () => {
     expect(configured.activation.enabledPluginIds).toEqual([
       runtimePluginId,
       firstPartyModelToolsPluginId,
+      characterMemoryPluginId,
       characterStatePluginId,
       sessionHistoryPluginId,
     ]);

@@ -1,9 +1,11 @@
 export const runtimePluginContractVersion = 'mvp-008.runtime_plugin.v2';
 export const firstPartyModelToolsPluginId = 'first_party.model_tools';
 export const runtimePluginId = 'runtime.plugin';
+export const characterMemoryPluginId = 'character-memory';
 export const characterStatePluginId = 'character-state';
 export const sessionHistoryPluginId = 'session-history';
 
+export const characterMemoryUpdateToolName = 'memory.update';
 export const characterStatePatchModelToolName = 'character_state.patch';
 export const runtimePluginListToolName = 'runtime.plugin.list';
 export const runtimePluginConfigReadToolName = 'runtime.plugin.config';

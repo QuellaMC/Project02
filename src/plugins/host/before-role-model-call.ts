@@ -160,24 +160,26 @@ async function runBeforeRoleModelCallPlugin(
     accessByPluginId: options.accessByPluginId,
   });
   const executionScope = createPluginHookExecutionScope(plugin.manifest);
-  const hookContext = createPluginHookContext({
-    context: options.context,
-    plugin,
-    access,
-    deadlineAt: executionScope.deadlineAt,
-    signal: executionScope.abortController.signal,
-    storeRoot: options.storeRoot,
-    sessionId: options.sessionId,
-    sessionIdentity: options.sessionIdentity,
-    createFileStore: options.createFileStore,
-    sessionHistory: options.sessionHistory,
-    openPluginDatabase: options.openPluginDatabase,
-  });
   const result = await invokeBeforeRoleModelCallHook({
     plugin,
-    context: hookContext.context,
     executionScope,
-    revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
+    // Built inside the invocation: opening a durable store takes its
+    // mutation lease, and a lock that is already held must degrade the
+    // plugin like any other hook failure, not reject the turn.
+    createHookContext: () =>
+      createPluginHookContext({
+        context: options.context,
+        plugin,
+        access,
+        deadlineAt: executionScope.deadlineAt,
+        signal: executionScope.abortController.signal,
+        storeRoot: options.storeRoot,
+        sessionId: options.sessionId,
+        sessionIdentity: options.sessionIdentity,
+        createFileStore: options.createFileStore,
+        sessionHistory: options.sessionHistory,
+        openPluginDatabase: options.openPluginDatabase,
+      }),
     hook,
   });
 
@@ -284,14 +286,18 @@ function continuedBeforeRoleModelCall(
 
 async function invokeBeforeRoleModelCallHook(options: {
   readonly plugin: RuntimePlugin;
-  readonly context: RuntimePluginContext;
   readonly executionScope: PluginHookExecutionScope;
-  readonly revokeFileStoreWrites: () => void;
+  readonly createHookContext: () => {
+    readonly context: RuntimePluginContext;
+    readonly revokeFileStoreWrites: () => void;
+  };
   readonly hook: NonNullable<
     RuntimePlugin['lifecycleHooks']['beforeRoleModelCall']
   >;
 }): Promise<BeforeRoleModelCallInvocationResult> {
   try {
+    const hookContext = options.createHookContext();
+
     return Object.freeze({
       status: 'accepted',
       value: await withPluginHookTimeout({
@@ -299,12 +305,12 @@ async function invokeBeforeRoleModelCallHook(options: {
         policyManifest: options.plugin.manifest,
         hookName: 'beforeRoleModelCall',
         executionScope: options.executionScope,
-        revokeFileStoreWrites: options.revokeFileStoreWrites,
+        revokeFileStoreWrites: hookContext.revokeFileStoreWrites,
         operation: async deadlineAt =>
           normalizeBeforeRoleModelCallResult({
             plugin: options.plugin,
-            context: options.context,
-            value: await options.hook(options.context),
+            context: hookContext.context,
+            value: await options.hook(hookContext.context),
             deadlineAt,
           }),
       }),

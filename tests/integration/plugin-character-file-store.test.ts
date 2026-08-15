@@ -143,6 +143,41 @@ describe('character-scoped plugin file store', () => {
     }).toThrow(/no longer allowed after hook completion/);
   });
 
+  it('degrades a plugin whose store cannot be opened instead of failing the turn', async () => {
+    const storeRoot = createTestTempRoot('project02-character-store-');
+    const probe = createStorageProbePlugin({
+      requestedAccess: {character_file_store: 'write'},
+      onContext: () => undefined,
+      beforeRoleModelCallFailure: 'degrade',
+    });
+    const host = createRuntimePluginHost({
+      plugins: [probe],
+      enabledPluginIds: [
+        runtimePluginId,
+        firstPartyModelToolsPluginId,
+        probePluginId,
+      ],
+      storeRoot,
+      sessionId: 'contended',
+      fileStore: {
+        createFileStore: () => {
+          throw new Error('character store mutation lock deadline exceeded');
+        },
+      },
+    });
+
+    const result = await host.beforeRoleModelCall(
+      contextForSession('evt_contended'),
+    );
+
+    // Opening the store is host work done for the plugin, so its failure
+    // owes the same degrade the manifest declares for the hook itself.
+    expect(result.status).toBe('completed');
+    expect(JSON.stringify(result.evidence)).toContain(
+      'mutation lock deadline exceeded',
+    );
+  });
+
   it('recovers a crashed write under any later session', () => {
     const storeRoot = createTestTempRoot('project02-character-store-');
     const crashing = createDurableRuntimePluginFileStore(
@@ -200,6 +235,7 @@ describe('character-scoped plugin file store', () => {
 function createStorageProbePlugin(options: {
   readonly requestedAccess: RuntimePluginAccessMap;
   readonly onContext: (context: RuntimePluginContext) => void;
+  readonly beforeRoleModelCallFailure?: 'reject_turn' | 'degrade';
 }): RuntimePlugin {
   return createRuntimePlugin({
     manifest: createRuntimePluginManifest({
@@ -217,7 +253,8 @@ function createStorageProbePlugin(options: {
         timeoutMs: 5_000,
         redactionLabels: [],
         failureBehavior: {
-          beforeRoleModelCall: 'reject_turn',
+          beforeRoleModelCall:
+            options.beforeRoleModelCallFailure ?? 'reject_turn',
           handleToolCall: 'degrade',
           health: 'degrade',
         },
