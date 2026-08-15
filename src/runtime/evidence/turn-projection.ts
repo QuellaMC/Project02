@@ -8,9 +8,10 @@ import type {
 import {isTerminalRawEventLogRecordKind} from './records.ts';
 import {canonicalJsonStringify} from '../../shared/canonical-json.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
-import type {
-  RoleModelDecisionResult,
-  RoleModelPromptSize,
+import {
+  estimateTokensForChars,
+  type RoleModelDecisionResult,
+  type RoleModelPromptSize,
 } from '../../role-model/index.ts';
 import type {RoleModelCommitValidationResult} from './records.ts';
 import type {
@@ -40,6 +41,7 @@ import type {
   InspectPluginHealthSnapshot,
   InspectPluginSourceReference,
   InspectPromptSize,
+  InspectPromptSizeMeasure,
 } from './turn-projection-contract.ts';
 
 export function createTurnEvidence(options: {
@@ -385,24 +387,33 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
 }
 
 function inspectPromptSize(size: RoleModelPromptSize): InspectPromptSize {
+  const measure = (chars: number): InspectPromptSizeMeasure =>
+    Object.freeze({
+      chars,
+      estimatedTokens: chars === 0 ? 0 : estimateTokensForChars(chars),
+    });
+  const totalChars = size.frames.reduce(
+    (sum, frame) => sum + frame.chars,
+    size.toolChars,
+  );
+
   return Object.freeze({
-    ...size,
-    total: Object.freeze({
-      chars: size.frames.reduce(
-        (sum, frame) => sum + frame.chars,
-        size.tools.chars,
+    frames: Object.freeze(
+      size.frames.map(frame =>
+        Object.freeze({...frame, ...measure(frame.chars)}),
       ),
-      estimatedTokens: size.frames.reduce(
-        (sum, frame) => sum + frame.estimatedTokens,
-        size.tools.estimatedTokens,
-      ),
-    }),
+    ),
+    tools: measure(size.toolChars),
+    total: measure(totalChars),
   });
 }
 
+// The prompt size tells two otherwise identical rounds apart: the later one
+// carries the replayed tool messages the earlier one did not.
 function roleModelRoundEvidenceKey(evidence: InspectRoleModelEvidence): string {
   return canonicalJsonStringify({
     input: evidence.input,
+    promptSize: evidence.promptSize,
     output: evidence.output,
     parsedDecision: evidence.parsedDecision,
   });

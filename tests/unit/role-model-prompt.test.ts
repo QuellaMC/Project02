@@ -275,6 +275,13 @@ describe('role-model prompt rendering', () => {
     };
     const turnContext = renderRoleModelTurnContext(inputEnvelope, {
       conversationHistory: [priorTurn],
+      // This turn's own rounds so far: the model's message, a tool result,
+      // and a note the runtime put between them — three kinds, not one.
+      additionalMessages: [
+        {role: 'assistant', content: 'checking'},
+        {role: 'tool', tool_call_id: 'call-1', content: '{"ok":true}'},
+        {role: 'system', content: 'Your last reply could not be used.'},
+      ],
     });
     const size = measureRoleModelPromptSize(turnContext);
     const wireChars = turnContext.messages.reduce(
@@ -292,6 +299,9 @@ describe('role-model prompt rendering', () => {
       ['conversation_history', 2],
       ['current_user_message', 1],
       ['recalled_memory', 1],
+      ['native_assistant_message', 1],
+      ['native_tool_result_message', 1],
+      ['native_system_message', 1],
     ]);
     // Frames sum to the wire: a suffix frame is charged exactly the bytes it
     // adds to the serialized user message, separator and escaping included.
@@ -301,11 +311,13 @@ describe('role-model prompt rendering', () => {
     expect(
       size.frames.find(frame => frame.kind === 'current_user_message')?.chars,
     ).toBe(currentUserChars);
+    const currentUserMessage = turnContext.messages.find(
+      message =>
+        message.role === 'user' && message.content.startsWith('and the roses?'),
+    );
     expect(
       size.frames.find(frame => frame.kind === 'recalled_memory')?.chars,
-    ).toBe(
-      JSON.stringify(turnContext.messages.at(-1)).length - currentUserChars,
-    );
+    ).toBe(JSON.stringify(currentUserMessage).length - currentUserChars);
     expect(
       size.frames.find(frame => frame.kind === 'conversation_history')?.chars,
     ).toBe(
@@ -314,8 +326,7 @@ describe('role-model prompt rendering', () => {
         0,
       ),
     );
-    expect(size.tools.chars).toBe(JSON.stringify(turnContext.tools).length);
-    expect(size.tools.estimatedTokens).toBeGreaterThan(0);
+    expect(size.toolChars).toBe(JSON.stringify(turnContext.tools).length);
   });
 
   it('omits the curated context frame when no sections exist', () => {

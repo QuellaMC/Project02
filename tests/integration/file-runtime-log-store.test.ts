@@ -595,15 +595,10 @@ describe('file runtime log store plugin tool event validation', () => {
     };
     const promptSize = {
       frames: [
-        {kind: 'system_protocol', count: 1, chars: 400, estimatedTokens: 100},
-        {
-          kind: 'conversation_history',
-          count: 4,
-          chars: 800,
-          estimatedTokens: 200,
-        },
+        {kind: 'system_protocol', count: 1, chars: 400},
+        {kind: 'conversation_history', count: 4, chars: 800},
       ],
-      tools: {chars: 1200, estimatedTokens: 300},
+      toolChars: 1200,
     };
 
     storedRecord.roleModelIOSnapshot['promptSize'] = promptSize;
@@ -621,13 +616,12 @@ describe('file runtime log store plugin tool event validation', () => {
     // A frame row exists only for a frame that was sent, so a zero count is
     // as malformed as a negative measure.
     for (const malformed of [
-      {...promptSize, tools: {chars: -1, estimatedTokens: 300}},
+      {...promptSize, toolChars: -1},
       {
         ...promptSize,
-        frames: [
-          {kind: 'system_protocol', count: 0, chars: 400, estimatedTokens: 100},
-        ],
+        frames: [{kind: 'system_protocol', count: 0, chars: 400}],
       },
+      {...promptSize, frames: []},
     ]) {
       storedRecord.roleModelIOSnapshot['promptSize'] = malformed;
       expect(() =>
