@@ -5,239 +5,128 @@ import {
   createMemoryProviderRuntimePlugin,
   type Project02MemoryProvider,
 } from '../../src/plugins/builtin/memory-provider/index.ts';
-import {createRuntimePluginContext} from '../../src/plugins/index.ts';
+import {
+  createRuntimePluginContext,
+  createRuntimePluginManifest,
+  runtimePluginContractVersion,
+} from '../../src/plugins/api/index.ts';
+import {project02IdentifierMaxLength} from '../../src/shared/identifier.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimePluginAfterTurnCommittedContext} from '../../src/plugins/api/index.ts';
+import {runMemoryProviderSeamContract} from '../support/memory-provider-conformance.ts';
 
-describe('memory provider runtime plugin helper', () => {
+runMemoryProviderSeamContract();
+
+describe('memory provider runtime plugin factory', () => {
   it('declares only implemented provider methods', () => {
-    const provider: Project02MemoryProvider = {
+    const recallOnly = createMemoryProviderRuntimePlugin({
       id: 'memory.recall-only',
       displayName: 'Recall Only',
       recall() {
         return Promise.resolve({items: []});
       },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-
-    expect(plugin.manifest.kind).toBe('memory_provider');
-    expect(plugin.manifest.declaredPlugins).toEqual(
-      expect.arrayContaining(['before_role_model_call']),
-    );
-    expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
-    expect(plugin.providedTools).toEqual([]);
-    expect(plugin.manifest.runtimePolicy.failureBehavior).toMatchObject({
-      beforeRoleModelCall: 'degrade',
-      health: 'degrade',
     });
-  });
-
-  it('provides bounded memory context with source references', async () => {
-    const provider: Project02MemoryProvider = {
-      id: 'memory.recall',
-      displayName: 'Recall Provider',
-      recall() {
-        return Promise.resolve({
-          items: [
-            {
-              id: 'remembered-fact',
-              text: 'A'.repeat(700),
-              sourceReferences: [
-                {
-                  kind: 'memory',
-                  id: 'memory-1',
-                  title: 'Memory row',
-                },
-              ],
-              confidence: 0.8,
-            },
-          ],
-        });
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const result =
-      await plugin.lifecycleHooks.beforeRoleModelCall?.(testContext());
-
-    expect(result?.contextItems[0]).toMatchObject({
-      pluginId: 'memory.recall',
-      kind: 'memory',
-      sourceReferences: [
-        {
-          kind: 'memory',
-          id: 'memory-1',
-        },
-      ],
-      confidence: 0.8,
-    });
-    expect(result?.contextItems[0]?.text.length).toBeLessThanOrEqual(600);
-    expect(result?.evidence[0]).toMatchObject({
-      pluginId: 'memory.recall',
-      evidenceKind: 'before_role_model_call',
-      status: 'accepted',
-    });
-  });
-
-  it('normalizes provider recall IDs before creating context items', async () => {
-    const provider: Project02MemoryProvider = {
-      id: 'memory.recall-id-normalization',
-      displayName: 'Recall ID Normalization Provider',
-      recall() {
-        return Promise.resolve({
-          items: [
-            {
-              id: '123',
-              text: 'Numeric provider row ID should still become context.',
-              sourceReferences: [
-                {
-                  kind: 'memory',
-                  id: '123',
-                  title: 'Provider memory row',
-                },
-              ],
-            },
-          ],
-        });
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
-
-    const result = await host.beforeRoleModelCall(testContext());
-
-    expect(result.status).toBe('completed');
-    if (result.status !== 'completed') {
-      throw new Error('Expected numeric provider recall ID to be accepted.');
-    }
-    expect(result.contextItems[0]).toMatchObject({
-      id: 'memory.123',
-      sourceReferences: [
-        {
-          kind: 'memory',
-          id: '123',
-          title: 'Provider memory row',
-        },
-      ],
-    });
-    expect(result.evidence).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          pluginId: 'memory.recall-id-normalization',
-          evidenceKind: 'before_role_model_call',
-          status: 'accepted',
-        }),
-      ]),
-    );
-    expect(result.evidence).not.toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          pluginId: 'memory.recall-id-normalization',
-          status: 'degraded',
-        }),
-      ]),
-    );
-  });
-
-  it('omits source-less recall items without rejecting valid recall rows', async () => {
-    const provider: Project02MemoryProvider = {
-      id: 'memory.recall-source-filter',
-      displayName: 'Recall Source Filter Provider',
-      recall() {
-        return Promise.resolve({
-          items: [
-            {
-              id: 'source-less',
-              text: 'This unauditable item should be omitted.',
-              sourceReferences: [],
-            },
-            {
-              id: 'source-backed',
-              text: 'This auditable item should remain.',
-              sourceReferences: [
-                {
-                  kind: 'memory',
-                  id: 'source-backed',
-                },
-              ],
-            },
-          ],
-        });
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
-
-    const result = await host.beforeRoleModelCall(testContext());
-
-    expect(result.status).toBe('completed');
-    if (result.status !== 'completed') {
-      throw new Error('Expected source-backed recall row to be accepted.');
-    }
-    expect(result.contextItems.map(item => item.id)).toEqual([
-      'memory.source-backed',
-    ]);
-    expect(result.contextItems[0]?.sourceReferences).toEqual([
-      {
-        kind: 'memory',
-        id: 'source-backed',
-      },
-    ]);
-    expect(result.evidence).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          pluginId: 'memory.recall-source-filter',
-          evidenceKind: 'before_role_model_call',
-          status: 'accepted',
-          summary: 'Provided 1 memory item(s).',
-        }),
-      ]),
-    );
-  });
-
-  it('gives a capture-only provider the after-turn hook and no tool surface', () => {
-    const provider: Project02MemoryProvider = {
+    const captureOnly = createMemoryProviderRuntimePlugin({
       id: 'memory.capture-only',
       displayName: 'Capture Only Provider',
       captureTurn() {
-        return Promise.resolve({
-          captured: true,
-          summary: 'Captured.',
-        });
+        return Promise.resolve({captured: true, summary: 'Captured.'});
       },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
+    });
 
-    // Providers own their storage behind the provider interface, so they never
-    // touch the host file store.
-    expect(plugin.manifest.requestedAccess.file_store).toBeUndefined();
-    expect(plugin.manifest.declaredPlugins).toContain('after_turn_committed');
-    expect(plugin.manifest.declaredPlugins).not.toContain('handle_tool_call');
+    expect(recallOnly.manifest.kind).toBe('memory_provider');
+    expect(recallOnly.manifest.declaredPlugins).toEqual(
+      expect.arrayContaining(['before_role_model_call']),
+    );
+    expect(recallOnly.manifest.declaredPlugins).not.toContain(
+      'handle_tool_call',
+    );
+    expect(recallOnly.providedTools).toEqual([]);
+    expect(recallOnly.manifest.runtimePolicy.failureBehavior).toMatchObject({
+      beforeRoleModelCall: 'degrade',
+      health: 'degrade',
+    });
+    expect(captureOnly.manifest.requestedAccess.file_store).toBeUndefined();
+    expect(captureOnly.manifest.declaredPlugins).toContain(
+      'after_turn_committed',
+    );
+    expect(captureOnly.manifest.declaredPlugins).not.toContain(
+      'handle_tool_call',
+    );
   });
 
-  it('degrades source-less after-turn capture evidence before accepting it', async () => {
-    let captureSourceReferences:
-      | readonly {
-          readonly kind: string;
-          readonly id: string;
-          readonly title?: string;
-        }[]
-      | undefined;
+  it('namespaces tools by the provider id unless overridden', () => {
     const provider: Project02MemoryProvider = {
-      id: 'memory.capture',
-      displayName: 'Capture Provider',
+      id: 'mem-fixture',
+      displayName: 'Namespace Fixture',
+      search() {
+        return Promise.resolve({items: []});
+      },
+      add() {
+        return Promise.resolve({id: 'added', sourceReferences: []});
+      },
+    };
+
+    expect(
+      createMemoryProviderRuntimePlugin(provider).providedTools.map(
+        tool => tool.name,
+      ),
+    ).toEqual(['mem-fixture.search', 'mem-fixture.add']);
+    expect(
+      createMemoryProviderRuntimePlugin(provider, {
+        toolNamespace: 'memory',
+      }).providedTools.map(tool => tool.name),
+    ).toEqual(['memory.search', 'memory.add']);
+
+    // The registered identity names the tools, not the identity the
+    // adapter was written with: one adapter mounted twice under
+    // different ids must not advertise the same tool names.
+    expect(
+      createMemoryProviderRuntimePlugin(provider, {
+        pluginId: 'mem-fixture.second',
+      }).providedTools.map(tool => tool.name),
+    ).toEqual(['mem-fixture.second.search', 'mem-fixture.second.add']);
+
+    // Two ids that fill the identifier budget and share a long prefix must
+    // not collapse into one tool name, which would stop the host from
+    // enabling both providers at once.
+    const [first, second] = ['a', 'b'].map(tail =>
+      createMemoryProviderRuntimePlugin(provider, {
+        toolNamespace: `${'n'.repeat(project02IdentifierMaxLength - 1)}${tail}`,
+      }).providedTools.map(tool => tool.name),
+    );
+
+    expect(first?.[0]?.length).toBeLessThanOrEqual(
+      project02IdentifierMaxLength,
+    );
+    expect(first).not.toEqual(second);
+  });
+
+  it('hands the provider the turn scope and source references', async () => {
+    let searchDeadlineAt: number | undefined;
+    let searchSignal: AbortSignal | undefined;
+    let captureSourceReferences: unknown;
+    let closeDeadlineAt: number | undefined;
+    let closeSignal: AbortSignal | undefined;
+    const provider: Project02MemoryProvider = {
+      id: 'memory.scope-probe',
+      displayName: 'Scope Probe Provider',
       captureTurn(turn) {
         captureSourceReferences = turn.sourceReferences;
 
-        return Promise.resolve({
-          captured: true,
-          summary: 'Captured.',
-        });
+        return Promise.resolve({captured: true, summary: 'Captured.'});
+      },
+      search(request) {
+        searchDeadlineAt = request.deadlineAt;
+        searchSignal = request.signal;
+
+        return Promise.resolve({items: []});
+      },
+      close(scope) {
+        closeDeadlineAt = scope.deadlineAt;
+        closeSignal = scope.signal;
+
+        return Promise.resolve(undefined);
       },
     };
     const plugin = createMemoryProviderRuntimePlugin(provider);
@@ -245,8 +134,24 @@ describe('memory provider runtime plugin helper', () => {
       plugins: [plugin],
       enabledPluginIds: [plugin.manifest.id],
     });
-    const result = await host.afterTurnCommitted(afterTurnContext());
 
+    await host.handleToolCall(
+      {
+        eventId: 'evt_memory',
+        traceId: 'trace_memory',
+        createdAt: '2026-06-21T00:00:00.000Z',
+        pluginId: provider.id,
+        toolName: 'memory.scope-probe.search',
+        input: {query: 'prior'},
+      },
+      testContext(),
+    );
+    await host.afterTurnCommitted(afterTurnContext());
+    await host.shutdown(testContext());
+
+    expect(searchDeadlineAt).toBeTypeOf('number');
+    expect(searchDeadlineAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
+    expect(searchSignal?.aborted).toBe(false);
     expect(captureSourceReferences).toEqual([
       {
         kind: 'conversation',
@@ -254,417 +159,184 @@ describe('memory provider runtime plugin helper', () => {
         title: 'Current conversation turn',
       },
     ]);
-    expect(result.status).toBe('completed');
-
-    expect(result.evidence[0]).toMatchObject({
-      pluginId: 'memory.capture',
-      evidenceKind: 'after_turn_committed',
-      status: 'degraded',
-      summary: 'Captured. Missing provider source references.',
-      sourceReferences: [
-        {
-          kind: 'conversation',
-          id: 'evt_memory',
-          title: 'Current conversation turn',
-        },
-      ],
-    });
-  });
-
-  it('preserves after-turn capture source references', async () => {
-    const provider: Project02MemoryProvider = {
-      id: 'memory.capture-sources',
-      displayName: 'Capture Source Provider',
-      captureTurn() {
-        return Promise.resolve({
-          captured: true,
-          summary: 'Captured from provider row.',
-          sourceReferences: [
-            {
-              kind: 'memory',
-              id: 'memory-capture-1',
-              title: 'Captured memory row',
-            },
-          ],
-        });
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const result = await plugin.lifecycleHooks.afterTurnCommitted?.(
-      afterTurnContext({
-        eventId: 'evt_memory_capture_sources',
-        traceId: 'trace_memory_capture_sources',
-        currentUserMessage: 'remember this with a source',
-      }),
-    );
-
-    expect(result?.evidence[0]).toMatchObject({
-      pluginId: 'memory.capture-sources',
-      evidenceKind: 'after_turn_committed',
-      status: 'accepted',
-      sourceReferences: [
-        {
-          kind: 'memory',
-          id: 'memory-capture-1',
-          title: 'Captured memory row',
-        },
-      ],
-    });
-  });
-
-  it('ends only the selected provider session on the session-end lifecycle', async () => {
-    const endedSessions: string[] = [];
-    let closeCalls = 0;
-    let closeDeadlineAt: number | undefined;
-    let closeSignal: AbortSignal | undefined;
-    const provider: Project02MemoryProvider = {
-      id: 'memory.close',
-      displayName: 'Close Provider',
-      endSession(sessionId) {
-        endedSessions.push(sessionId);
-
-        return Promise.resolve();
-      },
-      close(scope) {
-        closeCalls += 1;
-        closeDeadlineAt = scope.deadlineAt;
-        closeSignal = scope.signal;
-
-        return Promise.resolve();
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
-    const result = await host.onSessionEnd(testContext());
-    const shutdownResult = await host.shutdown(testContext());
-    const repeatedShutdownResult = await host.shutdown(testContext());
-    const registeredPlugin = host
-      .registrySnapshot()
-      .plugins.find(snapshot => snapshot.manifest.id === 'memory.close');
-
-    expect(plugin.manifest.declaredPlugins).toContain('on_session_end');
-    expect(plugin.manifest.declaredPlugins).toContain('on_shutdown');
-    expect(registeredPlugin?.registeredLifecycleHooks).toContain(
-      'on_session_end',
-    );
-    expect(registeredPlugin?.registeredLifecycleHooks).toContain('on_shutdown');
-    expect(endedSessions).toEqual(['session-memory']);
-    expect(closeCalls).toBe(1);
     expect(closeDeadlineAt).toBeGreaterThan(Date.now());
     expect(closeSignal).toBeInstanceOf(AbortSignal);
     expect(closeSignal?.aborted).toBe(false);
-    expect(result).toMatchObject({
-      status: 'completed',
-      evidence: [
-        {
-          pluginId: 'memory.close',
-          evidenceKind: 'session_end',
-          status: 'accepted',
-        },
-      ],
-    });
-    expect(shutdownResult).toMatchObject({
-      status: 'completed',
-      evidence: [
-        {
-          pluginId: 'memory.close',
-          evidenceKind: 'shutdown',
-          status: 'accepted',
-        },
-      ],
-    });
-    expect(repeatedShutdownResult).toBe(shutdownResult);
   });
 
-  it('exposes optional search and add tools when methods exist', async () => {
-    let searchDeadlineAt: number | undefined;
-    let searchSignal: AbortSignal | undefined;
+  it('adopts a consistent supplied manifest wholesale', () => {
     const provider: Project02MemoryProvider = {
-      id: 'memory.tools',
-      displayName: 'Tool Provider',
-      search(request) {
-        searchDeadlineAt = request.deadlineAt;
-        searchSignal = request.signal;
-        return Promise.resolve({
-          items: [
-            {
-              id: 'result',
-              text: 'Prior session detail.',
-              sourceReferences: [{kind: 'memory', id: 'result-1'}],
-            },
-          ],
-        });
+      id: 'memory.packaged',
+      displayName: 'Packaged Provider',
+      recall() {
+        return Promise.resolve({items: []});
       },
-      add() {
-        return Promise.resolve({
-          id: 'added',
-          sourceReferences: [{kind: 'memory', id: 'added'}],
-        });
+      search() {
+        return Promise.resolve({items: []});
       },
     };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
+    const manifest = packagedProviderManifest();
+    const plugin = createMemoryProviderRuntimePlugin(provider, {manifest});
 
-    expect(plugin.manifest.requestedAccess).toEqual({model_input: 'write'});
+    expect(plugin.manifest).toEqual(manifest);
     expect(plugin.providedTools.map(tool => tool.name)).toEqual([
-      'memory.search',
-      'memory.add',
+      'memory.packaged.search',
     ]);
-    expect(host.pluginToolDefinitions().map(tool => tool.name)).toEqual([
-      'memory.search',
-      'memory.add',
-    ]);
-
-    const search = await host.handleToolCall(
-      {
-        eventId: 'evt_memory',
-        traceId: 'trace_memory',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        pluginId: 'memory.tools',
-        toolName: 'memory.search',
-        input: {query: 'prior'},
-      },
-      testContext(),
-    );
-
-    expect(search.status).toBe('accepted');
-    if (search.status !== 'accepted') {
-      throw new Error('Expected memory.search to be accepted.');
-    }
-    expect(search).toMatchObject({
-      status: 'accepted',
-      output: {
-        items: [
-          {
-            id: 'result',
-          },
-        ],
-      },
-    });
-    expect(search.evidence[0]).toMatchObject({
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      sourceReferences: [
-        {
-          kind: 'memory',
-          id: 'result-1',
-        },
-      ],
-    });
-    expect(searchDeadlineAt).toBeTypeOf('number');
-    expect(searchDeadlineAt).toBeLessThan(Number.MAX_SAFE_INTEGER);
-    expect(searchSignal?.aborted).toBe(false);
-
-    const add = await host.handleToolCall(
-      {
-        eventId: 'evt_memory',
-        traceId: 'trace_memory',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        pluginId: 'memory.tools',
-        toolName: 'memory.add',
-        input: {text: 'New durable memory.'},
-      },
-      testContext(),
-    );
-
-    expect(add.status).toBe('accepted');
-    if (add.status !== 'accepted') {
-      throw new Error('Expected memory.add to be accepted.');
-    }
-    expect(add).toMatchObject({
-      status: 'accepted',
-      output: {
-        id: 'added',
-        sourceReferences: [
-          {
-            kind: 'memory',
-            id: 'added',
-          },
-        ],
-      },
-    });
-    expect(add.evidence[0]).toMatchObject({
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      sourceReferences: [
-        {
-          kind: 'conversation',
-          id: 'evt_memory',
-        },
-        {
-          kind: 'memory',
-          id: 'added',
-        },
-      ],
-    });
   });
 
-  it('synthesizes persisted memory source references for memory.add results without one', async () => {
+  it('rejects supplied manifests that diverge from the provider', () => {
     const provider: Project02MemoryProvider = {
-      id: 'memory.add-source-synthesis',
-      displayName: 'Add Source Synthesis Provider',
-      add() {
-        return Promise.resolve({
-          id: 'persisted-memory-1',
-          sourceReferences: [],
-        });
+      id: 'memory.packaged',
+      displayName: 'Packaged Provider',
+      recall() {
+        return Promise.resolve({items: []});
+      },
+      search() {
+        return Promise.resolve({items: []});
       },
     };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
 
-    const add = await host.handleToolCall(
-      {
-        eventId: 'evt_memory',
-        traceId: 'trace_memory',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        pluginId: 'memory.add-source-synthesis',
-        toolName: 'memory.add',
-        input: {text: 'New durable memory.'},
-      },
-      testContext(),
-    );
-
-    expect(add.status).toBe('accepted');
-    if (add.status !== 'accepted') {
-      throw new Error('Expected memory.add to be accepted.');
-    }
-    expect(add.output).toEqual({
-      id: 'persisted-memory-1',
-      sourceReferences: [
-        {
-          kind: 'memory',
-          id: 'persisted-memory-1',
-          title: 'Persisted memory item',
-        },
-      ],
-    });
-    expect(add.evidence[0]).toMatchObject({
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      sourceReferences: [
-        {
-          kind: 'conversation',
-          id: 'evt_memory',
-        },
-        {
-          kind: 'memory',
-          id: 'persisted-memory-1',
-          title: 'Persisted memory item',
-        },
-      ],
-    });
-  });
-
-  it('accepts no-hit memory.search results with empty items', async () => {
-    const provider: Project02MemoryProvider = {
-      id: 'memory.search-empty',
-      displayName: 'Empty Search Provider',
-      search() {
-        return Promise.resolve({
-          items: [],
-        });
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
-
-    const search = await host.handleToolCall(
-      {
-        eventId: 'evt_memory',
-        traceId: 'trace_memory',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        pluginId: 'memory.search-empty',
-        toolName: 'memory.search',
-        input: {query: 'missing memory'},
-      },
-      testContext(),
-    );
-
-    expect(search.status).toBe('accepted');
-    if (search.status !== 'accepted') {
-      throw new Error('Expected empty memory.search to be accepted.');
-    }
-    expect(search.output).toEqual({
-      items: [],
-    });
-    expect(search.evidence[0]).toMatchObject({
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      sourceReferences: [
-        {
-          kind: 'runtime',
-          id: 'evt_memory:memory.search.no_results',
-        },
-      ],
-    });
-  });
-
-  it('omits memory.search items without source references before accepting', async () => {
-    const provider: Project02MemoryProvider = {
-      id: 'memory.search-source-filter',
-      displayName: 'Source Filter Search Provider',
-      search() {
-        return Promise.resolve({
-          items: [
-            {
-              id: 'source-less',
-              text: 'This item lacks evidence.',
-              sourceReferences: [],
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest(),
+        pluginId: 'memory.other',
+      }),
+    ).toThrow('cannot combine with pluginId or version overrides');
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({kind: 'context_provider'}),
+      }),
+    ).toThrow('must have kind "memory_provider"');
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({requestedAccess: {}}),
+      }),
+    ).toThrow('must request turn_context "read"');
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          declaredPlugins: ['plugin_discovery'],
+        }),
+      }),
+    ).toThrow(/declare/u);
+    // The seam contract: an outage costs the turn its memory, never the
+    // turn itself — a packaged reject_turn would fail the user's message
+    // on an ordinary recall exception.
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          runtimePolicy: {
+            timeoutMs: 8000,
+            redactionLabels: ['memory'],
+            failureBehavior: {
+              beforeRoleModelCall: 'reject_turn',
+              handleToolCall: 'degrade',
+              health: 'degrade',
             },
-          ],
-        });
-      },
-    };
-    const plugin = createMemoryProviderRuntimePlugin(provider);
-    const host = createRuntimePluginHost({
-      plugins: [plugin],
-      enabledPluginIds: [plugin.manifest.id],
-    });
-
-    const search = await host.handleToolCall(
-      {
-        eventId: 'evt_memory',
-        traceId: 'trace_memory',
-        createdAt: '2026-06-21T00:00:00.000Z',
-        pluginId: 'memory.search-source-filter',
-        toolName: 'memory.search',
-        input: {query: 'source-less memory'},
-      },
-      testContext(),
-    );
-
-    expect(search.status).toBe('accepted');
-    if (search.status !== 'accepted') {
-      throw new Error('Expected source-filtered memory.search to be accepted.');
-    }
-    expect(search.output).toEqual({
-      items: [],
-    });
-    expect(search.evidence[0]).toMatchObject({
-      evidenceKind: 'tool_invocation',
-      status: 'accepted',
-      sourceReferences: [
+          },
+        }),
+      }),
+    ).toThrow('must not declare beforeRoleModelCall: "reject_turn"');
+    expect(() =>
+      createMemoryProviderRuntimePlugin(
         {
-          kind: 'runtime',
-          id: 'evt_memory:memory.search.no_results',
+          ...provider,
+          health() {
+            return Promise.resolve({status: 'ok' as const, summary: 'Ready.'});
+          },
         },
-      ],
-    });
+        {
+          manifest: packagedProviderManifest({
+            declaredPlugins: [
+              'before_role_model_call',
+              'tool_provider',
+              'handle_tool_call',
+              'health',
+            ],
+            runtimePolicy: {
+              timeoutMs: 8000,
+              redactionLabels: ['memory'],
+              failureBehavior: {
+                beforeRoleModelCall: 'degrade',
+                handleToolCall: 'degrade',
+                health: 'reject_turn',
+              },
+            },
+          }),
+        },
+      ),
+    ).toThrow('must not declare health: "reject_turn"');
+    // A descriptor promising a hook the provider does not implement would
+    // load a package advertising behavior nothing can deliver.
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          declaredPlugins: [
+            'plugin_discovery',
+            'before_role_model_call',
+            'tool_provider',
+            'handle_tool_call',
+            'health',
+          ],
+        }),
+      }),
+    ).toThrow('for provider methods it does not implement');
+    // Access nothing needs still has to be satisfied by the host, so a
+    // missing file-store provider would fail an unrelated startup.
+    expect(() =>
+      createMemoryProviderRuntimePlugin(provider, {
+        manifest: packagedProviderManifest({
+          requestedAccess: {
+            turn_context: 'read',
+            model_input: 'write',
+            file_store: 'read',
+          },
+        }),
+      }),
+    ).toThrow('requests file_store access that no provider method needs');
   });
 });
+
+function packagedProviderManifest(
+  overrides: Readonly<Record<string, unknown>> = {},
+) {
+  return createRuntimePluginManifest({
+    id: 'memory.packaged',
+    displayName: 'Packaged Provider',
+    version: '2.0.0',
+    kind: 'memory_provider',
+    description: 'Packaged memory provider fixture.',
+    contractVersion: runtimePluginContractVersion,
+    compatibility: {
+      hostContractVersions: [runtimePluginContractVersion],
+    },
+    declaredPlugins: [
+      'before_role_model_call',
+      'tool_provider',
+      'handle_tool_call',
+    ],
+    config: {
+      scope: 'global_with_character_overrides',
+      fields: [],
+    },
+    firstParty: false,
+    runtimePolicy: {
+      timeoutMs: 8000,
+      redactionLabels: ['memory'],
+      failureBehavior: {
+        beforeRoleModelCall: 'degrade',
+        handleToolCall: 'degrade',
+        health: 'degrade',
+      },
+    },
+    activation: {
+      defaultEnabled: false,
+      reasons: ['memory_provider_package'],
+    },
+    requestedAccess: {turn_context: 'read', model_input: 'write'},
+    ...overrides,
+  });
+}
 
 function testContext() {
   return createRuntimePluginContext({
@@ -678,20 +350,14 @@ function testContext() {
   });
 }
 
-function afterTurnContext(
-  options: {
-    readonly eventId?: string;
-    readonly traceId?: string;
-    readonly currentUserMessage?: string;
-  } = {},
-) {
+function afterTurnContext() {
   return createRuntimePluginAfterTurnCommittedContext({
-    eventId: options.eventId ?? 'evt_memory',
-    traceId: options.traceId ?? 'trace_memory',
+    eventId: 'evt_memory',
+    traceId: 'trace_memory',
     createdAt: '2026-06-21T00:00:00.000Z',
     sessionId: 'session-memory',
     eventType: 'USER_MESSAGE',
-    currentUserMessage: options.currentUserMessage ?? 'remember this',
+    currentUserMessage: 'remember this',
     character: testCharacterProfile,
     committedAt: '2026-06-21T00:00:01.000Z',
     visibleMessages: [

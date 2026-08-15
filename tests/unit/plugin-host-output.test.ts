@@ -1,4 +1,9 @@
 import {describe, expect, it} from 'vitest';
+
+import {
+  createRuntimePlugin,
+  createRuntimePluginEvidenceSnapshot,
+} from '../../src/plugins/api/index.ts';
 import {
   createAcceptedBlockingBeforeRoleModelCallPlugin,
   createAcceptedBlockingEvidenceMemorySearchPlugin,
@@ -10,6 +15,8 @@ import {
   createRejectingMemorySearchPlugin,
   createRuntimeNotesPlugin,
   createSlowNormalizationPlugin,
+  memorySearchPluginManifest,
+  memorySearchProvidedTools,
   createUnderestimatedContextItemPlugin,
   expectJsonObject,
   testIdentity,
@@ -379,5 +386,62 @@ describe('runtime plugin host output boundaries', () => {
       policyOutcome: 'timeout',
     });
     expect(result.evidence[0]?.summary).toContain('timed out after 1ms');
+  });
+
+  it('stamps plugin evidence with the config version behind it', async () => {
+    const id = 'memory.fingerprinted.fixture';
+    const plugin = createRuntimePlugin({
+      manifest: {
+        ...memorySearchPluginManifest(id),
+        config: {
+          scope: 'global_with_character_overrides',
+          fields: [],
+          fingerprint: 'sha256:config-version',
+        },
+      },
+      providedTools: memorySearchProvidedTools(),
+      lifecycleHooks: {
+        handleToolCall(_call, context) {
+          return {
+            status: 'accepted',
+            output: {},
+            evidence: [
+              createRuntimePluginEvidenceSnapshot({
+                eventId: context.eventId,
+                traceId: context.traceId,
+                createdAt: context.timestamp,
+                kind: 'runtime_plugin_evidence_snapshot',
+                pluginId: id,
+                evidenceKind: 'tool_invocation',
+                status: 'accepted',
+                summary: 'Search completed.',
+                redactionLabels: [],
+              }),
+            ],
+          };
+        },
+      },
+    });
+
+    const result = await createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin],
+    }).handleToolCall(
+      {
+        ...testIdentity(),
+        pluginId: id,
+        toolName: 'memory.search',
+        input: {query: 'Mira'},
+      },
+      testPluginContext(),
+    );
+
+    // Which configuration produced a record is the host's to state: a
+    // plugin's own records carry the same stamp the host puts on its
+    // failure records, so a persisted action stays tied to its config.
+    expect(result.evidence[0]).toMatchObject({
+      evidenceKind: 'tool_invocation',
+      status: 'accepted',
+      configFingerprint: 'sha256:config-version',
+    });
   });
 });

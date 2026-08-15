@@ -1,4 +1,10 @@
-const project02IdentifierPattern = /^[A-Za-z][A-Za-z0-9._-]{0,127}$/u;
+export const project02IdentifierMaxLength = 128;
+
+/** Built from the one length above so the two can never disagree. */
+const project02IdentifierPattern = new RegExp(
+  `^[A-Za-z][A-Za-z0-9._-]{0,${String(project02IdentifierMaxLength - 1)}}$`,
+  'u',
+);
 
 export function isProject02Identifier(value: unknown): boolean {
   return typeof value === 'string' && project02IdentifierPattern.test(value);

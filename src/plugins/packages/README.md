@@ -57,6 +57,12 @@ returns a `RuntimePlugin`. It runs when the configured host is constructed
 at session start. The returned plugin's manifest must equal the discovered
 one — build it from `input.manifest`, never a second copy.
 
+Bundled packages import host helpers directly, an installed package cannot:
+its captured artifact resolves only its own files, so a memory provider
+shipped by an operator builds its `RuntimePlugin` from `createRuntimePlugin`
+rather than reusing the bundled memory-provider adapter. Reusing it from an
+installed package needs a host-injected seam that does not exist yet.
+
 ## Tool input contracts
 
 A tool declares `inputContract` as a JSON Schema object, and that one
