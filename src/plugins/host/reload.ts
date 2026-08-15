@@ -53,6 +53,8 @@ export function createRuntimePluginConfigLiveApply(options: {
   ) => void;
   /** Keeps terminal dispatch behind every reload, settled or abandoned. */
   readonly trackWork: <T>(work: Promise<T>) => Promise<T>;
+  /** Once terminal dispatch owns the instances, nothing new may go live. */
+  readonly closed: () => boolean;
 }): RuntimePluginConfigLiveApply {
   const restartPendingPluginIds = new Set<string>();
 
@@ -93,9 +95,14 @@ async function rebuildLivePlugin(options: {
     catalogPluginId: string,
   ) => void;
   readonly trackWork: <T>(work: Promise<T>) => Promise<T>;
+  readonly closed: () => boolean;
 }): Promise<RuntimePluginConfigLiveApplyOutcome> {
   if (options.reloader === undefined) {
     return {status: 'declined', reason: 'this host has no plugin reloader'};
+  }
+
+  if (options.closed()) {
+    return {status: 'declined', reason: 'the host is shutting down'};
   }
 
   const previous = options
@@ -141,6 +148,12 @@ async function rebuildLivePlugin(options: {
       status: 'declined',
       reason: 'the rebuilt plugin changed its manifest, hook, or tool surface',
     };
+  }
+
+  // Shutdown may have started while the factory ran; the candidate was
+  // retired on arrival and must not be published.
+  if (options.closed()) {
+    return {status: 'declined', reason: 'the host is shutting down'};
   }
 
   if (options.swapEnabledPlugin(reloaded.plugin) === undefined) {

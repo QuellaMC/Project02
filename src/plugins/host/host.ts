@@ -248,6 +248,7 @@ export function createRuntimePluginHost(
       );
     },
     trackWork: instanceOwnership.track,
+    closed: instanceOwnership.closed,
   });
 
   return Object.freeze({

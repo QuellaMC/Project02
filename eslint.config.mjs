@@ -60,7 +60,7 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        {max: 1368, skipBlankLines: true, skipComments: true},
+        {max: 1369, skipBlankLines: true, skipComments: true},
       ],
     },
   },

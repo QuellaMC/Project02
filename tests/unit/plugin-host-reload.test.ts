@@ -168,6 +168,8 @@ function reloadHost(options: {
   readonly reloader?: RuntimePluginReloader;
   readonly initial?: RuntimePlugin;
   readonly enabled?: boolean;
+  /** Defaults to approving at once. */
+  readonly confirm?: () => Promise<{readonly status: 'approved'}>;
 }): ReloadHost {
   const storeRoot = createTestTempRoot('project02-plugin-host-reload-');
   const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
@@ -185,7 +187,7 @@ function reloadHost(options: {
       control: testRuntimePluginConfigControlCapability,
       pluginManifests: [manifest],
     }),
-    toolConfirmationHandler: () => ({status: 'approved'}),
+    toolConfirmationHandler: options.confirm ?? (() => ({status: 'approved'})),
     ...(options.reloader === undefined
       ? {}
       : {pluginReloader: options.reloader}),
@@ -427,6 +429,47 @@ describe('runtime plugin host live config reload', () => {
     });
     expect(withoutReloader.authoredValue('tone')).toBe('warm');
     expect(await contextText(withoutReloader.host)).toBe('v1');
+  });
+
+  it('declines a live rebuild once the host has shut down', async () => {
+    const terminalLog: string[] = [];
+    const reloads: string[] = [];
+    let approve: (() => void) | undefined;
+    const fixture = reloadHost({
+      initial: terminalReloadFixturePlugin('v1', terminalLog),
+      reloader: rebuiltReloader(
+        () => terminalReloadFixturePlugin('v2', terminalLog),
+        reloads,
+      ),
+      confirm: () =>
+        new Promise(resolve => {
+          approve = () => {
+            resolve({status: 'approved'});
+          };
+        }),
+    });
+
+    // The person is still being asked when the host shuts down; the approval
+    // that arrives afterwards writes the change but must not publish an
+    // instance that terminal dispatch will never own.
+    const pending = fixture.approve();
+
+    await vi.waitFor(() => {
+      expect(approve).toBeDefined();
+    });
+    await fixture.host.shutdown(testPluginContext());
+    approve?.();
+
+    expect(await pending).toMatchObject({
+      status: 'accepted',
+      output: {
+        appliesTo: 'next_launch',
+        appliesToNote: expect.stringContaining('shutting down') as string,
+      },
+    });
+    expect(fixture.authoredValue('tone')).toBe('warm');
+    expect(reloads).toEqual([]);
+    expect(terminalLog).toEqual(['v1:shutdown']);
   });
 
   it('keeps reloading live after a session ends, and ends a retired instance once', async () => {
