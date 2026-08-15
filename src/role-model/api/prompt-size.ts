@@ -12,14 +12,14 @@ export type RoleModelPromptFrameSize = RoleModelPromptSizeMeasure & {
 };
 
 /**
- * How big the prompt was, per frame kind in wire order, plus the tools and
- * the whole. Recorded on every round so an inspection can hold the runtime's
- * chars/4 estimate against the tokens the provider reported.
+ * How big the prompt was, per frame kind in wire order, plus the tools; the
+ * frames sum to the wire messages, so the whole is a sum, not a field.
+ * Recorded on every round so an inspection can hold the runtime's chars/4
+ * estimate against the tokens the provider reported.
  */
 export type RoleModelPromptSize = {
   readonly frames: readonly RoleModelPromptFrameSize[];
   readonly tools: RoleModelPromptSizeMeasure;
-  readonly total: RoleModelPromptSizeMeasure;
 };
 
 /** Validates and freezes a prompt size, from the loop or a stored record. */
@@ -31,7 +31,6 @@ export function freezeRoleModelPromptSize(value: unknown): RoleModelPromptSize {
   return Object.freeze({
     frames: Object.freeze(value['frames'].map(freezeFrameSize)),
     tools: freezeMeasure(value['tools'], 'tools'),
-    total: freezeMeasure(value['total'], 'total'),
   } satisfies RoleModelPromptSize);
 }
 

@@ -604,7 +604,6 @@ describe('file runtime log store plugin tool event validation', () => {
         },
       ],
       tools: {chars: 1200, estimatedTokens: 300},
-      total: {chars: 2400, estimatedTokens: 600},
     };
 
     storedRecord.roleModelIOSnapshot['promptSize'] = promptSize;
@@ -621,7 +620,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
     storedRecord.roleModelIOSnapshot['promptSize'] = {
       ...promptSize,
-      total: {chars: -1, estimatedTokens: 600},
+      tools: {chars: -1, estimatedTokens: 300},
     };
     expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
       /promptSize/u,

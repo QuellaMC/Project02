@@ -4,5 +4,9 @@
  * real count, when reported, is measured against it rather than replacing it.
  */
 export function estimateTextTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
+  return estimateTokensForChars(text.length);
+}
+
+export function estimateTokensForChars(chars: number): number {
+  return Math.max(1, Math.ceil(chars / 4));
 }

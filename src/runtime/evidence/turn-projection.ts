@@ -8,7 +8,10 @@ import type {
 import {isTerminalRawEventLogRecordKind} from './records.ts';
 import {canonicalJsonStringify} from '../../shared/canonical-json.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
-import type {RoleModelDecisionResult} from '../../role-model/index.ts';
+import type {
+  RoleModelDecisionResult,
+  RoleModelPromptSize,
+} from '../../role-model/index.ts';
 import type {RoleModelCommitValidationResult} from './records.ts';
 import type {
   RuntimePluginContextItem,
@@ -36,6 +39,7 @@ import type {
   InspectPluginEvidenceSnapshot,
   InspectPluginHealthSnapshot,
   InspectPluginSourceReference,
+  InspectPromptSize,
 } from './turn-projection-contract.ts';
 
 export function createTurnEvidence(options: {
@@ -344,7 +348,11 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
           }),
       ...(rawEvent.roleModelIOSnapshot?.promptSize === undefined
         ? {}
-        : {promptSize: rawEvent.roleModelIOSnapshot.promptSize}),
+        : {
+            promptSize: inspectPromptSize(
+              rawEvent.roleModelIOSnapshot.promptSize,
+            ),
+          }),
       ...(rawEvent.roleModelIOSnapshot === undefined
         ? {}
         : {
@@ -374,6 +382,22 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
           }),
     } satisfies InspectRoleModelEvidence),
   };
+}
+
+function inspectPromptSize(size: RoleModelPromptSize): InspectPromptSize {
+  return Object.freeze({
+    ...size,
+    total: Object.freeze({
+      chars: size.frames.reduce(
+        (sum, frame) => sum + frame.chars,
+        size.tools.chars,
+      ),
+      estimatedTokens: size.frames.reduce(
+        (sum, frame) => sum + frame.estimatedTokens,
+        size.tools.estimatedTokens,
+      ),
+    }),
+  });
 }
 
 function roleModelRoundEvidenceKey(evidence: InspectRoleModelEvidence): string {

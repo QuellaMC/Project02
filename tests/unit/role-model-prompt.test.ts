@@ -277,9 +277,14 @@ describe('role-model prompt rendering', () => {
       conversationHistory: [priorTurn],
     });
     const size = measureRoleModelPromptSize(turnContext);
-    const recalledMemoryChars =
-      turnContext.frames.find(frame => frame.kind === 'recalled_memory')
-        ?.content?.length ?? 0;
+    const wireChars = turnContext.messages.reduce(
+      (sum, message) => sum + JSON.stringify(message).length,
+      0,
+    );
+    const currentUserChars = JSON.stringify({
+      role: 'user',
+      content: 'and the roses?',
+    }).length;
 
     expect(size.frames.map(frame => [frame.kind, frame.count])).toEqual([
       ['system_protocol', 1],
@@ -288,16 +293,18 @@ describe('role-model prompt rendering', () => {
       ['current_user_message', 1],
       ['recalled_memory', 1],
     ]);
-    // Own-message frames cost their wire message; a suffix frame costs the
-    // text it adds to the user message.
-    expect(recalledMemoryChars).toBeGreaterThan(0);
-    expect(size.frames.find(frame => frame.kind === 'recalled_memory')).toEqual(
-      {
-        kind: 'recalled_memory',
-        count: 1,
-        chars: recalledMemoryChars,
-        estimatedTokens: Math.ceil(recalledMemoryChars / 4),
-      },
+    // Frames sum to the wire: a suffix frame is charged exactly the bytes it
+    // adds to the serialized user message, separator and escaping included.
+    expect(size.frames.reduce((sum, frame) => sum + frame.chars, 0)).toBe(
+      wireChars,
+    );
+    expect(
+      size.frames.find(frame => frame.kind === 'current_user_message')?.chars,
+    ).toBe(currentUserChars);
+    expect(
+      size.frames.find(frame => frame.kind === 'recalled_memory')?.chars,
+    ).toBe(
+      JSON.stringify(turnContext.messages.at(-1)).length - currentUserChars,
     );
     expect(
       size.frames.find(frame => frame.kind === 'conversation_history')?.chars,
@@ -309,16 +316,6 @@ describe('role-model prompt rendering', () => {
     );
     expect(size.tools.chars).toBe(JSON.stringify(turnContext.tools).length);
     expect(size.tools.estimatedTokens).toBeGreaterThan(0);
-    expect(size.total).toEqual({
-      chars: size.frames.reduce(
-        (sum, frame) => sum + frame.chars,
-        size.tools.chars,
-      ),
-      estimatedTokens: size.frames.reduce(
-        (sum, frame) => sum + frame.estimatedTokens,
-        size.tools.estimatedTokens,
-      ),
-    });
   });
 
   it('omits the curated context frame when no sections exist', () => {

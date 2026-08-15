@@ -1,4 +1,7 @@
-import {estimateTextTokens} from '../../shared/token-estimate.ts';
+import {
+  estimateTextTokens,
+  estimateTokensForChars,
+} from '../../shared/token-estimate.ts';
 import {
   freezeRoleModelPromptSize,
   type RoleModelPromptFrameSize,
@@ -9,8 +12,9 @@ import type {RoleModelTurnContext} from './render.ts';
 
 /**
  * Measures the rendered prompt in the currency the history window is
- * budgeted in: a frame that travels as its own message costs its serialized
- * message; a suffix frame costs the text it adds to the user message.
+ * budgeted in: every frame costs what it adds to the serialized wire
+ * messages, so the frames sum to the wire and a suffix frame is charged the
+ * bytes it puts into the user message, separator and escaping included.
  */
 export function measureRoleModelPromptSize(
   turnContext: RoleModelTurnContext,
@@ -19,17 +23,42 @@ export function measureRoleModelPromptSize(
     string,
     {count: number; chars: number; tokens: number}
   >();
+  let userMessage: {content: string; serializedLength: number} | undefined;
 
   for (const frame of turnContext.frames) {
-    const text =
-      frame.placement === 'own_message'
-        ? JSON.stringify(frame.message)
-        : frame.content;
+    let chars: number;
+    let tokens: number;
+
+    if (frame.placement === 'own_message') {
+      const serialized = JSON.stringify(frame.message);
+
+      chars = serialized.length;
+      tokens = estimateTextTokens(serialized);
+      userMessage =
+        frame.message.role === 'user' &&
+        typeof frame.message.content === 'string'
+          ? {content: frame.message.content, serializedLength: chars}
+          : undefined;
+    } else {
+      if (userMessage === undefined) {
+        throw new TypeError(
+          `Prompt frame ${frame.kind} must follow the current user message.`,
+        );
+      }
+
+      const content = `${userMessage.content}\n\n${frame.content}`;
+      const serializedLength = JSON.stringify({role: 'user', content}).length;
+
+      chars = serializedLength - userMessage.serializedLength;
+      tokens = estimateTokensForChars(chars);
+      userMessage = {content, serializedLength};
+    }
+
     const entry = byKind.get(frame.kind) ?? {count: 0, chars: 0, tokens: 0};
 
     entry.count += 1;
-    entry.chars += text.length;
-    entry.tokens += estimateTextTokens(text);
+    entry.chars += chars;
+    entry.tokens += tokens;
     byKind.set(frame.kind, entry);
   }
 
@@ -41,20 +70,12 @@ export function measureRoleModelPromptSize(
       estimatedTokens: entry.tokens,
     }),
   );
-  const tools = measureText(
-    turnContext.tools.length === 0 ? '' : JSON.stringify(turnContext.tools),
-  );
 
   return freezeRoleModelPromptSize({
     frames,
-    tools,
-    total: {
-      chars: frames.reduce((sum, frame) => sum + frame.chars, tools.chars),
-      estimatedTokens: frames.reduce(
-        (sum, frame) => sum + frame.estimatedTokens,
-        tools.estimatedTokens,
-      ),
-    },
+    tools: measureText(
+      turnContext.tools.length === 0 ? '' : JSON.stringify(turnContext.tools),
+    ),
   });
 }
 
