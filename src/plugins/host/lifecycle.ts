@@ -2,6 +2,7 @@ import type {CharacterProfile} from '../../core/index.ts';
 import {createRuntimeEventIdentity} from '../../core/index.ts';
 import {createRuntimePluginContext} from '../api/index.ts';
 import type {
+  RuntimePluginHookHostResult,
   RuntimePluginHost,
   RuntimePluginSessionEndOptions,
 } from './host.ts';
@@ -29,14 +30,19 @@ export async function runBestEffortPluginSessionEnd(options: {
   }
 }
 
+/**
+ * Returns what shutdown recorded, so a caller can show it: this runs
+ * after the last turn, and a plugin reporting work it could not finish
+ * has no later hook to say so through.
+ */
 export async function runBestEffortPluginShutdown(options: {
   readonly pluginHost: RuntimePluginHost;
   readonly sessionId: string;
   readonly currentUserMessage: string;
   readonly character: CharacterProfile;
-}): Promise<void> {
+}): Promise<RuntimePluginHookHostResult | undefined> {
   try {
-    await options.pluginHost.shutdown(
+    return await options.pluginHost.shutdown(
       createRuntimePluginContext({
         ...createRuntimeEventIdentity(),
         sessionId: options.sessionId,
@@ -47,5 +53,6 @@ export async function runBestEffortPluginShutdown(options: {
     );
   } catch {
     // Best-effort: shutdown must not mask the failing chat lifetime.
+    return undefined;
   }
 }

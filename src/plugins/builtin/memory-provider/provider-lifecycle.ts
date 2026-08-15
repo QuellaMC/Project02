@@ -1,3 +1,4 @@
+import {runtimePluginSourceReferenceLimit} from '../../api/validation-primitives.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
@@ -206,7 +207,11 @@ async function runMemorySearchTool(
     pluginId: options.pluginId,
     output: {items: items.map(memoryItemOutput)},
     summary: `Returned ${String(items.length)} memory search result(s).`,
-    sourceReferences: searchSourceReferences({context, items}),
+    sourceReferences: searchSourceReferences({
+      context,
+      items,
+      searchToolName: options.searchToolName,
+    }),
   });
 }
 
@@ -284,7 +289,7 @@ function createShutdownHook(
   options: MemoryProviderHookOptions,
 ): NonNullable<RuntimePluginLifecycleHooks['onShutdown']> {
   return async context => {
-    await options.provider.close?.({
+    const result = await options.provider.close?.({
       deadlineAt: context.deadlineAt,
       signal: context.signal,
     });
@@ -293,7 +298,8 @@ function createShutdownHook(
       context,
       options.pluginId,
       'shutdown',
-      'Closed memory provider.',
+      result?.summary ?? 'Closed memory provider.',
+      result?.drained === false ? 'degraded' : 'accepted',
     );
   };
 }
@@ -303,6 +309,7 @@ function completedLifecycleResult(
   pluginId: string,
   evidenceKind: Extract<RuntimePluginEvidenceKind, 'session_end' | 'shutdown'>,
   summary: string,
+  status: 'accepted' | 'degraded' = 'accepted',
 ): ReturnType<NonNullable<RuntimePluginLifecycleHooks['onSessionEnd']>> {
   return {
     status: 'completed',
@@ -311,7 +318,7 @@ function completedLifecycleResult(
         context,
         pluginId,
         evidenceKind,
-        status: 'accepted',
+        status,
         summary,
       }),
     ],
@@ -379,19 +386,18 @@ function memoryContextItemId(providerItemId: string): string {
 function searchSourceReferences(options: {
   readonly context: RuntimePluginContext;
   readonly items: readonly MemoryRecallItem[];
+  readonly searchToolName: string;
 }): readonly RuntimePluginSourceReference[] {
-  const itemSourceReferences = options.items.flatMap(
-    item => item.sourceReferences,
-  );
+  const references = itemSourceReferences(options.items);
 
-  if (itemSourceReferences.length > 0) {
-    return itemSourceReferences;
+  if (references.length > 0) {
+    return references;
   }
 
   return Object.freeze([
     {
       kind: 'runtime',
-      id: `${options.context.eventId}:memory.search.no_results`,
+      id: `${options.context.eventId}:${options.searchToolName}.no_results`,
       title: 'Memory search completed with no results',
     },
   ] satisfies RuntimePluginSourceReference[]);
@@ -401,21 +407,19 @@ function addResultSourceReferences(options: {
   readonly id: string;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
 }): readonly RuntimePluginSourceReference[] {
-  if (
-    options.sourceReferences.some(
-      reference => reference.kind === 'memory' && reference.id === options.id,
-    )
-  ) {
-    return options.sourceReferences;
-  }
+  const identifying = options.sourceReferences.find(
+    reference => reference.kind === 'memory' && reference.id === options.id,
+  );
 
+  // The row this write created leads the list: a record bounded to what it
+  // can carry must not lose the one reference naming what was stored.
   return Object.freeze([
-    ...options.sourceReferences,
-    {
+    identifying ?? {
       kind: 'memory',
       id: options.id,
       title: 'Persisted memory item',
     },
+    ...options.sourceReferences.filter(reference => reference !== identifying),
   ] satisfies RuntimePluginSourceReference[]);
 }
 
@@ -457,6 +461,34 @@ function captureTurnEvidenceSummary(options: {
   );
 }
 
+/**
+ * Callers order references by what a reader cannot do without -- the turn
+ * it came from, then the row it became, then everything else -- so a list
+ * longer than one record may carry loses only the ancillary tail.
+ */
+/**
+ * One reference per returned item first, then the rest: flattening in
+ * item order would let an early item's long list push every later item's
+ * provenance past the bound, while the model still reads those memories
+ * in the output.
+ */
+function itemSourceReferences(
+  items: readonly MemoryRecallItem[],
+): readonly RuntimePluginSourceReference[] {
+  return [
+    ...items.flatMap(item => item.sourceReferences.slice(0, 1)),
+    ...items.flatMap(item => item.sourceReferences.slice(1)),
+  ];
+}
+
+function boundedSourceReferences(
+  references: readonly RuntimePluginSourceReference[] | undefined,
+): readonly RuntimePluginSourceReference[] | undefined {
+  return references === undefined
+    ? references
+    : references.slice(0, runtimePluginSourceReferenceLimit);
+}
+
 function memoryEvidence(options: {
   readonly context: RuntimePluginContext;
   readonly pluginId: string;
@@ -466,9 +498,14 @@ function memoryEvidence(options: {
   readonly sourceItems?: readonly MemoryRecallItem[];
   readonly sourceReferences?: readonly RuntimePluginSourceReference[];
 }): RuntimePluginEvidenceSnapshot {
-  const sourceReferences =
+  // A backend that names many rows must not turn a completed write into a
+  // failed hook: evidence records what fits, the write already happened.
+  const collected =
     options.sourceReferences ??
-    options.sourceItems?.flatMap(item => item.sourceReferences);
+    (options.sourceItems === undefined
+      ? undefined
+      : itemSourceReferences(options.sourceItems));
+  const sourceReferences = boundedSourceReferences(collected);
 
   return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,

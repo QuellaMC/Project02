@@ -65,6 +65,16 @@ export type MemoryHealthResult = {
   readonly summary: string;
 };
 
+/**
+ * What draining at shutdown found. Nothing runs after it -- no later turn,
+ * no health call, and the next launch builds a fresh provider -- so work
+ * a provider could not finish has this one record to appear in.
+ */
+export type MemoryCloseResult = {
+  readonly drained: boolean;
+  readonly summary: string;
+};
+
 export type Project02MemoryProvider = {
   readonly id: string;
   readonly displayName: string;
@@ -74,5 +84,5 @@ export type Project02MemoryProvider = {
   add?(request: MemoryAddRequest): Promise<MemoryAddResult>;
   health?(request: MemoryHealthRequest): Promise<MemoryHealthResult>;
   endSession?(sessionId: string, scope: MemoryOperationScope): Promise<void>;
-  close?(scope: MemoryOperationScope): Promise<void>;
+  close?(scope: MemoryOperationScope): Promise<MemoryCloseResult | undefined>;
 };
