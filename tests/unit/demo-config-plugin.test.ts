@@ -86,7 +86,7 @@ describe('demo-config plugin package', () => {
 
     expect(result.contextItems).toHaveLength(1);
     expect(result.contextItems[0]?.text).toContain(
-      `reply in a ${demoConfigDefaultTone} tone`,
+      `${demoConfigDefaultTone} tone`,
     );
     expect(result.contextItems[0]?.text).not.toContain('signoff "');
     expect(result.evidence[0]?.status).toBe('accepted');
@@ -99,9 +99,9 @@ describe('demo-config plugin package', () => {
       ),
     );
 
-    expect(result.contextItems[0]?.text).toContain('reply in a pirate tone');
+    expect(result.contextItems[0]?.text).toContain('pirate tone');
     expect(result.contextItems[0]?.text).toContain(
-      'End every reply with the exact signoff "Arr, matey!"',
+      'exact signoff "Arr, matey!"',
     );
   });
 
@@ -123,7 +123,7 @@ describe('demo-config plugin package', () => {
     );
 
     expect(result.contextItems[0]?.text).toContain(
-      `reply in a ${demoConfigDefaultTone} tone`,
+      `${demoConfigDefaultTone} tone`,
     );
     expect(result.contextItems[0]?.text).not.toContain('signoff');
   });

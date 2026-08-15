@@ -130,7 +130,7 @@ resolution, the operator console, and the model-facing
 - `secret: true` fields hold credentials. The preferred home is an env
   file — the manifest's `envVar` or an authored `{"$env": "VAR"}` ref —
   and each character's own env file (set with `runtime-config --character
-  <id> secret set`) merges over the home `.env`, so two characters can
+<id> secret set`) merges over the home `.env`, so two characters can
   hold different accounts for one plugin. A plain string typed into
   config also works; the env wins whenever it holds the variable. Reads
   always show secret fields redacted, and they cannot be `agentMutable`.
@@ -141,6 +141,32 @@ resolution, the operator console, and the model-facing
   where they go.
 - `reloadRequired` states whether a committed change needs a runtime
   reload before it takes effect.
+
+## Model input
+
+A `beforeRoleModelCall` hook returns typed `contextItems`; the host, not
+the plugin, decides where each one renders. Every item needs
+`model_input: write`.
+
+- `kind: "runtime_note"` from a bundled package that holds
+  `trusted_context: write` renders in the trusted per-turn frame (system
+  role) as a bullet under "Right now"; capped at 4 notes and 2048 chars
+  per plugin, never truncated — over the cap the plugin degrades or
+  rejects per its `failureBehavior`. From any other plugin the same item
+  is untrusted.
+- `kind: "memory"` renders inside a `<recalled_memory>` fence appended to
+  the current user message, under a 1024-estimated-token budget shared by
+  every memory item, evicted by priority.
+- Every other kind renders inside an `<untrusted_plugin_context>` fence
+  on the same message as `## <pluginId> · <id>` plus text, under a
+  256-token budget. Only `text` reaches the model; `sourceReferences`,
+  `confidence`, `budget`, and `redactionLabels` are evidence.
+- `curatedContext` sections (also gated by `trusted_context`) render in
+  the curated frame between the persona and the runtime notes.
+
+Write item text and tool descriptions to the character in the second
+person ("your notes", "how you are right now", "they") — the runtime
+speaks that way everywhere and names the person only when configured.
 
 ## Activation
 

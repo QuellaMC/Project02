@@ -59,32 +59,27 @@ const characterStatePatchInputContract = Object.freeze({
   properties: Object.freeze({
     mood: Object.freeze({
       type: 'string',
-      description:
-        "The character's internal current mood; assistant-owned, model-only, and not the user's mood.",
+      description: 'Your own mood right now (yours, never theirs).',
       enum: characterMoodValues,
     }),
     energy: Object.freeze({
       type: 'string',
-      description:
-        "The character's internal current energy; assistant-owned, model-only, and not the user's energy.",
+      description: 'Your own energy right now (yours, never theirs).',
       enum: characterEnergyValues,
     }),
     attention: Object.freeze({
       type: 'string',
-      description:
-        "The character's internal current attention; assistant-owned and model-only.",
+      description: 'Where your attention is right now.',
       enum: characterAttentionValues,
     }),
     currentActivity: Object.freeze({
       type: 'string',
-      description:
-        "The character's internal current activity; assistant-owned and model-only.",
+      description: 'What you are doing right now.',
       enum: characterCurrentActivityValues,
     }),
     socialOrientation: Object.freeze({
       type: 'string',
-      description:
-        "The character's internal current social orientation; assistant-owned and model-only.",
+      description: 'How open to company you feel right now.',
       enum: characterSocialOrientationValues,
     }),
   }),
@@ -120,7 +115,7 @@ function createCharacterStatePluginFromManifest(
       Object.freeze({
         name: characterStatePatchModelToolName,
         description:
-          "Optionally patch the character's internal Character State. This assistant-owned model-only state is not the user's mood, energy, attention, activity, or social orientation.",
+          'Adjust how you are right now — your own mood, energy, attention, activity, or social orientation (yours, never theirs). Call it when the conversation genuinely shifts something in you.',
         inputContract: characterStatePatchInputContract,
         validationOwner: 'plugin_host',
         // Two patches in one batch would race the same files.
@@ -141,7 +136,7 @@ function createCharacterStatePluginFromManifest(
               pluginId: characterStatePluginId,
               id: 'current',
               kind: 'runtime_note',
-              text: `${context.character.displayName}'s internal Character State (assistant-owned, model-only; not user state): ${brief.text}`,
+              text: `How you are right now (your own inner state, not theirs): ${brief.text}`,
               budget: {
                 estimatedTokens: 32,
                 priority: 90,

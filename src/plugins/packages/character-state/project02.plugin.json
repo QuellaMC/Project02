@@ -7,7 +7,7 @@
     "displayName": "Character State",
     "version": "1.0.0",
     "kind": "first_party",
-    "description": "First-party assistant-owned Character State context and patch tool for the active character's internal state.",
+    "description": "First-party Character State: the character's own inner state as a trusted runtime note, with a tool to adjust it.",
     "contractVersion": "mvp-008.runtime_plugin.v2",
     "compatibility": {
       "hostContractVersions": ["mvp-008.runtime_plugin.v2"]

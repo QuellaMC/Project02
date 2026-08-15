@@ -64,9 +64,9 @@
       </tr>
       <tr>
         <td>Prompt placement</td>
-        <td>Trusted curated-context frame</td>
-        <td>Tool results</td>
-        <td>Untrusted plugin-context frame, budget-capped (automatic recall; a provider's own tool answers in a tool result)</td>
+        <td>Trusted curated-context frame (system role, addressed to the character as its own notes)</td>
+        <td>Tool results, plus a trusted runtime note that nudges recall</td>
+        <td>A <code>&lt;recalled_memory&gt;</code> block appended to the current user message under its own 1024-token budget (automatic recall); a provider's own tool answers in a tool result</td>
       </tr>
       <tr>
         <td>Default</td>
@@ -80,12 +80,13 @@
 
     <p>
       The <code>character-memory</code> package keeps two capped stores per character:
-      character notes and a user profile. Whatever the store holds is injected every
-      session as a <em>Curated memory</em> block with capacity headers, so the character
-      never has to search for what it must always know; until the character writes its
-      first entry the store is empty and no block appears at all. The snapshot is frozen per launch: writes land on
-      disk immediately and reach the prompt at the next launch, keeping the prompt prefix
-      byte-stable for provider caching.
+      notes to itself and what it knows about the person. Whatever the store holds is
+      injected every session as the character's own notes (<em>What you carry between
+      conversations</em>) with capacity headers, so the character never has to search
+      for what it must always know; until the character writes its first entry the
+      store is empty and no block appears at all. The snapshot is frozen per launch:
+      writes land on disk immediately and reach the prompt at the next launch, keeping
+      the prompt prefix byte-stable for provider caching.
     </p>
 
     <p>
@@ -146,12 +147,25 @@
     <p>
       Curated memory renders in a trusted prompt frame because the runtime owns every step:
       entries are validated and capped at write time, sections are typed and screened at
-      render time, and the <code>trusted_context</code> access that feeds the frame is granted
-      only to bundled packages by catalog provenance — a manifest flag alone never earns it.
-      Automatic per-turn recall from an external provider stays in the untrusted plugin
-      frame under the shared token budget, and recall items without source references are
-      dropped rather than shown. A provider's own search tool answers where every tool
-      answers, in a tool result, which that budget does not cover.
+      render time, and the <code>trusted_context</code> access that feeds the trusted frames
+      is granted only to bundled packages by catalog provenance — a manifest flag alone
+      never earns it. The same grant lets a bundled plugin add a runtime note to the
+      trusted per-turn frame (the day, the character's own inner state, the recall nudge),
+      cap-checked like curated sections and never budgeted. Automatic per-turn recall from
+      an external provider is appended to the current user message inside a
+      <code>&lt;recalled_memory&gt;</code> fence with its own budget and a preamble that
+      calls it memories, not requests; recall items without source references are dropped
+      rather than shown. Every other plugin item rides the same message inside an
+      <code>&lt;untrusted_plugin_context&gt;</code> fence that names it data, not
+      instructions. A provider's own search tool answers where every tool answers, in a
+      tool result, which neither budget covers.
+    </p>
+
+    <p>
+      Every sentence the runtime itself writes into the prompt speaks to the model as
+      the character — its notes, its memories, how it feels, what its tools handed it —
+      and lives in one module, <code>src/role-model/prompt/prompt-text.ts</code>, so the
+      wording can be tuned in one place without touching how the frames are built.
     </p>
 
     <p class="rule">

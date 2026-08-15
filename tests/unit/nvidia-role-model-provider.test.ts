@@ -510,7 +510,7 @@ describe('NVIDIA role-model provider', () => {
     expect(
       tools.find(tool => tool.function.name === 'character_state_patch')
         ?.function.description,
-    ).toContain("the character's internal Character State");
+    ).toContain('yours, never theirs');
     expect(
       tools.find(tool => tool.function.name === 'runtime_plugin_list')?.function
         .parameters.additionalProperties,
