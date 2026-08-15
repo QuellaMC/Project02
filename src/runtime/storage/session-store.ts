@@ -366,6 +366,9 @@ export function createLocalRuntimeSessionStore(
         sessionId: existing.sessionId,
         createdAt: existing.createdAt,
         updatedAt: selectOptions.updatedAt ?? now(),
+        ...(existing.continuedFrom === undefined
+          ? {}
+          : {continuedFrom: existing.continuedFrom}),
       });
 
       sessions.set(existing.sessionId, selected);

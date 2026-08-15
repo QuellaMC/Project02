@@ -17,6 +17,7 @@ export {
   type RuntimePluginFileStoreProvider,
 } from './plugin-file-store/index.ts';
 export {
+  createContinuedDurableChatRuntime,
   createDurableChatRuntime,
   type DurableChatRuntime,
 } from './durable-session-bootstrap.ts';

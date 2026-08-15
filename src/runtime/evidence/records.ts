@@ -121,8 +121,8 @@ export type SessionContinuationSnapshot = RuntimeEventIdentity & {
   readonly summarizer: ContextSummarizer;
 };
 
-type CreateSessionContinuationSnapshotOptions = RuntimeEventIdentity & {
-  readonly sessionId: string;
+/** What a continuation decides before the new session's identity exists. */
+export type SessionContinuationPlan = {
   readonly continuedFrom: {
     readonly sessionId: string;
     readonly lastEventId: string;
@@ -132,6 +132,11 @@ type CreateSessionContinuationSnapshotOptions = RuntimeEventIdentity & {
   readonly carriedTurns: readonly ConversationTurn[];
   readonly summarizer: ContextSummarizer;
 };
+
+type CreateSessionContinuationSnapshotOptions = RuntimeEventIdentity &
+  SessionContinuationPlan & {
+    readonly sessionId: string;
+  };
 
 /** The one validator for writers and the codec alike. */
 export function createSessionContinuationSnapshot(

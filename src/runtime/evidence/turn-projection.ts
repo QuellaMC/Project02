@@ -317,6 +317,12 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
                   ...inputEnvelope.decisionContext.historyWindow.turnEventIds,
                 ]),
               }),
+              ...(inputEnvelope.decisionContext.contextSummary === undefined
+                ? {}
+                : {
+                    contextSummary:
+                      inputEnvelope.decisionContext.contextSummary,
+                  }),
               runtimeNotes: Object.freeze(
                 inputEnvelope.decisionContext.runtimeNotes.map(note =>
                   Object.freeze({

@@ -115,7 +115,10 @@ export {
   renderRoleModelTurnContext,
   type RoleModelTurnContext,
 } from './prompt/render.ts';
-export {createTodayRuntimeNote} from './prompt/prompt-text.ts';
+export {
+  createTodayRuntimeNote,
+  summarizerInstructions,
+} from './prompt/prompt-text.ts';
 export {
   assertConversationHistoryMatchesWindow,
   conversationHistoryWindow,

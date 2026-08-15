@@ -27,6 +27,15 @@ export function requiredDecisionContext(value: unknown): DecisionContext {
     sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
     characterSnapshot: requiredCharacterProfile(value['characterSnapshot']),
     historyWindow: optionalConversationHistoryWindow(value['historyWindow']),
+    ...(value['contextSummary'] === undefined
+      ? {}
+      : {
+          contextSummary: requiredRecordString(
+            value,
+            'contextSummary',
+            'malformed_record',
+          ),
+        }),
     runtimeNotes: requiredDecisionRuntimeNotes(value['runtimeNotes']),
     pluginContextItems: optionalRuntimePluginContextItems(
       value['pluginContextItems'],

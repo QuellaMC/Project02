@@ -12,6 +12,7 @@ import {
   type RoleModelPluginToolDefinition,
 } from '../../src/role-model/index.ts';
 import {
+  contextSummaryHeader,
   curatedContextHeader,
   recalledMemoryFenceTag,
   recalledMemoryPreamble,
@@ -161,6 +162,62 @@ describe('role-model prompt rendering', () => {
       ...conversationTurnToChatMessages(priorTurn),
       {role: 'user', content: 'and now?'},
     ]);
+  });
+
+  it('renders a continued session summary as a stable frame between the curated notes and the runtime notes', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('and now?', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-summary-frame',
+        characterSnapshot: testCharacterProfile,
+        contextSummary: 'Mike is planning a hike; I suggested Ridge Loop.',
+        runtimeNotes: [{id: 'today', text: 'Today is Monday, June 15, 2026.'}],
+        curatedContextSections: [
+          createRuntimePluginCuratedContextSection({
+            pluginId: 'character-memory',
+            id: 'notes',
+            title: 'Notes to yourself',
+            text: 'Prefers tea over coffee.',
+          }),
+        ],
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      userDisplayName: 'Mike',
+    });
+    const kinds = turnContext.frames.map(frame => frame.kind);
+    const summaryFrame = turnContext.frames.find(
+      frame => frame.kind === 'context_summary',
+    );
+
+    expect(kinds.slice(0, 5)).toEqual([
+      'system_protocol',
+      'developer_protocol',
+      'curated_context',
+      'context_summary',
+      'model_only_runtime_context',
+    ]);
+    expect(summaryFrame).toMatchObject({
+      placement: 'own_message',
+      role: 'system',
+      modelOnly: true,
+    });
+    expect(summaryFrame?.content).toBe(
+      `${contextSummaryHeader({userDisplayName: 'Mike'})}\nMike is planning a hike; I suggested Ridge Loop.`,
+    );
+    expect(
+      renderRoleModelTurnContext(
+        createRoleModelInputEnvelope({
+          event: createUserMessageRuntimeEvent('hello', testIdentity()),
+          decisionContext: createDecisionContext({
+            sessionId: 'session-no-summary',
+            characterSnapshot: testCharacterProfile,
+          }),
+          pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+        }),
+      ).frames.map(frame => frame.kind),
+    ).not.toContain('context_summary');
   });
 
   it('omits the curated context frame when no sections exist', () => {

@@ -16,6 +16,7 @@ import {
   type RoleModelUserChatMessage,
 } from '../api/chat-wire.ts';
 import {
+  contextSummaryHeader,
   curatedContextHeader,
   recalledMemoryFenceTag,
   recalledMemoryPreamble,
@@ -33,6 +34,7 @@ type RoleModelPromptFrameKind =
   | 'system_protocol'
   | 'developer_protocol'
   | 'curated_context'
+  | 'context_summary'
   | 'model_only_runtime_context'
   | 'conversation_history'
   | 'current_user_message'
@@ -217,6 +219,23 @@ function createRoleModelPromptFrames(
       ownFrame(
         'curated_context',
         Object.freeze({role: modelOnlyRole, content: curatedContent}),
+        true,
+      ),
+    );
+  }
+
+  // Between the curated snapshot and the per-turn notes: a continued session's
+  // summary changes only when a session begins, so it belongs to the stable
+  // prefix, ahead of what changes every turn.
+  const contextSummary = inputEnvelope.decisionContext.contextSummary;
+  if (contextSummary !== undefined) {
+    frames.push(
+      ownFrame(
+        'context_summary',
+        Object.freeze({
+          role: modelOnlyRole,
+          content: `${contextSummaryHeader(addressee)}\n${contextSummary}`,
+        }),
         true,
       ),
     );
