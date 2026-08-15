@@ -150,8 +150,14 @@ describe('local runtime session store', () => {
     await writeFile(rootLog, '{"later": true}\n');
     expect((await store.newestSession())?.sessionId).toBe(root.sessionId);
 
-    // A session that never received a record can be discarded; one holding
+    // A session that never received a record can be discarded — a torn tail
+    // from a write that never completed is not a record; one holding
     // evidence cannot.
+    await writeFile(
+      createLocalRuntimeSessionPaths({storeRoot, sessionId: third.sessionId})
+        .rawEventsPath,
+      '{"torn": tru',
+    );
     await store.discardEmptySession(third.sessionId);
     expect((await store.listSessions()).map(item => item.sessionId)).toEqual([
       root.sessionId,

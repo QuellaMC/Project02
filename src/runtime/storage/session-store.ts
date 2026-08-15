@@ -1,4 +1,4 @@
-import {join} from 'node:path';
+import {basename, join} from 'node:path';
 import {
   listDirectoryEntries,
   listDirectoryNamesSync,
@@ -6,6 +6,7 @@ import {
   readTextFile,
   readTextFileSync,
   removeDirectory,
+  removePathSync,
   statPathNumericSync,
   type Dirent,
 } from '../../shared/file-system.ts';
@@ -28,6 +29,7 @@ import {
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeSessionId,
   type LocalRuntimeSessionMetadata,
+  type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
@@ -1037,12 +1039,12 @@ async function discardEmptySessionFromCatalog(
       return;
     }
 
-    const sessionRoot = createLocalRuntimeSessionPaths({
+    const paths = createLocalRuntimeSessionPaths({
       storeRoot: layout.storeRoot,
       sessionId,
-    }).sessionRoot;
+    });
 
-    if (localRuntimeSessionDirectoryHasDurableEvidence(sessionRoot)) {
+    if (!localRuntimeSessionIsEmpty(paths)) {
       throw new LocalRuntimeSessionStoreError(
         'session_not_empty',
         `Local runtime session "${sessionId}" holds evidence and cannot be discarded.`,
@@ -1051,10 +1053,44 @@ async function discardEmptySessionFromCatalog(
 
     sessions.delete(sessionId);
     rewriteSessionCatalog(layout, sessions);
-    // An empty directory left behind reads as an interrupted start, which
-    // the catalog already tolerates.
-    await removeDirectory(sessionRoot);
+    // A torn opening record goes with the entry; an empty directory left
+    // behind reads as an interrupted start, which the catalog tolerates.
+    removePathSync(paths.rawEventsPath, {force: true});
+    await removeDirectory(paths.sessionRoot);
   });
+}
+
+/**
+ * Empty means no committed record: a raw-events file whose only content is
+ * the torn tail of a write that never completed holds nothing the reader
+ * would return, and nothing else may live in the directory.
+ */
+function localRuntimeSessionIsEmpty(paths: LocalRuntimeSessionPaths): boolean {
+  let entries: readonly string[];
+
+  try {
+    entries = listDirectoryNamesSync(paths.sessionRoot);
+  } catch (error: unknown) {
+    if (isNodeErrorWithCode(error, 'ENOENT')) {
+      return true;
+    }
+
+    throw error;
+  }
+
+  const meaningful = entries.filter(
+    name => !isOperatingSystemMetadataEntry(name),
+  );
+
+  if (meaningful.length === 0) {
+    return true;
+  }
+
+  return (
+    meaningful.length === 1 &&
+    meaningful[0] === basename(paths.rawEventsPath) &&
+    readUndamagedJsonLines(readTextFileSync(paths.rawEventsPath)).length === 0
+  );
 }
 
 /**

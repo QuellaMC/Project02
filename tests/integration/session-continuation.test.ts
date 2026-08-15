@@ -258,6 +258,7 @@ describe('session continuation', () => {
     const runtime = await createDurableChatRuntime({
       homeRoot,
       character: testCharacterProfile,
+      userDisplayName: 'Mike',
       newSessionId: 'first',
     });
     const adapter = replyAdapter({});
@@ -283,11 +284,7 @@ describe('session continuation', () => {
           plugins: [probe],
           enabledPluginIds: [probe.manifest.id],
         }),
-        continueSession: durableSessionContinuation({
-          homeRoot,
-          character: testCharacterProfile,
-          userDisplayName: undefined,
-        }),
+        continueSession: durableSessionContinuation({homeRoot}),
         roleModelAdapter: adapter,
         contextWindowTokens,
         stdout: collect(() => {}),
@@ -300,6 +297,9 @@ describe('session continuation', () => {
 
     try {
       expect(next?.session.id).toBe('first.2');
+      // The next segment keeps the identities the conversation really has.
+      expect(next?.session.userSpeaker.displayName).toBe('Mike');
+      expect(next?.session.character.id).toBe(testCharacterProfile.id);
       // The old session's end evidence is the last log write anywhere, yet a
       // flagless launch must resume the new session, not the closed one.
       expect(endedSessions).toEqual(['first']);

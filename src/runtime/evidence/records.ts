@@ -171,6 +171,17 @@ export function createSessionContinuationSnapshot(
     );
   }
 
+  if (
+    options.summarizer.status === 'model'
+      ? options.summarizer.provider.name.length === 0 ||
+        options.summarizer.provider.model?.length === 0
+      : options.summarizer.reason.length === 0
+  ) {
+    throw new TypeError(
+      'Session continuation must name its summariser, or say why there was none.',
+    );
+  }
+
   return Object.freeze({
     eventId: options.eventId,
     traceId: options.traceId,

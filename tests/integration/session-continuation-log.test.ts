@@ -62,6 +62,28 @@ function continuation(sessionId: string) {
 }
 
 describe('session continuation records', () => {
+  it('refuses a snapshot whose summariser is unnamed, so what is written can always be read back', () => {
+    for (const summarizer of [
+      {status: 'model', provider: {name: ''}},
+      {status: 'model', provider: {name: 'nvidia', model: ''}},
+      {status: 'fallback', reason: ''},
+    ] as const) {
+      expect(() =>
+        createSessionContinuationSnapshot({
+          eventId: 'evt_continued',
+          traceId: 'trace_continued',
+          createdAt: '2026-06-15T00:05:00.000Z',
+          sessionId: 'first.2',
+          continuedFrom: {sessionId: 'first', lastEventId: 'evt_carried'},
+          summary: 'Enough.',
+          summarizedTurnCount: 1,
+          carriedTurns: [],
+          summarizer,
+        }),
+      ).toThrow(/summariser/u);
+    }
+  });
+
   it('opens a session as its first record and lets ordinary turns follow', () => {
     const logStore = createRuntimeLogStore({
       sessionId: 'first.2',

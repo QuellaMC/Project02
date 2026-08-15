@@ -47,7 +47,10 @@ import {
   createProject02HomeLayout,
   decodeStorageSchemaMarker,
 } from '../../src/runtime/storage/layout-contract.ts';
-import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {
+  acquireLocalRuntimeSessionWriterLease,
+  createLocalRuntimeSessionStore,
+} from '../../src/runtime/storage/session-store.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {nvidiaApiKeyEnvName} from '../../src/role-model/providers/nvidia.ts';
 import {runChatCli, runChatCliFromArgs} from '../../src/cli/chat/main.ts';
@@ -680,9 +683,30 @@ describe('chat CLI provider selection', () => {
     };
     let stdout = '';
     const endedSessions: string[] = [];
-    const sessionEndPlugin = createSessionEndPlugin(context => {
-      endedSessions.push(context.sessionId);
-    });
+    const rootLeaseHeldWhen: string[] = [];
+    const sessionEndPlugin = createSessionEndPlugin(
+      context => {
+        endedSessions.push(context.sessionId);
+      },
+      {
+        // From inside a later turn, another window's view: is the closed root
+        // segment's writer lease already free while this chat goes on?
+        async beforeRoleModelCall(context) {
+          try {
+            const lease = await acquireLocalRuntimeSessionWriterLease({
+              storeRoot: characterDataDirPath(storeRoot, 'mira'),
+              sessionId: 'long-talk',
+            });
+
+            await lease.release();
+          } catch {
+            rootLeaseHeldWhen.push(context.sessionId);
+          }
+
+          return {contextItems: [], evidence: []};
+        },
+      },
+    );
 
     // ~21 estimated tokens per turn: a 100-token window replays two turns,
     // so the third completed turn overflows it and the talk continues in a
@@ -697,7 +721,7 @@ describe('chat CLI provider selection', () => {
     const exitCode = await runChatCliFromArgs(
       ['--store', storeRoot, '--new-session', 'long-talk'],
       {
-        stdin: Readable.from(['one\n', 'two\n', 'three\n']),
+        stdin: Readable.from(['one\n', 'two\n', 'three\n', 'four\n']),
         stdout: collect(chunk => {
           stdout += chunk;
         }),
@@ -720,8 +744,10 @@ describe('chat CLI provider selection', () => {
       'Mira: noted\n[context] Continuing in session long-talk.2: 2 earlier turns condensed into a summary.\nYou: ',
     );
     // Each segment is closed under its own name: the first at continuation,
-    // the second at exit.
+    // the second at exit. The root's lease is held only while it is the
+    // active segment: the fourth turn, already in long-talk.2, finds it free.
     expect(endedSessions).toEqual(['long-talk', 'long-talk.2']);
+    expect(rootLeaseHeldWhen).toEqual(['long-talk', 'long-talk', 'long-talk']);
     expect(
       (
         await createLocalRuntimeSessionStore({

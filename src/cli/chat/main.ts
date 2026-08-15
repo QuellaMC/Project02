@@ -23,6 +23,11 @@ import {
   type ContinueChatSession,
 } from './session-continuation.ts';
 import {
+  writeNonCommittedTopLevelText,
+  writeRuntimeProgress,
+  writeTraceSummary,
+} from './turn-output.ts';
+import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
   type LocalRuntimeTurnProgressEvent,
@@ -106,6 +111,8 @@ type ChatCliOptions = {
   readonly contextWindowTokens?: number;
   /** Opens the session that continues the current one once its history outgrows the window. */
   readonly continueSession?: ContinueChatSession;
+  /** Frees the first session's writer lease when the chat leaves it, not only at exit. */
+  readonly releaseSession?: () => Promise<void>;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
@@ -482,8 +489,6 @@ async function runChatCliAfterConfiguredHost(options: {
   // one it was in at the end, which every continuation reports here.
   const continueSession = durableSessionContinuation({
     homeRoot: options.runtimeArgs.storeRoot,
-    character: options.characterProfile,
-    userDisplayName: options.userDisplayName,
   });
   let activeSession = durableRuntime.session;
 
@@ -502,12 +507,13 @@ async function runChatCliAfterConfiguredHost(options: {
       ...(options.contextWindowTokens === undefined
         ? {}
         : {contextWindowTokens: options.contextWindowTokens}),
-      async continueSession(plan) {
-        const next = await continueSession(plan);
+      async continueSession(plan, current) {
+        const next = await continueSession(plan, current);
 
         activeSession = next.session;
         return next;
       },
+      releaseSession: () => durableRuntime.writerLease.release(),
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
@@ -637,6 +643,10 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
     return await runChatCliWithActiveWriter({
       ...options,
       logStore: activeLogStore,
+      async releaseSession() {
+        await writerLease.release();
+        await options.releaseSession?.();
+      },
     });
   } finally {
     await writerLease.release();
@@ -663,8 +673,7 @@ async function runChatCliWithActiveWriter(
         boundCharacter: session.character,
         boundUserSpeaker: session.userSpeaker,
       }),
-    // The first session's writer lease belongs to whoever opened it.
-    release: () => Promise.resolve(),
+    release: options.releaseSession ?? (() => Promise.resolve()),
   };
   const pluginHost = options.pluginHost;
   const lines = createInterface({
@@ -992,28 +1001,6 @@ function mapRuntimeResult(
   };
 }
 
-function writeRuntimeProgress(
-  stdout: NodeJS.WritableStream,
-  session: ConversationSession,
-  progressEvent: LocalRuntimeTurnProgressEvent,
-): void {
-  if (progressEvent.kind === 'visible_reply') {
-    stdout.write(`${session.character.displayName}: ${progressEvent.text}\n`);
-    return;
-  }
-
-  if (progressEvent.kind === 'tool_calls_requested') {
-    stdout.write(
-      `[tools] Model requested ${String(progressEvent.toolNames.length)} ${progressEvent.toolNames.length === 1 ? 'tool call' : 'tool calls'}: ${progressEvent.toolNames.join(', ')}\n`,
-    );
-    return;
-  }
-
-  stdout.write(
-    `[tools] ${progressEvent.toolName} ${progressEvent.status === 'accepted' ? 'completed' : 'rejected'}\n`,
-  );
-}
-
 function nonCommittedTopLevelTextOption(rawEvent: RawEventLogRecord): {
   readonly nonCommittedTopLevelText?: string;
 } {
@@ -1045,20 +1032,6 @@ function modelTextVisibilityCommand(
   }
 
   return undefined;
-}
-
-function writeNonCommittedTopLevelText(
-  stdout: NodeJS.WritableStream,
-  text: string,
-): void {
-  stdout.write('[model top-level text | not committed]\n');
-  stdout.write(text);
-
-  if (!text.endsWith('\n')) {
-    stdout.write('\n');
-  }
-
-  stdout.write('[/model top-level text]\n');
 }
 
 function mapInputRejectionResult(
@@ -1097,13 +1070,6 @@ function mapUnexpectedRuntimeFailureResult(
       rawEvents,
     ),
   };
-}
-
-function writeTraceSummary(
-  stderr: NodeJS.WritableStream,
-  summary: ChatTraceSummary,
-): void {
-  stderr.write(`${JSON.stringify(summary)}\n`);
 }
 
 if (isMainModule(import.meta.url)) {

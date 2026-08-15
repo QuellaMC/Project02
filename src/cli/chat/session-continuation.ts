@@ -4,7 +4,6 @@ import {
   createContinuedDurableChatRuntime,
   type DurableChatRuntime,
 } from '../../runtime/storage/index.ts';
-import type {CharacterProfile} from '../../core/index.ts';
 import {
   planSessionContinuation,
   type SessionContinuationPlan,
@@ -20,8 +19,10 @@ export type ActiveChatSession = {
   release(): Promise<void>;
 };
 
+/** Opens the session that continues `current`, keeping its character and speaker. */
 export type ContinueChatSession = (
   plan: SessionContinuationPlan,
+  current: ConversationSession,
 ) => Promise<DurableChatRuntime>;
 
 /** Naming a closed segment opens it, but the person should know it went on. */
@@ -40,19 +41,19 @@ export function writeContinuedSessionNotice(
   }
 }
 
-/** Continues into the same home, character, and speaker the chat opened with. */
+/**
+ * Continues in the same home with the identities the current session really
+ * has: a reopened session keeps its recorded character and speaker even when
+ * the configuration has since changed, and its continuation must too.
+ */
 export function durableSessionContinuation(options: {
   readonly homeRoot: string | undefined;
-  readonly character: CharacterProfile;
-  readonly userDisplayName: string | undefined;
 }): ContinueChatSession {
-  return plan =>
+  return (plan, current) =>
     createContinuedDurableChatRuntime({
       ...(options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot}),
-      character: options.character,
-      ...(options.userDisplayName === undefined
-        ? {}
-        : {userDisplayName: options.userDisplayName}),
+      character: current.character,
+      userDisplayName: current.userSpeaker.displayName,
       plan,
     });
 }
@@ -98,7 +99,7 @@ export async function continueChatSessionIfNeeded(options: {
   let next: DurableChatRuntime;
 
   try {
-    next = await options.continueSession(plan);
+    next = await options.continueSession(plan, session);
   } catch (error: unknown) {
     options.stdout.write(
       `[context] Could not continue in a new session, staying in ${session.id}: ${
