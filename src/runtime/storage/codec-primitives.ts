@@ -33,6 +33,84 @@ export function optionalRecordString(
   return requiredNonEmptyString(value, key, code);
 }
 
+export function requiredRecordStringAllowingEmpty(
+  record: Record<string, unknown>,
+  key: string,
+  code: LocalRuntimeStorageContractErrorCode,
+): string {
+  const value = record[key];
+
+  if (typeof value !== 'string') {
+    throw new LocalRuntimeStorageContractError(
+      code,
+      `Stored local runtime field "${key}" must be a string.`,
+    );
+  }
+
+  return value;
+}
+
+export function optionalRecordStringAllowingEmpty(
+  record: Record<string, unknown>,
+  key: string,
+  code: LocalRuntimeStorageContractErrorCode,
+): string | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requiredRecordStringAllowingEmpty(record, key, code);
+}
+
+export function requiredRecordNumber(
+  record: Record<string, unknown>,
+  key: string,
+  code: LocalRuntimeStorageContractErrorCode,
+): number {
+  const value = record[key];
+
+  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
+    throw new LocalRuntimeStorageContractError(
+      code,
+      `Stored local runtime field "${key}" must be a positive integer.`,
+    );
+  }
+
+  return value;
+}
+
+export function optionalRecordNumber(
+  record: Record<string, unknown>,
+  key: string,
+): number | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requiredRecordNumber(record, key, 'malformed_record');
+}
+
+export function optionalRecordBoolean(
+  record: Record<string, unknown>,
+  key: string,
+): boolean | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (typeof value !== 'boolean') {
+    throwMalformedRecord(key);
+  }
+
+  return value;
+}
+
 export function requiredRuntimeEventIdentity(
   record: Record<string, unknown>,
 ): RuntimeEventIdentity {
