@@ -1300,7 +1300,7 @@ function createNvidiaTestInputEnvelope(
           text: 'previous answer',
         },
       ],
-      runtimeNotes: ['Use concise replies.'],
+      runtimeNotes: [{id: 'concise', text: 'Use concise replies.'}],
       pluginContextItems: [
         createRuntimePluginContextItem({
           pluginId: 'character-state',

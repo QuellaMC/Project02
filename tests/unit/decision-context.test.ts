@@ -2,6 +2,7 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {buildUserTurnDecisionContext} from '../../src/role-model/api/decision-context.ts';
+import {createDecisionContext} from '../../src/role-model/index.ts';
 import {
   createConversationSession,
   defaultRecentVisibleMessageLimit,
@@ -17,25 +18,19 @@ type MutableVisibleMessage = {
 };
 
 describe('user-turn decision context builder', () => {
-  it('builds an immutable fresh-session context with local identity and runtime notes', () => {
+  it('builds an immutable fresh-session context with local identity', () => {
     const session = createConversationSession({
       character: testCharacterProfile,
       id: 'session-fresh',
     });
-    const runtimeNotes = ['local USER_MESSAGE turn', 'recent visible only'];
 
-    const context = buildUserTurnDecisionContext({
-      session,
-      runtimeNotes,
-    });
-
-    runtimeNotes.push('mutated after build');
+    const context = buildUserTurnDecisionContext({session});
 
     expect(context).toEqual({
       sessionId: 'session-fresh',
       characterSnapshot: testCharacterProfile,
       recentVisibleMessages: [],
-      runtimeNotes: ['local USER_MESSAGE turn', 'recent visible only'],
+      runtimeNotes: [],
       pluginContextItems: [],
       curatedContextSections: [],
     });
@@ -83,7 +78,6 @@ describe('user-turn decision context builder', () => {
     });
     const optionsWithCurrentMessage = {
       session,
-      runtimeNotes: ['top-level event envelope owns the current message'],
       currentUserMessage: 'do not put me in DecisionContext',
     };
 
@@ -99,21 +93,15 @@ describe('user-turn decision context builder', () => {
 
   it('returns nested snapshots that resist caller mutation', () => {
     const seedMessages = createVisibleTranscriptSeed('session-snapshots', 1);
-    const runtimeNotes = ['immutable note'];
     const session = createConversationSession({
       character: testCharacterProfile,
       id: 'session-snapshots',
       visibleTranscript: seedMessages,
     });
 
-    const context = buildUserTurnDecisionContext({
-      session,
-      runtimeNotes,
-    });
+    const context = buildUserTurnDecisionContext({session});
     const firstRecentMessage = context.recentVisibleMessages[0];
     const firstSeedMessage = seedMessages[0];
-
-    runtimeNotes[0] = 'mutated note';
 
     expect(firstRecentMessage).toBeDefined();
     expect(firstSeedMessage).toBeDefined();
@@ -144,7 +132,6 @@ describe('user-turn decision context builder', () => {
         text: 'reply 1',
       },
     ]);
-    expect(context.runtimeNotes).toEqual(['immutable note']);
     expect(Object.isFrozen(firstRecentMessage)).toBe(true);
     expect(() => {
       Object.defineProperty(firstRecentMessage, 'text', {
@@ -162,6 +149,55 @@ describe('user-turn decision context builder', () => {
         } satisfies VisibleMessage,
       ]);
     }).toThrow(TypeError);
+  });
+});
+
+describe('decision context runtime notes', () => {
+  it('freezes structured notes and keeps the plugin attribution', () => {
+    const notes = [
+      {id: 'today', text: 'Today is Saturday, August 15, 2026.'},
+      {id: 'current', text: 'mood=steady', pluginId: 'character-state'},
+    ];
+
+    const context = createDecisionContext({
+      sessionId: 'session-notes',
+      characterSnapshot: testCharacterProfile,
+      runtimeNotes: notes,
+    });
+
+    notes[0] = {id: 'today', text: 'mutated'};
+
+    expect(context.runtimeNotes).toEqual([
+      {id: 'today', text: 'Today is Saturday, August 15, 2026.'},
+      {id: 'current', text: 'mood=steady', pluginId: 'character-state'},
+    ]);
+    expect(Object.isFrozen(context.runtimeNotes[0])).toBe(true);
+  });
+
+  it('rejects notes with empty text or malformed identifiers', () => {
+    const base = {
+      sessionId: 'session-notes',
+      characterSnapshot: testCharacterProfile,
+    };
+
+    expect(() =>
+      createDecisionContext({
+        ...base,
+        runtimeNotes: [{id: 'today', text: '   '}],
+      }),
+    ).toThrow('Decision runtime note text must be non-empty.');
+    expect(() =>
+      createDecisionContext({
+        ...base,
+        runtimeNotes: [{id: '9 lives', text: 'note'}],
+      }),
+    ).toThrow('runtime note id');
+    expect(() =>
+      createDecisionContext({
+        ...base,
+        runtimeNotes: [{id: 'note', text: 'note', pluginId: 'bad plugin'}],
+      }),
+    ).toThrow('runtime note pluginId');
   });
 });
 

@@ -421,12 +421,13 @@ function createRoleModelPromptFragments(
   inputEnvelope: RoleModelInputEnvelope,
 ): readonly RoleModelPromptFragment[] {
   return Object.freeze([
-    ...inputEnvelope.decisionContext.runtimeNotes.map((text, index) =>
+    ...inputEnvelope.decisionContext.runtimeNotes.map(note =>
       Object.freeze({
-        id: `runtime-note-${String(index + 1)}`,
+        id: `runtime-note-${note.pluginId ?? 'runtime'}-${note.id}`,
+        ...(note.pluginId === undefined ? {} : {pluginId: note.pluginId}),
         kind: 'runtime_note',
         slot: 'developer_context',
-        text,
+        text: note.text,
         sourceReferences: Object.freeze([]),
         redactionLabels: Object.freeze([]),
       } satisfies RoleModelPromptFragment),

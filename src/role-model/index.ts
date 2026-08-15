@@ -10,6 +10,7 @@ export {
   type CreateRoleModelInputEnvelopeOptions,
   type CreateRoleModelIOSnapshotOptions,
   type DecisionContext,
+  type DecisionRuntimeNote,
   isRoleModelMalformedAdapterRawOutputDetails,
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
