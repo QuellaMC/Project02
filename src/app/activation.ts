@@ -200,14 +200,24 @@ export function discoverRuntimePluginCatalog(options: {
       ? {}
       : {factories: options.factoryOverrides}),
   });
+  const overriddenPluginIds = new Set(
+    Object.values(options.factoryOverrides ?? {}).map(
+      definition => definition.manifest.id,
+    ),
+  );
 
   return Object.freeze({
     storeRoot: options.storeRoot,
     catalogEntries: composition.catalogEntries,
     defaultEnabledPluginIds: composition.defaultEnabledPluginIds,
+    // Provenance describes the entry that won the catalog: a factory
+    // override displaces the discovered package, so the displaced
+    // package's origin must not travel with the override.
     packageProvenanceByPluginId: Object.freeze(
       Object.fromEntries(
-        ordinaryPackages.map(item => [item.manifest.id, item.provenance]),
+        ordinaryPackages
+          .filter(item => !overriddenPluginIds.has(item.manifest.id))
+          .map(item => [item.manifest.id, item.provenance]),
       ),
     ),
     packageDiagnostics: discovery.diagnostics,
@@ -307,6 +317,9 @@ export function prepareConfiguredProject02PluginActivation(options: {
     // The enablement ladder judges the merged view, not just the global one.
     effectiveConfig: layeredConfig.effective,
     catalogDiagnostics: composition.diagnostics,
+    curatedContextEligiblePluginIds: curatedContextEligiblePluginIds(
+      composition.packageProvenanceByPluginId,
+    ),
   });
   const globalMutationBase = createRuntimeConfigAuthoredSnapshot(
     options.loadedConfig,
@@ -405,6 +418,11 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       host: createRuntimePluginHost({
         plugins,
         enabledPluginIds: activationPlan.activation.enabledPluginIds,
+        curatedContextEligiblePluginIds: [
+          ...curatedContextEligiblePluginIds(
+            activationPlan.packageProvenanceByPluginId,
+          ),
+        ],
         storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
         fileStore: configuredRuntimePluginFileStoreProvider,
         pluginInventoryState: runtimePluginInventoryStateForInvalidConfig(
@@ -441,6 +459,11 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       plugins,
       lifecycleTargets: instantiated.lifecycleTargets,
       enabledPluginIds: activationPlan.activation.enabledPluginIds,
+      curatedContextEligiblePluginIds: [
+        ...curatedContextEligiblePluginIds(
+          activationPlan.packageProvenanceByPluginId,
+        ),
+      ],
       storeRoot: activationPlan.runtimeLocation.characterScope.dataRoot,
       fileStore: configuredRuntimePluginFileStoreProvider,
       pluginConfigControl: activationPlan.pluginConfigControl,
@@ -472,6 +495,19 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
     pluginConfigControl: activationPlan.pluginConfigControl,
     runtimeLocation: activationPlan.runtimeLocation,
   } satisfies Project02ConfiguredPluginHost);
+}
+
+/** Provenance is the gate: only bundled packages may hold curated_context. */
+function curatedContextEligiblePluginIds(
+  packageProvenanceByPluginId: Readonly<
+    Record<string, RuntimePluginPackageProvenance>
+  >,
+): ReadonlySet<string> {
+  return new Set(
+    Object.entries(packageProvenanceByPluginId)
+      .filter(([, provenance]) => provenance === 'bundled')
+      .map(([pluginId]) => pluginId),
+  );
 }
 
 function assertCharacterRuntimeInitialized(
@@ -509,6 +545,7 @@ export function resolveRuntimePluginActivation(options: {
   readonly catalogDiagnostics?: readonly RuntimeConfigDiagnostic[];
   readonly resolvedConfig: ResolvedProject02RuntimeConfig;
   readonly effectiveConfig: EffectiveProject02RuntimeConfigSnapshot;
+  readonly curatedContextEligiblePluginIds?: ReadonlySet<string>;
 }): RuntimePluginActivationResult {
   const {pluginManifests} = options;
   const config = options.effectiveConfig.config;
@@ -587,11 +624,29 @@ export function resolveRuntimePluginActivation(options: {
         activationConfigErrors &&
         !isRuntimePluginInventoryRecoveryManifest(manifest),
     });
+    const curatedContextEligible =
+      options.curatedContextEligiblePluginIds?.has(manifest.id) === true;
     const access = runtimePluginAccessSnapshot({
       requestedAccess: manifest.requestedAccess,
       enabled: decision.enabled,
       fieldPrefix: manifest.id,
+      curatedContextEligible,
     });
+
+    if (
+      !curatedContextEligible &&
+      Object.hasOwn(access.requestedAccess, 'curated_context')
+    ) {
+      diagnostics.push(
+        createRuntimeConfigDiagnostic(
+          'warning',
+          'curated_context_not_first_party',
+          `Plugin "${manifest.id}" requests curated_context access, which only bundled first-party packages can hold.`,
+          `plugins.${manifest.id}`,
+          {pluginId: manifest.id},
+        ),
+      );
+    }
 
     if (decision.enabled) {
       enabledPluginIds.push(manifest.id);

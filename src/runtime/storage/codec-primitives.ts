@@ -148,3 +148,28 @@ export function throwMalformedRecord(field: string): never {
     `Stored local runtime field "${field}" is malformed.`,
   );
 }
+
+export function requiredArray(value: unknown, key: string): readonly unknown[] {
+  if (!Array.isArray(value)) {
+    throwMalformedRecord(key);
+  }
+
+  return value;
+}
+
+export function requiredStringArray(
+  value: unknown,
+  key: string,
+): readonly string[] {
+  const strings: string[] = [];
+
+  for (const item of requiredArray(value, key)) {
+    if (typeof item !== 'string') {
+      throwMalformedRecord(key);
+    }
+
+    strings.push(item);
+  }
+
+  return Object.freeze(strings);
+}

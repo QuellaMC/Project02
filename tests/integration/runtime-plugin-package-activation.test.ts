@@ -98,6 +98,48 @@ describe('configured runtime plugin package activation', () => {
     ).toBe(false);
   });
 
+  it('drops bundled provenance when a factory override displaces the package', () => {
+    const storeRoot = createTestTempRoot('project02-package-override-');
+    const manifest = createRuntimePluginManifest({
+      ...testPackageManifest(characterStatePluginId),
+      requestedAccess: {curated_context: 'write'},
+    });
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const configured = prepareConfiguredProject02PluginActivation({
+      ...runtimeConfigSnapshotForTest({
+        loadedConfig: loadRuntimeConfigForTest({storeRoot}),
+        factories: {
+          [characterStatePluginId]: {
+            manifest,
+            create: () => {
+              throw new Error('override factory must not construct here');
+            },
+          },
+        },
+      }),
+    });
+    const overridden = configured.activation.plugins.find(
+      plugin => plugin.pluginId === characterStatePluginId,
+    );
+
+    // The override wins the catalog entry, so the displaced bundled
+    // package's provenance must not grant it the trusted frame.
+    expect(
+      configured.packageProvenanceByPluginId[characterStatePluginId],
+    ).toBeUndefined();
+    expect(overridden?.grantedAccess).not.toMatchObject({
+      curated_context: 'write',
+    });
+    expect(configured.activation.diagnostics).toContainEqual(
+      expect.objectContaining({
+        code: 'curated_context_not_first_party',
+        pluginId: characterStatePluginId,
+      }),
+    );
+  });
+
   it('keeps an operator package disabled without evaluating its entry', async () => {
     const storeRoot = createTestTempRoot('project02-package-disabled-');
     const manifest = testPackageManifest('operator.cold', {

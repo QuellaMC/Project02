@@ -76,20 +76,22 @@ export {
   runRuntimePluginShutdownHooksForTargets,
   type RuntimePluginSessionEndOptions,
   type CreateRuntimePluginHostOptions,
-  type RuntimePluginBeforeRoleModelCallCompletedResult,
   type RuntimePluginHealthHostResult,
   type RuntimePluginHookHostResult,
   type RuntimePluginHost,
 } from './host/host.ts';
+export {type RuntimePluginBeforeRoleModelCallCompletedResult} from './host/before-role-model-call.ts';
 export {
   runtimePluginLifecycleTarget,
   type RuntimePluginLifecycleTarget,
 } from './host/instance-lifecycle.ts';
 export {createMemoryProviderRuntimePlugin} from './builtin/memory-provider/provider-plugin.ts';
 export {memorySearchTool} from './builtin/memory-provider/tools.ts';
+export {createRuntimePluginCuratedContextSection} from './api/curated-context.ts';
 export type {
   RuntimePlugin,
   RuntimePluginContext,
+  RuntimePluginCuratedContextSection,
   RuntimePluginFileStore,
   RuntimePluginJsonValue,
   RuntimePluginManifest,

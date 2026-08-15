@@ -11,7 +11,10 @@ import {
   type RoleModelSystemChatMessage,
   type RoleModelUserChatMessage,
 } from '../../src/role-model/index.ts';
-import {createRuntimePluginContextItem} from '../../src/plugins/api/index.ts';
+import {
+  createRuntimePluginContextItem,
+  createRuntimePluginCuratedContextSection,
+} from '../../src/plugins/api/index.ts';
 import {runtimePluginListToolName} from '../../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
@@ -19,6 +22,71 @@ import {
 } from '../../src/core/index.ts';
 
 describe('role-model prompt rendering', () => {
+  it('renders curated context as a stable trusted frame before the runtime context', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-curated-context',
+        characterSnapshot: testCharacterProfile,
+        runtimeNotes: ['per-turn note'],
+        curatedContextSections: [
+          createRuntimePluginCuratedContextSection({
+            pluginId: 'character-memory',
+            id: 'notes',
+            title: 'Character notes',
+            text: '-- marker line stays data\nPrefers tea over coffee.',
+            capChars: 2200,
+            usedChars: 1474,
+          }),
+          createRuntimePluginCuratedContextSection({
+            pluginId: 'character-memory',
+            id: 'user-profile',
+            title: 'User profile',
+            text: 'Reads TypeScript fluently.',
+          }),
+        ],
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope);
+    const frameKinds = turnContext.frames.map(frame => frame.kind);
+    const curatedFrame = turnContext.frames.find(
+      frame => frame.kind === 'curated_context',
+    );
+    const content = curatedFrame?.content ?? '';
+
+    expect(frameKinds.indexOf('curated_context')).toBeGreaterThan(
+      frameKinds.indexOf('developer_protocol'),
+    );
+    expect(frameKinds.indexOf('curated_context')).toBeLessThan(
+      frameKinds.indexOf('model_only_runtime_context'),
+    );
+    expect(curatedFrame).toMatchObject({role: 'system', modelOnly: true});
+    expect(content).toContain(
+      'Curated memory (assistant-maintained durable notes; model-only, not user input).',
+    );
+    expect(content).toContain('-- Character notes [67% - 1474/2200 chars] --');
+    expect(content).toContain('-- User profile --');
+    expect(content).toContain(' -- marker line stays data');
+    expect(content).toContain('Prefers tea over coffee.');
+  });
+
+  it('omits the curated context frame when no sections exist', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('hello', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-no-curated-context',
+        characterSnapshot: testCharacterProfile,
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const frameKinds = renderRoleModelTurnContext(inputEnvelope).frames.map(
+      frame => frame.kind,
+    );
+
+    expect(frameKinds).not.toContain('curated_context');
+  });
+
   it('keeps current user text exact and renders runtime context as model-only context', () => {
     const inputEnvelope = createRoleModelInputEnvelope({
       event: createUserMessageRuntimeEvent('hello', testIdentity()),

@@ -37,6 +37,7 @@ export const runtimePluginAccessNameValues = [
   'plugin_database',
   'turn_context',
   'model_input',
+  'curated_context',
 ] as const;
 
 export const runtimePluginAccessLevelValues = [
