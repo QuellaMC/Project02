@@ -4,6 +4,7 @@ import {
   createRuntimePluginToolInvocationSnapshot,
   runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginContext,
+  type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
@@ -64,6 +65,8 @@ type PreparedRuntimeTurn = {
   readonly runtimePluginContext: RuntimePluginContext;
   readonly pluginHost: RuntimePluginHost;
   readonly beforeRoleModelCallResult: RuntimePluginBeforeRoleModelCallCompletedResult;
+  /** Every plugin item the model was shown this turn, whichever frame it rendered in. */
+  readonly pluginContextItems: readonly RuntimePluginContextItem[];
 };
 
 type PrepareRuntimeTurnResult =
@@ -183,6 +186,10 @@ async function prepareRuntimeTurn(
       runtimePluginContext,
       pluginHost,
       beforeRoleModelCallResult,
+      pluginContextItems: [
+        ...beforeRoleModelCallResult.runtimeNotes,
+        ...beforeRoleModelCallResult.contextItems,
+      ],
     },
   };
 }
@@ -376,7 +383,7 @@ async function validateAndCommitRuntimeModelResult(
     state,
     decisionContext: prepared.decisionContext,
     pluginHost: prepared.pluginHost,
-    contextItems: prepared.beforeRoleModelCallResult.contextItems,
+    contextItems: prepared.pluginContextItems,
     roleModelResult,
     roleModelPluginEvidence,
     roleModelPluginToolInvocations,
@@ -404,7 +411,7 @@ async function rejectRoleModelResult(options: {
     roleModelResult.rejection,
     {...options.roleModelEvidence, commitValidation},
     options.roleModelPluginEvidence,
-    prepared.beforeRoleModelCallResult.contextItems,
+    prepared.pluginContextItems,
     options.roleModelPluginToolInvocations,
     prepared.runtimePluginContext,
   );
@@ -429,8 +436,7 @@ async function rejectPreCommitHealth(options: {
 
   return await appendRejectedResult(options.state, {
     runtimePluginEvidence: options.roleModelPluginEvidence,
-    runtimePluginContextItems:
-      options.prepared.beforeRoleModelCallResult.contextItems,
+    runtimePluginContextItems: options.prepared.pluginContextItems,
     runtimePluginToolInvocations: options.roleModelPluginToolInvocations,
     evidence: {
       ...options.roleModelEvidence,

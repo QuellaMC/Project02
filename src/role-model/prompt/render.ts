@@ -464,11 +464,13 @@ function renderUntrustedPluginContext(
     return undefined;
   }
 
+  // Plugin data keeps its own shape: indentation and blank lines may be
+  // meaning (code, YAML, a table), so only the outer whitespace goes.
   return fenced(untrustedPluginContextFenceTag, [
     untrustedPluginContextPreamble(addressee),
     ...items.flatMap(item => [
       `## ${item.pluginId ?? 'plugin'} · ${item.id}`,
-      ...trimmedLines(item.text),
+      item.text.trim(),
     ]),
   ]);
 }

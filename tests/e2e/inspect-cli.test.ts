@@ -146,6 +146,12 @@ describe('inspect CLI plugin evidence', () => {
           }[];
           readonly toolEvents: readonly [{readonly pluginId: string}];
           readonly pluginEvidence: {
+            readonly contextItems: readonly {
+              readonly pluginId: string;
+              readonly id: string;
+              readonly kind: string;
+              readonly redactionLabels: readonly string[];
+            }[];
             readonly evidence: readonly {
               readonly pluginId: string;
               readonly evidenceKind: string;
@@ -186,6 +192,16 @@ describe('inspect CLI plugin evidence', () => {
       expect.objectContaining({
         pluginId: 'character-state',
         text: expect.stringContaining('mood=') as string,
+      }),
+    ]);
+    // The trusted frame is where the note rendered; the plugin evidence still
+    // records the whole item the plugin handed over.
+    expect(output.turns[0].pluginEvidence.contextItems).toEqual([
+      expect.objectContaining({
+        pluginId: 'character-state',
+        id: 'current',
+        kind: 'runtime_note',
+        redactionLabels: expect.any(Array) as string[],
       }),
     ]);
     expect(
