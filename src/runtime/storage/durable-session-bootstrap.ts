@@ -40,9 +40,6 @@ export type DurableChatRuntime = {
 export async function createDurableChatRuntime(
   args: DurableSessionSelection,
 ): Promise<DurableChatRuntime> {
-  const sessionId = normalizeLocalRuntimeSessionId(
-    args.newSessionId ?? args.sessionId,
-  );
   // Canonicalized before the first directory exists, so the data directory,
   // the marker, the log store, and the session all bind the same spelling.
   const characterId = normalizeLocalRuntimeCharacterId(args.character.id);
@@ -77,6 +74,13 @@ export async function createDurableChatRuntime(
       },
     },
   });
+  // No flag names a session: the conversation resumes where it was last
+  // active, whichever segment of a chain that is; a fresh store starts one.
+  const sessionId = normalizeLocalRuntimeSessionId(
+    args.newSessionId ??
+      args.sessionId ??
+      (await sessionStore.newestSession())?.sessionId,
+  );
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();
   const writerLease = await acquireLocalRuntimeSessionWriterLease({
     ...storageOptions,

@@ -97,6 +97,12 @@ type CreateLocalRuntimeSessionOptions = {
   readonly sessionId?: string;
   readonly createdAt?: string;
   readonly updatedAt?: string;
+  readonly continuedFrom?: string;
+};
+
+type CreateContinuedLocalRuntimeSessionOptions = {
+  readonly continuedFrom: string;
+  readonly createdAt?: string;
 };
 
 type SelectLocalRuntimeSessionOptions = {
@@ -112,7 +118,17 @@ type LocalRuntimeSessionStore = {
   createSession(
     options?: CreateLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata>;
+  /** Opens the next segment of a chain under a generated id. */
+  createContinuedSession(
+    options: CreateContinuedLocalRuntimeSessionOptions,
+  ): Promise<LocalRuntimeSessionMetadata>;
   listSessions(): Promise<readonly LocalRuntimeSessionMetadata[]>;
+  /** The most recently active session, if any exists. */
+  newestSession(): Promise<LocalRuntimeSessionMetadata | undefined>;
+  /** The session that continued the given one, if a compaction opened one. */
+  successorOf(
+    sessionId: string,
+  ): Promise<LocalRuntimeSessionMetadata | undefined>;
   readSession(sessionId?: string): Promise<LocalRuntimeSessionMetadata>;
   selectSession(
     sessionId?: string,
@@ -207,6 +223,9 @@ export function createLocalRuntimeSessionStore(
         sessionId,
         createdAt,
         updatedAt: sessionOptions.updatedAt ?? createdAt,
+        ...(sessionOptions.continuedFrom === undefined
+          ? {}
+          : {continuedFrom: sessionOptions.continuedFrom}),
       });
 
       const sessionDirectory = await createSessionDirectory(layout, sessionId);
@@ -224,6 +243,55 @@ export function createLocalRuntimeSessionStore(
 
       return metadata;
     });
+  }
+
+  async function createContinuedSession(
+    continuation: CreateContinuedLocalRuntimeSessionOptions,
+  ): Promise<LocalRuntimeSessionMetadata> {
+    const continuedFrom = normalizeLocalRuntimeSessionId(
+      continuation.continuedFrom,
+    );
+    const sessions = await readSessionCatalog(layout);
+
+    if (!sessions.has(continuedFrom)) {
+      throw new LocalRuntimeSessionStoreError(
+        'session_not_found',
+        `Local runtime session "${continuedFrom}" does not exist.`,
+      );
+    }
+
+    return await createSession({
+      sessionId: continuationSessionId(sessions, continuedFrom),
+      continuedFrom,
+      ...(continuation.createdAt === undefined
+        ? {}
+        : {createdAt: continuation.createdAt}),
+    });
+  }
+
+  async function newestSession(): Promise<
+    LocalRuntimeSessionMetadata | undefined
+  > {
+    const sessions = await listSessions();
+
+    return sessions.reduce<LocalRuntimeSessionMetadata | undefined>(
+      (newest, candidate) =>
+        newest === undefined ||
+        candidate.updatedAt.localeCompare(newest.updatedAt) > 0
+          ? candidate
+          : newest,
+      undefined,
+    );
+  }
+
+  async function successorOf(
+    sessionId: string,
+  ): Promise<LocalRuntimeSessionMetadata | undefined> {
+    const normalizedSessionId = normalizeLocalRuntimeSessionId(sessionId);
+
+    return (await listSessions()).find(
+      metadata => metadata.continuedFrom === normalizedSessionId,
+    );
   }
 
   async function listSessions(): Promise<
@@ -340,7 +408,10 @@ export function createLocalRuntimeSessionStore(
   return Object.freeze({
     layout,
     createSession,
+    createContinuedSession,
     listSessions,
+    newestSession,
+    successorOf,
     readSession,
     selectSession,
     rehydrateConversationSession,
@@ -793,13 +864,21 @@ export function decodeSessionMetadata(
   }
 
   const sessionId = readCanonicalStoredSessionId(parsed);
-  const metadata = createLocalRuntimeSessionMetadata({
+  const continuedFrom = parsed['continuedFrom'];
+
+  if (continuedFrom !== undefined && typeof continuedFrom !== 'string') {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Stored local runtime session continuedFrom must be a string.',
+    );
+  }
+
+  return createLocalRuntimeSessionMetadata({
     sessionId,
     createdAt: readRecordString(parsed, 'createdAt'),
     updatedAt: readRecordString(parsed, 'updatedAt'),
+    ...(continuedFrom === undefined ? {} : {continuedFrom}),
   });
-
-  return metadata;
 }
 
 function readCanonicalStoredSessionId(record: Record<string, unknown>): string {
@@ -854,6 +933,35 @@ function toVisibleMessage(record: ConversationLogRecord): VisibleMessage {
     speakerName: record.speakerName,
     text: record.text,
   };
+}
+
+/**
+ * A continued session is named after the chain it belongs to: the root's id
+ * plus the segment number, skipping ids already taken and keeping the whole
+ * within the id length limit.
+ */
+function continuationSessionId(
+  sessions: ReadonlyMap<string, LocalRuntimeSessionMetadata>,
+  continuedFrom: string,
+): string {
+  let root = continuedFrom;
+
+  for (
+    let previous = sessions.get(root)?.continuedFrom;
+    previous !== undefined;
+    previous = sessions.get(root)?.continuedFrom
+  ) {
+    root = previous;
+  }
+
+  for (let segment = 2; ; segment += 1) {
+    const suffix = `.${String(segment)}`;
+    const candidate = `${root.slice(0, 64 - suffix.length)}${suffix}`;
+
+    if (!sessions.has(candidate)) {
+      return candidate;
+    }
+  }
 }
 
 function compareSessionMetadata(

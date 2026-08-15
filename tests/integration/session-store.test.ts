@@ -90,6 +90,45 @@ describe('local runtime session store', () => {
     expect(await reopened.listSessions()).toEqual([selected, second]);
   });
 
+  it('continues a session under a chain-named id, finds its successor, and resumes the newest', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock([
+        '2026-06-04T00:00:00.000Z',
+        '2026-06-04T00:01:00.000Z',
+        '2026-06-04T00:02:00.000Z',
+        '2026-06-04T00:03:00.000Z',
+      ]),
+    });
+
+    const root = await store.createSession({sessionId: 'local-session'});
+    const second = await store.createContinuedSession({
+      continuedFrom: 'local-session',
+    });
+    const third = await store.createContinuedSession({
+      continuedFrom: second.sessionId,
+    });
+
+    expect(second).toMatchObject({
+      sessionId: 'local-session.2',
+      continuedFrom: 'local-session',
+    });
+    expect(third).toMatchObject({
+      sessionId: 'local-session.3',
+      continuedFrom: 'local-session.2',
+    });
+    expect(await store.successorOf('local-session')).toEqual(second);
+    expect(await store.successorOf(third.sessionId)).toBeUndefined();
+    expect(await store.newestSession()).toEqual(third);
+    // Reopening the root exactly is allowed; it stays a closed segment.
+    expect(await store.readSession(root.sessionId)).toEqual(root);
+    await expect(
+      store.createContinuedSession({continuedFrom: 'never-existed'}),
+    ).rejects.toThrow(LocalRuntimeSessionStoreError);
+  });
+
   it('creates sessions for a padded character ID instead of mismatching its own marker', async () => {
     const storeRoot = await createTempStoreRoot();
     // The marker this writes is canonical, so a raw comparison used to fail the

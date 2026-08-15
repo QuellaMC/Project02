@@ -10,7 +10,7 @@ const defaultLocalRuntimeSessionId = 'local-session';
 
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
-export const localRuntimeStorageSchemaVersion = 8;
+export const localRuntimeStorageSchemaVersion = 9;
 
 const localRuntimeStorageScopeValues = Object.freeze([
   'home',
@@ -145,12 +145,15 @@ export type LocalRuntimeSessionMetadata = {
   readonly sessionId: string;
   readonly createdAt: string;
   readonly updatedAt: string;
+  /** The session this one continues, when a compaction opened it. */
+  readonly continuedFrom?: string;
 };
 
 export type CreateLocalRuntimeSessionMetadataOptions = {
   readonly sessionId?: string;
   readonly createdAt: string;
   readonly updatedAt?: string;
+  readonly continuedFrom?: string;
 };
 
 const configFileName = 'config.json';
@@ -352,8 +355,21 @@ function normalizeLocalRuntimePluginId(pluginId: string): string {
 export function createLocalRuntimeSessionMetadata(
   options: CreateLocalRuntimeSessionMetadataOptions,
 ): LocalRuntimeSessionMetadata {
+  const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
+  const continuedFrom =
+    options.continuedFrom === undefined
+      ? undefined
+      : normalizeLocalRuntimeSessionId(options.continuedFrom);
+
+  if (continuedFrom === sessionId) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'A session cannot continue itself.',
+    );
+  }
+
   return Object.freeze({
-    sessionId: normalizeLocalRuntimeSessionId(options.sessionId),
+    sessionId,
     createdAt: requiredCanonicalTimestamp(
       options.createdAt,
       'createdAt',
@@ -364,6 +380,7 @@ export function createLocalRuntimeSessionMetadata(
       'updatedAt',
       'malformed_record',
     ),
+    ...(continuedFrom === undefined ? {} : {continuedFrom}),
   } satisfies LocalRuntimeSessionMetadata);
 }
 

@@ -87,6 +87,20 @@ export function assertIncrementalRawEventAppend(options: {
   const {record, state} = options;
   assertIncrementalIdentityTimestamp(state, record);
   const identityKey = runtimeEventIdentityKey(record);
+
+  // A continuation is how a session begins, never something a turn records:
+  // it stands alone as the very first record and opens no turn of its own.
+  if (record.kind === 'session_continued') {
+    if (options.evidence.rawEvents.length > 0) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'Raw event log session_continued must be the first record of a session.',
+      );
+    }
+
+    return;
+  }
+
   assertIncrementalRawSequence(state, record, identityKey);
 
   assertIncrementalToolCallAppend(state, record);
@@ -209,6 +223,11 @@ export function applyIncrementalRawEventAppend(options: {
 }): void {
   const {record, state} = options;
   recordIncrementalIdentityTimestamp(state, record);
+
+  if (record.kind === 'session_continued') {
+    return;
+  }
+
   const identityKey = runtimeEventIdentityKey(record);
   const kinds = state.rawKindsByIdentity.get(identityKey) ?? new Set();
 
