@@ -59,10 +59,6 @@ export {
   freezeAllowedTools,
 } from './api/decision.ts';
 export {
-  buildUserTurnDecisionContext,
-  type BuildUserTurnDecisionContextOptions,
-} from './api/decision-context.ts';
-export {
   createRoleModelAdapterRawOutput,
   type RoleModelAdapter,
   type RoleModelAdapterInvocation,
@@ -118,6 +114,20 @@ export {
   type RoleModelTurnContext,
 } from './prompt/render.ts';
 export {createTodayRuntimeNote} from './prompt/prompt-text.ts';
+export {
+  assertConversationHistoryMatchesWindow,
+  conversationHistoryWindow,
+  conversationTurnVisibleMessages,
+  type ConversationHistoryWindow,
+  type ConversationToolCall,
+  type ConversationToolRound,
+  type ConversationTurn,
+} from './api/conversation-history.ts';
+export {
+  conversationTurnToChatMessages,
+  estimateConversationTurnTokens,
+  selectConversationHistoryWindow,
+} from './prompt/conversation-history-wire.ts';
 export {
   createRoleModelProviderToolNameMappings,
   modelToolDefinitionToChatTool,

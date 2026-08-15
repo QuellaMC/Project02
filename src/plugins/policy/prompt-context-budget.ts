@@ -6,6 +6,7 @@ import type {
   RuntimePluginEvidenceSnapshot,
 } from '../api/types.ts';
 import {beforeRoleModelFailureRejectsTurn} from '../api/evidence-policy.ts';
+import {estimateTextTokens} from '../../shared/token-estimate.ts';
 
 /**
  * Each block the model reads has its own estimated-token budget: recalled
@@ -243,12 +244,5 @@ function contextBudgetEvidenceSummary(options: {
 }
 
 function estimateContextItemTokens(item: RuntimePluginContextItem): number {
-  return Math.max(
-    item.budget.estimatedTokens,
-    estimateRuntimeTextTokens(item.text),
-  );
-}
-
-function estimateRuntimeTextTokens(text: string): number {
-  return Math.max(1, Math.ceil(text.length / 4));
+  return Math.max(item.budget.estimatedTokens, estimateTextTokens(item.text));
 }

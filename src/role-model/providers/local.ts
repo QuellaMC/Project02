@@ -8,6 +8,7 @@ import {
   visibleReplyModelToolName,
 } from '../api/model-tools.ts';
 import type {RoleModelAdapter} from '../api/adapter.ts';
+import {conversationTurnVisibleMessages} from '../api/conversation-history.ts';
 import {createRoleModelAdapterRawOutput} from '../api/adapter.ts';
 
 export function createDeterministicLocalRoleModelAdapter(): RoleModelAdapter {
@@ -20,12 +21,13 @@ export function createRoleModelAdapterFromCharacterAgent(
   agent: CharacterAgent,
 ): RoleModelAdapter {
   return Object.freeze({
-    async invoke(inputEnvelope) {
+    async invoke(inputEnvelope, invocation) {
       const reply = await agent.reply({
         character: inputEnvelope.decisionContext.characterSnapshot,
         message: inputEnvelope.event.payload.currentUserMessage,
-        recentVisibleMessages:
-          inputEnvelope.decisionContext.recentVisibleMessages,
+        recentVisibleMessages: invocation.conversationHistory.flatMap(
+          conversationTurnVisibleMessages,
+        ),
       });
       const characterReply = validateCharacterAgentReply(reply);
 

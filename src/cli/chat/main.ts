@@ -9,7 +9,6 @@ import {
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
 } from '../../core/index.ts';
-import {buildUserTurnDecisionContext} from '../../role-model/index.ts';
 import {shutdownConfiguredChatPluginHost} from './plugin-host-shutdown.ts';
 import {
   recordLocalUserMessageInputRejection,
@@ -510,14 +509,10 @@ async function runChatCliAfterConfiguredHost(options: {
     return exitCode;
   } finally {
     if (options.configuredHost !== undefined) {
-      const decisionContext = buildUserTurnDecisionContext({
-        session: durableRuntime.session,
-      });
-
       await shutdownConfiguredChatPluginHost({
         pluginHost: options.configuredHost.host,
-        sessionId: decisionContext.sessionId,
-        character: decisionContext.characterSnapshot,
+        sessionId: durableRuntime.session.id,
+        character: durableRuntime.session.character,
         stderr: options.options.stderr,
       });
     }
@@ -529,15 +524,11 @@ async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
   readonly session: ConversationSession;
 }): Promise<void> {
-  const decisionContext = buildUserTurnDecisionContext({
-    session: options.session,
-  });
-
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
-    sessionId: decisionContext.sessionId,
+    sessionId: options.session.id,
     currentUserMessage: fatalFailurePluginCleanupMessage,
-    character: decisionContext.characterSnapshot,
+    character: options.session.character,
   });
 }
 
@@ -843,15 +834,12 @@ type EndChatSessionOptions = {
 
 async function endChatSession(options: EndChatSessionOptions): Promise<void> {
   const identity = createRuntimeEventIdentity();
-  const decisionContext = buildUserTurnDecisionContext({
-    session: options.session,
-  });
   const context = createRuntimePluginContext({
     ...identity,
-    sessionId: decisionContext.sessionId,
+    sessionId: options.session.id,
     eventType: 'USER_MESSAGE',
     currentUserMessage: exitCommand,
-    character: decisionContext.characterSnapshot,
+    character: options.session.character,
   });
   const sessionEndResult = await options.pluginHost.onSessionEnd(context);
 

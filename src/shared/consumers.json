@@ -17,5 +17,6 @@
   "real-path.ts": ["plugins", "runtime"],
   "redaction.ts": ["plugins", "runtime"],
   "secret-marker.ts": ["characters", "runtime"],
-  "shell-command.ts": ["app", "cli"]
+  "shell-command.ts": ["app", "cli"],
+  "token-estimate.ts": ["plugins", "role-model"]
 }

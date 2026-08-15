@@ -7,6 +7,8 @@ import {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
   renderRoleModelTurnContext,
+  type ConversationTurn,
+  type RoleModelAdapterInvocation,
   type RoleModelAssistantChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,
@@ -69,9 +71,10 @@ describe('NVIDIA role-model provider', () => {
     const inputEnvelope = createNvidiaTestInputEnvelope(
       'Authorization: ApiKey user-secret',
     );
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(requestBody).toContain('user-secret');
     expect(JSON.parse(output.rawOutputText)).toMatchObject({
@@ -110,9 +113,10 @@ describe('NVIDIA role-model provider', () => {
       transportRetryDelaysMs: [0],
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(fetchCalls).toBe(2);
     expect(output.rejection).toBeUndefined();
@@ -136,9 +140,10 @@ describe('NVIDIA role-model provider', () => {
       transportRetryDelaysMs: [0],
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(fetchCalls).toBe(2);
     expect(output.rejection).toBeUndefined();
@@ -166,9 +171,10 @@ describe('NVIDIA role-model provider', () => {
       transportRetryDelaysMs: [0, 0],
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(fetchCalls).toBe(1);
     expect(output.rejection).toMatchObject({reason: 'provider_error'});
@@ -198,9 +204,10 @@ describe('NVIDIA role-model provider', () => {
       transportRetryDelaysMs: [0, 0],
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(fetchCalls).toBe(3);
     expect(output.providerMetadata?.error).toMatchObject({code: 'http_error'});
@@ -234,9 +241,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(output.rejection).toBeUndefined();
     expect(JSON.parse(output.rawOutputText)).toEqual({toolCalls: []});
@@ -279,9 +287,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(output.rejection).toBeUndefined();
     expect(JSON.parse(output.rawOutputText)).toMatchObject({
@@ -305,9 +314,10 @@ describe('NVIDIA role-model provider', () => {
       transportRetryDelaysMs: [60_000],
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(output.providerMetadata?.error).toMatchObject({
       code: 'request_timeout',
@@ -352,9 +362,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(JSON.parse(output.rawOutputText)).toMatchObject({
       toolCalls: [
@@ -417,9 +428,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
     const serializedExchange = JSON.stringify(output.providerExchange);
 
     expect(output.providerExchange?.usage).toEqual({
@@ -600,9 +612,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaAliasCollisionInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(
       (
@@ -717,9 +730,10 @@ describe('NVIDIA role-model provider', () => {
       model: 'nvidia/test-model',
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(capturedBody).toMatchObject({
       model: 'nvidia/test-model',
@@ -798,9 +812,10 @@ describe('NVIDIA role-model provider', () => {
       model: 'nvidia/test-model',
     });
     const inputEnvelope = createNvidiaNoVisibleReplyInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(capturedBody).not.toHaveProperty('tools');
     expect(JSON.parse(output.rawOutputText)).toEqual({
@@ -840,9 +855,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(JSON.parse(output.rawOutputText)).toEqual({
       toolCalls: [
@@ -888,9 +904,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(output.rawOutputText).toBe('');
     expect(output.rejection).toMatchObject({
@@ -932,9 +949,10 @@ describe('NVIDIA role-model provider', () => {
         fetchClient,
       });
       const inputEnvelope = createNvidiaTestInputEnvelope();
-      const output = await adapter.invoke(inputEnvelope, {
-        turnContext: renderRoleModelTurnContext(inputEnvelope),
-      });
+      const output = await adapter.invoke(
+        inputEnvelope,
+        testInvocation(inputEnvelope),
+      );
 
       expect(output.rejection).toEqual({
         reason: roleModelProviderErrorRejectionReason,
@@ -955,9 +973,10 @@ describe('NVIDIA role-model provider', () => {
       requestTimeoutMs: 5,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(requestSignal?.aborted).toBe(true);
     expect(output.rejection).toEqual({
@@ -985,9 +1004,10 @@ describe('NVIDIA role-model provider', () => {
       requestTimeoutMs: 5,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(output.rejection?.details).toBe(
       'NVIDIA provider request timed out after 5ms.',
@@ -1023,9 +1043,10 @@ describe('NVIDIA role-model provider', () => {
       requestTimeoutMs: 5,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     expect(output.rejection?.details).toBe(
       'NVIDIA provider request timed out after 5ms.',
@@ -1078,9 +1099,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     const rawDecision: unknown = JSON.parse(output.rawOutputText);
 
@@ -1158,9 +1180,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
     const rawDecision: unknown = JSON.parse(output.rawOutputText);
 
     expect(rawDecision).toEqual({
@@ -1213,9 +1236,10 @@ describe('NVIDIA role-model provider', () => {
       fetchClient,
     });
     const inputEnvelope = createNvidiaTestInputEnvelope();
-    const output = await adapter.invoke(inputEnvelope, {
-      turnContext: renderRoleModelTurnContext(inputEnvelope),
-    });
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
 
     // JSON has no value for the provider's 1e999, so it arrives as null.
     expect(JSON.parse(output.rawOutputText)).toEqual({
@@ -1252,13 +1276,57 @@ async function captureNvidiaRequest(
     },
   });
 
-  await adapter.invoke(inputEnvelope, {
-    turnContext: renderRoleModelTurnContext(inputEnvelope, {
-      additionalMessages,
-    }),
-  });
+  await adapter.invoke(
+    inputEnvelope,
+    testInvocation(inputEnvelope, {additionalMessages}),
+  );
 
   return capturedBody as CapturedNvidiaRequest;
+}
+
+const nvidiaTestHistoryTurn = Object.freeze({
+  eventId: 'evt_nvidia_previous',
+  traceId: 'trace_nvidia_previous',
+  createdAt: '2026-06-14T00:00:00.000Z',
+  userMessage: {
+    id: 'm1',
+    role: 'user' as const,
+    speakerId: 'local-user',
+    speakerName: 'You',
+    text: 'previous question',
+  },
+  toolRounds: [],
+  finalReplies: [
+    {
+      id: 'm2',
+      role: 'character' as const,
+      speakerId: 'mira',
+      speakerName: 'Mira',
+      text: 'previous answer',
+    },
+  ],
+} satisfies ConversationTurn);
+
+function testInvocation(
+  inputEnvelope: RoleModelInputEnvelope,
+  options: {
+    readonly additionalMessages?: readonly RoleModelChatMessage[];
+    readonly conversationHistory?: readonly ConversationTurn[];
+  } = {},
+): RoleModelAdapterInvocation {
+  const conversationHistory = options.conversationHistory ?? [
+    nvidiaTestHistoryTurn,
+  ];
+
+  return {
+    turnContext: renderRoleModelTurnContext(inputEnvelope, {
+      conversationHistory,
+      ...(options.additionalMessages === undefined
+        ? {}
+        : {additionalMessages: options.additionalMessages}),
+    }),
+    conversationHistory,
+  };
 }
 
 function createNvidiaTestInputEnvelope(
@@ -1279,22 +1347,7 @@ function createNvidiaTestInputEnvelope(
     decisionContext: createDecisionContext({
       sessionId: 'session-nvidia',
       characterSnapshot: testCharacterProfile,
-      recentVisibleMessages: [
-        {
-          id: 'm1',
-          role: 'user',
-          speakerId: 'local-user',
-          speakerName: 'You',
-          text: 'previous question',
-        },
-        {
-          id: 'm2',
-          role: 'character',
-          speakerId: 'mira',
-          speakerName: 'Mira',
-          text: 'previous answer',
-        },
-      ],
+      historyWindow: {turnEventIds: [nvidiaTestHistoryTurn.eventId]},
       runtimeNotes: [
         {id: 'concise', text: 'Use concise replies.'},
         {

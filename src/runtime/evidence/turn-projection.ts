@@ -312,11 +312,11 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
               outputContractVersion: inputEnvelope.outputContract.version,
               currentUserMessage:
                 inputEnvelope.event.payload.currentUserMessage,
-              recentVisibleMessages: Object.freeze(
-                inputEnvelope.decisionContext.recentVisibleMessages.map(
-                  visibleMessageFromSnapshot,
-                ),
-              ),
+              historyWindow: Object.freeze({
+                turnEventIds: Object.freeze([
+                  ...inputEnvelope.decisionContext.historyWindow.turnEventIds,
+                ]),
+              }),
               runtimeNotes: Object.freeze(
                 inputEnvelope.decisionContext.runtimeNotes.map(note =>
                   Object.freeze({
@@ -768,18 +768,4 @@ function visibleMessagesForId(
       text: message.text,
     } satisfies InspectVisibleMessage),
   ];
-}
-
-function visibleMessageFromSnapshot(message: {
-  readonly id: string;
-  readonly role: ConversationLogRecord['role'];
-  readonly speakerName: string;
-  readonly text: string;
-}): InspectVisibleMessage {
-  return Object.freeze({
-    id: message.id,
-    role: message.role,
-    speakerName: message.speakerName,
-    text: message.text,
-  } satisfies InspectVisibleMessage);
 }

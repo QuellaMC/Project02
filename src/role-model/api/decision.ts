@@ -3,8 +3,8 @@ import {
   type CharacterProfile,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
-  type VisibleMessage,
 } from '../../core/index.ts';
+import type {ConversationHistoryWindow} from './conversation-history.ts';
 import {
   createRuntimePluginContextItem,
   createRuntimePluginCuratedContextSection,
@@ -66,8 +66,8 @@ export function createDecisionContext(
     characterSnapshot: freezeCharacterProfileSnapshot(
       options.characterSnapshot,
     ),
-    recentVisibleMessages: freezeVisibleMessageSnapshots(
-      options.recentVisibleMessages ?? [],
+    historyWindow: freezeConversationHistoryWindow(
+      options.historyWindow ?? {turnEventIds: []},
     ),
     runtimeNotes: freezeDecisionRuntimeNotes(options.runtimeNotes ?? []),
     pluginContextItems: freezePluginContextItems(
@@ -300,20 +300,18 @@ function freezeCharacterProfileSnapshot(
   } satisfies CharacterProfile);
 }
 
-function freezeVisibleMessageSnapshots(
-  visibleMessages: readonly VisibleMessage[],
-): readonly VisibleMessage[] {
-  return Object.freeze(visibleMessages.map(freezeVisibleMessageSnapshot));
-}
+function freezeConversationHistoryWindow(
+  window: ConversationHistoryWindow,
+): ConversationHistoryWindow {
+  for (const eventId of window.turnEventIds) {
+    if (typeof eventId !== 'string' || eventId.length === 0) {
+      throw new TypeError('History window turn ids must be non-empty strings.');
+    }
+  }
 
-function freezeVisibleMessageSnapshot(message: VisibleMessage): VisibleMessage {
   return Object.freeze({
-    id: message.id,
-    role: message.role,
-    speakerId: message.speakerId,
-    speakerName: message.speakerName,
-    text: message.text,
-  } satisfies VisibleMessage);
+    turnEventIds: Object.freeze([...window.turnEventIds]),
+  } satisfies ConversationHistoryWindow);
 }
 
 function freezeDecisionRuntimeNotes(

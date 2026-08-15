@@ -31,6 +31,8 @@ type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
 export const defaultProject02CharacterId = 'mira';
+/** A safe floor for small local models; a stopgap until providers report their own limit. */
+export const defaultProject02ContextWindowTokens = 32768;
 export const defaultProject02UserDisplayName = 'You';
 
 /** Trimmed here so no reader re-trims: a padded authored id is not missing. */
