@@ -4,7 +4,10 @@ import {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
 } from '../api/contracts.ts';
-import {freezeRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
+import {
+  freezeRoleModelProviderExchangeSnapshot,
+  roleModelProviderExchangeJsonBoundaryLimits,
+} from '../api/provider-exchange.ts';
 import {
   visibleReplyModelToolName,
   type ModelToolCall,
@@ -1015,6 +1018,7 @@ function redactProviderBoundaryJson(value: unknown): RuntimePluginJsonValue {
   return createJsonBoundarySnapshot(value, {
     field: 'NVIDIA provider exchange',
     redact: true,
+    limits: roleModelProviderExchangeJsonBoundaryLimits,
   });
 }
 

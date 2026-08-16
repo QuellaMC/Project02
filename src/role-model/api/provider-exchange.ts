@@ -1,6 +1,8 @@
 import {
   createJsonBoundarySnapshot,
+  defaultJsonBoundaryLimits,
   isJsonRecord,
+  type JsonBoundaryLimits,
 } from '../../shared/json-boundary.ts';
 import {
   freezeRoleModelChatMessage,
@@ -12,6 +14,20 @@ import type {
   RoleModelProviderExchangeSnapshot,
   RoleModelProviderMetadata,
 } from './contracts.ts';
+
+/**
+ * The exchange is the wire as sent and received, so it weighs what the prompt
+ * weighs: bounded by the context window, not by a plugin's output. These
+ * limits stop only a runaway shape; a prompt the window admits must always
+ * be recordable, or the evidence would fail the very turn it describes.
+ */
+export const roleModelProviderExchangeJsonBoundaryLimits = Object.freeze({
+  ...defaultJsonBoundaryLimits,
+  maxEntriesPerContainer: 65_536,
+  maxNodes: 1_048_576,
+  maxStringBytes: 8 * 1_024 * 1_024,
+  maxTotalStringBytes: 64 * 1_024 * 1_024,
+} satisfies JsonBoundaryLimits);
 
 export function parseRoleModelProviderExchangeSnapshot(
   value: unknown,
@@ -30,6 +46,7 @@ export function freezeRoleModelProviderExchangeSnapshot(
   const boundedValue = createJsonBoundarySnapshot(value, {
     field: 'Role-model provider exchange',
     redact: true,
+    limits: roleModelProviderExchangeJsonBoundaryLimits,
   });
 
   if (!isRoleModelProviderExchangeSnapshot(boundedValue)) {
