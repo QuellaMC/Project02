@@ -1680,6 +1680,39 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
+  it("rejects a rejection for one of the model's reasons that names no round", async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-model-rejection-without-round',
+      createMalformedProviderExchangeAdapter(),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_rejected"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a rejected terminal record.');
+    }
+
+    // The provider's failure was a round's; a rejection that keeps the reason
+    // but drops the round claims a model refusal no round produced.
+    const record = JSON.parse(terminal) as Record<string, unknown>;
+
+    delete record['round'];
+    delete record['commitValidation'];
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .map(line => (line === terminal ? JSON.stringify(record) : line))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /"commitValidation" is malformed/iu,
+    );
+  });
+
   it('rejects a completed terminal stripped of its round and verdict', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-terminal-without-verdict',

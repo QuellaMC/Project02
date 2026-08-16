@@ -11,6 +11,7 @@ import {
 } from '../../core/index.ts';
 import {
   isRoleModelRawOutputReplayableDecisionEvidence,
+  roleModelDecisionRejectionReasons,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
@@ -22,7 +23,7 @@ import {
   type RuntimeTurnRejectionReason,
   type RuntimeTurnStatus,
 } from '../evidence/records.ts';
-import {throwMalformedRecord} from './codec-primitives.ts';
+import {isOneOf, throwMalformedRecord} from './codec-primitives.ts';
 
 type RawEventRoundSemantics = {
   readonly identity: RuntimeEventIdentity;
@@ -197,11 +198,17 @@ function assertCommitRoundReference(options: RawEventRoundSemantics): void {
   );
 }
 
-/** A terminal record judges a round when the model ran: both or neither. */
+/**
+ * A terminal record judges a round when the model ran: both or neither. A
+ * rejection for one of the model's own reasons came from a round, so it
+ * names one.
+ */
 function assertTerminalRoundReference(options: RawEventRoundSemantics): void {
   if (
     (options.round === undefined) !==
-    (options.commitValidation === undefined)
+      (options.commitValidation === undefined) ||
+    (options.round === undefined &&
+      isOneOf(options.reason, roleModelDecisionRejectionReasons))
   ) {
     throwMalformedRecord('commitValidation');
   }
