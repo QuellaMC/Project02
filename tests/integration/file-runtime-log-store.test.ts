@@ -614,7 +614,8 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toBeUndefined();
 
     // A frame row exists only for a frame that was sent, so a zero count is
-    // as malformed as a negative measure.
+    // as malformed as a negative measure, and a kind measured twice would
+    // count twice in the whole.
     for (const malformed of [
       {...promptSize, toolChars: -1},
       {
@@ -622,6 +623,10 @@ describe('file runtime log store plugin tool event validation', () => {
         frames: [{kind: 'system_protocol', count: 0, chars: 400}],
       },
       {...promptSize, frames: []},
+      {
+        ...promptSize,
+        frames: [...promptSize.frames, {...promptSize.frames[0]}],
+      },
     ]) {
       storedRecord.roleModelIOSnapshot['promptSize'] = malformed;
       expect(() =>

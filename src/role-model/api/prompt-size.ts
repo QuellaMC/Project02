@@ -29,8 +29,16 @@ export function freezeRoleModelPromptSize(value: unknown): RoleModelPromptSize {
     throw new TypeError('Role-model prompt size is malformed.');
   }
 
+  const frames = value['frames'].map(freezeFrameSize);
+
+  // One row per kind: the frames of a kind are summed, so a repeated kind
+  // would count twice in the whole.
+  if (new Set(frames.map(frame => frame.kind)).size !== frames.length) {
+    throw new TypeError('Role-model prompt size repeats a frame kind.');
+  }
+
   return Object.freeze({
-    frames: Object.freeze(value['frames'].map(freezeFrameSize)),
+    frames: Object.freeze(frames),
     // Only the tools may weigh nothing: a turn without tools sends none.
     toolChars: sizeNumber(value['toolChars'], 'toolChars', 0),
   } satisfies RoleModelPromptSize);
