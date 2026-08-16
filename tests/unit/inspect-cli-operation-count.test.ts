@@ -39,7 +39,7 @@ describe('inspect CLI evidence indexing', () => {
         kind: 'tool_call_started',
         eventType: 'USER_MESSAGE',
         toolCallId: 'call_inspect_visit_gate',
-        toolRound: 1,
+        round: 1,
         toolName: 'fixture.read',
         toolPluginId: 'fixture',
       },

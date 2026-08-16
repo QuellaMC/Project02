@@ -88,7 +88,7 @@ const rejectedScenarios = [
         ...identity,
         kind: 'runtime_event_received',
         eventType: 'USER_MESSAGE',
-        toolRound: 1,
+        toolName: 'memory.search',
       });
     },
   },
@@ -116,7 +116,7 @@ const rejectedScenarios = [
         status: 'completed',
         toolCallId: 'call_1',
         dispatchedToHost: true,
-        toolRound: 1,
+        round: 1,
         toolName: 'memory.search',
         toolPluginId: 'memory.fixture',
         toolResult: {
@@ -177,7 +177,8 @@ const rejectedScenarios = [
         kind: 'runtime_turn_rejected',
         eventType: 'USER_MESSAGE',
         status: 'rejected',
-        reason: 'prepared before the user message committed',
+        reason: 'runtime_failure',
+        message: 'prepared before the user message committed',
       });
 
       appendUserMessage(logStore, currentSessionId);

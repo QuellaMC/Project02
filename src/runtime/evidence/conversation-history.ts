@@ -102,30 +102,30 @@ export function conversationTurnsFromRawEvents(
       } else if (record.visibleMessage !== undefined) {
         turn.characterMessages.push({
           message: record.visibleMessage,
-          round: record.decisionRound,
+          round: record.round,
         });
+      }
+    } else if (record.kind === 'role_model_round') {
+      const text = roundTextFromRecord(record);
+
+      if (record.round !== undefined && text !== undefined) {
+        turn.textByRound.set(record.round, text);
       }
     } else if (
       record.kind === 'tool_call_started' &&
       record.toolCallId !== undefined &&
-      record.toolRound !== undefined &&
+      record.round !== undefined &&
       record.toolPluginId !== undefined &&
       record.toolName !== undefined &&
       record.toolInput !== undefined
     ) {
       turn.startedCalls.push({
         toolCallId: record.toolCallId,
-        round: record.toolRound,
+        round: record.round,
         pluginId: record.toolPluginId,
         toolName: record.toolName,
         input: record.toolInput,
       });
-
-      const text = roundTextFromRecord(record);
-
-      if (text !== undefined && !turn.textByRound.has(record.toolRound)) {
-        turn.textByRound.set(record.toolRound, text);
-      }
     } else if (
       record.kind === 'tool_call_finished' &&
       record.toolCallId !== undefined &&
@@ -210,7 +210,6 @@ function completeConversationTurn(
   } satisfies ConversationTurn);
 }
 
-/** The round's decision travels on its tool_call_started record. */
 function roundTextFromRecord(record: RawEventLogRecord): string | undefined {
   const result = record.parsedRoleModelDecisionSnapshot?.result;
 

@@ -74,7 +74,7 @@ export {
   type RejectedRoleModelLoopResult,
   type RoleModelLoopResult,
   type RoleModelVisibleReplyEvent,
-  type RoleModelLoopRound,
+  type RoleModelRoundEvent,
   type RoleModelPluginToolCallCompletedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
   type RoleModelPluginToolCallStartedEvent,

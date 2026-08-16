@@ -14,18 +14,16 @@ import type {
   RuntimePluginHost,
 } from '../../plugins/index.ts';
 import type {
-  ParsedRoleModelDecisionSnapshot,
   RoleModelCharacterRef,
   RoleModelDecisionRejectionReason,
-  RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
 import type {RoleModelAdapter} from '../../role-model/index.ts';
 import type {
   ConversationLogRecord,
   RawEventLogPayloadSummary,
   RawEventLogRecord,
-  RawEventLogRecordInput,
   RoleModelCommitValidationSnapshot,
+  RuntimeTurnRejectionReason,
 } from '../evidence/records.ts';
 import type {RuntimeLogStore} from '../evidence/contract.ts';
 
@@ -112,18 +110,6 @@ export type RecordLocalUserMessageInputRejectionOptions = {
   readonly rawInput?: string;
 };
 
-export type RoleModelRawEvidence = {
-  readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
-  readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
-  readonly commitValidation?: RoleModelCommitValidationSnapshot;
-};
-
-export function roleModelIOSnapshotSessionId(
-  snapshot: RoleModelIOSnapshot,
-): string {
-  return snapshot.inputEnvelope.decisionContext.sessionId;
-}
-
 export type NormalizeUserMessageRuntimeEventResult =
   | {
       readonly status: 'accepted';
@@ -149,12 +135,8 @@ export type RuntimeTurnState = {
 
 export type AppendVisibleReplyOptions = {
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot;
-  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-  /**
-   * Recorded on the commit event so two rounds are told apart by round, not
-   * by whether they said the same thing.
-   */
+  readonly sessionId: string;
+  /** The round whose decision said this; the commit references it. */
   readonly round: number;
   readonly text: string;
 };
@@ -163,12 +145,17 @@ export type RuntimeTurnRejectionOptions = {
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
   readonly runtimePluginContextItems?: readonly RuntimePluginContextItem[];
   readonly runtimePluginToolInvocations?: readonly RuntimePluginToolInvocationSnapshot[];
-  readonly evidence?: RoleModelRawEvidence;
+  /** The model round the rejection judged, with the runtime's verdict on it. */
+  readonly round?: number;
+  readonly commitValidation?: RoleModelCommitValidationSnapshot;
   readonly healthResult?: RuntimePluginHealthHostResult;
   readonly message: string;
-  readonly rawKind: RawEventLogRecordInput['kind'];
-  readonly rawReason: string;
   readonly reason: LocalRuntimeUserMessageRejectionReason;
+  /**
+   * What the record says; the same as the result's reason except at the
+   * health gate, where the record names the commit validation failure.
+   */
+  readonly recordReason: RuntimeTurnRejectionReason;
   readonly runtimePluginContext?: RuntimePluginContext;
   readonly toolCallIds?: readonly string[];
   readonly visibleMessageIds?: readonly string[];

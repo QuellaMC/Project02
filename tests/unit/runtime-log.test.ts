@@ -12,7 +12,10 @@ import type {
 } from '../../src/runtime/evidence/records.ts';
 import type {RuntimePluginTurnEvidenceSnapshot} from '../../src/plugins/api/index.ts';
 import type {RuntimeEventIdentity} from '../../src/core/index.ts';
-import {appendVisibleMessageWithCommitAnchor} from '../support/runtime-log-fixtures.ts';
+import {
+  appendModelRound,
+  appendVisibleMessageWithCommitAnchor,
+} from '../support/runtime-log-fixtures.ts';
 
 const identity = {
   eventId: 'evt_log_001',
@@ -143,7 +146,11 @@ describe('runtime log store', () => {
     expect(
       store
         .rawEvents()
-        .filter(event => event.kind !== 'visible_message_committed'),
+        .filter(
+          event =>
+            event.kind !== 'visible_message_committed' &&
+            event.kind !== 'role_model_round',
+        ),
     ).toEqual([receivedRecord, normalizedRecord, appended]);
   });
 
@@ -156,7 +163,7 @@ describe('runtime log store', () => {
       kind: 'tool_call_started',
       eventType: 'USER_MESSAGE',
       toolCallId: 'call_snapshot_001',
-      toolRound: 1,
+      round: 1,
       toolName: 'memory.search',
       toolPluginId: 'memory.fixture',
       toolInput: {nested: nestedInput},
@@ -167,7 +174,7 @@ describe('runtime log store', () => {
       eventType: 'USER_MESSAGE',
       status: 'completed',
       toolCallId: 'call_snapshot_001',
-      toolRound: 1,
+      round: 1,
       toolName: 'memory.search',
       toolPluginId: 'memory.fixture',
       dispatchedToHost: true,
@@ -181,6 +188,11 @@ describe('runtime log store', () => {
       ...identity,
       kind: 'runtime_event_received',
       eventType: 'USER_MESSAGE',
+    });
+    appendModelRound(store, identity, {
+      round: 1,
+      sessionId: 'local-session',
+      decision: {toolCalls: [{name: 'memory.search', input: {}}]},
     });
     const storedStart = store.appendRawEvent(started);
     const storedFinish = store.appendRawEvent(finished);
@@ -243,8 +255,13 @@ describe('runtime log store', () => {
     expect(
       store
         .rawEvents()
-        .filter(event => event.kind !== 'visible_message_committed'),
-    ).toHaveLength(2);
+        .filter(event => event.kind !== 'visible_message_committed')
+        .map(event => event.kind),
+    ).toEqual([
+      'runtime_event_received',
+      'role_model_round',
+      'runtime_turn_completed',
+    ]);
   });
 
   it('records failed raw rejections without adding visible conversation records', () => {
@@ -254,7 +271,8 @@ describe('runtime log store', () => {
       kind: 'runtime_turn_rejected',
       eventType: 'USER_MESSAGE',
       status: 'rejected',
-      reason: 'Provide exactly one non-empty message.',
+      reason: 'input_validation_rejected',
+      message: 'Provide exactly one non-empty message.',
     };
     const received = store.appendRawEvent({
       ...identity,

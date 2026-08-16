@@ -62,7 +62,7 @@ export function createTurnEvidence(options: {
 
 type InspectEvidenceIndexes = {
   readonly conversationById: ReadonlyMap<string, ConversationLogRecord>;
-  readonly terminalRawEvents: readonly InspectTerminalRawEvent[];
+  readonly terminalRawEvents: readonly RawEventLogRecord[];
   readonly turnProjectionsByIdentity: ReadonlyMap<
     string,
     InspectTurnRawEventProjection
@@ -73,13 +73,6 @@ type InspectEvidenceIndexes = {
   >;
 };
 
-type InspectTerminalRawEvent = {
-  readonly rawEvent: RawEventLogRecord;
-  readonly roleModelEvidence: {
-    readonly roleModelEvidence?: InspectRoleModelEvidence;
-  };
-};
-
 type InspectTurnRawEventProjection = {
   readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
   readonly simplePluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
@@ -88,7 +81,6 @@ type InspectTurnRawEventProjection = {
 
 type MutableInspectTurnRawEventProjection = {
   readonly modelRounds: InspectRoleModelRoundEvidence[];
-  readonly seenModelRoundEvidenceKeys: Set<string>;
   readonly simplePluginEvidence: RuntimePluginEvidenceSnapshot[];
   readonly toolEvents: InspectToolCallEvent[];
 };
@@ -116,7 +108,7 @@ function createInspectRawEventIndexes(
   InspectEvidenceIndexes,
   'terminalRawEvents' | 'turnProjectionsByIdentity'
 > {
-  const terminalRawEvents: InspectTerminalRawEvent[] = [];
+  const terminalRawEvents: RawEventLogRecord[] = [];
   const mutableProjections = new Map<
     string,
     MutableInspectTurnRawEventProjection
@@ -129,13 +121,15 @@ function createInspectRawEventIndexes(
       mutableProjections,
       identityKey,
     );
-    const roleModelEvidence = roleModelEvidenceForRawEvent(rawEvent);
 
-    appendInspectModelRound({
-      projection,
-      rawEventKind,
-      roleModelEvidence,
-    });
+    if (rawEventKind === 'role_model_round' && rawEvent.round !== undefined) {
+      projection.modelRounds.push(
+        Object.freeze({
+          round: rawEvent.round,
+          roleModelEvidence: roleModelEvidenceForRound(rawEvent),
+        } satisfies InspectRoleModelRoundEvidence),
+      );
+    }
 
     if (
       rawEvent.toolCallId !== undefined &&
@@ -155,12 +149,7 @@ function createInspectRawEventIndexes(
     }
 
     if (isTerminalRawEventLogRecordKind(rawEventKind)) {
-      terminalRawEvents.push(
-        Object.freeze({
-          rawEvent,
-          roleModelEvidence,
-        } satisfies InspectTerminalRawEvent),
-      );
+      terminalRawEvents.push(rawEvent);
     }
   }
 
@@ -182,40 +171,11 @@ function mutableInspectTurnProjection(
 
   const created: MutableInspectTurnRawEventProjection = {
     modelRounds: [],
-    seenModelRoundEvidenceKeys: new Set(),
     simplePluginEvidence: [],
     toolEvents: [],
   };
   projections.set(identityKey, created);
   return created;
-}
-
-function appendInspectModelRound(options: {
-  readonly projection: MutableInspectTurnRawEventProjection;
-  readonly rawEventKind: RawEventLogRecord['kind'];
-  readonly roleModelEvidence: {
-    readonly roleModelEvidence?: InspectRoleModelEvidence;
-  };
-}): void {
-  const evidence = options.roleModelEvidence.roleModelEvidence;
-
-  if (evidence === undefined) {
-    return;
-  }
-
-  const evidenceKey = roleModelRoundEvidenceKey(evidence);
-
-  if (options.projection.seenModelRoundEvidenceKeys.has(evidenceKey)) {
-    return;
-  }
-
-  options.projection.seenModelRoundEvidenceKeys.add(evidenceKey);
-  options.projection.modelRounds.push(
-    Object.freeze({
-      rawEventKind: options.rawEventKind,
-      roleModelEvidence: evidence,
-    } satisfies InspectRoleModelRoundEvidence),
-  );
 }
 
 function freezeInspectTurnProjections(
@@ -258,9 +218,9 @@ function groupEvidenceByIdentity<
 
 function createTurnEvidenceEntry(options: {
   readonly indexes: InspectEvidenceIndexes;
-  readonly terminalRawEvent: InspectTerminalRawEvent;
+  readonly terminalRawEvent: RawEventLogRecord;
 }): InspectTurnEvidence {
-  const {rawEvent, roleModelEvidence} = options.terminalRawEvent;
+  const rawEvent = options.terminalRawEvent;
   const visibleMessageIds = rawEvent.visibleMessageIds ?? [];
   const identityKey = runtimeEventIdentityKey(rawEvent);
   const projection = options.indexes.turnProjectionsByIdentity.get(identityKey);
@@ -282,107 +242,97 @@ function createTurnEvidenceEntry(options: {
       toolEvents: projection?.toolEvents ?? [],
       terminalRawEvent: rawEvent,
     }),
-    ...roleModelEvidence,
+    ...(rawEvent.round === undefined || rawEvent.commitValidation === undefined
+      ? {}
+      : {
+          commitValidation: roleModelCommitValidation(
+            rawEvent.round,
+            rawEvent.commitValidation.result,
+          ),
+        }),
     ...pluginEvidenceForTurn({
       simpleEvidence: projection?.simplePluginEvidence ?? [],
       turnEvidence: rawEvent.runtimePluginTurnEvidence,
     }),
     ...(rawEvent.reason === undefined ? {} : {reason: rawEvent.reason}),
+    ...(rawEvent.message === undefined ? {} : {message: rawEvent.message}),
   } satisfies InspectTurnEvidence);
 }
 
-function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
-  readonly roleModelEvidence?: InspectRoleModelEvidence;
-} {
-  if (
-    rawEvent.roleModelIOSnapshot === undefined &&
-    rawEvent.parsedRoleModelDecisionSnapshot === undefined &&
-    rawEvent.commitValidation === undefined
-  ) {
-    return {};
-  }
-
+function roleModelEvidenceForRound(
+  rawEvent: RawEventLogRecord,
+): InspectRoleModelEvidence {
   const inputEnvelope = rawEvent.roleModelIOSnapshot?.inputEnvelope;
   const parsedDecision = rawEvent.parsedRoleModelDecisionSnapshot?.result;
-  const commitValidation = rawEvent.commitValidation?.result;
 
-  return {
-    roleModelEvidence: Object.freeze({
-      ...(inputEnvelope === undefined
-        ? {}
-        : {
-            input: Object.freeze({
-              sessionId: inputEnvelope.decisionContext.sessionId,
-              allowedTools: Object.freeze([...inputEnvelope.allowedTools]),
-              outputContractVersion: inputEnvelope.outputContract.version,
-              currentUserMessage:
-                inputEnvelope.event.payload.currentUserMessage,
-              historyWindow: Object.freeze({
-                turnEventIds: Object.freeze([
-                  ...inputEnvelope.decisionContext.historyWindow.turnEventIds,
-                ]),
-              }),
-              ...(inputEnvelope.decisionContext.contextSummary === undefined
-                ? {}
-                : {
-                    contextSummary:
-                      inputEnvelope.decisionContext.contextSummary,
-                  }),
-              runtimeNotes: Object.freeze(
-                inputEnvelope.decisionContext.runtimeNotes.map(note =>
-                  Object.freeze({
-                    id: note.id,
-                    text: note.text,
-                    ...(note.pluginId === undefined
-                      ? {}
-                      : {pluginId: note.pluginId}),
-                  }),
-                ),
-              ),
-              curatedContextSections: curatedContextSectionsFromSnapshots(
-                inputEnvelope.decisionContext.curatedContextSections,
-              ),
-              pluginContextItems: pluginContextItemsFromSnapshots(
-                inputEnvelope.decisionContext.pluginContextItems,
-              ),
+  return Object.freeze({
+    ...(inputEnvelope === undefined
+      ? {}
+      : {
+          input: Object.freeze({
+            sessionId: inputEnvelope.decisionContext.sessionId,
+            allowedTools: Object.freeze([...inputEnvelope.allowedTools]),
+            outputContractVersion: inputEnvelope.outputContract.version,
+            currentUserMessage: inputEnvelope.event.payload.currentUserMessage,
+            historyWindow: Object.freeze({
+              turnEventIds: Object.freeze([
+                ...inputEnvelope.decisionContext.historyWindow.turnEventIds,
+              ]),
             }),
-          }),
-      ...(rawEvent.roleModelIOSnapshot?.promptSize === undefined
-        ? {}
-        : {
-            promptSize: inspectPromptSize(
-              rawEvent.roleModelIOSnapshot.promptSize,
+            ...(inputEnvelope.decisionContext.contextSummary === undefined
+              ? {}
+              : {
+                  contextSummary: inputEnvelope.decisionContext.contextSummary,
+                }),
+            runtimeNotes: Object.freeze(
+              inputEnvelope.decisionContext.runtimeNotes.map(note =>
+                Object.freeze({
+                  id: note.id,
+                  text: note.text,
+                  ...(note.pluginId === undefined
+                    ? {}
+                    : {pluginId: note.pluginId}),
+                }),
+              ),
+            ),
+            curatedContextSections: curatedContextSectionsFromSnapshots(
+              inputEnvelope.decisionContext.curatedContextSections,
+            ),
+            pluginContextItems: pluginContextItemsFromSnapshots(
+              inputEnvelope.decisionContext.pluginContextItems,
             ),
           }),
-      ...(rawEvent.roleModelIOSnapshot === undefined
-        ? {}
-        : {
-            output: Object.freeze({
-              rawOutputText: rawEvent.roleModelIOSnapshot.rawOutputText,
-              ...(rawEvent.roleModelIOSnapshot.providerMetadata === undefined
-                ? {}
-                : {
-                    providerMetadata:
-                      rawEvent.roleModelIOSnapshot.providerMetadata,
-                  }),
-              ...(rawEvent.roleModelIOSnapshot.providerExchange === undefined
-                ? {}
-                : {
-                    providerExchange:
-                      rawEvent.roleModelIOSnapshot.providerExchange,
-                  }),
-            }),
+        }),
+    ...(rawEvent.roleModelIOSnapshot?.promptSize === undefined
+      ? {}
+      : {
+          promptSize: inspectPromptSize(
+            rawEvent.roleModelIOSnapshot.promptSize,
+          ),
+        }),
+    ...(rawEvent.roleModelIOSnapshot === undefined
+      ? {}
+      : {
+          output: Object.freeze({
+            rawOutputText: rawEvent.roleModelIOSnapshot.rawOutputText,
+            ...(rawEvent.roleModelIOSnapshot.providerMetadata === undefined
+              ? {}
+              : {
+                  providerMetadata:
+                    rawEvent.roleModelIOSnapshot.providerMetadata,
+                }),
+            ...(rawEvent.roleModelIOSnapshot.providerExchange === undefined
+              ? {}
+              : {
+                  providerExchange:
+                    rawEvent.roleModelIOSnapshot.providerExchange,
+                }),
           }),
-      ...(parsedDecision === undefined
-        ? {}
-        : {parsedDecision: parsedRoleModelDecision(parsedDecision)}),
-      ...(commitValidation === undefined
-        ? {}
-        : {
-            commitValidation: roleModelCommitValidation(commitValidation),
-          }),
-    } satisfies InspectRoleModelEvidence),
-  };
+        }),
+    ...(parsedDecision === undefined
+      ? {}
+      : {parsedDecision: parsedRoleModelDecision(parsedDecision)}),
+  } satisfies InspectRoleModelEvidence);
 }
 
 function inspectPromptSize(size: RoleModelPromptSize): InspectPromptSize {
@@ -404,17 +354,6 @@ function inspectPromptSize(size: RoleModelPromptSize): InspectPromptSize {
     ),
     tools: measure(size.toolChars),
     total: measure(totalChars),
-  });
-}
-
-// The prompt size tells two otherwise identical rounds apart: the later one
-// carries the replayed tool messages the earlier one did not.
-function roleModelRoundEvidenceKey(evidence: InspectRoleModelEvidence): string {
-  return canonicalJsonStringify({
-    input: evidence.input,
-    promptSize: evidence.promptSize,
-    output: evidence.output,
-    parsedDecision: evidence.parsedDecision,
   });
 }
 
@@ -440,7 +379,7 @@ function inspectToolCallEvent(
 ): InspectToolCallEvent {
   return Object.freeze({
     callId: rawEvent.toolCallId ?? '',
-    round: rawEvent.toolRound ?? 0,
+    round: rawEvent.round ?? 0,
     toolName: rawEvent.toolName ?? '',
     pluginId: rawEvent.toolPluginId ?? '',
     ...(rawEvent.toolInput === undefined ? {} : {input: rawEvent.toolInput}),
@@ -752,10 +691,12 @@ function parsedRoleModelDecision(
 }
 
 function roleModelCommitValidation(
+  round: number,
   result: RoleModelCommitValidationResult,
 ): InspectRoleModelCommitValidation {
   if (result.status === 'accepted') {
     return Object.freeze({
+      round,
       status: 'accepted',
       ...(result.acceptedVisibleReplyText === undefined
         ? {}
@@ -764,6 +705,7 @@ function roleModelCommitValidation(
   }
 
   return Object.freeze({
+    round,
     status: 'rejected',
     rejectionReason: result.rejection.reason,
     ...(result.rejection.details === undefined

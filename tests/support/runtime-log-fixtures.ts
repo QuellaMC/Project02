@@ -18,8 +18,10 @@ import {
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
+  runtimeEventIdentityKey,
   sessionIdFromMessageId,
   type CharacterProfile,
+  type RuntimeEventIdentity,
 } from '../../src/core/index.ts';
 
 export type DurableConversationExchange = readonly [string, string];
@@ -154,9 +156,56 @@ function conversationTurnTimestamp(turn: number, step: number): string {
   ).toISOString();
 }
 
-// The model input inside the character evidence must match the turn's
-// committed user message; callers whose turn committed something other than
-// the default `hello` pass that text.
+/**
+ * One model round as the runtime records it: what the model was shown and
+ * the decision it made. `decision` is the raw model output.
+ */
+export function appendModelRound(
+  store: RuntimeLogStore,
+  identity: RuntimeEventIdentity,
+  options: {
+    readonly round: number;
+    readonly sessionId: string;
+    readonly decision: unknown;
+    readonly character?: CharacterProfile;
+    readonly modelInputText?: string;
+  },
+): void {
+  const rawOutputText = JSON.stringify(options.decision);
+
+  store.appendRawEvent({
+    ...identity,
+    kind: 'role_model_round',
+    eventType: 'USER_MESSAGE',
+    round: options.round,
+    roleModelIOSnapshot: createRoleModelIOSnapshot({
+      ...identity,
+      sessionId: options.sessionId,
+      inputEnvelope: createRoleModelInputEnvelope({
+        event: createUserMessageRuntimeEvent(
+          options.modelInputText ?? 'hello',
+          createRuntimeEventIdentity(identity),
+        ),
+        decisionContext: createDecisionContext({
+          sessionId: options.sessionId,
+          characterSnapshot: options.character ?? testCharacterProfile,
+        }),
+        pluginToolDefinitions: [],
+      }),
+      rawOutputText,
+    }),
+    parsedRoleModelDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
+      ...identity,
+      sessionId: options.sessionId,
+      result: parseRoleModelExecutionDecision(rawOutputText),
+    }),
+  });
+}
+
+// The model input inside the round evidence must match the turn's committed
+// user message; callers whose turn committed something other than the
+// default `hello` pass that text. A character row appends the round that
+// said it first, numbered after the turn's earlier rounds.
 export function appendVisibleMessageWithCommitAnchor(
   store: RuntimeLogStore,
   message: ConversationLogRecord,
@@ -169,6 +218,29 @@ export function appendVisibleMessageWithCommitAnchor(
     createdAt: message.createdAt,
   };
   const sessionId = sessionIdFromMessageId(message.id) ?? 'local-session';
+  const round =
+    store
+      .rawEvents()
+      .filter(
+        record =>
+          record.kind === 'role_model_round' &&
+          runtimeEventIdentityKey(record) ===
+            runtimeEventIdentityKey(eventIdentity),
+      ).length + 1;
+
+  if (message.role === 'character') {
+    appendModelRound(store, eventIdentity, {
+      round,
+      sessionId,
+      decision: {
+        toolCalls: [{name: 'visible_reply', input: {text: message.text}}],
+      },
+      ...(expectedCharacter === undefined
+        ? {}
+        : {character: expectedCharacter}),
+      modelInputText,
+    });
+  }
 
   store.appendRawEvent(
     {
@@ -187,38 +259,7 @@ export function appendVisibleMessageWithCommitAnchor(
       ...(message.role === 'user'
         ? {}
         : {
-            roleModelIOSnapshot: createRoleModelIOSnapshot({
-              ...eventIdentity,
-              sessionId,
-              inputEnvelope: createRoleModelInputEnvelope({
-                event: createUserMessageRuntimeEvent(
-                  modelInputText,
-                  createRuntimeEventIdentity(eventIdentity),
-                ),
-                decisionContext: createDecisionContext({
-                  sessionId,
-                  characterSnapshot: expectedCharacter ?? testCharacterProfile,
-                }),
-                pluginToolDefinitions: [],
-              }),
-              rawOutputText: JSON.stringify({
-                toolCalls: [
-                  {name: 'visible_reply', input: {text: message.text}},
-                ],
-              }),
-            }),
-            parsedRoleModelDecisionSnapshot:
-              createParsedRoleModelDecisionSnapshot({
-                ...eventIdentity,
-                sessionId,
-                result: parseRoleModelExecutionDecision(
-                  JSON.stringify({
-                    toolCalls: [
-                      {name: 'visible_reply', input: {text: message.text}},
-                    ],
-                  }),
-                ),
-              }),
+            round,
             commitValidation: createRoleModelCommitValidationSnapshot({
               ...eventIdentity,
               sessionId,
@@ -227,7 +268,6 @@ export function appendVisibleMessageWithCommitAnchor(
                 acceptedVisibleReplyText: message.text,
               },
             }),
-            decisionRound: 1,
           }),
     },
     expectedCharacter,

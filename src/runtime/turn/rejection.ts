@@ -4,10 +4,8 @@ import {
 } from '../../core/index.ts';
 import type {
   RuntimePluginContext,
-  RuntimePluginContextItem,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginHealthSnapshot,
-  RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
 import type {
   RuntimePluginHealthHostResult,
@@ -16,7 +14,6 @@ import type {
 import {type RoleModelDecisionRejection} from '../../role-model/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
-  type RawEventLogRecordInput,
   type RoleModelCommitValidationSnapshot,
 } from '../evidence/records.ts';
 import {
@@ -26,7 +23,6 @@ import {
 import {appendRawEvent, visibleMessageIdsForTurnOption} from './commit.ts';
 import {
   type LocalRuntimeUserMessageRejectedResult,
-  type RoleModelRawEvidence,
   type RuntimeTurnRejectionOptions,
   type RuntimeTurnState,
 } from './contracts.ts';
@@ -38,7 +34,6 @@ export async function appendRejectedResult(
   state: RuntimeTurnState,
   optionsForRejection: RuntimeTurnRejectionOptions,
 ): Promise<LocalRuntimeUserMessageRejectedResult> {
-  const evidence = optionsForRejection.evidence ?? {};
   const pluginHost = state.options.pluginHost;
   const healthResult =
     optionsForRejection.healthResult ??
@@ -50,16 +45,21 @@ export async function appendRejectedResult(
     optionsForRejection.runtimePluginEvidence ?? [],
     healthResult.evidence,
   );
-  // Both records describe the same rejection, so they carry one body and
-  // one plugin turn-evidence snapshot; only the kind tells them apart.
-  const rejectionRecord: Omit<RawEventLogRecordInput, 'kind'> = {
+  const rawEvent = appendRawEvent(state, {
     ...state.identity,
+    kind: 'runtime_turn_rejected',
     eventType: state.event.type,
     status: 'rejected',
-    reason: optionsForRejection.rawReason,
+    reason: optionsForRejection.recordReason,
+    message: optionsForRejection.message,
     ...rejectionIdentityOptions(optionsForRejection),
     payloadSummary: state.payloadSummary,
-    ...evidence,
+    ...(optionsForRejection.round === undefined
+      ? {}
+      : {round: optionsForRejection.round}),
+    ...(optionsForRejection.commitValidation === undefined
+      ? {}
+      : {commitValidation: optionsForRejection.commitValidation}),
     ...runtimePluginEvidenceOption(runtimePluginEvidence),
     ...runtimePluginTurnEvidenceOption({
       identity: state.identity,
@@ -69,16 +69,6 @@ export async function appendRejectedResult(
       evidence: runtimePluginEvidence,
       health: healthResult.snapshots,
     }),
-  };
-
-  appendRawEvent(state, {
-    ...rejectionRecord,
-    kind: optionsForRejection.rawKind,
-  });
-
-  const rawEvent = appendRawEvent(state, {
-    ...rejectionRecord,
-    kind: 'runtime_turn_rejected',
   });
 
   return Object.freeze({
@@ -105,34 +95,6 @@ function rejectionIdentityOptions(options: RuntimeTurnRejectionOptions): {
   };
 }
 
-export function appendRoleModelRejectedResult(
-  state: RuntimeTurnState,
-  rejection: RoleModelDecisionRejection,
-  evidence: RoleModelRawEvidence,
-  runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[],
-  runtimePluginContextItems?: readonly RuntimePluginContextItem[],
-  runtimePluginToolInvocations?: readonly RuntimePluginToolInvocationSnapshot[],
-  runtimePluginContext?: RuntimePluginContext,
-): Promise<LocalRuntimeUserMessageRejectedResult> {
-  return appendRejectedResult(state, {
-    evidence,
-    ...(runtimePluginEvidence === undefined ? {} : {runtimePluginEvidence}),
-    ...(runtimePluginContextItems === undefined
-      ? {}
-      : {runtimePluginContextItems}),
-    ...(runtimePluginToolInvocations === undefined
-      ? {}
-      : {runtimePluginToolInvocations}),
-    message: rejection.details ?? rejection.reason,
-    rawKind: 'commit_validation_rejected',
-    rawReason: rejection.reason,
-    reason: rejection.reason,
-    ...(runtimePluginContext === undefined ? {} : {runtimePluginContext}),
-    toolCallIds: Object.freeze([...state.finishedToolCallIds]),
-    ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
-  });
-}
-
 export async function handleRuntimeTurnFailure(
   state: RuntimeTurnState,
   error: unknown,
@@ -144,9 +106,8 @@ export async function handleRuntimeTurnFailure(
   if (error instanceof CharacterInputError) {
     return await appendRejectedResult(state, {
       message: error.message,
-      rawKind: 'input_validation_rejected',
-      rawReason: error.message,
       reason: 'input_validation_rejected',
+      recordReason: 'input_validation_rejected',
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
     });
   }
@@ -156,7 +117,8 @@ export async function handleRuntimeTurnFailure(
     kind: 'runtime_turn_rejected',
     eventType: state.event.type,
     status: 'rejected',
-    reason: unexpectedRuntimeTurnFailureMessage,
+    reason: 'runtime_failure',
+    message: unexpectedRuntimeTurnFailureMessage,
     toolCallIds: Object.freeze([...state.finishedToolCallIds]),
     ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     payloadSummary: state.payloadSummary,

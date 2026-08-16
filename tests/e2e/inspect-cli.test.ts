@@ -58,6 +58,7 @@ import {
   runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
+import {createSequencedAdapter} from '../support/role-model-loop-fixtures.ts';
 
 describe('inspect CLI plugin evidence', () => {
   it('shows model rounds and per-tool plugin events', async () => {
@@ -98,6 +99,29 @@ describe('inspect CLI plugin evidence', () => {
       }),
       roleModelAdapter: createPatchThenReplyAdapter(),
     });
+    // A second turn whose first round the parser refused: the refused round
+    // is on record and shows up like any other.
+    await runLocalUserMessageEvent({
+      event: createUserMessageRuntimeEvent(
+        'again',
+        createRuntimeEventIdentity({
+          eventId: 'evt_inspect_refused',
+          traceId: 'trace_inspect_refused',
+          createdAt: '2026-06-15T00:00:01.000Z',
+        }),
+      ),
+      session,
+      logStore,
+      pluginHost: createDefaultProject02PluginHost({
+        storeRoot: characterDataDirPath(storeRoot, 'mira'),
+        sessionId: 'session-inspect',
+        sessionIdentity: session,
+      }),
+      roleModelAdapter: createSequencedAdapter([
+        {toolCalls: []},
+        {toolCalls: [{name: 'visible_reply', input: {text: 'recovered'}}]},
+      ]),
+    });
 
     let stdout = '';
     const exitCode = await runInspectCliFromArgs(
@@ -122,8 +146,9 @@ describe('inspect CLI plugin evidence', () => {
       readonly turns: readonly [
         {
           readonly modelRounds: readonly {
-            readonly rawEventKind: string;
+            readonly round: number;
             readonly roleModelEvidence: {
+              readonly parsedDecision?: {readonly status: string};
               readonly promptSize?: {
                 readonly frames: readonly {
                   readonly kind: string;
@@ -174,6 +199,19 @@ describe('inspect CLI plugin evidence', () => {
             }[];
           };
         },
+        {
+          readonly modelRounds: readonly {
+            readonly round: number;
+            readonly roleModelEvidence: {
+              readonly parsedDecision?: {readonly status: string};
+            };
+          }[];
+          readonly commitValidation?: {
+            readonly round: number;
+            readonly status: string;
+            readonly acceptedVisibleReplyText?: string;
+          };
+        },
       ];
     };
 
@@ -186,9 +224,9 @@ describe('inspect CLI plugin evidence', () => {
     });
     expect(output.counts.traceEntries).toBeGreaterThan(0);
     expect(output.turns[0].modelRounds).toHaveLength(2);
-    expect(
-      output.turns[0].modelRounds.map(round => round.rawEventKind),
-    ).toEqual(['tool_call_started', 'visible_message_committed']);
+    expect(output.turns[0].modelRounds.map(round => round.round)).toEqual([
+      1, 2,
+    ]);
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText,
     ).toContain('character_state.patch');
@@ -274,6 +312,21 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(patchTool).toMatchObject({
       concurrency: 'exclusive',
+    });
+
+    expect(
+      output.turns[1].modelRounds.map(round => [
+        round.round,
+        round.roleModelEvidence.parsedDecision?.status,
+      ]),
+    ).toEqual([
+      [1, 'rejected'],
+      [2, 'accepted'],
+    ]);
+    expect(output.turns[1].commitValidation).toEqual({
+      round: 2,
+      status: 'accepted',
+      acceptedVisibleReplyText: 'recovered',
     });
   });
 

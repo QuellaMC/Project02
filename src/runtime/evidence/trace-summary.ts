@@ -54,22 +54,18 @@ export function createTraceSummary(
     traceId: identity.traceId,
     status,
     steps: Object.freeze(entries.map(entry => entry.step)),
-    ...traceProviderSummaryOption(rawEvent, rawEvents),
+    ...traceProviderSummaryOption(rawEvents),
     ...traceToolCallSummaryOption(rawEvent, rawEvents),
     ...(error === undefined ? {} : {error}),
   } satisfies ChatTraceSummary);
 }
 
 function traceProviderSummaryOption(
-  rawEvent: RawEventLogRecord | undefined,
   rawEvents: readonly RawEventLogRecord[] | undefined,
 ): {readonly provider?: ChatTraceProviderSummary} {
-  const providerMetadata =
-    rawEvent?.roleModelIOSnapshot?.providerMetadata ??
-    [...(rawEvents ?? [])]
-      .reverse()
-      .find(event => event.roleModelIOSnapshot?.providerMetadata !== undefined)
-      ?.roleModelIOSnapshot?.providerMetadata;
+  const providerMetadata = modelRounds(rawEvents)
+    .map(round => round.roleModelIOSnapshot?.providerMetadata)
+    .findLast(metadata => metadata !== undefined);
 
   if (providerMetadata === undefined) {
     return {};
@@ -94,6 +90,11 @@ function traceProviderSummaryOption(
   };
 }
 
+/**
+ * Requested: every call an accepted round asked for, in round order.
+ * Executed: every call the host ran. Terminal: what the round the turn
+ * ended on asked for.
+ */
 function traceToolCallSummaryOption(
   terminalRawEvent: RawEventLogRecord | undefined,
   rawEvents: readonly RawEventLogRecord[] | undefined,
@@ -103,85 +104,61 @@ function traceToolCallSummaryOption(
   readonly terminalToolCalls?: readonly string[];
 } {
   const turnRawEvents = rawEvents ?? [];
-  if (!hasTraceToolCallEvidence(terminalRawEvent, turnRawEvents)) {
+  const rounds = modelRounds(turnRawEvents);
+
+  if (
+    rounds.length === 0 &&
+    !turnRawEvents.some(event => event.kind === 'tool_call_finished')
+  ) {
     return {};
   }
 
-  const requestedToolCalls = requestedToolCallNames(turnRawEvents);
-  const executedToolCalls = executedToolCallNames(turnRawEvents);
-  const terminalDecision = terminalDecisionEvidenceRawEvent(
-    terminalRawEvent,
-    turnRawEvents,
-  )?.parsedRoleModelDecisionSnapshot?.result;
-  const terminalToolCalls =
-    terminalDecision?.status === 'accepted'
-      ? terminalDecision.decision.toolCalls.map(call => call.name)
-      : [];
-
-  requestedToolCalls.push(...terminalToolCalls);
+  const terminal = terminalRound(terminalRawEvent, rounds);
 
   return {
-    requestedToolCalls: Object.freeze(requestedToolCalls),
-    executedToolCalls: Object.freeze(executedToolCalls),
-    terminalToolCalls: Object.freeze(terminalToolCalls),
+    requestedToolCalls: Object.freeze(rounds.flatMap(requestedToolCallNames)),
+    executedToolCalls: Object.freeze(executedToolCallNames(turnRawEvents)),
+    terminalToolCalls: Object.freeze(
+      terminal === undefined ? [] : requestedToolCallNames(terminal),
+    ),
   };
 }
 
-function hasTraceToolCallEvidence(
+/**
+ * The terminal record names the round the turn ended on. Without one the
+ * turn was cut short, and its last round ended it only if the loop would
+ * have stopped there — a decision with no executable calls.
+ */
+function terminalRound(
   terminalRawEvent: RawEventLogRecord | undefined,
-  turnRawEvents: readonly RawEventLogRecord[],
-): boolean {
-  return (
-    terminalRawEvent?.parsedRoleModelDecisionSnapshot !== undefined ||
-    turnRawEvents.some(
-      event =>
-        event.parsedRoleModelDecisionSnapshot !== undefined ||
-        event.kind === 'tool_call_finished',
-    )
-  );
-}
-
-function requestedToolCallNames(
-  turnRawEvents: readonly RawEventLogRecord[],
-): string[] {
-  const requestedToolCalls: string[] = [];
-  const seenRequestedDecisions = new Set<string>();
-
-  for (const event of turnRawEvents) {
-    if (
-      event.kind !== 'tool_call_started' &&
-      event.kind !== 'visible_message_committed'
-    ) {
-      continue;
-    }
-
-    // The terminal decision's calls are appended once by the summary
-    // composer; scanning its commit event here would double-count them.
-    if (
-      event.kind === 'visible_message_committed' &&
-      rawEventDecisionIsTerminal(event)
-    ) {
-      continue;
-    }
-
-    const decisionSnapshot = event.parsedRoleModelDecisionSnapshot;
-    const decisionEvidenceKey = requestedDecisionEvidenceKey(event);
-
-    if (
-      decisionSnapshot?.result.status !== 'accepted' ||
-      decisionEvidenceKey === undefined ||
-      seenRequestedDecisions.has(decisionEvidenceKey)
-    ) {
-      continue;
-    }
-
-    seenRequestedDecisions.add(decisionEvidenceKey);
-    requestedToolCalls.push(
-      ...decisionSnapshot.result.decision.toolCalls.map(call => call.name),
-    );
+  rounds: readonly RawEventLogRecord[],
+): RawEventLogRecord | undefined {
+  if (terminalRawEvent?.round !== undefined) {
+    return rounds.find(round => round.round === terminalRawEvent.round);
   }
 
-  return requestedToolCalls;
+  const lastRound = rounds.at(-1);
+  const result = lastRound?.parsedRoleModelDecisionSnapshot?.result;
+
+  return result?.status === 'accepted' &&
+    visibleReplyToolCalls(result.decision).length ===
+      result.decision.toolCalls.length
+    ? lastRound
+    : undefined;
+}
+
+function modelRounds(
+  rawEvents: readonly RawEventLogRecord[] | undefined,
+): readonly RawEventLogRecord[] {
+  return (rawEvents ?? []).filter(event => event.kind === 'role_model_round');
+}
+
+function requestedToolCallNames(round: RawEventLogRecord): readonly string[] {
+  const result = round.parsedRoleModelDecisionSnapshot?.result;
+
+  return result?.status === 'accepted'
+    ? result.decision.toolCalls.map(call => call.name)
+    : [];
 }
 
 function executedToolCallNames(
@@ -214,61 +191,4 @@ function executedToolCallNames(
   }
 
   return executedToolCalls;
-}
-
-function requestedDecisionEvidenceKey(
-  event: RawEventLogRecord,
-): string | undefined {
-  const roleModelIOSnapshot = event.roleModelIOSnapshot;
-
-  if (
-    roleModelIOSnapshot === undefined ||
-    event.parsedRoleModelDecisionSnapshot === undefined
-  ) {
-    return undefined;
-  }
-
-  // Every executable round appends a tool round before the next model
-  // invocation, so this pair is a stable key for one decision.
-  return `${String(
-    roleModelIOSnapshot.inputEnvelope.toolRounds.length,
-  )}:${roleModelIOSnapshot.rawOutputText}`;
-}
-
-export function terminalDecisionEvidenceRawEvent(
-  terminalRawEvent: RawEventLogRecord | undefined,
-  turnRawEvents: readonly RawEventLogRecord[],
-): RawEventLogRecord | undefined {
-  if (terminalRawEvent !== undefined) {
-    return terminalRawEvent;
-  }
-
-  const reverseEvents = [...turnRawEvents].reverse();
-  const persistedTerminalEvent = reverseEvents.find(
-    event =>
-      (event.kind === 'runtime_turn_completed' ||
-        event.kind === 'runtime_turn_rejected') &&
-      event.parsedRoleModelDecisionSnapshot !== undefined,
-  );
-
-  // Terminal means a decision with no executable tool calls — the same rule
-  // the loop uses to stop.
-  return (
-    persistedTerminalEvent ??
-    reverseEvents.find(
-      event =>
-        event.kind === 'visible_message_committed' &&
-        rawEventDecisionIsTerminal(event),
-    )
-  );
-}
-
-function rawEventDecisionIsTerminal(event: RawEventLogRecord): boolean {
-  const result = event.parsedRoleModelDecisionSnapshot?.result;
-
-  return (
-    result?.status === 'accepted' &&
-    visibleReplyToolCalls(result.decision).length ===
-      result.decision.toolCalls.length
-  );
 }

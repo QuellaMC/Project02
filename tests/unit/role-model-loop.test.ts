@@ -4,12 +4,13 @@ import {
   type RoleModelAdapter,
   type RoleModelChatMessage,
   type RoleModelPluginToolHost,
+  type RoleModelRoundEvent,
   runRoleModelLoop,
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
 import {
   acceptingPluginToolHost,
-  testVisibleReplySink,
+  testLoopCallbacks,
   createAcceptedToolCallResult,
   createRejectedToolCallResult,
   createRejectedToolCallResultWithEvidence,
@@ -31,7 +32,7 @@ describe('role-model loop routing and policy', () => {
 
       await expect(
         runRoleModelLoop({
-          onVisibleReply: testVisibleReplySink(),
+          ...testLoopCallbacks(),
           event: createTestEvent('hello', 'evt_invalid_max_tool_rounds'),
           decisionContext: createTestDecisionContext(),
           pluginToolDefinitions: [],
@@ -75,7 +76,7 @@ describe('role-model loop routing and policy', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(text => replies.push(text)),
+      ...testLoopCallbacks({onReply: text => replies.push(text)}),
       event: createTestEvent('hello', 'evt_no_plugin_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -90,11 +91,12 @@ describe('role-model loop routing and policy', () => {
     expect(replies).toEqual(['hello there']);
   });
 
-  it('hands a refused reply back to the model for exactly its next round, and records the refused round', async () => {
+  it('hands a refused reply back to the model for exactly its next round, and reports the refused round', async () => {
     const seenMessages: (readonly RoleModelChatMessage[])[] = [];
+    const rounds: RoleModelRoundEvent[] = [];
     let invocations = 0;
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks({rounds}),
       event: createTestEvent('hello', 'evt_refused_round_handed_back'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [memorySearchToolDefinition],
@@ -118,7 +120,7 @@ describe('role-model loop routing and policy', () => {
     expect(result.status).toBe('accepted');
     expect(invocations).toBe(3);
     expect(
-      result.rounds.map(round => round.parsedDecisionSnapshot.result.status),
+      rounds.map(round => round.parsedDecisionSnapshot.result.status),
     ).toEqual(['rejected', 'accepted', 'accepted']);
     const notesIn = (round: number) =>
       seenMessages[round]?.filter(
@@ -137,9 +139,10 @@ describe('role-model loop routing and policy', () => {
   });
 
   it('ends the turn when the rounds run out, or when no usable output arrived at all', async () => {
+    const rounds: RoleModelRoundEvent[] = [];
     let invocations = 0;
     const spent = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks({rounds}),
       event: createTestEvent('hello', 'evt_rounds_spent'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -156,14 +159,16 @@ describe('role-model loop routing and policy', () => {
 
     expect(spent).toMatchObject({
       status: 'rejected',
+      round: 3,
       rejection: {reason: 'malformed_output'},
     });
     expect(invocations).toBe(3);
-    expect(spent.rounds).toHaveLength(3);
+    expect(rounds.map(round => round.round)).toEqual([1, 2, 3]);
 
     invocations = 0;
+    rounds.length = 0;
     const providerFailure = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks({rounds}),
       event: createTestEvent('hello', 'evt_provider_failure'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -184,12 +189,71 @@ describe('role-model loop routing and policy', () => {
       } satisfies RoleModelAdapter),
     });
 
-    // Nothing to hand back: the model wrote nothing.
+    // Nothing to hand back: the model wrote nothing. The round is still on
+    // record, with the provider's failure as its verdict.
     expect(providerFailure).toMatchObject({
       status: 'rejected',
+      round: 1,
       rejection: {reason: 'provider_error', details: 'upstream 503'},
     });
     expect(invocations).toBe(1);
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]?.parsedDecisionSnapshot.result).toMatchObject({
+      status: 'rejected',
+      rejection: {reason: 'provider_error'},
+    });
+    expect(rounds[0]?.ioSnapshot.rawOutputText).toBe('');
+  });
+
+  it('reports every round before delivering a reply or dispatching a tool', async () => {
+    const events: string[] = [];
+    const result = await runRoleModelLoop({
+      onRound(event) {
+        events.push(`round:${String(event.round)}`);
+      },
+      onVisibleReply(event) {
+        events.push(`reply:${event.text}`);
+
+        return {
+          id: `session-loop:message-${String(events.length)}`,
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: event.text,
+        };
+      },
+      onPluginToolCallStarted(event) {
+        events.push(`tool:${event.call.toolName}`);
+      },
+      event: createTestEvent('search memory', 'evt_round_before_effects'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: [memorySearchToolDefinition],
+      pluginToolHost: acceptingPluginToolHost,
+      runtimePluginContext: createTestPluginContext('evt_round_before_effects'),
+      adapter: createSequencedAdapter(
+        [
+          {
+            toolCalls: [
+              {name: visibleReplyModelToolName, input: {text: 'looking'}},
+              {name: 'memory.search', input: {query: 'first'}},
+            ],
+          },
+          {toolCalls: [{name: visibleReplyModelToolName, input: {text: 'ok'}}]},
+        ],
+        () => undefined,
+      ),
+    });
+
+    // The round is on record before its consequences are: a crash after
+    // the reply or the tool call still leaves the round that decided them.
+    expect(result.status).toBe('accepted');
+    expect(events).toEqual([
+      'round:1',
+      'reply:looking',
+      'tool:memory.search',
+      'round:2',
+      'reply:ok',
+    ]);
   });
 
   it('overlaps shared tool calls and keeps observations in call order', async () => {
@@ -213,7 +277,7 @@ describe('role-model loop routing and policy', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_shared_tool_overlap'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [searchTool, recallTool],
@@ -242,9 +306,10 @@ describe('role-model loop routing and policy', () => {
       events.indexOf('end:memory.search'),
     );
     // Observations follow the model's call order, not completion order.
-    expect(
-      result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
-    ).toEqual(['memory.search', 'memory.recall']);
+    expect(result.pluginToolResults.map(entry => entry.call.toolName)).toEqual([
+      'memory.search',
+      'memory.recall',
+    ]);
   });
 
   it('reports a finished tool call before its slower sibling settles', async () => {
@@ -267,7 +332,7 @@ describe('role-model loop routing and policy', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_completion_timing'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [slowTool, fastTool],
@@ -298,9 +363,10 @@ describe('role-model loop routing and policy', () => {
     expect(events.indexOf('reported:memory.search')).toBeLessThan(
       events.indexOf('settled:memory.recall'),
     );
-    expect(
-      result.rounds[0]?.pluginToolResults.map(entry => entry.call.toolName),
-    ).toEqual(['memory.recall', 'memory.search']);
+    expect(result.pluginToolResults.map(entry => entry.call.toolName)).toEqual([
+      'memory.recall',
+      'memory.search',
+    ]);
   });
 
   it('lets every call finish before a failed report propagates', async () => {
@@ -322,7 +388,7 @@ describe('role-model loop routing and policy', () => {
 
     await expect(
       runRoleModelLoop({
-        onVisibleReply: testVisibleReplySink(),
+        ...testLoopCallbacks(),
         event: createTestEvent('search memory', 'evt_report_failure'),
         decisionContext: createTestDecisionContext(),
         pluginToolDefinitions: [fastTool, slowTool],
@@ -372,7 +438,7 @@ describe('role-model loop routing and policy', () => {
     });
 
     await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('mixed batch', 'evt_exclusive_tool_alone'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [searchTool, recallTool],
@@ -408,7 +474,7 @@ describe('role-model loop routing and policy', () => {
     const eventId = 'evt_round_replay';
     const messagesByRound: (readonly RoleModelChatMessage[])[] = [];
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [memorySearchToolDefinition],
@@ -505,7 +571,7 @@ describe('role-model loop routing and policy', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_rejected_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -533,14 +599,13 @@ describe('role-model loop routing and policy', () => {
         reason: 'handler_failed',
       },
     });
-    expect(result.rounds).toHaveLength(2);
-    expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+    expect(result).toMatchObject({round: 2});
   });
 
   it('routes executable tools through the immutable definition owner', async () => {
     const routedPluginIds: string[] = [];
     const options = {
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_definition_owned_routing'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -616,7 +681,7 @@ describe('role-model loop routing and policy', () => {
       });
 
       const result = await runRoleModelLoop({
-        onVisibleReply: testVisibleReplySink(),
+        ...testLoopCallbacks(),
         event: createTestEvent(
           'search memory',
           'evt_replayed_tool_call',
@@ -698,7 +763,7 @@ describe('role-model loop routing and policy', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent(
         'search memory',
         'evt_handler_rejected_plugin_tool',
