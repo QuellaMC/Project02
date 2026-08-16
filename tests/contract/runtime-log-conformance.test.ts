@@ -3,6 +3,7 @@ import {describe, expect, it} from 'vitest';
 
 import type {CharacterProfile} from '../../src/core/index.ts';
 import {type RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
+import type {RawEventLogRecordInput} from '../../src/runtime/evidence/records.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
@@ -12,7 +13,11 @@ import {
   createLocalRuntimeSessionStore,
 } from '../../src/runtime/storage/session-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {appendVisibleMessageWithCommitAnchor} from '../support/runtime-log-fixtures.ts';
+import {
+  appendModelRound,
+  appendVisibleMessageWithCommitAnchor,
+  completedTerminalRecord,
+} from '../support/runtime-log-fixtures.ts';
 
 type RuntimeLogBackend = 'memory' | 'file';
 
@@ -48,14 +53,10 @@ const acceptedScenarios = [
   {
     name: 'accepts a canonical completed turn without visible messages',
     expected: 'accepted',
-    run(logStore) {
+    run(logStore, currentSessionId) {
       appendTurnStart(logStore);
-      logStore.appendRawEvent({
-        ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
-      });
+      appendToolRound(logStore, currentSessionId);
+      logStore.appendRawEvent(completedTerminal(currentSessionId));
     },
   },
   {
@@ -66,10 +67,7 @@ const acceptedScenarios = [
       appendUserMessage(logStore, currentSessionId);
       appendCharacterMessage(logStore, currentSessionId, miraCharacter);
       logStore.appendRawEvent({
-        ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
+        ...completedTerminal(currentSessionId, 'hi'),
         visibleMessageIds: [
           `${currentSessionId}:message-1`,
           `${currentSessionId}:message-2`,
@@ -95,13 +93,8 @@ const rejectedScenarios = [
   {
     name: 'rejects runtime_turn_completed as the first raw record',
     expected: 'malformed_record',
-    run(logStore) {
-      logStore.appendRawEvent({
-        ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
-      });
+    run(logStore, currentSessionId) {
+      logStore.appendRawEvent(completedTerminal(currentSessionId));
     },
   },
   {
@@ -191,11 +184,9 @@ const rejectedScenarios = [
     run(logStore, currentSessionId) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, currentSessionId);
+      appendToolRound(logStore, currentSessionId);
       logStore.appendRawEvent({
-        ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
+        ...completedTerminal(currentSessionId),
         visibleMessageIds: [`${currentSessionId}:message-1`],
         payloadSummary: {normalizedCurrentUserMessage: 'not what the row says'},
       });
@@ -348,6 +339,30 @@ function appendTurnStart(logStore: RuntimeLogStore): void {
     ...identity,
     kind: 'runtime_event_received',
     eventType: 'USER_MESSAGE',
+  });
+}
+
+/** A round that decided a tool call and said nothing: a turn with no reply to commit. */
+function appendToolRound(
+  logStore: RuntimeLogStore,
+  currentSessionId: string,
+): void {
+  appendModelRound(logStore, identity, {
+    round: 1,
+    sessionId: currentSessionId,
+    decision: {toolCalls: [{name: 'memory.search', input: {query: 'hi'}}]},
+  });
+}
+
+function completedTerminal(
+  currentSessionId: string,
+  acceptedVisibleReplyText?: string,
+): RawEventLogRecordInput {
+  return completedTerminalRecord(identity, {
+    sessionId: currentSessionId,
+    ...(acceptedVisibleReplyText === undefined
+      ? {}
+      : {acceptedVisibleReplyText}),
   });
 }
 

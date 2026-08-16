@@ -41,7 +41,10 @@ import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
 import {createSequencedAdapter} from '../support/role-model-loop-fixtures.ts';
-import {appendModelRound} from '../support/runtime-log-fixtures.ts';
+import {
+  appendModelRound,
+  completedTerminalRecord,
+} from '../support/runtime-log-fixtures.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
@@ -1578,6 +1581,38 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
+  it('rejects a completed terminal stripped of its round and verdict', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-without-verdict',
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    // A turn that ran the model completed on a verdict; a terminal without
+    // one reports a model turn with no verdict at all.
+    const record = JSON.parse(terminal) as Record<string, unknown>;
+
+    delete record['round'];
+    delete record['commitValidation'];
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .map(line => (line === terminal ? JSON.stringify(record) : line))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /ran the model must judge the round it ended on/iu,
+    );
+  });
+
   it('rejects a completed terminal that anchors a reply its round never asked for', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-terminal-anchor',
@@ -2535,13 +2570,10 @@ describe('file runtime log store plugin tool event validation', () => {
       expect(logStore.rawEvents().at(-1)?.kind).toBe('tool_call_started');
       // Claiming completion over an unfinished call is a writer bug.
       expect(() =>
-        logStore.appendRawEvent({
-          ...identity(),
-          kind: 'runtime_turn_completed',
-          eventType: 'USER_MESSAGE',
-          status: 'completed',
-        }),
-      ).toThrow(LocalRuntimeStorageContractError);
+        logStore.appendRawEvent(
+          completedTerminalRecord(identity(), {sessionId: 'session-tools'}),
+        ),
+      ).toThrow(/started without finish/iu);
     } finally {
       await writerLease.release();
     }
@@ -2630,15 +2662,19 @@ describe('file runtime log store plugin tool event validation', () => {
 
     try {
       appendTurnPrefix(logStore, 'evt_terminal_tool_ref');
+      appendModelRound(logStore, identity('evt_terminal_tool_ref'), {
+        round: 1,
+        sessionId: 'session-terminal-tools',
+        decision: {toolCalls: [{name: 'memory.search', input: {}}]},
+      });
       expect(() =>
         logStore.appendRawEvent({
-          ...identity('evt_terminal_tool_ref'),
-          kind: 'runtime_turn_completed',
-          eventType: 'USER_MESSAGE',
-          status: 'completed',
+          ...completedTerminalRecord(identity('evt_terminal_tool_ref'), {
+            sessionId: 'session-terminal-tools',
+          }),
           toolCallIds: ['round-1.1.memory.search'],
         }),
-      ).toThrow(LocalRuntimeStorageContractError);
+      ).toThrow(/references unfinished tool call/iu);
     } finally {
       await writerLease.release();
     }

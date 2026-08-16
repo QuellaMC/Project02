@@ -75,6 +75,19 @@ export function assertTerminalJudgesItsRound(
     );
   }
 
+  // A turn can complete without a model round (a session end), but one that
+  // ran the model completed on a verdict.
+  if (
+    record.kind === 'runtime_turn_completed' &&
+    record.round === undefined &&
+    turnRounds.length > 0
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'A completed turn that ran the model must judge the round it ended on.',
+    );
+  }
+
   const commitResult = record.commitValidation?.result;
   const parsedResult = referencedDecision(record, turnRounds);
 

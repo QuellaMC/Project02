@@ -15,6 +15,7 @@ import type {RuntimeEventIdentity} from '../../src/core/index.ts';
 import {
   appendModelRound,
   appendVisibleMessageWithCommitAnchor,
+  completedTerminalRecord,
 } from '../support/runtime-log-fixtures.ts';
 
 const identity = {
@@ -41,12 +42,14 @@ describe('runtime log store', () => {
       kind: 'runtime_event_normalized',
       eventType: 'USER_MESSAGE',
     });
-    store.appendRawEvent({
-      ...identity,
-      kind: 'runtime_turn_completed',
-      eventType: 'USER_MESSAGE',
-      status: 'completed',
+    appendModelRound(store, identity, {
+      round: 1,
+      sessionId: 'local-session',
+      decision: {toolCalls: [{name: 'memory.search', input: {}}]},
     });
+    store.appendRawEvent(
+      completedTerminalRecord(identity, {sessionId: 'local-session'}),
+    );
 
     const snapshot = store.traceEntries();
 
@@ -54,6 +57,7 @@ describe('runtime log store', () => {
       'runtime_event_received',
       'runtime_event_normalized',
       'runtime_turn_started',
+      'role_model_round',
       'raw_event_log_appended',
       'runtime_turn_completed',
     ]);
@@ -85,10 +89,10 @@ describe('runtime log store', () => {
       payloadSummary,
     };
     const completed: RawEventLogRecordInput = {
-      ...identity,
-      kind: 'runtime_turn_completed',
-      eventType: 'USER_MESSAGE',
-      status: 'completed',
+      ...completedTerminalRecord(identity, {
+        sessionId: 'local-session',
+        acceptedVisibleReplyText: 'hello back',
+      }),
       visibleMessageIds,
       runtimePluginTurnEvidence: createMinimalPluginTurnEvidence(identity),
     };
@@ -240,13 +244,13 @@ describe('runtime log store', () => {
     });
     appendVisibleMessageWithCommitAnchor(store, userMessage);
     appendVisibleMessageWithCommitAnchor(store, characterMessage);
-    store.appendRawEvent({
-      ...identity,
-      kind: 'runtime_turn_completed',
-      eventType: 'USER_MESSAGE',
-      status: 'completed',
-      visibleMessageIds: [userMessage.id, characterMessage.id],
-    });
+    store.appendRawEvent(
+      completedTerminalRecord(identity, {
+        sessionId: 'local-session',
+        visibleMessageIds: [userMessage.id, characterMessage.id],
+        acceptedVisibleReplyText: characterMessage.text,
+      }),
+    );
 
     expect(store.conversationMessages()).toEqual([
       userMessage,

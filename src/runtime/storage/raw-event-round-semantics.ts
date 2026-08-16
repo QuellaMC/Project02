@@ -197,7 +197,7 @@ function assertCommitRoundReference(options: RawEventRoundSemantics): void {
   );
 }
 
-/** A terminal record judges a round when there was one: both or neither. */
+/** A terminal record judges a round when the model ran: both or neither. */
 function assertTerminalRoundReference(options: RawEventRoundSemantics): void {
   if (
     (options.round === undefined) !==

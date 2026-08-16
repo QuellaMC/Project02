@@ -1,6 +1,9 @@
 import {testCharacterProfile} from './character-fixtures.ts';
 import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
-import type {ConversationLogRecord} from '../../src/runtime/evidence/records.ts';
+import type {
+  ConversationLogRecord,
+  RawEventLogRecordInput,
+} from '../../src/runtime/evidence/records.ts';
 import {createRoleModelCommitValidationSnapshot} from '../../src/runtime/evidence/records.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from '../../src/runtime/storage/mutation-lock.ts';
@@ -141,13 +144,45 @@ function appendConversationExchange(
     character,
     userText,
   );
-  logStore.appendRawEvent({
+  logStore.appendRawEvent(
+    completedTerminalRecord(identity, {
+      sessionId,
+      visibleMessageIds: [userMessageId, characterMessageId],
+      acceptedVisibleReplyText: characterText,
+    }),
+  );
+}
+
+/** A completed terminal that judges round 1, as the runtime writes one. */
+export function completedTerminalRecord(
+  identity: RuntimeEventIdentity,
+  options: {
+    readonly sessionId: string;
+    readonly visibleMessageIds?: readonly string[];
+    readonly acceptedVisibleReplyText?: string;
+    readonly round?: number;
+  },
+): RawEventLogRecordInput {
+  return {
     ...identity,
     kind: 'runtime_turn_completed',
     eventType: 'USER_MESSAGE',
     status: 'completed',
-    visibleMessageIds: [userMessageId, characterMessageId],
-  });
+    ...(options.visibleMessageIds === undefined
+      ? {}
+      : {visibleMessageIds: options.visibleMessageIds}),
+    round: options.round ?? 1,
+    commitValidation: createRoleModelCommitValidationSnapshot({
+      ...identity,
+      sessionId: options.sessionId,
+      result: {
+        status: 'accepted',
+        ...(options.acceptedVisibleReplyText === undefined
+          ? {}
+          : {acceptedVisibleReplyText: options.acceptedVisibleReplyText}),
+      },
+    }),
+  };
 }
 
 function conversationTurnTimestamp(turn: number, step: number): string {
