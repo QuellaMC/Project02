@@ -25,6 +25,7 @@ import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {createTurnEvidence} from '../../src/runtime/evidence/turn-projection.ts';
 import {
   defaultRoleModelProviderCapabilities,
+  parseRoleModelExecutionDecision,
   type RoleModelAdapter,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
@@ -1475,12 +1476,9 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
-  it('rejects a completed terminal that references a refused round', async () => {
-    // Round 1 is refused (a blank reply) and round 2 recovers, so the
-    // completed terminal names round 2; pointing it at round 1 contradicts
-    // what that round said.
+  it("rejects a terminal that judges a round other than the turn's last", async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-terminal-on-refused-round',
+      'session-terminal-on-earlier-round',
       createSequencedAdapter([
         {toolCalls: [{name: 'visible_reply', input: {text: '   '}}]},
         {toolCalls: [{name: 'visible_reply', input: {text: 'real reply'}}]},
@@ -1494,6 +1492,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected a completed terminal record.');
     }
 
+    // The turn ended on round 2; a terminal pointed at round 1 attributes
+    // the outcome to a round that did not end it.
     const repointed = JSON.stringify({
       ...(JSON.parse(terminal) as Record<string, unknown>),
       round: 1,
@@ -1502,6 +1502,74 @@ describe('file runtime log store plugin tool event validation', () => {
     writeFileSync(
       paths.rawEventsPath,
       `${rawLines.map(line => (line === terminal ? repointed : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /judges the round the turn ended on, round 2, not round 1/iu,
+    );
+  });
+
+  it('rejects a completed terminal whose last round the parser refused', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-on-refused-round',
+    );
+    const round = rawLines.find(line => line.includes('"role_model_round"'));
+    const commit = rawLines.find(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (round === undefined || commit === undefined || terminal === undefined) {
+      throw new Error('Expected a round, its reply, and the terminal.');
+    }
+
+    // The round is rewritten as one the parser refused, consistently with its
+    // raw output, and the reply it produced is dropped along with its
+    // reference; only the terminal still claims an accepted round.
+    const rawOutputText = 'not a decision';
+    const roundRecord = JSON.parse(round) as {
+      roleModelIOSnapshot: Record<string, unknown>;
+      parsedRoleModelDecisionSnapshot: Record<string, unknown>;
+    };
+    const refusedRound = JSON.stringify({
+      ...roundRecord,
+      roleModelIOSnapshot: {...roundRecord.roleModelIOSnapshot, rawOutputText},
+      parsedRoleModelDecisionSnapshot: {
+        ...roundRecord.parsedRoleModelDecisionSnapshot,
+        result: parseRoleModelExecutionDecision(rawOutputText),
+      },
+    });
+    const commitRecord = JSON.parse(commit) as {
+      visibleMessage: {id: string};
+    };
+    const terminalRecord = JSON.parse(terminal) as {
+      visibleMessageIds: readonly string[];
+    };
+    const forgedTerminal = JSON.stringify({
+      ...terminalRecord,
+      visibleMessageIds: terminalRecord.visibleMessageIds.filter(
+        id => id !== commitRecord.visibleMessage.id,
+      ),
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .flatMap(line =>
+          line === round
+            ? [refusedRound]
+            : line === commit
+              ? []
+              : line === terminal
+                ? [forgedTerminal]
+                : [line],
+        )
+        .join('\n')}\n`,
       'utf8',
     );
 

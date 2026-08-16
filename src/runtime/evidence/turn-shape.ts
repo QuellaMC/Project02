@@ -59,14 +59,22 @@ export function assertRoundReference(
 }
 
 /**
- * A terminal record that judges a round agrees with what the round said: a
- * completed turn ends on an accepted decision, and a rejection repeats the
+ * A terminal record that judges a round judges the round the turn ended on
+ * and agrees with what it said: a completed turn ends on an accepted
+ * decision and anchors one of its replies, and a rejection repeats the
  * parser's refusal or names one of the runtime's own.
  */
 export function assertTerminalJudgesItsRound(
   record: RawEventLogRecord,
   turnRounds: readonly RawEventLogRecord[],
 ): void {
+  if (record.round !== undefined && record.round !== turnRounds.length) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `A terminal record judges the round the turn ended on, round ${String(turnRounds.length)}, not round ${String(record.round)}.`,
+    );
+  }
+
   const commitResult = record.commitValidation?.result;
   const parsedResult = referencedDecision(record, turnRounds);
 
