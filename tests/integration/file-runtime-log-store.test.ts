@@ -1510,6 +1510,43 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
+  it('rejects a completed terminal that anchors a reply its round never asked for', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-anchor',
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    const record = JSON.parse(terminal) as {
+      commitValidation: {result: Record<string, unknown>};
+    };
+    const forged = JSON.stringify({
+      ...record,
+      commitValidation: {
+        ...record.commitValidation,
+        result: {
+          ...record.commitValidation.result,
+          acceptedVisibleReplyText: 'not what the round said',
+        },
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === terminal ? forged : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must anchor a reply the round it ended on asked for/iu,
+    );
+  });
+
   it('rejects a turn rejection whose reason disagrees with the round it judged', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-rejection-disagrees',

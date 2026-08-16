@@ -82,6 +82,20 @@ export function assertTerminalJudgesItsRound(
       );
     }
 
+    const replies = storedDecisionReplyTexts(parsedResult.decision);
+    const anchored = commitResult.acceptedVisibleReplyText;
+
+    if (
+      anchored === undefined
+        ? replies.length !== 0
+        : !replies.includes(anchored)
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'A completed turn must anchor a reply the round it ended on asked for.',
+      );
+    }
+
     return;
   }
 
