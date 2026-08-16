@@ -45,10 +45,13 @@ describe('runtime log store', () => {
     appendModelRound(store, identity, {
       round: 1,
       sessionId: 'local-session',
-      decision: {toolCalls: [{name: 'memory.search', input: {}}]},
+      decision: {toolCalls: [{name: 'visible_reply', input: {text: 'hi'}}]},
     });
     store.appendRawEvent(
-      completedTerminalRecord(identity, {sessionId: 'local-session'}),
+      completedTerminalRecord(identity, {
+        sessionId: 'local-session',
+        acceptedVisibleReplyText: 'hi',
+      }),
     );
 
     const snapshot = store.traceEntries();

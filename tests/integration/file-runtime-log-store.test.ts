@@ -373,15 +373,24 @@ describe('file runtime log store plugin tool event validation', () => {
       patchRoundRecord(sessionId),
       {
         ...eventIdentity,
-        kind: 'runtime_turn_completed',
+        kind: 'runtime_turn_rejected',
         eventType: 'USER_MESSAGE',
-        status: 'completed',
+        status: 'rejected',
+        reason: 'tool_rounds_exhausted',
+        message: 'Role model exceeded maximum executable tool rounds (0).',
         round: 1,
         commitValidation: {
           ...eventIdentity,
           kind: 'role_model_commit_validation_snapshot',
           sessionId,
-          result: {status: 'accepted'},
+          result: {
+            status: 'rejected',
+            rejection: {
+              reason: 'tool_rounds_exhausted',
+              details:
+                'Role model exceeded maximum executable tool rounds (0).',
+            },
+          },
         },
       },
     ]);
@@ -391,7 +400,7 @@ describe('file runtime log store plugin tool event validation', () => {
         reopenStore(paths).rawEvents(),
         eventIdentity,
       )?.kind,
-    ).toBe('runtime_turn_completed');
+    ).toBe('runtime_turn_rejected');
     expect(
       findRuntimeTurnTerminalRawEvent(reopenStore(paths).rawEvents(), {
         ...eventIdentity,
@@ -1578,6 +1587,96 @@ describe('file runtime log store plugin tool event validation', () => {
 
     expect(() => reopenStore(paths).rawEvents()).toThrow(
       /must end on a round the parser accepted/iu,
+    );
+  });
+
+  it('rejects a completed terminal on a round that still asked for a tool', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-on-tool-round',
+      createSequencedVisibleReplyAdapter(['a reply']),
+    );
+    const round = rawLines.find(line => line.includes('"role_model_round"'));
+
+    if (round === undefined) {
+      throw new Error('Expected a model round record.');
+    }
+
+    // The round keeps its reply, so the row still matches, and gains a tool
+    // call the turn never ran; only the terminal claims it completed there.
+    const rawOutputText = JSON.stringify({
+      toolCalls: [
+        {name: 'visible_reply', input: {text: 'a reply'}},
+        {name: 'runtime.plugin.list', input: {}},
+      ],
+    });
+    const roundRecord = JSON.parse(round) as {
+      roleModelIOSnapshot: Record<string, unknown>;
+      parsedRoleModelDecisionSnapshot: Record<string, unknown>;
+    };
+    const askingRound = JSON.stringify({
+      ...roundRecord,
+      roleModelIOSnapshot: {...roundRecord.roleModelIOSnapshot, rawOutputText},
+      parsedRoleModelDecisionSnapshot: {
+        ...roundRecord.parsedRoleModelDecisionSnapshot,
+        result: parseRoleModelExecutionDecision(rawOutputText),
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === round ? askingRound : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must end on a round that asked for no tool/iu,
+    );
+  });
+
+  it('rejects an exhausted-budget rejection on a round that asked for no tool', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-exhausted-on-reply-round',
+      createSequencedVisibleReplyAdapter(['a reply']),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    // Internally consistent: reason, message, and verdict all say the budget
+    // ran out. The round it judges asked for nothing the budget could refuse.
+    const record = JSON.parse(terminal) as {
+      commitValidation: Record<string, unknown>;
+    };
+    const forged = JSON.stringify({
+      ...record,
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: 'tool_rounds_exhausted',
+      message: 'forged budget refusal',
+      commitValidation: {
+        ...record.commitValidation,
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: 'tool_rounds_exhausted',
+            details: 'forged budget refusal',
+          },
+        },
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === terminal ? forged : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must repeat the refusal of the round it judged/iu,
     );
   });
 

@@ -226,9 +226,13 @@ function assertTerminalRoundReference(options: RawEventRoundSemantics): void {
     return;
   }
 
+  // The record says what the verdict says: same reason, and the message is
+  // the verdict's details.
   if (
     commitResult.status !== 'rejected' ||
-    commitResult.rejection.reason !== options.reason
+    commitResult.rejection.reason !== options.reason ||
+    (commitResult.rejection.details ?? commitResult.rejection.reason) !==
+      options.message
   ) {
     throwMalformedRecord('commitValidation.result.status');
   }

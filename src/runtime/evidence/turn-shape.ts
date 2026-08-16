@@ -1,5 +1,6 @@
 /** The turn rules the append gate applies to live and replayed records. */
 import {
+  executableModelToolCalls,
   roleModelCommitValidationFailureRejectionReason,
   roleModelToolRoundsExhaustedRejectionReason,
   visibleReplyToolCalls,
@@ -103,6 +104,15 @@ export function assertTerminalJudgesItsRound(
       );
     }
 
+    // The loop stops where the model stops asking for tools; a round that
+    // still asks for one is not where a turn completes.
+    if (executableModelToolCalls(parsedResult.decision.toolCalls).length > 0) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'A completed turn must end on a round that asked for no tool.',
+      );
+    }
+
     const replies = storedDecisionReplyTexts(parsedResult.decision);
     const anchored = commitResult.acceptedVisibleReplyText;
 
@@ -120,14 +130,17 @@ export function assertTerminalJudgesItsRound(
     return;
   }
 
+  // Of the runtime's own refusals, an exhausted budget only ever refuses a
+  // round that still asked for a tool.
   const agrees =
     parsedResult.status === 'rejected'
       ? parsedResult.rejection.reason === commitResult.rejection.reason &&
         parsedResult.rejection.details === commitResult.rejection.details
       : commitResult.rejection.reason ===
-          roleModelToolRoundsExhaustedRejectionReason ||
-        commitResult.rejection.reason ===
-          roleModelCommitValidationFailureRejectionReason;
+          roleModelCommitValidationFailureRejectionReason ||
+        (commitResult.rejection.reason ===
+          roleModelToolRoundsExhaustedRejectionReason &&
+          executableModelToolCalls(parsedResult.decision.toolCalls).length > 0);
 
   if (!agrees) {
     throw new LocalRuntimeStorageContractError(

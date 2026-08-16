@@ -51,12 +51,17 @@ const novaCharacter = Object.freeze({
 
 const acceptedScenarios = [
   {
-    name: 'accepts a canonical completed turn without visible messages',
+    // A session end closes like this: a completed turn that ran no model round.
+    name: 'accepts a completed turn that ran no model round',
     expected: 'accepted',
-    run(logStore, currentSessionId) {
+    run(logStore) {
       appendTurnStart(logStore);
-      appendToolRound(logStore, currentSessionId);
-      logStore.appendRawEvent(completedTerminal(currentSessionId));
+      logStore.appendRawEvent({
+        ...identity,
+        kind: 'runtime_turn_completed',
+        eventType: 'USER_MESSAGE',
+        status: 'completed',
+      });
     },
   },
   {
@@ -184,9 +189,9 @@ const rejectedScenarios = [
     run(logStore, currentSessionId) {
       appendTurnStart(logStore);
       appendUserMessage(logStore, currentSessionId);
-      appendToolRound(logStore, currentSessionId);
+      appendReplyRound(logStore, currentSessionId);
       logStore.appendRawEvent({
-        ...completedTerminal(currentSessionId),
+        ...completedTerminal(currentSessionId, 'hi'),
         visibleMessageIds: [`${currentSessionId}:message-1`],
         payloadSummary: {normalizedCurrentUserMessage: 'not what the row says'},
       });
@@ -342,15 +347,14 @@ function appendTurnStart(logStore: RuntimeLogStore): void {
   });
 }
 
-/** A round that decided a tool call and said nothing: a turn with no reply to commit. */
-function appendToolRound(
+function appendReplyRound(
   logStore: RuntimeLogStore,
   currentSessionId: string,
 ): void {
   appendModelRound(logStore, identity, {
     round: 1,
     sessionId: currentSessionId,
-    decision: {toolCalls: [{name: 'memory.search', input: {query: 'hi'}}]},
+    decision: {toolCalls: [{name: 'visible_reply', input: {text: 'hi'}}]},
   });
 }
 

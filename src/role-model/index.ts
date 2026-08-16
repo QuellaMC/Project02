@@ -84,6 +84,7 @@ export {
   type RunRoleModelLoopOptions,
 } from './loop/loop.ts';
 export {
+  executableModelToolCalls,
   visibleReplyToolCalls,
   parseRoleModelDecision,
   parseRoleModelExecutionDecision,
