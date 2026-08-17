@@ -6,6 +6,8 @@ import {
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
   type RoleModelProviderMetadata,
+  type RoleModelRoundEvent,
+  type RunRoleModelLoopOptions,
 } from '../../src/role-model/index.ts';
 import {
   createRuntimePlugin,
@@ -163,25 +165,34 @@ export function createProviderMetadataAdapter(
 }
 
 /**
- * A reply sink standing in for the runtime's commit: it hands the loop the
- * message as committed, so tool rounds can replay what the person was told.
+ * The loop's required callbacks, standing in for the runtime: every round is
+ * collected as the runtime would record it, and every reply is handed back
+ * as committed, so tool rounds can replay what the person was told.
  */
-export function testVisibleReplySink(
-  onReply?: (text: string) => void,
-): (event: {readonly text: string}) => VisibleMessage {
+export function testLoopCallbacks(
+  options: {
+    readonly rounds?: RoleModelRoundEvent[];
+    readonly onReply?: (text: string) => void;
+  } = {},
+): Pick<RunRoleModelLoopOptions, 'onRound' | 'onVisibleReply'> {
   let count = 0;
 
-  return event => {
-    count += 1;
-    onReply?.(event.text);
+  return {
+    onRound(event) {
+      options.rounds?.push(event);
+    },
+    onVisibleReply(event) {
+      count += 1;
+      options.onReply?.(event.text);
 
-    return Object.freeze({
-      id: `session-loop:message-${String(count)}`,
-      role: 'character',
-      speakerId: testCharacterProfile.id,
-      speakerName: testCharacterProfile.displayName,
-      text: event.text,
-    } satisfies VisibleMessage);
+      return Object.freeze({
+        id: `session-loop:message-${String(count)}`,
+        role: 'character',
+        speakerId: testCharacterProfile.id,
+        speakerName: testCharacterProfile.displayName,
+        text: event.text,
+      } satisfies VisibleMessage);
+    },
   };
 }
 

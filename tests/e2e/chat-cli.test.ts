@@ -176,7 +176,6 @@ describe('chat CLI trace summary', () => {
       status: 'rejected',
       steps: [
         'runtime_event_received',
-        'input_validation_rejected',
         'raw_event_log_appended',
         'runtime_turn_rejected',
       ],

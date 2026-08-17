@@ -113,8 +113,11 @@ describe('plugin-driven Character State tool loop', () => {
         'evt_plugin_patch.trace_evt_plugin_patch.round-1.1.character_state.patch',
       ],
     });
+    const secondRound = rawEvents.find(
+      event => event.kind === 'role_model_round' && event.round === 2,
+    );
     const toolRounds =
-      terminalEvent?.roleModelIOSnapshot?.inputEnvelope.toolRounds ?? [];
+      secondRound?.roleModelIOSnapshot?.inputEnvelope.toolRounds ?? [];
 
     expect(toolRounds).toHaveLength(1);
     expect(toolRounds[0]?.round).toBe(1);
@@ -129,7 +132,7 @@ describe('plugin-driven Character State tool loop', () => {
     ]);
   });
 
-  it('persists role-model evidence on tool-authorizing rounds without interim replies', async () => {
+  it('persists every model round as its own record, referenced by its tool call and by the terminal', async () => {
     const sessionId = 'session-tool-round-evidence';
     const {session, logStore, storeRoot} =
       await createDurableCharacterStateHarness(sessionId);
@@ -172,57 +175,63 @@ describe('plugin-driven Character State tool loop', () => {
       sessionId,
     });
     const reopenedRawEvents = reopenedLogStore.rawEvents();
-    const toolStartEvents = reopenedRawEvents.filter(
-      event => event.kind === 'tool_call_started',
+    const rounds = reopenedRawEvents.filter(
+      event => event.kind === 'role_model_round',
     );
-    const toolStartEvent = toolStartEvents[0];
 
-    expect(toolStartEvents).toHaveLength(1);
-
-    if (toolStartEvent === undefined) {
-      throw new Error('Expected tool_call_started evidence.');
-    }
-
-    expect(toolStartEvent).toMatchObject({
-      toolCallId:
-        'evt_tool_round_evidence.trace_evt_tool_round_evidence.round-1.1.character_state.patch',
-      toolRound: 1,
-      roleModelIOSnapshot: {
-        inputEnvelope: {
-          toolRounds: [],
-        },
-      },
+    // Each round carries its own facts once: what the model was shown and
+    // what it wrote. Everything else names the round.
+    expect(rounds.map(round => round.round)).toEqual([1, 2]);
+    expect(rounds[0]).toMatchObject({
+      roleModelIOSnapshot: {inputEnvelope: {toolRounds: []}},
       parsedRoleModelDecisionSnapshot: {
         result: {
           status: 'accepted',
           decision: {
             toolCalls: [
-              {
-                name: 'character_state.patch',
-                input: {
-                  mood: 'curious',
-                },
-              },
+              {name: 'character_state.patch', input: {mood: 'curious'}},
             ],
           },
         },
       },
     });
-    expect(toolStartEvent.roleModelIOSnapshot?.rawOutputText).toContain(
+    expect(rounds[0]?.roleModelIOSnapshot?.rawOutputText).toContain(
       'character_state.patch',
     );
-    expect(toolStartEvent.commitValidation).toBeUndefined();
+    expect(rounds[1]?.roleModelIOSnapshot?.rawOutputText).toContain(
+      'visible_reply',
+    );
+    expect(rounds[1]?.roleModelIOSnapshot?.rawOutputText).not.toContain(
+      'character_state.patch',
+    );
+
+    const toolStartEvents = reopenedRawEvents.filter(
+      event => event.kind === 'tool_call_started',
+    );
+
+    expect(toolStartEvents).toEqual([
+      expect.objectContaining({
+        toolCallId:
+          'evt_tool_round_evidence.trace_evt_tool_round_evidence.round-1.1.character_state.patch',
+        round: 1,
+      }),
+    ]);
+    expect(toolStartEvents[0]).not.toHaveProperty('roleModelIOSnapshot');
+    expect(toolStartEvents[0]).not.toHaveProperty(
+      'parsedRoleModelDecisionSnapshot',
+    );
 
     const terminalEvent = reopenedRawEvents.find(
       event => event.kind === 'runtime_turn_completed',
     );
 
-    expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).toContain(
-      'visible_reply',
-    );
-    expect(terminalEvent?.roleModelIOSnapshot?.rawOutputText).not.toContain(
-      'character_state.patch',
-    );
+    expect(terminalEvent).toMatchObject({
+      round: 2,
+      commitValidation: {
+        result: {status: 'accepted', acceptedVisibleReplyText: 'state updated'},
+      },
+    });
+    expect(terminalEvent).not.toHaveProperty('roleModelIOSnapshot');
   });
 
   it('persists repeated same tool calls across separate durable turns', async () => {

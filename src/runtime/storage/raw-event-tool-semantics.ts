@@ -11,7 +11,7 @@ type RawEventToolSemantics = {
   readonly kind: RawEventLogRecordKind;
   readonly toolCallId: string | undefined;
   readonly dispatchedToHost: boolean | undefined;
-  readonly toolRound: number | undefined;
+  readonly round: number | undefined;
   readonly toolName: string | undefined;
   readonly toolPluginId: string | undefined;
   readonly toolInput: RuntimePluginJsonObject | undefined;
@@ -46,7 +46,6 @@ function assertNonToolRawEventHasNoToolFields(
   if (
     options.toolCallId !== undefined ||
     options.dispatchedToHost !== undefined ||
-    options.toolRound !== undefined ||
     options.toolName !== undefined ||
     options.toolPluginId !== undefined ||
     options.toolInput !== undefined ||
@@ -59,7 +58,7 @@ function assertNonToolRawEventHasNoToolFields(
 function assertRequiredToolIdentity(options: RawEventToolSemantics): void {
   if (
     options.toolCallId === undefined ||
-    options.toolRound === undefined ||
+    options.round === undefined ||
     options.toolName === undefined ||
     options.toolPluginId === undefined
   ) {

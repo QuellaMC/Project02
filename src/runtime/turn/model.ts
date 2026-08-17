@@ -31,12 +31,12 @@ import {
   type RoleModelAdapter,
   type RoleModelLoopResult,
   type RoleModelPluginToolCallCompletedEvent,
-  type RoleModelPluginToolCallStartedEvent,
   type RoleModelPluginToolCallsRequestedEvent,
   type RoleModelPluginToolRoutingEvidence,
   type RoleModelVisibleReplyEvent,
 } from '../../role-model/index.ts';
 import {
+  appendRoleModelRound,
   appendToolCallFinished,
   appendToolCallStarted,
   appendVisibleReplyForDecision,
@@ -49,7 +49,6 @@ import {
 import {
   type LocalRuntimeUserMessageRejectedResult,
   type LocalRuntimeUserMessageResult,
-  type RoleModelRawEvidence,
   type RunLocalUserMessageEventOptions,
   type RuntimeTurnState,
   runtimePluginHealthRejectionReason,
@@ -57,7 +56,6 @@ import {
 import {createRuntimeTurnState} from './input.ts';
 import {
   appendRejectedResult,
-  appendRoleModelRejectedResult,
   combineRuntimePluginEvidence,
   createRejectedCommitValidationSnapshot,
   handleRuntimeTurnFailure,
@@ -111,9 +109,8 @@ async function runPreparedLocalRuntimeTurn(
   if (state.normalizedEventResult.status === 'rejected') {
     return await appendRejectedResult(state, {
       message: state.normalizedEventResult.message,
-      rawKind: 'input_validation_rejected',
-      rawReason: state.normalizedEventResult.message,
       reason: 'input_validation_rejected',
+      recordReason: 'input_validation_rejected',
     });
   }
 
@@ -186,9 +183,8 @@ async function prepareRuntimeTurn(
       result: await appendRejectedResult(state, {
         runtimePluginEvidence: beforeRoleModelCallResult.evidence,
         message: beforeRoleModelCallResult.message,
-        rawKind: runtimePluginBeforeRoleModelCallRejectionReason,
-        rawReason: beforeRoleModelCallResult.message,
         reason: beforeRoleModelCallResult.reason,
+        recordReason: runtimePluginBeforeRoleModelCallRejectionReason,
         runtimePluginContext,
         // The terminal event must reference the already-committed user
         // message, or later evidence reads rebuild a conversation missing it.
@@ -260,8 +256,11 @@ async function runRuntimeModel(
     ...(state.options.characterRef === undefined
       ? {}
       : {characterRef: state.options.characterRef}),
+    onRound(event) {
+      appendRoleModelRound(state, event);
+    },
     onPluginToolCallStarted(event) {
-      recordPluginToolCallStarted(state, event);
+      appendToolCallStarted(state, event);
     },
     async onPluginToolCallCompleted(event) {
       await recordPluginToolCallCompleted(state, event);
@@ -276,19 +275,6 @@ async function runRuntimeModel(
   });
 
   return {status: 'completed', result};
-}
-
-function recordPluginToolCallStarted(
-  state: RuntimeTurnState,
-  event: RoleModelPluginToolCallStartedEvent,
-): void {
-  appendToolCallStarted(state, {
-    callId: event.callId,
-    round: event.round,
-    call: event.call,
-    roleModelIOSnapshot: event.ioSnapshot,
-    parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,
-  });
 }
 
 async function recordPluginToolCallCompleted(
@@ -329,8 +315,7 @@ async function commitVisibleReply(
 ): Promise<VisibleMessage> {
   return await appendVisibleReplyForDecision(state, {
     runtimePluginEvidence: prepared.beforeRoleModelCallResult.evidence,
-    roleModelIOSnapshot: event.ioSnapshot,
-    parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,
+    sessionId: prepared.decisionContext.sessionId,
     round: event.round,
     text: event.text,
   });
@@ -341,10 +326,6 @@ async function validateAndCommitRuntimeModelResult(
   prepared: PreparedRuntimeTurn,
   roleModelResult: RoleModelLoopResult,
 ): Promise<LocalRuntimeUserMessageResult> {
-  const roleModelEvidence = {
-    roleModelIOSnapshot: roleModelResult.ioSnapshot,
-    parsedRoleModelDecisionSnapshot: roleModelResult.parsedDecisionSnapshot,
-  } satisfies RoleModelRawEvidence;
   const roleModelPluginEvidence = combineRuntimePluginEvidence(
     prepared.beforeRoleModelCallResult.evidence,
     pluginToolEvidenceFromRouting(roleModelResult.pluginToolResults),
@@ -358,7 +339,6 @@ async function validateAndCommitRuntimeModelResult(
       state,
       prepared,
       roleModelResult,
-      roleModelEvidence,
       roleModelPluginEvidence,
       roleModelPluginToolInvocations,
     });
@@ -377,7 +357,7 @@ async function validateAndCommitRuntimeModelResult(
     return await rejectPreCommitHealth({
       state,
       prepared,
-      roleModelEvidence,
+      round: roleModelResult.round,
       roleModelPluginEvidence,
       roleModelPluginToolInvocations,
       preCommitHealthResult,
@@ -400,32 +380,35 @@ async function rejectRoleModelResult(options: {
   readonly state: RuntimeTurnState;
   readonly prepared: PreparedRuntimeTurn;
   readonly roleModelResult: Extract<RoleModelLoopResult, {status: 'rejected'}>;
-  readonly roleModelEvidence: RoleModelRawEvidence;
   readonly roleModelPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly roleModelPluginToolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
 }): Promise<LocalRuntimeUserMessageRejectedResult> {
   const {state, prepared, roleModelResult} = options;
-  const commitValidation = createRejectedCommitValidationSnapshot({
-    identity: state.identity,
-    rejection: roleModelResult.rejection,
-    sessionId: prepared.decisionContext.sessionId,
-  });
+  const {rejection} = roleModelResult;
 
-  return await appendRoleModelRejectedResult(
-    state,
-    roleModelResult.rejection,
-    {...options.roleModelEvidence, commitValidation},
-    options.roleModelPluginEvidence,
-    prepared.pluginContextItems,
-    options.roleModelPluginToolInvocations,
-    prepared.runtimePluginContext,
-  );
+  return await appendRejectedResult(state, {
+    runtimePluginEvidence: options.roleModelPluginEvidence,
+    runtimePluginContextItems: prepared.pluginContextItems,
+    runtimePluginToolInvocations: options.roleModelPluginToolInvocations,
+    round: roleModelResult.round,
+    commitValidation: createRejectedCommitValidationSnapshot({
+      identity: state.identity,
+      rejection,
+      sessionId: prepared.decisionContext.sessionId,
+    }),
+    message: rejection.details ?? rejection.reason,
+    reason: rejection.reason,
+    recordReason: rejection.reason,
+    runtimePluginContext: prepared.runtimePluginContext,
+    toolCallIds: Object.freeze([...state.finishedToolCallIds]),
+    ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
+  });
 }
 
 async function rejectPreCommitHealth(options: {
   readonly state: RuntimeTurnState;
   readonly prepared: PreparedRuntimeTurn;
-  readonly roleModelEvidence: RoleModelRawEvidence;
+  readonly round: number;
   readonly roleModelPluginEvidence: readonly RuntimePluginEvidenceSnapshot[];
   readonly roleModelPluginToolInvocations: readonly RuntimePluginToolInvocationSnapshot[];
   readonly preCommitHealthResult: RuntimePluginHealthHostResult;
@@ -443,20 +426,18 @@ async function rejectPreCommitHealth(options: {
     runtimePluginEvidence: options.roleModelPluginEvidence,
     runtimePluginContextItems: options.prepared.pluginContextItems,
     runtimePluginToolInvocations: options.roleModelPluginToolInvocations,
-    evidence: {
-      ...options.roleModelEvidence,
-      commitValidation: createRejectedCommitValidationSnapshot({
-        identity: options.state.identity,
-        rejection,
-        sessionId: options.prepared.decisionContext.sessionId,
-      }),
-    },
+    round: options.round,
+    commitValidation: createRejectedCommitValidationSnapshot({
+      identity: options.state.identity,
+      rejection,
+      sessionId: options.prepared.decisionContext.sessionId,
+    }),
     healthResult: options.preCommitHealthResult,
     message,
-    rawKind: 'commit_validation_rejected',
-    rawReason: roleModelCommitValidationFailureRejectionReason,
     reason: runtimePluginHealthRejectionReason,
+    recordReason: roleModelCommitValidationFailureRejectionReason,
     runtimePluginContext: options.prepared.runtimePluginContext,
+    toolCallIds: Object.freeze([...options.state.finishedToolCallIds]),
     ...visibleMessageIdsForTurnOption(options.state.committedVisibleMessages),
   });
 }

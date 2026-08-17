@@ -5,16 +5,18 @@ import {
   type VisibleMessage,
 } from '../../core/index.ts';
 import {
+  roleModelDecisionRejectionReasons,
   type ConversationTurn,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
   type RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
-import type {
-  RuntimePluginEvidenceSnapshot,
-  RuntimePluginJsonObject,
-  RuntimePluginToolCallResult,
-  RuntimePluginTurnEvidenceSnapshot,
+import {
+  runtimePluginBeforeRoleModelCallRejectionReason,
+  type RuntimePluginEvidenceSnapshot,
+  type RuntimePluginJsonObject,
+  type RuntimePluginToolCallResult,
+  type RuntimePluginTurnEvidenceSnapshot,
 } from '../../plugins/api/index.ts';
 
 export const runtimeTurnStatusValues = [
@@ -28,12 +30,10 @@ export type RuntimeTurnStatus = (typeof runtimeTurnStatusValues)[number];
 export const rawEventLogRecordKindValues = [
   'runtime_event_received',
   'runtime_event_normalized',
-  'plugin_before_role_model_call_rejected',
+  'role_model_round',
   'tool_call_started',
   'tool_call_finished',
   'visible_message_committed',
-  'input_validation_rejected',
-  'commit_validation_rejected',
   'runtime_turn_completed',
   'after_turn_committed',
   'runtime_turn_rejected',
@@ -42,6 +42,21 @@ export const rawEventLogRecordKindValues = [
 
 export type RawEventLogRecordKind =
   (typeof rawEventLogRecordKindValues)[number];
+
+/**
+ * Why a turn was rejected, as the log records it. A plugin health rejection
+ * is a commit validation failure here; the runtime result names the health
+ * gate, the record names the seam that refused.
+ */
+export const runtimeTurnRejectionReasonValues = Object.freeze([
+  'input_validation_rejected',
+  runtimePluginBeforeRoleModelCallRejectionReason,
+  ...roleModelDecisionRejectionReasons,
+  'runtime_failure',
+] as const);
+
+export type RuntimeTurnRejectionReason =
+  (typeof runtimeTurnRejectionReasonValues)[number];
 
 /**
  * A trace replays the raw event log, so its steps are the raw kinds minus the
@@ -65,22 +80,29 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly kind: RawEventLogRecordKind;
   readonly eventType: RuntimeEventType;
   readonly status?: RuntimeTurnStatus;
-  readonly reason?: string;
+  /** Present exactly on runtime_turn_rejected, with the message. */
+  readonly reason?: RuntimeTurnRejectionReason;
+  readonly message?: string;
   readonly visibleMessageIds?: readonly string[];
   /** The message this event commits; present exactly on commit events. */
   readonly visibleMessage?: VisibleMessage;
   readonly committedAt?: string;
-  readonly decisionRound?: number;
+  /**
+   * The model round a record belongs to. A role_model_round record is that
+   * round; a tool call, a character commit, or a terminal record judging a
+   * decision references the round it came from.
+   */
+  readonly round?: number;
   readonly toolCallIds?: readonly string[];
   readonly toolCallId?: string;
   readonly dispatchedToHost?: boolean;
-  readonly toolRound?: number;
   readonly toolName?: string;
   readonly toolPluginId?: string;
   readonly toolInput?: RuntimePluginJsonObject;
   readonly toolResult?: RuntimePluginToolCallResult;
   readonly pluginStoreRevision?: number;
   readonly payloadSummary?: RawEventLogPayloadSummary;
+  /** What the model was shown and what it wrote; present exactly on role_model_round. */
   readonly roleModelIOSnapshot?: RoleModelIOSnapshot;
   readonly parsedRoleModelDecisionSnapshot?: ParsedRoleModelDecisionSnapshot;
   readonly commitValidation?: RoleModelCommitValidationSnapshot;

@@ -1,26 +1,18 @@
 import {
-  normalizeVisibleMessageText,
   type RuntimeEventIdentity,
   type RuntimeEventType,
   runtimeEventTypeValues,
   type UserMessageRuntimeEvent,
-  VisibleMessageTextValidationError,
 } from '../../core/index.ts';
 import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   freezeRoleModelPromptSize,
-  visibleReplyToolCalls,
-  isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelProviderExchangeSnapshot,
-  roleModelToolRoundsExhaustedRejectionReason,
-  roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
-  type CharacterDecision,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
-  type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
@@ -53,11 +45,13 @@ import {
   createRoleModelCommitValidationSnapshot,
   isTerminalRawEventLogRecordKind,
   rawEventLogRecordKindValues,
+  runtimeTurnRejectionReasonValues,
   runtimeTurnStatusValues,
   type RawEventLogPayloadSummary,
   type RawEventLogRecord,
   type RawEventLogRecordKind,
   type RoleModelCommitValidationSnapshot,
+  type RuntimeTurnRejectionReason,
   type RuntimeTurnStatus,
 } from '../evidence/records.ts';
 import {
@@ -87,6 +81,7 @@ import {
   assertSessionContinuationRawEventSemantics,
   optionalSessionContinuationOption,
 } from './session-continuation-codec.ts';
+import {assertRoundRawEventSemantics} from './raw-event-round-semantics.ts';
 import {assertToolRawEventSemantics} from './raw-event-tool-semantics.ts';
 import {
   isRecord,
@@ -94,13 +89,6 @@ import {
   requiredRecordCanonicalTimestamp,
   requiredRecordString,
 } from './layout-contract.ts';
-
-// Refused above the parser: the parsed snapshot stays accepted while the
-// commit validation carries the refusal.
-const commitOwnedRoleModelRejectionReasons = [
-  roleModelToolRoundsExhaustedRejectionReason,
-  roleModelCommitValidationFailureRejectionReason,
-] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
 export function encodeRawEventLogRecord(record: RawEventLogRecord): string {
   return JSON.stringify(record);
@@ -112,7 +100,9 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const kind = requiredRawEventKind(record['kind']);
   const eventType = requiredRuntimeEventType(record['eventType']);
   const status = optionalRuntimeTurnStatus(record['status']);
-  const reason = optionalRecordString(record, 'reason', 'malformed_record');
+  const reason = optionalRuntimeTurnRejectionReason(record['reason']);
+  const message = optionalRecordString(record, 'message', 'malformed_record');
+  const round = optionalRecordNumber(record, 'round');
   const visibleMessageIds = optionalStringArray(
     record['visibleMessageIds'],
     'visibleMessageIds',
@@ -125,7 +115,6 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     'malformed_record',
   );
   const dispatchedToHost = optionalRecordBoolean(record, 'dispatchedToHost');
-  const toolRound = optionalRecordNumber(record, 'toolRound');
   const toolName = optionalRecordString(record, 'toolName', 'malformed_record');
   const toolPluginId = optionalRecordString(
     record,
@@ -180,22 +169,25 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     kind,
     toolCallId,
     dispatchedToHost,
-    toolRound,
+    round,
     toolName,
     toolPluginId,
     toolInput,
     toolResult,
   });
-  assertRoleModelRawEventEvidenceSemantics({
+  assertRoundRawEventSemantics({
     identity: {
       eventId,
       traceId,
       createdAt,
     },
-    payloadSummary,
     kind,
-    reason,
     status,
+    reason,
+    message,
+    round,
+    visibleMessage: committedMessage.visibleMessage,
+    payloadSummary,
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot,
     commitValidation,
@@ -217,12 +209,13 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     eventType,
     ...(status === undefined ? {} : {status}),
     ...(reason === undefined ? {} : {reason}),
+    ...(message === undefined ? {} : {message}),
     ...(visibleMessageIds === undefined ? {} : {visibleMessageIds}),
     ...committedMessage,
+    ...(round === undefined ? {} : {round}),
     ...(toolCallIds === undefined ? {} : {toolCallIds}),
     ...(toolCallId === undefined ? {} : {toolCallId}),
     ...(dispatchedToHost === undefined ? {} : {dispatchedToHost}),
-    ...(toolRound === undefined ? {} : {toolRound}),
     ...(toolName === undefined ? {} : {toolName}),
     ...(toolPluginId === undefined ? {} : {toolPluginId}),
     ...(toolInput === undefined ? {} : {toolInput}),
@@ -270,6 +263,20 @@ function optionalRuntimeTurnStatus(
   }
 
   throwMalformedRecord('status');
+}
+
+function optionalRuntimeTurnRejectionReason(
+  value: unknown,
+): RuntimeTurnRejectionReason | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (isOneOf(value, runtimeTurnRejectionReasonValues)) {
+    return value;
+  }
+
+  throwMalformedRecord('reason');
 }
 
 function requiredRuntimePluginEvidenceKind(
@@ -690,277 +697,6 @@ function assertRuntimePluginEvidenceSemantics(options: {
   });
 }
 
-function assertRoleModelRawEventEvidenceSemantics(options: {
-  readonly identity: RuntimeEventIdentity;
-  readonly payloadSummary: RawEventLogPayloadSummary | undefined;
-  readonly kind: RawEventLogRecordKind;
-  readonly status: RuntimeTurnStatus | undefined;
-  readonly reason: string | undefined;
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
-  readonly parsedRoleModelDecisionSnapshot:
-    ParsedRoleModelDecisionSnapshot | undefined;
-  readonly commitValidation: RoleModelCommitValidationSnapshot | undefined;
-}): void {
-  const roleModelEvidenceCount = [
-    options.roleModelIOSnapshot,
-    options.parsedRoleModelDecisionSnapshot,
-  ].filter(value => value !== undefined).length;
-
-  if (roleModelEvidenceCount === 0 && options.commitValidation === undefined) {
-    return;
-  }
-
-  if (
-    options.roleModelIOSnapshot === undefined ||
-    options.parsedRoleModelDecisionSnapshot === undefined
-  ) {
-    throwMalformedRecord('roleModelEvidence');
-  }
-
-  const roleModelIOSnapshot = options.roleModelIOSnapshot;
-  const parsedRoleModelDecisionSnapshot =
-    options.parsedRoleModelDecisionSnapshot;
-  const commitValidation = options.commitValidation;
-
-  assertMatchingRoleModelIdentity({
-    actual: roleModelIOSnapshot,
-    expected: options.identity,
-    field: 'roleModelIOSnapshot',
-  });
-  assertMatchingRoleModelIdentity({
-    actual: roleModelIOSnapshot.inputEnvelope.event,
-    expected: options.identity,
-    field: 'roleModelIOSnapshot.inputEnvelope.event',
-  });
-  assertRoleModelInputTextMatchesPayloadSummary({
-    payloadSummary: options.payloadSummary,
-    inputText:
-      roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage,
-  });
-  assertMatchingRoleModelIdentity({
-    actual: parsedRoleModelDecisionSnapshot,
-    expected: options.identity,
-    field: 'parsedRoleModelDecisionSnapshot',
-  });
-  assertMatchingRoleModelSession({
-    actual: roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId,
-    expected: roleModelIOSnapshot.sessionId,
-    field: 'roleModelIOSnapshot.inputEnvelope.decisionContext.sessionId',
-  });
-  assertMatchingRoleModelSession({
-    actual: parsedRoleModelDecisionSnapshot.sessionId,
-    expected: roleModelIOSnapshot.sessionId,
-    field: 'parsedRoleModelDecisionSnapshot.sessionId',
-  });
-  assertParsedRoleModelDecisionMatchesRawOutput({
-    roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot,
-  });
-
-  if (commitValidation === undefined) {
-    if (options.kind !== 'tool_call_started') {
-      throwMalformedRecord('commitValidation');
-    }
-
-    if (options.status !== undefined || options.reason !== undefined) {
-      throwMalformedRecord('commitValidation');
-    }
-
-    return;
-  }
-
-  assertMatchingRoleModelSession({
-    actual: commitValidation.sessionId,
-    expected: roleModelIOSnapshot.sessionId,
-    field: 'commitValidation.sessionId',
-  });
-  assertMatchingRoleModelIdentity({
-    actual: commitValidation,
-    expected: options.identity,
-    field: 'commitValidation',
-  });
-  assertRoleModelCommitStatusMatchesRawEvent({
-    kind: options.kind,
-    status: options.status,
-    reason: options.reason,
-    parsedRoleModelDecisionSnapshot,
-    commitValidation,
-  });
-}
-
-function assertRoleModelInputTextMatchesPayloadSummary(options: {
-  readonly payloadSummary: RawEventLogPayloadSummary | undefined;
-  readonly inputText: string;
-}): void {
-  const normalizedCurrentUserMessage =
-    options.payloadSummary?.normalizedCurrentUserMessage;
-
-  if (normalizedCurrentUserMessage === undefined) {
-    return;
-  }
-
-  if (options.inputText === normalizedCurrentUserMessage) {
-    return;
-  }
-
-  throwMalformedRecord(
-    'roleModelIOSnapshot.inputEnvelope.event.payload.currentUserMessage',
-  );
-}
-
-function assertParsedRoleModelDecisionMatchesRawOutput(options: {
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot;
-  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-}): void {
-  if (
-    isRoleModelRawOutputReplayableDecisionEvidence({
-      rawOutputText: options.roleModelIOSnapshot.rawOutputText,
-      decisionResult: options.parsedRoleModelDecisionSnapshot.result,
-    })
-  ) {
-    return;
-  }
-
-  throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
-}
-
-function assertRoleModelCommitStatusMatchesRawEvent(options: {
-  readonly kind: RawEventLogRecordKind;
-  readonly status: RuntimeTurnStatus | undefined;
-  readonly reason: string | undefined;
-  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-  readonly commitValidation: RoleModelCommitValidationSnapshot;
-}): void {
-  const commitResult = options.commitValidation.result;
-
-  if (commitResult.status === 'accepted') {
-    const parsedResult = options.parsedRoleModelDecisionSnapshot.result;
-
-    if (parsedResult.status !== 'accepted') {
-      throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
-    }
-
-    assertAcceptedCommitTextMatchesParsedDecision({
-      actual: commitResult.acceptedVisibleReplyText,
-      parsedDecision: parsedResult.decision,
-    });
-
-    if (
-      options.kind !== 'visible_message_committed' &&
-      options.kind !== 'runtime_turn_completed'
-    ) {
-      throwMalformedRecord('commitValidation');
-    }
-
-    if (
-      options.kind === 'runtime_turn_completed' &&
-      options.status !== 'completed' &&
-      options.status !== 'completed_with_failures'
-    ) {
-      throwMalformedRecord('commitValidation.result.status');
-    }
-
-    if (options.reason !== undefined) {
-      throwMalformedRecord('reason');
-    }
-
-    return;
-  }
-
-  if (
-    options.kind !== 'commit_validation_rejected' &&
-    options.kind !== 'runtime_turn_rejected'
-  ) {
-    throwMalformedRecord('commitValidation');
-  }
-
-  if (
-    options.kind === 'runtime_turn_rejected' &&
-    options.status !== 'rejected'
-  ) {
-    throwMalformedRecord('commitValidation.result.status');
-  }
-
-  if (options.reason !== commitResult.rejection.reason) {
-    throwMalformedRecord('reason');
-  }
-
-  assertRejectedCommitMatchesParsedDecision({
-    parsedRoleModelDecisionSnapshot: options.parsedRoleModelDecisionSnapshot,
-    commitValidation: options.commitValidation,
-  });
-}
-
-function assertAcceptedCommitTextMatchesParsedDecision(options: {
-  readonly actual: string | undefined;
-  readonly parsedDecision: CharacterDecision;
-}): void {
-  const parsedTexts = visibleReplyToolCalls(options.parsedDecision).map(
-    call => call.input.text,
-  );
-
-  if (parsedTexts.length === 0 || options.actual === undefined) {
-    if (parsedTexts.length === 0 && options.actual === undefined) {
-      return;
-    }
-
-    throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
-  }
-
-  let normalizedTexts: readonly string[];
-
-  try {
-    normalizedTexts = parsedTexts.map(text =>
-      normalizeVisibleMessageText(text),
-    );
-  } catch (error: unknown) {
-    if (error instanceof VisibleMessageTextValidationError) {
-      throwMalformedRecord(
-        'parsedRoleModelDecisionSnapshot.result.decision.action.text',
-      );
-    }
-
-    throw error;
-  }
-
-  if (!normalizedTexts.includes(options.actual)) {
-    throwMalformedRecord('commitValidation.result.acceptedVisibleReplyText');
-  }
-}
-
-function assertRejectedCommitMatchesParsedDecision(options: {
-  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-  readonly commitValidation: RoleModelCommitValidationSnapshot;
-}): void {
-  const parsedResult = options.parsedRoleModelDecisionSnapshot.result;
-  const commitResult = options.commitValidation.result;
-
-  if (commitResult.status !== 'rejected') {
-    throwMalformedRecord('commitValidation.result.status');
-  }
-
-  if (parsedResult.status === 'rejected') {
-    if (parsedResult.rejection.reason !== commitResult.rejection.reason) {
-      throwMalformedRecord('commitValidation.result.rejection.reason');
-    }
-
-    if (parsedResult.rejection.details !== commitResult.rejection.details) {
-      throwMalformedRecord('commitValidation.result.rejection.details');
-    }
-
-    return;
-  }
-
-  if (
-    !isOneOf(
-      commitResult.rejection.reason,
-      commitOwnedRoleModelRejectionReasons,
-    )
-  ) {
-    throwMalformedRecord('commitValidation.result.rejection.reason');
-  }
-}
-
 function assertMatchingRoleModelIdentity(options: {
   readonly actual: RuntimeEventIdentity;
   readonly expected: RuntimeEventIdentity;
@@ -971,18 +707,6 @@ function assertMatchingRoleModelIdentity(options: {
     options.actual.traceId === options.expected.traceId &&
     options.actual.createdAt === options.expected.createdAt
   ) {
-    return;
-  }
-
-  throwMalformedRecord(options.field);
-}
-
-function assertMatchingRoleModelSession(options: {
-  readonly actual: string;
-  readonly expected: string;
-  readonly field: string;
-}): void {
-  if (options.actual === options.expected) {
     return;
   }
 

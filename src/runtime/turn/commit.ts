@@ -28,14 +28,11 @@ import type {
   RawEventLogRecord,
   RawEventLogRecordInput,
 } from '../evidence/records.ts';
-import type {
-  DecisionContext,
-  ParsedRoleModelDecisionSnapshot,
-  RoleModelIOSnapshot,
-} from '../../role-model/index.ts';
+import type {DecisionContext} from '../../role-model/index.ts';
 import {
   executionVisibleReplyTexts,
   type RoleModelLoopResult,
+  type RoleModelRoundEvent,
 } from '../../role-model/index.ts';
 import {findRuntimeTurnTerminalRawEvent} from '../evidence/validation.ts';
 import type {
@@ -44,7 +41,6 @@ import type {
   LocalRuntimeUserMessageCompletedResult,
   RuntimeTurnState,
 } from './contracts.ts';
-import {roleModelIOSnapshotSessionId} from './contracts.ts';
 
 type AcceptedRoleModelLoopResult = Extract<
   RoleModelLoopResult,
@@ -109,6 +105,22 @@ export async function commitUserMessage(
   return await commitVisibleMessage(state, message, {});
 }
 
+/** Every model round lands as one record before anything it decided happens. */
+export function appendRoleModelRound(
+  state: RuntimeTurnState,
+  event: RoleModelRoundEvent,
+): void {
+  appendRawEvent(state, {
+    ...state.identity,
+    kind: 'role_model_round',
+    eventType: state.event.type,
+    round: event.round,
+    roleModelIOSnapshot: event.ioSnapshot,
+    parsedRoleModelDecisionSnapshot: event.parsedDecisionSnapshot,
+    payloadSummary: state.payloadSummary,
+  });
+}
+
 export async function appendVisibleReplyForDecision(
   state: RuntimeTurnState,
   optionsForReply: AppendVisibleReplyOptions,
@@ -118,9 +130,7 @@ export async function appendVisibleReplyForDecision(
   });
   const commitValidation = createRoleModelCommitValidationSnapshot({
     ...state.identity,
-    sessionId: roleModelIOSnapshotSessionId(
-      optionsForReply.roleModelIOSnapshot,
-    ),
+    sessionId: optionsForReply.sessionId,
     result: {
       status: 'accepted',
       acceptedVisibleReplyText: normalizedReply.text,
@@ -132,11 +142,8 @@ export async function appendVisibleReplyForDecision(
   );
 
   return await commitVisibleMessage(state, message, {
-    roleModelIOSnapshot: optionsForReply.roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      optionsForReply.parsedRoleModelDecisionSnapshot,
+    round: optionsForReply.round,
     commitValidation,
-    decisionRound: optionsForReply.round,
     ...runtimePluginEvidenceOption(optionsForReply.runtimePluginEvidence),
   });
 }
@@ -192,8 +199,6 @@ export function appendToolCallStarted(
     readonly callId: string;
     readonly round: number;
     readonly call: RuntimePluginToolCall;
-    readonly roleModelIOSnapshot: RoleModelIOSnapshot;
-    readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
   },
 ): void {
   appendRawEvent(state, {
@@ -201,13 +206,10 @@ export function appendToolCallStarted(
     kind: 'tool_call_started',
     eventType: state.event.type,
     toolCallId: optionsForTool.callId,
-    toolRound: optionsForTool.round,
+    round: optionsForTool.round,
     toolName: optionsForTool.call.toolName,
     toolPluginId: optionsForTool.call.pluginId,
     toolInput: optionsForTool.call.input,
-    roleModelIOSnapshot: optionsForTool.roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      optionsForTool.parsedRoleModelDecisionSnapshot,
     payloadSummary: state.payloadSummary,
   });
 }
@@ -229,7 +231,7 @@ export function appendToolCallFinished(
     eventType: state.event.type,
     toolCallId: optionsForTool.callId,
     dispatchedToHost: optionsForTool.dispatchedToHost,
-    toolRound: optionsForTool.round,
+    round: optionsForTool.round,
     toolName: optionsForTool.toolName,
     toolPluginId: optionsForTool.pluginId,
     toolResult: optionsForTool.result,
@@ -311,9 +313,7 @@ function createTerminalRawEventInput(
     ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     toolCallIds: Object.freeze([...state.finishedToolCallIds]),
     payloadSummary: state.payloadSummary,
-    roleModelIOSnapshot: options.roleModelResult.ioSnapshot,
-    parsedRoleModelDecisionSnapshot:
-      options.roleModelResult.parsedDecisionSnapshot,
+    round: options.roleModelResult.round,
     commitValidation: createRoleModelCommitValidationSnapshot({
       ...state.identity,
       sessionId: options.decisionContext.sessionId,

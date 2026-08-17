@@ -10,9 +10,11 @@ export type InspectTurnEvidence = {
   readonly visibleMessages: readonly InspectVisibleMessage[];
   readonly modelRounds: readonly InspectRoleModelRoundEvidence[];
   readonly toolEvents: readonly InspectToolCallEvent[];
-  readonly roleModelEvidence?: InspectRoleModelEvidence;
+  /** The runtime's verdict on the round the turn ended with, when a model round was judged. */
+  readonly commitValidation?: InspectRoleModelCommitValidation;
   readonly pluginEvidence?: InspectPluginEvidence;
   readonly reason?: string;
+  readonly message?: string;
 };
 
 export type InspectVisibleMessage = {
@@ -80,11 +82,11 @@ export type InspectRoleModelEvidence = {
     readonly providerExchange?: unknown;
   };
   readonly parsedDecision?: InspectParsedRoleModelDecision;
-  readonly commitValidation?: InspectRoleModelCommitValidation;
 };
 
+/** One model round of a turn, accepted or refused, in the order it ran. */
 export type InspectRoleModelRoundEvidence = {
-  readonly rawEventKind: string;
+  readonly round: number;
   readonly roleModelEvidence: InspectRoleModelEvidence;
 };
 
@@ -108,10 +110,12 @@ export type InspectModelToolCall = {
 
 export type InspectRoleModelCommitValidation =
   | {
+      readonly round: number;
       readonly status: 'accepted';
       readonly acceptedVisibleReplyText?: string;
     }
   | {
+      readonly round: number;
       readonly status: 'rejected';
       readonly rejectionReason: string;
       readonly rejectionDetails?: string;

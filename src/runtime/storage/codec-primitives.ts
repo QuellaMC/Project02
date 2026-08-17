@@ -194,7 +194,6 @@ export function requiredVisibleMessage(
 export function optionalCommittedMessage(record: Record<string, unknown>): {
   readonly visibleMessage?: VisibleMessage;
   readonly committedAt?: string;
-  readonly decisionRound?: number;
 } {
   const value = record['visibleMessage'];
   const commitsAMessage = record['kind'] === 'visible_message_committed';
@@ -213,8 +212,6 @@ export function optionalCommittedMessage(record: Record<string, unknown>): {
     throwMalformedRecord('visibleMessage');
   }
 
-  const decisionRound = record['decisionRound'];
-
   return Object.freeze({
     committedAt: requiredRecordCanonicalTimestamp(
       record,
@@ -222,18 +219,7 @@ export function optionalCommittedMessage(record: Record<string, unknown>): {
       'malformed_record',
     ),
     visibleMessage: requiredVisibleMessage(value, 'visibleMessage'),
-    ...(decisionRound === undefined
-      ? {}
-      : {decisionRound: requiredCommittedDecisionRound(decisionRound)}),
   });
-}
-
-function requiredCommittedDecisionRound(value: unknown): number {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throwMalformedRecord('decisionRound');
-  }
-
-  return value;
 }
 
 function requiredVisibleMessageRole(value: unknown): VisibleMessageRole {

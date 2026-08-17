@@ -24,20 +24,13 @@ export function recordLocalUserMessageInputRejection(
     eventType: 'USER_MESSAGE',
     ...(payloadSummary === undefined ? {} : {payloadSummary}),
   });
-  const validationRawEvent = options.logStore.appendRawEvent({
-    ...identity,
-    kind: 'input_validation_rejected',
-    eventType: 'USER_MESSAGE',
-    status: 'rejected',
-    reason: options.message,
-    ...(payloadSummary === undefined ? {} : {payloadSummary}),
-  });
   const rawEvent = options.logStore.appendRawEvent({
     ...identity,
     kind: 'runtime_turn_rejected',
     eventType: 'USER_MESSAGE',
     status: 'rejected',
-    reason: options.message,
+    reason: 'input_validation_rejected',
+    message: options.message,
     ...(payloadSummary === undefined ? {} : {payloadSummary}),
   });
 
@@ -48,11 +41,7 @@ export function recordLocalUserMessageInputRejection(
     reason: 'input_validation_rejected',
     message: options.message,
     rawEvent,
-    rawEventLogRecords: Object.freeze([
-      receivedRawEvent,
-      validationRawEvent,
-      rawEvent,
-    ]),
+    rawEventLogRecords: Object.freeze([receivedRawEvent, rawEvent]),
   } satisfies LocalRuntimeUserMessageInputRejectedResult);
 }
 

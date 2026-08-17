@@ -1,7 +1,11 @@
 /** The turn rules the append gate applies to live and replayed records. */
 import {
-  type CharacterDecision,
+  executableModelToolCalls,
+  roleModelCommitValidationFailureRejectionReason,
+  roleModelToolRoundsExhaustedRejectionReason,
   visibleReplyToolCalls,
+  type CharacterDecision,
+  type RoleModelDecisionResult,
 } from '../../role-model/index.ts';
 import {conversationMessageForRawEvent} from './cache.ts';
 import {
@@ -12,21 +16,153 @@ import {sameOrderedValues} from '../storage/codec-primitives.ts';
 import {LocalRuntimeStorageContractError} from '../storage/layout-contract.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 
-export function assertVisibleMessageCommitEvidence(
-  message: ConversationLogRecord,
-  commitEvent: RawEventLogRecord,
+/**
+ * A turn's rounds are numbered as they happen, and everything else that
+ * names a round names one the turn already ran.
+ */
+export function assertRoundReference(
+  record: RawEventLogRecord,
+  turnRounds: readonly RawEventLogRecord[],
 ): void {
-  if (message.role === 'character') {
-    assertCharacterCommitCarriesItsDecision(message, commitEvent);
+  if (record.kind === 'role_model_round') {
+    if (record.round !== turnRounds.length + 1) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        `Model round ${String(record.round)} is out of sequence: the turn has run ${String(turnRounds.length)}.`,
+      );
+    }
+
     return;
   }
 
-  // The writer never stamps model commit validation on the user row; its
-  // text is pinned by the turn's one recorded model input instead.
-  if (commitEvent.commitValidation !== undefined) {
+  if (record.round === undefined) {
+    return;
+  }
+
+  const round = turnRounds[record.round - 1];
+
+  if (round === undefined) {
     throw new LocalRuntimeStorageContractError(
       'malformed_record',
-      `User message commit must not carry model commit validation: ${message.id}.`,
+      `Raw event references model round ${String(record.round)}, which the turn never ran.`,
+    );
+  }
+
+  if (
+    record.commitValidation !== undefined &&
+    record.commitValidation.sessionId !== round.roleModelIOSnapshot?.sessionId
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'Commit validation must belong to the session of the round it judges.',
+    );
+  }
+}
+
+/**
+ * A terminal record that judges a round judges the round the turn ended on
+ * and agrees with what it said: a completed turn ends on an accepted
+ * decision and anchors one of its replies, and a rejection repeats the
+ * parser's refusal or names one of the runtime's own.
+ */
+export function assertTerminalJudgesItsRound(
+  record: RawEventLogRecord,
+  turnRounds: readonly RawEventLogRecord[],
+): void {
+  if (record.round !== undefined && record.round !== turnRounds.length) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `A terminal record judges the round the turn ended on, round ${String(turnRounds.length)}, not round ${String(record.round)}.`,
+    );
+  }
+
+  // A turn can complete without a model round (a session end), but one that
+  // ran the model completed on a verdict.
+  if (
+    record.kind === 'runtime_turn_completed' &&
+    record.round === undefined &&
+    turnRounds.length > 0
+  ) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'A completed turn that ran the model must judge the round it ended on.',
+    );
+  }
+
+  const commitResult = record.commitValidation?.result;
+  const parsedResult = referencedDecision(record, turnRounds);
+
+  if (commitResult === undefined || parsedResult === undefined) {
+    return;
+  }
+
+  if (commitResult.status === 'accepted') {
+    if (parsedResult.status !== 'accepted') {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'A completed turn must end on a round the parser accepted.',
+      );
+    }
+
+    // The loop stops where the model stops asking for tools; a round that
+    // still asks for one is not where a turn completes.
+    if (executableModelToolCalls(parsedResult.decision.toolCalls).length > 0) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'A completed turn must end on a round that asked for no tool.',
+      );
+    }
+
+    const replies = storedDecisionReplyTexts(parsedResult.decision);
+    const anchored = commitResult.acceptedVisibleReplyText;
+
+    if (
+      anchored === undefined
+        ? replies.length !== 0
+        : !replies.includes(anchored)
+    ) {
+      throw new LocalRuntimeStorageContractError(
+        'malformed_record',
+        'A completed turn must anchor a reply the round it ended on asked for.',
+      );
+    }
+
+    return;
+  }
+
+  // Of the runtime's own refusals, an exhausted budget only ever refuses a
+  // round that still asked for a tool.
+  const agrees =
+    parsedResult.status === 'rejected'
+      ? parsedResult.rejection.reason === commitResult.rejection.reason &&
+        parsedResult.rejection.details === commitResult.rejection.details
+      : commitResult.rejection.reason ===
+          roleModelCommitValidationFailureRejectionReason ||
+        (commitResult.rejection.reason ===
+          roleModelToolRoundsExhaustedRejectionReason &&
+          executableModelToolCalls(parsedResult.decision.toolCalls).length > 0);
+
+  if (!agrees) {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      'A turn rejection must repeat the refusal of the round it judged, or name a refusal of the runtime itself.',
+    );
+  }
+}
+
+export function assertVisibleMessageCommitEvidence(
+  message: ConversationLogRecord,
+  commitEvent: RawEventLogRecord,
+  turnRounds: readonly RawEventLogRecord[],
+): void {
+  if (message.role !== 'character') {
+    return;
+  }
+
+  if (referencedDecision(commitEvent, turnRounds)?.status !== 'accepted') {
+    throw new LocalRuntimeStorageContractError(
+      'malformed_record',
+      `Character message commit must reference the accepted round that produced its text: ${message.id}.`,
     );
   }
 }
@@ -83,6 +219,7 @@ export function assertSingleLeadingUserMessage(
 export function assertCharacterRowsFollowTheirDecision(
   turnMessages: readonly ConversationLogRecord[],
   commitEventByMessageKey: ReadonlyMap<string, RawEventLogRecord>,
+  turnRounds: readonly RawEventLogRecord[],
 ): void {
   // Keyed by round, not by text: two rounds may legitimately say the same
   // thing.
@@ -96,8 +233,11 @@ export function assertCharacterRowsFollowTheirDecision(
     const commitEvent = commitEventByMessageKey.get(
       visibleMessageEvidenceKey(message, message.id),
     );
-    const decision = commitEvent?.parsedRoleModelDecisionSnapshot?.result;
-    const round = commitEvent?.decisionRound;
+    const round = commitEvent?.round;
+    const decision =
+      commitEvent === undefined
+        ? undefined
+        : referencedDecision(commitEvent, turnRounds);
 
     if (
       message.role !== 'character' ||
@@ -135,6 +275,15 @@ export function assertCharacterRowsFollowTheirDecision(
   }
 }
 
+function referencedDecision(
+  record: RawEventLogRecord,
+  turnRounds: readonly RawEventLogRecord[],
+): RoleModelDecisionResult | undefined {
+  return record.round === undefined
+    ? undefined
+    : turnRounds[record.round - 1]?.parsedRoleModelDecisionSnapshot?.result;
+}
+
 /**
  * Normalized the way the commit path stored them, so rows compare through
  * one normalization.
@@ -153,37 +302,6 @@ function storedDecisionReplyTexts(
       );
     }
   });
-}
-
-function assertCharacterCommitCarriesItsDecision(
-  message: ConversationLogRecord,
-  commitEvent: RawEventLogRecord,
-): void {
-  const commitResult = commitEvent.commitValidation?.result;
-  const decisionResult = commitEvent.parsedRoleModelDecisionSnapshot?.result;
-
-  // The round is required: the ordering check keys on it, so a row without
-  // one would escape that check.
-  if (
-    commitResult?.status !== 'accepted' ||
-    commitResult.acceptedVisibleReplyText === undefined ||
-    decisionResult?.status !== 'accepted' ||
-    commitEvent.decisionRound === undefined
-  ) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      `Character message commit must carry the accepted decision that produced its text: ${message.id}.`,
-    );
-  }
-
-  // The commit anchor holds the reply text verbatim, so any difference
-  // between it and the row is edited text rather than a projection.
-  if (commitResult.acceptedVisibleReplyText !== message.text) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      `Character message text must match the accepted reply its commit anchored: ${message.id}.`,
-    );
-  }
 }
 
 export function visibleMessageEvidenceKey(

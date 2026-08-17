@@ -12,7 +12,9 @@ import {
 import {
   assertAgreedModelInputText,
   assertCharacterRowsFollowTheirDecision,
+  assertRoundReference,
   assertSingleLeadingUserMessage,
+  assertTerminalJudgesItsRound,
   assertVisibleMessageCommitEvidence,
   turnModelInputTexts,
   visibleMessageEvidenceKey,
@@ -63,6 +65,7 @@ export function createRuntimeEvidenceIncrementalState(
     messagesById: new Map(),
     messageIdsByIdentity: new Map(),
     commitEventByMessageKey: new Map(),
+    roundsByIdentity: new Map(),
     turnModelInputByIdentity: new Map(),
     roleModelCharacter: undefined,
     conversationCharacter: undefined,
@@ -177,6 +180,7 @@ function assertIncrementalRawCrossLogEvidence(options: {
 }): void {
   const {record, state} = options;
 
+  assertRoundReference(record, turnRoundsFor(state, record));
   assertIncrementalRawVisibleReferences(state, record);
   assertIncrementalVisibleCommitShape(state, record);
   assertIncrementalRecordedModelInput(state, record);
@@ -219,6 +223,15 @@ function assertIncrementalTerminalRawEvent(
       'Terminal raw-event evidence must exactly match the visible conversation messages for that turn.',
     );
   }
+
+  assertTerminalJudgesItsRound(record, turnRoundsFor(state, record));
+}
+
+function turnRoundsFor(
+  state: RuntimeEvidenceIncrementalState,
+  record: RawEventLogRecord,
+): readonly RawEventLogRecord[] {
+  return state.roundsByIdentity.get(runtimeEventIdentityKey(record)) ?? [];
 }
 
 export function applyIncrementalRawEventAppend(options: {
@@ -238,6 +251,14 @@ export function applyIncrementalRawEventAppend(options: {
 
   kinds.add(record.kind);
   state.rawKindsByIdentity.set(identityKey, kinds);
+
+  if (record.kind === 'role_model_round') {
+    const rounds = state.roundsByIdentity.get(identityKey) ?? [];
+
+    rounds.push(record);
+    state.roundsByIdentity.set(identityKey, rounds);
+  }
+
   applyIncrementalToolCallState(state, record);
   applyIncrementalTurnShapeState(state, record);
   const character = roleModelCharacterSnapshot(record);
@@ -419,8 +440,10 @@ function assertIncrementalVisibleCommitShape(
     ownMessage,
   ];
 
+  const turnRounds = turnRoundsFor(state, record);
+
   assertSingleLeadingUserMessage(turnMessages);
-  assertVisibleMessageCommitEvidence(ownMessage, record);
+  assertVisibleMessageCommitEvidence(ownMessage, record, turnRounds);
 
   const commitEventByMessageKey = new Map<string, RawEventLogRecord>();
 
@@ -437,7 +460,11 @@ function assertIncrementalVisibleCommitShape(
     visibleMessageEvidenceKey(record, ownMessage.id),
     record,
   );
-  assertCharacterRowsFollowTheirDecision(turnMessages, commitEventByMessageKey);
+  assertCharacterRowsFollowTheirDecision(
+    turnMessages,
+    commitEventByMessageKey,
+    turnRounds,
+  );
 }
 
 function assertIncrementalRecordedModelInput(
@@ -484,11 +511,6 @@ export function assertIncrementalConversationAppend(options: {
   readonly state: RuntimeEvidenceIncrementalState;
   readonly record: ConversationLogRecord;
   readonly expectedCharacter?: CharacterProfile;
-  /**
-   * The display name is a per-session historical fact, so the row's own
-   * decision evidence supplies it on the session's first character row.
-   */
-  readonly recordCharacter?: CharacterProfile;
 }): void {
   assertIncrementalIdentityTimestamp(options.state, options.record);
   const identityKey = runtimeEventIdentityKey(options.record);
@@ -506,7 +528,6 @@ export function assertIncrementalConversationAppend(options: {
     options.expectedCharacter ??
     options.state.roleModelCharacter ??
     options.state.conversationCharacter ??
-    options.recordCharacter ??
     options.state.boundCharacter;
 
   if (expectedCharacter === undefined) {

@@ -24,7 +24,10 @@ its own business. When no usable output arrived at all — the provider
 failed — there is nothing to hand back, and the turn ends. The loop's only
 refusal of its own is the round budget (`tool_rounds_exhausted`), recorded
 against the commit while the parsed round stays what the model said. The
-loop keeps no table of reasons.
+loop keeps no table of reasons. Every round, accepted or refused, goes out
+through the required `onRound` callback as soon as it is parsed and before
+anything it decided happens; the loop result then only says which round
+the turn ended on and how.
 
 The conversation history the model replays is a list of whole prior turns
 (`api/conversation-history.ts`); `prompt/conversation-history-wire.ts`
