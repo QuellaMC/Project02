@@ -52,7 +52,7 @@ export type InspectRoleModelEvidence = {
     readonly allowedTools: readonly string[];
     readonly outputContractVersion: string;
     readonly currentUserMessage: string;
-    readonly recentVisibleMessages: readonly InspectVisibleMessage[];
+    readonly historyWindow: {readonly turnEventIds: readonly string[]};
     readonly runtimeNotes: readonly InspectRuntimeNote[];
     readonly curatedContextSections: readonly InspectCuratedContextSection[];
     readonly pluginContextItems: readonly InspectPluginContextItem[];

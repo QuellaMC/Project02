@@ -90,6 +90,34 @@ describe('runtime config loading and resolution', () => {
     expect(resolved.project02.userDisplayName).toBe('Mike');
   });
 
+  it('resolves the context window to its default and fingerprints a configured one', () => {
+    const storeRoot = createTestTempRoot('project02-config-context-window-');
+    const configPath = join(storeRoot, 'config.json');
+    const resolveFrom = () =>
+      resolveProject02RuntimeConfig({
+        ...runtimeConfigSnapshotForTest({
+          loadedConfig: loadRuntimeConfigForTest({storeRoot}),
+          storeRoot,
+        }),
+      });
+
+    writeRuntimeConfig(configPath, {project02: {}});
+    const defaulted = resolveFrom();
+
+    expect(defaulted.project02.contextWindowTokens).toBe(32768);
+    expect(
+      createRuntimeConfigInspectShape(defaulted).project02.contextWindowTokens,
+    ).toBe(32768);
+
+    writeRuntimeConfig(configPath, {project02: {contextWindowTokens: 8192}});
+    const configured = resolveFrom();
+
+    expect(configured.project02.contextWindowTokens).toBe(8192);
+    expect(configured.effectiveConfigFingerprint).not.toBe(
+      defaulted.effectiveConfigFingerprint,
+    );
+  });
+
   it('loads explicit config before env config', () => {
     const root = createTestTempRoot('project02-config-precedence-');
     const explicitPath = join(root, 'explicit.json');

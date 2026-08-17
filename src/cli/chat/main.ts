@@ -9,8 +9,8 @@ import {
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
 } from '../../core/index.ts';
-import {buildUserTurnDecisionContext} from '../../role-model/index.ts';
 import {shutdownConfiguredChatPluginHost} from './plugin-host-shutdown.ts';
+import {endChatSession, exitCommand} from './session-end.ts';
 import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
@@ -33,10 +33,6 @@ import {
   type TraceIdentity,
 } from '../../runtime/evidence/index.ts';
 import {
-  runtimePluginEvidenceOption,
-  runtimePluginTurnEvidenceOption,
-} from '../../runtime/turn/index.ts';
-import {
   acquireLocalRuntimeSessionWriterLease,
   createDurableChatRuntime,
   createLocalRuntimeMutationLockOwnerToken,
@@ -46,8 +42,6 @@ import {
   runtimeLogStoreWithWriterOwner,
 } from '../../runtime/storage/index.ts';
 import {
-  createRuntimePluginContext,
-  type RuntimePluginHookHostResult,
   type RuntimePluginHost,
   type RuntimePluginToolConfirmationHandler,
   type RuntimePluginToolConfirmationRequest,
@@ -106,6 +100,7 @@ type ChatCliOptions = {
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
   readonly userDisplayName?: string;
+  readonly contextWindowTokens?: number;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
@@ -152,7 +147,6 @@ type ChatToolConfirmationBridge = {
   ): () => void;
 };
 
-const exitCommand = '/exit';
 const modelTextToggleCommand = '/model-text';
 const showModelTextCommand = '/show-model-text';
 const hideModelTextCommand = '/hide-model-text';
@@ -407,6 +401,8 @@ export async function runChatCliFromArgs(
       characterRef: characterActivation.characterRef,
       userDisplayName:
         startup.activationPlan.resolvedConfig.project02.userDisplayName,
+      contextWindowTokens:
+        startup.activationPlan.resolvedConfig.project02.contextWindowTokens,
     });
   } catch (error: unknown) {
     if (isCliTerminalError(error)) {
@@ -429,6 +425,7 @@ async function runChatCliAfterConfiguredHost(options: {
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
   readonly userDisplayName?: string;
+  readonly contextWindowTokens?: number;
 }): Promise<number> {
   let durableRuntime: DurableChatRuntime;
   let pluginHost: RuntimePluginHost;
@@ -493,6 +490,9 @@ async function runChatCliAfterConfiguredHost(options: {
       ...(options.characterRef === undefined
         ? {}
         : {characterRef: options.characterRef}),
+      ...(options.contextWindowTokens === undefined
+        ? {}
+        : {contextWindowTokens: options.contextWindowTokens}),
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
@@ -510,14 +510,10 @@ async function runChatCliAfterConfiguredHost(options: {
     return exitCode;
   } finally {
     if (options.configuredHost !== undefined) {
-      const decisionContext = buildUserTurnDecisionContext({
-        session: durableRuntime.session,
-      });
-
       await shutdownConfiguredChatPluginHost({
         pluginHost: options.configuredHost.host,
-        sessionId: decisionContext.sessionId,
-        character: decisionContext.characterSnapshot,
+        sessionId: durableRuntime.session.id,
+        character: durableRuntime.session.character,
         stderr: options.options.stderr,
       });
     }
@@ -529,15 +525,11 @@ async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
   readonly session: ConversationSession;
 }): Promise<void> {
-  const decisionContext = buildUserTurnDecisionContext({
-    session: options.session,
-  });
-
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
-    sessionId: decisionContext.sessionId,
+    sessionId: options.session.id,
     currentUserMessage: fatalFailurePluginCleanupMessage,
-    character: decisionContext.characterSnapshot,
+    character: options.session.character,
   });
 }
 
@@ -765,6 +757,9 @@ async function handleChatInputLine(options: {
       ...(options.options.characterRef === undefined
         ? {}
         : {characterRef: options.options.characterRef}),
+      ...(options.options.contextWindowTokens === undefined
+        ? {}
+        : {contextWindowTokens: options.options.contextWindowTokens}),
       pluginHost: options.pluginHost,
       onProgress(progressEvent) {
         writeRuntimeProgress(
@@ -835,74 +830,6 @@ function writeChatInputError(
   );
 }
 
-type EndChatSessionOptions = {
-  readonly session: ConversationSession;
-  readonly logStore: RuntimeLogStore;
-  readonly pluginHost: RuntimePluginHost;
-};
-
-async function endChatSession(options: EndChatSessionOptions): Promise<void> {
-  const identity = createRuntimeEventIdentity();
-  const decisionContext = buildUserTurnDecisionContext({
-    session: options.session,
-  });
-  const context = createRuntimePluginContext({
-    ...identity,
-    sessionId: decisionContext.sessionId,
-    eventType: 'USER_MESSAGE',
-    currentUserMessage: exitCommand,
-    character: decisionContext.characterSnapshot,
-  });
-  const sessionEndResult = await options.pluginHost.onSessionEnd(context);
-
-  if (!shouldRecordSessionEndResult(options.pluginHost, sessionEndResult)) {
-    return;
-  }
-
-  const payloadSummary = {
-    rawInput: exitCommand,
-    normalizedCurrentUserMessage: exitCommand,
-  };
-
-  options.logStore.appendRawEvent({
-    ...identity,
-    kind: 'runtime_event_received',
-    eventType: 'USER_MESSAGE',
-    payloadSummary,
-  });
-  options.logStore.appendRawEvent({
-    ...identity,
-    kind: 'runtime_turn_completed',
-    eventType: 'USER_MESSAGE',
-    status: sessionEndResult.status,
-    payloadSummary,
-    ...runtimePluginEvidenceOption(sessionEndResult.evidence),
-    ...runtimePluginTurnEvidenceOption({
-      identity,
-      pluginHost: options.pluginHost,
-      contextItems: [],
-      toolInvocations: [],
-      evidence: sessionEndResult.evidence,
-      health: [],
-    }),
-  });
-}
-
-function shouldRecordSessionEndResult(
-  pluginHost: RuntimePluginHost,
-  result: RuntimePluginHookHostResult,
-): boolean {
-  return (
-    result.evidence.length > 0 ||
-    result.status === 'completed_with_failures' ||
-    pluginHost
-      .registrySnapshot()
-      .plugins.some(plugin =>
-        plugin.registeredLifecycleHooks.includes('on_session_end'),
-      )
-  );
-}
-
 type HandleUserMessageThroughRuntimeOptions = {
   readonly session: ConversationSession;
   readonly logStore: RuntimeLogStore;
@@ -910,6 +837,7 @@ type HandleUserMessageThroughRuntimeOptions = {
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
+  readonly contextWindowTokens?: number;
   readonly pluginHost: RuntimePluginHost;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
@@ -939,6 +867,9 @@ async function handleUserMessageThroughRuntime(
         ...(options.characterRef === undefined
           ? {}
           : {characterRef: options.characterRef}),
+        ...(options.contextWindowTokens === undefined
+          ? {}
+          : {contextWindowTokens: options.contextWindowTokens}),
         pluginHost: options.pluginHost,
         ...(options.onProgress === undefined
           ? {}

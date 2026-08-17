@@ -55,6 +55,8 @@ export type RunLocalUserMessageEventOptions = {
   readonly characterRef?: RoleModelCharacterRef;
   /** IANA zone the day note is written in; defaults to the process zone. */
   readonly timeZone?: string;
+  /** The model's context size; replayed history may use half of it. */
+  readonly contextWindowTokens?: number;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;

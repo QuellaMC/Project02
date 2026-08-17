@@ -6,6 +6,7 @@ import {createRuntimeConfigFingerprint} from './fingerprint.ts';
 import type {ResolvedProject02RuntimeLocation} from './location.ts';
 import {redactResolvedRuntimeConfigField} from './redact.ts';
 import {
+  defaultProject02ContextWindowTokens,
   defaultProject02UserDisplayName,
   isRuntimeControlEnvVarName,
   type LoadedProject02RuntimeConfig,
@@ -159,6 +160,9 @@ export function resolveEffectiveProject02RuntimeConfig(
   ]);
   const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
   const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
+  const contextWindowTokens =
+    config?.project02?.contextWindowTokens ??
+    defaultProject02ContextWindowTokens;
   // Already trimmed by the character-scope helper.
   const character = options.runtimeLocation.characterScope.characterId;
   // Trimmed here: the strict speaker constructor would crash on padding.
@@ -171,6 +175,7 @@ export function resolveEffectiveProject02RuntimeConfig(
     userDisplayName,
     ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
     roleModelProvider,
+    contextWindowTokens,
   });
 
   return Object.freeze({
@@ -651,6 +656,9 @@ function effectiveFingerprintInput(options: {
         options.config?.project02?.defaultMemoryProvider ?? null,
       roleModelProvider:
         options.config?.project02?.roleModelProvider ?? 'local',
+      contextWindowTokens:
+        options.config?.project02?.contextWindowTokens ??
+        defaultProject02ContextWindowTokens,
     }),
     plugins: options.redactedPluginConfigs,
     ...(pluginActivation === undefined ? {} : {pluginActivation}),

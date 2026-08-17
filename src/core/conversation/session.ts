@@ -43,8 +43,6 @@ export type ConversationSessionOptions = {
   readonly visibleTranscript?: readonly VisibleMessage[];
 };
 
-export const defaultRecentVisibleMessageLimit = 8;
-
 // The id is permanent; only the display name is configurable.
 export const localUserSpeaker = {
   id: 'local-user',
@@ -270,17 +268,6 @@ function isCharacterAgentReply(reply: unknown): reply is CharacterAgentReply {
     'text' in reply &&
     typeof reply.text === 'string'
   );
-}
-
-export function selectRecentVisibleMessages(
-  transcript: readonly VisibleMessage[],
-  recentMessageLimit: number = defaultRecentVisibleMessageLimit,
-): readonly VisibleMessage[] {
-  if (recentMessageLimit <= 0) {
-    return [];
-  }
-
-  return transcript.slice(-recentMessageLimit);
 }
 
 function getMutableTranscript(session: ConversationSession): VisibleMessage[] {

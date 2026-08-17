@@ -104,9 +104,11 @@
 
     <p>
       Everything said is recorded and indexed &mdash; past sessions and the parts of the
-      current one that have scrolled out of the model's recent-message window alike; the
-      character reads back windows of those transcripts with <code>sessions.search</code>
-      and <code>sessions.read</code>. Each tool bounds what it returns, so a long message
+      current one that no longer fit the model's history window alike. That window is a
+      token budget over whole prior turns (half of <code>project02.contextWindowTokens</code>),
+      replayed newest-first with each turn's tool calls and results, so older turns fall out
+      whole; the character reads back windows of those transcripts with
+      <code>sessions.search</code> and <code>sessions.read</code>. Each tool bounds what it returns, so a long message
       comes back shortened rather than whole. Curated
       memory holds what must always be known; session search recovers what was merely said.
       A fact worth keeping gets promoted by the model from a transcript into

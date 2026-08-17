@@ -77,6 +77,7 @@ describe('role-model loop routing and policy', () => {
     });
     const output = await adapter.invoke(inputEnvelope, {
       turnContext: renderRoleModelTurnContext(inputEnvelope),
+      conversationHistory: [],
     });
 
     expect(JSON.parse(output.rawOutputText)).toEqual({

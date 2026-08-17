@@ -167,6 +167,30 @@ describe('runtime config loader validation', () => {
     ).toEqual([]);
   });
 
+  it('accepts a positive whole context window and rejects anything else', () => {
+    expect(
+      validateProject02RuntimeConfig({
+        version: runtimeConfigVersion,
+        project02: {contextWindowTokens: 65536},
+      }).diagnostics,
+    ).toEqual([]);
+
+    for (const contextWindowTokens of [0, 1.5, '32768']) {
+      expect(
+        validateProject02RuntimeConfig({
+          version: runtimeConfigVersion,
+          project02: {contextWindowTokens},
+        }).diagnostics,
+      ).toEqual([
+        expect.objectContaining({
+          severity: 'error',
+          code: 'runtime_config_context_window_tokens_invalid',
+          path: 'project02.contextWindowTokens',
+        }),
+      ]);
+    }
+  });
+
   it('validates and loads one authored document under the same config limit', () => {
     const configPath = join(
       createTestTempRoot('project02-config-load-shared-limit-'),
