@@ -13,6 +13,7 @@ import {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
+  freezeRoleModelPromptSize,
   getRequiredVisibleReplyText,
   visibleReplyToolCalls,
   hasDuplicateRoleModelAllowedTools,
@@ -35,6 +36,7 @@ import {
   type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
+  type RoleModelPromptSize,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelToolObservation,
 } from '../../role-model/index.ts';
@@ -89,9 +91,14 @@ import {
 import {
   isOneOf,
   optionalCommittedMessage,
+  optionalRecordBoolean,
+  optionalRecordNumber,
   optionalRecordString,
+  optionalRecordStringAllowingEmpty,
   requiredArray,
   requiredNormalizedVisibleMessageText,
+  requiredRecordNumber,
+  requiredRecordStringAllowingEmpty,
   requiredRuntimeEventIdentity,
   requiredStringArray,
   throwMalformedRecord,
@@ -104,12 +111,10 @@ import {
 } from './session-continuation-codec.ts';
 import {assertToolRawEventSemantics} from './raw-event-tool-semantics.ts';
 import {
-  LocalRuntimeStorageContractError,
   isRecord,
   parseJsonObject,
   requiredRecordCanonicalTimestamp,
   requiredRecordString,
-  type LocalRuntimeStorageContractErrorCode,
 } from './layout-contract.ts';
 
 const commitOwnedRoleModelRejectionReasons = [
@@ -268,84 +273,6 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     ...(runtimeConfigEffects === undefined ? {} : {runtimeConfigEffects}),
     ...sessionContinuation,
   } satisfies RawEventLogRecord);
-}
-
-function requiredRecordStringAllowingEmpty(
-  record: Record<string, unknown>,
-  key: string,
-  code: LocalRuntimeStorageContractErrorCode,
-): string {
-  const value = record[key];
-
-  if (typeof value !== 'string') {
-    throw new LocalRuntimeStorageContractError(
-      code,
-      `Stored local runtime field "${key}" must be a string.`,
-    );
-  }
-
-  return value;
-}
-
-function optionalRecordStringAllowingEmpty(
-  record: Record<string, unknown>,
-  key: string,
-  code: LocalRuntimeStorageContractErrorCode,
-): string | undefined {
-  const value = record[key];
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return requiredRecordStringAllowingEmpty(record, key, code);
-}
-
-function requiredRecordNumber(
-  record: Record<string, unknown>,
-  key: string,
-  code: LocalRuntimeStorageContractErrorCode,
-): number {
-  const value = record[key];
-
-  if (typeof value !== 'number' || !Number.isInteger(value) || value < 1) {
-    throw new LocalRuntimeStorageContractError(
-      code,
-      `Stored local runtime field "${key}" must be a positive integer.`,
-    );
-  }
-
-  return value;
-}
-
-function optionalRecordNumber(
-  record: Record<string, unknown>,
-  key: string,
-): number | undefined {
-  const value = record[key];
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return requiredRecordNumber(record, key, 'malformed_record');
-}
-
-function optionalRecordBoolean(
-  record: Record<string, unknown>,
-  key: string,
-): boolean | undefined {
-  const value = record[key];
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (typeof value !== 'boolean') {
-    throwMalformedRecord(key);
-  }
-
-  return value;
 }
 
 function requiredRawEventKind(value: unknown): RawEventLogRecordKind {
@@ -539,9 +466,24 @@ function optionalRoleModelIOSnapshot(
       'malformed_record',
     ),
     ...optionalRoleModelCharacterRefOption(value['characterRef']),
+    ...optionalRoleModelPromptSizeOption(value['promptSize']),
     ...optionalRoleModelProviderMetadataOption(value['providerMetadata']),
     ...optionalRoleModelProviderExchangeOption(value['providerExchange']),
   });
+}
+
+function optionalRoleModelPromptSizeOption(value: unknown): {
+  readonly promptSize?: RoleModelPromptSize;
+} {
+  if (value === undefined) {
+    return {};
+  }
+
+  try {
+    return {promptSize: freezeRoleModelPromptSize(value)};
+  } catch {
+    throwMalformedRecord('promptSize');
+  }
 }
 
 function optionalRoleModelCharacterRefOption(value: unknown): {

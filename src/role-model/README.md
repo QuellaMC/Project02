@@ -13,7 +13,11 @@ writes to the model; it speaks to the character in the second person, and
 The conversation history the model replays is a list of whole prior turns
 (`api/conversation-history.ts`); `prompt/conversation-history-wire.ts`
 turns each into native chat messages, estimates its cost, and selects the
-newest turns that fit half the context window.
+newest turns that fit half the context window. `prompt/prompt-size.ts`
+measures every rendered prompt per frame kind in wire characters and the
+loop records it on the round; `inspect` applies the estimator to those
+characters, so the runtime's estimate can be held against the tokens a
+provider reports.
 
 Adapters may also offer `completeText`, a plain completion on the same
 model with no persona or tools; the runtime uses it to condense a

@@ -53,6 +53,7 @@ import {
   type RoleModelChatToolCall,
   type RoleModelProviderToolNameMapping,
 } from '../api/chat-wire.ts';
+import {measureRoleModelPromptSize} from '../prompt/prompt-size.ts';
 import {renderRoleModelTurnContext} from '../prompt/render.ts';
 import {
   assertConversationHistoryMatchesWindow,
@@ -347,6 +348,7 @@ async function invokeRoleModelLoopRound(options: {
     ...(options.options.characterRef === undefined
       ? {}
       : {characterRef: options.options.characterRef}),
+    promptSize: measureRoleModelPromptSize(turnContext),
     ...providerMetadataOption(rawOutputValidation.providerMetadata),
     ...providerExchangeOption(rawOutputValidation.providerExchange),
   });

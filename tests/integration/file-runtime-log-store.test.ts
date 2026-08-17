@@ -588,6 +588,53 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toEqual({turnEventIds: []});
   });
 
+  it('round-trips the prompt size, decodes records without one, and rejects a malformed one', () => {
+    const sessionId = 'prompt-size-round-trip';
+    const storedRecord = patchCompletedEvent(sessionId) as {
+      roleModelIOSnapshot: Record<string, unknown>;
+    };
+    const promptSize = {
+      frames: [
+        {kind: 'system_protocol', count: 1, chars: 400},
+        {kind: 'conversation_history', count: 4, chars: 800},
+      ],
+      toolChars: 1200,
+    };
+
+    storedRecord.roleModelIOSnapshot['promptSize'] = promptSize;
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.promptSize,
+    ).toEqual(promptSize);
+
+    delete storedRecord.roleModelIOSnapshot['promptSize'];
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.promptSize,
+    ).toBeUndefined();
+
+    // A frame row exists only for a frame that was sent, so a zero count is
+    // as malformed as a negative measure, and a kind measured twice would
+    // count twice in the whole.
+    for (const malformed of [
+      {...promptSize, toolChars: -1},
+      {
+        ...promptSize,
+        frames: [{kind: 'system_protocol', count: 0, chars: 400}],
+      },
+      {...promptSize, frames: []},
+      {
+        ...promptSize,
+        frames: [...promptSize.frames, {...promptSize.frames[0]}],
+      },
+    ]) {
+      storedRecord.roleModelIOSnapshot['promptSize'] = malformed;
+      expect(() =>
+        decodeRawEventLogRecord(JSON.stringify(storedRecord)),
+      ).toThrow(/promptSize/u);
+    }
+  });
+
   it('round-trips supported persisted plugin tool schemas unchanged', () => {
     const jsonSchema = supportedPersistedPluginToolJsonSchema();
     const storedRecord = storedRecordWithPluginToolJsonSchema(jsonSchema);
