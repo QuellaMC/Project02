@@ -16,6 +16,8 @@ import {
   type RoleModelUserChatMessage,
 } from '../api/chat-wire.ts';
 import {
+  earlierConversationFenceTag,
+  earlierConversationPreamble,
   curatedContextHeader,
   recalledMemoryFenceTag,
   recalledMemoryPreamble,
@@ -33,6 +35,7 @@ type RoleModelPromptFrameKind =
   | 'system_protocol'
   | 'developer_protocol'
   | 'curated_context'
+  | 'context_summary'
   | 'model_only_runtime_context'
   | 'conversation_history'
   | 'current_user_message'
@@ -125,6 +128,7 @@ export const defaultRoleModelProviderCapabilities = Object.freeze({
 const promptFenceTags = Object.freeze([
   recalledMemoryFenceTag,
   untrustedPluginContextFenceTag,
+  earlierConversationFenceTag,
 ]);
 
 export function renderRoleModelTurnContext(
@@ -231,6 +235,27 @@ function createRoleModelPromptFrames(
       ownFrame(
         'model_only_runtime_context',
         Object.freeze({role: modelOnlyRole, content: runtimeContent}),
+        true,
+      ),
+    );
+  }
+
+  // Where the earlier conversation would have been: a continued session's
+  // recollection is model output, so it rides a fenced user-role message like
+  // recalled memory does, never a trusted frame. It changes only when a
+  // session begins, so the prefix before the replayed turns stays stable.
+  const contextSummary = inputEnvelope.decisionContext.contextSummary;
+  if (contextSummary !== undefined) {
+    frames.push(
+      ownFrame(
+        'context_summary',
+        Object.freeze({
+          role: 'user',
+          content: fenced(earlierConversationFenceTag, [
+            earlierConversationPreamble(addressee),
+            neutralizePromptFenceTags(contextSummary),
+          ]),
+        } satisfies RoleModelUserChatMessage),
         true,
       ),
     );

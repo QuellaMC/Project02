@@ -36,7 +36,6 @@ import {
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
   type RoleModelProviderExchangeSnapshot,
-  type RoleModelProviderMetadata,
   type RoleModelToolObservation,
 } from '../../role-model/index.ts';
 import {
@@ -90,6 +89,7 @@ import {
 import {
   isOneOf,
   optionalCommittedMessage,
+  optionalRecordString,
   requiredArray,
   requiredNormalizedVisibleMessageText,
   requiredRuntimeEventIdentity,
@@ -97,12 +97,16 @@ import {
   throwMalformedRecord,
 } from './codec-primitives.ts';
 import {requiredDecisionContext} from './decision-context-codec.ts';
+import {optionalRoleModelProviderMetadataOption} from './provider-metadata-codec.ts';
+import {
+  assertSessionContinuationRawEventSemantics,
+  optionalSessionContinuationOption,
+} from './session-continuation-codec.ts';
 import {assertToolRawEventSemantics} from './raw-event-tool-semantics.ts';
 import {
   LocalRuntimeStorageContractError,
   isRecord,
   parseJsonObject,
-  requiredNonEmptyString,
   requiredRecordCanonicalTimestamp,
   requiredRecordString,
   type LocalRuntimeStorageContractErrorCode,
@@ -173,6 +177,15 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     record['runtimeConfigEffects'],
   );
 
+  const sessionContinuation = optionalSessionContinuationOption(
+    record['sessionContinuation'],
+  );
+
+  assertSessionContinuationRawEventSemantics({
+    identity: {eventId, traceId, createdAt},
+    kind,
+    ...sessionContinuation,
+  });
   assertTerminalRawEventSemantics({
     kind,
     status,
@@ -253,21 +266,8 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
       ? {}
       : {runtimePluginTurnEvidence}),
     ...(runtimeConfigEffects === undefined ? {} : {runtimeConfigEffects}),
+    ...sessionContinuation,
   } satisfies RawEventLogRecord);
-}
-
-function optionalRecordString(
-  record: Record<string, unknown>,
-  key: string,
-  code: LocalRuntimeStorageContractErrorCode,
-): string | undefined {
-  const value = record[key];
-
-  if (value === undefined) {
-    return undefined;
-  }
-
-  return requiredNonEmptyString(value, key, code);
 }
 
 function requiredRecordStringAllowingEmpty(
@@ -1423,39 +1423,6 @@ function requiredRoleModelOutputContract(
   } satisfies RoleModelOutputContract);
 }
 
-function optionalRoleModelProviderMetadataOption(value: unknown): {
-  readonly providerMetadata?: RoleModelProviderMetadata;
-} {
-  if (value === undefined) {
-    return {};
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('providerMetadata');
-  }
-
-  const provider = requiredRecordString(value, 'provider', 'malformed_record');
-
-  if (provider !== 'nvidia') {
-    throwMalformedRecord('providerMetadata.provider');
-  }
-
-  const model = optionalRecordString(value, 'model', 'malformed_record');
-  const request = optionalProviderRequestMetadata(value['request']);
-  const response = optionalProviderResponseMetadata(value['response']);
-  const error = optionalProviderErrorMetadata(value['error']);
-
-  return {
-    providerMetadata: Object.freeze({
-      provider,
-      ...(model === undefined ? {} : {model}),
-      ...(request === undefined ? {} : {request}),
-      ...(response === undefined ? {} : {response}),
-      ...(error === undefined ? {} : {error}),
-    } satisfies RoleModelProviderMetadata),
-  };
-}
-
 function optionalRoleModelProviderExchangeOption(value: unknown): {
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
 } {
@@ -1472,76 +1439,6 @@ function optionalRoleModelProviderExchangeOption(value: unknown): {
   return {
     providerExchange,
   };
-}
-
-function optionalProviderRequestMetadata(
-  value: unknown,
-): RoleModelProviderMetadata['request'] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('providerMetadata.request');
-  }
-
-  const endpoint = optionalRecordString(value, 'endpoint', 'malformed_record');
-  const messageCount = value['messageCount'];
-
-  if (messageCount !== undefined && typeof messageCount !== 'number') {
-    throwMalformedRecord('providerMetadata.request.messageCount');
-  }
-
-  requiredLiteralBooleanFalse(
-    value,
-    'stream',
-    'providerMetadata.request.stream',
-  );
-
-  return Object.freeze({
-    ...(endpoint === undefined ? {} : {endpoint}),
-    ...(messageCount === undefined ? {} : {messageCount}),
-    stream: false,
-  });
-}
-
-function optionalProviderResponseMetadata(
-  value: unknown,
-): RoleModelProviderMetadata['response'] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('providerMetadata.response');
-  }
-
-  const status = value['status'];
-
-  if (status !== undefined && typeof status !== 'number') {
-    throwMalformedRecord('providerMetadata.response.status');
-  }
-
-  return Object.freeze({
-    ...(status === undefined ? {} : {status}),
-  });
-}
-
-function optionalProviderErrorMetadata(
-  value: unknown,
-): RoleModelProviderMetadata['error'] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!isRecord(value)) {
-    throwMalformedRecord('providerMetadata.error');
-  }
-
-  return Object.freeze({
-    code: requiredRecordString(value, 'code', 'malformed_record'),
-    message: requiredRecordString(value, 'message', 'malformed_record'),
-  });
 }
 
 function requiredRoleModelDecisionResult(
@@ -1751,16 +1648,6 @@ function requiredLiteralString(
   const value = requiredRecordString(record, key, 'malformed_record');
 
   if (value !== expectedValue) {
-    throwMalformedRecord(errorField);
-  }
-}
-
-function requiredLiteralBooleanFalse(
-  record: Record<string, unknown>,
-  key: string,
-  errorField: string,
-): void {
-  if (record[key] !== false) {
     throwMalformedRecord(errorField);
   }
 }

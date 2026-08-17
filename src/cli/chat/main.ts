@@ -1,4 +1,3 @@
-import {readFlagValue} from '../shared/flags.ts';
 import {createInterface} from 'node:readline';
 
 import {
@@ -11,6 +10,23 @@ import {
 } from '../../core/index.ts';
 import {shutdownConfiguredChatPluginHost} from './plugin-host-shutdown.ts';
 import {endChatSession, exitCommand} from './session-end.ts';
+import {
+  parseChatCliArgs,
+  validateDurableSessionArgs,
+  type ChatCliArgs,
+} from './args.ts';
+import {
+  continueChatSessionIfNeeded,
+  durableSessionContinuation,
+  writeContinuedSessionNotice,
+  type ActiveChatSession,
+  type ContinueChatSession,
+} from './session-continuation.ts';
+import {
+  writeNonCommittedTopLevelText,
+  writeRuntimeProgress,
+  writeTraceSummary,
+} from './turn-output.ts';
 import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
@@ -36,7 +52,6 @@ import {
   acquireLocalRuntimeSessionWriterLease,
   createDurableChatRuntime,
   createLocalRuntimeMutationLockOwnerToken,
-  createProject02HomeLayout,
   type DurableChatRuntime,
   normalizeLocalRuntimeSessionId,
   runtimeLogStoreWithWriterOwner,
@@ -67,21 +82,14 @@ import {
   isCliTerminalError,
   formatCliTerminalErrorMessage,
 } from '../shared/terminal-errors.ts';
-import {
-  matchesRuntimeStoreInitFlag,
-  parseRuntimeStoreFlag,
-  type RuntimeLocationCliState,
-} from '../shared/runtime-location-flags.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
 import {characterActivationFailureMessage} from '../shared/startup-outcome.ts';
 import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
 import {assertProject02StoreConsent} from '../shared/store-consent.ts';
 import {
   createSelectedRoleModelAdapter,
-  parseProviderName,
   providerOption,
   selectChatProvider,
-  type ChatProviderName,
 } from '../../role-model/index.ts';
 import {runBestEffortPluginSessionEnd} from '../../plugins/host/index.ts';
 import {isMainModule} from '../shared/main-module.ts';
@@ -101,6 +109,10 @@ type ChatCliOptions = {
   readonly characterRef?: RoleModelCharacterRef;
   readonly userDisplayName?: string;
   readonly contextWindowTokens?: number;
+  /** Opens the session that continues the current one once its history outgrows the window. */
+  readonly continueSession?: ContinueChatSession;
+  /** Frees the first session's writer lease when the chat leaves it, not only at exit. */
+  readonly releaseSession?: () => Promise<void>;
   readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
@@ -108,17 +120,6 @@ type ChatCliOptions = {
 
 type RunChatCliOptions = Omit<ChatCliOptions, 'pluginHost'> & {
   readonly pluginHost: RuntimePluginHost;
-};
-
-type ChatCliArgs = {
-  readonly traceMode: boolean;
-  readonly init: boolean;
-  readonly provider?: ChatProviderName;
-  readonly storeRoot?: string;
-  readonly configPath?: string;
-  readonly character?: string;
-  readonly sessionId?: string;
-  readonly newSessionId?: string;
 };
 
 type CompletedChatRuntimeTurn = {
@@ -447,6 +448,12 @@ async function runChatCliAfterConfiguredHost(options: {
         ? {}
         : {userDisplayName: options.userDisplayName}),
     });
+    writeContinuedSessionNotice(
+      options.options.stdout,
+      options.runtimeArgs.sessionId,
+      durableRuntime,
+    );
+
     const startupPluginHost =
       options.options.pluginHost ?? options.configuredHost?.host;
 
@@ -478,6 +485,13 @@ async function runChatCliAfterConfiguredHost(options: {
     throw error;
   }
 
+  // The chat may continue into later sessions; cleanup and shutdown name the
+  // one it was in at the end, which every continuation reports here.
+  const continueSession = durableSessionContinuation({
+    homeRoot: options.runtimeArgs.storeRoot,
+  });
+  let activeSession = durableRuntime.session;
+
   try {
     const exitCode = await runChatCli({
       ...options.options,
@@ -493,6 +507,13 @@ async function runChatCliAfterConfiguredHost(options: {
       ...(options.contextWindowTokens === undefined
         ? {}
         : {contextWindowTokens: options.contextWindowTokens}),
+      async continueSession(plan, current) {
+        const next = await continueSession(plan, current);
+
+        activeSession = next.session;
+        return next;
+      },
+      releaseSession: () => durableRuntime.writerLease.release(),
       pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
@@ -503,7 +524,7 @@ async function runChatCliAfterConfiguredHost(options: {
     if (exitCode !== 0 && options.configuredHost !== undefined) {
       await cleanupConfiguredChatPluginHostAfterFatalExit({
         configuredHost: options.configuredHost,
-        session: durableRuntime.session,
+        session: activeSession,
       });
     }
 
@@ -512,8 +533,8 @@ async function runChatCliAfterConfiguredHost(options: {
     if (options.configuredHost !== undefined) {
       await shutdownConfiguredChatPluginHost({
         pluginHost: options.configuredHost.host,
-        sessionId: durableRuntime.session.id,
-        character: durableRuntime.session.character,
+        sessionId: activeSession.id,
+        character: activeSession.character,
         stderr: options.options.stderr,
       });
     }
@@ -622,6 +643,10 @@ export async function runChatCli(options: RunChatCliOptions): Promise<number> {
     return await runChatCliWithActiveWriter({
       ...options,
       logStore: activeLogStore,
+      async releaseSession() {
+        await writerLease.release();
+        await options.releaseSession?.();
+      },
     });
   } finally {
     await writerLease.release();
@@ -639,13 +664,17 @@ async function runChatCliWithActiveWriter(
         ? {}
         : {userDisplayName: options.userDisplayName}),
     });
-  const logStore =
-    options.logStore ??
-    createRuntimeLogStore({
-      sessionId: session.id,
-      boundCharacter: session.character,
-      boundUserSpeaker: session.userSpeaker,
-    });
+  let active: ActiveChatSession = {
+    session,
+    logStore:
+      options.logStore ??
+      createRuntimeLogStore({
+        sessionId: session.id,
+        boundCharacter: session.character,
+        boundUserSpeaker: session.userSpeaker,
+      }),
+    release: options.releaseSession ?? (() => Promise.resolve()),
+  };
   const pluginHost = options.pluginHost;
   const lines = createInterface({
     input: options.stdin,
@@ -676,8 +705,8 @@ async function runChatCliWithActiveWriter(
 
       const lineResult = await handleChatInputLine({
         options,
-        session,
-        logStore,
+        session: active.session,
+        logStore: active.logStore,
         pluginHost,
         line: nextLine.value,
         showNonCommittedTopLevelText,
@@ -688,14 +717,37 @@ async function runChatCliWithActiveWriter(
       }
 
       showNonCommittedTopLevelText = lineResult.showNonCommittedTopLevelText;
+
+      if (lineResult.turnCompleted) {
+        const next = await continueChatSessionIfNeeded({
+          current: active,
+          pluginHost,
+          continueSession: options.continueSession,
+          ...(options.roleModelAdapter === undefined
+            ? {}
+            : {roleModelAdapter: options.roleModelAdapter}),
+          ...(options.contextWindowTokens === undefined
+            ? {}
+            : {contextWindowTokens: options.contextWindowTokens}),
+          stdout: options.stdout,
+        });
+
+        if (next !== undefined) {
+          await active.release();
+          active = next;
+        }
+      }
+
+      options.stdout.write(promptTextFor(active.session));
     }
 
     await endChatSession({
-      session,
-      logStore,
+      session: active.session,
+      logStore: active.logStore,
       pluginHost,
     });
   } finally {
+    await active.release();
     releaseTerminalConfirmationHandler?.();
     lines.close();
   }
@@ -707,6 +759,7 @@ type ChatInputLineResult =
   | {
       readonly status: 'continue';
       readonly showNonCommittedTopLevelText: boolean;
+      readonly turnCompleted: boolean;
     }
   | {readonly status: 'exit'; readonly exitCode: number};
 
@@ -734,12 +787,14 @@ async function handleChatInputLine(options: {
     options.options.stdout.write(
       `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`,
     );
-    options.options.stdout.write(promptTextFor(options.session));
     return {
       status: 'continue',
       showNonCommittedTopLevelText: nextModelTextVisibility,
+      turnCompleted: false,
     };
   }
+
+  let turnCompleted: boolean;
 
   try {
     const result = await handleUserMessageThroughRuntime({
@@ -780,15 +835,17 @@ async function handleChatInputLine(options: {
     if (result.status === 'rejected' && result.fatal) {
       return {status: 'exit', exitCode: 1};
     }
+
+    turnCompleted = result.status === 'completed';
   } catch (error: unknown) {
     writeChatInputError(options.options.stderr, error);
     return {status: 'exit', exitCode: 1};
   }
 
-  options.options.stdout.write(promptTextFor(options.session));
   return {
     status: 'continue',
     showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,
+    turnCompleted,
   };
 }
 
@@ -944,28 +1001,6 @@ function mapRuntimeResult(
   };
 }
 
-function writeRuntimeProgress(
-  stdout: NodeJS.WritableStream,
-  session: ConversationSession,
-  progressEvent: LocalRuntimeTurnProgressEvent,
-): void {
-  if (progressEvent.kind === 'visible_reply') {
-    stdout.write(`${session.character.displayName}: ${progressEvent.text}\n`);
-    return;
-  }
-
-  if (progressEvent.kind === 'tool_calls_requested') {
-    stdout.write(
-      `[tools] Model requested ${String(progressEvent.toolNames.length)} ${progressEvent.toolNames.length === 1 ? 'tool call' : 'tool calls'}: ${progressEvent.toolNames.join(', ')}\n`,
-    );
-    return;
-  }
-
-  stdout.write(
-    `[tools] ${progressEvent.toolName} ${progressEvent.status === 'accepted' ? 'completed' : 'rejected'}\n`,
-  );
-}
-
 function nonCommittedTopLevelTextOption(rawEvent: RawEventLogRecord): {
   readonly nonCommittedTopLevelText?: string;
 } {
@@ -997,20 +1032,6 @@ function modelTextVisibilityCommand(
   }
 
   return undefined;
-}
-
-function writeNonCommittedTopLevelText(
-  stdout: NodeJS.WritableStream,
-  text: string,
-): void {
-  stdout.write('[model top-level text | not committed]\n');
-  stdout.write(text);
-
-  if (!text.endsWith('\n')) {
-    stdout.write('\n');
-  }
-
-  stdout.write('[/model top-level text]\n');
 }
 
 function mapInputRejectionResult(
@@ -1049,123 +1070,6 @@ function mapUnexpectedRuntimeFailureResult(
       rawEvents,
     ),
   };
-}
-
-function writeTraceSummary(
-  stderr: NodeJS.WritableStream,
-  summary: ChatTraceSummary,
-): void {
-  stderr.write(`${JSON.stringify(summary)}\n`);
-}
-
-function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
-  let traceMode = false;
-  let provider: ChatProviderName | undefined;
-  let location: RuntimeLocationCliState = {};
-  let init = false;
-  let sessionId: string | undefined;
-  let newSessionId: string | undefined;
-
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index];
-
-    if (arg === undefined) {
-      continue;
-    }
-
-    if (arg === '--') {
-      continue;
-    }
-
-    if (arg === '--trace') {
-      traceMode = true;
-      continue;
-    }
-
-    if (arg === '--provider') {
-      if (provider !== undefined) {
-        throw new CliUsageError('--provider can only be provided once.');
-      }
-
-      provider = parseProviderName(readFlagValue(args, index, '--provider'));
-      index += 1;
-      continue;
-    }
-
-    if (matchesRuntimeStoreInitFlag(arg, init)) {
-      init = true;
-      continue;
-    }
-
-    const storeResult = parseRuntimeStoreFlag({
-      args,
-      index,
-      location,
-    });
-
-    if (storeResult.status === 'matched') {
-      location = storeResult.location;
-      index = storeResult.nextIndex;
-      continue;
-    }
-
-    if (arg === '--session') {
-      if (sessionId !== undefined) {
-        throw new CliUsageError('--session can only be provided once.');
-      }
-
-      sessionId = readFlagValue(args, index, '--session');
-      index += 1;
-      continue;
-    }
-
-    if (arg === '--new-session') {
-      if (newSessionId !== undefined) {
-        throw new CliUsageError('--new-session can only be provided once.');
-      }
-
-      newSessionId = readFlagValue(args, index, '--new-session');
-      index += 1;
-      continue;
-    }
-
-    throw new CliUsageError(`Unknown chat option: ${arg}.`);
-  }
-
-  if (sessionId !== undefined && newSessionId !== undefined) {
-    throw new CliUsageError('Use either --session or --new-session, not both.');
-  }
-
-  return {
-    traceMode,
-    init,
-    ...providerOption(provider),
-    ...(location.character === undefined
-      ? {}
-      : {character: location.character}),
-    ...(location.storeRoot === undefined
-      ? {}
-      : {storeRoot: location.storeRoot}),
-    ...(location.configPath === undefined
-      ? {}
-      : {configPath: location.configPath}),
-    ...(sessionId === undefined ? {} : {sessionId}),
-    ...(newSessionId === undefined ? {} : {newSessionId}),
-  } satisfies ChatCliArgs;
-}
-
-function validateDurableSessionArgs(args: ChatCliArgs): void {
-  if (args.storeRoot !== undefined) {
-    createProject02HomeLayout({homeRoot: args.storeRoot});
-  }
-
-  if (args.sessionId !== undefined) {
-    normalizeLocalRuntimeSessionId(args.sessionId);
-  }
-
-  if (args.newSessionId !== undefined) {
-    normalizeLocalRuntimeSessionId(args.newSessionId);
-  }
 }
 
 if (isMainModule(import.meta.url)) {

@@ -26,6 +26,7 @@ import {
   LocalRuntimeStorageContractError,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {
+  acquireLocalRuntimeSessionWriterLease,
   createLocalRuntimeSessionStore,
   LocalRuntimeSessionStoreError,
 } from '../../src/runtime/storage/session-store.ts';
@@ -88,6 +89,84 @@ describe('local runtime session store', () => {
     });
     expect(await reopened.readSession('mira-local')).toEqual(selected);
     expect(await reopened.listSessions()).toEqual([selected, second]);
+  });
+
+  it('continues a session under a chain-named id, finds its successor, and resumes the newest', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock([
+        '2026-06-04T00:00:00.000Z',
+        '2026-06-04T00:01:00.000Z',
+        '2026-06-04T00:02:00.000Z',
+        '2026-06-04T00:03:00.000Z',
+      ]),
+    });
+
+    const root = await store.createSession({sessionId: 'local-session'});
+    const continued = await store.createContinuedSession({
+      continuedFrom: 'local-session',
+    });
+    const second = continued.metadata;
+    // The creator holds the new session's writer lease from the start, so no
+    // other window can open it before its opening record exists.
+    await expect(
+      acquireLocalRuntimeSessionWriterLease({
+        storeRoot,
+        sessionId: second.sessionId,
+      }),
+    ).rejects.toThrow(/busy|lock/iu);
+    await continued.writerLease.release();
+    const continuedAgain = await store.createContinuedSession({
+      continuedFrom: second.sessionId,
+    });
+    const third = continuedAgain.metadata;
+    await continuedAgain.writerLease.release();
+
+    expect(second).toMatchObject({
+      sessionId: 'local-session.2',
+      continuedFrom: 'local-session',
+    });
+    expect(third).toMatchObject({
+      sessionId: 'local-session.3',
+      continuedFrom: 'local-session.2',
+    });
+    expect(await store.successorOf('local-session')).toEqual(second);
+    expect(await store.successorOf(third.sessionId)).toBeUndefined();
+    expect(await store.newestSession()).toEqual(third);
+    // Reopening the root exactly is allowed; it stays a closed segment.
+    expect(await store.readSession(root.sessionId)).toEqual(root);
+    await expect(
+      store.createContinuedSession({continuedFrom: 'never-existed'}),
+    ).rejects.toThrow(LocalRuntimeSessionStoreError);
+
+    // Recency follows the last write: a session that kept receiving records
+    // stays the newest over one merely opened later.
+    const rootLog = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: root.sessionId,
+    }).rawEventsPath;
+    await writeFile(rootLog, '{"later": true}\n');
+    expect((await store.newestSession())?.sessionId).toBe(root.sessionId);
+
+    // A session that never received a record can be discarded — a torn tail
+    // from a write that never completed is not a record; one holding
+    // evidence cannot.
+    await writeFile(
+      createLocalRuntimeSessionPaths({storeRoot, sessionId: third.sessionId})
+        .rawEventsPath,
+      '{"torn": tru',
+    );
+    await store.discardEmptySession(third.sessionId);
+    expect((await store.listSessions()).map(item => item.sessionId)).toEqual([
+      root.sessionId,
+      second.sessionId,
+    ]);
+    await expect(store.discardEmptySession(root.sessionId)).rejects.toThrow(
+      /holds evidence/u,
+    );
+    expect(await store.readSession(root.sessionId)).toEqual(root);
   });
 
   it('creates sessions for a padded character ID instead of mismatching its own marker', async () => {

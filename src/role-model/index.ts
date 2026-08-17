@@ -62,6 +62,8 @@ export {
   createRoleModelAdapterRawOutput,
   type RoleModelAdapter,
   type RoleModelAdapterInvocation,
+  type RoleModelTextCompletionRequest,
+  type RoleModelTextCompletionResult,
   type RoleModelAdapterRawOutput,
   type RoleModelNativeToolCallArgumentError,
 } from './api/adapter.ts';
@@ -113,7 +115,10 @@ export {
   renderRoleModelTurnContext,
   type RoleModelTurnContext,
 } from './prompt/render.ts';
-export {createTodayRuntimeNote} from './prompt/prompt-text.ts';
+export {
+  createTodayRuntimeNote,
+  summarizerInstructions,
+} from './prompt/prompt-text.ts';
 export {
   assertConversationHistoryMatchesWindow,
   conversationHistoryWindow,

@@ -9,7 +9,38 @@ import type {
   ConversationTurn,
 } from '../../role-model/index.ts';
 import type {RuntimePluginToolCallResult} from '../../plugins/api/index.ts';
-import type {RawEventLogRecord} from './records.ts';
+import type {
+  RawEventLogRecord,
+  SessionContinuationSnapshot,
+} from './records.ts';
+
+export type ConversationHistory = {
+  /** Carried turns from the session this one continues, then its own. */
+  readonly turns: readonly ConversationTurn[];
+  /** The condensed earlier conversation, when this session continues another. */
+  readonly summary?: string;
+  readonly continuation?: SessionContinuationSnapshot;
+};
+
+/**
+ * A session that continues another opens with the earlier conversation's
+ * summary and the turns carried over verbatim; the model's history starts
+ * there and grows with the session's own turns.
+ */
+export function conversationHistoryFromRawEvents(
+  rawEvents: readonly RawEventLogRecord[],
+): ConversationHistory {
+  const continuation = rawEvents[0]?.sessionContinuation;
+  const ownTurns = conversationTurnsFromRawEvents(rawEvents);
+
+  return continuation === undefined
+    ? Object.freeze({turns: ownTurns})
+    : Object.freeze({
+        turns: Object.freeze([...continuation.carriedTurns, ...ownTurns]),
+        summary: continuation.summary,
+        continuation,
+      });
+}
 
 type MutableTurn = {
   readonly identity: RuntimeEventIdentity;

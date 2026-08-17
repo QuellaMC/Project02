@@ -160,9 +160,15 @@ export function createProject02Plugin(
 function createCharacterMemoryPluginFromManifest(
   manifest: RuntimePluginManifest,
 ): RuntimePlugin {
-  // Launch-frozen snapshot: built once per plugin instance, so mid-session
-  // writes surface next launch and the trusted frame stays byte-stable.
-  let snapshot: readonly RuntimePluginCuratedContextSection[] | undefined;
+  // Frozen per session: built once for each session this instance serves,
+  // so mid-session writes surface when the next session begins (a
+  // continuation included) and the trusted frame stays byte-stable meanwhile.
+  let snapshot:
+    | {
+        readonly sessionId: string;
+        readonly sections: readonly RuntimePluginCuratedContextSection[];
+      }
+    | undefined;
 
   return createRuntimePlugin({
     manifest,
@@ -180,22 +186,29 @@ function createCharacterMemoryPluginFromManifest(
     ],
     lifecycleHooks: {
       beforeRoleModelCall(context) {
-        snapshot ??= characterMemorySnapshotSections(
-          requiredCharacterFileStore(context),
-        );
+        if (snapshot?.sessionId !== context.sessionId) {
+          snapshot = {
+            sessionId: context.sessionId,
+            sections: characterMemorySnapshotSections(
+              requiredCharacterFileStore(context),
+            ),
+          };
+        }
+
+        const sections = snapshot.sections;
 
         return Object.freeze({
           contextItems: [],
-          curatedContext: snapshot,
+          curatedContext: sections,
           evidence: [
             createPluginContextEvidence({
               context,
               pluginId: characterMemoryPluginId,
               status: 'accepted',
               summary:
-                snapshot.length === 0
+                sections.length === 0
                   ? 'Curated memory is empty.'
-                  : `Provided the curated memory snapshot (${snapshot
+                  : `Provided the curated memory snapshot (${sections
                       .map(
                         section =>
                           `${section.id} ${String(section.usedChars ?? 0)}/${String(
