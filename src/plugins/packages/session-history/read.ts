@@ -28,7 +28,8 @@ export function createSessionHistoryReadTool(): RuntimePluginProvidedTool {
   return {
     name: sessionHistoryReadToolName,
     description:
-      'Read a window of messages from one past session, oldest-first. ' +
+      'Read a window of messages from one of your past conversations, ' +
+      'oldest-first. ' +
       'Without anchorMessageId it returns the latest messages. To scroll, ' +
       'pass a returned messageId as anchorMessageId to get the messages ' +
       'around it; hasBefore and hasAfter say whether more exist beyond the ' +

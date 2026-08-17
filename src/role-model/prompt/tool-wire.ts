@@ -8,7 +8,57 @@ import type {
   RoleModelChatCompletionTool,
   RoleModelProviderToolNameMapping,
 } from '../api/chat-wire.ts';
+import type {RoleModelToolObservationResult} from '../api/contracts.ts';
+import {visibleReplyModelToolName} from '../api/model-tools.ts';
+import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import {isJsonRecord} from '../../shared/json-boundary.ts';
+
+/** The tool-result message content every round shows the model, live or replayed. */
+export function createNativeToolResultMessageContent(call: {
+  readonly pluginId: string;
+  readonly toolName: string;
+  readonly result: RoleModelToolObservationResult;
+}): Readonly<Record<string, RuntimePluginJsonValue>> {
+  if (call.result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      pluginId: call.pluginId,
+      toolName: call.toolName,
+      output: call.result.output,
+    });
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    pluginId: call.pluginId,
+    toolName: call.toolName,
+    reason: call.result.reason,
+    message: call.result.message,
+  });
+}
+
+export function createNativeVisibleReplyToolResultContent(): Readonly<
+  Record<string, RuntimePluginJsonValue>
+> {
+  return Object.freeze({
+    status: 'accepted',
+    toolName: visibleReplyModelToolName,
+    output: Object.freeze({
+      kind: 'visible_reply_delivered',
+    }),
+  });
+}
+
+export function createNativeMissingToolResultContent(
+  toolName: string,
+): Readonly<Record<string, RuntimePluginJsonValue>> {
+  return Object.freeze({
+    status: 'rejected',
+    toolName,
+    reason: 'tool_result_missing',
+    message: `No routed plugin result was available for native tool call "${toolName}".`,
+  });
+}
 
 export function modelToolDefinitionToChatTool(
   definition: ModelToolDefinition,

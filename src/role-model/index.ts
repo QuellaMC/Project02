@@ -10,6 +10,7 @@ export {
   type CreateRoleModelInputEnvelopeOptions,
   type CreateRoleModelIOSnapshotOptions,
   type DecisionContext,
+  type DecisionRuntimeNote,
   isRoleModelMalformedAdapterRawOutputDetails,
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
@@ -116,6 +117,7 @@ export {
   renderRoleModelTurnContext,
   type RoleModelTurnContext,
 } from './prompt/render.ts';
+export {createTodayRuntimeNote} from './prompt/prompt-text.ts';
 export {
   createRoleModelProviderToolNameMappings,
   modelToolDefinitionToChatTool,

@@ -108,7 +108,7 @@ describe('configured runtime plugin package activation', () => {
     const storeRoot = createTestTempRoot('project02-package-override-');
     const manifest = createRuntimePluginManifest({
       ...testPackageManifest(characterStatePluginId),
-      requestedAccess: {curated_context: 'write'},
+      requestedAccess: {trusted_context: 'write'},
     });
 
     writeRuntimeConfig(join(storeRoot, 'config.json'), {});
@@ -136,11 +136,11 @@ describe('configured runtime plugin package activation', () => {
       configured.packageProvenanceByPluginId[characterStatePluginId],
     ).toBeUndefined();
     expect(overridden?.grantedAccess).not.toMatchObject({
-      curated_context: 'write',
+      trusted_context: 'write',
     });
     expect(configured.activation.diagnostics).toContainEqual(
       expect.objectContaining({
-        code: 'curated_context_not_first_party',
+        code: 'trusted_context_not_first_party',
         pluginId: characterStatePluginId,
       }),
     );

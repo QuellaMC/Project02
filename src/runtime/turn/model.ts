@@ -4,6 +4,7 @@ import {
   createRuntimePluginToolInvocationSnapshot,
   runtimePluginBeforeRoleModelCallRejectionReason,
   type RuntimePluginContext,
+  type RuntimePluginContextItem,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolInvocationSnapshot,
 } from '../../plugins/api/index.ts';
@@ -15,9 +16,11 @@ import type {
 import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
+  createTodayRuntimeNote,
   roleModelCommitValidationFailureRejectionReason,
   type DecisionContext,
 } from '../../role-model/index.ts';
+import {localUserSpeaker} from '../../core/index.ts';
 import {
   runRoleModelLoop,
   type RoleModelAdapter,
@@ -62,6 +65,8 @@ type PreparedRuntimeTurn = {
   readonly runtimePluginContext: RuntimePluginContext;
   readonly pluginHost: RuntimePluginHost;
   readonly beforeRoleModelCallResult: RuntimePluginBeforeRoleModelCallCompletedResult;
+  /** Every plugin item the model was shown this turn, whichever frame it rendered in. */
+  readonly pluginContextItems: readonly RuntimePluginContextItem[];
 };
 
 type PrepareRuntimeTurnResult =
@@ -181,6 +186,10 @@ async function prepareRuntimeTurn(
       runtimePluginContext,
       pluginHost,
       beforeRoleModelCallResult,
+      pluginContextItems: [
+        ...beforeRoleModelCallResult.runtimeNotes,
+        ...beforeRoleModelCallResult.contextItems,
+      ],
     },
   };
 }
@@ -193,10 +202,22 @@ async function runRuntimeModel(
     sessionId: prepared.decisionContext.sessionId,
     characterSnapshot: prepared.decisionContext.characterSnapshot,
     recentVisibleMessages: prepared.decisionContext.recentVisibleMessages,
-    runtimeNotes: prepared.decisionContext.runtimeNotes,
+    runtimeNotes: [
+      createTodayRuntimeNote(
+        state.event.createdAt,
+        state.options.timeZone ??
+          Intl.DateTimeFormat().resolvedOptions().timeZone,
+      ),
+      ...prepared.beforeRoleModelCallResult.runtimeNotes.map(item => ({
+        id: item.id,
+        text: item.text,
+        pluginId: item.pluginId,
+      })),
+    ],
     pluginContextItems: prepared.beforeRoleModelCallResult.contextItems,
     curatedContextSections: prepared.beforeRoleModelCallResult.curatedContext,
   });
+  const userDisplayName = state.options.session.userSpeaker.displayName;
   const result = await runRoleModelLoop({
     event: state.event,
     decisionContext: roleModelDecisionContext,
@@ -210,6 +231,10 @@ async function runRuntimeModel(
     ...(state.options.characterPersonaSections === undefined
       ? {}
       : {personaSections: state.options.characterPersonaSections}),
+    // The default label is a transcript speaker, not a name the prompt uses.
+    ...(userDisplayName === localUserSpeaker.displayName
+      ? {}
+      : {userDisplayName}),
     ...(state.options.characterRef === undefined
       ? {}
       : {characterRef: state.options.characterRef}),
@@ -358,7 +383,7 @@ async function validateAndCommitRuntimeModelResult(
     state,
     decisionContext: prepared.decisionContext,
     pluginHost: prepared.pluginHost,
-    contextItems: prepared.beforeRoleModelCallResult.contextItems,
+    contextItems: prepared.pluginContextItems,
     roleModelResult,
     roleModelPluginEvidence,
     roleModelPluginToolInvocations,
@@ -386,7 +411,7 @@ async function rejectRoleModelResult(options: {
     roleModelResult.rejection,
     {...options.roleModelEvidence, commitValidation},
     options.roleModelPluginEvidence,
-    prepared.beforeRoleModelCallResult.contextItems,
+    prepared.pluginContextItems,
     options.roleModelPluginToolInvocations,
     prepared.runtimePluginContext,
   );
@@ -411,8 +436,7 @@ async function rejectPreCommitHealth(options: {
 
   return await appendRejectedResult(options.state, {
     runtimePluginEvidence: options.roleModelPluginEvidence,
-    runtimePluginContextItems:
-      options.prepared.beforeRoleModelCallResult.contextItems,
+    runtimePluginContextItems: options.prepared.pluginContextItems,
     runtimePluginToolInvocations: options.roleModelPluginToolInvocations,
     evidence: {
       ...options.roleModelEvidence,

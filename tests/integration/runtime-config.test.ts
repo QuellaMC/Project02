@@ -445,7 +445,17 @@ describe('runtime config loading and resolution', () => {
       enabled: false,
       activationStatus: 'blocked',
     });
-    expect(characterStateActivation?.diagnostics).toEqual([]);
+    // The injected factory displaces the bundled package, so the only
+    // diagnostic is the provenance warning that withholds trusted_context.
+    const injectedFactoryDiagnostics = [
+      expect.objectContaining({
+        code: 'trusted_context_not_first_party',
+        severity: 'warning',
+      }),
+    ];
+    expect(characterStateActivation?.diagnostics).toEqual(
+      injectedFactoryDiagnostics,
+    );
     expect(configured.activation.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -530,7 +540,12 @@ describe('runtime config loading and resolution', () => {
       enabled: false,
       activationStatus: 'blocked',
     });
-    expect(characterActivation?.diagnostics).toEqual([]);
+    expect(characterActivation?.diagnostics).toEqual([
+      expect.objectContaining({
+        code: 'trusted_context_not_first_party',
+        severity: 'warning',
+      }),
+    ]);
     expect(badActivation).toMatchObject({
       pluginId: 'bad',
       enabled: false,

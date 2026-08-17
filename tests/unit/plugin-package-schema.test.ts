@@ -61,7 +61,7 @@ function validDescriptor(): Record<string, unknown> {
 }
 
 describe('plugin package descriptor schema parity', () => {
-  it('accepts curated_context in requestedAccess through both validators', () => {
+  it('accepts trusted_context in requestedAccess through both validators', () => {
     const descriptor = validDescriptor();
     const manifest = descriptor['manifest'] as Record<string, unknown>;
     const withCuratedContext = {
@@ -70,7 +70,7 @@ describe('plugin package descriptor schema parity', () => {
         ...manifest,
         requestedAccess: {
           ...(manifest['requestedAccess'] as Record<string, unknown>),
-          curated_context: 'write',
+          trusted_context: 'write',
         },
       },
     };

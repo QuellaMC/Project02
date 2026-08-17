@@ -374,9 +374,9 @@ describe('runtime plugin access control', () => {
     expect(runtimePluginAccessAllows('read', 'none')).toBe(true);
   });
 
-  it('withholds curated_context from ineligible plugins while keeping the request truthful', () => {
+  it('withholds trusted_context from ineligible plugins while keeping the request truthful', () => {
     const requestedAccess = {
-      curated_context: 'write',
+      trusted_context: 'write',
       model_input: 'write',
     } satisfies RuntimePluginAccessMap;
     const ineligible = runtimePluginAccessSnapshot({
@@ -386,7 +386,7 @@ describe('runtime plugin access control', () => {
     const eligible = runtimePluginAccessSnapshot({
       requestedAccess,
       enabled: true,
-      curatedContextEligible: true,
+      trustedContextEligible: true,
     });
 
     expect(ineligible.requestedAccess).toEqual(requestedAccess);

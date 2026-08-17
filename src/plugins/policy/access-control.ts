@@ -19,7 +19,7 @@ export type RuntimePluginAccessMapByPluginId = Readonly<
 export function resolveRuntimePluginAccessForPlugins(options: {
   readonly plugins: readonly RuntimePlugin[];
   readonly enabledPluginIds: readonly string[];
-  readonly curatedContextEligiblePluginIds?: ReadonlySet<string>;
+  readonly trustedContextEligiblePluginIds?: ReadonlySet<string>;
 }): RuntimePluginAccessMapByPluginId {
   assertUniqueRuntimePluginIds(options.plugins);
 
@@ -32,8 +32,8 @@ export function resolveRuntimePluginAccessForPlugins(options: {
         resolveRuntimePluginAccessForPlugin({
           plugin,
           enabled: enabledPluginIds.has(plugin.manifest.id),
-          curatedContextEligible:
-            options.curatedContextEligiblePluginIds?.has(plugin.manifest.id) ===
+          trustedContextEligible:
+            options.trustedContextEligiblePluginIds?.has(plugin.manifest.id) ===
             true,
         }),
       ]),
@@ -69,13 +69,13 @@ export function runtimePluginAccessForPluginId(options: {
 function resolveRuntimePluginAccessForPlugin(options: {
   readonly plugin: RuntimePlugin;
   readonly enabled: boolean;
-  readonly curatedContextEligible: boolean;
+  readonly trustedContextEligible: boolean;
 }): RuntimePluginAccessSnapshot {
   return runtimePluginAccessSnapshot({
     requestedAccess: options.plugin.manifest.requestedAccess,
     enabled: options.enabled,
     fieldPrefix: options.plugin.manifest.id,
-    curatedContextEligible: options.curatedContextEligible,
+    trustedContextEligible: options.trustedContextEligible,
   });
 }
 
@@ -85,10 +85,10 @@ export function runtimePluginAccessSnapshot(options: {
   readonly fieldPrefix?: string;
   /**
    * Provenance decision made by the composition root: only bundled
-   * first-party packages may hold curated_context, whatever the manifest
+   * first-party packages may hold trusted_context, whatever the manifest
    * requests. Defaults closed.
    */
-  readonly curatedContextEligible?: boolean;
+  readonly trustedContextEligible?: boolean;
 }): RuntimePluginAccessSnapshot {
   const fieldPrefix = options.fieldPrefix ?? 'plugin';
   const requestedAccess = normalizeRuntimePluginAccessMap(
@@ -96,10 +96,10 @@ export function runtimePluginAccessSnapshot(options: {
     `${fieldPrefix}.requestedAccess`,
   );
   const grantedAccess =
-    options.curatedContextEligible === true ||
-    !Object.hasOwn(requestedAccess, 'curated_context')
+    options.trustedContextEligible === true ||
+    !Object.hasOwn(requestedAccess, 'trusted_context')
       ? requestedAccess
-      : withoutCuratedContextAccess(requestedAccess);
+      : withoutTrustedContextAccess(requestedAccess);
 
   return Object.freeze({
     requestedAccess,
@@ -107,10 +107,10 @@ export function runtimePluginAccessSnapshot(options: {
   } satisfies RuntimePluginAccessSnapshot);
 }
 
-function withoutCuratedContextAccess(
+function withoutTrustedContextAccess(
   accessMap: RuntimePluginAccessMap,
 ): RuntimePluginAccessMap {
-  const {curated_context: withheld, ...grantable} = accessMap;
+  const {trusted_context: withheld, ...grantable} = accessMap;
 
   void withheld;
   return Object.freeze(grantable);

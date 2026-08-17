@@ -12,6 +12,7 @@ import {
   createDegradedRejectingMemorySearchPlugin,
   createExplicitlyEnabledRuntimePluginHost,
   createProtoKeyOutputPlugin,
+  createRecalledMemoryBudgetPlugin,
   createRejectingMemorySearchPlugin,
   createRuntimeNotesPlugin,
   createSlowNormalizationPlugin,
@@ -320,6 +321,38 @@ describe('runtime plugin host output boundaries', () => {
     expect(JSON.stringify(result.contextItems)).not.toContain(
       'oversized context',
     );
+  });
+
+  it('bounds recalled memory under its own budget separately from plugin context', async () => {
+    // Three 1200-char memories (~900 tokens) overflow the 256-token plugin
+    // budget but fit the 1024-token memory budget; a fourth is evicted and
+    // the resource item is judged against the plugin budget alone.
+    const plugin = createRecalledMemoryBudgetPlugin({
+      memoryCount: 4,
+      memoryChars: 1_200,
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
+
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      throw new Error('Expected beforeRoleModelCall to complete.');
+    }
+
+    expect(result.contextItems.map(item => item.id)).toEqual([
+      'memory-1',
+      'memory-2',
+      'memory-3',
+      'resource-1',
+    ]);
+    const budgetEvidence = result.evidence.find(
+      evidence =>
+        evidence.evidenceKind === 'before_role_model_call' &&
+        evidence.status === 'degraded',
+    );
+    expect(budgetEvidence?.summary).toContain('Recalled-memory budget');
+    expect(budgetEvidence?.summary).toContain('dropped ids memory-4');
   });
 
   it('accepts 64 hook records and rejects record 65 without truncation', async () => {

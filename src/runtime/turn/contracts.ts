@@ -53,6 +53,8 @@ export type RunLocalUserMessageEventOptions = {
   readonly pluginHost: RuntimePluginHost;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
+  /** IANA zone the day note is written in; defaults to the process zone. */
+  readonly timeZone?: string;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;

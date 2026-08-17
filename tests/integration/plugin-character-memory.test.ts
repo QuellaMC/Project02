@@ -36,7 +36,7 @@ describe('Character Memory plugin', () => {
     expect(plugin.manifest.requestedAccess).toEqual({
       character_file_store: 'write',
       model_input: 'write',
-      curated_context: 'write',
+      trusted_context: 'write',
     });
     expect(plugin.providedTools.map(tool => tool.name)).toEqual([
       characterMemoryUpdateToolName,
@@ -221,7 +221,7 @@ describe('Character Memory plugin', () => {
       expect.objectContaining({
         pluginId: characterMemoryPluginId,
         id: 'notes',
-        title: 'Character notes',
+        title: 'Notes to yourself',
         text: 'Prefers tea over coffee.',
         capChars: 2200,
         usedChars: 24,
@@ -234,7 +234,7 @@ describe('Character Memory plugin', () => {
       expect.objectContaining({id: 'notes'}),
       expect.objectContaining({
         id: 'user-profile',
-        title: 'User profile',
+        title: 'What you know about them',
         text: 'Reads TypeScript.',
         capChars: 1375,
       }),

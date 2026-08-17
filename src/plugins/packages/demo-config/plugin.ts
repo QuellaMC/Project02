@@ -32,11 +32,11 @@ export function createProject02Plugin(
   const tone = configuredStringValue(input, 'tone') ?? demoConfigDefaultTone;
   const signoff = configuredStringValue(input, 'signoff');
   const directives =
-    'Demo Config style directives (agent-adjustable via the ' +
-    `runtime.plugin.config tools): reply in a ${tone} tone.` +
+    'Your speaking style right now (adjustable through the ' +
+    `runtime.plugin.config tools): speak in a ${tone} tone.` +
     (signoff === undefined
       ? ''
-      : ` End every reply with the exact signoff "${signoff}".`);
+      : ` End everything you say with the exact signoff "${signoff}".`);
 
   return createRuntimePlugin({
     manifest: input.manifest,

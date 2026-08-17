@@ -132,6 +132,11 @@ describe('inspect CLI plugin evidence', () => {
                 };
               };
               readonly input?: {
+                readonly runtimeNotes: readonly {
+                  readonly id: string;
+                  readonly text: string;
+                  readonly pluginId?: string;
+                }[];
                 readonly pluginContextItems: readonly {
                   readonly pluginId: string;
                   readonly text: string;
@@ -141,6 +146,12 @@ describe('inspect CLI plugin evidence', () => {
           }[];
           readonly toolEvents: readonly [{readonly pluginId: string}];
           readonly pluginEvidence: {
+            readonly contextItems: readonly {
+              readonly pluginId: string;
+              readonly id: string;
+              readonly kind: string;
+              readonly redactionLabels: readonly string[];
+            }[];
             readonly evidence: readonly {
               readonly pluginId: string;
               readonly evidenceKind: string;
@@ -173,10 +184,26 @@ describe('inspect CLI plugin evidence', () => {
     expect(
       output.turns[0].modelRounds[0]?.roleModelEvidence.output?.rawOutputText,
     ).toContain('character_state.patch');
+    // Character State is a trusted runtime note, attributed to its plugin.
     expect(
-      output.turns[0].modelRounds[0]?.roleModelEvidence.input
-        ?.pluginContextItems[0]?.text,
-    ).toContain("Mira's internal Character State");
+      output.turns[0].modelRounds[0]?.roleModelEvidence.input?.runtimeNotes,
+    ).toEqual([
+      expect.objectContaining({id: 'today'}),
+      expect.objectContaining({
+        pluginId: 'character-state',
+        text: expect.stringContaining('mood=') as string,
+      }),
+    ]);
+    // The trusted frame is where the note rendered; the plugin evidence still
+    // records the whole item the plugin handed over.
+    expect(output.turns[0].pluginEvidence.contextItems).toEqual([
+      expect.objectContaining({
+        pluginId: 'character-state',
+        id: 'current',
+        kind: 'runtime_note',
+        redactionLabels: expect.any(Array) as string[],
+      }),
+    ]);
     expect(
       output.turns[0].modelRounds[1]?.roleModelEvidence.output?.providerExchange
         ?.renderedMessages.length,

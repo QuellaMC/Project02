@@ -30,6 +30,7 @@ import {
   createRetainedHandleToolCallFileStorePlugin,
   createSessionEndFileStoreProbePlugin,
   createStagedAppendFileStorePlugin,
+  createTrustedContextItemsPlugin,
   expectRetainedFileStoreWriteBlocked,
   testIdentity,
   testRuntimePluginFileStoreProvider,
@@ -38,7 +39,7 @@ import {
 } from '../support/plugin-host-fixtures.ts';
 
 describe('runtime plugin host curated context', () => {
-  it('drops sections and degrades when the host has not cleared the plugin for curated_context', () => {
+  it('drops sections and degrades when the host has not cleared the plugin for trusted_context', () => {
     const plugin = createCuratedContextSectionPlugin({
       pluginId: 'memory.curated.fixture',
     });
@@ -57,7 +58,7 @@ describe('runtime plugin host curated context', () => {
           status: 'degraded',
           policyOutcome: 'optional_degraded',
           summary: expect.stringContaining(
-            'curated_context write access',
+            'trusted_context write access',
           ) as string,
         }),
       );
@@ -74,7 +75,7 @@ describe('runtime plugin host curated context', () => {
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      curatedContextEligiblePluginIds: [plugin.manifest.id],
+      trustedContextEligiblePluginIds: [plugin.manifest.id],
     });
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -100,7 +101,7 @@ describe('runtime plugin host curated context', () => {
     });
     const host = createExplicitlyEnabledRuntimePluginHost({
       plugins: [plugin],
-      curatedContextEligiblePluginIds: [plugin.manifest.id],
+      trustedContextEligiblePluginIds: [plugin.manifest.id],
     });
     const result = await host.beforeRoleModelCall(testPluginContext());
 
@@ -115,6 +116,77 @@ describe('runtime plugin host curated context', () => {
         evidenceKind: 'before_role_model_call',
         status: 'degraded',
         summary: expect.stringContaining('8192-character limit') as string,
+      }),
+    );
+  });
+
+  it('routes a cleared plugin runtime notes to the trusted frame and the rest to the blocks', async () => {
+    const plugin = createTrustedContextItemsPlugin({
+      pluginId: 'memory.trusted-items.fixture',
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin],
+      trustedContextEligiblePluginIds: [plugin.manifest.id],
+    });
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      return;
+    }
+
+    expect(result.runtimeNotes.map(item => item.id)).toEqual(['note-1']);
+    expect(result.contextItems.map(item => `${item.kind}:${item.id}`)).toEqual([
+      'memory:memory-1',
+      'resource:resource-1',
+    ]);
+    expect(result.evidence).toEqual([]);
+  });
+
+  it('keeps runtime notes from an uncleared plugin in the untrusted block', async () => {
+    const plugin = createTrustedContextItemsPlugin({
+      pluginId: 'memory.untrusted-items.fixture',
+      requestedAccess: {model_input: 'write'},
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({plugins: [plugin]});
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      return;
+    }
+
+    expect(result.runtimeNotes).toEqual([]);
+    expect(result.contextItems.map(item => item.id)).toEqual([
+      'memory-1',
+      'note-1',
+      'resource-1',
+    ]);
+  });
+
+  it('degrades a cleared plugin whose runtime notes exceed the per-plugin caps', async () => {
+    const plugin = createTrustedContextItemsPlugin({
+      pluginId: 'memory.trusted-items.fixture',
+      noteCount: 5,
+    });
+    const host = createExplicitlyEnabledRuntimePluginHost({
+      plugins: [plugin],
+      trustedContextEligiblePluginIds: [plugin.manifest.id],
+    });
+    const result = await host.beforeRoleModelCall(testPluginContext());
+
+    expect(result.status).toBe('completed');
+    if (result.status !== 'completed') {
+      return;
+    }
+
+    expect(result.runtimeNotes).toEqual([]);
+    expect(result.contextItems).toEqual([]);
+    expect(result.evidence).toContainEqual(
+      expect.objectContaining({
+        evidenceKind: 'before_role_model_call',
+        status: 'degraded',
+        summary: expect.stringContaining('4-note limit') as string,
       }),
     );
   });

@@ -317,9 +317,17 @@ function roleModelEvidenceForRawEvent(rawEvent: RawEventLogRecord): {
                   visibleMessageFromSnapshot,
                 ),
               ),
-              runtimeNotes: Object.freeze([
-                ...inputEnvelope.decisionContext.runtimeNotes,
-              ]),
+              runtimeNotes: Object.freeze(
+                inputEnvelope.decisionContext.runtimeNotes.map(note =>
+                  Object.freeze({
+                    id: note.id,
+                    text: note.text,
+                    ...(note.pluginId === undefined
+                      ? {}
+                      : {pluginId: note.pluginId}),
+                  }),
+                ),
+              ),
               curatedContextSections: curatedContextSectionsFromSnapshots(
                 inputEnvelope.decisionContext.curatedContextSections,
               ),
