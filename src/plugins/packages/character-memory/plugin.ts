@@ -56,8 +56,8 @@ const characterMemoryPluginDescriptorUrl = new URL(
 const characterMemorySectionTitles: Readonly<
   Record<CharacterMemoryTarget, string>
 > = Object.freeze({
-  notes: 'Character notes',
-  user_profile: 'User profile',
+  notes: 'Notes to yourself',
+  user_profile: 'What you know about them',
 });
 
 const characterMemorySectionIds: Readonly<
@@ -78,7 +78,7 @@ const characterMemoryTargetSchema = Object.freeze({
   type: 'string',
   enum: characterMemoryTargetValues,
   description:
-    "notes holds the character's durable notes; user_profile holds facts about the user.",
+    'notes holds what you want to remember; user_profile holds what you know about them.',
 });
 
 const characterMemoryOldTextSchema = Object.freeze({
@@ -170,7 +170,7 @@ function createCharacterMemoryPluginFromManifest(
       Object.freeze({
         name: characterMemoryUpdateToolName,
         description:
-          "Update the character's curated durable memory (assistant-owned; injected every session as 'Curated memory'). Proactively save stable facts worth keeping across sessions: user preferences and corrections, environment facts, conventions, workflow knowledge. Skip transient task state and easily rediscovered details. add appends an entry; replace and remove select exactly one existing entry via a unique old_text substring. Writes land next session; capacity overflows reject the batch, so compress or remove stale entries first.",
+          "Update your notes — what you carry from one conversation to the next (you see them at the start of every conversation as 'What you carry between conversations'). Save stable facts worth keeping: what they like and correct you on, facts about their world, conventions, how they work. Skip passing task details and anything easily found again. add appends an entry; replace and remove pick exactly one existing entry by a unique old_text substring. New notes appear from your next conversation on; a full notebook rejects the batch, so tighten or drop stale entries first.",
         inputContract: characterMemoryUpdateInputContract,
         validationOwner: 'plugin_host',
         // Two batches in flight would race the same document.

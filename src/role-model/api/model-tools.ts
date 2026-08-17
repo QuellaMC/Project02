@@ -1,4 +1,8 @@
 import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
+import {
+  visibleReplyTextDescription,
+  visibleReplyToolDescription,
+} from '../prompt/prompt-text.ts';
 
 export const visibleReplyModelToolName = 'visible_reply';
 
@@ -59,13 +63,13 @@ export const userTurnBuiltInModelToolNames = Object.freeze([
 export const builtInModelToolDefinitions = Object.freeze([
   createBuiltInModelToolDefinition({
     name: visibleReplyModelToolName,
-    description: 'Send a user-visible reply message from you.',
+    description: visibleReplyToolDescription,
     inputContract: {
       type: 'object',
       properties: {
         text: {
           type: 'string',
-          description: 'The reply text to show to the user.',
+          description: visibleReplyTextDescription,
         },
       },
       required: ['text'],

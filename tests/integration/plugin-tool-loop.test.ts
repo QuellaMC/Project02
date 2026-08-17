@@ -830,9 +830,7 @@ describe('plugin-driven Character State tool loop', () => {
       roleModelAdapter: secondAdapter,
     });
     const runtimeContextMessage = messagesByRound[0]?.find(
-      message =>
-        message.role === 'user' &&
-        message.content.includes('Untrusted plugin context'),
+      message => message.role === 'system' && message.content.includes('mood='),
     );
     const currentUserMessage = messagesByRound[0]?.findLast(
       message => message.role === 'user',

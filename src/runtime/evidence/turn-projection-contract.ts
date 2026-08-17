@@ -40,6 +40,12 @@ export type InspectCuratedContextSection = {
   readonly usedChars?: number;
 };
 
+export type InspectRuntimeNote = {
+  readonly id: string;
+  readonly text: string;
+  readonly pluginId?: string;
+};
+
 export type InspectRoleModelEvidence = {
   readonly input?: {
     readonly sessionId: string;
@@ -47,7 +53,7 @@ export type InspectRoleModelEvidence = {
     readonly outputContractVersion: string;
     readonly currentUserMessage: string;
     readonly recentVisibleMessages: readonly InspectVisibleMessage[];
-    readonly runtimeNotes: readonly string[];
+    readonly runtimeNotes: readonly InspectRuntimeNote[];
     readonly curatedContextSections: readonly InspectCuratedContextSection[];
     readonly pluginContextItems: readonly InspectPluginContextItem[];
   };

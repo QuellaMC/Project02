@@ -203,7 +203,7 @@
             "model_input": {
               "$ref": "#/definitions/accessLevel"
             },
-            "curated_context": {
+            "trusted_context": {
               "$ref": "#/definitions/accessLevel"
             }
           }

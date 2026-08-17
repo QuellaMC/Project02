@@ -72,7 +72,8 @@
       "reasons": ["bundled_demo_config"]
     },
     "requestedAccess": {
-      "model_input": "write"
+      "model_input": "write",
+      "trusted_context": "write"
     }
   }
 }

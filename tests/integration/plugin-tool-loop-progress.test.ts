@@ -56,9 +56,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     });
 
     const runtimeContextMessage = messagesByRound[0]?.find(
-      message =>
-        message.role === 'user' &&
-        message.content.includes('Untrusted plugin context'),
+      message => message.role === 'system' && message.content.includes('mood='),
     );
     const currentUserMessage = messagesByRound[0]?.findLast(
       message => message.role === 'user',
@@ -75,10 +73,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
       logStore.rawEvents().some(event => event.kind === 'tool_call_started'),
     ).toBe(false);
     expect(currentUserMessage?.content).toBe('what plugins are available?');
-    expect(runtimeContextMessage?.content).toContain(
-      "Mira's internal Character State",
-    );
-    expect(runtimeContextMessage?.content).toContain('sourceReferences');
+    // Character State rides the trusted per-turn frame, not the user turn.
+    expect(runtimeContextMessage?.content).toContain('mood=');
+    expect(runtimeContextMessage?.content).not.toContain('sourceReferences');
     expect(runtimeContextMessage?.content).not.toContain('runtime.plugin.list');
     expect(runtimeContextMessage?.content).not.toContain('visible_reply');
     expect(runtimeContextMessage?.content).not.toContain(

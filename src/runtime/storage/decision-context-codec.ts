@@ -1,6 +1,7 @@
 import {
   createDecisionContext,
   type DecisionContext,
+  type DecisionRuntimeNote,
 } from '../../role-model/index.ts';
 import {
   createRuntimePluginContextItem,
@@ -11,7 +12,6 @@ import {
 import type {CharacterProfile, VisibleMessage} from '../../core/index.ts';
 import {
   requiredArray,
-  requiredStringArray,
   requiredVisibleMessage,
   throwMalformedRecord,
 } from './codec-primitives.ts';
@@ -29,7 +29,7 @@ export function requiredDecisionContext(value: unknown): DecisionContext {
       value['recentVisibleMessages'],
       'recentVisibleMessages',
     ),
-    runtimeNotes: requiredStringArray(value['runtimeNotes'], 'runtimeNotes'),
+    runtimeNotes: requiredDecisionRuntimeNotes(value['runtimeNotes']),
     pluginContextItems: optionalRuntimePluginContextItems(
       value['pluginContextItems'],
     ),
@@ -37,6 +37,30 @@ export function requiredDecisionContext(value: unknown): DecisionContext {
       value['curatedContextSections'],
     ),
   });
+}
+
+function requiredDecisionRuntimeNotes(
+  value: unknown,
+): readonly DecisionRuntimeNote[] {
+  return Object.freeze(
+    requiredArray(value, 'runtimeNotes').map(item => {
+      if (!isRecord(item)) {
+        throwMalformedRecord('runtimeNotes');
+      }
+
+      const pluginId = item['pluginId'];
+
+      if (pluginId !== undefined && typeof pluginId !== 'string') {
+        throwMalformedRecord('runtimeNotes');
+      }
+
+      return Object.freeze({
+        id: requiredRecordString(item, 'id', 'malformed_record'),
+        text: requiredRecordString(item, 'text', 'malformed_record'),
+        ...(pluginId === undefined ? {} : {pluginId}),
+      } satisfies DecisionRuntimeNote);
+    }),
+  );
 }
 
 function requiredCharacterProfile(value: unknown): CharacterProfile {

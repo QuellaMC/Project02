@@ -34,10 +34,10 @@ export function createSessionHistorySearchTool(): RuntimePluginProvidedTool {
   return {
     name: sessionHistorySearchToolName,
     description:
-      "Search this character's past conversation sessions. Use it whenever " +
-      'the user references an earlier conversation or relevant ' +
-      'cross-session context may exist, before asking them to repeat ' +
-      'themselves. The query is matched as literal text (no operators). ' +
+      'Search your own past conversations. Use it whenever they mention an ' +
+      'earlier conversation or the answer may sit further back than you can ' +
+      'see, before asking them to repeat themselves. The query is matched ' +
+      'as literal text (no operators). ' +
       'Messages you can currently see never match, so results always add ' +
       'to your context, including older parts of this conversation. Each ' +
       'matching session returns its opening messages, a window around the ' +

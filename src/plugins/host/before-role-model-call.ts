@@ -15,7 +15,7 @@ import {
 } from '../api/contract.ts';
 import {beforeRoleModelFailureRejectsTurn} from '../api/evidence-policy.ts';
 import {
-  boundPluginPromptContext,
+  boundPromptContextBlock,
   type CollectedPluginContextItem,
 } from '../policy/prompt-context-budget.ts';
 import {
@@ -25,8 +25,9 @@ import {
 import {pluginCanWriteModelInput} from '../policy/tool-policy.ts';
 import {
   assertPluginCuratedContextWithinCaps,
-  pluginCanContributeCuratedContext,
-} from '../policy/curated-context.ts';
+  assertPluginRuntimeNotesWithinCaps,
+  pluginCanWriteTrustedContext,
+} from '../policy/trusted-context.ts';
 import {
   assertSnapshotPluginId,
   createHookFailureEvidence,
@@ -48,7 +49,10 @@ import {
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
   readonly status: 'completed';
+  /** Recalled memories and plugin data, each block already held to its budget. */
   readonly contextItems: readonly RuntimePluginContextItem[];
+  /** Runtime notes from plugins cleared for the trusted frame, cap-checked. */
+  readonly runtimeNotes: readonly RuntimePluginContextItem[];
   readonly curatedContext: readonly RuntimePluginCuratedContextSection[];
   readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
 };
@@ -86,6 +90,7 @@ type BeforeRoleModelCallPluginOutcome =
   | {
       readonly status: 'continued';
       readonly contextItems: readonly CollectedPluginContextItem[];
+      readonly runtimeNotes: readonly RuntimePluginContextItem[];
       readonly curatedContext: readonly RuntimePluginCuratedContextSection[];
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
     }
@@ -100,6 +105,7 @@ export async function runBeforeRoleModelCall(
   options: BeforeRoleModelCallOptions,
 ): Promise<RuntimePluginBeforeRoleModelCallHostResult> {
   const contextItems: CollectedPluginContextItem[] = [];
+  const runtimeNotes: RuntimePluginContextItem[] = [];
   const curatedContext: RuntimePluginCuratedContextSection[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
 
@@ -118,28 +124,49 @@ export async function runBeforeRoleModelCall(
     }
 
     contextItems.push(...outcome.contextItems);
+    runtimeNotes.push(...outcome.runtimeNotes);
     curatedContext.push(...outcome.curatedContext);
   }
 
-  const boundedContext = boundPluginPromptContext({
-    context: options.context,
-    contextItems,
-  });
-  evidence.push(...boundedContext.evidence);
+  const boundedBlocks = [
+    boundPromptContextBlock({
+      context: options.context,
+      block: 'recalled_memory',
+      contextItems: contextItems.filter(({item}) => item.kind === 'memory'),
+    }),
+    boundPromptContextBlock({
+      context: options.context,
+      block: 'untrusted_plugin_context',
+      contextItems: contextItems.filter(({item}) => item.kind !== 'memory'),
+    }),
+  ];
 
-  if (boundedContext.status === 'rejected') {
+  for (const boundedBlock of boundedBlocks) {
+    evidence.push(...boundedBlock.evidence);
+  }
+
+  const rejectedBlock = boundedBlocks.find(
+    boundedBlock => boundedBlock.status === 'rejected',
+  );
+
+  if (rejectedBlock?.status === 'rejected') {
     return Object.freeze({
       status: 'rejected',
       reason: runtimePluginBeforeRoleModelCallRejectionReason,
-      pluginId: boundedContext.pluginId,
-      message: boundedContext.message,
+      pluginId: rejectedBlock.pluginId,
+      message: rejectedBlock.message,
       evidence: Object.freeze([...evidence]),
     } satisfies RuntimePluginBeforeRoleModelCallHostResult);
   }
 
   return Object.freeze({
     status: 'completed',
-    contextItems: boundedContext.contextItems,
+    contextItems: Object.freeze(
+      boundedBlocks.flatMap(boundedBlock =>
+        boundedBlock.status === 'completed' ? boundedBlock.contextItems : [],
+      ),
+    ),
+    runtimeNotes: Object.freeze([...runtimeNotes]),
     curatedContext: Object.freeze([...curatedContext]),
     evidence: Object.freeze([...evidence]),
   } satisfies RuntimePluginBeforeRoleModelCallHostResult);
@@ -214,12 +241,33 @@ async function runBeforeRoleModelCallPlugin(
   }
 
   const curatedContext = result.value.curatedContext ?? [];
+  const trusted = pluginCanWriteTrustedContext(access);
 
-  if (curatedContext.length > 0 && !pluginCanContributeCuratedContext(access)) {
+  if (curatedContext.length > 0 && !trusted) {
     return failedBeforeRoleModelCallPlugin({
       plugin,
       context: options.context,
-      message: `Plugin "${plugin.manifest.id}" returned curated context sections without granted curated_context write access.`,
+      message: `Plugin "${plugin.manifest.id}" returned curated context sections without granted trusted_context write access.`,
+      acceptedEvidence: result.value.evidence,
+    });
+  }
+
+  // A cleared plugin's runtime notes are trusted model input; every other
+  // item, and every item from an uncleared plugin, stays in the budgeted blocks.
+  const runtimeNotes = trusted
+    ? result.value.contextItems.filter(item => item.kind === 'runtime_note')
+    : [];
+
+  try {
+    assertPluginRuntimeNotesWithinCaps({
+      pluginId: plugin.manifest.id,
+      notes: runtimeNotes,
+    });
+  } catch (error: unknown) {
+    return failedBeforeRoleModelCallPlugin({
+      plugin,
+      context: options.context,
+      message: errorMessage(error),
       acceptedEvidence: result.value.evidence,
     });
   }
@@ -227,8 +275,11 @@ async function runBeforeRoleModelCallPlugin(
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze(
-      result.value.contextItems.map(item => ({plugin, item})),
+      result.value.contextItems
+        .filter(item => !runtimeNotes.includes(item))
+        .map(item => ({plugin, item})),
     ),
+    runtimeNotes: Object.freeze(runtimeNotes),
     curatedContext,
     evidence: result.value.evidence,
   } satisfies BeforeRoleModelCallPluginOutcome);
@@ -279,6 +330,7 @@ function continuedBeforeRoleModelCall(
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze([]),
+    runtimeNotes: Object.freeze([]),
     curatedContext: Object.freeze([]),
     evidence,
   });

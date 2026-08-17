@@ -43,6 +43,7 @@ import {
   type CreateRoleModelInputEnvelopeOptions,
   type CreateRoleModelIOSnapshotOptions,
   type DecisionContext,
+  type DecisionRuntimeNote,
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
@@ -68,7 +69,7 @@ export function createDecisionContext(
     recentVisibleMessages: freezeVisibleMessageSnapshots(
       options.recentVisibleMessages ?? [],
     ),
-    runtimeNotes: Object.freeze([...(options.runtimeNotes ?? [])]),
+    runtimeNotes: freezeDecisionRuntimeNotes(options.runtimeNotes ?? []),
     pluginContextItems: freezePluginContextItems(
       options.pluginContextItems ?? [],
     ),
@@ -313,6 +314,31 @@ function freezeVisibleMessageSnapshot(message: VisibleMessage): VisibleMessage {
     speakerName: message.speakerName,
     text: message.text,
   } satisfies VisibleMessage);
+}
+
+function freezeDecisionRuntimeNotes(
+  runtimeNotes: readonly DecisionRuntimeNote[],
+): readonly DecisionRuntimeNote[] {
+  return Object.freeze(
+    runtimeNotes.map(note => {
+      if (typeof note.text !== 'string' || note.text.trim().length === 0) {
+        throw new TypeError('Decision runtime note text must be non-empty.');
+      }
+
+      return Object.freeze({
+        id: requiredRoleModelIdentifier(note.id, 'runtime note id'),
+        text: note.text,
+        ...(note.pluginId === undefined
+          ? {}
+          : {
+              pluginId: requiredRoleModelIdentifier(
+                note.pluginId,
+                'runtime note pluginId',
+              ),
+            }),
+      } satisfies DecisionRuntimeNote);
+    }),
+  );
 }
 
 function freezePluginContextItems(

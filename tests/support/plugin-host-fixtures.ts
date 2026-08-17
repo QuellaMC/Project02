@@ -271,7 +271,7 @@ export function createCuratedContextSectionPlugin(options: {
     manifest: {
       ...memorySearchPluginManifest(options.pluginId),
       declaredPlugins: ['before_role_model_call'],
-      requestedAccess: options.requestedAccess ?? {curated_context: 'write'},
+      requestedAccess: options.requestedAccess ?? {trusted_context: 'write'},
     },
     providedTools: [],
     lifecycleHooks: {
@@ -286,6 +286,58 @@ export function createCuratedContextSectionPlugin(options: {
               text: sectionText,
             }),
           ),
+          evidence: [],
+        };
+      },
+    },
+  });
+}
+
+/** Returns runtime notes plus one memory and one resource item, to prove host routing. */
+export function createTrustedContextItemsPlugin(options: {
+  readonly pluginId: string;
+  readonly noteCount?: number;
+  readonly noteText?: string;
+  readonly requestedAccess?: RuntimePlugin['manifest']['requestedAccess'];
+}): RuntimePlugin {
+  const noteCount = options.noteCount ?? 1;
+  const noteText = options.noteText ?? 'Mood: steady.';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(options.pluginId),
+      declaredPlugins: ['before_role_model_call'],
+      requestedAccess: options.requestedAccess ?? {
+        model_input: 'write',
+        trusted_context: 'write',
+      },
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        const item = (
+          id: string,
+          kind: 'runtime_note' | 'memory' | 'resource',
+          text: string,
+        ) =>
+          createRuntimePluginContextItem({
+            pluginId: options.pluginId,
+            id,
+            kind,
+            text,
+            budget: {estimatedTokens: 8, priority: 50},
+            sourceReferences: [],
+            redactionLabels: context.privacy.redactionLabels,
+          });
+
+        return {
+          contextItems: [
+            ...Array.from({length: noteCount}, (_, index) =>
+              item(`note-${String(index + 1)}`, 'runtime_note', noteText),
+            ),
+            item('memory-1', 'memory', 'Prefers tea without sugar.'),
+            item('resource-1', 'resource', 'Sunny, 24C.'),
+          ],
           evidence: [],
         };
       },
@@ -824,7 +876,7 @@ export function createUnderestimatedContextItemPlugin(): RuntimePlugin {
             createRuntimePluginContextItem({
               pluginId,
               id: 'oversized-context',
-              kind: 'memory',
+              kind: 'resource',
               text: 'oversized context '.repeat(160),
               budget: {
                 estimatedTokens: 1,
@@ -869,7 +921,7 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
             createRuntimePluginContextItem({
               pluginId,
               id: 'low-priority-bulk',
-              kind: 'memory',
+              kind: 'resource',
               text: 'low '.repeat(254),
               budget: {
                 estimatedTokens: 254,
@@ -904,6 +956,50 @@ export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
               redactionLabels: [],
             }),
           ],
+        };
+      },
+    },
+  });
+}
+
+/** Memories that overflow the untrusted budget but fit the recalled-memory one, plus one resource. */
+export function createRecalledMemoryBudgetPlugin(options: {
+  readonly memoryCount: number;
+  readonly memoryChars: number;
+}): RuntimePlugin {
+  const pluginId = 'memory.recalled-budget.fixture';
+
+  return createRuntimePlugin({
+    manifest: {
+      ...memorySearchPluginManifest(pluginId),
+      declaredPlugins: ['before_role_model_call'],
+    },
+    providedTools: [],
+    lifecycleHooks: {
+      beforeRoleModelCall(context) {
+        const item = (id: string, kind: 'memory' | 'resource', text: string) =>
+          createRuntimePluginContextItem({
+            pluginId,
+            id,
+            kind,
+            text,
+            budget: {estimatedTokens: 1, priority: 50},
+            sourceReferences: [],
+            redactionLabels: context.privacy.redactionLabels,
+          });
+
+        return {
+          contextItems: [
+            ...Array.from({length: options.memoryCount}, (_, index) =>
+              item(
+                `memory-${String(index + 1)}`,
+                'memory',
+                'm'.repeat(options.memoryChars),
+              ),
+            ),
+            item('resource-1', 'resource', 'r'.repeat(800)),
+          ],
+          evidence: [],
         };
       },
     },
