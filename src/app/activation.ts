@@ -34,10 +34,8 @@ import {
   assertResolvedProject02HomeAdoptable,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
-  createRuntimeConfigAuthoredSnapshot,
   createRuntimePluginConfigControlCapability,
   diagnosticsHaveErrors,
-  layeredRuntimeConfigFingerprintForScope,
   readCharacterOverlayForScope,
   resolveRuntimeConfigScopeTarget,
   resolveLayeredProject02RuntimeConfigWithSnapshot,
@@ -110,7 +108,6 @@ export type PreparedProject02PluginActivationPlan =
       Record<string, RuntimePluginCatalogEntry>
     >;
     readonly pluginConfigControl: RuntimePluginConfigControlHostState;
-    readonly authoredConfigFingerprint: string;
   };
 
 export type RuntimePluginCatalogSnapshot = {
@@ -321,22 +318,12 @@ export function prepareConfiguredProject02PluginActivation(options: {
       composition.packageProvenanceByPluginId,
     ),
   });
-  const globalMutationBase = createRuntimeConfigAuthoredSnapshot(
-    options.loadedConfig,
-  ).document;
-
   return Object.freeze({
     runtimeLocation: options.runtimeLocation,
     catalogEntries,
     packageProvenanceByPluginId: composition.packageProvenanceByPluginId,
     resolvedConfig,
     activation,
-    authoredConfigFingerprint: layeredRuntimeConfigFingerprintForScope({
-      globalConfig: globalMutationBase,
-      characterScope,
-      overlay: overlayConfig,
-      pluginManifests,
-    }),
     pluginConfigControl: Object.freeze({
       pluginManifests,
       activationByPluginId: runtimePluginConfigActivationByPluginId(activation),
@@ -473,7 +460,6 @@ export async function createConfiguredProject02PluginHostFromPlan(options: {
       sessionId: options.sessionId,
       sessionIdentity: options.sessionIdentity,
       pluginReloader: createConfiguredRuntimePluginReloader({activationPlan}),
-      constructionConfigFingerprint: activationPlan.authoredConfigFingerprint,
     });
   } catch (error: unknown) {
     await cleanupPartiallyInstantiatedPlugins({

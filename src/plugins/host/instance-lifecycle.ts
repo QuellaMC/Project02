@@ -25,6 +25,8 @@ export type RuntimePluginInstanceOwnership = {
   readonly close: (
     disposeLate: (target: RuntimePluginLifecycleTarget) => void,
   ) => void;
+  /** True once terminal dispatch owns every instance; nothing new goes live. */
+  readonly closed: () => boolean;
   /**
    * The live plugins plus each retired instance once: a session's end reaches
    * an instance for the session it served, not for every later one, while
@@ -130,6 +132,7 @@ export function createRuntimePluginInstanceOwnership(config: {
     close(disposeLate) {
       disposeLateTarget ??= disposeLate;
     },
+    closed: () => disposeLateTarget !== undefined,
     sessionEndTargets(livePlugins) {
       const pending = retired.filter(
         target => !sessionEnded.has(target.plugin),

@@ -84,10 +84,7 @@ export function createRuntimeTurnState(
     runtimePluginContextForTurn: undefined,
     terminalRawEventMayBeDurable: false,
     committedVisibleMessages: [],
-    startedPluginToolCalls: new Map(),
     finishedToolCallIds: [],
-    finishedPluginToolResults: [],
-    preparedConfigEffectsByToolCallId: new Map(),
   } satisfies RuntimeTurnState;
 }
 

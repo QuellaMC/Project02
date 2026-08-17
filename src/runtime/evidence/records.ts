@@ -11,7 +11,6 @@ import {
   type RoleModelIOSnapshot,
 } from '../../role-model/index.ts';
 import type {
-  PreparedRuntimePluginConfigEffect,
   RuntimePluginEvidenceSnapshot,
   RuntimePluginJsonObject,
   RuntimePluginToolCallResult,
@@ -88,7 +87,6 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly commitValidation?: RoleModelCommitValidationSnapshot;
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
   readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
-  readonly runtimeConfigEffects?: readonly PreparedRuntimePluginConfigEffect[];
   /** Present exactly on session_continued, a session's first record. */
   readonly sessionContinuation?: SessionContinuationSnapshot;
 };

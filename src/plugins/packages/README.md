@@ -139,8 +139,9 @@ resolution, the operator console, and the model-facing
   approval). Every other field is out of the model's reach — that is what
   keeps the agent away from credentials and from the settings that decide
   where they go.
-- `reloadRequired` states whether a committed change needs a runtime
-  reload before it takes effect.
+- `reloadRequired: false` means an approved change takes effect at once: the
+  host rebuilds the plugin from the freshly written config inside the tool
+  call. Anything else waits for the next launch.
 
 ## Model input
 

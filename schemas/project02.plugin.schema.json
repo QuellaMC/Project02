@@ -293,7 +293,7 @@
         },
         "reloadRequired": {
           "type": "boolean",
-          "description": "Whether a committed change to this field requires a runtime reload before taking effect."
+          "description": "false lets an approved change take effect at once by rebuilding the plugin live; otherwise it waits for the next launch."
         },
         "redactionLabels": {
           "$ref": "#/definitions/stringArray"

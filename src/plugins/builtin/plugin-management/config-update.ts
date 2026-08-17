@@ -43,7 +43,7 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
   return {
     name: runtimePluginConfigUpdateToolName,
     description:
-      'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. Committed changes apply by the next turn when the host can live-reload the plugin (reported per update as appliesTo), otherwise at a later host construction.',
+      'Set or unset one declared non-secret, agent-mutable plugin config field after exact user approval. This cannot change activation, permissions, paths, secrets, or Project02 host settings. An approved change is written at once and takes effect right away when the host can rebuild the plugin live (reported per update as appliesTo), otherwise at the next launch.',
     inputContract: {
       type: 'object',
       properties: {
@@ -79,10 +79,16 @@ export function createRuntimePluginConfigUpdateTool(): RuntimePluginProvidedTool
   };
 }
 
-export function reconcilePreparedRuntimePluginConfigEffect(options: {
+/**
+ * Writes an approved change. Runs inside the tool call, right after the person
+ * approved it: the fingerprint the change was prepared against must still be
+ * the file's, or the change is refused rather than written over someone
+ * else's edit.
+ */
+export function applyPreparedRuntimePluginConfigEffect(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
-}) {
+}): RuntimePluginConfigField {
   const manifest = options.state.pluginManifests.find(
     candidate => candidate.id === options.effect.targetPluginId,
   );
@@ -104,9 +110,8 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
           kind: 'unset',
           fieldName: options.effect.fieldName,
         };
-  const field = requiredRuntimePluginConfigControl(
-    options.state,
-  ).validateOperation({
+  const control = requiredRuntimePluginConfigControl(options.state);
+  const field = control.validateOperation({
     manifest,
     actor: 'agent',
     operation,
@@ -114,95 +119,30 @@ export function reconcilePreparedRuntimePluginConfigEffect(options: {
   const target = options.state.configControl.target;
 
   if (target.canonicalConfigPath !== options.effect.targetConfigPath) {
-    throw requiredRuntimePluginConfigControl(options.state).createConflictError(
+    throw control.createConflictError(
       `Prepared config effect "${options.effect.effectId}" targets another runtime config path.`,
     );
   }
 
-  const inspection = inspectRuntimePluginConfigForControl({
-    manifest,
-    state: options.state,
+  const result = control.applyOperation({
+    target,
+    pluginManifests: options.state.pluginManifests,
+    expectedFingerprint: options.effect.expectedFingerprint,
+    request: {
+      kind: 'plugin_config',
+      manifest,
+      actor: 'agent',
+      fieldOperation: operation,
+    },
   });
-  let reconciliation: 'already_applied' | 'applied';
 
-  if (inspection.fingerprint === options.effect.resultFingerprint) {
-    reconciliation = 'already_applied';
-  } else {
-    if (inspection.fingerprint !== options.effect.expectedFingerprint) {
-      throw requiredRuntimePluginConfigControl(
-        options.state,
-      ).createConflictError(
-        `Prepared config effect "${options.effect.effectId}" cannot be reconciled because authored config changed.`,
-      );
-    }
-
-    const prepared = requiredRuntimePluginConfigControl(
-      options.state,
-    ).prepareOperation({
-      target,
-      pluginManifests: options.state.pluginManifests,
-      expectedFingerprint: options.effect.expectedFingerprint,
-      request: {
-        kind: 'plugin_config',
-        manifest,
-        actor: 'agent',
-        fieldOperation: operation,
-      },
-    });
-
-    if (
-      prepared.targetConfigPath !== options.effect.targetConfigPath ||
-      prepared.resultFingerprint !== options.effect.resultFingerprint
-    ) {
-      throw new Error(
-        `Prepared config effect "${options.effect.effectId}" does not match its validated config candidate.`,
-      );
-    }
-
-    const result = requiredRuntimePluginConfigControl(
-      options.state,
-    ).applyOperation({
-      target,
-      pluginManifests: options.state.pluginManifests,
-      expectedFingerprint: options.effect.expectedFingerprint,
-      request: {
-        kind: 'plugin_config',
-        manifest,
-        actor: 'agent',
-        fieldOperation: operation,
-      },
-    });
-
-    if (result.fingerprint !== options.effect.resultFingerprint) {
-      throw new Error(
-        `Prepared config effect "${options.effect.effectId}" produced an unexpected config fingerprint.`,
-      );
-    }
-
-    reconciliation = 'applied';
+  if (result.fingerprint !== options.effect.resultFingerprint) {
+    throw new Error(
+      `Prepared config effect "${options.effect.effectId}" produced an unexpected config fingerprint.`,
+    );
   }
 
-  return createRuntimePluginEvidenceSnapshot({
-    eventId: options.effect.eventId,
-    traceId: options.effect.traceId,
-    createdAt: options.effect.createdAt,
-    kind: 'runtime_plugin_evidence_snapshot',
-    pluginId: runtimePluginId,
-    evidenceKind: 'after_turn_committed',
-    status: 'accepted',
-    summary:
-      reconciliation === 'applied'
-        ? `Applied approved plugin "${manifest.id}" config field "${field.name}".`
-        : `Reconciled already-applied plugin "${manifest.id}" config field "${field.name}".`,
-    sourceReferences: [
-      {
-        kind: 'runtime',
-        id: options.effect.effectId,
-      },
-    ],
-    redactionLabels: field.redactionLabels,
-    configFingerprint: options.effect.resultFingerprint,
-  });
+  return field;
 }
 
 export function normalizePreparedRuntimePluginConfigEffect(options: {
@@ -233,7 +173,7 @@ export function normalizePreparedRuntimePluginConfigEffect(options: {
   return effect;
 }
 
-export function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
+function preparedRuntimePluginConfigEffectIsStillCurrent(options: {
   readonly effect: PreparedRuntimePluginConfigEffect;
   readonly state: RuntimePluginConfigControlHostState;
 }): boolean {
@@ -324,9 +264,6 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly state: RuntimePluginConfigControlHostState;
-  readonly canLiveReload?: (pluginId: string) => boolean;
-  /** A mixed group defers, so a live update must stop promising next_turn. */
-  readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
 }): RuntimePluginToolCallExecutionResult {
   let pluginId: string;
 
@@ -420,7 +357,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     if (isRuntimeConfigConflictError(error)) {
       return rejectedPluginConfigToolCall(
         'plugin_config_fingerprint_conflict',
-        'Plugin config changed after approval and was not updated. Inspect runtime.plugin.config again for the current fingerprint, then retry.',
+        'Plugin config changed after it was inspected and no update was prepared. Inspect runtime.plugin.config again for the current fingerprint, then retry.',
       );
     }
 
@@ -430,7 +367,7 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     );
   }
 
-  return approvedRuntimePluginConfigUpdateResult({
+  return preparedRuntimePluginConfigUpdateResult({
     call: options.call,
     context: options.context,
     manifest,
@@ -439,19 +376,15 @@ export function handleRuntimePluginConfigUpdateToolCall(options: {
     expectedFingerprint,
     resultFingerprint,
     targetConfigPath,
-    ...(options.canLiveReload === undefined
-      ? {}
-      : {canLiveReload: options.canLiveReload}),
-    ...(options.sessionScopedUpdateConfirmedThisTurn === undefined
-      ? {}
-      : {
-          sessionScopedUpdateConfirmedThisTurn:
-            options.sessionScopedUpdateConfirmedThisTurn,
-        }),
   });
 }
 
-function approvedRuntimePluginConfigUpdateResult(options: {
+/**
+ * The tool's own result only says what it validated; the host asks the
+ * person, writes the change, and answers the model with what happened
+ * (`appliedRuntimePluginConfigUpdateOutput`).
+ */
+function preparedRuntimePluginConfigUpdateResult(options: {
   readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly manifest: {readonly id: string};
@@ -460,39 +393,19 @@ function approvedRuntimePluginConfigUpdateResult(options: {
   readonly expectedFingerprint: string;
   readonly resultFingerprint: string;
   readonly targetConfigPath: string;
-  readonly canLiveReload?: (pluginId: string) => boolean;
-  readonly sessionScopedUpdateConfirmedThisTurn?: (pluginId: string) => boolean;
 }): RuntimePluginToolCallExecutionResult {
   const {call, context, manifest, field, operation, resultFingerprint} =
     options;
-  const liveField = field.reloadRequired === false;
-  // Backward-looking: a later update conflict-closes on the file fingerprint.
-  const mixedTurnGroup =
-    liveField &&
-    options.sessionScopedUpdateConfirmedThisTurn?.(manifest.id) === true;
 
   return {
     status: 'accepted',
     output: createJsonBoundaryObjectSnapshot(
       {
-        status: 'approved_pending_commit',
-        appliesTo:
-          liveField &&
-          !mixedTurnGroup &&
-          options.canLiveReload?.(manifest.id) === true
-            ? 'next_turn'
-            : 'future_host_construction',
-        ...(mixedTurnGroup
-          ? {
-              appliesToNote:
-                'Not promised for the next turn: this turn already approved a session-scoped update for this plugin, and committed same-plugin changes are never live-applied as a mixed group.',
-            }
-          : {}),
+        status: 'prepared',
         pluginId: manifest.id,
         fieldName: field.name,
         operation: operation.kind,
         fingerprint: resultFingerprint,
-        reloadRequired: field.reloadRequired !== false,
       },
       {field: 'Prepared plugin config update'},
     ),
@@ -505,7 +418,7 @@ function approvedRuntimePluginConfigUpdateResult(options: {
         pluginId: runtimePluginId,
         evidenceKind: 'tool_invocation',
         status: 'accepted',
-        summary: `Approved plugin "${manifest.id}" config field "${field.name}" for turn commit.`,
+        summary: `Prepared plugin "${manifest.id}" config field "${field.name}" for approval.`,
         redactionLabels: context.privacy.redactionLabels,
         configFingerprint: resultFingerprint,
       }),
@@ -534,6 +447,28 @@ function approvedRuntimePluginConfigUpdateResult(options: {
           : Object.freeze({kind: 'unset'}),
     }),
   };
+}
+
+/** What the model hears once the change is written: whether it is already in effect. */
+export function appliedRuntimePluginConfigUpdateOutput(options: {
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly field: RuntimePluginConfigField;
+  readonly appliesTo: 'now' | 'next_launch';
+  readonly note?: string;
+}): RuntimePluginJsonObject {
+  return createJsonBoundaryObjectSnapshot(
+    {
+      status: 'applied',
+      appliesTo: options.appliesTo,
+      ...(options.note === undefined ? {} : {appliesToNote: options.note}),
+      pluginId: options.effect.targetPluginId,
+      fieldName: options.field.name,
+      operation: options.effect.operation.kind,
+      fingerprint: options.effect.resultFingerprint,
+      reloadRequired: options.field.reloadRequired !== false,
+    },
+    {field: 'Applied plugin config update'},
+  );
 }
 
 function pluginConfigOperationFromInput(

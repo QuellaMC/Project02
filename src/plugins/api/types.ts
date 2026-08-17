@@ -293,6 +293,11 @@ export type PreparedRuntimePluginConfigEffect = RuntimeEventIdentity & {
       };
 };
 
+/**
+ * What a handleToolCall hook returns. An approval-gated tool hands the host
+ * the change it prepared; the host asks the person, applies it on approval,
+ * and answers the model with a plain result — the effect never travels on.
+ */
 export type RuntimePluginToolCallExecutionResult =
   | (Extract<RuntimePluginToolCallResult, {readonly status: 'accepted'}> & {
       readonly preparedConfigEffect?: PreparedRuntimePluginConfigEffect;
