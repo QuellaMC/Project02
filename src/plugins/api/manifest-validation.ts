@@ -43,7 +43,6 @@ import {
   optionalString,
   reject,
   requiredBoolean,
-  requiredContextBudget,
   requiredIdentifier,
   requiredNonEmptyString,
   requiredPositiveInteger,
@@ -288,7 +287,6 @@ export function validateRuntimePluginContextItem(
   const id = requiredIdentifier(value['id'], 'id');
   const kind = value['kind'];
   const text = requiredNonEmptyString(value['text'], 'text');
-  const budget = requiredContextBudget(value['budget']);
   const sourceReferences = requiredSourceReferences(value['sourceReferences']);
   const confidence = optionalConfidence(value['confidence']);
   const redactionLabels = requiredStringArray(
@@ -300,7 +298,6 @@ export function validateRuntimePluginContextItem(
     pluginId.status === 'rejected' ||
     id.status === 'rejected' ||
     text.status === 'rejected' ||
-    budget.status === 'rejected' ||
     sourceReferences.status === 'rejected' ||
     confidence.status === 'rejected' ||
     redactionLabels.status === 'rejected'
@@ -309,7 +306,6 @@ export function validateRuntimePluginContextItem(
       pluginId,
       id,
       text,
-      budget,
       sourceReferences,
       confidence,
       redactionLabels,
@@ -336,7 +332,6 @@ export function validateRuntimePluginContextItem(
       id: id.value,
       kind,
       text: text.value,
-      budget: budget.value,
       sourceReferences: freezeSourceReferences(sourceReferences.value),
       ...(confidence.value === undefined ? {} : {confidence: confidence.value}),
       redactionLabels: freezeRedactedStrings(redactionLabels.value),

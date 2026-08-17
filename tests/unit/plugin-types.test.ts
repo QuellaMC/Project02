@@ -36,7 +36,6 @@ describe('runtime plugin source references', () => {
       id: 'bounded-context',
       kind: 'memory',
       text: 'safe',
-      budget: {estimatedTokens: 1, priority: 1},
       sourceReferences,
       redactionLabels: [],
     });
@@ -158,7 +157,6 @@ describe('runtime plugin source references', () => {
       pluginId: 'memory.boundary.fixture',
       id: 'bounded-context',
       kind: 'memory',
-      budget: {estimatedTokens: 1, priority: 1},
       redactionLabels: [],
     } as const;
 
@@ -212,10 +210,6 @@ describe('runtime plugin source references', () => {
       id: 'memory-context',
       kind: 'memory',
       text: 'Retrieved memory context.',
-      budget: {
-        estimatedTokens: 8,
-        priority: 1,
-      },
       sourceReferences: references,
       redactionLabels: [],
     });
@@ -254,10 +248,6 @@ describe('runtime plugin source references', () => {
           id: 'memory-context',
           kind: 'memory',
           text: 'Retrieved memory context.',
-          budget: {
-            estimatedTokens: 8,
-            priority: 1,
-          },
           sourceReferences: [
             {
               kind: 'memory',

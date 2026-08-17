@@ -45,16 +45,14 @@
       "name": "Memory Summary",
       "description": "A bounded resource summary.",
       "mimeType": "text/plain",
-      "fixtureText": "MCP resource fixture: project02 has a universal plugin host contract.",
-      "estimatedTokens": 10
+      "fixtureText": "MCP resource fixture: project02 has a universal plugin host contract."
     },
     {
       "uri": "mcp://project02/tool-policy",
       "name": "Tool Policy",
       "description": "A resource describing local tool policy.",
       "mimeType": "text/plain",
-      "fixtureText": "MCP resource fixture: runtime policy validates model-requested tool calls.",
-      "estimatedTokens": 10
+      "fixtureText": "MCP resource fixture: runtime policy validates model-requested tool calls."
     }
   ],
   "unsupportedFields": [

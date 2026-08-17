@@ -137,10 +137,6 @@ function createCharacterStatePluginFromManifest(
               id: 'current',
               kind: 'runtime_note',
               text: `How you are right now (your own inner state, not theirs): ${brief.text}`,
-              budget: {
-                estimatedTokens: 32,
-                priority: 90,
-              },
               sourceReferences: [],
               confidence: 1,
               redactionLabels: context.privacy.redactionLabels,

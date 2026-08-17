@@ -160,10 +160,6 @@ export type InspectPluginContextItem = {
   readonly id: string;
   readonly kind: string;
   readonly text: string;
-  readonly budget: {
-    readonly estimatedTokens: number;
-    readonly priority: number;
-  };
   readonly sourceReferences: readonly InspectPluginSourceReference[];
   readonly redactionLabels: readonly string[];
   readonly confidence?: number;

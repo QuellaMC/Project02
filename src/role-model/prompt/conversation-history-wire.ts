@@ -8,7 +8,7 @@ import type {
   RoleModelToolChatMessage,
   RoleModelUserChatMessage,
 } from '../api/chat-wire.ts';
-import {estimateTextTokens} from '../../shared/token-estimate.ts';
+import {estimateTextTokens} from './token-estimate.ts';
 import {createNativeToolResultMessageContent} from './tool-wire.ts';
 
 /**

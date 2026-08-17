@@ -15,10 +15,6 @@ import {
 } from '../api/contract.ts';
 import {beforeRoleModelFailureRejectsTurn} from '../api/evidence-policy.ts';
 import {
-  boundPromptContextBlock,
-  type CollectedPluginContextItem,
-} from '../policy/prompt-context-budget.ts';
-import {
   runtimePluginAccessForPlugin,
   type RuntimePluginAccessMapByPluginId,
 } from '../policy/access-control.ts';
@@ -49,7 +45,7 @@ import {
 
 export type RuntimePluginBeforeRoleModelCallCompletedResult = {
   readonly status: 'completed';
-  /** Recalled memories and plugin data, each block already held to its budget. */
+  /** Recalled memories and plugin data, whole, in the order plugins returned them. */
   readonly contextItems: readonly RuntimePluginContextItem[];
   /** Runtime notes from plugins cleared for the trusted frame, cap-checked. */
   readonly runtimeNotes: readonly RuntimePluginContextItem[];
@@ -89,7 +85,7 @@ export type BeforeRoleModelCallOptions = {
 type BeforeRoleModelCallPluginOutcome =
   | {
       readonly status: 'continued';
-      readonly contextItems: readonly CollectedPluginContextItem[];
+      readonly contextItems: readonly RuntimePluginContextItem[];
       readonly runtimeNotes: readonly RuntimePluginContextItem[];
       readonly curatedContext: readonly RuntimePluginCuratedContextSection[];
       readonly evidence: readonly RuntimePluginEvidenceSnapshot[];
@@ -104,7 +100,7 @@ type BeforeRoleModelCallPluginOutcome =
 export async function runBeforeRoleModelCall(
   options: BeforeRoleModelCallOptions,
 ): Promise<RuntimePluginBeforeRoleModelCallHostResult> {
-  const contextItems: CollectedPluginContextItem[] = [];
+  const contextItems: RuntimePluginContextItem[] = [];
   const runtimeNotes: RuntimePluginContextItem[] = [];
   const curatedContext: RuntimePluginCuratedContextSection[] = [];
   const evidence: RuntimePluginEvidenceSnapshot[] = [];
@@ -128,44 +124,9 @@ export async function runBeforeRoleModelCall(
     curatedContext.push(...outcome.curatedContext);
   }
 
-  const boundedBlocks = [
-    boundPromptContextBlock({
-      context: options.context,
-      block: 'recalled_memory',
-      contextItems: contextItems.filter(({item}) => item.kind === 'memory'),
-    }),
-    boundPromptContextBlock({
-      context: options.context,
-      block: 'untrusted_plugin_context',
-      contextItems: contextItems.filter(({item}) => item.kind !== 'memory'),
-    }),
-  ];
-
-  for (const boundedBlock of boundedBlocks) {
-    evidence.push(...boundedBlock.evidence);
-  }
-
-  const rejectedBlock = boundedBlocks.find(
-    boundedBlock => boundedBlock.status === 'rejected',
-  );
-
-  if (rejectedBlock?.status === 'rejected') {
-    return Object.freeze({
-      status: 'rejected',
-      reason: runtimePluginBeforeRoleModelCallRejectionReason,
-      pluginId: rejectedBlock.pluginId,
-      message: rejectedBlock.message,
-      evidence: Object.freeze([...evidence]),
-    } satisfies RuntimePluginBeforeRoleModelCallHostResult);
-  }
-
   return Object.freeze({
     status: 'completed',
-    contextItems: Object.freeze(
-      boundedBlocks.flatMap(boundedBlock =>
-        boundedBlock.status === 'completed' ? boundedBlock.contextItems : [],
-      ),
-    ),
+    contextItems: Object.freeze([...contextItems]),
     runtimeNotes: Object.freeze([...runtimeNotes]),
     curatedContext: Object.freeze([...curatedContext]),
     evidence: Object.freeze([...evidence]),
@@ -253,7 +214,7 @@ async function runBeforeRoleModelCallPlugin(
   }
 
   // A cleared plugin's runtime notes are trusted model input; every other
-  // item, and every item from an uncleared plugin, stays in the budgeted blocks.
+  // item, and every item from an uncleared plugin, rides the user turn.
   const runtimeNotes = trusted
     ? result.value.contextItems.filter(item => item.kind === 'runtime_note')
     : [];
@@ -275,9 +236,7 @@ async function runBeforeRoleModelCallPlugin(
   return Object.freeze({
     status: 'continued',
     contextItems: Object.freeze(
-      result.value.contextItems
-        .filter(item => !runtimeNotes.includes(item))
-        .map(item => ({plugin, item})),
+      result.value.contextItems.filter(item => !runtimeNotes.includes(item)),
     ),
     runtimeNotes: Object.freeze(runtimeNotes),
     curatedContext,

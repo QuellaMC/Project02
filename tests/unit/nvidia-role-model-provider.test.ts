@@ -491,7 +491,6 @@ describe('NVIDIA role-model provider', () => {
       expect(content).not.toContain('"version"');
       expect(content).not.toContain('sourceReferences');
       expect(content).not.toContain('confidence');
-      expect(content).not.toContain('budget');
       expect(content).not.toContain('character_state.patch');
     }
     expect(messages[2]?.content).not.toContain(visibleReplyModelToolName);
@@ -1417,7 +1416,6 @@ function createNvidiaTestInputEnvelope(
           id: 'tea',
           kind: 'memory',
           text: 'Prefers tea without sugar.',
-          budget: {estimatedTokens: 8, priority: 70},
           sourceReferences: [],
           confidence: 1,
           redactionLabels: [],
@@ -1427,7 +1425,6 @@ function createNvidiaTestInputEnvelope(
           id: 'forecast',
           kind: 'resource',
           text: 'Sunny, 24C.',
-          budget: {estimatedTokens: 8, priority: 50},
           sourceReferences: [],
           redactionLabels: [],
         }),

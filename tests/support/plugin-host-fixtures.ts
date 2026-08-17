@@ -325,7 +325,6 @@ export function createTrustedContextItemsPlugin(options: {
             id,
             kind,
             text,
-            budget: {estimatedTokens: 8, priority: 50},
             sourceReferences: [],
             redactionLabels: context.privacy.redactionLabels,
           });
@@ -364,7 +363,6 @@ export function createRuntimeNotesWithoutModelInputPlugin(): RuntimePlugin {
               id: 'undeclared-model-input',
               kind: 'runtime_note',
               text: 'undeclared model input note',
-              budget: {estimatedTokens: 6, priority: 50},
               sourceReferences: [],
               redactionLabels: [],
             }),
@@ -742,7 +740,6 @@ export function createBoundedHookRecordsPlugin(options: {
                 id: `context-${String(index)}`,
                 kind: 'memory',
                 text: 'x',
-                budget: {estimatedTokens: 1, priority: 1},
                 sourceReferences: [],
                 redactionLabels: [],
               }),
@@ -827,10 +824,6 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
               id: 'blocked-context',
               kind: 'memory',
               text: 'blocked context',
-              budget: {
-                estimatedTokens: 1,
-                priority: 1,
-              },
               sourceReferences: [],
               redactionLabels: context.privacy.redactionLabels,
             }),
@@ -854,152 +847,6 @@ export function createAcceptedBlockingBeforeRoleModelCallPlugin(options: {
               redactionLabels: [],
             }),
           ],
-        };
-      },
-    },
-  });
-}
-
-export function createUnderestimatedContextItemPlugin(): RuntimePlugin {
-  const pluginId = 'memory.underestimated-context.fixture';
-
-  return createRuntimePlugin({
-    manifest: {
-      ...memorySearchPluginManifest(pluginId),
-      declaredPlugins: ['before_role_model_call'],
-    },
-    providedTools: [],
-    lifecycleHooks: {
-      beforeRoleModelCall(context) {
-        return {
-          contextItems: [
-            createRuntimePluginContextItem({
-              pluginId,
-              id: 'oversized-context',
-              kind: 'resource',
-              text: 'oversized context '.repeat(160),
-              budget: {
-                estimatedTokens: 1,
-                priority: 1,
-              },
-              sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels,
-            }),
-          ],
-          evidence: [
-            createRuntimePluginEvidenceSnapshot({
-              eventId: context.eventId,
-              traceId: context.traceId,
-              createdAt: context.timestamp,
-              kind: 'runtime_plugin_evidence_snapshot',
-              pluginId,
-              evidenceKind: 'before_role_model_call',
-              status: 'accepted',
-              summary: 'Loaded oversized context item.',
-              redactionLabels: [],
-            }),
-          ],
-        };
-      },
-    },
-  });
-}
-
-export function createLowPriorityBudgetPressurePlugin(): RuntimePlugin {
-  const pluginId = 'memory.low-priority-budget-pressure.fixture';
-
-  return createRuntimePlugin({
-    manifest: {
-      ...memorySearchPluginManifest(pluginId),
-      declaredPlugins: ['before_role_model_call'],
-    },
-    providedTools: [],
-    lifecycleHooks: {
-      beforeRoleModelCall(context) {
-        return {
-          contextItems: [
-            createRuntimePluginContextItem({
-              pluginId,
-              id: 'low-priority-bulk',
-              kind: 'resource',
-              text: 'low '.repeat(254),
-              budget: {
-                estimatedTokens: 254,
-                priority: 1,
-              },
-              sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels,
-            }),
-            createRuntimePluginContextItem({
-              pluginId,
-              id: 'runtime-note-host',
-              kind: 'runtime_note',
-              text: 'runtime note from host',
-              budget: {
-                estimatedTokens: 6,
-                priority: 100,
-              },
-              sourceReferences: [],
-              redactionLabels: context.privacy.redactionLabels,
-            }),
-          ],
-          evidence: [
-            createRuntimePluginEvidenceSnapshot({
-              eventId: context.eventId,
-              traceId: context.traceId,
-              createdAt: context.timestamp,
-              kind: 'runtime_plugin_evidence_snapshot',
-              pluginId,
-              evidenceKind: 'before_role_model_call',
-              status: 'accepted',
-              summary: 'Loaded low-priority budget pressure context.',
-              redactionLabels: [],
-            }),
-          ],
-        };
-      },
-    },
-  });
-}
-
-/** Memories that overflow the untrusted budget but fit the recalled-memory one, plus one resource. */
-export function createRecalledMemoryBudgetPlugin(options: {
-  readonly memoryCount: number;
-  readonly memoryChars: number;
-}): RuntimePlugin {
-  const pluginId = 'memory.recalled-budget.fixture';
-
-  return createRuntimePlugin({
-    manifest: {
-      ...memorySearchPluginManifest(pluginId),
-      declaredPlugins: ['before_role_model_call'],
-    },
-    providedTools: [],
-    lifecycleHooks: {
-      beforeRoleModelCall(context) {
-        const item = (id: string, kind: 'memory' | 'resource', text: string) =>
-          createRuntimePluginContextItem({
-            pluginId,
-            id,
-            kind,
-            text,
-            budget: {estimatedTokens: 1, priority: 50},
-            sourceReferences: [],
-            redactionLabels: context.privacy.redactionLabels,
-          });
-
-        return {
-          contextItems: [
-            ...Array.from({length: options.memoryCount}, (_, index) =>
-              item(
-                `memory-${String(index + 1)}`,
-                'memory',
-                'm'.repeat(options.memoryChars),
-              ),
-            ),
-            item('resource-1', 'resource', 'r'.repeat(800)),
-          ],
-          evidence: [],
         };
       },
     },
@@ -1102,7 +949,6 @@ export function createReadOnlyBeforeRoleModelFileStoreProbePlugin(): RuntimePlug
               id: 'read-only-probe',
               kind: 'runtime_note',
               text: JSON.stringify({seed, writeBlocked}),
-              budget: {estimatedTokens: 16, priority: 50},
               sourceReferences: [],
               redactionLabels: [],
             }),
