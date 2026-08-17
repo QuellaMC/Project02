@@ -1,28 +1,20 @@
 import {
-  roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-  roleModelAdapterRejectionNotReplayableDetails,
-  roleModelAdapterProviderExchangeMalformedDetails,
-  roleModelAdapterRawOutputMissingTextRejectionDetails,
   roleModelDecisionRejectionReasons,
-  roleModelMalformedOutputRejectionReason,
+  roleModelProviderErrorRejectionReason,
   type RoleModelDecisionRejection,
-  type RoleModelMalformedAdapterRawOutputDetails,
-  type RoleModelPluginToolDefinition,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   type RejectedRoleModelDecisionResult,
 } from '../api/contracts.ts';
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
-import {normalizeReplayableRejectedRoleModelDecisionResult} from './replay-evidence.ts';
+import {isRoleModelRawOutputReplayableDecisionEvidence} from './replay-evidence.ts';
 import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {isOneOf} from '../../shared/one-of.ts';
 import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
-import type {RoleModelNativeToolCallArgumentError} from '../api/adapter.ts';
 import type {
   RoleModelAssistantChatMessage,
   RoleModelChatToolCall,
 } from '../api/chat-wire.ts';
-import {type RoleModelAllowedToolName} from '../api/tool-names.ts';
 
 type RoleModelAdapterRawOutputValidationResult =
   | {
@@ -31,7 +23,6 @@ type RoleModelAdapterRawOutputValidationResult =
       readonly providerMetadata?: RoleModelProviderMetadata;
       readonly providerExchange?: RoleModelProviderExchangeSnapshot;
       readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
-      readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
     }
   | {
       readonly status: 'rejected';
@@ -41,78 +32,60 @@ type RoleModelAdapterRawOutputValidationResult =
       readonly decisionResult: RejectedRoleModelDecisionResult;
     };
 
+/**
+ * The adapter is our side of the provider: when what it hands back is not
+ * the contract, nothing usable arrived, and the round is a provider error
+ * with no raw text — the loop ends the turn rather than hand it back.
+ */
 export function validateRoleModelAdapterRawOutput(
   rawOutput: unknown,
-  allowedTools: readonly RoleModelAllowedToolName[],
-  pluginToolDefinitions: readonly RoleModelPluginToolDefinition[],
 ): RoleModelAdapterRawOutputValidationResult {
   if (!isJsonRecord(rawOutput)) {
-    return createMalformedAdapterRawOutputResult();
+    return createProviderFailureResult(
+      'Adapter raw output must include string rawOutputText.',
+    );
   }
 
-  const rawOutputTextValue = rawOutput['rawOutputText'];
+  const rawOutputText = rawOutput['rawOutputText'];
 
-  if (typeof rawOutputTextValue !== 'string') {
-    return createMalformedAdapterRawOutputResult();
+  if (typeof rawOutputText !== 'string') {
+    return createProviderFailureResult(
+      'Adapter raw output must include string rawOutputText.',
+    );
   }
-  const rawOutputText = rawOutputTextValue;
 
-  const providerMetadataResult = optionalProviderMetadata(
+  const providerMetadata = optionalProviderMetadata(
     rawOutput['providerMetadata'],
   );
   const providerExchange = parseRoleModelProviderExchangeSnapshot(
     rawOutput['providerExchange'],
   );
 
-  if (providerMetadataResult.status === 'rejected') {
-    return createMalformedAdapterRawOutputResult(
-      providerMetadataResult.details,
-    );
-  }
-
   if (
     rawOutput['providerExchange'] !== undefined &&
     providerExchange === undefined
   ) {
-    return createMalformedAdapterRawOutputResult(
-      roleModelAdapterProviderExchangeMalformedDetails,
+    return createProviderFailureResult(
+      'Role-model adapter provider exchange is malformed.',
     );
   }
 
-  const providerMetadata = providerMetadataResult.providerMetadata;
   const rejection = optionalRoleModelDecisionRejection(rawOutput['rejection']);
-  const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
-    rawOutput['nativeAssistantMessage'],
-  );
-  const nativeToolCallArgumentErrors =
-    optionalRoleModelNativeToolCallArgumentErrors(
-      rawOutput['nativeToolCallArgumentErrors'],
-    );
-
-  if (
-    rawOutput['nativeToolCallArgumentErrors'] !== undefined &&
-    nativeToolCallArgumentErrors === undefined
-  ) {
-    return createMalformedAdapterRawOutputResult(
-      roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-    );
-  }
 
   if (rejection !== undefined) {
-    const decisionResult = normalizeReplayableRejectedRoleModelDecisionResult({
-      rawOutputText,
-      providerMetadata,
-      decisionResult: createRejectedRoleModelDecisionResult(
-        rejection.reason,
-        rejection.details,
-      ),
-      allowedTools,
-      pluginToolDefinitions,
-    });
+    const decisionResult = createRejectedRoleModelDecisionResult(
+      rejection.reason,
+      rejection.details,
+    );
 
-    if (decisionResult === undefined) {
-      return createMalformedAdapterRawOutputResult(
-        roleModelAdapterRejectionNotReplayableDetails,
+    if (
+      !isRoleModelRawOutputReplayableDecisionEvidence({
+        rawOutputText,
+        decisionResult,
+      })
+    ) {
+      return createProviderFailureResult(
+        'Adapter rejection must be replayable from rawOutputText.',
       );
     }
 
@@ -125,24 +98,27 @@ export function validateRoleModelAdapterRawOutput(
     } satisfies RoleModelAdapterRawOutputValidationResult);
   }
 
+  const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
+    rawOutput['nativeAssistantMessage'],
+  );
+
   return Object.freeze({
     status: 'accepted',
     rawOutputText,
     ...providerMetadataOption(providerMetadata),
     ...providerExchangeOption(providerExchange),
-    ...nativeAssistantMessageOption(nativeAssistantMessage),
-    ...nativeToolCallArgumentErrorsOption(nativeToolCallArgumentErrors),
+    ...(nativeAssistantMessage === undefined ? {} : {nativeAssistantMessage}),
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
-function createMalformedAdapterRawOutputResult(
-  details: RoleModelMalformedAdapterRawOutputDetails = roleModelAdapterRawOutputMissingTextRejectionDetails,
+function createProviderFailureResult(
+  details: string,
 ): RoleModelAdapterRawOutputValidationResult {
   return Object.freeze({
     status: 'rejected',
     rawOutputText: '',
     decisionResult: createRejectedRoleModelDecisionResult(
-      roleModelMalformedOutputRejectionReason,
+      roleModelProviderErrorRejectionReason,
       details,
     ),
   } satisfies RoleModelAdapterRawOutputValidationResult);
@@ -158,73 +134,6 @@ export function providerExchangeOption(
   providerExchange: RoleModelProviderExchangeSnapshot | undefined,
 ): {readonly providerExchange?: RoleModelProviderExchangeSnapshot} {
   return providerExchange === undefined ? {} : {providerExchange};
-}
-
-function nativeAssistantMessageOption(
-  nativeAssistantMessage: RoleModelAssistantChatMessage | undefined,
-): {readonly nativeAssistantMessage?: RoleModelAssistantChatMessage} {
-  return nativeAssistantMessage === undefined ? {} : {nativeAssistantMessage};
-}
-
-function nativeToolCallArgumentErrorsOption(
-  nativeToolCallArgumentErrors:
-    readonly RoleModelNativeToolCallArgumentError[] | undefined,
-): {
-  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-} {
-  return nativeToolCallArgumentErrors === undefined
-    ? {}
-    : {nativeToolCallArgumentErrors};
-}
-
-function optionalRoleModelNativeToolCallArgumentErrors(
-  value: unknown,
-): readonly RoleModelNativeToolCallArgumentError[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const errors: RoleModelNativeToolCallArgumentError[] = [];
-
-  for (const item of value) {
-    if (!isJsonRecord(item)) {
-      return undefined;
-    }
-
-    const executableIndex = item['executableIndex'];
-    const toolName = item['toolName'];
-    const reason = item['reason'];
-    const message = item['message'];
-
-    if (
-      typeof executableIndex !== 'number' ||
-      !Number.isInteger(executableIndex) ||
-      executableIndex < 0 ||
-      typeof toolName !== 'string' ||
-      toolName.length === 0 ||
-      typeof reason !== 'string' ||
-      reason.length === 0 ||
-      typeof message !== 'string' ||
-      message.length === 0
-    ) {
-      return undefined;
-    }
-
-    errors.push(
-      Object.freeze({
-        executableIndex,
-        toolName,
-        reason: reason,
-        message: message,
-      } satisfies RoleModelNativeToolCallArgumentError),
-    );
-  }
-
-  return Object.freeze(errors);
 }
 
 function optionalRoleModelAssistantChatMessage(
@@ -306,27 +215,11 @@ function optionalRoleModelChatToolCall(
   } satisfies RoleModelChatToolCall);
 }
 
-function optionalProviderMetadata(value: unknown):
-  | {
-      readonly status: 'accepted';
-      readonly providerMetadata?: RoleModelProviderMetadata;
-    }
-  | {
-      readonly status: 'rejected';
-      readonly details: RoleModelMalformedAdapterRawOutputDetails;
-    } {
-  if (value === undefined) {
-    return Object.freeze({status: 'accepted'});
-  }
-
-  if (!isJsonRecord(value)) {
-    return Object.freeze({status: 'accepted'});
-  }
-
-  const provider = value['provider'];
-
-  if (provider !== 'nvidia') {
-    return Object.freeze({status: 'accepted'});
+function optionalProviderMetadata(
+  value: unknown,
+): RoleModelProviderMetadata | undefined {
+  if (!isJsonRecord(value) || value['provider'] !== 'nvidia') {
+    return undefined;
   }
 
   const model = value['model'];
@@ -335,15 +228,12 @@ function optionalProviderMetadata(value: unknown):
   const error = optionalProviderErrorMetadata(value['error']);
 
   return Object.freeze({
-    status: 'accepted',
-    providerMetadata: Object.freeze({
-      provider,
-      ...(typeof model === 'string' ? {model} : {}),
-      ...(request === undefined ? {} : {request: request.request}),
-      ...(response === undefined ? {} : {response: response.response}),
-      ...(error === undefined ? {} : {error}),
-    } satisfies RoleModelProviderMetadata),
-  });
+    provider: 'nvidia',
+    ...(typeof model === 'string' ? {model} : {}),
+    ...(request === undefined ? {} : {request: request.request}),
+    ...(response === undefined ? {} : {response: response.response}),
+    ...(error === undefined ? {} : {error}),
+  } satisfies RoleModelProviderMetadata);
 }
 
 type ProviderRequestMetadata = NonNullable<

@@ -92,7 +92,8 @@ export type InspectParsedRoleModelDecision =
   | {
       readonly status: 'accepted';
       readonly toolCalls: readonly InspectModelToolCall[];
-      readonly nonCommittedTopLevelText?: InspectNonCommittedTopLevelText;
+      /** What the model wrote beside its calls; kept, never shown to the person. */
+      readonly text?: string;
     }
   | {
       readonly status: 'rejected';
@@ -103,12 +104,6 @@ export type InspectParsedRoleModelDecision =
 export type InspectModelToolCall = {
   readonly name: string;
   readonly input: Readonly<Record<string, unknown>>;
-};
-
-export type InspectNonCommittedTopLevelText = {
-  readonly source: 'model_top_level_text';
-  readonly committed: false;
-  readonly text: string;
 };
 
 export type InspectRoleModelCommitValidation =

@@ -1,10 +1,10 @@
 import {testCharacterProfile} from './character-fixtures.ts';
 import {
   createDecisionContext,
-  createDefaultRoleModelPluginToolDefinitions,
   type RoleModelAdapter,
   type RoleModelAdapterInvocation,
   type RoleModelPluginToolDefinition,
+  type RoleModelPluginToolHost,
   type RoleModelProviderMetadata,
 } from '../../src/role-model/index.ts';
 import {
@@ -56,15 +56,6 @@ export function toolWithConcurrency(
   concurrency: 'shared' | 'exclusive',
 ): RoleModelPluginToolDefinition {
   return Object.freeze({...definition, concurrency});
-}
-
-export function withVisibleReplyTool(
-  ...definitions: readonly RoleModelPluginToolDefinition[]
-): readonly RoleModelPluginToolDefinition[] {
-  return Object.freeze([
-    ...createDefaultRoleModelPluginToolDefinitions(),
-    ...definitions,
-  ]);
 }
 
 export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
@@ -176,6 +167,11 @@ export function createProviderMetadataAdapter(
     },
   } satisfies RoleModelAdapter);
 }
+
+/** A host that accepts every call: for turns whose tools are not the subject. */
+export const acceptingPluginToolHost: RoleModelPluginToolHost = Object.freeze({
+  handleToolCall: () => createAcceptedToolCallResult(),
+});
 
 export function createAcceptedToolCallResult(): RuntimePluginToolCallResult {
   return Object.freeze({

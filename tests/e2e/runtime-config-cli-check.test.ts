@@ -1,4 +1,5 @@
 import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 import {createTestTempRoot} from '../support/temp-root.ts';
@@ -179,7 +180,7 @@ describe('runtime config CLI reads and checks', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

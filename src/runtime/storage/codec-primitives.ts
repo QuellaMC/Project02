@@ -341,3 +341,13 @@ export function requiredLiteralString(
     throwMalformedRecord(errorField);
   }
 }
+
+export function sameOrderedValues(
+  actualValues: readonly string[],
+  expectedValues: readonly string[],
+): boolean {
+  return (
+    actualValues.length === expectedValues.length &&
+    actualValues.every((value, index) => value === expectedValues[index])
+  );
+}

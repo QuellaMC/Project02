@@ -5,7 +5,6 @@ export {
   characterMemoryUpdateToolName,
   characterStatePatchModelToolName,
   characterStatePluginId,
-  firstPartyModelToolsPluginId,
   handleToolCallFailureBehaviorValues,
   healthFailureBehaviorValues,
   runtimePluginAccessLevelValues,

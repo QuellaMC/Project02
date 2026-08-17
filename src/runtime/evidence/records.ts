@@ -33,7 +33,6 @@ export const rawEventLogRecordKindValues = [
   'tool_call_finished',
   'visible_message_committed',
   'input_validation_rejected',
-  'character_reply_rejected',
   'commit_validation_rejected',
   'runtime_turn_completed',
   'after_turn_committed',

@@ -11,13 +11,8 @@ export {
   type CreateRoleModelIOSnapshotOptions,
   type DecisionContext,
   type DecisionRuntimeNote,
-  isRoleModelMalformedAdapterRawOutputDetails,
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
-  roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-  roleModelAdapterProviderExchangeMalformedDetails,
-  roleModelAdapterRawOutputMissingTextRejectionDetails,
-  roleModelAdapterRejectionNotReplayableDetails,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
@@ -25,26 +20,19 @@ export {
   type RoleModelDecisionRejectionReason,
   roleModelDecisionRejectionReasons,
   type RoleModelDecisionResult,
-  roleModelDisallowedToolRejectionReason,
   type RoleModelInputEnvelope,
-  roleModelInvalidVisibleReplyRejectionReason,
   type RoleModelCharacterRef,
   type RoleModelIOSnapshot,
-  type RoleModelMalformedAdapterRawOutputDetails,
-  roleModelMalformedAdapterRawOutputDetails,
   roleModelMalformedOutputRejectionReason,
-  roleModelMalformedToolCallRejectionReason,
   type RoleModelOutputContract,
   type RoleModelPluginToolDefinition,
-  roleModelPluginToolRejectedRejectionReason,
   roleModelProviderErrorRejectionReason,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
-  roleModelTerminalEmptyOutputRejectionDetails,
   type RoleModelToolDefinition,
   type RoleModelToolObservation,
   type RoleModelToolObservationResult,
-  roleModelUnsupportedEffectRejectionReason,
+  roleModelToolRoundsExhaustedRejectionReason,
 } from './api/contracts.ts';
 export {
   assertRoleModelCharacterRefMatchesCharacter,
@@ -56,7 +44,6 @@ export {
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
-  freezeAllowedTools,
 } from './api/decision.ts';
 export {
   createRoleModelAdapterRawOutput,
@@ -65,7 +52,6 @@ export {
   type RoleModelTextCompletionRequest,
   type RoleModelTextCompletionResult,
   type RoleModelAdapterRawOutput,
-  type RoleModelNativeToolCallArgumentError,
 } from './api/adapter.ts';
 export {
   freezeProviderMetadata,
@@ -79,13 +65,7 @@ export {
 } from './api/prompt-size.ts';
 export {measureRoleModelPromptSize} from './prompt/prompt-size.ts';
 export {estimateTokensForChars} from './prompt/token-estimate.ts';
-export {
-  createDefaultRoleModelPluginToolDefinitions,
-  createRoleModelPluginToolDefinitions,
-  defaultAllowedToolsForPluginDefinitions,
-  modelToolDefinitionsForPluginToolDefinitions,
-  toolDefinitionsForAllowedTools,
-} from './api/plugin-tool-definitions.ts';
+export {createRoleModelPluginToolDefinitions} from './api/plugin-tool-definitions.ts';
 export {
   scrubReasoningBlocks,
   type ScrubReasoningBlocksResult,
@@ -107,16 +87,11 @@ export {
   type RunRoleModelLoopOptions,
 } from './loop/loop.ts';
 export {
-  getRequiredVisibleReplyText,
   visibleReplyToolCalls,
   parseRoleModelDecision,
   parseRoleModelExecutionDecision,
 } from './loop/decision-parser.ts';
-export {
-  isRoleModelProviderErrorRawOutputEvidence,
-  isRoleModelRawOutputReplayableDecisionEvidence,
-  normalizeReplayableRejectedRoleModelDecisionResult,
-} from './loop/replay-evidence.ts';
+export {isRoleModelRawOutputReplayableDecisionEvidence} from './loop/replay-evidence.ts';
 export {
   defaultRoleModelProviderCapabilities,
   renderRoleModelTurnContext,

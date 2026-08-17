@@ -22,7 +22,6 @@ import {collect} from '../support/streams.ts';
 import {createConversationSession} from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
-import {firstPartyModelToolsPluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {createRuntimePluginManagementPluginManifest} from '../../src/plugins/index.ts';
 import {
@@ -60,8 +59,8 @@ import {resolveRuntimeCliStartup} from '../../src/app/index.ts';
 const roleModelProviderEnvName = 'PROJECT02_ROLE_MODEL_PROVIDER';
 const realSetTimeout = globalThis.setTimeout;
 
-describe('chat CLI folded top-level model text', () => {
-  it('hides top-level model text by default', async () => {
+describe('chat CLI model text', () => {
+  it("never shows the model's text note next to its tool calls", async () => {
     let stdout = '';
     const exitCode = await runChatCli({
       characterProfile: testCharacterProfile,
@@ -71,11 +70,12 @@ describe('chat CLI folded top-level model text', () => {
         stdout += chunk;
       }),
       stderr: collect(() => {}),
-      roleModelAdapter: createTextOnlyAdapter(),
+      roleModelAdapter: createReplyWithNoteAdapter(),
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout).not.toContain('folded model note');
+    expect(stdout).toContain('hello back');
+    expect(stdout).not.toContain('private note');
   });
 
   it('rejects a direct invocation without a session or character profile', async () => {
@@ -373,7 +373,7 @@ describe('chat CLI trace summary', () => {
     });
   });
 
-  it('does not count native argument validation failures as executed calls', async () => {
+  it("leaves a refused round's tool calls out of the trace summary", async () => {
     let adapterRound = 0;
     let stderr = '';
     const roleModelAdapter: RoleModelAdapter = {
@@ -381,38 +381,12 @@ describe('chat CLI trace summary', () => {
         adapterRound += 1;
 
         if (adapterRound === 1) {
+          // Native arguments that were not a JSON object reach the parser as
+          // written; the whole round is refused and handed back.
           return {
             rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
-                },
-              ],
+              toolCalls: [{name: 'runtime.plugin.list', input: '{"score":'}],
             }),
-            nativeAssistantMessage: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call_invalid_runtime_plugin_list_args',
-                  type: 'function',
-                  function: {
-                    name: 'runtime.plugin.list',
-                    arguments: '{"score":1e999}',
-                  },
-                },
-              ],
-            },
-            nativeToolCallArgumentErrors: [
-              {
-                executableIndex: 0,
-                toolName: 'runtime.plugin.list',
-                reason: 'invalid_native_tool_arguments',
-                message:
-                  'runtime.plugin.list arguments must contain finite JSON values.',
-              },
-            ],
           };
         }
 
@@ -446,7 +420,8 @@ describe('chat CLI trace summary', () => {
     expect(exitCode).toBe(0);
     expect(adapterRound).toBe(2);
     expect(JSON.parse(stderr.trim())).toMatchObject({
-      requestedToolCalls: ['runtime.plugin.list', 'visible_reply'],
+      status: 'completed',
+      requestedToolCalls: ['visible_reply'],
       executedToolCalls: [],
       terminalToolCalls: ['visible_reply'],
     });
@@ -731,10 +706,7 @@ describe('chat CLI provider selection', () => {
         roleModelAdapter: adapter,
         pluginHost: createRuntimePluginHost({
           plugins: [sessionEndPlugin],
-          enabledPluginIds: [
-            firstPartyModelToolsPluginId,
-            sessionEndPlugin.manifest.id,
-          ],
+          enabledPluginIds: [sessionEndPlugin.manifest.id],
         }),
       },
     );
@@ -2452,13 +2424,13 @@ describe('chat CLI rejected-turn recovery', () => {
   });
 });
 
-function createTextOnlyAdapter(): RoleModelAdapter {
+function createReplyWithNoteAdapter(): RoleModelAdapter {
   return {
     invoke() {
       return {
         rawOutputText: JSON.stringify({
-          text: 'folded model note',
-          toolCalls: [],
+          toolCalls: [{name: 'visible_reply', input: {text: 'hello back'}}],
+          text: 'private note',
         }),
       };
     },

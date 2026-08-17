@@ -56,10 +56,6 @@ export type BuiltInModelToolCall = VisibleReplyModelToolCall;
 
 export type ModelToolCall = BuiltInModelToolCall | PluginModelToolCall;
 
-export const userTurnBuiltInModelToolNames = Object.freeze([
-  visibleReplyModelToolName,
-] satisfies readonly BuiltInModelToolName[]);
-
 export const builtInModelToolDefinitions = Object.freeze([
   createBuiltInModelToolDefinition({
     name: visibleReplyModelToolName,
@@ -77,10 +73,6 @@ export const builtInModelToolDefinitions = Object.freeze([
     },
   }),
 ] satisfies readonly BuiltInModelToolDefinition[]);
-
-export function builtInModelToolDefinitionsForUserTurn(): readonly BuiltInModelToolDefinition[] {
-  return Object.freeze([...builtInModelToolDefinitions]);
-}
 
 export function isBuiltInModelToolName(
   value: unknown,

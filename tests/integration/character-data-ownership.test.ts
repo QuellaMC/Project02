@@ -7,6 +7,7 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -124,7 +125,7 @@ describe('character data ownership marker', () => {
     expect(first).toEqual({
       created: true,
       marker: {
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -136,7 +137,7 @@ describe('character data ownership marker', () => {
         characterId: 'mira',
       }),
     ).toEqual({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',

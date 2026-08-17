@@ -20,7 +20,6 @@ import {
   createPluginContextEvidence,
   createRuntimePluginContextItem,
   createRuntimePluginManifest,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/index.ts';
 import {inspectRuntimePluginConfig} from '../../src/runtime/config/index.ts';
@@ -273,11 +272,7 @@ async function createLiveReloadLoopFixture(label: string) {
       sessionId: fixture.sessionId,
       sessionIdentity: session,
       plugins: [stylePlugin(authoredTone())],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        manifest.id,
-      ],
+      enabledPluginIds: [runtimePluginId, manifest.id],
       pluginConfigControl: runtimePluginConfigControlStateForTest({
         runtimeLocation: runtimeLocationForTest({
           configPath: fixture.configPath,
@@ -338,7 +333,7 @@ async function createLiveReloadLoopFixture(label: string) {
 }
 
 describe('plugin-driven tool loop commit and rollback', () => {
-  it('terminates on top-level text only without committing visible messages', async () => {
+  it("keeps the model's text next to its tool calls in the stored decision", async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
@@ -347,98 +342,39 @@ describe('plugin-driven tool loop commit and rollback', () => {
     });
     const adapter = createSequencedAdapter([
       {
-        text: 'folded model note',
-        toolCalls: [],
+        toolCalls: [{name: 'visible_reply', input: {text: 'hi'}}],
+        text: 'private note',
       },
     ]);
 
     const result = await runLocalUserMessageEvent({
-      event: createTestEvent('quiet turn', 'evt_text_only'),
+      event: createTestEvent('say hi', 'evt_reply_with_note'),
       session,
       logStore,
       roleModelAdapter: adapter,
     });
 
-    if (result.status !== 'completed') {
-      throw new Error('Expected text-only turn to complete.');
-    }
-
-    // The user's message is history the moment it is accepted, even when the
-    // turn produces no visible reply.
+    expect(result.status).toBe('completed');
+    // The note is the model's own; it is stored with the decision and never
+    // becomes a message.
     expect(
-      logStore.conversationMessages().map(message => message.role),
-    ).toEqual(['user']);
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['say hi', 'hi']);
     expect(logStore.rawEvents().at(-1)).toMatchObject({
       kind: 'runtime_turn_completed',
       parsedRoleModelDecisionSnapshot: {
         result: {
           status: 'accepted',
-          nonCommittedText: 'folded model note',
+          decision: {
+            toolCalls: [{name: 'visible_reply', input: {text: 'hi'}}],
+            text: 'private note',
+          },
         },
       },
       commitValidation: {
-        result: {
-          status: 'accepted',
-        },
+        result: {status: 'accepted', acceptedVisibleReplyText: 'hi'},
       },
     });
-    expect(logStore.rawEvents().at(-1)?.visibleMessageIds).toEqual([
-      'local-session:message-1',
-    ]);
-  });
-
-  it('completes a text-only terminal round after a committed interim reply', async () => {
-    const session = createConversationSession({
-      character: testCharacterProfile,
-    });
-    const logStore = createRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-    });
-    const adapter = createSequencedAdapter([
-      {
-        toolCalls: [
-          {
-            name: 'visible_reply',
-            input: {text: 'let me check'},
-          },
-          {
-            name: 'character_state.patch',
-            input: {mood: 'curious'},
-          },
-        ],
-      },
-      {
-        text: 'internal wrap-up note',
-        toolCalls: [],
-      },
-    ]);
-
-    const result = await runLocalUserMessageEvent({
-      event: createTestEvent('quiet finish', 'evt_interim_then_text_only'),
-      session,
-      logStore,
-      roleModelAdapter: adapter,
-    });
-
-    // The terminal decision has no visible_reply, so commit validation carries
-    // no accepted reply text despite the earlier interim message.
-    expect(result.status).toBe('completed');
-    expect(
-      logStore.conversationMessages().map(message => message.text),
-    ).toEqual(['quiet finish', 'let me check']);
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_completed',
-      status: 'completed',
-      parsedRoleModelDecisionSnapshot: {
-        result: {
-          status: 'accepted',
-          nonCommittedText: 'internal wrap-up note',
-        },
-      },
-    });
-    expect(
-      logStore.rawEvents().at(-1)?.commitValidation?.result,
-    ).not.toHaveProperty('acceptedVisibleReplyText');
   });
 
   it('commits every visible reply a round asks for, in order', async () => {
@@ -754,11 +690,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        characterStatePluginId,
-      ],
+      enabledPluginIds: [runtimePluginId, characterStatePluginId],
     });
     const pluginStore = createRuntimePluginFileStore({
       storeRoot,

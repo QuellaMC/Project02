@@ -10,7 +10,6 @@ import {
   createRuntimePlugin,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginHealthSnapshot,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
@@ -518,7 +517,7 @@ export function createAfterTurnCommittedProbeHost(
         },
       }),
     ],
-    enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId, pluginId],
+    enabledPluginIds: [runtimePluginId, pluginId],
   });
 }
 
@@ -577,7 +576,7 @@ export function createPluginStoreRevisionFixtureHost() {
         },
       }),
     ],
-    enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId, pluginId],
+    enabledPluginIds: [runtimePluginId, pluginId],
   });
 }
 

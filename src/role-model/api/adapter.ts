@@ -14,14 +14,6 @@ export type RoleModelAdapterRawOutput = {
   readonly providerExchange?: RoleModelProviderExchangeSnapshot;
   readonly rejection?: RoleModelDecisionRejection;
   readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
-  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-};
-
-export type RoleModelNativeToolCallArgumentError = {
-  readonly executableIndex: number;
-  readonly toolName: string;
-  readonly reason: string;
-  readonly message: string;
 };
 
 export type RoleModelAdapterInvocation = {

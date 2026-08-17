@@ -3,10 +3,7 @@ import {
   type CharacterAgent,
 } from '../../core/index.ts';
 import {createDeterministicCharacterAgent} from './deterministic.ts';
-import {
-  createVisibleReplyModelToolCall,
-  visibleReplyModelToolName,
-} from '../api/model-tools.ts';
+import {createVisibleReplyModelToolCall} from '../api/model-tools.ts';
 import type {RoleModelAdapter} from '../api/adapter.ts';
 import {conversationTurnVisibleMessages} from '../api/conversation-history.ts';
 import {createRoleModelAdapterRawOutput} from '../api/adapter.ts';
@@ -32,18 +29,9 @@ export function createRoleModelAdapterFromCharacterAgent(
       const characterReply = validateCharacterAgentReply(reply);
 
       return createRoleModelAdapterRawOutput(
-        JSON.stringify(
-          inputEnvelope.allowedTools.includes(visibleReplyModelToolName)
-            ? {
-                toolCalls: [
-                  createVisibleReplyModelToolCall(characterReply.text),
-                ],
-              }
-            : {
-                toolCalls: [],
-                text: characterReply.text,
-              },
-        ),
+        JSON.stringify({
+          toolCalls: [createVisibleReplyModelToolCall(characterReply.text)],
+        }),
       );
     },
   } satisfies RoleModelAdapter);

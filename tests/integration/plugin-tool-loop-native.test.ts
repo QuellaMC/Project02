@@ -3,10 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {createConversationSession} from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
-import {
-  type RoleModelAdapter,
-  type RoleModelChatMessage,
-} from '../../src/role-model/index.ts';
+import {type RoleModelChatMessage} from '../../src/role-model/index.ts';
 import {
   createNativePluginListAdapter,
   createNativeVisibleReplyAndPluginListAdapter,
@@ -149,68 +146,30 @@ describe('plugin-driven native tool loop routing', () => {
     expect(messagesByRound[1]?.[6]?.content).toContain('"status":"accepted"');
   });
 
-  it('feeds native tool argument errors back as rejected tool result messages', async () => {
+  it('hands a native tool call with non-object arguments back to the model', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
-    let index = 0;
-    const adapter: RoleModelAdapter = Object.freeze({
-      invoke(_inputEnvelope, invocation) {
-        messagesByRound.push([...invocation.turnContext.messages]);
-        index += 1;
-
-        if (index === 1) {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
-                },
-              ],
-            }),
-            nativeAssistantMessage: {
-              role: 'assistant',
-              content: null,
-              tool_calls: [
-                {
-                  id: 'call_bad_args',
-                  type: 'function',
-                  function: {
-                    name: 'runtime.plugin.list',
-                    arguments: '{"score":1e999}',
-                  },
-                },
-              ],
+    const adapter = createSequencedAdapter(
+      [
+        // What NVIDIA hands the parser when the model's arguments were not
+        // a JSON object: the string, as written.
+        {toolCalls: [{name: 'runtime.plugin.list', input: '{"score":'}]},
+        {
+          toolCalls: [
+            {
+              name: 'visible_reply',
+              input: {text: 'Recovered after the argument error.'},
             },
-            nativeToolCallArgumentErrors: [
-              {
-                executableIndex: 0,
-                toolName: 'runtime.plugin.list',
-                reason: 'invalid_native_tool_arguments',
-                message:
-                  'runtime.plugin.list arguments must contain finite JSON values.',
-              },
-            ],
-          };
-        }
-
-        return {
-          rawOutputText: JSON.stringify({
-            toolCalls: [
-              {
-                name: 'visible_reply',
-                input: {
-                  text: 'Recovered after argument error.',
-                },
-              },
-            ],
-          }),
-        };
+          ],
+        },
+      ],
+      invocation => {
+        messagesByRound.push([...invocation.turnContext.messages]);
       },
-    });
+    );
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent(
@@ -224,32 +183,19 @@ describe('plugin-driven native tool loop routing', () => {
 
     expect(result.status).toBe('completed');
     expect(messagesByRound).toHaveLength(2);
-    expect(messagesByRound[1]?.map(message => message.role)).toEqual([
-      'system',
-      'system',
-      'system',
-      'user',
-      'assistant',
-      'tool',
-    ]);
-    expect(messagesByRound[1]?.[5]).toMatchObject({
-      role: 'tool',
-      tool_call_id: 'call_bad_args',
-    });
-    expect(messagesByRound[1]?.[5]?.content).toContain('"status":"rejected"');
-    expect(messagesByRound[1]?.[5]?.content).toContain(
-      '"reason":"invalid_native_tool_arguments"',
+    // The refusal is a note in the next round, not a tool result: no call
+    // was made, so nothing was dispatched or recorded as a tool event.
+    const note = messagesByRound[1]?.find(
+      message =>
+        message.role === 'system' &&
+        message.content.startsWith('Your last reply could not be used.'),
     );
+
+    expect(note?.content).toContain('runtime.plugin.list');
+    expect(note?.content).toContain('must be a JSON object');
     expect(
-      logStore.rawEvents().find(event => event.kind === 'tool_call_finished'),
-    ).toMatchObject({
-      dispatchedToHost: false,
-      toolName: 'runtime.plugin.list',
-      toolResult: {
-        status: 'rejected',
-        reason: 'invalid_native_tool_arguments',
-      },
-    });
+      logStore.rawEvents().some(event => event.kind === 'tool_call_started'),
+    ).toBe(false);
   });
 
   it('returns undeclared executable tools to the model without dispatching them', async () => {

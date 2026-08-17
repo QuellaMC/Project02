@@ -1,6 +1,5 @@
 import {
   CharacterInputError,
-  CharacterReplyValidationError,
   type RuntimeEventIdentity,
 } from '../../core/index.ts';
 import type {
@@ -14,11 +13,7 @@ import type {
   RuntimePluginHealthHostResult,
   RuntimePluginHost,
 } from '../../plugins/index.ts';
-import {
-  createRejectedRoleModelDecisionResult,
-  roleModelInvalidVisibleReplyRejectionReason,
-  type RoleModelDecisionRejection,
-} from '../../role-model/index.ts';
+import {type RoleModelDecisionRejection} from '../../role-model/index.ts';
 import {
   createRoleModelCommitValidationSnapshot,
   type RawEventLogRecordInput,
@@ -153,19 +148,6 @@ export async function handleRuntimeTurnFailure(
       rawReason: error.message,
       reason: 'input_validation_rejected',
       ...runtimePluginContextOption(state.runtimePluginContextForTurn),
-    });
-  }
-
-  if (error instanceof CharacterReplyValidationError) {
-    const rejection = createInvalidVisibleReplyRejection(error);
-
-    return await appendRejectedResult(state, {
-      message: error.message,
-      rawKind: 'character_reply_rejected',
-      rawReason: rejection.reason,
-      reason: rejection.reason,
-      ...runtimePluginContextOption(state.runtimePluginContextForTurn),
-      ...visibleMessageIdsForTurnOption(state.committedVisibleMessages),
     });
   }
 
@@ -306,13 +288,4 @@ export function createRejectedCommitValidationSnapshot(options: {
       rejection: options.rejection,
     },
   });
-}
-
-function createInvalidVisibleReplyRejection(
-  error: CharacterReplyValidationError,
-): RoleModelDecisionRejection {
-  return createRejectedRoleModelDecisionResult(
-    roleModelInvalidVisibleReplyRejectionReason,
-    error.message,
-  ).rejection;
 }

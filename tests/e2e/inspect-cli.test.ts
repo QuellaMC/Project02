@@ -1,4 +1,5 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {
   createContinuedDurableChatRuntime,
   createDurableChatRuntime,
@@ -54,7 +55,6 @@ import {
 } from '../../src/plugins/api/index.ts';
 import {
   characterStatePatchModelToolName,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/contract.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
@@ -416,10 +416,6 @@ describe('inspect CLI plugin evidence', () => {
           enabled: true,
           requestedAccess: {model_input: 'write'},
           grantedAccess: {model_input: 'write'},
-        }),
-        expect.objectContaining({
-          pluginId: firstPartyModelToolsPluginId,
-          enabled: true,
         }),
         expect.objectContaining({
           pluginId: 'character-state',
@@ -900,7 +896,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -937,7 +933,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',
@@ -971,7 +967,7 @@ describe('inspect CLI plugin evidence', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 9,
+        schemaVersion: localRuntimeStorageSchemaVersion,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

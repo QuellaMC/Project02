@@ -1,4 +1,5 @@
 import {cpSync, existsSync, readFileSync, rmSync, symlinkSync} from 'node:fs';
+import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -24,7 +25,7 @@ describe('character data marker', () => {
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toEqual({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',
@@ -50,7 +51,7 @@ describe('character data marker', () => {
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toEqual({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',
@@ -101,7 +102,7 @@ describe('character data marker', () => {
     expect(
       decodeStorageSchemaMarker(readFileSync(layout.schemaPath, 'utf8')),
     ).toEqual({
-      schemaVersion: 9,
+      schemaVersion: localRuntimeStorageSchemaVersion,
       scope: 'character-data',
       characterId: 'mira',
       createdAt: '2026-07-23T00:00:00.000Z',

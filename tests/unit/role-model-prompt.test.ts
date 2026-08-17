@@ -4,7 +4,6 @@ import {describe, expect, it} from 'vitest';
 import {
   conversationTurnToChatMessages,
   createDecisionContext,
-  createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
   defaultRoleModelProviderCapabilities,
   measureRoleModelPromptSize,
@@ -59,7 +58,7 @@ describe('role-model prompt rendering', () => {
           }),
         ],
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope);
     const frameKinds = turnContext.frames.map(frame => frame.kind);
@@ -97,7 +96,7 @@ describe('role-model prompt rendering', () => {
         runtimeNotes: [{id: 'today', text: 'Today is Monday, June 15, 2026.'}],
         historyWindow: {turnEventIds: ['evt_prior']},
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const priorTurn: ConversationTurn = {
       eventId: 'evt_prior',
@@ -183,7 +182,7 @@ describe('role-model prompt rendering', () => {
           }),
         ],
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope, {
       userDisplayName: 'Mike',
@@ -224,7 +223,7 @@ describe('role-model prompt rendering', () => {
             sessionId: 'session-no-summary',
             characterSnapshot: testCharacterProfile,
           }),
-          pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+          pluginToolDefinitions: [],
         }),
       ).frames.map(frame => frame.kind),
     ).not.toContain('context_summary');
@@ -248,7 +247,7 @@ describe('role-model prompt rendering', () => {
           }),
         ],
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const priorTurn: ConversationTurn = {
       eventId: 'evt_prior',
@@ -335,7 +334,7 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-no-curated-context',
         characterSnapshot: testCharacterProfile,
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const frameKinds = renderRoleModelTurnContext(inputEnvelope).frames.map(
       frame => frame.kind,
@@ -374,7 +373,7 @@ describe('role-model prompt rendering', () => {
           }),
         ],
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope);
     const runtimeFrame = turnContext.frames.find(
@@ -460,7 +459,7 @@ describe('role-model prompt rendering', () => {
           }),
         ],
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope, {
       userDisplayName: 'Mike',
@@ -523,7 +522,7 @@ describe('role-model prompt rendering', () => {
           }),
         ],
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope);
     const trustedText = turnContext.messages
@@ -553,7 +552,7 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-role-model-native-multi-call-prompt',
         characterSnapshot: testCharacterProfile,
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const parallel = renderRoleModelTurnContext(inputEnvelope, {
       userDisplayName: 'Mike',
@@ -568,42 +567,15 @@ describe('role-model prompt rendering', () => {
     expect(parallel).toBe(
       toolProtocolText({
         userDisplayName: 'Mike',
-        visibleReplyAvailable: true,
         supportsParallelToolCalls: true,
       }),
     );
     expect(sequential).toBe(
-      toolProtocolText({
-        visibleReplyAvailable: true,
-        supportsParallelToolCalls: false,
-      }),
+      toolProtocolText({supportsParallelToolCalls: false}),
     );
     expect(parallel).not.toBe(sequential);
     expect(parallel).toContain('Mike');
     expect(parallel).not.toContain(runtimePluginListToolName);
-  });
-
-  it('tells the character when visible_reply is unavailable', () => {
-    const inputEnvelope = createRoleModelInputEnvelope({
-      event: createUserMessageRuntimeEvent('hello', testIdentity()),
-      decisionContext: createDecisionContext({
-        sessionId: 'session-role-model-no-visible-reply',
-        characterSnapshot: testCharacterProfile,
-      }),
-      pluginToolDefinitions: [],
-    });
-    const protocol = renderRoleModelTurnContext(inputEnvelope).frames.find(
-      frame => frame.kind === 'developer_protocol',
-    )?.content;
-
-    expect(protocol).toBe(
-      toolProtocolText({
-        visibleReplyAvailable: false,
-        supportsParallelToolCalls: true,
-      }),
-    );
-    expect(protocol).toContain('visible_reply is unavailable');
-    expect(protocol).not.toContain(runtimePluginListToolName);
   });
 
   it('advertises plugin inventory only when the inventory tool is exposed', () => {
@@ -626,7 +598,6 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-role-model-plugin-inventory',
         characterSnapshot: testCharacterProfile,
       }),
-      allowedTools: [runtimePluginListToolName],
       pluginToolDefinitions: [inventoryTool],
     });
     const protocol = renderRoleModelTurnContext(inputEnvelope).frames.find(
@@ -636,7 +607,6 @@ describe('role-model prompt rendering', () => {
     expect(protocol).toBe(
       toolProtocolText({
         inventoryToolName: runtimePluginListToolName,
-        visibleReplyAvailable: false,
         supportsParallelToolCalls: true,
       }),
     );
@@ -711,7 +681,7 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-system-frame-golden',
         characterSnapshot: testCharacterProfile,
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const systemFrame = renderRoleModelTurnContext(inputEnvelope).frames[0];
 
@@ -729,7 +699,7 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-persona-structure',
         characterSnapshot: testCharacterProfile,
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const content =
       renderRoleModelTurnContext(inputEnvelope, {
@@ -761,7 +731,7 @@ describe('role-model prompt rendering', () => {
         sessionId: 'session-mira-frame-golden',
         characterSnapshot: testCharacterProfile,
       }),
-      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      pluginToolDefinitions: [],
     });
     const turnContext = renderRoleModelTurnContext(inputEnvelope, {
       personaSections: miraPersonaSections,

@@ -21,7 +21,6 @@ import {
   createRuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
 import {
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   sessionHistoryPluginId,
   sessionHistoryReadToolName,
@@ -43,11 +42,7 @@ import {
   createRuntimePluginDatabaseProvider,
 } from '../../src/runtime/storage/index.ts';
 
-const enabledWithSessionHistory = [
-  runtimePluginId,
-  firstPartyModelToolsPluginId,
-  sessionHistoryPluginId,
-];
+const enabledWithSessionHistory = [runtimePluginId, sessionHistoryPluginId];
 
 describe('session history plugin through the host', () => {
   it('serves search and anchored reads over a real store', async () => {
@@ -191,7 +186,7 @@ describe('session history plugin through the host', () => {
     const {host, storeRoot} = await createHistoryHost();
     const disabledHost = createRuntimePluginHost({
       plugins: [createSessionHistoryPlugin()],
-      enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
+      enabledPluginIds: [runtimePluginId],
       ...historyCapabilities(storeRoot),
     });
     const guided = await host.beforeRoleModelCall(
@@ -250,7 +245,7 @@ describe('session history plugin through the host', () => {
 
     const bareHost = createRuntimePluginHost({
       plugins: [createSessionHistoryPlugin()],
-      enabledPluginIds: [runtimePluginId, firstPartyModelToolsPluginId],
+      enabledPluginIds: [runtimePluginId],
       ...historyCapabilities(bareRoot),
     });
     const skipped = await bareHost.afterTurnCommitted(

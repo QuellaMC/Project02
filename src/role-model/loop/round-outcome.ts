@@ -1,12 +1,5 @@
 import {
-  normalizeVisibleMessageText,
-  type RuntimeEventIdentity,
-} from '../../core/index.ts';
-import {
-  roleModelInvalidVisibleReplyRejectionReason,
-  roleModelMalformedOutputRejectionReason,
-  roleModelPluginToolRejectedRejectionReason,
-  roleModelTerminalEmptyOutputRejectionDetails,
+  roleModelToolRoundsExhaustedRejectionReason,
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type ParsedRoleModelDecisionSnapshot,
@@ -16,14 +9,8 @@ import {
   type RoleModelIOSnapshot,
   type RoleModelToolObservation,
 } from '../api/contracts.ts';
-import {
-  createParsedRoleModelDecisionSnapshot,
-  createRejectedRoleModelDecisionResult,
-} from '../api/decision.ts';
-import {
-  visibleReplyModelToolName,
-  type ModelToolCall,
-} from '../api/model-tools.ts';
+import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
+import {type ModelToolCall} from '../api/model-tools.ts';
 import {type RoleModelChatMessage} from '../api/chat-wire.ts';
 import {unusableReplyNote} from '../prompt/prompt-text.ts';
 import {visibleReplyToolCalls} from './decision-parser.ts';
@@ -52,8 +39,8 @@ export type RejectedRoleModelLoopResult = {
   readonly status: 'rejected';
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
+  /** The parser's verdict on the last round; accepted when only the budget refused. */
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-  readonly decisionResult: RejectedRoleModelDecisionResult;
   readonly rejection: RoleModelDecisionRejection;
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly rounds: readonly RoleModelLoopRound[];
@@ -113,23 +100,15 @@ function createRejectedRoleModelLoopResult(options: {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly rejection: RoleModelDecisionRejection;
   readonly rounds: readonly RoleModelLoopRound[];
 }): RejectedRoleModelLoopResult {
-  const decisionResult = options.parsedDecisionSnapshot.result;
-
-  if (decisionResult.status !== 'rejected') {
-    throw new TypeError(
-      'Rejected role-model execution decision must produce rejected public evidence.',
-    );
-  }
-
   return Object.freeze({
     status: 'rejected',
     inputEnvelope: options.inputEnvelope,
     ioSnapshot: options.ioSnapshot,
     parsedDecisionSnapshot: options.parsedDecisionSnapshot,
-    decisionResult,
-    rejection: decisionResult.rejection,
+    rejection: options.rejection,
     pluginToolResults: Object.freeze([...options.pluginToolResults]),
     rounds: Object.freeze([...options.rounds]),
   } satisfies RejectedRoleModelLoopResult);
@@ -139,21 +118,16 @@ export function executionVisibleReplyTexts(
   decision: CharacterDecision,
 ): readonly string[] {
   return Object.freeze(
-    decision.toolCalls
-      .filter(call => call.name === visibleReplyModelToolName)
-      .map(call => call.input['text'])
-      .filter((text): text is string => typeof text === 'string'),
+    visibleReplyToolCalls(decision).map(call => call.input.text),
   );
 }
 
 /**
- * The loop's one rule for a round it cannot use. When the model wrote
- * something the runtime refuses — whether the parser, the loop, or the
- * adapter refused it — the error goes back to the model as part of its next
- * round, and what it does with that is its own business; the round counts
- * like any other. When no output arrived at all — the adapter failed, the
- * provider failed — there is nothing to hand back, and the turn ends. Either
- * way the round is on record.
+ * The loop's one rule for a round the parser refused. When the model wrote
+ * something, the refusal goes back to the model as part of its next round,
+ * and what it does with that is its own business; the round counts like any
+ * other. When no output arrived at all — the provider failed — there is
+ * nothing to hand back, and the turn ends. Either way the round is on record.
  */
 export function settleRejectedRound(options: {
   readonly state: RoleModelLoopState;
@@ -173,17 +147,18 @@ export function settleRejectedRound(options: {
     }),
   );
 
+  const rejection = invokedRound.decisionResult.rejection;
+
   if (!invokedRound.modelOutput || state.toolRounds >= options.maxToolRounds) {
     return createRejectedRoleModelLoopResult({
       pluginToolResults: state.allPluginToolResults,
       inputEnvelope: invokedRound.inputEnvelope,
       ioSnapshot: invokedRound.ioSnapshot,
       parsedDecisionSnapshot: invokedRound.parsedDecisionSnapshot,
+      rejection,
       rounds: state.rounds,
     });
   }
-
-  const rejection = invokedRound.decisionResult.rejection;
 
   state.unusableReplyNote = unusableReplyNote(
     rejection.details ?? rejection.reason,
@@ -193,30 +168,19 @@ export function settleRejectedRound(options: {
   return 'continue';
 }
 
+/**
+ * An accepted round either ends the turn (no executable calls), goes on to
+ * its tool calls, or — the loop's only refusal of its own — runs out of
+ * rounds. The budget refusal leaves the parser's accepted verdict as it is;
+ * it is what the runtime records against the commit.
+ */
 export function terminalRoleModelLoopResult(options: {
   readonly state: RoleModelLoopState;
   readonly invokedRound: AcceptedRoundView;
-  readonly identity: RuntimeEventIdentity;
-  readonly sessionId: string;
   readonly round: number;
   readonly maxToolRounds: number;
-}): RoleModelLoopResult | 'continue' | undefined {
-  const isTerminalRound = options.invokedRound.executableToolCalls.length === 0;
-  const gate = visibleReplyGateRejection(
-    options.invokedRound.decisionResult,
-    isTerminalRound,
-  );
-
-  if (gate !== undefined) {
-    return settleRejectedRound({
-      state: options.state,
-      invokedRound: rejectedRoundView(options, gate),
-      round: options.round,
-      maxToolRounds: options.maxToolRounds,
-    });
-  }
-
-  if (isTerminalRound) {
+}): RoleModelLoopResult | undefined {
+  if (options.invokedRound.executableToolCalls.length === 0) {
     return terminalAcceptedRoleModelLoopResult(options);
   }
 
@@ -224,49 +188,27 @@ export function terminalRoleModelLoopResult(options: {
     return undefined;
   }
 
-  return settleRejectedRound({
-    state: options.state,
-    invokedRound: rejectedRoundView(
-      options,
-      createRejectedRoleModelDecisionResult(
-        roleModelPluginToolRejectedRejectionReason,
-        `Role model exceeded maximum executable tool rounds (${String(options.maxToolRounds)}).`,
-        {
-          requestedToolNames:
-            options.invokedRound.decisionResult.decision.toolCalls.map(
-              call => call.name,
-            ),
-        },
-      ),
-    ),
-    round: options.round,
-    maxToolRounds: options.maxToolRounds,
-  });
-}
+  options.state.rounds.push(
+    createRoleModelLoopRound({
+      pluginToolResults: [],
+      inputEnvelope: options.invokedRound.inputEnvelope,
+      ioSnapshot: options.invokedRound.ioSnapshot,
+      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+      round: options.round,
+    }),
+  );
 
-/**
- * A round the parser accepted but the loop refuses is recorded as refused,
- * so evidence reads the way the model was treated.
- */
-function rejectedRoundView(
-  options: {
-    readonly invokedRound: AcceptedRoundView;
-    readonly identity: RuntimeEventIdentity;
-    readonly sessionId: string;
-  },
-  decisionResult: RejectedRoleModelDecisionResult,
-): RejectedRoundView {
-  return {
-    decisionResult,
+  return createRejectedRoleModelLoopResult({
+    pluginToolResults: options.state.allPluginToolResults,
     inputEnvelope: options.invokedRound.inputEnvelope,
     ioSnapshot: options.invokedRound.ioSnapshot,
-    parsedDecisionSnapshot: createParsedRoleModelDecisionSnapshot({
-      ...options.identity,
-      sessionId: options.sessionId,
-      result: decisionResult,
-    }),
-    modelOutput: true,
-  };
+    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    rejection: createRejectedRoleModelDecisionResult(
+      roleModelToolRoundsExhaustedRejectionReason,
+      `Role model exceeded maximum executable tool rounds (${String(options.maxToolRounds)}).`,
+    ).rejection,
+    rounds: options.state.rounds,
+  });
 }
 
 function terminalAcceptedRoleModelLoopResult(options: {
@@ -303,41 +245,4 @@ function terminalAcceptedRoleModelLoopResult(options: {
     pluginToolResults: Object.freeze([...options.state.allPluginToolResults]),
     rounds: Object.freeze([...options.state.rounds]),
   } satisfies AcceptedRoleModelLoopResult);
-}
-
-// Runs before anything is shown or committed; failures go back to the model.
-function visibleReplyGateRejection(
-  decisionResult: AcceptedRoleModelDecisionResult,
-  isTerminalRound: boolean,
-): RejectedRoleModelDecisionResult | undefined {
-  const visibleReplies = visibleReplyToolCalls(decisionResult.decision);
-  const requestedToolNames = decisionResult.decision.toolCalls.map(
-    call => call.name,
-  );
-
-  if (visibleReplies.length === 0) {
-    return isTerminalRound && decisionResult.nonCommittedText === undefined
-      ? createRejectedRoleModelDecisionResult(
-          roleModelMalformedOutputRejectionReason,
-          roleModelTerminalEmptyOutputRejectionDetails,
-          {requestedToolNames},
-        )
-      : undefined;
-  }
-
-  for (const visibleReply of visibleReplies) {
-    const text = visibleReply.input['text'];
-
-    try {
-      normalizeVisibleMessageText(typeof text === 'string' ? text : undefined);
-    } catch {
-      return createRejectedRoleModelDecisionResult(
-        roleModelInvalidVisibleReplyRejectionReason,
-        'visible_reply text must not be empty.',
-        {requestedToolNames},
-      );
-    }
-  }
-
-  return undefined;
 }

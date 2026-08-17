@@ -1,9 +1,4 @@
 import {
-  createFirstPartyModelToolsPlugin,
-  createFirstPartyModelToolsPluginManifest,
-  isFirstPartyModelToolsPlugin,
-} from '../builtin/model-tools/index.ts';
-import {
   createRuntimePluginManagementPlugin,
   createRuntimePluginManagementPluginManifest,
   isRuntimePluginManagementPlugin,
@@ -13,7 +8,6 @@ import {
 import {
   characterMemoryPluginId,
   characterStatePluginId,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   sessionHistoryPluginId,
 } from '../api/contract.ts';
@@ -67,11 +61,6 @@ export function defaultRuntimePluginHostServiceCatalogEntries(): Readonly<
             : {pluginConfigControl: input.pluginConfigControl}),
         }),
     } satisfies RuntimePluginHostServiceCatalogEntry),
-    [firstPartyModelToolsPluginId]: Object.freeze({
-      catalogKind: 'host_service',
-      manifest: createFirstPartyModelToolsPluginManifest(),
-      bootstrap: () => createFirstPartyModelToolsPlugin(),
-    } satisfies RuntimePluginHostServiceCatalogEntry),
   });
 }
 
@@ -123,10 +112,7 @@ export function isHostScopedFirstPartyRuntimePluginId(
 export function isHostOwnedFirstPartyRuntimePlugin(
   plugin: RuntimePlugin,
 ): boolean {
-  return (
-    isRuntimePluginManagementPlugin(plugin) ||
-    isFirstPartyModelToolsPlugin(plugin)
-  );
+  return isRuntimePluginManagementPlugin(plugin);
 }
 
 /** Absent an explicit selection, host-owned defaults decide enablement. */

@@ -178,8 +178,7 @@
       <strong>System services</strong>. The groups share one continuous numeric selection list,
       preserve stable plugin-ID ordering within each group, and omit empty headings. The default
       catalog therefore shows <code>character-state</code> and <code>demo-config</code> as
-      plugins and <code>first_party.model_tools</code> plus <code>runtime.plugin</code> as
-      system services.
+      plugins and <code>runtime.plugin</code> as the system service.
     </p>
 
     <h2>Runtime plugin management</h2>
@@ -223,9 +222,9 @@
 
     <p>
       Disabling <code>runtime.plugin</code> removes all three model-facing management tools together,
-      while the operator console remains available as the recovery path. The separate
-      <code>first_party.model_tools</code> system service is unchanged because its terminal tools use
-      different routing and commit semantics.
+      while the operator console remains available as the recovery path. <code>visible_reply</code>
+      is not a plugin tool: it is how the character speaks, built into the role model and always
+      offered, so no configuration can take it away.
     </p>
 
     <h2>Unified plugin packages</h2>

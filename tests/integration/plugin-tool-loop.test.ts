@@ -13,7 +13,6 @@ import {testRuntimePluginFileStoreProvider} from '../support/plugin-host-fixture
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePluginContext,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
 } from '../../src/plugins/api/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
@@ -418,7 +417,7 @@ describe('plugin-driven Character State tool loop', () => {
 
     expect(result).toMatchObject({
       status: 'rejected',
-      reason: 'invalid_visible_reply',
+      reason: 'malformed_output',
     });
     expect(
       logStore.conversationMessages().map(message => message.role),
@@ -457,7 +456,6 @@ describe('plugin-driven Character State tool loop', () => {
       plugins: [createCharacterStatePlugin(), createHealthRejectingPlugin()],
       enabledPluginIds: [
         runtimePluginId,
-        firstPartyModelToolsPluginId,
         characterStatePluginId,
         'health-reject.fixture',
       ],
@@ -525,11 +523,7 @@ describe('plugin-driven Character State tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        characterStatePluginId,
-      ],
+      enabledPluginIds: [runtimePluginId, characterStatePluginId],
     });
     const context = createRuntimePluginContext({
       ...createRuntimeEventIdentity({
@@ -594,11 +588,7 @@ describe('plugin-driven Character State tool loop', () => {
       storeRoot,
       sessionId,
       plugins: [createCharacterStatePlugin()],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        characterStatePluginId,
-      ],
+      enabledPluginIds: [runtimePluginId, characterStatePluginId],
     });
     const context = createRuntimePluginContext({
       ...createRuntimeEventIdentity({

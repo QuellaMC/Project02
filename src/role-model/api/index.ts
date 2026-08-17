@@ -1,7 +1,6 @@
 /** The only role-model barrel plugins/api may import: anything more cycles. */
 export {
   builtInModelToolDefinitions,
-  builtInModelToolDefinitionsForUserTurn,
   createVisibleReplyModelToolCall,
   freezeBuiltInModelToolCall,
   freezeModelToolCall,
@@ -9,7 +8,6 @@ export {
   freezeModelToolDefinition,
   isBuiltInModelToolName,
   isModelToolJsonSchemaTypeArray,
-  userTurnBuiltInModelToolNames,
   visibleReplyModelToolName,
   type BuiltInModelToolCall,
   type BuiltInModelToolDefinition,
@@ -31,11 +29,8 @@ export {
   type ModelToolInputValidationResult,
 } from './model-tool-input-validation.ts';
 export {
-  hasDuplicateRoleModelAllowedTools,
-  isRoleModelAllowedToolName,
   isRoleModelToolNameSyntax,
   requiredRoleModelIdentifier,
-  roleModelAllowedToolNames,
   type RoleModelAllowedToolName,
 } from './tool-names.ts';
 export {

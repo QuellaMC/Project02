@@ -16,7 +16,6 @@ import {runInspectCliFromArgs} from '../../src/cli/inspect/main.ts';
 import {
   characterMemoryPluginId,
   characterStatePluginId,
-  firstPartyModelToolsPluginId,
   runtimePluginContractVersion,
   runtimePluginId,
   sessionHistoryPluginId,
@@ -59,7 +58,6 @@ describe('configured runtime plugin package activation', () => {
         characterMemoryPluginId,
         characterStatePluginId,
         demoConfigPluginId,
-        firstPartyModelToolsPluginId,
         mem0PluginId,
         runtimePluginId,
         sessionHistoryPluginId,

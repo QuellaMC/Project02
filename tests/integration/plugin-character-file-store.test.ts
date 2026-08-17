@@ -10,7 +10,6 @@ import {
   createRuntimePluginManifest,
 } from '../../src/plugins/api/index.ts';
 import {
-  firstPartyModelToolsPluginId,
   runtimePluginContractVersion,
   runtimePluginId,
   type RuntimePluginAccessMap,
@@ -152,11 +151,7 @@ describe('character-scoped plugin file store', () => {
     });
     const host = createRuntimePluginHost({
       plugins: [probe],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        probePluginId,
-      ],
+      enabledPluginIds: [runtimePluginId, probePluginId],
       storeRoot,
       sessionId: 'contended',
       fileStore: {
@@ -275,11 +270,7 @@ function createStorageProbePlugin(options: {
 function probeHost(probe: RuntimePlugin, storeRoot: string, sessionId: string) {
   return createRuntimePluginHost({
     plugins: [probe],
-    enabledPluginIds: [
-      runtimePluginId,
-      firstPartyModelToolsPluginId,
-      probePluginId,
-    ],
+    enabledPluginIds: [runtimePluginId, probePluginId],
     storeRoot,
     sessionId,
     fileStore: {createFileStore: createRuntimePluginFileStore},
