@@ -931,6 +931,46 @@ describe('NVIDIA role-model provider', () => {
     expect(JSON.stringify(output.providerExchange)).not.toContain('<think>');
   });
 
+  it('passes a reply with an unterminated reasoning block to the parser as the model wrote it', async () => {
+    const fetchClient: NvidiaFetchClient = () =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        json() {
+          return Promise.resolve({
+            choices: [
+              {
+                finish_reason: 'stop',
+                message: {
+                  role: 'assistant',
+                  content: '<think>still thinking about it',
+                },
+              },
+            ],
+          });
+        },
+        text() {
+          return Promise.resolve('');
+        },
+      });
+    const adapter = createNvidiaRoleModelProviderAdapter({
+      apiKey: 'secret',
+      fetchClient,
+    });
+    const inputEnvelope = createNvidiaTestInputEnvelope();
+    const output = await adapter.invoke(
+      inputEnvelope,
+      testInvocation(inputEnvelope),
+    );
+
+    // Not a provider fault: the model wrote something the runtime cannot
+    // use, so it is not a rejection here — the parser refuses it and the
+    // loop hands that back to the model.
+    expect(output.rejection).toBeUndefined();
+    expect(output.rawOutputText).toBe('<think>still thinking about it');
+    expect(output.nativeAssistantMessage).toBeUndefined();
+  });
+
   it('rejects length-finished assistant content as partial output', async () => {
     const fetchClient: NvidiaFetchClient = () =>
       Promise.resolve({

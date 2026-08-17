@@ -3,6 +3,7 @@ import {
   createDecisionContext,
   createDefaultRoleModelPluginToolDefinitions,
   type RoleModelAdapter,
+  type RoleModelAdapterInvocation,
   type RoleModelPluginToolDefinition,
   type RoleModelProviderMetadata,
 } from '../../src/role-model/index.ts';
@@ -132,12 +133,12 @@ export function createDegradingRejectedMemorySearchPlugin(): RuntimePlugin {
 
 export function createSequencedAdapter(
   decisions: readonly Readonly<Record<string, unknown>>[],
-  onInvoke?: () => void,
+  onInvoke?: (invocation: RoleModelAdapterInvocation) => void,
 ): RoleModelAdapter {
   let index = 0;
 
   return Object.freeze({
-    invoke() {
+    invoke(_inputEnvelope, invocation) {
       const decision = decisions[index] ?? decisions.at(-1);
 
       if (decision === undefined) {
@@ -145,7 +146,7 @@ export function createSequencedAdapter(
       }
 
       index += 1;
-      onInvoke?.();
+      onInvoke?.(invocation);
 
       return {
         rawOutputText: JSON.stringify(decision),

@@ -11,6 +11,14 @@ import {
   VisibleMessageTextValidationError,
 } from '../../core/index.ts';
 import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot,
+} from '../../shared/json-boundary.ts';
+import type {
+  RuntimePluginJsonObject,
+  RuntimePluginJsonValue,
+} from '../../plugins/api/index.ts';
+import {
   isRecord,
   LocalRuntimeStorageContractError,
   requiredNonEmptyString,
@@ -266,4 +274,70 @@ export function requiredStringArray(
   }
 
   return Object.freeze(strings);
+}
+
+export function optionalStringArray(
+  value: unknown,
+  key: string,
+): readonly string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  if (!Array.isArray(value)) {
+    throwMalformedRecord(key);
+  }
+
+  const strings: string[] = [];
+  const items = value as readonly unknown[];
+
+  for (const item of items) {
+    if (typeof item !== 'string') {
+      throwMalformedRecord(key);
+    }
+
+    strings.push(item);
+  }
+
+  return Object.freeze(strings);
+}
+export function requiredBoundedJsonObject(
+  value: unknown,
+  field: string,
+): RuntimePluginJsonObject {
+  try {
+    return createJsonBoundaryObjectSnapshot(value, {field});
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord(field);
+    }
+
+    throw error;
+  }
+}
+export function requiredBoundedJsonValue(
+  value: unknown,
+  field: string,
+): RuntimePluginJsonValue {
+  try {
+    return createJsonBoundarySnapshot(value, {field});
+  } catch (error: unknown) {
+    if (error instanceof TypeError) {
+      throwMalformedRecord(field);
+    }
+
+    throw error;
+  }
+}
+export function requiredLiteralString(
+  record: Record<string, unknown>,
+  key: string,
+  expectedValue: string,
+  errorField: string,
+): void {
+  const value = requiredRecordString(record, key, 'malformed_record');
+
+  if (value !== expectedValue) {
+    throwMalformedRecord(errorField);
+  }
 }

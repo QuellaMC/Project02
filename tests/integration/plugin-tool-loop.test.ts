@@ -412,7 +412,7 @@ describe('plugin-driven Character State tool loop', () => {
       session,
       logStore,
       roleModelAdapter: adapter,
-      // No feedback budget left after the tool round.
+      // No round left to hand the empty reply back after the tool round.
       maxToolRounds: 1,
     });
 

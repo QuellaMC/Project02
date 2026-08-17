@@ -137,6 +137,106 @@ describe('role-model loop routing and policy', () => {
     });
   });
 
+  it('hands a refused reply back to the model for exactly its next round, and records the refused round', async () => {
+    const seenMessages: (readonly RoleModelChatMessage[])[] = [];
+    let invocations = 0;
+    const result = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('hello', 'evt_refused_round_handed_back'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
+      pluginToolHost: Object.freeze({
+        handleToolCall: () => createAcceptedToolCallResult(),
+      }),
+      runtimePluginContext: createTestPluginContext(
+        'evt_refused_round_handed_back',
+      ),
+      adapter: createSequencedAdapter(
+        [
+          {toolCalls: [{name: 'not.a.tool.field', input: 'oops'}]},
+          {toolCalls: [{name: 'memory.search', input: {query: 'first'}}]},
+          {toolCalls: [{name: visibleReplyModelToolName, input: {text: 'ok'}}]},
+        ],
+        invocation => {
+          invocations += 1;
+          seenMessages.push(invocation.turnContext.messages);
+        },
+      ),
+    });
+
+    expect(result.status).toBe('accepted');
+    expect(invocations).toBe(3);
+    expect(
+      result.rounds.map(round => round.parsedDecisionSnapshot.result.status),
+    ).toEqual(['rejected', 'accepted', 'accepted']);
+    const notesIn = (round: number) =>
+      seenMessages[round]?.filter(
+        message =>
+          message.role === 'system' &&
+          message.content.startsWith('Your last reply could not be used.'),
+      ) ?? [];
+
+    // The error is simply there in the next round, quoted as data, with
+    // nothing about what to do; the round after that no longer carries it.
+    expect(notesIn(0)).toHaveLength(0);
+    expect(notesIn(1)).toHaveLength(1);
+    expect(notesIn(1)[0]?.content).toContain('The runtime said: "');
+    expect(notesIn(1)[0]?.content).not.toMatch(/again|correct|retry/iu);
+    expect(notesIn(2)).toHaveLength(0);
+  });
+
+  it('ends the turn when the rounds run out, or when no usable output arrived at all', async () => {
+    let invocations = 0;
+    const spent = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('hello', 'evt_rounds_spent'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      maxToolRounds: 2,
+      adapter: Object.freeze({
+        invoke() {
+          invocations += 1;
+          return {rawOutputText: 'still not a decision object'};
+        },
+      } satisfies RoleModelAdapter),
+    });
+
+    expect(spent).toMatchObject({
+      status: 'rejected',
+      rejection: {reason: 'malformed_output'},
+    });
+    expect(invocations).toBe(3);
+    expect(spent.rounds).toHaveLength(3);
+
+    invocations = 0;
+    const providerFailure = await runRoleModelLoop({
+      onVisibleReply: () => {},
+      event: createTestEvent('hello', 'evt_provider_failure'),
+      decisionContext: createTestDecisionContext(),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      adapter: Object.freeze({
+        invoke() {
+          invocations += 1;
+          return {
+            rawOutputText: '',
+            providerMetadata: {
+              provider: 'nvidia',
+              error: {code: 'http_error', message: 'upstream 503'},
+            },
+            rejection: {reason: 'provider_error', details: 'upstream 503'},
+          };
+        },
+      } satisfies RoleModelAdapter),
+    });
+
+    // Nothing to hand back: the model wrote nothing.
+    expect(providerFailure).toMatchObject({
+      status: 'rejected',
+      rejection: {reason: 'provider_error', details: 'upstream 503'},
+    });
+    expect(invocations).toBe(1);
+  });
+
   it('derives requested tool names for a replayable live adapter rejection', async () => {
     const details = 'Decision requested disallowed tool visible_reply.';
     const result = await runRoleModelLoop({
@@ -144,6 +244,9 @@ describe('role-model loop routing and policy', () => {
       event: createTestEvent('hello', 'evt_live_replayable_rejection'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
+      // The rejection carries model output, so it would go back to the model;
+      // this pins the record's shape, so no round is left to hand it back in.
+      maxToolRounds: 0,
       adapter: Object.freeze({
         invoke() {
           return {
@@ -194,6 +297,7 @@ describe('role-model loop routing and policy', () => {
       event: createTestEvent('hello', 'evt_gate_refused_round'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+      maxToolRounds: 0,
       adapter: Object.freeze({
         invoke() {
           // Parses and is allowed; only the loop's gate refuses the blank text.
