@@ -39,7 +39,6 @@ const sessionHistoryPluginDescriptorUrl = new URL(
   './project02.plugin.json',
   import.meta.url,
 );
-const sessionHistoryPluginInstances = new WeakSet<RuntimePlugin>();
 
 export function createSessionHistoryPlugin(): RuntimePlugin {
   return createSessionHistoryPluginFromManifest(
@@ -79,7 +78,7 @@ function createSessionHistoryPluginFromManifest(
     return engine;
   };
 
-  const plugin = createRuntimePlugin({
+  return createRuntimePlugin({
     manifest,
     providedTools: [
       createSessionHistorySearchTool(),
@@ -224,9 +223,6 @@ function createSessionHistoryPluginFromManifest(
       },
     },
   });
-
-  sessionHistoryPluginInstances.add(plugin);
-  return plugin;
 }
 
 export function createSessionHistoryPluginManifest(): RuntimePluginManifest {
@@ -234,10 +230,6 @@ export function createSessionHistoryPluginManifest(): RuntimePluginManifest {
     descriptorUrl: sessionHistoryPluginDescriptorUrl,
     expectedEntry: sessionHistoryPluginEntry,
   }).manifest;
-}
-
-export function isSessionHistoryPlugin(plugin: RuntimePlugin): boolean {
-  return sessionHistoryPluginInstances.has(plugin);
 }
 
 /**
