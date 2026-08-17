@@ -2,6 +2,7 @@ import {sessionHistoryPluginId} from '../../api/contract.ts';
 import {createRuntimePluginContextItem} from '../../api/index.ts';
 import {createPluginContextEvidence} from '../../api/evidence-helpers.ts';
 import type {RuntimePluginLifecycleHooks} from '../../api/types.ts';
+import {estimateTextTokens} from '../../../shared/token-estimate.ts';
 
 const sessionHistoryGuidanceText =
   'When they bring up an earlier conversation, or the answer may sit ' +
@@ -24,7 +25,7 @@ export function createSessionHistoryGuidanceHook(): NonNullable<
         kind: 'runtime_note',
         text: sessionHistoryGuidanceText,
         budget: {
-          estimatedTokens: Math.ceil(sessionHistoryGuidanceText.length / 4),
+          estimatedTokens: estimateTextTokens(sessionHistoryGuidanceText),
           priority: sessionHistoryGuidancePriority,
         },
         sourceReferences: [],

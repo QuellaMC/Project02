@@ -1,4 +1,3 @@
-import {buildUserTurnDecisionContext} from '../../role-model/index.ts';
 import {
   createRuntimePluginContext,
   createRuntimePluginToolInvocationSnapshot,
@@ -14,13 +13,19 @@ import type {
   RuntimePluginHost,
 } from '../../plugins/index.ts';
 import {
+  conversationHistoryWindow,
+  conversationTurnVisibleMessages,
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
   createTodayRuntimeNote,
   roleModelCommitValidationFailureRejectionReason,
+  selectConversationHistoryWindow,
+  type ConversationTurn,
   type DecisionContext,
 } from '../../role-model/index.ts';
 import {localUserSpeaker} from '../../core/index.ts';
+import {conversationTurnsFromRawEvents} from '../evidence/conversation-history.ts';
+import {defaultProject02ContextWindowTokens} from '../config/types.ts';
 import {
   runRoleModelLoop,
   type RoleModelAdapter,
@@ -62,6 +67,7 @@ import {
 
 type PreparedRuntimeTurn = {
   readonly decisionContext: DecisionContext;
+  readonly conversationHistory: readonly ConversationTurn[];
   readonly runtimePluginContext: RuntimePluginContext;
   readonly pluginHost: RuntimePluginHost;
   readonly beforeRoleModelCallResult: RuntimePluginBeforeRoleModelCallCompletedResult;
@@ -133,11 +139,24 @@ async function runPreparedLocalRuntimeTurn(
 async function prepareRuntimeTurn(
   state: RuntimeTurnState,
 ): Promise<PrepareRuntimeTurnResult> {
-  // Context first, then commit: recentVisibleMessages means the conversation
-  // before this turn, and the current user message rides the event payload.
-  const decisionContext = buildUserTurnDecisionContext({
-    session: state.options.session,
+  // History first, then commit: the window is the conversation before this
+  // turn, and the current user message rides the event payload.
+  const conversationHistory = selectConversationHistoryWindow(
+    conversationTurnsFromRawEvents(state.options.logStore.rawEvents()),
+    {
+      contextWindowTokens:
+        state.options.contextWindowTokens ??
+        defaultProject02ContextWindowTokens,
+    },
+  );
+  const decisionContext = createDecisionContext({
+    sessionId: state.options.session.id,
+    characterSnapshot: state.options.session.character,
+    historyWindow: conversationHistoryWindow(conversationHistory),
   });
+  const windowVisibleMessageIds = conversationHistory.flatMap(turn =>
+    conversationTurnVisibleMessages(turn).map(message => message.id),
+  );
 
   await commitUserMessage(state);
 
@@ -146,14 +165,13 @@ async function prepareRuntimeTurn(
     sessionId: decisionContext.sessionId,
     eventType: state.event.type,
     currentUserMessage: state.event.payload.currentUserMessage,
-    // What the model sees this turn: the recent window plus everything
+    // What the model sees this turn: the replayed window plus everything
     // committed so far, read live because interim replies land while
     // the turn is still running.
-    recentVisibleMessageIds: () =>
-      [
-        ...decisionContext.recentVisibleMessages,
-        ...state.committedVisibleMessages,
-      ].map(message => message.id),
+    recentVisibleMessageIds: () => [
+      ...windowVisibleMessageIds,
+      ...state.committedVisibleMessages.map(message => message.id),
+    ],
     character: decisionContext.characterSnapshot,
   });
   const pluginHost = state.options.pluginHost;
@@ -183,6 +201,7 @@ async function prepareRuntimeTurn(
     status: 'prepared',
     turn: {
       decisionContext,
+      conversationHistory,
       runtimePluginContext,
       pluginHost,
       beforeRoleModelCallResult,
@@ -201,7 +220,7 @@ async function runRuntimeModel(
   const roleModelDecisionContext = createDecisionContext({
     sessionId: prepared.decisionContext.sessionId,
     characterSnapshot: prepared.decisionContext.characterSnapshot,
-    recentVisibleMessages: prepared.decisionContext.recentVisibleMessages,
+    historyWindow: prepared.decisionContext.historyWindow,
     runtimeNotes: [
       createTodayRuntimeNote(
         state.event.createdAt,
@@ -226,6 +245,7 @@ async function runRuntimeModel(
       : {maxToolRounds: state.options.maxToolRounds}),
     pluginToolDefinitions: prepared.pluginHost.pluginToolDefinitions(),
     pluginToolHost: prepared.pluginHost,
+    conversationHistory: prepared.conversationHistory,
     preparedConfigEffectsByToolCallId: state.preparedConfigEffectsByToolCallId,
     runtimePluginContext: prepared.runtimePluginContext,
     ...(state.options.characterPersonaSections === undefined

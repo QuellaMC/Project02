@@ -2,8 +2,8 @@ import type {
   CharacterProfile,
   RuntimeEventIdentity,
   UserMessageRuntimeEvent,
-  VisibleMessage,
 } from '../../core/index.ts';
+
 import type {
   RuntimePluginContextItem,
   RuntimePluginCuratedContextSection,
@@ -76,8 +76,16 @@ export type RoleModelProviderExchangeSnapshot = {
 
 export const roleModelDecisionOutputContract = Object.freeze({
   version: roleModelDecisionContractVersion,
-  text: 'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, recentVisibleMessages, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A response may use as many visible_reply calls as it has messages to send; each commits as its own message, in the order listed. A terminal response may end with visible_reply calls, or may use top-level text only as folded model text with no visible final reply.',
+  text: 'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, historyWindow, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A response may use as many visible_reply calls as it has messages to send; each commits as its own message, in the order listed. A terminal response may end with visible_reply calls, or may use top-level text only as folded model text with no visible final reply.',
 } satisfies RoleModelOutputContract);
+
+/**
+ * What a model turn persists about its history: which turns were replayed,
+ * oldest first. The turns themselves are already durable in the session log.
+ */
+export type ConversationHistoryWindow = {
+  readonly turnEventIds: readonly string[];
+};
 
 /** A trusted per-turn note; the runtime authors it when no plugin id is set. */
 export type DecisionRuntimeNote = {
@@ -89,7 +97,8 @@ export type DecisionRuntimeNote = {
 export type DecisionContext = {
   readonly sessionId: string;
   readonly characterSnapshot: CharacterProfile;
-  readonly recentVisibleMessages: readonly VisibleMessage[];
+  /** The prior turns replayed to the model, by identity; bodies live in the log. */
+  readonly historyWindow: ConversationHistoryWindow;
   readonly runtimeNotes: readonly DecisionRuntimeNote[];
   readonly pluginContextItems: readonly RuntimePluginContextItem[];
   readonly curatedContextSections: readonly RuntimePluginCuratedContextSection[];
@@ -98,7 +107,7 @@ export type DecisionContext = {
 export type CreateDecisionContextOptions = {
   readonly sessionId: string;
   readonly characterSnapshot: CharacterProfile;
-  readonly recentVisibleMessages?: readonly VisibleMessage[];
+  readonly historyWindow?: ConversationHistoryWindow;
   readonly runtimeNotes?: readonly DecisionRuntimeNote[];
   readonly pluginContextItems?: readonly RuntimePluginContextItem[];
   readonly curatedContextSections?: readonly RuntimePluginCuratedContextSection[];

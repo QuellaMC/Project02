@@ -165,6 +165,13 @@ export function createNvidiaRoleModelProviderAdapter(
         requestBody,
         toolNameMappings,
         tools,
+        // History replays earlier tool results too; only this turn's belong here.
+        nativeToolResultMessages: turnContext.frames.flatMap(frame =>
+          frame.placement === 'own_message' &&
+          frame.kind === 'native_tool_result_message'
+            ? [sanitizeNvidiaMessage(frame.message, toolNameMappings)]
+            : [],
+        ),
       });
       const baseMetadata = createProviderMetadata({
         endpoint,
@@ -301,6 +308,7 @@ function createBaseNvidiaProviderExchange(options: {
   readonly requestBody: Readonly<Record<string, unknown>>;
   readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
   readonly tools: readonly NvidiaChatCompletionTool[];
+  readonly nativeToolResultMessages: readonly NvidiaChatCompletionMessage[];
 }): RoleModelProviderExchangeSnapshot {
   return createNvidiaProviderExchange({
     base: Object.freeze({
@@ -318,9 +326,9 @@ function createBaseNvidiaProviderExchange(options: {
       renderedTools: Object.freeze([...options.tools]),
       toolNameMappings: Object.freeze([...options.toolNameMappings]),
       requestBody: redactProviderBoundaryJson(options.requestBody),
-      nativeToolResultMessages: Object.freeze(
-        options.messages.filter(message => message.role === 'tool'),
-      ),
+      nativeToolResultMessages: Object.freeze([
+        ...options.nativeToolResultMessages,
+      ]),
     } satisfies RoleModelProviderExchangeSnapshot),
   });
 }

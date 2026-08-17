@@ -6,6 +6,7 @@ import type {
 } from './contracts.ts';
 import type {RoleModelAssistantChatMessage} from './chat-wire.ts';
 import type {RoleModelTurnContext} from '../prompt/render.ts';
+import type {ConversationTurn} from './conversation-history.ts';
 
 export type RoleModelAdapterRawOutput = {
   readonly rawOutputText: string;
@@ -25,6 +26,8 @@ export type RoleModelNativeToolCallArgumentError = {
 
 export type RoleModelAdapterInvocation = {
   readonly turnContext: RoleModelTurnContext;
+  /** The prior turns the window replays, structured; the wire form is in turnContext. */
+  readonly conversationHistory: readonly ConversationTurn[];
 };
 
 export type RoleModelAdapter = {

@@ -2,11 +2,13 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 
 import {
+  conversationTurnToChatMessages,
   createDecisionContext,
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
   defaultRoleModelProviderCapabilities,
   renderRoleModelTurnContext,
+  type ConversationTurn,
   type RoleModelPluginToolDefinition,
 } from '../../src/role-model/index.ts';
 import {
@@ -81,6 +83,84 @@ describe('role-model prompt rendering', () => {
     expect(content).toContain('-- What you know about them --');
     expect(content).toContain(' -- marker line stays data');
     expect(content).toContain('Prefers tea over coffee.');
+  });
+
+  it('replays the history window as conversation frames between the runtime notes and the user turn', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('and now?', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-history-frames',
+        characterSnapshot: testCharacterProfile,
+        runtimeNotes: [{id: 'today', text: 'Today is Monday, June 15, 2026.'}],
+        historyWindow: {turnEventIds: ['evt_prior']},
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const priorTurn: ConversationTurn = {
+      eventId: 'evt_prior',
+      traceId: 'trace_prior',
+      createdAt: '2026-06-15T00:00:00.000Z',
+      userMessage: {
+        id: 's:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'what plugins are available?',
+      },
+      toolRounds: [
+        {
+          round: 1,
+          interimReplies: [],
+          toolCalls: [
+            {
+              toolCallId: 'call-1',
+              pluginId: 'runtime',
+              toolName: 'runtime.plugin.list',
+              input: {},
+              result: {status: 'accepted', output: {plugins: []}},
+            },
+          ],
+        },
+      ],
+      finalReplies: [
+        {
+          id: 's:message-2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'Plugins are available.',
+        },
+      ],
+    };
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      conversationHistory: [priorTurn],
+    });
+    const kinds = turnContext.frames.map(frame => frame.kind);
+
+    expect(kinds).toEqual([
+      'system_protocol',
+      'developer_protocol',
+      'model_only_runtime_context',
+      'conversation_history',
+      'conversation_history',
+      'conversation_history',
+      'conversation_history',
+      'current_user_message',
+    ]);
+    expect(
+      turnContext.frames
+        .filter(frame => frame.kind === 'conversation_history')
+        .map(frame => [frame.role, frame.modelOnly]),
+    ).toEqual([
+      ['user', false],
+      ['assistant', false],
+      ['tool', true],
+      ['assistant', false],
+    ]);
+    expect(turnContext.messages.slice(3)).toEqual([
+      ...conversationTurnToChatMessages(priorTurn),
+      {role: 'user', content: 'and now?'},
+    ]);
   });
 
   it('omits the curated context frame when no sections exist', () => {

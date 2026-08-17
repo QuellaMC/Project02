@@ -314,35 +314,96 @@ describe('plugin-driven tool loop progress and evidence', () => {
 
     expect(firstTurn.status).toBe('completed');
 
-    let observedRecentTexts: readonly string[] = [];
+    const captureWire = () => {
+      const captured: {messages?: readonly RoleModelChatMessage[]} = {};
+
+      return {
+        captured,
+        adapter: Object.freeze({
+          invoke(_inputEnvelope, invocation) {
+            captured.messages ??= invocation.turnContext.messages;
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+              }),
+            };
+          },
+        } satisfies RoleModelAdapter),
+      };
+    };
+    const live = captureWire();
     const secondTurn = await runLocalUserMessageEvent({
       event: createTestEvent('and now?', 'evt_interim_context_second'),
       session,
       logStore,
-      roleModelAdapter: Object.freeze({
-        invoke(inputEnvelope) {
-          observedRecentTexts =
-            inputEnvelope.decisionContext.recentVisibleMessages.map(
-              message => message.text,
-            );
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {text: 'context noted'},
-                },
-              ],
-            }),
-          };
-        },
-      }),
+      roleModelAdapter: live.adapter,
     });
 
     expect(secondTurn.status).toBe('completed');
-    // Interim replies are prior conversation the model reads back; the current
-    // user message rides the event payload instead.
-    expect(observedRecentTexts).toEqual(['needs tool', 'checking', 'finished']);
+    // The prior turn replays natively: interim reply as assistant content
+    // beside the tool call, the tool result, then the final reply.
+    const replayed = (live.captured.messages ?? []).filter(
+      message =>
+        message.role === 'tool' ||
+        (message.role === 'assistant' && message.content !== 'noted') ||
+        (message.role === 'user' && !message.content.startsWith('and now?')),
+    );
+    expect(replayed).toEqual([
+      {role: 'user', content: 'needs tool'},
+      expect.objectContaining({
+        role: 'assistant',
+        content: 'checking',
+        tool_calls: [
+          expect.objectContaining({
+            type: 'function',
+            function: {
+              name: 'character_state.patch',
+              arguments: '{"energy":"high"}',
+            },
+          }),
+        ],
+      }),
+      expect.objectContaining({role: 'tool'}),
+      {role: 'assistant', content: 'finished'},
+    ]);
+    const toolCallId = (
+      replayed[1] as {tool_calls?: readonly {id: string}[]} | undefined
+    )?.tool_calls?.[0]?.id;
+    expect(replayed[2]).toMatchObject({tool_call_id: toolCallId});
+    expect(
+      String((replayed[2] as {content?: unknown} | undefined)?.content),
+    ).toContain('"toolName":"character_state.patch"');
+
+    // Reopened from the same log, the replayed prefix is byte-identical.
+    const reopened = captureWire();
+    const thirdTurn = await runLocalUserMessageEvent({
+      event: createTestEvent('still there?', 'evt_interim_context_third'),
+      session: createConversationSession({
+        id: session.id,
+        character: testCharacterProfile,
+        visibleTranscript: logStore
+          .readSessionEvidence()
+          .conversationMessages.map(message => ({
+            id: message.id,
+            role: message.role,
+            speakerId: message.speakerId,
+            speakerName: message.speakerName,
+            text: message.text,
+          })),
+      }),
+      logStore,
+      roleModelAdapter: reopened.adapter,
+    });
+
+    expect(thirdTurn.status).toBe('completed');
+    const historyOf = (messages: readonly RoleModelChatMessage[]) => {
+      const start = messages.findIndex(message => message.role === 'user');
+
+      return JSON.stringify(messages.slice(start, start + replayed.length));
+    };
+    expect(historyOf(reopened.captured.messages ?? [])).toBe(
+      historyOf(live.captured.messages ?? []),
+    );
   });
 
   it('keeps durable final visible_reply committed when progress callback fails', async () => {

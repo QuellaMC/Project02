@@ -1,4 +1,3 @@
-import type {VisibleMessage} from '../../core/index.ts';
 import type {
   RuntimePluginContextBudget,
   RuntimePluginContextItem,
@@ -10,7 +9,6 @@ import type {RoleModelInputEnvelope} from '../api/contracts.ts';
 import {visibleReplyModelToolName} from '../api/model-tools.ts';
 import {
   freezeRoleModelChatMessage,
-  type RoleModelAssistantChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,
   type RoleModelProviderCapabilities,
@@ -27,14 +25,16 @@ import {
   untrustedPluginContextFenceTag,
   untrustedPluginContextPreamble,
 } from './prompt-text.ts';
+import {conversationTurnToChatMessages} from './conversation-history-wire.ts';
 import {modelToolDefinitionToChatTool} from './tool-wire.ts';
+import type {ConversationTurn} from '../api/conversation-history.ts';
 
 type RoleModelPromptFrameKind =
   | 'system_protocol'
   | 'developer_protocol'
   | 'curated_context'
   | 'model_only_runtime_context'
-  | 'visible_transcript'
+  | 'conversation_history'
   | 'current_user_message'
   | 'recalled_memory'
   | 'untrusted_plugin_context'
@@ -101,6 +101,7 @@ export type RoleModelTurnContext = {
 type RenderRoleModelTurnContextOptions = {
   readonly additionalMessages?: readonly RoleModelChatMessage[];
   readonly capabilities?: RoleModelProviderCapabilities;
+  readonly conversationHistory?: readonly ConversationTurn[];
   readonly personaSections?: readonly string[];
   readonly userDisplayName?: string;
 };
@@ -136,6 +137,7 @@ export function renderRoleModelTurnContext(
   const frames = createRoleModelPromptFrames(inputEnvelope, {
     additionalMessages: options.additionalMessages ?? [],
     capabilities,
+    conversationHistory: options.conversationHistory ?? [],
     promptFragments,
     ...(options.personaSections === undefined
       ? {}
@@ -164,6 +166,7 @@ function createRoleModelPromptFrames(
   options: {
     readonly additionalMessages: readonly RoleModelChatMessage[];
     readonly capabilities: RoleModelProviderCapabilities;
+    readonly conversationHistory: readonly ConversationTurn[];
     readonly promptFragments: readonly RoleModelPromptFragment[];
     readonly personaSections?: readonly string[];
     readonly userDisplayName?: string;
@@ -234,13 +237,11 @@ function createRoleModelPromptFrames(
   }
 
   frames.push(
-    ...inputEnvelope.decisionContext.recentVisibleMessages.map(message =>
-      ownFrame(
-        'visible_transcript',
-        visibleMessageToChatMessage(message),
-        false,
+    ...options.conversationHistory
+      .flatMap(conversationTurnToChatMessages)
+      .map(message =>
+        ownFrame('conversation_history', message, message.role === 'tool'),
       ),
-    ),
     ownFrame(
       'current_user_message',
       Object.freeze({
@@ -358,22 +359,6 @@ function createSystemMessage(
     role: 'system',
     content: `${personaText}\n\n${systemProtocolTail({...addressee, characterName})}`,
   } satisfies RoleModelSystemChatMessage);
-}
-
-function visibleMessageToChatMessage(
-  message: VisibleMessage,
-): RoleModelUserChatMessage | RoleModelAssistantChatMessage {
-  if (message.role === 'user') {
-    return Object.freeze({
-      role: 'user',
-      content: message.text,
-    } satisfies RoleModelUserChatMessage);
-  }
-
-  return Object.freeze({
-    role: 'assistant',
-    content: message.text,
-  } satisfies RoleModelAssistantChatMessage);
 }
 
 const curatedContextSectionMarker = '--';

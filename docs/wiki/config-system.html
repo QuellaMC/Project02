@@ -40,7 +40,8 @@
     "character": "mira",
     "userDisplayName": "You",
     "defaultMemoryProvider": "memory.example",
-    "roleModelProvider": "local"
+    "roleModelProvider": "local",
+    "contextWindowTokens": 32768
   },
   "plugins": {
     "memory.example": {
@@ -56,7 +57,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, active character, user display name, selected memory provider, and default role-model provider.</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, active character, user display name, selected memory provider, default role-model provider, and the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit).</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
       </tbody>
     </table>

@@ -31,6 +31,8 @@ type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
 export const defaultProject02CharacterId = 'mira';
+/** A safe floor for small local models; a stopgap until providers report their own limit. */
+export const defaultProject02ContextWindowTokens = 32768;
 export const defaultProject02UserDisplayName = 'You';
 
 /** Trimmed here so no reader re-trims: a padded authored id is not missing. */
@@ -53,6 +55,7 @@ export type Project02HostConfig = Readonly<
   readonly userDisplayName?: string;
   readonly defaultMemoryProvider?: string;
   readonly roleModelProvider?: Project02RoleModelProvider;
+  readonly contextWindowTokens?: number;
 };
 
 export type Project02RuntimeConfig = {
@@ -175,6 +178,7 @@ export type ResolvedProject02RuntimeConfig = {
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
+    readonly contextWindowTokens: number;
   };
   readonly pluginConfigs: Readonly<Record<string, ResolvedPluginRuntimeConfig>>;
   readonly redactedPluginConfigs: Readonly<
@@ -193,6 +197,7 @@ export type RuntimeConfigInspectShape = {
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
+    readonly contextWindowTokens: number;
   };
   readonly diagnostics: readonly RuntimeConfigDiagnostic[];
   readonly fingerprint: string;

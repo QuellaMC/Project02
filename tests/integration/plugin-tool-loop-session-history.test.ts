@@ -129,8 +129,9 @@ describe('session history through the tool loop', () => {
 
     await writeDurableConversationSession({storeRoot, sessionId, exchanges});
 
-    // Restore the same transcript the store holds; the model window is its
-    // last 8 messages, so the wifi exchange sits beyond what the model sees.
+    // Restore the same transcript the store holds; with a 256-token context
+    // window the history budget (half of it) holds the five filler turns and
+    // not the wifi exchange, which sits beyond what the model sees.
     const session = createConversationSession({
       id: sessionId,
       character: testCharacterProfile,
@@ -197,6 +198,7 @@ describe('session history through the tool loop', () => {
       }),
       roleModelAdapter: adapter,
       pluginHost,
+      contextWindowTokens: 256,
     });
 
     expect(result.status).toBe('completed');

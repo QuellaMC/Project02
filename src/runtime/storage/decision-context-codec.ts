@@ -1,5 +1,6 @@
 import {
   createDecisionContext,
+  type ConversationHistoryWindow,
   type DecisionContext,
   type DecisionRuntimeNote,
 } from '../../role-model/index.ts';
@@ -9,10 +10,10 @@ import {
   type RuntimePluginContextItem,
   type RuntimePluginCuratedContextSection,
 } from '../../plugins/api/index.ts';
-import type {CharacterProfile, VisibleMessage} from '../../core/index.ts';
+import type {CharacterProfile} from '../../core/index.ts';
 import {
   requiredArray,
-  requiredVisibleMessage,
+  requiredStringArray,
   throwMalformedRecord,
 } from './codec-primitives.ts';
 import {isRecord, requiredRecordString} from './layout-contract.ts';
@@ -25,10 +26,7 @@ export function requiredDecisionContext(value: unknown): DecisionContext {
   return createDecisionContext({
     sessionId: requiredRecordString(value, 'sessionId', 'malformed_record'),
     characterSnapshot: requiredCharacterProfile(value['characterSnapshot']),
-    recentVisibleMessages: requiredVisibleMessages(
-      value['recentVisibleMessages'],
-      'recentVisibleMessages',
-    ),
+    historyWindow: optionalConversationHistoryWindow(value['historyWindow']),
     runtimeNotes: requiredDecisionRuntimeNotes(value['runtimeNotes']),
     pluginContextItems: optionalRuntimePluginContextItems(
       value['pluginContextItems'],
@@ -74,17 +72,21 @@ function requiredCharacterProfile(value: unknown): CharacterProfile {
   } satisfies CharacterProfile);
 }
 
-function requiredVisibleMessages(
+/** Optional so records written before the window existed decode unchanged. */
+function optionalConversationHistoryWindow(
   value: unknown,
-  key: string,
-): readonly VisibleMessage[] {
-  const messages: VisibleMessage[] = [];
-
-  for (const item of requiredArray(value, key)) {
-    messages.push(requiredVisibleMessage(item, 'recentVisibleMessages'));
+): ConversationHistoryWindow {
+  if (value === undefined) {
+    return Object.freeze({turnEventIds: Object.freeze([])});
   }
 
-  return Object.freeze(messages);
+  if (!isRecord(value)) {
+    throwMalformedRecord('historyWindow');
+  }
+
+  return Object.freeze({
+    turnEventIds: requiredStringArray(value['turnEventIds'], 'turnEventIds'),
+  });
 }
 
 function optionalRuntimePluginContextItems(
