@@ -1,5 +1,6 @@
 import {
   assertCanonicalRuntimeTimestamp,
+  freezeCharacterProfile,
   type CharacterProfile,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
@@ -53,9 +54,7 @@ export function createDecisionContext(
 ): DecisionContext {
   return Object.freeze({
     sessionId: options.sessionId,
-    characterSnapshot: freezeCharacterProfileSnapshot(
-      options.characterSnapshot,
-    ),
+    characterSnapshot: freezeCharacterProfile(options.characterSnapshot),
     historyWindow: freezeConversationHistoryWindow(
       options.historyWindow ?? {turnEventIds: []},
     ),
@@ -253,15 +252,6 @@ function freezeUserMessageRuntimeEventSnapshot(
       currentUserMessage: event.payload.currentUserMessage,
     }),
   } satisfies UserMessageRuntimeEvent);
-}
-
-function freezeCharacterProfileSnapshot(
-  character: CharacterProfile,
-): CharacterProfile {
-  return Object.freeze({
-    id: character.id,
-    displayName: character.displayName,
-  } satisfies CharacterProfile);
 }
 
 function requiredContextSummary(value: string): string {
