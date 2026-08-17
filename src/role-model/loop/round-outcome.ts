@@ -5,13 +5,12 @@ import {
   type ParsedRoleModelDecisionSnapshot,
   type RejectedRoleModelDecisionResult,
   type RoleModelDecisionRejection,
+  type ConversationToolRound,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
-  type RoleModelToolObservation,
 } from '../api/contracts.ts';
 import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
 import {type ModelToolCall} from '../api/model-tools.ts';
-import {type RoleModelChatMessage} from '../api/chat-wire.ts';
 import {unusableReplyNote} from '../prompt/prompt-text.ts';
 import {visibleReplyToolCalls} from './decision-parser.ts';
 import {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
@@ -52,9 +51,10 @@ export type RoleModelLoopResult =
 export type RoleModelLoopState = {
   readonly rounds: RoleModelLoopRound[];
   readonly allPluginToolResults: RoleModelPluginToolRoutingEvidence[];
-  toolRounds: number;
-  toolObservations: readonly RoleModelToolObservation[];
-  nativeAdditionalMessages: readonly RoleModelChatMessage[];
+  /** Executable rounds spent so far, against maxToolRounds. */
+  spentRounds: number;
+  /** This turn's finished tool rounds: the model sees them on its next round. */
+  toolRounds: readonly ConversationToolRound[];
   /** What the runtime could not use of the last reply; shown to the model once, on its next round. */
   unusableReplyNote: string | undefined;
 };
@@ -149,7 +149,7 @@ export function settleRejectedRound(options: {
 
   const rejection = invokedRound.decisionResult.rejection;
 
-  if (!invokedRound.modelOutput || state.toolRounds >= options.maxToolRounds) {
+  if (!invokedRound.modelOutput || state.spentRounds >= options.maxToolRounds) {
     return createRejectedRoleModelLoopResult({
       pluginToolResults: state.allPluginToolResults,
       inputEnvelope: invokedRound.inputEnvelope,
@@ -163,7 +163,7 @@ export function settleRejectedRound(options: {
   state.unusableReplyNote = unusableReplyNote(
     rejection.details ?? rejection.reason,
   );
-  state.toolRounds += 1;
+  state.spentRounds += 1;
 
   return 'continue';
 }
@@ -184,7 +184,7 @@ export function terminalRoleModelLoopResult(options: {
     return terminalAcceptedRoleModelLoopResult(options);
   }
 
-  if (options.state.toolRounds < options.maxToolRounds) {
+  if (options.state.spentRounds < options.maxToolRounds) {
     return undefined;
   }
 

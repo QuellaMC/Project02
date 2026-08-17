@@ -2,10 +2,12 @@ import {createDeterministicLocalRoleModelAdapter} from '../providers/local.ts';
 import {
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
+  type VisibleMessage,
 } from '../../core/index.ts';
 import {
   type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
+  type ConversationToolCall,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
@@ -13,14 +15,12 @@ import {
   type RoleModelCharacterRef,
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
-  type RoleModelToolObservation,
 } from '../api/contracts.ts';
 import {
   assertRoleModelCharacterRefMatchesCharacter,
   createParsedRoleModelDecisionSnapshot,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
-  createRoleModelToolObservation,
 } from '../api/decision.ts';
 import {
   executableModelToolCalls,
@@ -42,19 +42,13 @@ import {
 } from './routing-rejections.ts';
 import type {RoleModelAdapter} from '../api/adapter.ts';
 import {type ModelToolCall} from '../api/model-tools.ts';
-import {
-  freezeRoleModelChatMessage,
-  type RoleModelAssistantChatMessage,
-  type RoleModelProviderToolNameMapping,
-} from '../api/chat-wire.ts';
 import {measureRoleModelPromptSize} from '../prompt/prompt-size.ts';
 import {renderRoleModelTurnContext} from '../prompt/render.ts';
 import {
   assertConversationHistoryMatchesWindow,
+  createConversationToolRound,
   type ConversationTurn,
 } from '../api/conversation-history.ts';
-import {appendNativeToolRoundMessages} from './native-round-messages.ts';
-import {nativeAssistantMessageForAcceptedDecision} from './native-assistant-message.ts';
 import {
   createRuntimePluginToolCallResultSnapshot,
   type RuntimePluginToolCall,
@@ -83,11 +77,12 @@ export type RunRoleModelLoopOptions = {
   /**
    * Fires for interim and terminal replies alike; required because an
    * undelivered reply is user-facing text lost. A rejected round delivers
-   * nothing.
+   * nothing. Returns the message as committed: a tool round replays to the
+   * model what the person was told.
    */
   readonly onVisibleReply: (
     event: RoleModelVisibleReplyEvent,
-  ) => Promise<void> | void;
+  ) => Promise<VisibleMessage> | VisibleMessage;
   readonly runtimePluginContext: RuntimePluginContext;
   readonly personaSections?: readonly string[];
   /** The person's name, when configured; the prompt then addresses them by it. */
@@ -183,9 +178,8 @@ export async function runRoleModelLoop(
   const state: RoleModelLoopState = {
     rounds: [],
     allPluginToolResults: [],
-    toolRounds: 0,
-    toolObservations: Object.freeze([]),
-    nativeAdditionalMessages: Object.freeze([]),
+    spentRounds: 0,
+    toolRounds: Object.freeze([]),
     unusableReplyNote: undefined,
   };
 
@@ -237,18 +231,17 @@ export async function runRoleModelLoop(
       return terminalResult;
     }
 
-    const pluginToolResults = await routeRoleModelLoopToolCalls({
+    const routed = await routeRoleModelLoopToolCalls({
       options,
       identity,
       invokedRound,
       round,
-      toolObservations: state.toolObservations,
     });
 
     recordRoleModelLoopToolRound({
       state,
       invokedRound,
-      pluginToolResults,
+      ...routed,
       round,
     });
   }
@@ -261,16 +254,22 @@ async function deliverVisibleReply(delivery: {
   readonly inputEnvelope: RoleModelInputEnvelope;
   readonly ioSnapshot: RoleModelIOSnapshot;
   readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-}): Promise<void> {
+}): Promise<readonly VisibleMessage[]> {
+  const committed: VisibleMessage[] = [];
+
   for (const text of executionVisibleReplyTexts(delivery.decision)) {
-    await delivery.options.onVisibleReply({
-      round: delivery.round,
-      text,
-      inputEnvelope: delivery.inputEnvelope,
-      ioSnapshot: delivery.ioSnapshot,
-      parsedDecisionSnapshot: delivery.parsedDecisionSnapshot,
-    });
+    committed.push(
+      await delivery.options.onVisibleReply({
+        round: delivery.round,
+        text,
+        inputEnvelope: delivery.inputEnvelope,
+        ioSnapshot: delivery.ioSnapshot,
+        parsedDecisionSnapshot: delivery.parsedDecisionSnapshot,
+      }),
+    );
   }
+
+  return Object.freeze(committed);
 }
 
 type InvokedRoleModelLoopRoundBase = {
@@ -289,8 +288,6 @@ type InvokedRoleModelLoopRound =
       readonly status: 'accepted';
       readonly decisionResult: AcceptedRoleModelDecisionResult;
       readonly executableToolCalls: readonly ModelToolCall[];
-      readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
-      readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
     });
 
 async function invokeRoleModelLoopRound(options: {
@@ -305,7 +302,7 @@ async function invokeRoleModelLoopRound(options: {
     event: options.options.event,
     decisionContext: options.options.decisionContext,
     pluginToolDefinitions: options.options.pluginToolDefinitions,
-    toolObservations: options.state.toolObservations,
+    toolRounds: options.state.toolRounds,
   });
   const conversationHistory = options.options.conversationHistory ?? [];
   // The note about an unusable reply rides exactly one round: the one the
@@ -314,16 +311,7 @@ async function invokeRoleModelLoopRound(options: {
 
   options.state.unusableReplyNote = undefined;
   const turnContext = renderRoleModelTurnContext(inputEnvelope, {
-    additionalMessages:
-      unusableReplyNote === undefined
-        ? options.state.nativeAdditionalMessages
-        : [
-            ...options.state.nativeAdditionalMessages,
-            freezeRoleModelChatMessage({
-              role: 'system',
-              content: unusableReplyNote,
-            }),
-          ],
+    ...(unusableReplyNote === undefined ? {} : {unusableReplyNote}),
     conversationHistory,
     ...(options.options.personaSections === undefined
       ? {}
@@ -372,17 +360,6 @@ async function invokeRoleModelLoopRound(options: {
     };
   }
 
-  const toolNameMappings =
-    rawOutputValidation.providerExchange?.toolNameMappings ?? [];
-  const nativeAssistantMessage = nativeAssistantMessageForAcceptedDecision({
-    assistantMessage:
-      rawOutputValidation.status === 'accepted'
-        ? rawOutputValidation.nativeAssistantMessage
-        : undefined,
-    decision: decisionResult.decision,
-    toolNameMappings,
-  });
-
   return {
     status: 'accepted',
     decisionResult,
@@ -392,8 +369,6 @@ async function invokeRoleModelLoopRound(options: {
     executableToolCalls: executableModelToolCalls(
       decisionResult.decision.toolCalls,
     ),
-    ...(nativeAssistantMessage === undefined ? {} : {nativeAssistantMessage}),
-    toolNameMappings,
   };
 }
 
@@ -405,9 +380,11 @@ async function routeRoleModelLoopToolCalls(options: {
     {status: 'accepted'}
   >;
   readonly round: number;
-  readonly toolObservations: readonly RoleModelToolObservation[];
-}): Promise<readonly RoleModelPluginToolRoutingEvidence[]> {
-  await deliverVisibleReply({
+}): Promise<{
+  readonly interimReplies: readonly VisibleMessage[];
+  readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
+}> {
+  const interimReplies = await deliverVisibleReply({
     options: options.options,
     round: options.round,
     decision: options.invokedRound.decisionResult.decision,
@@ -421,14 +398,13 @@ async function routeRoleModelLoopToolCalls(options: {
     toolNames: options.invokedRound.executableToolCalls.map(call => call.name),
   });
 
-  return await routeExecutableToolCalls({
+  const pluginToolResults = await routeExecutableToolCalls({
     toolCalls: options.invokedRound.executableToolCalls,
     identity: options.identity,
     inputEnvelope: options.invokedRound.inputEnvelope,
     ioSnapshot: options.invokedRound.ioSnapshot,
     parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
     round: options.round,
-    priorToolObservations: options.toolObservations,
     ...(options.options.onPluginToolCallStarted === undefined
       ? {}
       : {onPluginToolCallStarted: options.options.onPluginToolCallStarted}),
@@ -438,6 +414,8 @@ async function routeRoleModelLoopToolCalls(options: {
     pluginToolHost: options.options.pluginToolHost,
     runtimePluginContext: options.options.runtimePluginContext,
   });
+
+  return {interimReplies, pluginToolResults};
 }
 
 function recordRoleModelLoopToolRound(options: {
@@ -446,9 +424,12 @@ function recordRoleModelLoopToolRound(options: {
     InvokedRoleModelLoopRound,
     {status: 'accepted'}
   >;
+  readonly interimReplies: readonly VisibleMessage[];
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly round: number;
 }): void {
+  const {decision} = options.invokedRound.decisionResult;
+
   options.state.allPluginToolResults.push(...options.pluginToolResults);
   options.state.rounds.push(
     createRoleModelLoopRound({
@@ -459,18 +440,15 @@ function recordRoleModelLoopToolRound(options: {
       round: options.round,
     }),
   );
-  options.state.nativeAdditionalMessages = appendNativeToolRoundMessages({
-    assistantMessage: options.invokedRound.nativeAssistantMessage,
-    previousMessages: options.state.nativeAdditionalMessages,
-    results: options.pluginToolResults,
-    toolNameMappings: options.invokedRound.toolNameMappings,
-  });
-  options.state.toolRounds += 1;
-  options.state.toolObservations = Object.freeze([
-    ...options.state.toolObservations,
-    ...options.pluginToolResults.map(routing =>
-      createToolObservationFromRouting({round: options.round, routing}),
-    ),
+  options.state.spentRounds += 1;
+  options.state.toolRounds = Object.freeze([
+    ...options.state.toolRounds,
+    createConversationToolRound({
+      round: options.round,
+      ...(decision.text === undefined ? {} : {text: decision.text}),
+      interimReplies: options.interimReplies,
+      toolCalls: options.pluginToolResults.map(conversationToolCallFromRouting),
+    }),
   ]);
 }
 
@@ -484,29 +462,23 @@ function normalizeMaxToolRounds(value: number | undefined): number {
   return maxToolRounds;
 }
 
-function createToolObservationFromRouting(options: {
-  readonly round: number;
-  readonly routing: RoleModelPluginToolRoutingEvidence;
-}): RoleModelToolObservation {
-  const result =
-    options.routing.result.status === 'accepted'
-      ? ({
-          status: 'accepted',
-          output: options.routing.result.output,
-        } as const)
-      : ({
-          status: 'rejected',
-          reason: options.routing.result.reason,
-          message: options.routing.result.message,
-        } as const);
-
-  return createRoleModelToolObservation({
-    round: options.round,
-    pluginId: options.routing.call.pluginId,
-    toolName: options.routing.call.toolName,
-    input: options.routing.call.input,
-    result,
-  });
+function conversationToolCallFromRouting(
+  routing: RoleModelPluginToolRoutingEvidence,
+): ConversationToolCall {
+  return {
+    toolCallId: routing.callId,
+    pluginId: routing.call.pluginId,
+    toolName: routing.call.toolName,
+    input: routing.call.input,
+    result:
+      routing.result.status === 'accepted'
+        ? {status: 'accepted', output: routing.result.output}
+        : {
+            status: 'rejected',
+            reason: routing.result.reason,
+            message: routing.result.message,
+          },
+  };
 }
 
 async function routeExecutableToolCalls(options: {
@@ -524,7 +496,6 @@ async function routeExecutableToolCalls(options: {
     event: RoleModelPluginToolCallCompletedEvent,
   ) => Promise<void> | void;
   readonly runtimePluginContext: RuntimePluginContext;
-  readonly priorToolObservations: readonly RoleModelToolObservation[];
 }): Promise<readonly RoleModelPluginToolRoutingEvidence[]> {
   // Admission runs in call order: tool_call_started records must land in
   // the order the model asked so the terminal event's toolCallIds match.

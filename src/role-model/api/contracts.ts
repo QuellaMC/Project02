@@ -2,11 +2,13 @@ import type {
   CharacterProfile,
   RuntimeEventIdentity,
   UserMessageRuntimeEvent,
+  VisibleMessage,
 } from '../../core/index.ts';
 
 import type {
   RuntimePluginContextItem,
   RuntimePluginCuratedContextSection,
+  RuntimePluginJsonObject,
   RuntimePluginJsonValue,
   RuntimePluginProvidedTool,
 } from '../../plugins/api/index.ts';
@@ -67,13 +69,13 @@ export type RoleModelProviderExchangeSnapshot = {
   readonly requestBody: RuntimePluginJsonValue;
   readonly finishReason?: string;
   readonly usage?: RuntimePluginJsonValue;
+  /** The response message as the provider returned it; the runtime replays its own rendering. */
   readonly nativeAssistantMessage?: RoleModelChatMessage;
-  readonly nativeToolResultMessages: readonly RoleModelChatMessage[];
 };
 
 export const roleModelDecisionOutputContract = Object.freeze({
   version: roleModelDecisionContractVersion,
-  text: 'Return exactly one complete valid JSON CharacterDecision object. The only top-level fields are "toolCalls" (required, non-empty, in order) and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, historyWindow, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is how you speak: each visible_reply commits as its own message, in the order listed; any other tool call is executed and fed back as a tool observation; a visible_reply alongside executable calls is interim output, and the turn ends on a response whose calls are all visible_reply. A response must reply or call a tool. "text" is your own note next to your calls: it is kept with the decision and shown to you again, never to the person.',
+  text: 'Return exactly one complete valid JSON CharacterDecision object. The only top-level fields are "toolCalls" (required, non-empty, in order) and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, historyWindow, toolRounds, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is how you speak: each visible_reply commits as its own message, in the order listed; any other tool call is executed and fed back as a tool observation; a visible_reply alongside executable calls is interim output, and the turn ends on a response whose calls are all visible_reply. A response must reply or call a tool. "text" is your own note next to your calls: it is kept with the decision and shown to you again, never to the person.',
 } satisfies RoleModelOutputContract);
 
 /**
@@ -119,7 +121,8 @@ export type RoleModelInputEnvelope = {
   readonly allowedTools: readonly RoleModelAllowedToolName[];
   readonly toolDefinitions: readonly RoleModelToolDefinition[];
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
-  readonly toolObservations: readonly RoleModelToolObservation[];
+  /** This turn's finished tool rounds so far, rendered to the model after its message. */
+  readonly toolRounds: readonly ConversationToolRound[];
   readonly outputContract: RoleModelOutputContract;
 };
 
@@ -127,19 +130,11 @@ export type CreateRoleModelInputEnvelopeOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
-  readonly toolObservations?: readonly RoleModelToolObservation[];
+  readonly toolRounds?: readonly ConversationToolRound[];
   readonly outputContract?: RoleModelOutputContract;
 };
 
-export type RoleModelToolObservation = {
-  readonly round: number;
-  readonly pluginId: string;
-  readonly toolName: string;
-  readonly input: Readonly<Record<string, RuntimePluginJsonValue>>;
-  readonly result: RoleModelToolObservationResult;
-};
-
-export type RoleModelToolObservationResult =
+export type ConversationToolCallResult =
   | {
       readonly status: 'accepted';
       readonly output: RuntimePluginJsonValue;
@@ -149,6 +144,39 @@ export type RoleModelToolObservationResult =
       readonly reason: string;
       readonly message: string;
     };
+
+/** One completed tool call of a round: what the model asked and what came back. */
+export type ConversationToolCall = {
+  readonly toolCallId: string;
+  readonly pluginId: string;
+  readonly toolName: string;
+  readonly input: RuntimePluginJsonObject;
+  readonly result: ConversationToolCallResult;
+};
+
+/**
+ * One executable round, of this turn or a prior one — the one shape the
+ * model is shown a tool round in.
+ */
+export type ConversationToolRound = {
+  readonly round: number;
+  /** What the model wrote besides its calls this round, when it wrote anything. */
+  readonly text?: string;
+  /** visible_reply texts the model committed in this round, commit order. */
+  readonly interimReplies: readonly VisibleMessage[];
+  readonly toolCalls: readonly ConversationToolCall[];
+};
+
+/**
+ * A completed turn as the model replays it: the person's message, every tool
+ * round with its results, then the character's final replies. Turn identity
+ * is the runtime event that opened it.
+ */
+export type ConversationTurn = RuntimeEventIdentity & {
+  readonly userMessage: VisibleMessage;
+  readonly toolRounds: readonly ConversationToolRound[];
+  readonly finalReplies: readonly VisibleMessage[];
+};
 
 export type CharacterDecision = {
   readonly version: typeof roleModelDecisionContractVersion;

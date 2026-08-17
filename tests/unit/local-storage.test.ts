@@ -22,8 +22,8 @@ describe('local storage plugin schema', () => {
     expect(requiresCharacter).toBe(true);
   });
 
-  it('uses scoped schema version 10 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(10);
+  it('uses scoped schema version 11 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(11);
     expect(
       createLocalRuntimeSessionPaths({storeRoot: 'store'}),
     ).not.toHaveProperty('characterStatePath');

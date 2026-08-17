@@ -1,13 +1,4 @@
 import type {RuntimeEventIdentity} from '../../core/index.ts';
-import type {
-  ConversationToolCall,
-  ConversationToolRound,
-  ConversationTurn,
-} from '../../role-model/index.ts';
-import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-} from '../../shared/json-boundary.ts';
 import {
   createSessionContinuationSnapshot,
   type ContextSummarizer,
@@ -18,9 +9,9 @@ import {
   optionalRecordString,
   requiredArray,
   requiredRuntimeEventIdentity,
-  requiredVisibleMessage,
   throwMalformedRecord,
 } from './codec-primitives.ts';
+import {requiredConversationTurn} from './conversation-turn-codec.ts';
 import {isRecord, requiredRecordString} from './layout-contract.ts';
 
 export function optionalSessionContinuationOption(value: unknown): {
@@ -131,86 +122,4 @@ function requiredContextSummarizer(value: unknown): ContextSummarizer {
       ...(model === undefined ? {} : {model}),
     },
   };
-}
-
-function requiredConversationTurn(value: unknown): ConversationTurn {
-  if (!isRecord(value)) {
-    throwMalformedRecord('carriedTurns');
-  }
-
-  return Object.freeze({
-    ...requiredRuntimeEventIdentity(value),
-    userMessage: requiredVisibleMessage(value['userMessage'], 'userMessage'),
-    toolRounds: Object.freeze(
-      requiredArray(value['toolRounds'], 'toolRounds').map(
-        requiredConversationToolRound,
-      ),
-    ),
-    finalReplies: Object.freeze(
-      requiredArray(value['finalReplies'], 'finalReplies').map(reply =>
-        requiredVisibleMessage(reply, 'finalReplies'),
-      ),
-    ),
-  } satisfies ConversationTurn);
-}
-
-function requiredConversationToolRound(value: unknown): ConversationToolRound {
-  if (!isRecord(value) || typeof value['round'] !== 'number') {
-    throwMalformedRecord('toolRounds');
-  }
-
-  return Object.freeze({
-    round: value['round'],
-    interimReplies: Object.freeze(
-      requiredArray(value['interimReplies'], 'interimReplies').map(reply =>
-        requiredVisibleMessage(reply, 'interimReplies'),
-      ),
-    ),
-    toolCalls: Object.freeze(
-      requiredArray(value['toolCalls'], 'toolCalls').map(
-        requiredConversationToolCall,
-      ),
-    ),
-  } satisfies ConversationToolRound);
-}
-
-function requiredConversationToolCall(value: unknown): ConversationToolCall {
-  if (!isRecord(value) || !isRecord(value['result'])) {
-    throwMalformedRecord('toolCalls');
-  }
-
-  const result = value['result'];
-  const status = result['status'];
-
-  return Object.freeze({
-    toolCallId: requiredRecordString(value, 'toolCallId', 'malformed_record'),
-    pluginId: requiredRecordString(value, 'pluginId', 'malformed_record'),
-    toolName: requiredRecordString(value, 'toolName', 'malformed_record'),
-    input: createJsonBoundaryObjectSnapshot(value['input'], {
-      field: 'Carried tool call input',
-    }),
-    result:
-      status === 'accepted'
-        ? Object.freeze({
-            status,
-            output: createJsonBoundarySnapshot(result['output'], {
-              field: 'Carried tool call output',
-            }),
-          })
-        : status === 'rejected'
-          ? Object.freeze({
-              status,
-              reason: requiredRecordString(
-                result,
-                'reason',
-                'malformed_record',
-              ),
-              message: requiredRecordString(
-                result,
-                'message',
-                'malformed_record',
-              ),
-            })
-          : throwMalformedRecord('toolCalls.result'),
-  } satisfies ConversationToolCall);
 }

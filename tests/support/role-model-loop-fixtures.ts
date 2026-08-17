@@ -20,6 +20,7 @@ import {runtimePluginContractVersion} from '../../src/plugins/api/contract.ts';
 import {
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
+  type VisibleMessage,
 } from '../../src/core/index.ts';
 
 export const memorySearchToolDefinition = Object.freeze({
@@ -42,13 +43,6 @@ export const memoryRecallToolDefinition = Object.freeze({
   ...memorySearchToolDefinition,
   name: 'memory.recall',
   description: 'Recall memory.',
-} satisfies RoleModelPluginToolDefinition);
-
-export const visibleDotReplyToolDefinition = Object.freeze({
-  ...memorySearchToolDefinition,
-  pluginId: 'visible.reply.fixture',
-  name: 'visible.reply',
-  description: 'Exercise a provider-name collision with visible_reply.',
 } satisfies RoleModelPluginToolDefinition);
 
 export function toolWithConcurrency(
@@ -166,6 +160,29 @@ export function createProviderMetadataAdapter(
       };
     },
   } satisfies RoleModelAdapter);
+}
+
+/**
+ * A reply sink standing in for the runtime's commit: it hands the loop the
+ * message as committed, so tool rounds can replay what the person was told.
+ */
+export function testVisibleReplySink(
+  onReply?: (text: string) => void,
+): (event: {readonly text: string}) => VisibleMessage {
+  let count = 0;
+
+  return event => {
+    count += 1;
+    onReply?.(event.text);
+
+    return Object.freeze({
+      id: `session-loop:message-${String(count)}`,
+      role: 'character',
+      speakerId: testCharacterProfile.id,
+      speakerName: testCharacterProfile.displayName,
+      text: event.text,
+    } satisfies VisibleMessage);
+  };
 }
 
 /** A host that accepts every call: for turns whose tools are not the subject. */

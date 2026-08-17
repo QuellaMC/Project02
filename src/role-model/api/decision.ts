@@ -20,14 +20,11 @@ import {
 import {freezeRoleModelPromptSize} from './prompt-size.ts';
 import {requiredRoleModelIdentifier} from './tool-names.ts';
 import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-} from '../../shared/json-boundary.ts';
-import {
   freezeProviderMetadata,
   freezeRoleModelProviderExchangeSnapshot,
 } from './provider-exchange.ts';
 import {createRoleModelPluginToolDefinitions} from './plugin-tool-definitions.ts';
+import {createConversationToolRound} from './conversation-history.ts';
 import {
   roleModelDecisionContractVersion,
   roleModelDecisionOutputContract,
@@ -49,8 +46,6 @@ import {
   type RoleModelInputEnvelope,
   type RoleModelIOSnapshot,
   type RoleModelOutputContract,
-  type RoleModelToolObservation,
-  type RoleModelToolObservationResult,
 } from './contracts.ts';
 
 export function createDecisionContext(
@@ -101,19 +96,13 @@ export function createRoleModelInputEnvelope(
     ),
     toolDefinitions,
     pluginToolDefinitions,
-    toolObservations: freezeRoleModelToolObservations(
-      options.toolObservations ?? [],
+    toolRounds: Object.freeze(
+      (options.toolRounds ?? []).map(createConversationToolRound),
     ),
     outputContract: freezeRoleModelOutputContract(
       options.outputContract ?? roleModelDecisionOutputContract,
     ),
   } satisfies RoleModelInputEnvelope);
-}
-
-export function createRoleModelToolObservation(
-  observation: RoleModelToolObservation,
-): RoleModelToolObservation {
-  return freezeRoleModelToolObservation(observation);
 }
 
 export function createCharacterDecision(
@@ -341,59 +330,6 @@ function freezeRoleModelOutputContract(
     version: outputContract.version,
     text: outputContract.text,
   } satisfies RoleModelOutputContract);
-}
-
-function freezeRoleModelToolObservations(
-  observations: readonly RoleModelToolObservation[],
-): readonly RoleModelToolObservation[] {
-  return Object.freeze(observations.map(freezeRoleModelToolObservation));
-}
-
-function freezeRoleModelToolObservation(
-  observation: RoleModelToolObservation,
-): RoleModelToolObservation {
-  if (!Number.isInteger(observation.round) || observation.round < 1) {
-    throw new TypeError(
-      'Role-model tool observation round must be a positive integer.',
-    );
-  }
-
-  return Object.freeze({
-    round: observation.round,
-    pluginId: requiredRoleModelIdentifier(
-      observation.pluginId,
-      'tool observation pluginId',
-    ),
-    toolName: requiredRoleModelIdentifier(
-      observation.toolName,
-      'tool observation toolName',
-    ),
-    input: createJsonBoundaryObjectSnapshot(observation.input, {
-      field: 'Role-model tool observation input',
-      redact: true,
-    }),
-    result: freezeRoleModelToolObservationResult(observation.result),
-  } satisfies RoleModelToolObservation);
-}
-
-function freezeRoleModelToolObservationResult(
-  result: RoleModelToolObservationResult,
-): RoleModelToolObservationResult {
-  if (result.status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      output: createJsonBoundarySnapshot(result.output, {
-        field: 'Role-model tool observation output',
-        redact: true,
-      }),
-    } satisfies RoleModelToolObservationResult);
-  }
-
-  return Object.freeze({
-    status: 'rejected',
-    reason: result.reason,
-    message: result.message,
-  } satisfies RoleModelToolObservationResult);
 }
 
 function freezeCharacterDecision(

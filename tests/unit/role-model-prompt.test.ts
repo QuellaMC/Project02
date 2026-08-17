@@ -248,6 +248,24 @@ describe('role-model prompt rendering', () => {
         ],
       }),
       pluginToolDefinitions: [],
+      // This turn's own round so far: the model's text and call, and the
+      // tool's result, on the same wire history rounds travel.
+      toolRounds: [
+        {
+          round: 1,
+          text: 'checking',
+          interimReplies: [],
+          toolCalls: [
+            {
+              toolCallId: 'call-1',
+              pluginId: 'runtime',
+              toolName: 'runtime.plugin.list',
+              input: {},
+              result: {status: 'accepted', output: {ok: true}},
+            },
+          ],
+        },
+      ],
     });
     const priorTurn: ConversationTurn = {
       eventId: 'evt_prior',
@@ -273,13 +291,7 @@ describe('role-model prompt rendering', () => {
     };
     const turnContext = renderRoleModelTurnContext(inputEnvelope, {
       conversationHistory: [priorTurn],
-      // This turn's own rounds so far: the model's message, a tool result,
-      // and a note the runtime put between them — three kinds, not one.
-      additionalMessages: [
-        {role: 'assistant', content: 'checking'},
-        {role: 'tool', tool_call_id: 'call-1', content: '{"ok":true}'},
-        {role: 'system', content: 'Your last reply could not be used.'},
-      ],
+      unusableReplyNote: 'Your last reply could not be used.',
     });
     const size = measureRoleModelPromptSize(turnContext);
     const wireChars = turnContext.messages.reduce(
@@ -297,9 +309,9 @@ describe('role-model prompt rendering', () => {
       ['conversation_history', 2],
       ['current_user_message', 1],
       ['recalled_memory', 1],
-      ['native_assistant_message', 1],
-      ['native_tool_result_message', 1],
-      ['native_system_message', 1],
+      ['tool_round_assistant_message', 1],
+      ['tool_round_result_message', 1],
+      ['unusable_reply_note', 1],
     ]);
     // Frames sum to the wire: a suffix frame is charged exactly the bytes it
     // adds to the serialized user message, separator and escaping included.

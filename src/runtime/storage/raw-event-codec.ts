@@ -10,7 +10,6 @@ import {
   createParsedRoleModelDecisionSnapshot,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
-  createRoleModelToolObservation,
   freezeRoleModelPromptSize,
   visibleReplyToolCalls,
   isRoleModelRawOutputReplayableDecisionEvidence,
@@ -28,7 +27,6 @@ import {
   type RoleModelOutputContract,
   type RoleModelPromptSize,
   type RoleModelProviderExchangeSnapshot,
-  type RoleModelToolObservation,
 } from '../../role-model/index.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
@@ -71,15 +69,14 @@ import {
   optionalStringArray,
   requiredArray,
   requiredBoundedJsonObject,
-  requiredBoundedJsonValue,
   requiredLiteralString,
-  requiredRecordNumber,
   requiredRecordStringAllowingEmpty,
   requiredRuntimeEventIdentity,
   requiredStringArray,
   throwMalformedRecord,
   sameOrderedValues,
 } from './codec-primitives.ts';
+import {requiredConversationToolRounds} from './conversation-turn-codec.ts';
 import {requiredDecisionContext} from './decision-context-codec.ts';
 import {
   requiredRoleModelCommitValidationResult,
@@ -1012,9 +1009,9 @@ function requiredRoleModelInputEnvelope(
       event: requiredUserMessageRuntimeEvent(value['event']),
       decisionContext: requiredDecisionContext(value['decisionContext']),
       pluginToolDefinitions,
-      toolObservations: optionalRoleModelToolObservations(
-        value['toolObservations'],
-      ),
+      // Every envelope the runtime writes carries this array, so an absent one
+      // is damage, not an older record.
+      toolRounds: requiredConversationToolRounds(value['toolRounds']),
       outputContract: requiredRoleModelOutputContract(value['outputContract']),
     });
   } catch (error: unknown) {
@@ -1097,75 +1094,6 @@ function requiredRoleModelPluginToolDefinitions(
   }
 
   return Object.freeze(definitions);
-}
-
-function optionalRoleModelToolObservations(
-  value: unknown,
-): readonly RoleModelToolObservation[] {
-  if (value === undefined) {
-    return Object.freeze([]);
-  }
-
-  const observations: RoleModelToolObservation[] = [];
-
-  for (const item of requiredArray(value, 'toolObservations')) {
-    if (!isRecord(item)) {
-      throwMalformedRecord('toolObservations');
-    }
-
-    try {
-      observations.push(
-        createRoleModelToolObservation({
-          round: requiredRecordNumber(item, 'round', 'malformed_record'),
-          pluginId: requiredRecordString(item, 'pluginId', 'malformed_record'),
-          toolName: requiredRecordString(item, 'toolName', 'malformed_record'),
-          input: requiredBoundedJsonObject(
-            item['input'],
-            'toolObservations.input',
-          ),
-          result: requiredRoleModelToolObservationResult(item['result']),
-        }),
-      );
-    } catch (error: unknown) {
-      if (error instanceof TypeError) {
-        throwMalformedRecord('toolObservations');
-      }
-
-      throw error;
-    }
-  }
-
-  return Object.freeze(observations);
-}
-
-function requiredRoleModelToolObservationResult(
-  value: unknown,
-): RoleModelToolObservation['result'] {
-  if (!isRecord(value)) {
-    throwMalformedRecord('toolObservations.result');
-  }
-
-  const status = requiredRecordString(value, 'status', 'malformed_record');
-
-  if (status === 'accepted') {
-    return Object.freeze({
-      status: 'accepted',
-      output: requiredBoundedJsonValue(
-        value['output'],
-        'toolObservations.result.output',
-      ),
-    } satisfies RoleModelToolObservation['result']);
-  }
-
-  if (status === 'rejected') {
-    return Object.freeze({
-      status: 'rejected',
-      reason: requiredRecordString(value, 'reason', 'malformed_record'),
-      message: requiredRecordString(value, 'message', 'malformed_record'),
-    } satisfies RoleModelToolObservation['result']);
-  }
-
-  throwMalformedRecord('toolObservations.result.status');
 }
 
 function requiredRoleModelOutputContract(

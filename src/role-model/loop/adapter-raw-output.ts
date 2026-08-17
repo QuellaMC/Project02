@@ -11,10 +11,6 @@ import {isRoleModelRawOutputReplayableDecisionEvidence} from './replay-evidence.
 import {isJsonRecord} from '../../shared/json-boundary.ts';
 import {isOneOf} from '../../shared/one-of.ts';
 import {parseRoleModelProviderExchangeSnapshot} from '../api/provider-exchange.ts';
-import type {
-  RoleModelAssistantChatMessage,
-  RoleModelChatToolCall,
-} from '../api/chat-wire.ts';
 
 type RoleModelAdapterRawOutputValidationResult =
   | {
@@ -22,7 +18,6 @@ type RoleModelAdapterRawOutputValidationResult =
       readonly rawOutputText: string;
       readonly providerMetadata?: RoleModelProviderMetadata;
       readonly providerExchange?: RoleModelProviderExchangeSnapshot;
-      readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
     }
   | {
       readonly status: 'rejected';
@@ -98,16 +93,11 @@ export function validateRoleModelAdapterRawOutput(
     } satisfies RoleModelAdapterRawOutputValidationResult);
   }
 
-  const nativeAssistantMessage = optionalRoleModelAssistantChatMessage(
-    rawOutput['nativeAssistantMessage'],
-  );
-
   return Object.freeze({
     status: 'accepted',
     rawOutputText,
     ...providerMetadataOption(providerMetadata),
     ...providerExchangeOption(providerExchange),
-    ...(nativeAssistantMessage === undefined ? {} : {nativeAssistantMessage}),
   } satisfies RoleModelAdapterRawOutputValidationResult);
 }
 
@@ -134,85 +124,6 @@ export function providerExchangeOption(
   providerExchange: RoleModelProviderExchangeSnapshot | undefined,
 ): {readonly providerExchange?: RoleModelProviderExchangeSnapshot} {
   return providerExchange === undefined ? {} : {providerExchange};
-}
-
-function optionalRoleModelAssistantChatMessage(
-  value: unknown,
-): RoleModelAssistantChatMessage | undefined {
-  if (!isJsonRecord(value) || value['role'] !== 'assistant') {
-    return undefined;
-  }
-
-  const content = value['content'];
-  const toolCalls = optionalRoleModelChatToolCalls(value['tool_calls']);
-
-  if (content !== null && typeof content !== 'string') {
-    return undefined;
-  }
-
-  return Object.freeze({
-    role: 'assistant',
-    content: typeof content === 'string' ? content : null,
-    ...(toolCalls === undefined ? {} : {tool_calls: toolCalls}),
-  } satisfies RoleModelAssistantChatMessage);
-}
-
-function optionalRoleModelChatToolCalls(
-  value: unknown,
-): readonly RoleModelChatToolCall[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  if (!Array.isArray(value)) {
-    return undefined;
-  }
-
-  const calls: RoleModelChatToolCall[] = [];
-
-  for (const item of value) {
-    const call = optionalRoleModelChatToolCall(item);
-
-    if (call === undefined) {
-      return undefined;
-    }
-
-    calls.push(call);
-  }
-
-  return Object.freeze(calls);
-}
-
-function optionalRoleModelChatToolCall(
-  value: unknown,
-): RoleModelChatToolCall | undefined {
-  if (!isJsonRecord(value)) {
-    return undefined;
-  }
-
-  const id = value['id'];
-  const type = value['type'];
-  const fn = value['function'];
-
-  if (typeof id !== 'string' || type !== 'function' || !isJsonRecord(fn)) {
-    return undefined;
-  }
-
-  const name = fn['name'];
-  const args = fn['arguments'];
-
-  if (typeof name !== 'string' || typeof args !== 'string') {
-    return undefined;
-  }
-
-  return Object.freeze({
-    id,
-    type: 'function',
-    function: Object.freeze({
-      name,
-      arguments: args,
-    }),
-  } satisfies RoleModelChatToolCall);
 }
 
 function optionalProviderMetadata(

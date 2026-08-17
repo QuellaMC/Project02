@@ -5,8 +5,8 @@ import {
   createDecisionContext,
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
+  createConversationToolRound,
   createRoleModelPluginToolDefinitions,
-  createRoleModelToolObservation,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelDecision,
   roleModelDecisionContractVersion,
@@ -51,28 +51,36 @@ describe('role-model contracts', () => {
     ['input', Number.NaN],
     ['output', Number.POSITIVE_INFINITY],
   ] as const)(
-    'normalizes a non-finite tool observation %s to null',
+    'normalizes a non-finite tool round %s to null',
     (surface, nonFiniteValue) => {
-      const observation = createRoleModelToolObservation({
+      const round = createConversationToolRound({
         round: 1,
-        pluginId: 'memory',
-        toolName: 'memory.search',
-        input: {
-          query: 'Mira',
-          ...(surface === 'input' ? {score: nonFiniteValue} : {}),
-        },
-        result: {
-          status: 'accepted',
-          output:
-            surface === 'output' ? {score: nonFiniteValue} : {summary: 'found'},
-        },
+        interimReplies: [],
+        toolCalls: [
+          {
+            toolCallId: 'call-1',
+            pluginId: 'memory',
+            toolName: 'memory.search',
+            input: {
+              query: 'Mira',
+              ...(surface === 'input' ? {score: nonFiniteValue} : {}),
+            },
+            result: {
+              status: 'accepted',
+              output:
+                surface === 'output'
+                  ? {score: nonFiniteValue}
+                  : {summary: 'found'},
+            },
+          },
+        ],
       });
-
+      const call = round.toolCalls[0];
       const recorded =
         surface === 'input'
-          ? observation.input
-          : observation.result.status === 'accepted'
-            ? observation.result.output
+          ? call?.input
+          : call?.result.status === 'accepted'
+            ? call.result.output
             : undefined;
 
       expect(recorded).toMatchObject({score: null});

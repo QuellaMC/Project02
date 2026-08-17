@@ -1,4 +1,5 @@
 import type {
+  ConversationToolCall,
   ConversationToolRound,
   ConversationTurn,
 } from '../api/conversation-history.ts';
@@ -8,8 +9,8 @@ import type {
   RoleModelToolChatMessage,
   RoleModelUserChatMessage,
 } from '../api/chat-wire.ts';
+import type {RuntimePluginJsonValue} from '../../plugins/api/index.ts';
 import {estimateTextTokens} from './token-estimate.ts';
-import {createNativeToolResultMessageContent} from './tool-wire.ts';
 
 /**
  * History may use half the window: the rest is the stable prefix, the plugin
@@ -41,17 +42,23 @@ export function conversationTurnToChatMessages(
   ]);
 }
 
-function toolRoundToChatMessages(
+/**
+ * The one wire for a tool round, this turn's or a prior turn's: the
+ * assistant's own text and what it said aloud as content, its executable
+ * calls as tool calls, then one result per call. Call ids are the runtime's.
+ */
+export function toolRoundToChatMessages(
   round: ConversationToolRound,
 ): readonly RoleModelChatMessage[] {
-  const interimText = round.interimReplies
-    .map(reply => reply.text)
-    .join('\n\n');
+  const content = [
+    ...(round.text === undefined ? [] : [round.text]),
+    ...round.interimReplies.map(reply => reply.text),
+  ].join('\n\n');
 
   return Object.freeze([
     Object.freeze({
       role: 'assistant',
-      content: interimText.length === 0 ? null : interimText,
+      content: content.length === 0 ? null : content,
       tool_calls: Object.freeze(
         round.toolCalls.map(call =>
           Object.freeze({
@@ -69,10 +76,31 @@ function toolRoundToChatMessages(
       Object.freeze({
         role: 'tool',
         tool_call_id: call.toolCallId,
-        content: JSON.stringify(createNativeToolResultMessageContent(call)),
+        content: JSON.stringify(toolResultMessageContent(call)),
       } satisfies RoleModelToolChatMessage),
     ),
   ]);
+}
+
+function toolResultMessageContent(
+  call: ConversationToolCall,
+): Readonly<Record<string, RuntimePluginJsonValue>> {
+  if (call.result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      pluginId: call.pluginId,
+      toolName: call.toolName,
+      output: call.result.output,
+    });
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    pluginId: call.pluginId,
+    toolName: call.toolName,
+    reason: call.result.reason,
+    message: call.result.message,
+  });
 }
 
 export function estimateConversationTurnTokens(turn: ConversationTurn): number {

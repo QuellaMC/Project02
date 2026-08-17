@@ -57,6 +57,8 @@ type MutableTurn = {
     readonly input: ConversationToolCall['input'];
   }[];
   readonly resultsByCallId: Map<string, RuntimePluginToolCallResult>;
+  /** What the model wrote beside its calls, per round. */
+  readonly textByRound: Map<number, string>;
 };
 
 /**
@@ -89,6 +91,7 @@ export function conversationTurnsFromRawEvents(
         characterMessages: [],
         startedCalls: [],
         resultsByCallId: new Map(),
+        textByRound: new Map(),
       };
       turns.set(key, turn);
     }
@@ -117,6 +120,12 @@ export function conversationTurnsFromRawEvents(
         toolName: record.toolName,
         input: record.toolInput,
       });
+
+      const text = roundTextFromRecord(record);
+
+      if (text !== undefined && !turn.textByRound.has(record.toolRound)) {
+        turn.textByRound.set(record.toolRound, text);
+      }
     } else if (
       record.kind === 'tool_call_finished' &&
       record.toolCallId !== undefined &&
@@ -174,17 +183,20 @@ function completeConversationTurn(
 
   const toolRounds: ConversationToolRound[] = [...rounds.entries()]
     .sort(([left], [right]) => left - right)
-    .map(([round, toolCalls]) =>
-      Object.freeze({
+    .map(([round, toolCalls]) => {
+      const text = turn.textByRound.get(round);
+
+      return Object.freeze({
         round,
+        ...(text === undefined ? {} : {text}),
         interimReplies: Object.freeze(
           turn.characterMessages
             .filter(entry => entry.round === round)
             .map(entry => entry.message),
         ),
         toolCalls: Object.freeze(toolCalls),
-      } satisfies ConversationToolRound),
-    );
+      } satisfies ConversationToolRound);
+    });
 
   return Object.freeze({
     ...turn.identity,
@@ -196,4 +208,11 @@ function completeConversationTurn(
         .map(entry => entry.message),
     ),
   } satisfies ConversationTurn);
+}
+
+/** The round's decision travels on its tool_call_started record. */
+function roundTextFromRecord(record: RawEventLogRecord): string | undefined {
+  const result = record.parsedRoleModelDecisionSnapshot?.result;
+
+  return result?.status === 'accepted' ? result.decision.text : undefined;
 }

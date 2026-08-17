@@ -8,7 +8,6 @@ import {
   renderRoleModelTurnContext,
   type ConversationTurn,
   type RoleModelAdapterInvocation,
-  type RoleModelAssistantChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,
   type RoleModelInputEnvelope,
@@ -83,7 +82,9 @@ describe('NVIDIA role-model provider', () => {
         },
       ],
     });
-    expect(output.nativeAssistantMessage?.content).toBe('api_key=reply-secret');
+    expect(output.providerExchange?.nativeAssistantMessage?.content).toBe(
+      'api_key=reply-secret',
+    );
   });
 
   it('retries transient transport failures and succeeds within the deadline', async () => {
@@ -371,11 +372,14 @@ describe('NVIDIA role-model provider', () => {
         },
       ],
     });
-    expect(output.nativeAssistantMessage?.tool_calls?.[0]).toMatchObject({
-      id: 'call_token=id-secret',
-      function: {
-        arguments: '{"text":"Cookie: reply-cookie"}',
-      },
+    expect(output.providerExchange?.nativeAssistantMessage).toMatchObject({
+      role: 'assistant',
+      tool_calls: [
+        {
+          id: 'call_token=id-secret',
+          function: {arguments: '{"text":"Cookie: reply-cookie"}'},
+        },
+      ],
     });
   });
 
@@ -483,7 +487,7 @@ describe('NVIDIA role-model provider', () => {
     );
     for (const content of [messages[2]?.content, messages[5]?.content]) {
       expect(content).not.toContain('"event"');
-      expect(content).not.toContain('"toolObservations"');
+      expect(content).not.toContain('"toolRounds"');
       expect(content).not.toContain('"version"');
       expect(content).not.toContain('sourceReferences');
       expect(content).not.toContain('confidence');
@@ -645,54 +649,7 @@ describe('NVIDIA role-model provider', () => {
     });
   });
 
-  it('preserves provider aliases in prior assistant tool-call history', async () => {
-    const priorAssistantMessage = Object.freeze({
-      role: 'assistant',
-      content: null,
-      tool_calls: Object.freeze([
-        {
-          id: 'call_memory_search_dot',
-          type: 'function',
-          function: {
-            name: 'memory_search',
-            arguments: '{}',
-          },
-        },
-        {
-          id: 'call_memory_search_plain',
-          type: 'function',
-          function: {
-            name: 'memory_search_2',
-            arguments: '{}',
-          },
-        },
-        {
-          id: 'call_memory_search_two',
-          type: 'function',
-          function: {
-            name: 'memory_search_2_2',
-            arguments: '{}',
-          },
-        },
-      ]),
-    } satisfies RoleModelAssistantChatMessage);
-    const {messages} = await captureNvidiaRequest(
-      createNvidiaAliasCollisionInputEnvelope(),
-      [priorAssistantMessage],
-    );
-    const assistantHistoryMessage = messages.find(
-      (message): message is RoleModelAssistantChatMessage =>
-        message.role === 'assistant' && message.tool_calls !== undefined,
-    );
-
-    expect(
-      assistantHistoryMessage?.tool_calls?.map(
-        toolCall => toolCall.function.name,
-      ),
-    ).toEqual(['memory_search', 'memory_search_2', 'memory_search_2_2']);
-  });
-
-  it("maps replayed tool rounds to provider names and keeps them out of this round's tool results", async () => {
+  it('maps replayed tool rounds to provider names', async () => {
     const inputEnvelope = createNvidiaTestInputEnvelope();
     const historyWithTools: ConversationTurn = {
       ...nvidiaTestHistoryTurn,
@@ -743,8 +700,7 @@ describe('NVIDIA role-model provider', () => {
     expect(messages.find(message => message.role === 'tool')).toMatchObject({
       tool_call_id: 'evt_nvidia_previous.round-1.1',
     });
-    // Replayed history is not this round's own tool feedback.
-    expect(output.providerExchange?.nativeToolResultMessages).toEqual([]);
+    expect(output.rejection).toBeUndefined();
   });
 
   it('normalizes final assistant content through visible_reply', async () => {
@@ -810,7 +766,7 @@ describe('NVIDIA role-model provider', () => {
         },
       ],
     });
-    expect(output.nativeAssistantMessage).toMatchObject({
+    expect(output.providerExchange?.nativeAssistantMessage).toMatchObject({
       role: 'assistant',
       content: 'Hello from assistant content.\n- runtime.plugin.list',
     });
@@ -870,7 +826,9 @@ describe('NVIDIA role-model provider', () => {
     });
     expect(output.rawOutputText).not.toContain('secret');
     expect(output.rawOutputText).not.toContain('<think>');
-    expect(output.nativeAssistantMessage?.content).toBe('Hello');
+    expect(output.providerExchange?.nativeAssistantMessage?.content).toBe(
+      'Hello',
+    );
     expect(JSON.stringify(output.providerExchange)).not.toContain('secret');
     expect(JSON.stringify(output.providerExchange)).not.toContain('<think>');
   });
@@ -912,7 +870,7 @@ describe('NVIDIA role-model provider', () => {
     // loop hands that back to the model.
     expect(output.rejection).toBeUndefined();
     expect(output.rawOutputText).toBe('<think>still thinking about it');
-    expect(output.nativeAssistantMessage).toBeUndefined();
+    expect(output.providerExchange?.nativeAssistantMessage).toBeUndefined();
   });
 
   it('rejects length-finished assistant content as partial output', async () => {
@@ -1159,22 +1117,22 @@ describe('NVIDIA role-model provider', () => {
       ],
       text: 'Checking the available plugins.',
     });
-    expect(output.nativeAssistantMessage?.tool_calls).toMatchObject([
-      {
-        id: 'call_runtime_plugin_list',
-        function: {
-          name: 'runtime_plugin_list',
-          arguments: '{}',
+    expect(output.providerExchange?.nativeAssistantMessage).toMatchObject({
+      role: 'assistant',
+      tool_calls: [
+        {
+          id: 'call_runtime_plugin_list',
+          function: {name: 'runtime_plugin_list', arguments: '{}'},
         },
-      },
-      {
-        id: 'call_character_state_patch',
-        function: {
-          name: 'character_state_patch',
-          arguments: '{"mood":"curious"}',
+        {
+          id: 'call_character_state_patch',
+          function: {
+            name: 'character_state_patch',
+            arguments: '{"mood":"curious"}',
+          },
         },
-      },
-    ]);
+      ],
+    });
   });
 
   it('keeps content next to a native visible_reply as text, not as a second reply', async () => {

@@ -3,6 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {conversationTurnsFromRawEvents} from '../../src/runtime/evidence/conversation-history.ts';
 import type {RawEventLogRecord} from '../../src/runtime/evidence/records.ts';
 import type {VisibleMessage} from '../../src/core/index.ts';
+import {roleModelDecisionContractVersion} from '../../src/role-model/index.ts';
 
 const turnA = {
   eventId: 'evt_a',
@@ -59,6 +60,23 @@ describe('conversation turns projected from the session log', () => {
         toolName: 'character_state.patch',
         toolPluginId: 'character-state',
         toolInput: {energy: 'high'},
+        // The round's decision rides its started record; its text is the
+        // model's own note beside the call.
+        parsedRoleModelDecisionSnapshot: {
+          ...turnA,
+          kind: 'role_model_decision_snapshot',
+          sessionId: 'session-turns',
+          result: {
+            status: 'accepted',
+            decision: {
+              version: roleModelDecisionContractVersion,
+              toolCalls: [
+                {name: 'character_state.patch', input: {energy: 'high'}},
+              ],
+              text: 'thinking aloud',
+            },
+          },
+        },
       },
       {
         ...turnA,
@@ -96,6 +114,7 @@ describe('conversation turns projected from the session log', () => {
         toolRounds: [
           {
             round: 1,
+            text: 'thinking aloud',
             interimReplies: [message('s:message-2', 'character', 'checking')],
             toolCalls: [
               {

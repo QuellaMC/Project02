@@ -1,39 +1,91 @@
-import type {RuntimeEventIdentity, VisibleMessage} from '../../core/index.ts';
-import type {RuntimePluginJsonObject} from '../../plugins/api/index.ts';
+import {
+  createJsonBoundaryObjectSnapshot,
+  createJsonBoundarySnapshot,
+} from '../../shared/json-boundary.ts';
+import type {VisibleMessage} from '../../core/index.ts';
 import type {
   ConversationHistoryWindow,
-  RoleModelToolObservationResult,
+  ConversationToolCall,
+  ConversationToolCallResult,
+  ConversationToolRound,
+  ConversationTurn,
+} from './contracts.ts';
+import {requiredRoleModelIdentifier} from './tool-names.ts';
+
+export type {
+  ConversationHistoryWindow,
+  ConversationToolCall,
+  ConversationToolCallResult,
+  ConversationToolRound,
+  ConversationTurn,
 } from './contracts.ts';
 
-export type {ConversationHistoryWindow} from './contracts.ts';
+/** The one freezer for a tool round: the loop, the envelope, and the codec all pass through it. */
+export function createConversationToolRound(
+  round: ConversationToolRound,
+): ConversationToolRound {
+  if (!Number.isSafeInteger(round.round) || round.round < 1) {
+    throw new TypeError('Conversation tool round must be a positive integer.');
+  }
 
-/** One completed tool call of a prior turn: what the model asked and what came back. */
-export type ConversationToolCall = {
-  readonly toolCallId: string;
-  readonly pluginId: string;
-  readonly toolName: string;
-  readonly input: RuntimePluginJsonObject;
-  readonly result: RoleModelToolObservationResult;
-};
+  return Object.freeze({
+    round: round.round,
+    ...(round.text === undefined ? {} : {text: round.text}),
+    interimReplies: Object.freeze(
+      round.interimReplies.map(freezeVisibleMessage),
+    ),
+    toolCalls: Object.freeze(round.toolCalls.map(freezeConversationToolCall)),
+  } satisfies ConversationToolRound);
+}
 
-/** One executable decision round of a prior turn. */
-export type ConversationToolRound = {
-  readonly round: number;
-  /** visible_reply texts the model committed in this round, commit order. */
-  readonly interimReplies: readonly VisibleMessage[];
-  readonly toolCalls: readonly ConversationToolCall[];
-};
+function freezeConversationToolCall(
+  call: ConversationToolCall,
+): ConversationToolCall {
+  if (typeof call.toolCallId !== 'string' || call.toolCallId.length === 0) {
+    throw new TypeError('Conversation tool call must carry its call id.');
+  }
 
-/**
- * A completed turn as the model replays it: the person's message, every tool
- * round with its results, then the character's final replies. Turn identity
- * is the runtime event that opened it.
- */
-export type ConversationTurn = RuntimeEventIdentity & {
-  readonly userMessage: VisibleMessage;
-  readonly toolRounds: readonly ConversationToolRound[];
-  readonly finalReplies: readonly VisibleMessage[];
-};
+  return Object.freeze({
+    toolCallId: call.toolCallId,
+    pluginId: requiredRoleModelIdentifier(call.pluginId, 'tool call pluginId'),
+    toolName: requiredRoleModelIdentifier(call.toolName, 'tool call toolName'),
+    input: createJsonBoundaryObjectSnapshot(call.input, {
+      field: 'Conversation tool call input',
+      redact: true,
+    }),
+    result: freezeConversationToolCallResult(call.result),
+  } satisfies ConversationToolCall);
+}
+
+function freezeConversationToolCallResult(
+  result: ConversationToolCallResult,
+): ConversationToolCallResult {
+  if (result.status === 'accepted') {
+    return Object.freeze({
+      status: 'accepted',
+      output: createJsonBoundarySnapshot(result.output, {
+        field: 'Conversation tool call output',
+        redact: true,
+      }),
+    } satisfies ConversationToolCallResult);
+  }
+
+  return Object.freeze({
+    status: 'rejected',
+    reason: result.reason,
+    message: result.message,
+  } satisfies ConversationToolCallResult);
+}
+
+function freezeVisibleMessage(message: VisibleMessage): VisibleMessage {
+  return Object.freeze({
+    id: message.id,
+    role: message.role,
+    speakerId: message.speakerId,
+    speakerName: message.speakerName,
+    text: message.text,
+  } satisfies VisibleMessage);
+}
 
 export function conversationTurnVisibleMessages(
   turn: ConversationTurn,

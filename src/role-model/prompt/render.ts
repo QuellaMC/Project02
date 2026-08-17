@@ -6,7 +6,6 @@ import type {
 import {runtimePluginListToolName} from '../../plugins/api/index.ts';
 import type {RoleModelInputEnvelope} from '../api/contracts.ts';
 import {
-  freezeRoleModelChatMessage,
   type RoleModelChatCompletionTool,
   type RoleModelChatMessage,
   type RoleModelProviderCapabilities,
@@ -25,7 +24,10 @@ import {
   untrustedPluginContextFenceTag,
   untrustedPluginContextPreamble,
 } from './prompt-text.ts';
-import {conversationTurnToChatMessages} from './conversation-history-wire.ts';
+import {
+  conversationTurnToChatMessages,
+  toolRoundToChatMessages,
+} from './conversation-history-wire.ts';
 import {modelToolDefinitionToChatTool} from './tool-wire.ts';
 import type {ConversationTurn} from '../api/conversation-history.ts';
 
@@ -39,9 +41,9 @@ type RoleModelPromptFrameKind =
   | 'current_user_message'
   | 'recalled_memory'
   | 'untrusted_plugin_context'
-  | 'native_assistant_message'
-  | 'native_tool_result_message'
-  | 'native_system_message';
+  | 'tool_round_assistant_message'
+  | 'tool_round_result_message'
+  | 'unusable_reply_note';
 
 type RoleModelPromptSuffixFrameKind = Extract<
   RoleModelPromptFrameKind,
@@ -100,11 +102,12 @@ export type RoleModelTurnContext = {
 };
 
 type RenderRoleModelTurnContextOptions = {
-  readonly additionalMessages?: readonly RoleModelChatMessage[];
   readonly capabilities?: RoleModelProviderCapabilities;
   readonly conversationHistory?: readonly ConversationTurn[];
   readonly personaSections?: readonly string[];
   readonly userDisplayName?: string;
+  /** The runtime's note about the last unusable reply, when there is one. */
+  readonly unusableReplyNote?: string;
 };
 
 type Addressee = {
@@ -137,7 +140,6 @@ export function renderRoleModelTurnContext(
     options.capabilities ?? defaultRoleModelProviderCapabilities;
   const promptFragments = createRoleModelPromptFragments(inputEnvelope);
   const frames = createRoleModelPromptFrames(inputEnvelope, {
-    additionalMessages: options.additionalMessages ?? [],
     capabilities,
     conversationHistory: options.conversationHistory ?? [],
     promptFragments,
@@ -147,6 +149,9 @@ export function renderRoleModelTurnContext(
     ...(options.userDisplayName === undefined
       ? {}
       : {userDisplayName: options.userDisplayName}),
+    ...(options.unusableReplyNote === undefined
+      ? {}
+      : {unusableReplyNote: options.unusableReplyNote}),
   });
 
   return Object.freeze({
@@ -166,12 +171,12 @@ export function renderRoleModelTurnContext(
 function createRoleModelPromptFrames(
   inputEnvelope: RoleModelInputEnvelope,
   options: {
-    readonly additionalMessages: readonly RoleModelChatMessage[];
     readonly capabilities: RoleModelProviderCapabilities;
     readonly conversationHistory: readonly ConversationTurn[];
     readonly promptFragments: readonly RoleModelPromptFragment[];
     readonly personaSections?: readonly string[];
     readonly userDisplayName?: string;
+    readonly unusableReplyNote?: string;
   },
 ): readonly RoleModelPromptFrame[] {
   const addressee: Addressee =
@@ -288,21 +293,34 @@ function createRoleModelPromptFrames(
     frames.push(suffixFrame('untrusted_plugin_context', untrustedContext));
   }
 
-  // This turn's own rounds: the model's messages, the tool results, and any
-  // note the runtime put between them.
+  // This turn's own rounds, on the same wire as the replayed history, then
+  // the runtime's note when the last reply could not be used.
   frames.push(
-    ...options.additionalMessages.map(message =>
+    ...inputEnvelope.toolRounds
+      .flatMap(toolRoundToChatMessages)
+      .map(message =>
+        ownFrame(
+          message.role === 'tool'
+            ? 'tool_round_result_message'
+            : 'tool_round_assistant_message',
+          message,
+          message.role === 'tool',
+        ),
+      ),
+  );
+
+  if (options.unusableReplyNote !== undefined) {
+    frames.push(
       ownFrame(
-        message.role === 'tool'
-          ? 'native_tool_result_message'
-          : message.role === 'assistant'
-            ? 'native_assistant_message'
-            : 'native_system_message',
-        freezeRoleModelChatMessage(message),
+        'unusable_reply_note',
+        Object.freeze({
+          role: 'system',
+          content: options.unusableReplyNote,
+        } satisfies RoleModelSystemChatMessage),
         true,
       ),
-    ),
-  );
+    );
+  }
 
   return Object.freeze(frames);
 }

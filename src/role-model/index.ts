@@ -30,8 +30,6 @@ export {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
   type RoleModelToolDefinition,
-  type RoleModelToolObservation,
-  type RoleModelToolObservationResult,
   roleModelToolRoundsExhaustedRejectionReason,
 } from './api/contracts.ts';
 export {
@@ -43,7 +41,6 @@ export {
   createRejectedRoleModelDecisionResult,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
-  createRoleModelToolObservation,
 } from './api/decision.ts';
 export {
   createRoleModelAdapterRawOutput,
@@ -105,8 +102,10 @@ export {
   assertConversationHistoryMatchesWindow,
   conversationHistoryWindow,
   conversationTurnVisibleMessages,
+  createConversationToolRound,
   type ConversationHistoryWindow,
   type ConversationToolCall,
+  type ConversationToolCallResult,
   type ConversationToolRound,
   type ConversationTurn,
 } from './api/conversation-history.ts';
@@ -114,6 +113,7 @@ export {
   conversationTurnToChatMessages,
   estimateConversationTurnTokens,
   selectConversationHistoryWindow,
+  toolRoundToChatMessages,
 } from './prompt/conversation-history-wire.ts';
 export {
   createRoleModelProviderToolNameMappings,
