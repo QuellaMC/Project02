@@ -1045,7 +1045,7 @@ export function canonicalRuntimeConfigMutationPath(path: string): string {
   );
 }
 
-function mutationFileAccessError(
+export function mutationFileAccessError(
   message: string,
   cause: unknown,
 ): RuntimeConfigMutationError {

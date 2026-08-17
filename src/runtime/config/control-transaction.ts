@@ -25,6 +25,7 @@ import {
   canonicalRuntimeConfigMutationPath,
   commitPreparedRuntimeConfigMutation,
   createRuntimeConfigAuthoredSnapshot,
+  mutationFileAccessError,
   RuntimeConfigConflictError,
   runtimeConfigControlFileLockTarget,
   RuntimeConfigMutationError,
@@ -644,7 +645,7 @@ function acquireRuntimeConfigControlLocks(
       plan.overlay?.target !== undefined &&
       failedTarget?.resourceKey === plan.overlay.target.resourceKey;
 
-    throw runtimeConfigControlFileError(
+    throw mutationFileAccessError(
       envFailed
         ? `Could not write runtime config env file at ${
             plan.displayEnvPath ?? plan.canonicalEnvPath
@@ -675,13 +676,4 @@ function assertRuntimeConfigOverlayLockStillBound(
       'The selected character overlay path changed while its lock was acquired.',
     );
   }
-}
-
-function runtimeConfigControlFileError(
-  message: string,
-  cause: unknown,
-): RuntimeConfigMutationError {
-  return cause instanceof RuntimeConfigMutationError
-    ? cause
-    : new RuntimeConfigMutationError(message, {cause});
 }

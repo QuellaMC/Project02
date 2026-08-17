@@ -10,14 +10,8 @@ import {
   visibleMessageRoleValues,
   VisibleMessageTextValidationError,
 } from '../../core/index.ts';
-import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-} from '../../shared/json-boundary.ts';
-import type {
-  RuntimePluginJsonObject,
-  RuntimePluginJsonValue,
-} from '../../plugins/api/index.ts';
+import {createJsonBoundaryObjectSnapshot} from '../../shared/json-boundary.ts';
+import type {RuntimePluginJsonObject} from '../../plugins/api/index.ts';
 import {
   isRecord,
   LocalRuntimeStorageContractError,
@@ -287,6 +281,7 @@ export function optionalStringArray(
 
   return Object.freeze(strings);
 }
+
 export function requiredBoundedJsonObject(
   value: unknown,
   field: string,
@@ -301,20 +296,7 @@ export function requiredBoundedJsonObject(
     throw error;
   }
 }
-export function requiredBoundedJsonValue(
-  value: unknown,
-  field: string,
-): RuntimePluginJsonValue {
-  try {
-    return createJsonBoundarySnapshot(value, {field});
-  } catch (error: unknown) {
-    if (error instanceof TypeError) {
-      throwMalformedRecord(field);
-    }
 
-    throw error;
-  }
-}
 export function requiredLiteralString(
   record: Record<string, unknown>,
   key: string,
