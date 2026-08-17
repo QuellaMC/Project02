@@ -19,7 +19,6 @@ import {
   memoryProviderMaxItems,
 } from './context.ts';
 import type {MemoryRecallItem, Project02MemoryProvider} from './types.ts';
-import {estimateTextTokens} from '../../../shared/token-estimate.ts';
 
 export function createMemoryProviderLifecycleHooks(options: {
   readonly provider: Project02MemoryProvider;
@@ -79,10 +78,6 @@ function createRecallHook(
           id: memoryContextItemId(item.id),
           kind: 'memory',
           text: item.text,
-          budget: {
-            estimatedTokens: estimateTextTokens(item.text),
-            priority: 70,
-          },
           sourceReferences: item.sourceReferences,
           ...(item.confidence === undefined
             ? {}

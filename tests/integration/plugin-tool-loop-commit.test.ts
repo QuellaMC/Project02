@@ -278,7 +278,6 @@ async function createLiveReloadLoopFixture(
                 id: 'style',
                 kind: 'runtime_note',
                 text: `tone:${tone}`,
-                budget: {estimatedTokens: 8, priority: 50},
                 sourceReferences: [],
                 confidence: 1,
                 redactionLabels: context.privacy.redactionLabels,

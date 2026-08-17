@@ -11,53 +11,12 @@ import {
 } from '../support/adapter-proofs/index.ts';
 import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {
-  characterStatePluginId,
-  createCharacterStatePlugin,
-} from '../../src/plugins/packages/character-state/plugin.ts';
-import {
-  createExplicitlyEnabledRuntimePluginHost,
-  createLowPriorityBudgetPressurePlugin,
   createMemorySearchPluginWithoutHandlerDeclaration,
   readAgentCapabilityFixture,
   testPluginContext,
 } from '../support/plugin-host-fixtures.ts';
 
 describe('runtime plugin host adapters and contracts', () => {
-  it('retains higher-priority Character State and runtime notes before lower-priority context', async () => {
-    const pressurePlugin = createLowPriorityBudgetPressurePlugin();
-    const host = createExplicitlyEnabledRuntimePluginHost({
-      plugins: [createCharacterStatePlugin(), pressurePlugin],
-      sessionIdentity: {
-        test: 'priority-budget-pressure',
-      },
-    });
-
-    const result = await host.beforeRoleModelCall(testPluginContext());
-
-    expect(result.status).toBe('completed');
-    if (result.status !== 'completed') {
-      throw new Error('Expected beforeRoleModelCall to complete.');
-    }
-
-    expect(
-      result.contextItems.map(item => `${item.pluginId}:${item.id}`),
-    ).toEqual([
-      `${characterStatePluginId}:current`,
-      `${pressurePlugin.manifest.id}:runtime-note-host`,
-    ]);
-    expect(result.contextItems[0]?.budget.priority).toBe(90);
-    expect(result.contextItems[1]?.text).toBe('runtime note from host');
-    const budgetEvidence = result.evidence.find(
-      evidence =>
-        evidence.pluginId === pressurePlugin.manifest.id &&
-        evidence.evidenceKind === 'before_role_model_call' &&
-        evidence.status === 'degraded',
-    );
-
-    expect(budgetEvidence?.summary).toContain('dropped ids low-priority-bulk');
-    expect(JSON.stringify(result.contextItems)).not.toContain('low ');
-  });
-
   it.each([
     [
       'CoralDB',

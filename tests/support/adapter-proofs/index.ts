@@ -168,11 +168,6 @@ export function mapCoralDbMemoryGatewayFixture(
           sourceId: 'coral.recall.fixture',
           sourceTitle: 'CoralDB /recall fixture',
           sourceUri: 'fixture://coraldb/recall',
-          estimatedTokens:
-            optionalPositiveInteger(
-              recall.response['estimatedTokens'],
-              'endpoints.recall.response.estimatedTokens',
-            ) ?? 64,
           ...(confidence === undefined ? {} : {confidence}),
         });
 
@@ -337,11 +332,6 @@ export function mapAstraMemoryProviderFixture(
           sourceId: 'astra.prefetch.fixture',
           sourceTitle: 'Astra prefetch fixture',
           sourceUri: 'fixture://astra/prefetch',
-          estimatedTokens:
-            optionalPositiveInteger(
-              prefetch['estimatedTokens'],
-              'behavior.prefetch.estimatedTokens',
-            ) ?? 72,
           ...(confidence === undefined ? {} : {confidence}),
         });
 
@@ -502,14 +492,6 @@ export function mapMcpToolsResourcesFixture(
               resource['fixtureText'],
               'resources.fixtureText',
             ),
-            budget: {
-              estimatedTokens:
-                optionalPositiveInteger(
-                  resource['estimatedTokens'],
-                  'resources.estimatedTokens',
-                ) ?? 80,
-              priority: index + 1,
-            },
             sourceReferences: [
               {
                 kind: 'resource',
@@ -856,7 +838,6 @@ function createMemoryContextItem(options: {
   readonly sourceId: string;
   readonly sourceTitle: string;
   readonly sourceUri: string;
-  readonly estimatedTokens: number;
   readonly confidence?: number;
 }): RuntimePluginContextItem {
   return createRuntimePluginContextItem({
@@ -864,10 +845,6 @@ function createMemoryContextItem(options: {
     id: options.id,
     kind: 'memory',
     text: options.text,
-    budget: {
-      estimatedTokens: options.estimatedTokens,
-      priority: 1,
-    },
     sourceReferences: [
       {
         kind: 'memory',

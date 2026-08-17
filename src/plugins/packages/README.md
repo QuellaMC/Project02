@@ -155,12 +155,16 @@ the plugin, decides where each one renders. Every item needs
   rejects per its `failureBehavior`. From any other plugin the same item
   is untrusted.
 - `kind: "memory"` renders inside a `<recalled_memory>` fence appended to
-  the current user message, under a 1024-estimated-token budget shared by
-  every memory item, evicted by priority.
+  the current user message.
 - Every other kind renders inside an `<untrusted_plugin_context>` fence
-  on the same message as `## <pluginId> · <id>` plus text, under a
-  256-token budget. Only `text` reaches the model; `sourceReferences`,
-  `confidence`, `budget`, and `redactionLabels` are evidence.
+  on the same message as `## <pluginId> · <id>` plus text. Only `text`
+  reaches the model; `sourceReferences`, `confidence`, and
+  `redactionLabels` are evidence.
+- Neither fence has a token budget: items are shown whole, in the order
+  plugins returned them. The bounds are structural — an item's text
+  stays under 16 KB and a hook returns at most 64 records — so keep items
+  short because the model reads every one, not because a cap will trim
+  them.
 - `curatedContext` sections (also gated by `trusted_context`) render in
   the curated frame between the persona and the runtime notes.
 

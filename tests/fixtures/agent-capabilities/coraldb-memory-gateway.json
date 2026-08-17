@@ -58,7 +58,6 @@
         "context": "Mira remembers that the user prefers short implementation notes.",
         "strategy": "hybrid",
         "memory_count": 2,
-        "estimatedTokens": 11,
         "confidence": 0.82
       }
     },

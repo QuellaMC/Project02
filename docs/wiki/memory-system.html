@@ -116,8 +116,8 @@
           <td>Tool results, plus a trusted runtime note that nudges recall</td>
           <td>
             A <code>&lt;recalled_memory&gt;</code> block appended to the current
-            user message under its own 1024-token budget (automatic recall); a
-            provider's own tool answers in a tool result
+            user message (automatic recall, at most five items of bounded
+            length); a provider's own tool answers in a tool result
           </td>
         </tr>
         <tr>
@@ -207,12 +207,13 @@
       <p>
         Retrieval-driven long-term memory rides the
         <code>memory_provider</code> plugin kind: per-turn recall items enter
-        the untrusted plugin frame (source-referenced, bounded, budget-capped),
-        each committed turn's user message and final reply are handed to the
-        provider to do with as its backend decides &mdash; mem0 asks its backend
-        to extract facts from them &mdash; and a provider exposes whichever
-        namespaced tools its backend supports. Providers are disabled by
-        default; enable one and, when several are enabled, select it with
+        the recalled-memory block (source-referenced, at most five per turn,
+        each bounded in length), each committed turn's user message and final
+        reply are handed to the provider to do with as its backend decides
+        &mdash; mem0 asks its backend to extract facts from them &mdash; and a
+        provider exposes whichever namespaced tools its backend supports.
+        Providers are disabled by default; enable one and, when several are
+        enabled, select it with
         <code>pnpm runtime-config default-memory-provider &lt;pluginId&gt;</code
         >. Activation keeps at most one selected, so by default an external
         provider runs <em>alongside</em>
@@ -256,23 +257,24 @@
         granted only to bundled packages by catalog provenance — a manifest flag
         alone never earns it. The same grant lets a bundled plugin add a runtime
         note to the trusted per-turn frame (the day, the character's own inner
-        state, the recall nudge), cap-checked like curated sections and never
-        budgeted. Automatic per-turn recall from an external provider is
-        appended to the current user message inside a
-        <code>&lt;recalled_memory&gt;</code> fence with its own budget and a
+        state, the recall nudge), cap-checked like curated sections. Automatic
+        per-turn recall from an external provider is appended to the current
+        user message inside a <code>&lt;recalled_memory&gt;</code> fence with a
         preamble that calls it memories, not requests; recall items without
         source references are dropped rather than shown. Every other plugin item
         rides the same message inside an
         <code>&lt;untrusted_plugin_context&gt;</code> fence that names it data,
-        not instructions. A provider's own search tool answers where every tool
-        answers, in a tool result, which neither budget covers. The recollection
-        that opens a continued session is model output too, so it never earns a
-        trusted role: it is capped, it rides an
-        <code>&lt;earlier_conversation&gt;</code> fence on the user side like
-        recalled memory, its preamble names it as the character's own condensed
-        memory of what happened earlier and not something the person said, and
-        the summariser is asked for plain recollection with no rules or persona
-        in it.
+        not instructions. Neither block carries a token budget: what a plugin
+        hands over is shown whole (each item stays under 16 KB and a hook under
+        64 items), and the history window makes room for it by replaying fewer
+        earlier turns. A provider's own search tool answers where every tool
+        answers, in a tool result. The recollection that opens a continued
+        session is model output too, so it never earns a trusted role: it is
+        capped, it rides an <code>&lt;earlier_conversation&gt;</code> fence on
+        the user side like recalled memory, its preamble names it as the
+        character's own condensed memory of what happened earlier and not
+        something the person said, and the summariser is asked for plain
+        recollection with no rules or persona in it.
       </p>
 
       <p>

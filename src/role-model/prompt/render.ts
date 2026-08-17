@@ -1,5 +1,4 @@
 import type {
-  RuntimePluginContextBudget,
   RuntimePluginContextItem,
   RuntimePluginCuratedContextSection,
   RuntimePluginSourceReference,
@@ -90,7 +89,6 @@ type RoleModelPromptFragment = {
   readonly kind: RoleModelPromptFragmentKind;
   readonly slot: RoleModelPromptFragmentSlot;
   readonly text: string;
-  readonly budget?: RuntimePluginContextBudget;
   readonly sourceReferences: readonly RuntimePluginSourceReference[];
   readonly redactionLabels: readonly string[];
 };
@@ -536,7 +534,6 @@ function createRoleModelPromptFragments(
         kind: 'plugin_context_item',
         slot: pluginContextItemSlot(item),
         text: neutralizePromptFenceTags(item.text),
-        budget: item.budget,
         sourceReferences: Object.freeze([...item.sourceReferences]),
         redactionLabels: Object.freeze([...item.redactionLabels]),
       } satisfies RoleModelPromptFragment),
