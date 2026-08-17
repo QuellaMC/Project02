@@ -17,6 +17,7 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   acceptingPluginToolHost,
+  testVisibleReplySink,
   createAcceptedToolCallResult,
   createDegradingRejectedMemorySearchPlugin,
   createProviderMetadataAdapter,
@@ -31,7 +32,7 @@ describe('role-model loop evidence and boundary validation', () => {
   it('dispatches tool input to the host exactly as the model sent it', async () => {
     let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', 'evt_secret_tool_input'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -109,7 +110,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -183,7 +184,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -212,7 +213,7 @@ describe('role-model loop evidence and boundary validation', () => {
   it('rejects custom-host evidence that does not match the routed call identity', async () => {
     const eventId = 'evt_custom_host_evidence_identity';
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -279,7 +280,7 @@ describe('role-model loop evidence and boundary validation', () => {
     } satisfies RuntimePluginEvidenceSnapshot;
     Reflect.deleteProperty(malformedEvidence, 'kind');
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -356,7 +357,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -409,7 +410,7 @@ describe('role-model loop evidence and boundary validation', () => {
       () => undefined,
     );
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', 'evt_sequential_required_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -435,7 +436,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('hands a blank visible_reply back to the model as its next round', async () => {
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('reply blank', 'evt_blank_reply_feedback'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -471,7 +472,7 @@ describe('role-model loop evidence and boundary validation', () => {
   it('tool_rounds_exhausted ends the turn and leaves the parsed round accepted', async () => {
     let handledCalls = 0;
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('search memory', 'evt_rounds_exhausted'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [memorySearchToolDefinition],
@@ -513,7 +514,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('drops non-finite provider metadata numbers from the snapshot', async () => {
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('hello', 'evt_non_finite_provider_metadata'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -545,7 +546,7 @@ describe('role-model loop evidence and boundary validation', () => {
 
   it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
     const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
+      onVisibleReply: testVisibleReplySink(),
       event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -568,7 +569,6 @@ describe('role-model loop evidence and boundary validation', () => {
             renderedTools: invocation.turnContext.tools,
             toolNameMappings: [],
             requestBody: {},
-            nativeToolResultMessages: [],
           };
           Reflect.deleteProperty(providerExchange, 'reasoning');
 

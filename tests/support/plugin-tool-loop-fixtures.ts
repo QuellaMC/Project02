@@ -26,6 +26,7 @@ import {
   type RoleModelChatMessage,
 } from '../../src/role-model/index.ts';
 import {createTestTempRoot} from './temp-root.ts';
+import {createSequencedAdapter} from './role-model-loop-fixtures.ts';
 
 export function runLocalUserMessageEventWithDefaultTestHost(
   options: Omit<RunLocalUserMessageEventOptions, 'pluginHost'> &
@@ -48,124 +49,53 @@ export function runLocalUserMessageEventWithDefaultTestHost(
   });
 }
 
-export function createNativePluginListAdapter(
+/** Round 1 calls the plugin list with a note beside the call; round 2 replies. */
+export function createPluginListThenReplyAdapter(
   messagesByRound: RoleModelChatMessage[][],
 ): RoleModelAdapter {
-  let index = 0;
-
-  return Object.freeze({
-    invoke(_inputEnvelope, invocation) {
+  return createSequencedAdapter(
+    [
+      {
+        toolCalls: [{name: 'runtime.plugin.list', input: {}}],
+        text: 'Checking plugins.',
+      },
+      {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'Plugins are available.'}},
+        ],
+      },
+    ],
+    invocation => {
       messagesByRound.push([...invocation.turnContext.messages]);
-      index += 1;
-
-      if (index === 1) {
-        return {
-          rawOutputText: JSON.stringify({
-            toolCalls: [
-              {
-                name: 'runtime.plugin.list',
-                input: {},
-              },
-            ],
-          }),
-          nativeAssistantMessage: {
-            role: 'assistant',
-            content: 'Checking plugins.',
-            tool_calls: [
-              {
-                id: 'call_runtime_plugin_list',
-                type: 'function',
-                function: {
-                  name: 'runtime.plugin.list',
-                  arguments: '{}',
-                },
-              },
-            ],
-          },
-        };
-      }
-
-      return {
-        rawOutputText: JSON.stringify({
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {
-                text: 'Plugins are available.',
-              },
-            },
-          ],
-        }),
-      };
     },
-  } satisfies RoleModelAdapter);
+  );
 }
 
-export function createNativeVisibleReplyAndPluginListAdapter(
+/** Round 1 speaks an interim reply beside its call; round 2 replies for good. */
+export function createInterimReplyAndPluginListAdapter(
   messagesByRound: RoleModelChatMessage[][],
 ): RoleModelAdapter {
-  let index = 0;
-
-  return Object.freeze({
-    invoke(_inputEnvelope, invocation) {
-      messagesByRound.push([...invocation.turnContext.messages]);
-      index += 1;
-
-      if (index === 1) {
-        return {
-          rawOutputText: JSON.stringify({
-            toolCalls: [
-              {
-                name: 'visible_reply',
-                input: {
-                  text: 'Checking plugins.',
-                },
-              },
-              {
-                name: 'runtime.plugin.list',
-                input: {},
-              },
-            ],
-          }),
-          nativeAssistantMessage: {
-            role: 'assistant',
-            content: 'Checking plugins.',
-            tool_calls: [
-              {
-                id: 'call_visible_reply',
-                type: 'function',
-                function: {
-                  name: 'visible_reply',
-                  arguments: '{"text":"Checking plugins."}',
-                },
-              },
-              {
-                id: 'call_runtime_plugin_list_with_visible',
-                type: 'function',
-                function: {
-                  name: 'runtime.plugin.list',
-                  arguments: '{}',
-                },
-              },
-            ],
+  return createSequencedAdapter(
+    [
+      {
+        toolCalls: [
+          {name: 'visible_reply', input: {text: 'Checking plugins.'}},
+          {name: 'runtime.plugin.list', input: {}},
+        ],
+      },
+      {
+        toolCalls: [
+          {
+            name: 'visible_reply',
+            input: {text: 'Plugins are available after progress.'},
           },
-        };
-      }
-
-      return {
-        rawOutputText: JSON.stringify({
-          toolCalls: [
-            {
-              name: 'visible_reply',
-              input: {
-                text: 'Plugins are available after progress.',
-              },
-            },
-          ],
-        }),
-      };
+        ],
+      },
+    ],
+    invocation => {
+      messagesByRound.push([...invocation.turnContext.messages]);
     },
-  } satisfies RoleModelAdapter);
+  );
 }
 
 // `persist` appends before throwing, modelling a write that reached disk before

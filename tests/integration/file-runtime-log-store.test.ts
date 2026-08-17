@@ -487,6 +487,95 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toThrow(LocalRuntimeStorageContractError);
   });
 
+  it("round-trips this turn's tool rounds through the persisted envelope", () => {
+    const storedRecord = patchCompletedEvent('tool-rounds-round-trip') as {
+      roleModelIOSnapshot: {inputEnvelope: Record<string, unknown>};
+    };
+    const toolRounds = [
+      {
+        round: 1,
+        text: 'let me check',
+        interimReplies: [
+          {
+            id: 'tool-rounds-round-trip:message-2',
+            role: 'character',
+            speakerId: testCharacterProfile.id,
+            speakerName: testCharacterProfile.displayName,
+            text: 'One moment.',
+          },
+        ],
+        toolCalls: [
+          {
+            toolCallId: 'call-accepted',
+            pluginId: 'character-state',
+            toolName: characterStatePatchModelToolName,
+            input: {mood: 'curious'},
+            result: {status: 'accepted', output: {ok: true}},
+          },
+          {
+            toolCallId: 'call-rejected',
+            pluginId: 'character-state',
+            toolName: characterStatePatchModelToolName,
+            input: {},
+            result: {
+              status: 'rejected',
+              reason: 'handler_rejected',
+              message: 'Nothing to patch.',
+            },
+          },
+        ],
+      },
+    ];
+
+    storedRecord.roleModelIOSnapshot.inputEnvelope['toolRounds'] = toolRounds;
+
+    // The stored envelope is what the model was shown; every round must come
+    // back whole, the model's own note beside its calls included.
+    expect(
+      decodeRawEventLogRecord(JSON.stringify(storedRecord)).roleModelIOSnapshot
+        ?.inputEnvelope.toolRounds,
+    ).toEqual(toolRounds);
+  });
+
+  it.each([
+    [
+      'no tool rounds',
+      (envelope: Record<string, unknown>) => {
+        Reflect.deleteProperty(envelope, 'toolRounds');
+      },
+    ],
+    [
+      'a tool call result of an unknown status',
+      (envelope: Record<string, unknown>) => {
+        envelope['toolRounds'] = [
+          {
+            round: 1,
+            interimReplies: [],
+            toolCalls: [
+              {
+                toolCallId: 'call-1',
+                pluginId: 'character-state',
+                toolName: characterStatePatchModelToolName,
+                input: {},
+                result: {status: 'pending'},
+              },
+            ],
+          },
+        ];
+      },
+    ],
+  ])('rejects an envelope that persisted %s', (_label, damage) => {
+    const storedRecord = patchCompletedEvent('damaged-tool-rounds') as {
+      roleModelIOSnapshot: {inputEnvelope: Record<string, unknown>};
+    };
+
+    damage(storedRecord.roleModelIOSnapshot.inputEnvelope);
+
+    expect(() => decodeRawEventLogRecord(JSON.stringify(storedRecord))).toThrow(
+      LocalRuntimeStorageContractError,
+    );
+  });
+
   it('reloads a turn that ran out of tool rounds', async () => {
     const storedRecord = await persistedRoundsExhaustedRecord(
       'rounds-exhausted-round-trip',
@@ -2579,7 +2668,7 @@ function patchCompletedEvent(sessionId: string): object {
             requiresConfirmation: false,
           },
         ],
-        toolObservations: [],
+        toolRounds: [],
         outputContract: {
           version: roleModelDecisionContractVersion,
           text: 'patch completed output contract text',
@@ -2652,7 +2741,6 @@ function createMalformedProviderExchangeAdapter(): RoleModelAdapter {
         renderedTools: invocation.turnContext.tools,
         toolNameMappings: [],
         requestBody: {},
-        nativeToolResultMessages: [],
       };
       Reflect.deleteProperty(providerExchange, 'reasoning');
 

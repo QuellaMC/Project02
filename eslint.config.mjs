@@ -78,16 +78,7 @@ export default tseslint.config(
     rules: {
       'max-lines': [
         'error',
-        {max: 743, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
-    files: ['src/runtime/storage/raw-event-codec.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 1063, skipBlankLines: true, skipComments: true},
+        {max: 711, skipBlankLines: true, skipComments: true},
       ],
     },
   },

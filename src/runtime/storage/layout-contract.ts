@@ -10,7 +10,7 @@ const defaultLocalRuntimeSessionId = 'local-session';
 
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
-export const localRuntimeStorageSchemaVersion = 10;
+export const localRuntimeStorageSchemaVersion = 11;
 
 const localRuntimeStorageScopeValues = Object.freeze([
   'home',

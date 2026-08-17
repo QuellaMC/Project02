@@ -29,7 +29,12 @@ loop keeps no table of reasons.
 The conversation history the model replays is a list of whole prior turns
 (`api/conversation-history.ts`); `prompt/conversation-history-wire.ts`
 turns each into native chat messages, estimates its cost, and selects the
-newest turns that fit half the context window. `prompt/prompt-size.ts`
+newest turns that fit half the context window. A tool round has one shape
+(`ConversationToolRound`) and one wire (`toolRoundToChatMessages`) whether
+it belongs to a prior turn or to this one: the loop keeps this turn's
+finished rounds on the input envelope (`toolRounds`), so a round's stored
+envelope is exactly what the model was shown, and the model's text beside
+its calls is replayed as the round's assistant content. `prompt/prompt-size.ts`
 measures every rendered prompt per frame kind in wire characters and the
 loop records it on the round; `inspect` applies the estimator to those
 characters, so the runtime's estimate can be held against the tokens a

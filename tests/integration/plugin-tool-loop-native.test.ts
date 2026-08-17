@@ -5,8 +5,8 @@ import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {type RoleModelChatMessage} from '../../src/role-model/index.ts';
 import {
-  createNativePluginListAdapter,
-  createNativeVisibleReplyAndPluginListAdapter,
+  createInterimReplyAndPluginListAdapter,
+  createPluginListThenReplyAdapter,
   createPluginStoreRevisionFixtureHost,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
@@ -16,13 +16,13 @@ import {
 } from '../support/role-model-loop-fixtures.ts';
 
 describe('plugin-driven native tool loop routing', () => {
-  it('feeds native assistant tool calls back as OpenAI tool result messages', async () => {
+  it("replays a tool round with the runtime's call id and the plugin's result", async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
-    const adapter = createNativePluginListAdapter(messagesByRound);
+    const adapter = createPluginListThenReplyAdapter(messagesByRound);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('what plugins are available?', 'evt_native_tools'),
@@ -50,22 +50,24 @@ describe('plugin-driven native tool loop routing', () => {
       'assistant',
       'tool',
     ]);
+    // The model's note beside its call comes back as the round's content;
+    // the call carries the runtime's id, which the result answers.
+    const callId =
+      'evt_native_tools.trace_evt_native_tools.round-1.1.runtime.plugin.list';
+
     expect(messagesByRound[1]?.[4]).toMatchObject({
       role: 'assistant',
       content: 'Checking plugins.',
       tool_calls: [
         {
-          id: 'call_runtime_plugin_list',
-          function: {
-            name: 'runtime.plugin.list',
-            arguments: '{}',
-          },
+          id: callId,
+          function: {name: 'runtime.plugin.list', arguments: '{}'},
         },
       ],
     });
     expect(messagesByRound[1]?.[5]).toMatchObject({
       role: 'tool',
-      tool_call_id: 'call_runtime_plugin_list',
+      tool_call_id: callId,
     });
     expect(messagesByRound[1]?.[5]?.content).toContain(
       '"toolName":"runtime.plugin.list"',
@@ -73,14 +75,13 @@ describe('plugin-driven native tool loop routing', () => {
     expect(messagesByRound[1]?.[5]?.content).toContain('"status":"accepted"');
   });
 
-  it('answers every native tool call when visible_reply shares an executable tool round', async () => {
+  it("folds an interim visible_reply into the replayed round's assistant content instead of a tool call", async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
     const messagesByRound: RoleModelChatMessage[][] = [];
-    const adapter =
-      createNativeVisibleReplyAndPluginListAdapter(messagesByRound);
+    const adapter = createInterimReplyAndPluginListAdapter(messagesByRound);
 
     const result = await runLocalUserMessageEvent({
       event: createTestEvent(
@@ -108,42 +109,23 @@ describe('plugin-driven native tool loop routing', () => {
       'user',
       'assistant',
       'tool',
-      'tool',
     ]);
+    // What the person was told rides as the assistant's content; visible_reply
+    // itself is never replayed as a call, so there is one call and one result.
     expect(messagesByRound[1]?.[4]).toMatchObject({
       role: 'assistant',
+      content: 'Checking plugins.',
       tool_calls: [
         {
-          id: 'call_visible_reply',
-          function: {
-            name: 'visible_reply',
-            arguments: '{"text":"Checking plugins."}',
-          },
-        },
-        {
-          id: 'call_runtime_plugin_list_with_visible',
-          function: {
-            name: 'runtime.plugin.list',
-            arguments: '{}',
-          },
+          id: 'evt_native_visible_tool.trace_evt_native_visible_tool.round-1.1.runtime.plugin.list',
+          function: {name: 'runtime.plugin.list', arguments: '{}'},
         },
       ],
     });
-    expect(messagesByRound[1]?.[5]).toMatchObject({
-      role: 'tool',
-      tool_call_id: 'call_visible_reply',
-    });
     expect(messagesByRound[1]?.[5]?.content).toContain(
-      '"toolName":"visible_reply"',
-    );
-    expect(messagesByRound[1]?.[6]).toMatchObject({
-      role: 'tool',
-      tool_call_id: 'call_runtime_plugin_list_with_visible',
-    });
-    expect(messagesByRound[1]?.[6]?.content).toContain(
       '"toolName":"runtime.plugin.list"',
     );
-    expect(messagesByRound[1]?.[6]?.content).toContain('"status":"accepted"');
+    expect(messagesByRound[1]?.[5]?.content).toContain('"status":"accepted"');
   });
 
   it('hands a native tool call with non-object arguments back to the model', async () => {
