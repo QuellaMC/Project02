@@ -41,7 +41,7 @@ function committed(
     eventType: 'USER_MESSAGE',
     visibleMessage,
     committedAt: identity.createdAt,
-    ...(decisionRound === undefined ? {} : {decisionRound}),
+    ...(decisionRound === undefined ? {} : {round: decisionRound}),
   };
 }
 
@@ -50,18 +50,12 @@ describe('conversation turns projected from the session log', () => {
     const turns = conversationTurnsFromRawEvents([
       {...turnA, kind: 'runtime_event_received', eventType: 'USER_MESSAGE'},
       committed(turnA, message('s:message-1', 'user', 'needs tool')),
-      committed(turnA, message('s:message-2', 'character', 'checking'), 1),
       {
         ...turnA,
-        kind: 'tool_call_started',
+        kind: 'role_model_round',
         eventType: 'USER_MESSAGE',
-        toolCallId: 'call-1',
-        toolRound: 1,
-        toolName: 'character_state.patch',
-        toolPluginId: 'character-state',
-        toolInput: {energy: 'high'},
-        // The round's decision rides its started record; its text is the
-        // model's own note beside the call.
+        round: 1,
+        // The round's text is the model's own note beside the call.
         parsedRoleModelDecisionSnapshot: {
           ...turnA,
           kind: 'role_model_decision_snapshot',
@@ -78,12 +72,23 @@ describe('conversation turns projected from the session log', () => {
           },
         },
       },
+      committed(turnA, message('s:message-2', 'character', 'checking'), 1),
+      {
+        ...turnA,
+        kind: 'tool_call_started',
+        eventType: 'USER_MESSAGE',
+        toolCallId: 'call-1',
+        round: 1,
+        toolName: 'character_state.patch',
+        toolPluginId: 'character-state',
+        toolInput: {energy: 'high'},
+      },
       {
         ...turnA,
         kind: 'tool_call_started',
         eventType: 'USER_MESSAGE',
         toolCallId: 'call-unfinished',
-        toolRound: 1,
+        round: 1,
         toolName: 'character_state.patch',
         toolPluginId: 'character-state',
         toolInput: {},
@@ -93,7 +98,7 @@ describe('conversation turns projected from the session log', () => {
         kind: 'tool_call_finished',
         eventType: 'USER_MESSAGE',
         toolCallId: 'call-1',
-        toolRound: 1,
+        round: 1,
         toolName: 'character_state.patch',
         toolPluginId: 'character-state',
         toolResult: {status: 'accepted', output: {ok: true}, evidence: []},

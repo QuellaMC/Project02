@@ -360,8 +360,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
     expect(
       logStore.conversationMessages().map(message => message.text),
     ).toEqual(['say hi', 'hi']);
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
-      kind: 'runtime_turn_completed',
+    expect(
+      logStore.rawEvents().find(event => event.kind === 'role_model_round'),
+    ).toMatchObject({
+      round: 1,
       parsedRoleModelDecisionSnapshot: {
         result: {
           status: 'accepted',
@@ -371,6 +373,10 @@ describe('plugin-driven tool loop commit and rollback', () => {
           },
         },
       },
+    });
+    expect(logStore.rawEvents().at(-1)).toMatchObject({
+      kind: 'runtime_turn_completed',
+      round: 1,
       commitValidation: {
         result: {status: 'accepted', acceptedVisibleReplyText: 'hi'},
       },

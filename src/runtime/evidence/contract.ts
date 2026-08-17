@@ -41,6 +41,8 @@ export type RuntimeEvidenceIncrementalState = {
   readonly messagesById: Map<string, ConversationLogRecord>;
   readonly messageIdsByIdentity: Map<string, string[]>;
   readonly commitEventByMessageKey: Map<string, RawEventLogRecord>;
+  /** A turn's model rounds in order; index plus one is the round number. */
+  readonly roundsByIdentity: Map<string, RawEventLogRecord[]>;
   readonly turnModelInputByIdentity: Map<string, string>;
   roleModelCharacter: CharacterProfile | undefined;
   conversationCharacter: CharacterProfile | undefined;

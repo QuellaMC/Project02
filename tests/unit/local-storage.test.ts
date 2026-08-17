@@ -22,8 +22,8 @@ describe('local storage plugin schema', () => {
     expect(requiresCharacter).toBe(true);
   });
 
-  it('uses scoped schema version 11 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(11);
+  it('uses scoped schema version 12 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(12);
     expect(
       createLocalRuntimeSessionPaths({storeRoot: 'store'}),
     ).not.toHaveProperty('characterStatePath');
@@ -110,7 +110,7 @@ describe('local storage plugin schema', () => {
         kind: 'tool_call_finished',
         eventType: 'USER_MESSAGE',
         toolCallId: 'round-1.1.character_state.patch',
-        toolRound: 1,
+        round: 1,
         toolName: 'character_state.patch',
         toolPluginId: 'character-state',
         toolResult: {
@@ -143,7 +143,7 @@ describe('local storage plugin schema', () => {
           eventType: 'USER_MESSAGE',
           toolCallId: 'round-1.1.character_state.patch',
           dispatchedToHost: true,
-          toolRound: 1,
+          round: 1,
           toolName: 'character_state.patch',
           toolPluginId: 'character-state',
           toolResult: {
@@ -181,7 +181,7 @@ describe('local storage plugin schema', () => {
             kind: 'tool_call_finished',
             eventType: 'USER_MESSAGE',
             toolCallId: 'round-1.1.memory.search',
-            toolRound: 1,
+            round: 1,
             toolName: 'memory.search',
             toolPluginId: 'memory.fixture',
             toolResult: {

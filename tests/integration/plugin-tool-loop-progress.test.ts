@@ -506,7 +506,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toEqual(['runtime_turn_completed', 'runtime_turn_completed']);
   });
 
-  it('gives the model a feedback round when an interim visible_reply is invalid', async () => {
+  it('records the refused round it handed back to the model, before the round that recovered', async () => {
     const session = createConversationSession({
       character: testCharacterProfile,
     });
@@ -551,11 +551,24 @@ describe('plugin-driven tool loop progress and evidence', () => {
     });
 
     // An empty visible_reply is the model's own doing, so the error goes back
-    // to it as another round instead of ending the turn.
+    // to it as another round instead of ending the turn — and the refused
+    // round is on record like any other.
     expect(result.status).toBe('completed');
     expect(
       logStore.conversationMessages().map(message => message.text),
     ).toEqual(['needs invalid interim', 'finished']);
+    expect(
+      logStore
+        .rawEvents()
+        .filter(event => event.kind === 'role_model_round')
+        .map(event => [
+          event.round,
+          event.parsedRoleModelDecisionSnapshot?.result.status,
+        ]),
+    ).toEqual([
+      [1, 'rejected'],
+      [2, 'accepted'],
+    ]);
     expect(
       logStore.rawEvents().some(event => event.kind === 'tool_call_started'),
     ).toBe(false);
@@ -609,17 +622,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
     });
     const rejectionEvents = logStore
       .rawEvents()
-      .filter(
-        event =>
-          event.kind === 'commit_validation_rejected' ||
-          event.kind === 'runtime_turn_rejected',
-      );
+      .filter(event => event.kind === 'runtime_turn_rejected');
 
     expect(result).toMatchObject({
       status: 'rejected',
       reason: roleModelMalformedOutputRejectionReason,
     });
-    expect(rejectionEvents).toHaveLength(2);
+    expect(rejectionEvents).toHaveLength(1);
 
     for (const event of rejectionEvents) {
       expect(event).toMatchObject({

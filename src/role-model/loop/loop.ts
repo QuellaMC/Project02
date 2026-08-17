@@ -5,15 +5,13 @@ import {
   type VisibleMessage,
 } from '../../core/index.ts';
 import {
-  type AcceptedRoleModelDecisionResult,
   type CharacterDecision,
   type ConversationToolCall,
   type DecisionContext,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
-  type RejectedRoleModelDecisionResult,
   type RoleModelCharacterRef,
-  type RoleModelInputEnvelope,
+  type RoleModelDecisionRejection,
   type RoleModelIOSnapshot,
 } from '../api/contracts.ts';
 import {
@@ -65,6 +63,12 @@ export type RunRoleModelLoopOptions = {
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly pluginToolHost: RoleModelPluginToolHost;
   readonly maxToolRounds?: number;
+  /**
+   * Fires once per model round, accepted or refused, as soon as the output
+   * is parsed and before anything is delivered or dispatched: the round is
+   * on record before its consequences are.
+   */
+  readonly onRound: (event: RoleModelRoundEvent) => Promise<void> | void;
   readonly onPluginToolCallStarted?: (
     event: RoleModelPluginToolCallStartedEvent,
   ) => Promise<void> | void;
@@ -101,12 +105,15 @@ export type RoleModelPluginToolHost = {
 
 export {type RoleModelPluginToolRoutingEvidence} from './routing-rejections.ts';
 
+export type RoleModelRoundEvent = {
+  readonly round: number;
+  readonly ioSnapshot: RoleModelIOSnapshot;
+  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+};
+
 export type RoleModelVisibleReplyEvent = {
   readonly round: number;
   readonly text: string;
-  readonly inputEnvelope: RoleModelInputEnvelope;
-  readonly ioSnapshot: RoleModelIOSnapshot;
-  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 };
 
 export type RoleModelPluginToolCallsRequestedEvent = {
@@ -118,8 +125,6 @@ export type RoleModelPluginToolCallStartedEvent = {
   readonly callId: string;
   readonly round: number;
   readonly call: RuntimePluginToolCall;
-  readonly ioSnapshot: RoleModelIOSnapshot;
-  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 };
 
 export type RoleModelPluginToolCallCompletedEvent = {
@@ -133,18 +138,15 @@ export type RoleModelPluginToolCallCompletedEvent = {
 };
 
 export {
-  createRoleModelLoopRound,
   executionVisibleReplyTexts,
   settleRejectedRound,
   terminalRoleModelLoopResult,
   type AcceptedRoleModelLoopResult,
   type RejectedRoleModelLoopResult,
   type RoleModelLoopResult,
-  type RoleModelLoopRound,
   type RoleModelLoopState,
 } from './round-outcome.ts';
 import {
-  createRoleModelLoopRound,
   executionVisibleReplyTexts,
   settleRejectedRound,
   terminalRoleModelLoopResult,
@@ -176,7 +178,6 @@ export async function runRoleModelLoop(
   const identity = createSnapshotIdentity(options.event);
   const sessionId = options.decisionContext.sessionId;
   const state: RoleModelLoopState = {
-    rounds: [],
     allPluginToolResults: [],
     spentRounds: 0,
     toolRounds: Object.freeze([]),
@@ -196,7 +197,8 @@ export async function runRoleModelLoop(
     if (invokedRound.status === 'rejected') {
       const settled = settleRejectedRound({
         state,
-        invokedRound,
+        rejection: invokedRound.rejection,
+        modelOutput: invokedRound.modelOutput,
         round,
         maxToolRounds,
       });
@@ -210,21 +212,18 @@ export async function runRoleModelLoop(
 
     const terminalResult = terminalRoleModelLoopResult({
       state,
-      invokedRound,
+      decision: invokedRound.decision,
+      executableToolCalls: invokedRound.executableToolCalls,
       round,
       maxToolRounds,
     });
 
     if (terminalResult !== undefined) {
       if (terminalResult.status === 'accepted') {
-        // From the execution decision: the evidence snapshot may be redacted.
         await deliverVisibleReply({
           options,
           round,
-          decision: invokedRound.decisionResult.decision,
-          inputEnvelope: terminalResult.inputEnvelope,
-          ioSnapshot: terminalResult.ioSnapshot,
-          parsedDecisionSnapshot: terminalResult.parsedDecisionSnapshot,
+          decision: invokedRound.decision,
         });
       }
 
@@ -251,44 +250,31 @@ async function deliverVisibleReply(delivery: {
   readonly options: RunRoleModelLoopOptions;
   readonly round: number;
   readonly decision: CharacterDecision;
-  readonly inputEnvelope: RoleModelInputEnvelope;
-  readonly ioSnapshot: RoleModelIOSnapshot;
-  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
 }): Promise<readonly VisibleMessage[]> {
   const committed: VisibleMessage[] = [];
 
   for (const text of executionVisibleReplyTexts(delivery.decision)) {
     committed.push(
-      await delivery.options.onVisibleReply({
-        round: delivery.round,
-        text,
-        inputEnvelope: delivery.inputEnvelope,
-        ioSnapshot: delivery.ioSnapshot,
-        parsedDecisionSnapshot: delivery.parsedDecisionSnapshot,
-      }),
+      await delivery.options.onVisibleReply({round: delivery.round, text}),
     );
   }
 
   return Object.freeze(committed);
 }
 
-type InvokedRoleModelLoopRoundBase = {
-  readonly inputEnvelope: RoleModelInputEnvelope;
-  readonly ioSnapshot: RoleModelIOSnapshot;
-  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-};
-
 type InvokedRoleModelLoopRound =
-  | (InvokedRoleModelLoopRoundBase & {
+  | {
       readonly status: 'rejected';
-      readonly decisionResult: RejectedRoleModelDecisionResult;
+      readonly rejection: RoleModelDecisionRejection;
+      /** Whether the model wrote anything: nothing can go back when no output arrived. */
       readonly modelOutput: boolean;
-    })
-  | (InvokedRoleModelLoopRoundBase & {
+    }
+  | {
       readonly status: 'accepted';
-      readonly decisionResult: AcceptedRoleModelDecisionResult;
+      readonly decision: CharacterDecision;
       readonly executableToolCalls: readonly ModelToolCall[];
-    });
+      readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
+    };
 
 async function invokeRoleModelLoopRound(options: {
   readonly options: RunRoleModelLoopOptions;
@@ -347,28 +333,27 @@ async function invokeRoleModelLoopRound(options: {
     result: decisionResult,
   });
 
+  await options.options.onRound({
+    round: options.round,
+    ioSnapshot,
+    parsedDecisionSnapshot,
+  });
+
   if (decisionResult.status === 'rejected') {
     return {
       status: 'rejected',
-      decisionResult,
-      inputEnvelope,
-      ioSnapshot,
-      parsedDecisionSnapshot,
-      // Whoever refused it, there is something of the model's to hand back
-      // only when the model actually wrote something.
+      rejection: decisionResult.rejection,
       modelOutput: rawOutputValidation.rawOutputText.length > 0,
     };
   }
 
   return {
     status: 'accepted',
-    decisionResult,
-    inputEnvelope,
-    ioSnapshot,
-    parsedDecisionSnapshot,
+    decision: decisionResult.decision,
     executableToolCalls: executableModelToolCalls(
       decisionResult.decision.toolCalls,
     ),
+    pluginToolDefinitions: inputEnvelope.pluginToolDefinitions,
   };
 }
 
@@ -387,10 +372,7 @@ async function routeRoleModelLoopToolCalls(options: {
   const interimReplies = await deliverVisibleReply({
     options: options.options,
     round: options.round,
-    decision: options.invokedRound.decisionResult.decision,
-    inputEnvelope: options.invokedRound.inputEnvelope,
-    ioSnapshot: options.invokedRound.ioSnapshot,
-    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    decision: options.invokedRound.decision,
   });
 
   await options.options.onPluginToolCallsRequested?.({
@@ -401,9 +383,7 @@ async function routeRoleModelLoopToolCalls(options: {
   const pluginToolResults = await routeExecutableToolCalls({
     toolCalls: options.invokedRound.executableToolCalls,
     identity: options.identity,
-    inputEnvelope: options.invokedRound.inputEnvelope,
-    ioSnapshot: options.invokedRound.ioSnapshot,
-    parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
+    pluginToolDefinitions: options.invokedRound.pluginToolDefinitions,
     round: options.round,
     ...(options.options.onPluginToolCallStarted === undefined
       ? {}
@@ -428,18 +408,9 @@ function recordRoleModelLoopToolRound(options: {
   readonly pluginToolResults: readonly RoleModelPluginToolRoutingEvidence[];
   readonly round: number;
 }): void {
-  const {decision} = options.invokedRound.decisionResult;
+  const {decision} = options.invokedRound;
 
   options.state.allPluginToolResults.push(...options.pluginToolResults);
-  options.state.rounds.push(
-    createRoleModelLoopRound({
-      pluginToolResults: options.pluginToolResults,
-      inputEnvelope: options.invokedRound.inputEnvelope,
-      ioSnapshot: options.invokedRound.ioSnapshot,
-      parsedDecisionSnapshot: options.invokedRound.parsedDecisionSnapshot,
-      round: options.round,
-    }),
-  );
   options.state.spentRounds += 1;
   options.state.toolRounds = Object.freeze([
     ...options.state.toolRounds,
@@ -484,9 +455,7 @@ function conversationToolCallFromRouting(
 async function routeExecutableToolCalls(options: {
   readonly toolCalls: readonly ModelToolCall[];
   readonly identity: RuntimeEventIdentity;
-  readonly inputEnvelope: RoleModelInputEnvelope;
-  readonly ioSnapshot: RoleModelIOSnapshot;
-  readonly parsedDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
+  readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly round: number;
   readonly pluginToolHost: RoleModelPluginToolHost;
   readonly onPluginToolCallStarted?: (
@@ -517,7 +486,7 @@ async function routeExecutableToolCalls(options: {
   for (const [index, toolCall] of options.toolCalls.entries()) {
     const slot = results.push(undefined) - 1;
     const toolDefinition = findPluginToolDefinition(
-      options.inputEnvelope.pluginToolDefinitions,
+      options.pluginToolDefinitions,
       toolCall.name,
     );
     const callId = createToolCallId({
@@ -539,8 +508,6 @@ async function routeExecutableToolCalls(options: {
       callId,
       round: options.round,
       call: routedCall,
-      ioSnapshot: options.ioSnapshot,
-      parsedDecisionSnapshot: options.parsedDecisionSnapshot,
     });
 
     if (toolDefinition === undefined) {

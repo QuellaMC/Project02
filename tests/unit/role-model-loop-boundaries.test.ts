@@ -7,6 +7,7 @@ import {
   type RoleModelPluginToolHost,
   type RoleModelProviderExchangeSnapshot,
   type RoleModelProviderMetadata,
+  type RoleModelRoundEvent,
   runRoleModelLoop,
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
@@ -17,7 +18,7 @@ import {
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   acceptingPluginToolHost,
-  testVisibleReplySink,
+  testLoopCallbacks,
   createAcceptedToolCallResult,
   createDegradingRejectedMemorySearchPlugin,
   createProviderMetadataAdapter,
@@ -32,7 +33,7 @@ describe('role-model loop evidence and boundary validation', () => {
   it('dispatches tool input to the host exactly as the model sent it', async () => {
     let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_secret_tool_input'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -110,7 +111,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_host_degraded_plugin_tool'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -184,7 +185,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -206,14 +207,13 @@ describe('role-model loop evidence and boundary validation', () => {
         output: {score: null, ratio: null},
       },
     });
-    expect(result.rounds).toHaveLength(2);
-    expect(result.rounds[0]?.pluginToolResults).toHaveLength(1);
+    expect(result).toMatchObject({round: 2});
   });
 
   it('rejects custom-host evidence that does not match the routed call identity', async () => {
     const eventId = 'evt_custom_host_evidence_identity';
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -280,7 +280,7 @@ describe('role-model loop evidence and boundary validation', () => {
     } satisfies RuntimePluginEvidenceSnapshot;
     Reflect.deleteProperty(malformedEvidence, 'kind');
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', eventId),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -357,7 +357,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_required_observed'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -370,7 +370,7 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(invocations).toBe(2);
     expect(handledCalls).toBe(1);
     expect(result.pluginToolResults).toHaveLength(1);
-    expect(result.rounds).toHaveLength(2);
+    expect(result).toMatchObject({round: 2});
   });
 
   it('allows multiple required tools to complete in sequential rounds', async () => {
@@ -410,7 +410,7 @@ describe('role-model loop evidence and boundary validation', () => {
       () => undefined,
     );
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('search memory', 'evt_sequential_required_tools'),
       decisionContext: createTestDecisionContext(),
       adapter,
@@ -431,12 +431,12 @@ describe('role-model loop evidence and boundary validation', () => {
 
     expect(result.status).toBe('accepted');
     expect(handledTools).toEqual(['memory.search', 'memory.recall']);
-    expect(result.rounds).toHaveLength(3);
+    expect(result).toMatchObject({round: 3});
   });
 
   it('hands a blank visible_reply back to the model as its next round', async () => {
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks(),
       event: createTestEvent('reply blank', 'evt_blank_reply_feedback'),
       decisionContext: createTestDecisionContext(),
       adapter: createSequencedAdapter(
@@ -460,7 +460,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
 
     expect(result.status).toBe('accepted');
-    expect(result.rounds).toHaveLength(2);
+    expect(result).toMatchObject({round: 2});
     if (result.status !== 'accepted') {
       throw new Error(
         'Expected the model to get another round after a blank reply.',
@@ -470,9 +470,10 @@ describe('role-model loop evidence and boundary validation', () => {
   });
 
   it('tool_rounds_exhausted ends the turn and leaves the parsed round accepted', async () => {
+    const rounds: RoleModelRoundEvent[] = [];
     let handledCalls = 0;
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks({rounds}),
       event: createTestEvent('search memory', 'evt_rounds_exhausted'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [memorySearchToolDefinition],
@@ -492,29 +493,31 @@ describe('role-model loop evidence and boundary validation', () => {
 
     expect(result).toMatchObject({
       status: 'rejected',
+      round: 1,
       rejection: {reason: 'tool_rounds_exhausted'},
-      parsedDecisionSnapshot: {result: {status: 'accepted'}},
+      pluginToolResults: [],
     });
-    if (result.status !== 'rejected') {
-      throw new Error('Expected the budget to end the turn.');
-    }
 
     // The parser's verdict stands: the round is what the model said, and the
     // refusal is the runtime's, recorded against the commit.
     expect(handledCalls).toBe(0);
-    expect(result.rounds).toHaveLength(1);
-    expect(result.rounds[0]?.pluginToolResults).toEqual([]);
+    expect(rounds).toHaveLength(1);
+    expect(rounds[0]?.parsedDecisionSnapshot.result.status).toBe('accepted');
     expect(
       isRoleModelRawOutputReplayableDecisionEvidence({
-        rawOutputText: result.ioSnapshot.rawOutputText,
-        decisionResult: result.parsedDecisionSnapshot.result,
+        rawOutputText: rounds[0]?.ioSnapshot.rawOutputText ?? '',
+        decisionResult: rounds[0]?.parsedDecisionSnapshot.result ?? {
+          status: 'rejected',
+          rejection: {reason: 'provider_error'},
+        },
       }),
     ).toBe(true);
   });
 
   it('drops non-finite provider metadata numbers from the snapshot', async () => {
+    const rounds: RoleModelRoundEvent[] = [];
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks({rounds}),
       event: createTestEvent('hello', 'evt_non_finite_provider_metadata'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -536,17 +539,19 @@ describe('role-model loop evidence and boundary validation', () => {
       ),
     });
 
-    expect(result.ioSnapshot.providerMetadata?.request).not.toHaveProperty(
+    expect(result.status).toBe('accepted');
+    expect(rounds[0]?.ioSnapshot.providerMetadata?.request).not.toHaveProperty(
       'messageCount',
     );
-    expect(result.ioSnapshot.providerMetadata?.response).not.toHaveProperty(
+    expect(rounds[0]?.ioSnapshot.providerMetadata?.response).not.toHaveProperty(
       'status',
     );
   });
 
   it('rejects malformed provider exchange evidence at the adapter boundary', async () => {
+    const rounds: RoleModelRoundEvent[] = [];
     const result = await runRoleModelLoop({
-      onVisibleReply: testVisibleReplySink(),
+      ...testLoopCallbacks({rounds}),
       event: createTestEvent('hello', 'evt_malformed_provider_exchange'),
       decisionContext: createTestDecisionContext(),
       pluginToolDefinitions: [],
@@ -596,8 +601,8 @@ describe('role-model loop evidence and boundary validation', () => {
         details: 'Role-model adapter provider exchange is malformed.',
       },
     });
-    expect(result.ioSnapshot.rawOutputText).toBe('');
-    expect(result.ioSnapshot).not.toHaveProperty('providerExchange');
+    expect(rounds[0]?.ioSnapshot.rawOutputText).toBe('');
+    expect(rounds[0]?.ioSnapshot).not.toHaveProperty('providerExchange');
   });
 });
 

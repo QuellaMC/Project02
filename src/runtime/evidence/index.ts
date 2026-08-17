@@ -3,7 +3,6 @@ export {deriveRuntimeTraceEntries} from './trace-projection.ts';
 export {
   createTraceSummary,
   sameTraceIdentity,
-  terminalDecisionEvidenceRawEvent,
   type ChatTraceProviderSummary,
   type ChatTraceSummary,
   type TraceIdentity,

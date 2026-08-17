@@ -72,11 +72,11 @@ describe('character persona through the role-model loop', () => {
       'You are Mira, the persona-proof fixture.\n\nStay terse.',
     );
 
-    const committed = logStore
+    const round = logStore
       .rawEvents()
-      .findLast(rawEvent => rawEvent.kind === 'visible_message_committed');
+      .findLast(rawEvent => rawEvent.kind === 'role_model_round');
 
-    expect(committed?.roleModelIOSnapshot?.characterRef).toEqual(characterRef);
+    expect(round?.roleModelIOSnapshot?.characterRef).toEqual(characterRef);
   });
 
   it('rejects committing a turn for a foreign character on a bound store even with role-model anchoring', async () => {
@@ -150,11 +150,11 @@ describe('character persona through the role-model loop', () => {
     });
 
     expect(result.status).toBe('completed');
-    const committed = logStore
+    const round = logStore
       .rawEvents()
-      .findLast(rawEvent => rawEvent.kind === 'visible_message_committed');
+      .findLast(rawEvent => rawEvent.kind === 'role_model_round');
 
-    expect(committed?.roleModelIOSnapshot).toBeDefined();
-    expect(committed?.roleModelIOSnapshot?.characterRef).toBeUndefined();
+    expect(round?.roleModelIOSnapshot).toBeDefined();
+    expect(round?.roleModelIOSnapshot?.characterRef).toBeUndefined();
   });
 });

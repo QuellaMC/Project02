@@ -16,7 +16,6 @@ import {
   assertIncrementalRawEventAppend,
   createRuntimeEvidenceIncrementalState,
 } from './validation.ts';
-import {roleModelCharacterSnapshot} from './identity.ts';
 
 export type RuntimeEvidenceTransitionMachine = {
   readonly state: RuntimeEvidenceIncrementalState;
@@ -101,8 +100,6 @@ export function createRuntimeEvidenceTransitionMachine(options: {
     const message = conversationMessageForRawEvent(record);
 
     if (message !== undefined) {
-      const recordCharacter = roleModelCharacterSnapshot(record);
-
       assertIncrementalConversationAppend({
         evidence: options.evidence,
         state,
@@ -111,7 +108,6 @@ export function createRuntimeEvidenceTransitionMachine(options: {
           ? {}
           : {sessionId: options.sessionId}),
         ...(expectedCharacter === undefined ? {} : {expectedCharacter}),
-        ...(recordCharacter === undefined ? {} : {recordCharacter}),
       });
     }
   }

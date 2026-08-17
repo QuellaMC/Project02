@@ -25,6 +25,7 @@ import type {RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {createTurnEvidence} from '../../src/runtime/evidence/turn-projection.ts';
 import {
   defaultRoleModelProviderCapabilities,
+  parseRoleModelExecutionDecision,
   type RoleModelAdapter,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
@@ -39,6 +40,11 @@ import {
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
+import {createSequencedAdapter} from '../support/role-model-loop-fixtures.ts';
+import {
+  appendModelRound,
+  completedTerminalRecord,
+} from '../support/runtime-log-fixtures.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   createRuntimePlugin,
@@ -337,7 +343,7 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    writeJsonLines(paths.rawEventsPath, [patchCompletedEvent(sessionId)]);
+    writeJsonLines(paths.rawEventsPath, [patchRoundRecord(sessionId)]);
 
     expect(() => reopenStore(paths).rawEvents()).toThrow(
       LocalRuntimeStorageContractError,
@@ -364,7 +370,29 @@ describe('file runtime log store plugin tool event validation', () => {
         kind: 'runtime_event_received',
         eventType: 'USER_MESSAGE',
       },
-      patchCompletedEvent(sessionId),
+      patchRoundRecord(sessionId),
+      {
+        ...eventIdentity,
+        kind: 'runtime_turn_rejected',
+        eventType: 'USER_MESSAGE',
+        status: 'rejected',
+        reason: 'tool_rounds_exhausted',
+        message: 'Role model exceeded maximum executable tool rounds (0).',
+        round: 1,
+        commitValidation: {
+          ...eventIdentity,
+          kind: 'role_model_commit_validation_snapshot',
+          sessionId,
+          result: {
+            status: 'rejected',
+            rejection: {
+              reason: 'tool_rounds_exhausted',
+              details:
+                'Role model exceeded maximum executable tool rounds (0).',
+            },
+          },
+        },
+      },
     ]);
 
     expect(
@@ -372,7 +400,7 @@ describe('file runtime log store plugin tool event validation', () => {
         reopenStore(paths).rawEvents(),
         eventIdentity,
       )?.kind,
-    ).toBe('runtime_turn_completed');
+    ).toBe('runtime_turn_rejected');
     expect(
       findRuntimeTurnTerminalRawEvent(reopenStore(paths).rawEvents(), {
         ...eventIdentity,
@@ -419,7 +447,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects malformed persisted provider exchange evidence with the storage contract error', () => {
     const malformedRecord: unknown = structuredClone(
-      patchCompletedEvent('malformed-provider-exchange'),
+      patchRoundRecord('malformed-provider-exchange'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -440,7 +468,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a persisted characterRef that disagrees with the decision context', () => {
     const tamperedRecord: unknown = structuredClone(
-      patchCompletedEvent('tampered-character-ref'),
+      patchRoundRecord('tampered-character-ref'),
     );
     const roleModelIOSnapshot = isTestRecord(tamperedRecord)
       ? tamperedRecord['roleModelIOSnapshot']
@@ -465,7 +493,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects an envelope that persisted no plugin tool definitions', () => {
     const malformedRecord: unknown = structuredClone(
-      patchCompletedEvent('absent-plugin-tool-definitions'),
+      patchRoundRecord('absent-plugin-tool-definitions'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -488,7 +516,7 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it("round-trips this turn's tool rounds through the persisted envelope", () => {
-    const storedRecord = patchCompletedEvent('tool-rounds-round-trip') as {
+    const storedRecord = patchRoundRecord('tool-rounds-round-trip') as {
       roleModelIOSnapshot: {inputEnvelope: Record<string, unknown>};
     };
     const toolRounds = [
@@ -565,7 +593,7 @@ describe('file runtime log store plugin tool event validation', () => {
       },
     ],
   ])('rejects an envelope that persisted %s', (_label, damage) => {
-    const storedRecord = patchCompletedEvent('damaged-tool-rounds') as {
+    const storedRecord = patchRoundRecord('damaged-tool-rounds') as {
       roleModelIOSnapshot: {inputEnvelope: Record<string, unknown>};
     };
 
@@ -577,30 +605,39 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it('reloads a turn that ran out of tool rounds', async () => {
-    const storedRecord = await persistedRoundsExhaustedRecord(
-      'rounds-exhausted-round-trip',
-    );
+    const storedRecords = (
+      await persistedRoundsExhaustedRecords('rounds-exhausted-round-trip')
+    ).map(record => decodeRawEventLogRecord(JSON.stringify(record)));
 
     // The parsed round stays what the model said; the refusal is the
-    // runtime's, on the commit validation.
-    expect(decodeRawEventLogRecord(JSON.stringify(storedRecord))).toMatchObject(
-      {
-        kind: 'runtime_turn_rejected',
-        reason: 'tool_rounds_exhausted',
-        parsedRoleModelDecisionSnapshot: {result: {status: 'accepted'}},
-        commitValidation: {
-          result: {
-            status: 'rejected',
-            rejection: {reason: 'tool_rounds_exhausted'},
-          },
+    // runtime's, on the commit validation of the terminal that judged it.
+    expect(
+      storedRecords
+        .filter(record => record.kind === 'role_model_round')
+        .map(record => [
+          record.round,
+          record.parsedRoleModelDecisionSnapshot?.result.status,
+        ]),
+    ).toEqual([
+      [1, 'accepted'],
+      [2, 'accepted'],
+    ]);
+    expect(storedRecords.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      reason: 'tool_rounds_exhausted',
+      round: 2,
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {reason: 'tool_rounds_exhausted'},
         },
       },
-    );
+    });
   });
 
   it('round-trips trusted curated sections and runtime notes through the persisted envelope', () => {
     const sessionId = 'curated-context-round-trip';
-    const storedRecord = patchCompletedEvent(sessionId) as {
+    const storedRecord = patchRoundRecord(sessionId) as {
       roleModelIOSnapshot: {
         inputEnvelope: {
           decisionContext: Record<string, unknown>;
@@ -641,7 +678,7 @@ describe('file runtime log store plugin tool event validation', () => {
       decoded.roleModelIOSnapshot?.inputEnvelope.decisionContext.runtimeNotes,
     ).toEqual(runtimeNotes);
     expect(
-      decodeRawEventLogRecord(JSON.stringify(patchCompletedEvent(sessionId)))
+      decodeRawEventLogRecord(JSON.stringify(patchRoundRecord(sessionId)))
         .roleModelIOSnapshot?.inputEnvelope.decisionContext
         .curatedContextSections,
     ).toEqual([]);
@@ -649,7 +686,15 @@ describe('file runtime log store plugin tool event validation', () => {
     // dynamic model context, not just its untrusted half.
     const inspected = createTurnEvidence({
       conversationMessages: [],
-      rawEvents: [decoded],
+      rawEvents: [
+        decoded,
+        {
+          ...identity('evt_patch_completed'),
+          kind: 'runtime_turn_completed',
+          eventType: 'USER_MESSAGE',
+          status: 'completed',
+        },
+      ],
       traceEntries: [],
     })[0]?.modelRounds[0]?.roleModelEvidence.input;
     expect(inspected?.curatedContextSections).toEqual(sections);
@@ -658,7 +703,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('round-trips the history window and decodes records written before it had one', () => {
     const sessionId = 'history-window-round-trip';
-    const storedRecord = patchCompletedEvent(sessionId) as {
+    const storedRecord = patchRoundRecord(sessionId) as {
       roleModelIOSnapshot: {
         inputEnvelope: {
           decisionContext: Record<string, unknown>;
@@ -687,7 +732,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('round-trips the prompt size, decodes records without one, and rejects a malformed one', () => {
     const sessionId = 'prompt-size-round-trip';
-    const storedRecord = patchCompletedEvent(sessionId) as {
+    const storedRecord = patchRoundRecord(sessionId) as {
       roleModelIOSnapshot: Record<string, unknown>;
     };
     const promptSize = {
@@ -798,9 +843,11 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const reloadedTerminalEvent = reloadedLogStore.rawEvents().at(-1);
-    expect(reloadedTerminalEvent).toMatchObject({
-      kind: 'runtime_turn_rejected',
+    const reloadedRawEvents = reloadedLogStore.rawEvents();
+    expect(
+      reloadedRawEvents.find(event => event.kind === 'role_model_round'),
+    ).toMatchObject({
+      round: 1,
       parsedRoleModelDecisionSnapshot: {
         result: {
           status: 'rejected',
@@ -808,6 +855,17 @@ describe('file runtime log store plugin tool event validation', () => {
             reason: 'provider_error',
             details: 'Role-model adapter provider exchange is malformed.',
           },
+        },
+      },
+    });
+    expect(reloadedRawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
+      reason: 'provider_error',
+      round: 1,
+      commitValidation: {
+        result: {
+          status: 'rejected',
+          rejection: {reason: 'provider_error'},
         },
       },
     });
@@ -879,11 +937,11 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     }).rawEvents();
-    const completed = rawEvents.find(
-      rawEvent => rawEvent.kind === 'runtime_turn_completed',
+    const round = rawEvents.find(
+      rawEvent => rawEvent.kind === 'role_model_round',
     );
 
-    expect(completed?.roleModelIOSnapshot?.providerExchange?.usage).toEqual({
+    expect(round?.roleModelIOSnapshot?.providerExchange?.usage).toEqual({
       api_key: '[redacted]',
       safe: 'preserved',
     });
@@ -892,7 +950,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects persisted allowed tools that differ from the offered tools', () => {
     const malformedRecord: unknown = structuredClone(
-      patchCompletedEvent('duplicate-persisted-allowed-tools'),
+      patchRoundRecord('duplicate-persisted-allowed-tools'),
     );
     const roleModelIOSnapshot = isTestRecord(malformedRecord)
       ? malformedRecord['roleModelIOSnapshot']
@@ -1309,10 +1367,13 @@ describe('file runtime log store plugin tool event validation', () => {
       'utf8',
     );
 
+    // The row and its anchor travel on one record, so the codec sees the
+    // difference before any cross-record rule needs to.
     expect(() => reopenStore(paths).conversationMessages()).toThrow(
-      /must match the accepted reply/iu,
+      /"commitValidation" is malformed/iu,
     );
   });
+
   it('rejects replies committed out of their decision order', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
       'session-reply-order',
@@ -1369,61 +1430,398 @@ describe('file runtime log store plugin tool event validation', () => {
     );
   });
 
-  it('rejects replies reordered by stripping their decision rounds', async () => {
+  it('rejects a character row that names a round the turn never ran', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-stripped-rounds',
+      'session-unrun-round-reference',
       createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
     );
-    const commits = rawLines.filter(
+    const commit = rawLines.findLast(
       line =>
         line.includes('"visible_message_committed"') &&
         line.includes('"role":"character"'),
     );
 
-    if (commits.length !== 2) {
-      throw new Error(
-        `Expected two character commit events, got ${String(commits.length)}.`,
-      );
+    if (commit === undefined) {
+      throw new Error('Expected a character commit event.');
     }
 
-    // The ordering check keys on the decision round, and a character commit
-    // without its round is not a shape the writer produces.
-    const records = commits.map(
-      line => JSON.parse(line) as Record<string, unknown>,
-    );
-    const texts = records.map(
-      record => (record['visibleMessage'] as {text: string}).text,
-    );
-    const strippedLines = new Map(
-      commits.map((line, index) => {
-        const swapped: Record<string, unknown> = {
-          ...records[index],
-          visibleMessage: {
-            ...(records[index]?.['visibleMessage'] as object),
-            text: texts[texts.length - 1 - index],
-          },
-          commitValidation: {
-            ...(records[index]?.['commitValidation'] as object),
-            result: {
-              status: 'accepted',
-              acceptedVisibleReplyText: texts[texts.length - 1 - index],
-            },
-          },
-        };
-
-        delete swapped['decisionRound'];
-        return [line, JSON.stringify(swapped)];
-      }),
-    );
+    // Internally the record is fine: the round it names is what is missing.
+    const forged = JSON.stringify({
+      ...(JSON.parse(commit) as Record<string, unknown>),
+      round: 9,
+    });
 
     writeFileSync(
       paths.rawEventsPath,
-      `${rawLines.map(line => strippedLines.get(line) ?? line).join('\n')}\n`,
+      `${rawLines.map(line => (line === commit ? forged : line)).join('\n')}\n`,
       'utf8',
     );
 
     expect(() => reopenStore(paths).conversationMessages()).toThrow(
-      /must carry the accepted decision/iu,
+      /references model round 9, which the turn never ran/iu,
+    );
+  });
+
+  it('rejects a model round out of sequence', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-round-out-of-sequence',
+    );
+    const round = rawLines.find(line => line.includes('"role_model_round"'));
+
+    if (round === undefined) {
+      throw new Error('Expected a model round record.');
+    }
+
+    const renumbered = JSON.stringify({
+      ...(JSON.parse(round) as Record<string, unknown>),
+      round: 2,
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === round ? renumbered : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /Model round 2 is out of sequence/iu,
+    );
+  });
+
+  it("rejects a terminal that judges a round other than the turn's last", async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-on-earlier-round',
+      createSequencedAdapter([
+        {toolCalls: [{name: 'visible_reply', input: {text: '   '}}]},
+        {toolCalls: [{name: 'visible_reply', input: {text: 'real reply'}}]},
+      ]),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    // The turn ended on round 2; a terminal pointed at round 1 attributes
+    // the outcome to a round that did not end it.
+    const repointed = JSON.stringify({
+      ...(JSON.parse(terminal) as Record<string, unknown>),
+      round: 1,
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === terminal ? repointed : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /judges the round the turn ended on, round 2, not round 1/iu,
+    );
+  });
+
+  it('rejects a completed terminal whose last round the parser refused', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-on-refused-round',
+    );
+    const round = rawLines.find(line => line.includes('"role_model_round"'));
+    const commit = rawLines.find(
+      line =>
+        line.includes('"visible_message_committed"') &&
+        line.includes('"role":"character"'),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (round === undefined || commit === undefined || terminal === undefined) {
+      throw new Error('Expected a round, its reply, and the terminal.');
+    }
+
+    // The round is rewritten as one the parser refused, consistently with its
+    // raw output, and the reply it produced is dropped along with its
+    // reference; only the terminal still claims an accepted round.
+    const rawOutputText = 'not a decision';
+    const roundRecord = JSON.parse(round) as {
+      roleModelIOSnapshot: Record<string, unknown>;
+      parsedRoleModelDecisionSnapshot: Record<string, unknown>;
+    };
+    const refusedRound = JSON.stringify({
+      ...roundRecord,
+      roleModelIOSnapshot: {...roundRecord.roleModelIOSnapshot, rawOutputText},
+      parsedRoleModelDecisionSnapshot: {
+        ...roundRecord.parsedRoleModelDecisionSnapshot,
+        result: parseRoleModelExecutionDecision(rawOutputText),
+      },
+    });
+    const commitRecord = JSON.parse(commit) as {
+      visibleMessage: {id: string};
+    };
+    const terminalRecord = JSON.parse(terminal) as {
+      visibleMessageIds: readonly string[];
+    };
+    const forgedTerminal = JSON.stringify({
+      ...terminalRecord,
+      visibleMessageIds: terminalRecord.visibleMessageIds.filter(
+        id => id !== commitRecord.visibleMessage.id,
+      ),
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .flatMap(line =>
+          line === round
+            ? [refusedRound]
+            : line === commit
+              ? []
+              : line === terminal
+                ? [forgedTerminal]
+                : [line],
+        )
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must end on a round the parser accepted/iu,
+    );
+  });
+
+  it('rejects a completed terminal on a round that still asked for a tool', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-on-tool-round',
+      createSequencedVisibleReplyAdapter(['a reply']),
+    );
+    const round = rawLines.find(line => line.includes('"role_model_round"'));
+
+    if (round === undefined) {
+      throw new Error('Expected a model round record.');
+    }
+
+    // The round keeps its reply, so the row still matches, and gains a tool
+    // call the turn never ran; only the terminal claims it completed there.
+    const rawOutputText = JSON.stringify({
+      toolCalls: [
+        {name: 'visible_reply', input: {text: 'a reply'}},
+        {name: 'runtime.plugin.list', input: {}},
+      ],
+    });
+    const roundRecord = JSON.parse(round) as {
+      roleModelIOSnapshot: Record<string, unknown>;
+      parsedRoleModelDecisionSnapshot: Record<string, unknown>;
+    };
+    const askingRound = JSON.stringify({
+      ...roundRecord,
+      roleModelIOSnapshot: {...roundRecord.roleModelIOSnapshot, rawOutputText},
+      parsedRoleModelDecisionSnapshot: {
+        ...roundRecord.parsedRoleModelDecisionSnapshot,
+        result: parseRoleModelExecutionDecision(rawOutputText),
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === round ? askingRound : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must end on a round that asked for no tool/iu,
+    );
+  });
+
+  it('rejects an exhausted-budget rejection on a round that asked for no tool', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-exhausted-on-reply-round',
+      createSequencedVisibleReplyAdapter(['a reply']),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    // Internally consistent: reason, message, and verdict all say the budget
+    // ran out. The round it judges asked for nothing the budget could refuse.
+    const record = JSON.parse(terminal) as {
+      commitValidation: Record<string, unknown>;
+    };
+    const forged = JSON.stringify({
+      ...record,
+      kind: 'runtime_turn_rejected',
+      status: 'rejected',
+      reason: 'tool_rounds_exhausted',
+      message: 'forged budget refusal',
+      commitValidation: {
+        ...record.commitValidation,
+        result: {
+          status: 'rejected',
+          rejection: {
+            reason: 'tool_rounds_exhausted',
+            details: 'forged budget refusal',
+          },
+        },
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === terminal ? forged : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must repeat the refusal of the round it judged/iu,
+    );
+  });
+
+  it("rejects a rejection for one of the model's reasons that names no round", async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-model-rejection-without-round',
+      createMalformedProviderExchangeAdapter(),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_rejected"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a rejected terminal record.');
+    }
+
+    // The provider's failure was a round's; a rejection that keeps the reason
+    // but drops the round claims a model refusal no round produced.
+    const record = JSON.parse(terminal) as Record<string, unknown>;
+
+    delete record['round'];
+    delete record['commitValidation'];
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .map(line => (line === terminal ? JSON.stringify(record) : line))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /"commitValidation" is malformed/iu,
+    );
+  });
+
+  it('rejects a completed terminal stripped of its round and verdict', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-without-verdict',
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    // A turn that ran the model completed on a verdict; a terminal without
+    // one reports a model turn with no verdict at all.
+    const record = JSON.parse(terminal) as Record<string, unknown>;
+
+    delete record['round'];
+    delete record['commitValidation'];
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines
+        .map(line => (line === terminal ? JSON.stringify(record) : line))
+        .join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /ran the model must judge the round it ended on/iu,
+    );
+  });
+
+  it('rejects a completed terminal that anchors a reply its round never asked for', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-terminal-anchor',
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_completed"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a completed terminal record.');
+    }
+
+    const record = JSON.parse(terminal) as {
+      commitValidation: {result: Record<string, unknown>};
+    };
+    const forged = JSON.stringify({
+      ...record,
+      commitValidation: {
+        ...record.commitValidation,
+        result: {
+          ...record.commitValidation.result,
+          acceptedVisibleReplyText: 'not what the round said',
+        },
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === terminal ? forged : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must anchor a reply the round it ended on asked for/iu,
+    );
+  });
+
+  it('rejects a turn rejection whose reason disagrees with the round it judged', async () => {
+    const {paths, rawLines} = await committedTurnRawLines(
+      'session-rejection-disagrees',
+      createMalformedProviderExchangeAdapter(),
+    );
+    const terminal = rawLines.find(line =>
+      line.includes('"runtime_turn_rejected"'),
+    );
+
+    if (terminal === undefined) {
+      throw new Error('Expected a rejected terminal record.');
+    }
+
+    // Reason and verdict agree with each other, but not with the round.
+    const record = JSON.parse(terminal) as {
+      commitValidation: {result: {rejection: Record<string, unknown>}};
+    };
+    const forged = JSON.stringify({
+      ...record,
+      reason: 'malformed_output',
+      commitValidation: {
+        ...record.commitValidation,
+        result: {
+          status: 'rejected',
+          rejection: {
+            ...record.commitValidation.result.rejection,
+            reason: 'malformed_output',
+          },
+        },
+      },
+    });
+
+    writeFileSync(
+      paths.rawEventsPath,
+      `${rawLines.map(line => (line === terminal ? forged : line)).join('\n')}\n`,
+      'utf8',
+    );
+
+    expect(() => reopenStore(paths).rawEvents()).toThrow(
+      /must repeat the refusal of the round it judged/iu,
     );
   });
 
@@ -1501,13 +1899,10 @@ describe('file runtime log store plugin tool event validation', () => {
       createSequencedVisibleReplyAdapter(['a reply']),
     );
 
-    // Snapshot and summary agree inside the forged record, so only the
-    // cross-record rule can catch it.
+    // Snapshot and summary agree inside the forged round record, so only
+    // the cross-record rule can catch it.
     const editedLines = rawLines.map(line => {
-      if (
-        !line.includes('"visible_message_committed"') ||
-        !line.includes('"role":"character"')
-      ) {
+      if (!line.includes('"role_model_round"')) {
         return line;
       }
 
@@ -1572,7 +1967,8 @@ describe('file runtime log store plugin tool event validation', () => {
         kind: 'runtime_turn_rejected',
         eventType: 'USER_MESSAGE',
         status: 'rejected',
-        reason: 'prepared before the user message committed',
+        reason: 'runtime_failure',
+        message: 'prepared before the user message committed',
       });
       const messageId = `${sessionId}:message-1`;
 
@@ -1760,7 +2156,7 @@ describe('file runtime log store plugin tool event validation', () => {
       LocalRuntimeStorageContractError,
     );
   });
-  it('rejects a forged character row committed without its accepted decision', async () => {
+  it('rejects a forged character row committed without its round and anchor', async () => {
     const storeRoot = createStoreRoot();
     const sessionId = 'session-forged-character-row';
     await createLocalRuntimeSessionStore({
@@ -1799,8 +2195,8 @@ describe('file runtime log store plugin tool event validation', () => {
       throw new Error('Expected file runtime log store session paths.');
     }
 
-    // A forged reply can carry a bare commit event but not the accepted
-    // decision that produced its text.
+    // A forged reply can carry a bare commit event but not the round that
+    // produced its text nor the anchor that pins it.
     const rawLines = readFileSync(paths.rawEventsPath, 'utf8')
       .split('\n')
       .filter(line => line.length > 0);
@@ -1816,8 +2212,7 @@ describe('file runtime log store plugin tool event validation', () => {
       }
 
       delete record['commitValidation'];
-      delete record['parsedRoleModelDecisionSnapshot'];
-      delete record['roleModelIOSnapshot'];
+      delete record['round'];
       return JSON.stringify(record);
     });
 
@@ -1830,9 +2225,7 @@ describe('file runtime log store plugin tool event validation', () => {
         characterId: testCharacterProfile.id,
         boundCharacter: testCharacterProfile,
       }).readSessionEvidence(),
-    ).toThrow(
-      'Character message commit must carry the accepted decision that produced its text',
-    );
+    ).toThrow(/"round" is malformed/iu);
   });
 
   it('rejects a second user row appended into one turn', async () => {
@@ -2147,15 +2540,19 @@ describe('file runtime log store plugin tool event validation', () => {
       logStore.conversationMessages().map(message => message.role),
     ).toEqual(['user', 'character']);
 
+    // One record says it all: the health gate is a commit validation
+    // failure on the round the turn ended with.
     const rawEvents = logStore.rawEvents();
-    const commitRejection = rawEvents.find(
-      event => event.kind === 'commit_validation_rejected',
-    );
 
-    expect(commitRejection).toMatchObject({
-      kind: 'commit_validation_rejected',
+    expect(
+      rawEvents.filter(event => event.kind === 'runtime_turn_rejected'),
+    ).toHaveLength(1);
+    expect(rawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
       status: 'rejected',
       reason: roleModelCommitValidationFailureRejectionReason,
+      message: 'Plugin health unavailable: health fixture offline',
+      round: 1,
       commitValidation: {
         result: {
           status: 'rejected',
@@ -2173,20 +2570,6 @@ describe('file runtime log store plugin tool event validation', () => {
             summary: 'health fixture offline',
           },
         ],
-      },
-    });
-    expect(rawEvents.at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-      reason: roleModelCommitValidationFailureRejectionReason,
-      commitValidation: {
-        result: {
-          status: 'rejected',
-          rejection: {
-            reason: roleModelCommitValidationFailureRejectionReason,
-            details: 'Plugin health unavailable: health fixture offline',
-          },
-        },
       },
     });
   });
@@ -2236,14 +2619,12 @@ describe('file runtime log store plugin tool event validation', () => {
     ).toEqual(['user', 'character']);
 
     const rawEvents = logStore.rawEvents();
-    const commitRejection = rawEvents.find(
-      event => event.kind === 'commit_validation_rejected',
-    );
 
-    expect(commitRejection).toMatchObject({
-      kind: 'commit_validation_rejected',
+    expect(rawEvents.at(-1)).toMatchObject({
+      kind: 'runtime_turn_rejected',
       status: 'rejected',
       reason: roleModelCommitValidationFailureRejectionReason,
+      round: 1,
       commitValidation: {
         result: {
           status: 'rejected',
@@ -2272,20 +2653,6 @@ describe('file runtime log store plugin tool event validation', () => {
         ],
       },
     });
-    expect(rawEvents.at(-1)).toMatchObject({
-      kind: 'runtime_turn_rejected',
-      status: 'rejected',
-      reason: roleModelCommitValidationFailureRejectionReason,
-      commitValidation: {
-        result: {
-          status: 'rejected',
-          rejection: {
-            reason: roleModelCommitValidationFailureRejectionReason,
-            details: 'Plugin health degraded: health fixture backpressure',
-          },
-        },
-      },
-    });
   });
 
   it('keeps an unfinished tool call readable and refuses to complete over it', async () => {
@@ -2311,12 +2678,19 @@ describe('file runtime log store plugin tool event validation', () => {
 
     try {
       appendTurnPrefix(logStore);
+      appendModelRound(logStore, identity(), {
+        round: 1,
+        sessionId: 'session-tools',
+        decision: {
+          toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
+        },
+      });
       logStore.appendRawEvent({
         ...identity(),
         kind: 'tool_call_started',
         eventType: 'USER_MESSAGE',
         toolCallId: 'round-1.1.memory.search',
-        toolRound: 1,
+        round: 1,
         toolName: 'memory.search',
         toolPluginId: 'memory.fixture',
         toolInput: {
@@ -2328,13 +2702,10 @@ describe('file runtime log store plugin tool event validation', () => {
       expect(logStore.rawEvents().at(-1)?.kind).toBe('tool_call_started');
       // Claiming completion over an unfinished call is a writer bug.
       expect(() =>
-        logStore.appendRawEvent({
-          ...identity(),
-          kind: 'runtime_turn_completed',
-          eventType: 'USER_MESSAGE',
-          status: 'completed',
-        }),
-      ).toThrow(LocalRuntimeStorageContractError);
+        logStore.appendRawEvent(
+          completedTerminalRecord(identity(), {sessionId: 'session-tools'}),
+        ),
+      ).toThrow(/started without finish/iu);
     } finally {
       await writerLease.release();
     }
@@ -2364,12 +2735,19 @@ describe('file runtime log store plugin tool event validation', () => {
 
     try {
       appendTurnPrefix(logStore, eventId);
+      appendModelRound(logStore, identity(eventId), {
+        round: 1,
+        sessionId: 'session-tools-rejected',
+        decision: {
+          toolCalls: [{name: 'memory.write', input: {value: 'planned'}}],
+        },
+      });
       logStore.appendRawEvent({
         ...identity(eventId),
         kind: 'tool_call_started',
         eventType: 'USER_MESSAGE',
         toolCallId: 'round-1.1.memory.write',
-        toolRound: 1,
+        round: 1,
         toolName: 'memory.write',
         toolPluginId: 'memory.fixture',
         toolInput: {
@@ -2381,7 +2759,8 @@ describe('file runtime log store plugin tool event validation', () => {
         kind: 'runtime_turn_rejected',
         eventType: 'USER_MESSAGE',
         status: 'rejected',
-        reason: 'Runtime turn failed before producing a reply.',
+        reason: 'runtime_failure',
+        message: 'Runtime turn failed before producing a reply.',
       });
       expect(logStore.rawEvents().at(-1)).toMatchObject({
         kind: 'runtime_turn_rejected',
@@ -2415,15 +2794,19 @@ describe('file runtime log store plugin tool event validation', () => {
 
     try {
       appendTurnPrefix(logStore, 'evt_terminal_tool_ref');
+      appendModelRound(logStore, identity('evt_terminal_tool_ref'), {
+        round: 1,
+        sessionId: 'session-terminal-tools',
+        decision: {toolCalls: [{name: 'memory.search', input: {}}]},
+      });
       expect(() =>
         logStore.appendRawEvent({
-          ...identity('evt_terminal_tool_ref'),
-          kind: 'runtime_turn_completed',
-          eventType: 'USER_MESSAGE',
-          status: 'completed',
+          ...completedTerminalRecord(identity('evt_terminal_tool_ref'), {
+            sessionId: 'session-terminal-tools',
+          }),
           toolCallIds: ['round-1.1.memory.search'],
         }),
-      ).toThrow(LocalRuntimeStorageContractError);
+      ).toThrow(/references unfinished tool call/iu);
     } finally {
       await writerLease.release();
     }
@@ -2482,9 +2865,9 @@ function isTestRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-async function persistedRoundsExhaustedRecord(
+async function persistedRoundsExhaustedRecords(
   sessionId: string,
-): Promise<Record<string, unknown>> {
+): Promise<readonly unknown[]> {
   const storeRoot = createStoreRoot();
   await createLocalRuntimeSessionStore({
     storeRoot,
@@ -2528,18 +2911,14 @@ async function persistedRoundsExhaustedRecord(
     } satisfies RoleModelAdapter),
     maxToolRounds: 1,
   });
-  const storedRecord: unknown = structuredClone(logStore.rawEvents().at(-1));
+  const storedRecords: unknown[] = structuredClone([...logStore.rawEvents()]);
 
   expect(result).toMatchObject({
     status: 'rejected',
     reason: 'tool_rounds_exhausted',
   });
 
-  if (!isTestRecord(storedRecord)) {
-    throw new Error('Expected persisted rounds-exhausted fixture.');
-  }
-
-  return storedRecord;
+  return storedRecords;
 }
 
 function supportedPersistedPluginToolJsonSchema() {
@@ -2576,7 +2955,7 @@ function storedRecordWithPluginToolJsonSchema(
 ): object {
   const storedRecord: unknown = structuredClone(
     decodeRawEventLogRecord(
-      JSON.stringify(patchCompletedEvent('persisted-plugin-tool-schema')),
+      JSON.stringify(patchRoundRecord('persisted-plugin-tool-schema')),
     ),
   );
 
@@ -2612,7 +2991,7 @@ function storedRecordWithPluginToolJsonSchema(
   return storedRecord;
 }
 
-function patchCompletedEvent(sessionId: string): object {
+function patchRoundRecord(sessionId: string): object {
   const eventIdentity = identity('evt_patch_completed');
   const rawOutputText = JSON.stringify({
     toolCalls: [
@@ -2627,9 +3006,9 @@ function patchCompletedEvent(sessionId: string): object {
 
   return {
     ...eventIdentity,
-    kind: 'runtime_turn_completed',
+    kind: 'role_model_round',
     eventType: 'USER_MESSAGE',
-    status: 'completed',
+    round: 1,
     roleModelIOSnapshot: {
       ...eventIdentity,
       kind: 'role_model_io_snapshot',
@@ -2693,14 +3072,6 @@ function patchCompletedEvent(sessionId: string): object {
             },
           ],
         },
-      },
-    },
-    commitValidation: {
-      ...eventIdentity,
-      kind: 'role_model_commit_validation_snapshot',
-      sessionId,
-      result: {
-        status: 'accepted',
       },
     },
   };
