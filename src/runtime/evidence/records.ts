@@ -5,6 +5,7 @@ import {
   type VisibleMessage,
 } from '../../core/index.ts';
 import {
+  type ConversationTurn,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelDecisionRejection,
   type RoleModelIOSnapshot,
@@ -38,6 +39,7 @@ export const rawEventLogRecordKindValues = [
   'runtime_turn_completed',
   'after_turn_committed',
   'runtime_turn_rejected',
+  'session_continued',
 ] as const;
 
 export type RawEventLogRecordKind =
@@ -87,7 +89,130 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly runtimePluginEvidence?: readonly RuntimePluginEvidenceSnapshot[];
   readonly runtimePluginTurnEvidence?: RuntimePluginTurnEvidenceSnapshot;
   readonly runtimeConfigEffects?: readonly PreparedRuntimePluginConfigEffect[];
+  /** Present exactly on session_continued, a session's first record. */
+  readonly sessionContinuation?: SessionContinuationSnapshot;
 };
+
+export const maxContextSummaryChars = 6000;
+
+export type ContextSummarizer =
+  | {
+      readonly status: 'model';
+      readonly provider: {readonly name: string; readonly model?: string};
+    }
+  | {readonly status: 'fallback'; readonly reason: string};
+
+/**
+ * How a session began as the continuation of another: what the earlier
+ * conversation amounted to, and the newest turns carried over verbatim so the
+ * character keeps its footing. Carried turns keep their original identities;
+ * they are context here, evidence in the session that produced them.
+ */
+export type SessionContinuationSnapshot = RuntimeEventIdentity & {
+  readonly kind: 'session_continuation_snapshot';
+  readonly sessionId: string;
+  readonly continuedFrom: {
+    readonly sessionId: string;
+    readonly lastEventId: string;
+  };
+  readonly summary: string;
+  readonly summarizedTurnCount: number;
+  readonly carriedTurns: readonly ConversationTurn[];
+  readonly summarizer: ContextSummarizer;
+};
+
+/** What a continuation decides before the new session's identity exists. */
+export type SessionContinuationPlan = {
+  readonly continuedFrom: {
+    readonly sessionId: string;
+    readonly lastEventId: string;
+  };
+  readonly summary: string;
+  readonly summarizedTurnCount: number;
+  readonly carriedTurns: readonly ConversationTurn[];
+  readonly summarizer: ContextSummarizer;
+};
+
+type CreateSessionContinuationSnapshotOptions = RuntimeEventIdentity &
+  SessionContinuationPlan & {
+    readonly sessionId: string;
+  };
+
+/** The one validator for writers and the codec alike. */
+export function createSessionContinuationSnapshot(
+  options: CreateSessionContinuationSnapshotOptions,
+): SessionContinuationSnapshot {
+  const summary = options.summary.trim();
+
+  if (summary.length === 0 || summary.length > maxContextSummaryChars) {
+    throw new TypeError(
+      `Session continuation summary must be 1 to ${String(
+        maxContextSummaryChars,
+      )} characters.`,
+    );
+  }
+
+  if (
+    !Number.isSafeInteger(options.summarizedTurnCount) ||
+    options.summarizedTurnCount < 1
+  ) {
+    throw new TypeError(
+      'Session continuation must summarize at least one turn.',
+    );
+  }
+
+  if (
+    options.continuedFrom.sessionId.length === 0 ||
+    options.continuedFrom.sessionId === options.sessionId ||
+    options.continuedFrom.lastEventId.length === 0
+  ) {
+    throw new TypeError(
+      'Session continuation must name a different session and its last event.',
+    );
+  }
+
+  if (
+    options.summarizer.status === 'model'
+      ? options.summarizer.provider.name.length === 0 ||
+        options.summarizer.provider.model?.length === 0
+      : options.summarizer.reason.length === 0
+  ) {
+    throw new TypeError(
+      'Session continuation must name its summariser, or say why there was none.',
+    );
+  }
+
+  return Object.freeze({
+    eventId: options.eventId,
+    traceId: options.traceId,
+    createdAt: assertCanonicalRuntimeTimestamp(
+      options.createdAt,
+      'Session continuation createdAt',
+    ),
+    kind: 'session_continuation_snapshot',
+    sessionId: options.sessionId,
+    continuedFrom: Object.freeze({
+      sessionId: options.continuedFrom.sessionId,
+      lastEventId: options.continuedFrom.lastEventId,
+    }),
+    summary,
+    summarizedTurnCount: options.summarizedTurnCount,
+    carriedTurns: Object.freeze([...options.carriedTurns]),
+    summarizer: Object.freeze(
+      options.summarizer.status === 'model'
+        ? {
+            status: 'model',
+            provider: Object.freeze({
+              name: options.summarizer.provider.name,
+              ...(options.summarizer.provider.model === undefined
+                ? {}
+                : {model: options.summarizer.provider.model}),
+            }),
+          }
+        : {status: 'fallback', reason: options.summarizer.reason},
+    ),
+  } satisfies SessionContinuationSnapshot);
+}
 
 export type ConversationLogRecord = VisibleMessage &
   RuntimeEventIdentity & {

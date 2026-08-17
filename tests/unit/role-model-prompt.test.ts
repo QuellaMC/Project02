@@ -13,6 +13,8 @@ import {
 } from '../../src/role-model/index.ts';
 import {
   curatedContextHeader,
+  earlierConversationFenceTag,
+  earlierConversationPreamble,
   recalledMemoryFenceTag,
   recalledMemoryPreamble,
   runtimeContextHeader,
@@ -161,6 +163,70 @@ describe('role-model prompt rendering', () => {
       ...conversationTurnToChatMessages(priorTurn),
       {role: 'user', content: 'and now?'},
     ]);
+  });
+
+  it('renders a continued session summary as a fenced user message ahead of the replayed turns', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('and now?', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-summary-frame',
+        characterSnapshot: testCharacterProfile,
+        contextSummary: 'Mike is planning a hike; I suggested Ridge Loop.',
+        runtimeNotes: [{id: 'today', text: 'Today is Monday, June 15, 2026.'}],
+        curatedContextSections: [
+          createRuntimePluginCuratedContextSection({
+            pluginId: 'character-memory',
+            id: 'notes',
+            title: 'Notes to yourself',
+            text: 'Prefers tea over coffee.',
+          }),
+        ],
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      userDisplayName: 'Mike',
+    });
+    const kinds = turnContext.frames.map(frame => frame.kind);
+    const summaryFrame = turnContext.frames.find(
+      frame => frame.kind === 'context_summary',
+    );
+
+    expect(kinds).toEqual([
+      'system_protocol',
+      'developer_protocol',
+      'curated_context',
+      'model_only_runtime_context',
+      'context_summary',
+      'current_user_message',
+    ]);
+    // Model output never earns a trusted role: the recollection is data on
+    // the user side, fenced like recalled memory.
+    expect(summaryFrame).toMatchObject({
+      placement: 'own_message',
+      role: 'user',
+      modelOnly: true,
+    });
+    expect(summaryFrame?.content).toBe(
+      [
+        `<${earlierConversationFenceTag}>`,
+        earlierConversationPreamble({userDisplayName: 'Mike'}),
+        'Mike is planning a hike; I suggested Ridge Loop.',
+        `</${earlierConversationFenceTag}>`,
+      ].join('\n'),
+    );
+    expect(
+      renderRoleModelTurnContext(
+        createRoleModelInputEnvelope({
+          event: createUserMessageRuntimeEvent('hello', testIdentity()),
+          decisionContext: createDecisionContext({
+            sessionId: 'session-no-summary',
+            characterSnapshot: testCharacterProfile,
+          }),
+          pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+        }),
+      ).frames.map(frame => frame.kind),
+    ).not.toContain('context_summary');
   });
 
   it('omits the curated context frame when no sections exist', () => {

@@ -680,7 +680,7 @@ describe('runtime plugin config control', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 8,
+        schemaVersion: 9,
         scope: 'character-data',
         characterId: 'nova',
         createdAt: '2026-07-23T00:00:00.000Z',

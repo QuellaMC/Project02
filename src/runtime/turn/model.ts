@@ -24,7 +24,7 @@ import {
   type DecisionContext,
 } from '../../role-model/index.ts';
 import {localUserSpeaker} from '../../core/index.ts';
-import {conversationTurnsFromRawEvents} from '../evidence/conversation-history.ts';
+import {conversationHistoryFromRawEvents} from '../evidence/conversation-history.ts';
 import {defaultProject02ContextWindowTokens} from '../config/types.ts';
 import {
   runRoleModelLoop,
@@ -141,18 +141,18 @@ async function prepareRuntimeTurn(
 ): Promise<PrepareRuntimeTurnResult> {
   // History first, then commit: the window is the conversation before this
   // turn, and the current user message rides the event payload.
-  const conversationHistory = selectConversationHistoryWindow(
-    conversationTurnsFromRawEvents(state.options.logStore.rawEvents()),
-    {
-      contextWindowTokens:
-        state.options.contextWindowTokens ??
-        defaultProject02ContextWindowTokens,
-    },
+  const history = conversationHistoryFromRawEvents(
+    state.options.logStore.rawEvents(),
   );
+  const conversationHistory = selectConversationHistoryWindow(history.turns, {
+    contextWindowTokens:
+      state.options.contextWindowTokens ?? defaultProject02ContextWindowTokens,
+  });
   const decisionContext = createDecisionContext({
     sessionId: state.options.session.id,
     characterSnapshot: state.options.session.character,
     historyWindow: conversationHistoryWindow(conversationHistory),
+    ...(history.summary === undefined ? {} : {contextSummary: history.summary}),
   });
   const windowVisibleMessageIds = conversationHistory.flatMap(turn =>
     conversationTurnVisibleMessages(turn).map(message => message.id),
@@ -221,6 +221,9 @@ async function runRuntimeModel(
     sessionId: prepared.decisionContext.sessionId,
     characterSnapshot: prepared.decisionContext.characterSnapshot,
     historyWindow: prepared.decisionContext.historyWindow,
+    ...(prepared.decisionContext.contextSummary === undefined
+      ? {}
+      : {contextSummary: prepared.decisionContext.contextSummary}),
     runtimeNotes: [
       createTodayRuntimeNote(
         state.event.createdAt,

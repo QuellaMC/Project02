@@ -70,6 +70,9 @@ export function createDecisionContext(
     historyWindow: freezeConversationHistoryWindow(
       options.historyWindow ?? {turnEventIds: []},
     ),
+    ...(options.contextSummary === undefined
+      ? {}
+      : {contextSummary: requiredContextSummary(options.contextSummary)}),
     runtimeNotes: freezeDecisionRuntimeNotes(options.runtimeNotes ?? []),
     pluginContextItems: freezePluginContextItems(
       options.pluginContextItems ?? [],
@@ -299,6 +302,14 @@ function freezeCharacterProfileSnapshot(
     id: character.id,
     displayName: character.displayName,
   } satisfies CharacterProfile);
+}
+
+function requiredContextSummary(value: string): string {
+  if (typeof value !== 'string' || value.trim().length === 0) {
+    throw new TypeError('Decision context summary must be non-empty.');
+  }
+
+  return value;
 }
 
 function freezeConversationHistoryWindow(

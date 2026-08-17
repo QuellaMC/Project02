@@ -25,6 +25,14 @@ export type RuntimePluginInstanceOwnership = {
   readonly close: (
     disposeLate: (target: RuntimePluginLifecycleTarget) => void,
   ) => void;
+  /**
+   * The live plugins plus each retired instance once: a session's end reaches
+   * an instance for the session it served, not for every later one, while
+   * shutdown still reaches them all.
+   */
+  readonly sessionEndTargets: (
+    livePlugins: readonly RuntimePlugin[],
+  ) => readonly RuntimePluginLifecycleTarget[];
   readonly terminalTargets: (
     livePlugins: readonly RuntimePlugin[],
   ) => readonly RuntimePluginLifecycleTarget[];
@@ -43,6 +51,7 @@ export function createRuntimePluginInstanceOwnership(config: {
   const quiesceTimeoutMs =
     config.quiesceTimeoutMs ?? runtimePluginQuiesceTimeoutMs;
   const retired: RuntimePluginLifecycleTarget[] = [];
+  const sessionEnded = new Set<RuntimePlugin>();
   const inFlight = new Set<Promise<unknown>>();
   let disposeLateTarget:
     ((target: RuntimePluginLifecycleTarget) => void) | undefined;
@@ -52,6 +61,8 @@ export function createRuntimePluginInstanceOwnership(config: {
     if (index !== -1) {
       retired.splice(index, 1);
     }
+
+    sessionEnded.delete(plugin);
   };
   const retire = (
     plugin: RuntimePlugin,
@@ -118,6 +129,23 @@ export function createRuntimePluginInstanceOwnership(config: {
     },
     close(disposeLate) {
       disposeLateTarget ??= disposeLate;
+    },
+    sessionEndTargets(livePlugins) {
+      const pending = retired.filter(
+        target => !sessionEnded.has(target.plugin),
+      );
+
+      for (const target of pending) {
+        sessionEnded.add(target.plugin);
+      }
+
+      return Object.freeze([
+        ...pending,
+        ...runtimePluginLifecycleTargets(
+          livePlugins,
+          config.catalogManifestForPluginId,
+        ),
+      ]);
     },
     terminalTargets: livePlugins =>
       Object.freeze([

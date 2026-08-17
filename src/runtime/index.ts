@@ -9,5 +9,9 @@ export {
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult,
 } from './turn/local.ts';
-export type {RawEventLogRecord, RuntimeTraceEntry} from './evidence/records.ts';
+export type {
+  RawEventLogRecord,
+  RuntimeTraceEntry,
+  SessionContinuationSnapshot,
+} from './evidence/records.ts';
 export type {RuntimeLogStore} from './evidence/contract.ts';

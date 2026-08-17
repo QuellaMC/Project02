@@ -13,9 +13,25 @@ import {
 import {
   isRecord,
   LocalRuntimeStorageContractError,
+  requiredNonEmptyString,
   requiredRecordCanonicalTimestamp,
   requiredRecordString,
+  type LocalRuntimeStorageContractErrorCode,
 } from './layout-contract.ts';
+
+export function optionalRecordString(
+  record: Record<string, unknown>,
+  key: string,
+  code: LocalRuntimeStorageContractErrorCode,
+): string | undefined {
+  const value = record[key];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return requiredNonEmptyString(value, key, code);
+}
 
 export function requiredRuntimeEventIdentity(
   record: Record<string, unknown>,

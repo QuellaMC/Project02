@@ -120,7 +120,7 @@ describe('runtime-config --character verbs', () => {
       characterId: 'mira',
     });
     expect(marker).toMatchObject({
-      schemaVersion: 8,
+      schemaVersion: 9,
       scope: 'character-data',
       characterId: 'mira',
       materializedCharacterPackageVersion: '1.1.0',
@@ -763,7 +763,7 @@ describe('runtime-config --character verbs', () => {
     writeFileSync(
       join(dataRoot, 'schema.json'),
       `${JSON.stringify({
-        schemaVersion: 8,
+        schemaVersion: 9,
         scope: 'character-data',
         characterId: 'mira',
         createdAt: '2026-07-23T00:00:00.000Z',

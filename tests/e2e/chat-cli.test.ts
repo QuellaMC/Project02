@@ -22,6 +22,7 @@ import {collect} from '../support/streams.ts';
 import {createConversationSession} from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
+import {firstPartyModelToolsPluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {createRuntimePluginManagementPluginManifest} from '../../src/plugins/index.ts';
 import {
@@ -46,7 +47,10 @@ import {
   createProject02HomeLayout,
   decodeStorageSchemaMarker,
 } from '../../src/runtime/storage/layout-contract.ts';
-import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
+import {
+  acquireLocalRuntimeSessionWriterLease,
+  createLocalRuntimeSessionStore,
+} from '../../src/runtime/storage/session-store.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {nvidiaApiKeyEnvName} from '../../src/role-model/providers/nvidia.ts';
 import {runChatCli, runChatCliFromArgs} from '../../src/cli/chat/main.ts';
@@ -657,6 +661,136 @@ describe('chat CLI provider selection', () => {
     // Eight tokens leave no room for a whole prior turn; 4096 replay it.
     expect(await historyLengthsFor(8, 'tiny-window')).toEqual([0, 0]);
     expect(await historyLengthsFor(4096, 'roomy-window')).toEqual([0, 1]);
+  });
+
+  it('continues into a new session when the history outgrows the window and resumes it next launch', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-continuation-');
+    const adapter: RoleModelAdapter = {
+      invoke() {
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+          }),
+        };
+      },
+      completeText() {
+        return Promise.resolve({
+          status: 'completed',
+          text: 'We spoke of small things and I kept up.',
+          provider: {name: 'nvidia', model: 'test'},
+        });
+      },
+    };
+    let stdout = '';
+    const endedSessions: string[] = [];
+    const rootLeaseHeldWhen: string[] = [];
+    const sessionEndPlugin = createSessionEndPlugin(
+      context => {
+        endedSessions.push(context.sessionId);
+      },
+      {
+        // From inside a later turn, another window's view: is the closed root
+        // segment's writer lease already free while this chat goes on?
+        async beforeRoleModelCall(context) {
+          try {
+            const lease = await acquireLocalRuntimeSessionWriterLease({
+              storeRoot: characterDataDirPath(storeRoot, 'mira'),
+              sessionId: 'long-talk',
+            });
+
+            await lease.release();
+          } catch {
+            rootLeaseHeldWhen.push(context.sessionId);
+          }
+
+          return {contextItems: [], evidence: []};
+        },
+      },
+    );
+
+    // ~21 estimated tokens per turn: a 100-token window replays two turns,
+    // so the third completed turn overflows it and the talk continues in a
+    // new session with the newest turn carried along.
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100},
+    });
+
+    // The chat exits right after the continuation, so the closed session's
+    // end evidence is the last write anywhere: the new session must still be
+    // the one a flagless launch resumes.
+    const exitCode = await runChatCliFromArgs(
+      ['--store', storeRoot, '--new-session', 'long-talk'],
+      {
+        stdin: Readable.from(['one\n', 'two\n', 'three\n', 'four\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stdout += `[stderr] ${chunk}`;
+        }),
+        roleModelAdapter: adapter,
+        pluginHost: createRuntimePluginHost({
+          plugins: [sessionEndPlugin],
+          enabledPluginIds: [
+            firstPartyModelToolsPluginId,
+            sessionEndPlugin.manifest.id,
+          ],
+        }),
+      },
+    );
+
+    expect(exitCode).toBe(0);
+    expect(stdout).toContain(
+      'Mira: noted\n[context] Continuing in session long-talk.2: 2 earlier turns condensed into a summary.\nYou: ',
+    );
+    // Each segment is closed under its own name: the first at continuation,
+    // the second at exit. The root's lease is held only while it is the
+    // active segment: the fourth turn, already in long-talk.2, finds it free.
+    expect(endedSessions).toEqual(['long-talk', 'long-talk.2']);
+    expect(rootLeaseHeldWhen).toEqual(['long-talk', 'long-talk', 'long-talk']);
+    expect(
+      (
+        await createLocalRuntimeSessionStore({
+          storeRoot: characterDataDirPath(storeRoot, 'mira'),
+          characterId: 'mira',
+        }).newestSession()
+      )?.sessionId,
+    ).toBe('long-talk.2');
+
+    // No session named: the continued segment is where the conversation
+    // resumes; the closed one opens on request and says where it went on.
+    let resumedStdout = '';
+    expect(
+      await runChatCliFromArgs(['--store', storeRoot], {
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(chunk => {
+          resumedStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        roleModelAdapter: adapter,
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      }),
+    ).toBe(0);
+    expect(resumedStdout).not.toContain('was continued in');
+
+    let reopenedStdout = '';
+    expect(
+      await runChatCliFromArgs(
+        ['--store', storeRoot, '--session', 'long-talk'],
+        {
+          stdin: Readable.from(['/exit\n']),
+          stdout: collect(chunk => {
+            reopenedStdout += chunk;
+          }),
+          stderr: collect(() => {}),
+          roleModelAdapter: adapter,
+          pluginHost: createRuntimePluginHost({plugins: []}),
+        },
+      ),
+    ).toBe(0);
+    expect(reopenedStdout).toContain(
+      'Session long-talk was continued in long-talk.2; opening the one you named.',
+    );
   });
 
   it('lets the runtime env provider override project02.roleModelProvider', async () => {

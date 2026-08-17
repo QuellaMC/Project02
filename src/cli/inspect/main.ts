@@ -36,6 +36,7 @@ import {
   createTurnEvidence,
   type InspectTurnEvidence,
 } from '../../runtime/evidence/index.ts';
+import type {SessionContinuationSnapshot} from '../../runtime/index.ts';
 import {
   inspectConfiguredPlugins,
   type InspectConfiguredPlugin,
@@ -76,6 +77,8 @@ type InspectSessionOutput = {
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
   readonly session: LocalRuntimeSessionMetadata;
+  /** The opening record of a session that continues another. */
+  readonly continuation?: SessionContinuationSnapshot;
   readonly evidenceScopes: {
     readonly runtimeConfig: 'current_at_inspection';
     readonly activation: 'current_at_inspection';
@@ -310,6 +313,9 @@ async function writeSessionEvidence(
     ]),
     plugins: inspectConfiguredPlugins(runtimeConfig),
     session,
+    ...(rawEvents[0]?.sessionContinuation === undefined
+      ? {}
+      : {continuation: rawEvents[0].sessionContinuation}),
     evidenceScopes: Object.freeze({
       runtimeConfig: 'current_at_inspection',
       activation: 'current_at_inspection',

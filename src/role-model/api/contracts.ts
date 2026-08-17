@@ -99,6 +99,8 @@ export type DecisionContext = {
   readonly characterSnapshot: CharacterProfile;
   /** The prior turns replayed to the model, by identity; bodies live in the log. */
   readonly historyWindow: ConversationHistoryWindow;
+  /** The condensed earlier conversation a continued session opens with. */
+  readonly contextSummary?: string;
   readonly runtimeNotes: readonly DecisionRuntimeNote[];
   readonly pluginContextItems: readonly RuntimePluginContextItem[];
   readonly curatedContextSections: readonly RuntimePluginCuratedContextSection[];
@@ -108,6 +110,7 @@ export type CreateDecisionContextOptions = {
   readonly sessionId: string;
   readonly characterSnapshot: CharacterProfile;
   readonly historyWindow?: ConversationHistoryWindow;
+  readonly contextSummary?: string;
   readonly runtimeNotes?: readonly DecisionRuntimeNote[];
   readonly pluginContextItems?: readonly RuntimePluginContextItem[];
   readonly curatedContextSections?: readonly RuntimePluginCuratedContextSection[];
