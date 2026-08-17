@@ -17,12 +17,12 @@ import {
   handleRuntimePluginConfigReadToolCall,
 } from './config.ts';
 import {
+  appliedRuntimePluginConfigUpdateOutput,
+  applyPreparedRuntimePluginConfigEffect,
   createRuntimePluginConfigUpdateTool,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   normalizePreparedRuntimePluginConfigEffect,
-  preparedRuntimePluginConfigEffectIsStillCurrent,
   handleRuntimePluginConfigUpdateToolCall,
-  reconcilePreparedRuntimePluginConfigEffect,
   runtimePluginConfigUpdateExecutionTimeoutMs,
 } from './config-update.ts';
 import {
@@ -92,25 +92,6 @@ export function createRuntimePluginManagementPlugin(
             call,
             context,
             state: pluginConfigControl,
-            canLiveReload: pluginId => {
-              const hostState = options.hostStateForTurn();
-
-              return (
-                hostState.liveReloadAvailable === true &&
-                hostState.enabledPlugins.some(
-                  plugin => plugin.manifest.id === pluginId,
-                )
-              );
-            },
-            sessionScopedUpdateConfirmedThisTurn: pluginId =>
-              options.hostStateForTurn().sessionScopedConfigUpdateConfirmed?.(
-                {
-                  eventId: call.eventId,
-                  traceId: call.traceId,
-                  createdAt: call.createdAt,
-                },
-                pluginId,
-              ) === true,
           });
         }
 
@@ -194,8 +175,8 @@ export {
   type RuntimePluginInventoryHostState,
 } from './state.ts';
 export {
+  appliedRuntimePluginConfigUpdateOutput,
+  applyPreparedRuntimePluginConfigEffect,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   normalizePreparedRuntimePluginConfigEffect,
-  preparedRuntimePluginConfigEffectIsStillCurrent,
-  reconcilePreparedRuntimePluginConfigEffect,
 };

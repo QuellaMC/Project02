@@ -1,4 +1,3 @@
-export {reconcilePreparedRuntimePluginConfigEffect} from './builtin/plugin-management/config-update.ts';
 export {
   createRuntimePluginConfigControlBinding,
   createRuntimePluginManagementPlugin,
@@ -29,7 +28,6 @@ export type {
 export {
   createRuntimePlugin,
   createRuntimePluginContext,
-  preparedRuntimePluginConfigEffectHasApprovalEvidence,
 } from './api/constructors.ts';
 export {validateRuntimePluginManifest} from './api/manifest-validation.ts';
 export {
@@ -104,7 +102,6 @@ export {
   type RuntimePluginToolConfirmationRequest,
 } from './host/tool-confirmation.ts';
 export {
-  type RuntimePluginConfigReloadHostResult,
   type RuntimePluginReloader,
   type RuntimePluginReloadResult,
 } from './host/reload.ts';

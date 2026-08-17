@@ -24,10 +24,6 @@ import {
 } from '../storage/layout-contract.ts';
 import type {ConversationLogRecord, RawEventLogRecord} from './records.ts';
 import {isTerminalRawEventLogRecord} from './records.ts';
-import {
-  approvalToolRecordsByCallId,
-  runtimeConfigEffectHasLoggedApproval,
-} from './config-effect-approval.ts';
 import type {
   DurableRuntimeSessionEvidence,
   RuntimeEvidenceIncrementalState,
@@ -116,7 +112,11 @@ export function assertIncrementalRawEventAppend(options: {
   assertIncrementalRawSequence(state, record, identityKey);
 
   assertIncrementalToolCallAppend(state, record);
-  assertIncrementalRawCrossLogEvidence(options);
+  assertIncrementalRawCrossLogEvidence({
+    ...(options.sessionId === undefined ? {} : {sessionId: options.sessionId}),
+    state,
+    record,
+  });
 
   if (isTerminalRawEventLogRecord(record)) {
     assertIncrementalTerminalRawEvent(state, record, identityKey);
@@ -171,19 +171,12 @@ function assertIncrementalRawSequence(
 }
 
 function assertIncrementalRawCrossLogEvidence(options: {
-  readonly evidence: DurableRuntimeSessionEvidence;
   readonly sessionId?: string;
   readonly state: RuntimeEvidenceIncrementalState;
   readonly record: RawEventLogRecord;
 }): void {
   const {record, state} = options;
 
-  if (record.runtimeConfigEffects !== undefined) {
-    assertRuntimeConfigEffectsHaveApprovedToolEvidence([
-      ...options.evidence.rawEvents,
-      record,
-    ]);
-  }
   assertIncrementalRawVisibleReferences(state, record);
   assertIncrementalVisibleCommitShape(state, record);
   assertIncrementalRecordedModelInput(state, record);
@@ -725,27 +718,6 @@ function runtimeEventBaseIdentityKey(identity: {
   readonly traceId: string;
 }): string {
   return `${identity.eventId}\u0000${identity.traceId}`;
-}
-
-function assertRuntimeConfigEffectsHaveApprovedToolEvidence(
-  rawEvents: readonly RawEventLogRecord[],
-): void {
-  const approvalRecords = approvalToolRecordsByCallId(rawEvents);
-
-  for (const terminal of rawEvents) {
-    if (terminal.kind !== 'runtime_turn_completed') {
-      continue;
-    }
-
-    for (const effect of terminal.runtimeConfigEffects ?? []) {
-      if (!runtimeConfigEffectHasLoggedApproval(effect, approvalRecords)) {
-        throw new LocalRuntimeStorageContractError(
-          'malformed_record',
-          `Runtime config effect "${effect.effectId}" is missing matching approved config-update tool evidence.`,
-        );
-      }
-    }
-  }
 }
 
 function requiredToolCallId(rawEvent: RawEventLogRecord): string {

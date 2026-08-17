@@ -14,7 +14,7 @@ export function isModelFacingRuntimePluginTool(
   );
 }
 
-/** Gated tools stage an effect and apply nothing until the user approves. */
+/** A gated tool prepares its effect; the host applies it once the user approves. */
 export function isApprovalGatedRuntimePluginTool(
   tool: RuntimePluginProvidedTool,
 ): boolean {

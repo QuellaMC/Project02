@@ -4,7 +4,6 @@ import {
   defaultRoleModelProviderCapabilities,
   isRoleModelRawOutputReplayableDecisionEvidence,
   type RoleModelAdapter,
-  type RoleModelChatMessage,
   roleModelMalformedOutputRejectionReason,
   type RoleModelPluginToolDefinition,
   type RoleModelPluginToolHost,
@@ -15,7 +14,6 @@ import {
   visibleReplyModelToolName,
 } from '../../src/role-model/index.ts';
 import {
-  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginToolCallResult,
 } from '../../src/plugins/api/index.ts';
@@ -33,116 +31,6 @@ import {
 } from '../support/role-model-loop-fixtures.ts';
 
 describe('role-model loop evidence and boundary validation', () => {
-  it('keeps prepared config effects internal to bounded turn execution state', async () => {
-    const eventId = 'evt_prepared_effect_boundary';
-    const messagesByRound: RoleModelChatMessage[][] = [];
-    const completedResults: RuntimePluginToolCallResult[] = [];
-    const preparedConfigEffectsByToolCallId = new Map<
-      string,
-      PreparedRuntimePluginConfigEffect
-    >();
-    let round = 0;
-    const adapter: RoleModelAdapter = Object.freeze({
-      invoke(_inputEnvelope, invocation) {
-        round += 1;
-        messagesByRound.push([...invocation.turnContext.messages]);
-
-        if (round === 1) {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
-            }),
-            nativeAssistantMessage: {
-              role: 'assistant',
-              content: 'Preparing the update.',
-              tool_calls: [
-                {
-                  id: 'call_prepared_config_effect',
-                  type: 'function',
-                  function: {
-                    name: 'memory.search',
-                    arguments: '{"query":"Mira"}',
-                  },
-                },
-              ],
-            },
-          };
-        }
-
-        return {
-          rawOutputText: JSON.stringify({
-            toolCalls: [
-              {name: 'visible_reply', input: {text: 'Update prepared.'}},
-            ],
-          }),
-        };
-      },
-    });
-    const result = await runRoleModelLoop({
-      onVisibleReply: () => {},
-      event: createTestEvent('update config', eventId),
-      decisionContext: createTestDecisionContext(),
-      adapter,
-      pluginToolDefinitions: withVisibleReplyTool(memorySearchToolDefinition),
-      pluginToolHost: Object.freeze({
-        handleToolCall(call) {
-          return Object.freeze({
-            status: 'accepted',
-            output: Object.freeze({status: 'approved_pending_commit'}),
-            evidence: Object.freeze([]),
-            preparedConfigEffect: Object.freeze({
-              eventId: call.eventId,
-              traceId: call.traceId,
-              createdAt: call.createdAt,
-              kind: 'runtime_plugin_config_effect',
-              effectId: call.toolCallId ?? 'missing-tool-call-id',
-              targetPluginId: 'config.target.fixture',
-              targetConfigPath: '/tmp/project02-config.json',
-              fieldName: 'tone',
-              expectedFingerprint: 'before-fingerprint',
-              resultFingerprint: 'after-fingerprint',
-              operation: Object.freeze({kind: 'set', value: 'warm'}),
-            }),
-          });
-        },
-      }),
-      preparedConfigEffectsByToolCallId,
-      runtimePluginContext: createTestPluginContext(eventId),
-      onPluginToolCallCompleted(event) {
-        completedResults.push(event.result);
-      },
-    });
-    const nativeToolResult = messagesByRound[1]?.find(
-      message => message.role === 'tool',
-    );
-    const publicSurfaces = JSON.stringify({
-      result,
-      completedResults,
-      nativeToolResult,
-    });
-    const capturedEffects = [...preparedConfigEffectsByToolCallId.values()];
-
-    expect(result.status).toBe('accepted');
-    expect(capturedEffects).toMatchObject([
-      {
-        targetPluginId: 'config.target.fixture',
-        fieldName: 'tone',
-        operation: {kind: 'set', value: 'warm'},
-      },
-    ]);
-    expect(completedResults).toMatchObject([
-      {
-        status: 'accepted',
-        output: {status: 'approved_pending_commit'},
-      },
-    ]);
-    expect(nativeToolResult).toMatchObject({role: 'tool'});
-    expect(publicSurfaces).not.toContain('preparedConfigEffect');
-    expect(publicSurfaces).not.toContain('runtime_plugin_config_effect');
-    expect(publicSurfaces).not.toContain('before-fingerprint');
-    expect(publicSurfaces).not.toContain('after-fingerprint');
-  });
-
   it('dispatches tool input to the host exactly as the model sent it', async () => {
     let dispatchedInput: Readonly<Record<string, unknown>> | undefined;
     const result = await runRoleModelLoop({

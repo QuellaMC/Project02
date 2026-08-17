@@ -1,25 +1,33 @@
 import {
+  appliedRuntimePluginConfigUpdateOutput,
+  applyPreparedRuntimePluginConfigEffect,
   createPreparedRuntimePluginConfigEffectConfirmationPreview,
   isRuntimeConfigConflictError,
-  preparedRuntimePluginConfigEffectIsStillCurrent,
   type RuntimePluginConfigControlHostState,
 } from '../builtin/plugin-management/index.ts';
 import {createRuntimePluginEvidenceSnapshot} from '../api/constructors.ts';
 import {mergedRedactionLabels} from '../api/evidence-policy.ts';
 import type {
+  RuntimePluginEvidenceKind,
   RuntimePluginEvidenceStatus,
   RuntimePluginPolicyOutcome,
 } from '../api/contract.ts';
 import type {
   PreparedRuntimePluginConfigEffect,
   RuntimePlugin,
+  RuntimePluginConfigField,
   RuntimePluginContext,
+  RuntimePluginEvidenceSnapshot,
   RuntimePluginJsonObject,
   RuntimePluginProvidedTool,
   RuntimePluginToolCall,
   RuntimePluginToolCallExecutionResult,
   RuntimePluginToolCallResult,
 } from '../api/types.ts';
+import type {
+  RuntimePluginConfigLiveApply,
+  RuntimePluginConfigLiveApplyOutcome,
+} from './reload.ts';
 
 export type RuntimePluginToolConfirmationRequest = {
   readonly pluginId: string;
@@ -81,6 +89,11 @@ async function requestRuntimePluginToolConfirmation(
   }
 }
 
+/**
+ * The whole change happens inside the tool call: the person sees the exact
+ * change, and an approval writes it and brings it into the running host right
+ * then. Anything but an approval leaves the authored config untouched.
+ */
 export async function confirmPreparedRuntimePluginToolResult(options: {
   readonly plugin: RuntimePlugin;
   readonly providedTool: RuntimePluginProvidedTool;
@@ -92,8 +105,8 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
   >;
   readonly confirmationHandler: RuntimePluginToolConfirmationHandler;
   readonly pluginConfigControl: RuntimePluginConfigControlHostState;
-  readonly storeRoot?: string;
-}): Promise<RuntimePluginToolCallExecutionResult> {
+  readonly liveApply: RuntimePluginConfigLiveApply;
+}): Promise<RuntimePluginToolCallResult> {
   const effect = options.result.preparedConfigEffect;
 
   if (effect === undefined) {
@@ -111,9 +124,6 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
     preview = createPreparedRuntimePluginConfigEffectConfirmationPreview({
       effect,
       state: options.pluginConfigControl,
-      ...(options.storeRoot === undefined
-        ? {}
-        : {storeRoot: options.storeRoot}),
     });
   } catch (error: unknown) {
     if (!isRuntimeConfigConflictError(error)) {
@@ -157,30 +167,14 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
   }
 
   if (decision.status === 'approved') {
-    if (
-      !preparedRuntimePluginConfigEffectIsStillCurrent({
-        effect,
-        state: options.pluginConfigControl,
-        ...(options.storeRoot === undefined
-          ? {}
-          : {storeRoot: options.storeRoot}),
-      })
-    ) {
-      return createRejectedToolCallResult({
-        call: options.call,
-        context: options.context,
-        reason: 'plugin_config_fingerprint_conflict',
-        message:
-          'Plugin config changed during approval and the prepared update was discarded.',
-        evidenceStatus: 'rejected',
-        policyOutcome: 'handler_rejected',
-      });
-    }
-    return withRuntimePluginToolApprovalEvidence({
+    return await applyApprovedRuntimePluginConfigEffect({
       plugin: options.plugin,
+      call: options.call,
       context: options.context,
       effect,
-      result: options.result,
+      preparedResult: options.result,
+      pluginConfigControl: options.pluginConfigControl,
+      liveApply: options.liveApply,
     });
   }
 
@@ -209,41 +203,178 @@ export async function confirmPreparedRuntimePluginToolResult(options: {
   });
 }
 
-function withRuntimePluginToolApprovalEvidence(options: {
+/**
+ * Writes the approved change, then brings it into the running host. The
+ * write is guarded by the fingerprint the person approved against; once it
+ * has happened, a reload problem is reported, never undone.
+ */
+async function applyApprovedRuntimePluginConfigEffect(options: {
   readonly plugin: RuntimePlugin;
+  readonly call: RuntimePluginToolCall;
   readonly context: RuntimePluginContext;
   readonly effect: PreparedRuntimePluginConfigEffect;
-  readonly result: Extract<
+  readonly preparedResult: Extract<
     RuntimePluginToolCallExecutionResult,
     {readonly status: 'accepted'}
   >;
-}): RuntimePluginToolCallExecutionResult {
-  const approvalEvidence = createRuntimePluginEvidenceSnapshot({
+  readonly pluginConfigControl: RuntimePluginConfigControlHostState;
+  readonly liveApply: RuntimePluginConfigLiveApply;
+}): Promise<RuntimePluginToolCallResult> {
+  const {effect} = options;
+  let field: RuntimePluginConfigField;
+
+  try {
+    field = applyPreparedRuntimePluginConfigEffect({
+      effect,
+      state: options.pluginConfigControl,
+    });
+  } catch (error: unknown) {
+    return createRejectedToolCallResult({
+      call: options.call,
+      context: options.context,
+      ...(isRuntimeConfigConflictError(error)
+        ? {
+            reason: 'plugin_config_fingerprint_conflict',
+            message:
+              'Plugin config changed during approval and was not updated. Inspect runtime.plugin.config again for the current fingerprint, then retry.',
+          }
+        : {
+            reason: 'plugin_config_update_failed',
+            message:
+              error instanceof Error
+                ? error.message
+                : 'Plugin config update failed.',
+          }),
+      evidenceStatus: 'rejected',
+      policyOutcome: 'handler_rejected',
+    });
+  }
+
+  const outcome = await options.liveApply({
+    pluginId: effect.targetPluginId,
+    field,
+    configFingerprint: effect.resultFingerprint,
+  });
+  const applied = describeLiveApplyOutcome(outcome, effect, field);
+  const evidence = (input: {
+    readonly evidenceKind: RuntimePluginEvidenceKind;
+    readonly status: RuntimePluginEvidenceStatus;
+    readonly summary: string;
+    readonly policyOutcome?: RuntimePluginPolicyOutcome;
+  }): RuntimePluginEvidenceSnapshot =>
+    configEffectEvidence({
+      plugin: options.plugin,
+      context: options.context,
+      effect,
+      ...input,
+    });
+
+  return Object.freeze({
+    status: 'accepted',
+    output: appliedRuntimePluginConfigUpdateOutput({
+      effect,
+      field,
+      appliesTo: applied.appliesTo,
+      ...(applied.note === undefined ? {} : {note: applied.note}),
+    }),
+    evidence: Object.freeze([
+      ...options.preparedResult.evidence,
+      evidence({
+        evidenceKind: 'policy',
+        status: 'accepted',
+        summary: `User approved one prepared config effect from plugin "${options.plugin.manifest.id}".`,
+        policyOutcome: 'user_approved',
+      }),
+      evidence({
+        evidenceKind: 'tool_invocation',
+        status: 'accepted',
+        summary: `Applied approved plugin "${effect.targetPluginId}" config field "${field.name}".`,
+      }),
+      ...(applied.reload === undefined
+        ? []
+        : [evidence({evidenceKind: 'tool_invocation', ...applied.reload})]),
+    ]),
+  } satisfies RuntimePluginToolCallResult);
+}
+
+/**
+ * What the model and the log hear about a written change. A reload problem
+ * is degraded evidence, never failed: the write it follows already happened,
+ * and failed tool evidence would turn the whole result into a rejection.
+ */
+function describeLiveApplyOutcome(
+  outcome: RuntimePluginConfigLiveApplyOutcome,
+  effect: PreparedRuntimePluginConfigEffect,
+  field: RuntimePluginConfigField,
+): {
+  readonly appliesTo: 'now' | 'next_launch';
+  readonly note?: string;
+  readonly reload?: {
+    readonly status: RuntimePluginEvidenceStatus;
+    readonly summary: string;
+  };
+} {
+  const target = `plugin "${effect.targetPluginId}" config field "${field.name}"`;
+
+  switch (outcome.status) {
+    case 'live':
+      return {
+        appliesTo: 'now',
+        reload: {
+          status: 'accepted',
+          summary: `Live-applied ${target} by rebuilding its instance.`,
+        },
+      };
+    case 'restart_required':
+      return {appliesTo: 'next_launch'};
+    case 'declined':
+      return {
+        appliesTo: 'next_launch',
+        note: `Applies at the next launch instead of live: ${outcome.reason}.`,
+        reload: {
+          status: 'degraded',
+          summary: `Wrote ${target}; it applies at the next launch instead of live: ${outcome.reason}.`,
+        },
+      };
+    case 'failed':
+      return {
+        appliesTo: 'next_launch',
+        note: `Written, but the live reload failed and the previous instance keeps serving: ${outcome.message} It takes effect at the next launch.`,
+        reload: {
+          status: 'degraded',
+          summary: `Live reload for ${target} failed after the write; the previous instance keeps serving: ${outcome.message}`,
+        },
+      };
+  }
+}
+
+function configEffectEvidence(options: {
+  readonly plugin: RuntimePlugin;
+  readonly context: RuntimePluginContext;
+  readonly effect: PreparedRuntimePluginConfigEffect;
+  readonly evidenceKind: RuntimePluginEvidenceKind;
+  readonly status: RuntimePluginEvidenceStatus;
+  readonly summary: string;
+  readonly policyOutcome?: RuntimePluginPolicyOutcome;
+}): RuntimePluginEvidenceSnapshot {
+  return createRuntimePluginEvidenceSnapshot({
     eventId: options.context.eventId,
     traceId: options.context.traceId,
     createdAt: options.context.timestamp,
     kind: 'runtime_plugin_evidence_snapshot',
     pluginId: options.plugin.manifest.id,
-    evidenceKind: 'policy',
-    status: 'accepted',
-    summary: `User approved one prepared config effect from plugin "${options.plugin.manifest.id}".`,
-    policyOutcome: 'user_approved',
-    sourceReferences: [
-      {
-        kind: 'runtime',
-        id: options.effect.effectId,
-      },
-    ],
+    evidenceKind: options.evidenceKind,
+    status: options.status,
+    summary: options.summary,
+    ...(options.policyOutcome === undefined
+      ? {}
+      : {policyOutcome: options.policyOutcome}),
+    sourceReferences: [{kind: 'runtime', id: options.effect.effectId}],
     redactionLabels: mergedRedactionLabels({
       plugin: options.plugin,
       context: options.context,
     }),
     configFingerprint: options.effect.resultFingerprint,
-  });
-
-  return Object.freeze({
-    ...options.result,
-    evidence: Object.freeze([...options.result.evidence, approvalEvidence]),
   });
 }
 

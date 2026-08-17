@@ -8,9 +8,6 @@ import {
   createRuntimePluginContext,
   defaultRuntimePluginHostServiceCatalogEntries,
   isRuntimePluginManagementPlugin,
-  preparedRuntimePluginConfigEffectHasApprovalEvidence,
-  reconcilePreparedRuntimePluginConfigEffect,
-  firstPartyModelToolsPluginId,
   runtimePluginConfigReadToolName,
   runtimePluginConfigUpdateToolName,
   runtimePluginId,
@@ -31,7 +28,6 @@ import {
   inspectRuntimePluginConfig,
   resolveRuntimeConfigScopeTarget,
 } from '../../src/runtime/config/index.ts';
-import {ensureInitializedProject02Home} from '../../src/runtime/storage/index.ts';
 import {
   runtimePluginConfigControlStateForTest,
   writeRuntimeConfig,
@@ -287,41 +283,34 @@ describe('host-owned runtime plugin management tools', () => {
     const approved = await approvedHost.handleToolCall(call, testContext());
 
     expect(preparationCalls).toBe(2);
-    expect(approved.status).toBe('accepted');
-    if (approved.status !== 'accepted') {
-      return;
-    }
-
-    const effect = approved.preparedConfigEffect;
-
-    expect(effect).toBeDefined();
-    if (effect === undefined) {
-      return;
-    }
-
+    expect(approved).toMatchObject({
+      status: 'accepted',
+      output: {status: 'applied', pluginId: targetManifest.id},
+    });
+    expect(approved).not.toHaveProperty('preparedConfigEffect');
     expect(approved.evidence).toContainEqual(
       expect.objectContaining({
         pluginId: arbitraryPluginId,
         evidenceKind: 'policy',
         status: 'accepted',
         policyOutcome: 'user_approved',
-        configFingerprint: effect.resultFingerprint,
+        configFingerprint: prepared.resultFingerprint,
+      }),
+    );
+    expect(approved.evidence).toContainEqual(
+      expect.objectContaining({
+        pluginId: arbitraryPluginId,
+        evidenceKind: 'tool_invocation',
+        status: 'accepted',
+        summary: expect.stringContaining('Applied approved plugin') as string,
+        configFingerprint: prepared.resultFingerprint,
       }),
     );
     expect(
-      preparedRuntimePluginConfigEffectHasApprovalEvidence({
-        effect,
-        eventIdentity: call,
-        inputIdentity: call,
-        inputPluginId: call.pluginId,
-        inputToolName: call.toolName,
-        toolCallId: call.toolCallId,
-        dispatchedToHost: true,
-        pluginId: call.pluginId,
-        toolName: call.toolName,
-        result: approved,
-      }),
-    ).toBe(true);
+      loadRuntimeConfigForTest({configPath, storeRoot}).config?.plugins?.[
+        targetManifest.id
+      ]?.config,
+    ).toMatchObject({tone: 'warm'});
   });
 
   it('does not register or expose the removed plugin identifiers and tool names', () => {
@@ -837,385 +826,7 @@ describe('host-owned runtime plugin management tools', () => {
     ).toBe(false);
   });
 
-  it('reports next_turn for approved updates to reloadRequired:false fields', async () => {
-    const storeRoot = createTestTempRoot('project02-plugin-config-next-turn-');
-    const baseManifest = configurablePluginManifest();
-    const manifest = createRuntimePluginManifest({
-      ...baseManifest,
-      config: {
-        scope: 'global_with_character_overrides',
-        fields: baseManifest.config.fields.map(field =>
-          field.name === 'tone' ? {...field, reloadRequired: false} : field,
-        ),
-      },
-    });
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    });
-    const before = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-    const hostWithReloader = createRuntimePluginHost({
-      storeRoot,
-      plugins: [createRuntimePlugin({manifest})],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        manifest.id,
-      ],
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-      pluginReloader: {
-        reload: () =>
-          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
-      },
-    });
-    const hostWithoutReloader = createRuntimePluginHost({
-      storeRoot,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-    });
-
-    const withReloader = await updateConfigField(hostWithReloader, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: before.fingerprint,
-    });
-
-    expect(withReloader).toMatchObject({
-      status: 'accepted',
-      output: {
-        status: 'approved_pending_commit',
-        appliesTo: 'next_turn',
-        reloadRequired: false,
-      },
-    });
-
-    // Without a reloader the same field must not promise next-turn apply.
-    const withoutReloader = await updateConfigField(hostWithoutReloader, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: before.fingerprint,
-    });
-
-    expect(withoutReloader).toMatchObject({
-      status: 'accepted',
-      output: {
-        status: 'approved_pending_commit',
-        appliesTo: 'future_host_construction',
-        reloadRequired: false,
-      },
-    });
-
-    // A cold plugin is installed but not live, so a reloader alone is not
-    // enough to apply to it.
-    const hostWithColdPlugin = createRuntimePluginHost({
-      storeRoot,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-      pluginReloader: {
-        reload: () =>
-          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
-      },
-    });
-    const coldPlugin = await updateConfigField(hostWithColdPlugin, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: before.fingerprint,
-    });
-
-    expect(coldPlugin).toMatchObject({
-      status: 'accepted',
-      output: {
-        status: 'approved_pending_commit',
-        appliesTo: 'future_host_construction',
-        reloadRequired: false,
-      },
-    });
-  });
-
-  it('stops promising next_turn once the same turn approves a session-scoped update', async () => {
-    const storeRoot = createTestTempRoot('project02-plugin-config-mixed-turn-');
-    const baseManifest = configurablePluginManifest();
-    const manifest = createRuntimePluginManifest({
-      ...baseManifest,
-      config: {
-        scope: 'global_with_character_overrides',
-        fields: [
-          ...baseManifest.config.fields.map(field =>
-            field.name === 'tone' ? {...field, reloadRequired: false} : field,
-          ),
-          {
-            name: 'signoff',
-            description: 'Session-scoped signoff.',
-            required: false,
-            secret: false,
-            valueType: 'string',
-            agentMutable: true,
-            redactionLabels: [],
-          },
-        ],
-      },
-    });
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    });
-    const fingerprint = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    }).fingerprint;
-    const host = createRuntimePluginHost({
-      storeRoot,
-      plugins: [createRuntimePlugin({manifest})],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        manifest.id,
-      ],
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-      pluginReloader: {
-        reload: () =>
-          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
-      },
-    });
-
-    const liveFirst = await updateConfigField(host, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: fingerprint,
-    });
-
-    expect(liveFirst).toMatchObject({
-      status: 'accepted',
-      output: {appliesTo: 'next_turn'},
-    });
-    expect(JSON.stringify(liveFirst)).not.toContain('appliesToNote');
-
-    const sessionScoped = await updateConfigField(host, {
-      pluginId: manifest.id,
-      fieldName: 'signoff',
-      operation: 'set',
-      value: 'cheers',
-      expectedFingerprint: fingerprint,
-    });
-
-    expect(sessionScoped).toMatchObject({
-      status: 'accepted',
-      output: {appliesTo: 'future_host_construction', reloadRequired: true},
-    });
-
-    // Same-plugin changes reload as one group, and a mixed group always defers.
-    const liveAfterMix = await updateConfigField(host, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'sharp',
-      expectedFingerprint: fingerprint,
-    });
-
-    expect(liveAfterMix).toMatchObject({
-      status: 'accepted',
-      output: {
-        appliesTo: 'future_host_construction',
-        appliesToNote: expect.stringContaining('session-scoped') as unknown,
-        reloadRequired: false,
-      },
-    });
-
-    // A new runtime event starts a fresh update group, so the promise returns.
-    const nextEvent = await updateConfigField(
-      host,
-      {
-        pluginId: manifest.id,
-        fieldName: 'tone',
-        operation: 'set',
-        value: 'warm',
-        expectedFingerprint: fingerprint,
-      },
-      {eventId: 'evt_plugin_config_test_next'},
-    );
-
-    expect(nextEvent).toMatchObject({
-      status: 'accepted',
-      output: {appliesTo: 'next_turn'},
-    });
-
-    // The turn record is keyed by the full runtime identity, so a reused event
-    // id under a fresh trace is a different turn.
-    const freshTrace = await updateConfigField(
-      host,
-      {
-        pluginId: manifest.id,
-        fieldName: 'tone',
-        operation: 'set',
-        value: 'warm',
-        expectedFingerprint: fingerprint,
-      },
-      {traceId: 'trace_plugin_config_test_retry'},
-    );
-
-    expect(freshTrace).toMatchObject({
-      status: 'accepted',
-      output: {appliesTo: 'next_turn'},
-    });
-  });
-
-  it('keeps the next_turn promise when the session-scoped update was denied', async () => {
-    const storeRoot = createTestTempRoot('project02-plugin-config-denied-mix-');
-    const baseManifest = configurablePluginManifest();
-    const manifest = createRuntimePluginManifest({
-      ...baseManifest,
-      config: {
-        scope: 'global_with_character_overrides',
-        fields: [
-          ...baseManifest.config.fields.map(field =>
-            field.name === 'tone' ? {...field, reloadRequired: false} : field,
-          ),
-          {
-            name: 'signoff',
-            description: 'Session-scoped signoff.',
-            required: false,
-            secret: false,
-            valueType: 'string',
-            agentMutable: true,
-            redactionLabels: [],
-          },
-        ],
-      },
-    });
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    });
-    const fingerprint = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    }).fingerprint;
-    const host = createRuntimePluginHost({
-      storeRoot,
-      plugins: [createRuntimePlugin({manifest})],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        manifest.id,
-      ],
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      // Deny exactly the session-scoped field; a denied update never commits.
-      toolConfirmationHandler: request => ({
-        status:
-          request.preview['fieldName'] === 'signoff' ? 'denied' : 'approved',
-      }),
-      pluginReloader: {
-        reload: () =>
-          Promise.resolve({status: 'declined', reason: 'unused in this test'}),
-      },
-    });
-
-    const deniedSessionScoped = await updateConfigField(host, {
-      pluginId: manifest.id,
-      fieldName: 'signoff',
-      operation: 'set',
-      value: 'cheers',
-      expectedFingerprint: fingerprint,
-    });
-
-    expect(deniedSessionScoped).toMatchObject({
-      status: 'rejected',
-      reason: 'plugin_config_approval_denied',
-    });
-
-    const liveAfterDenied = await updateConfigField(host, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: fingerprint,
-    });
-
-    expect(liveAfterDenied).toMatchObject({
-      status: 'accepted',
-      output: {appliesTo: 'next_turn'},
-    });
-    expect(JSON.stringify(liveAfterDenied)).not.toContain('appliesToNote');
-  });
-
-  it('prepares one approved field update without mutating authored config', async () => {
+  it('writes one approved field update and reports next_launch for a reloadRequired field', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-approved-');
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -1272,218 +883,24 @@ describe('host-owned runtime plugin management tools', () => {
     expect(result).toMatchObject({
       status: 'accepted',
       output: {
-        status: 'approved_pending_commit',
-        appliesTo: 'future_host_construction',
+        status: 'applied',
+        appliesTo: 'next_launch',
+        reloadRequired: true,
         pluginId: manifest.id,
         fieldName: 'tone',
         operation: 'set',
-      },
-      preparedConfigEffect: {
-        targetPluginId: manifest.id,
-        fieldName: 'tone',
-        expectedFingerprint: before.fingerprint,
-        operation: {kind: 'set', value: 'warm'},
+        fingerprint: after.fingerprint,
       },
     });
+    expect(result).not.toHaveProperty('preparedConfigEffect');
     expect(confirmationCalls).toBe(1);
-    expect(after.fingerprint).toBe(before.fingerprint);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
     expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
-      {configured: true, value: 'cool'},
+      {configured: true, value: 'warm'},
     );
   });
 
-  it('rejects a tampered prepared result fingerprint before mutating authored config', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-plugin-config-tampered-effect-',
-    );
-    const manifest = configurablePluginManifest();
-    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
-      plugins: {
-        [manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    });
-    const before = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-    const host = createRuntimePluginHost({
-      storeRoot,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPath,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-    });
-    const result = await updateConfigField(host, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: before.fingerprint,
-    });
-    const preparedConfigEffect =
-      result.status === 'accepted' ? result.preparedConfigEffect : undefined;
-
-    if (preparedConfigEffect === undefined) {
-      throw new TypeError('Expected an approved prepared config effect.');
-    }
-
-    expect(() =>
-      reconcilePreparedRuntimePluginConfigEffect({
-        effect: Object.freeze({
-          ...preparedConfigEffect,
-          resultFingerprint: `${preparedConfigEffect.resultFingerprint}-tampered`,
-        }),
-        state: runtimePluginConfigControlStateForTest({
-          runtimeLocation: runtimeLocationForTest({
-            configPath: configPath,
-            storeRoot: storeRoot,
-          }),
-          control: testRuntimePluginConfigControlCapability,
-          pluginManifests: [manifest],
-        }),
-      }),
-    ).toThrow('does not match its validated config candidate');
-
-    const after = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPath,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-
-    expect(after.fingerprint).toBe(before.fingerprint);
-    expect(after.fields.find(field => field.name === 'tone')?.authored).toEqual(
-      {configured: true, value: 'cool'},
-    );
-  });
-
-  it('does not reconcile a prepared effect through a host targeting another config path', async () => {
-    const storeRoot = createTestTempRoot(
-      'project02-plugin-config-cross-path-effect-',
-    );
-    const manifest = configurablePluginManifest();
-    const authoredConfig = {
-      plugins: {
-        [manifest.id]: {
-          config: {tone: 'cool'},
-        },
-      },
-    } as const;
-
-    await ensureInitializedProject02Home({homeRoot: storeRoot});
-    const configPathA = writeRuntimeConfig(
-      join(storeRoot, 'config-a.json'),
-      authoredConfig,
-    );
-    const configPathB = writeRuntimeConfig(
-      join(storeRoot, 'config-b.json'),
-      authoredConfig,
-    );
-    const beforeA = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPathA,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-    const beforeB = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPathB,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-    const hostA = createRuntimePluginHost({
-      storeRoot,
-      pluginConfigControl: runtimePluginConfigControlStateForTest({
-        runtimeLocation: runtimeLocationForTest({
-          configPath: configPathA,
-          storeRoot: storeRoot,
-        }),
-
-        control: testRuntimePluginConfigControlCapability,
-        pluginManifests: [manifest],
-      }),
-      toolConfirmationHandler: () => ({status: 'approved'}),
-    });
-    const result = await updateConfigField(hostA, {
-      pluginId: manifest.id,
-      fieldName: 'tone',
-      operation: 'set',
-      value: 'warm',
-      expectedFingerprint: beforeA.fingerprint,
-    });
-    const preparedConfigEffect =
-      result.status === 'accepted' ? result.preparedConfigEffect : undefined;
-
-    if (preparedConfigEffect === undefined) {
-      throw new TypeError('Expected an approved prepared config effect.');
-    }
-
-    expect(() =>
-      reconcilePreparedRuntimePluginConfigEffect({
-        effect: preparedConfigEffect,
-        state: runtimePluginConfigControlStateForTest({
-          runtimeLocation: runtimeLocationForTest({
-            configPath: configPathB,
-            storeRoot: storeRoot,
-          }),
-          control: testRuntimePluginConfigControlCapability,
-          pluginManifests: [manifest],
-        }),
-      }),
-    ).toThrow('targets another runtime config path');
-
-    const afterA = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPathA,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-    const afterB = inspectRuntimePluginConfig({
-      targetScope: 'global',
-      runtimeLocation: runtimeLocationForTest({
-        configPath: configPathB,
-        storeRoot: storeRoot,
-      }),
-      manifest,
-      pluginManifests: [manifest],
-    });
-
-    expect(afterA.fingerprint).toBe(beforeA.fingerprint);
-    expect(afterB.fingerprint).toBe(beforeB.fingerprint);
-    expect(
-      afterA.fields.find(field => field.name === 'tone')?.authored,
-    ).toEqual({configured: true, value: 'cool'});
-    expect(
-      afterB.fields.find(field => field.name === 'tone')?.authored,
-    ).toEqual({configured: true, value: 'cool'});
-  });
-
-  it('canonicalizes caller-owned manifests before approval and preparation', async () => {
+  it('canonicalizes caller-owned manifests before approval and the write', async () => {
     const storeRoot = createTestTempRoot(
       'project02-plugin-config-manifest-snapshot-',
     );
@@ -1534,16 +951,15 @@ describe('host-owned runtime plugin management tools', () => {
     expect(result).toMatchObject({
       status: 'accepted',
       output: {
+        status: 'applied',
         pluginId: originalPluginId,
         fieldName: 'tone',
         operation: 'set',
       },
-      preparedConfigEffect: {
-        targetPluginId: originalPluginId,
-        operation: {kind: 'set', value: 'warm'},
-      },
     });
-    expect(loaded.config?.plugins?.[originalPluginId]).toBeUndefined();
+    expect(loaded.config?.plugins?.[originalPluginId]?.config).toMatchObject({
+      tone: 'warm',
+    });
     expect(loaded.config?.plugins?.[mutatedPluginId]).toBeUndefined();
   });
 
@@ -1929,13 +1345,15 @@ describe('host-owned runtime plugin management tools', () => {
       await vi.advanceTimersByTimeAsync(approvalDelayMs + 1);
       const result = await updatePromise;
 
-      expect(result.status).toBe('accepted');
-      expect(
-        result.status === 'accepted' ? result.preparedConfigEffect : undefined,
-      ).toMatchObject({
-        targetPluginId: manifest.id,
-        fieldName: 'tone',
+      expect(result).toMatchObject({
+        status: 'accepted',
+        output: {status: 'applied', pluginId: manifest.id, fieldName: 'tone'},
       });
+      expect(
+        loadRuntimeConfigForTest({configPath, storeRoot}).config?.plugins?.[
+          manifest.id
+        ]?.config,
+      ).toMatchObject({tone: 'warm'});
     } finally {
       vi.useRealTimers();
     }
@@ -2036,7 +1454,7 @@ describe('host-owned runtime plugin management tools', () => {
     }
   });
 
-  it('prepares the exact snapshotted value that the user approved', async () => {
+  it('writes the exact snapshotted value the user approved', async () => {
     const storeRoot = createTestTempRoot(
       'project02-plugin-config-exact-value-',
     );
@@ -2094,19 +1512,17 @@ describe('host-owned runtime plugin management tools', () => {
       pluginManifests: [manifest],
     });
 
-    expect(result.status).toBe('accepted');
     expect(result).toMatchObject({
-      preparedConfigEffect: {
-        operation: {
-          kind: 'set',
-          value: {mode: 'approved-value'},
-        },
-      },
+      status: 'accepted',
+      output: {status: 'applied', fieldName: 'settings', operation: 'set'},
     });
-    expect(after.fingerprint).toBe(before.fingerprint);
+    expect(after.fingerprint).not.toBe(before.fingerprint);
+    expect(
+      after.fields.find(field => field.name === 'settings')?.authored,
+    ).toEqual({configured: true, value: {mode: 'approved-value'}});
   });
 
-  it('prepares one approved unset without accepting a value payload', async () => {
+  it('applies one approved unset without accepting a value payload', async () => {
     const storeRoot = createTestTempRoot('project02-plugin-config-unset-');
     const manifest = configurablePluginManifest();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
@@ -2159,13 +1575,9 @@ describe('host-owned runtime plugin management tools', () => {
       pluginManifests: [manifest],
     });
 
-    expect(result.status).toBe('accepted');
     expect(result).toMatchObject({
-      preparedConfigEffect: {
-        targetPluginId: manifest.id,
-        fieldName: 'tone',
-        operation: {kind: 'unset'},
-      },
+      status: 'accepted',
+      output: {status: 'applied', fieldName: 'tone', operation: 'unset'},
     });
     expect(request?.preview).toMatchObject({
       operation: 'unset',
@@ -2174,7 +1586,7 @@ describe('host-owned runtime plugin management tools', () => {
     });
     expect(
       after.fields.find(field => field.name === 'tone')?.authored.configured,
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('rejects redacted nested content instead of asking approval for a hidden value', async () => {

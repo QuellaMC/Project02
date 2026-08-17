@@ -6,10 +6,6 @@ import {type RuntimeLogStore} from '../../src/runtime/evidence/contract.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {LocalRuntimeStorageContractError} from '../../src/runtime/storage/layout-contract.ts';
-import {
-  runtimePluginConfigUpdateToolName,
-  runtimePluginId,
-} from '../../src/plugins/api/contract.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from '../../src/runtime/storage/mutation-lock.ts';
 import {
   acquireLocalRuntimeSessionWriterLease,
@@ -128,85 +124,6 @@ const rejectedScenarios = [
           output: {ok: true},
           evidence: [],
         },
-      });
-    },
-  },
-  {
-    name: 'rejects a config effect attached to an unrelated finished tool call',
-    expected: 'malformed_record',
-    run(logStore) {
-      const toolCallId = 'call_unrelated_config_effect';
-      const expectedFingerprint = 'sha256:expected';
-      const resultFingerprint = 'sha256:result';
-
-      appendTurnStart(logStore);
-      logStore.appendRawEvent({
-        ...identity,
-        kind: 'tool_call_started',
-        eventType: 'USER_MESSAGE',
-        toolCallId,
-        toolRound: 1,
-        toolName: 'memory.search',
-        toolPluginId: 'memory.fixture',
-        toolInput: {
-          pluginId: 'config-target.fixture',
-          fieldName: 'tone',
-          operation: 'set',
-          value: 'warm',
-          expectedFingerprint,
-        },
-      });
-      logStore.appendRawEvent({
-        ...identity,
-        kind: 'tool_call_finished',
-        eventType: 'USER_MESSAGE',
-        toolCallId,
-        dispatchedToHost: true,
-        toolRound: 1,
-        toolName: runtimePluginConfigUpdateToolName,
-        toolPluginId: runtimePluginId,
-        toolResult: {
-          status: 'accepted',
-          output: {
-            status: 'approved_pending_commit',
-            pluginId: 'config-target.fixture',
-            fieldName: 'tone',
-            operation: 'set',
-            fingerprint: resultFingerprint,
-          },
-          evidence: [
-            {
-              ...identity,
-              kind: 'runtime_plugin_evidence_snapshot',
-              pluginId: runtimePluginId,
-              evidenceKind: 'tool_invocation',
-              status: 'accepted',
-              summary: 'Approved config update.',
-              redactionLabels: [],
-              configFingerprint: resultFingerprint,
-            },
-          ],
-        },
-      });
-      logStore.appendRawEvent({
-        ...identity,
-        kind: 'runtime_turn_completed',
-        eventType: 'USER_MESSAGE',
-        status: 'completed',
-        toolCallIds: [toolCallId],
-        runtimeConfigEffects: [
-          {
-            ...identity,
-            kind: 'runtime_plugin_config_effect',
-            effectId: toolCallId,
-            targetPluginId: 'config-target.fixture',
-            targetConfigPath: '/tmp/config-target.json',
-            fieldName: 'tone',
-            expectedFingerprint,
-            resultFingerprint,
-            operation: {kind: 'set', value: 'warm'},
-          },
-        ],
       });
     },
   },

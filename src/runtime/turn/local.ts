@@ -1,7 +1,6 @@
 import type {ConversationSession} from '../../core/index.ts';
 import {acquireLocalRuntimeSessionWriterLease} from '../storage/session-store.ts';
 import {runSerializedLocalUserMessageEvent} from './model.ts';
-import {recoverPendingRuntimeConfigEffects} from './config-effects.ts';
 import type {
   LocalRuntimeUserMessageResult,
   RunLocalUserMessageEventOptions,
@@ -50,10 +49,6 @@ async function runLocalUserMessageEventWithWriterLease(
   });
 
   try {
-    await recoverPendingRuntimeConfigEffects({
-      logStore: options.logStore,
-      pluginHost: options.pluginHost,
-    });
     return await runSerializedLocalUserMessageEvent(options);
   } finally {
     await lease.release();

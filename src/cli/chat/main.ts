@@ -34,7 +34,6 @@ import {
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult,
 } from '../../runtime/index.ts';
-import {recoverPendingRuntimeConfigEffects} from '../../runtime/turn/index.ts';
 import {
   type RawEventLogRecord,
   type RuntimeLogStore,
@@ -464,10 +463,6 @@ async function runChatCliAfterConfiguredHost(options: {
     }
 
     pluginHost = startupPluginHost;
-    await recoverPendingRuntimeConfigEffects({
-      logStore: durableRuntime.logStore,
-      pluginHost,
-    });
     roleModelAdapter = createSelectedRoleModelAdapter(
       options.runtimeArgs.provider,
       options.runtimeEnv,

@@ -1,4 +1,3 @@
-import type {RuntimeEventIdentity} from '../../../core/index.ts';
 import {
   runtimePluginId,
   runtimePluginListToolName,
@@ -44,11 +43,6 @@ export type RuntimePluginListHostState = () => {
   readonly installedPluginManifests?: readonly RuntimePluginManifest[];
   readonly activationStates?: readonly RuntimePluginListActivationState[];
   readonly confirmationAvailable: boolean;
-  readonly liveReloadAvailable?: boolean;
-  readonly sessionScopedConfigUpdateConfirmed?: (
-    identity: RuntimeEventIdentity,
-    pluginId: string,
-  ) => boolean;
 };
 
 export function createRuntimePluginListTool(): RuntimePluginProvidedTool {

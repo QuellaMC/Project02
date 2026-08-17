@@ -37,12 +37,10 @@ import {
 } from '../../role-model/index.ts';
 import {visibleReplyModelToolName} from '../../role-model/index.ts';
 import {
-  createPreparedRuntimePluginConfigEffect,
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginProvidedTool,
   createRuntimePluginToolCallResultSnapshot,
   createRuntimePluginTurnEvidenceSnapshot,
-  type PreparedRuntimePluginConfigEffect,
   type RuntimePluginEvidenceSnapshot,
   type RuntimePluginJsonObject,
   type RuntimePluginSourceReference,
@@ -166,10 +164,6 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
   const runtimePluginTurnEvidence = optionalRuntimePluginTurnEvidenceSnapshot(
     record['runtimePluginTurnEvidence'],
   );
-  const runtimeConfigEffects = optionalPreparedRuntimePluginConfigEffects(
-    record['runtimeConfigEffects'],
-  );
-
   const sessionContinuation = optionalSessionContinuationOption(
     record['sessionContinuation'],
   );
@@ -222,13 +216,6 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     runtimePluginEvidence,
     runtimePluginTurnEvidence,
   });
-  assertRuntimeConfigEffectSemantics({
-    identity: {eventId, traceId, createdAt},
-    kind,
-    toolCallIds,
-    runtimeConfigEffects,
-  });
-
   return Object.freeze({
     eventId,
     traceId,
@@ -258,7 +245,6 @@ export function decodeRawEventLogRecord(line: string): RawEventLogRecord {
     ...(runtimePluginTurnEvidence === undefined
       ? {}
       : {runtimePluginTurnEvidence}),
-    ...(runtimeConfigEffects === undefined ? {} : {runtimeConfigEffects}),
     ...sessionContinuation,
   } satisfies RawEventLogRecord);
 }
@@ -599,61 +585,6 @@ function optionalRuntimePluginTurnEvidenceSnapshot(
     }
 
     throw error;
-  }
-}
-
-function optionalPreparedRuntimePluginConfigEffects(
-  value: unknown,
-): readonly PreparedRuntimePluginConfigEffect[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-
-  try {
-    const items = requiredArray(value, 'runtimeConfigEffects');
-
-    if (items.length === 0 || items.length > 16) {
-      throw new TypeError(
-        'runtimeConfigEffects must contain between 1 and 16 records.',
-      );
-    }
-
-    return Object.freeze(
-      items.map(item => createPreparedRuntimePluginConfigEffect(item)),
-    );
-  } catch (error: unknown) {
-    if (error instanceof TypeError) {
-      throwMalformedRecord('runtimeConfigEffects');
-    }
-
-    throw error;
-  }
-}
-
-function assertRuntimeConfigEffectSemantics(options: {
-  readonly identity: RuntimeEventIdentity;
-  readonly kind: RawEventLogRecordKind;
-  readonly toolCallIds: readonly string[] | undefined;
-  readonly runtimeConfigEffects:
-    readonly PreparedRuntimePluginConfigEffect[] | undefined;
-}): void {
-  if (options.runtimeConfigEffects === undefined) {
-    return;
-  }
-
-  if (options.kind !== 'runtime_turn_completed') {
-    throwMalformedRecord('runtimeConfigEffects');
-  }
-
-  for (const effect of options.runtimeConfigEffects) {
-    if (
-      effect.eventId !== options.identity.eventId ||
-      effect.traceId !== options.identity.traceId ||
-      effect.createdAt !== options.identity.createdAt ||
-      !options.toolCallIds?.includes(effect.effectId)
-    ) {
-      throwMalformedRecord('runtimeConfigEffects');
-    }
   }
 }
 
