@@ -26,7 +26,6 @@ import {
   type RuntimePluginContext,
   requiredModelToolInputContract,
 } from '../../../src/plugins/api/index.ts';
-import {createFirstPartyModelToolsPlugin} from '../../../src/plugins/builtin/model-tools/index.ts';
 import {type ModelToolInputContract} from '../../../src/role-model/index.ts';
 import {isModelFacingRuntimePluginTool} from '../../../src/plugins/api/tool-classification.ts';
 
@@ -572,10 +571,6 @@ export function mapMcpToolsResourcesFixture(
   });
 
   return Object.freeze({plugin});
-}
-
-export function mapFirstPartyModelToolsPlugin(): RuntimePluginAdapterMapping {
-  return Object.freeze({plugin: createFirstPartyModelToolsPlugin()});
 }
 
 function createTidepoolManifest(options: {

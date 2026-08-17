@@ -8,10 +8,7 @@ import {
   freezeRoleModelProviderExchangeSnapshot,
   roleModelProviderExchangeJsonBoundaryLimits,
 } from '../api/provider-exchange.ts';
-import {
-  visibleReplyModelToolName,
-  type ModelToolCall,
-} from '../api/model-tools.ts';
+import {visibleReplyModelToolName} from '../api/model-tools.ts';
 import type {
   RoleModelAssistantChatMessage,
   RoleModelChatCompletionTool,
@@ -32,16 +29,12 @@ import {
 import type {
   RoleModelAdapter,
   RoleModelAdapterRawOutput,
-  RoleModelNativeToolCallArgumentError,
 } from '../api/adapter.ts';
 import {
   type RuntimePluginJsonObject,
   type RuntimePluginJsonValue,
 } from '../../plugins/api/index.ts';
-import {
-  createJsonBoundaryObjectSnapshot,
-  createJsonBoundarySnapshot,
-} from '../../shared/json-boundary.ts';
+import {createJsonBoundarySnapshot} from '../../shared/json-boundary.ts';
 import {scrubReasoningBlocks} from '../api/reasoning.ts';
 
 const nvidiaRoleModelProviderName = 'nvidia';
@@ -142,7 +135,7 @@ export function createNvidiaRoleModelProviderAdapter(
       requestTimeoutMs,
       transportRetryDelaysMs,
     }),
-    async invoke(inputEnvelope, invocation) {
+    async invoke(_inputEnvelope, invocation) {
       if (options.apiKey === undefined || options.apiKey.length === 0) {
         return createProviderRejectedOutput({
           code: 'missing_api_key',
@@ -216,7 +209,6 @@ export function createNvidiaRoleModelProviderAdapter(
         const rawOutput = parseNvidiaResponseMessage(
           responseBody,
           toolNameMappings,
-          inputEnvelope.allowedTools.includes(visibleReplyModelToolName),
         );
 
         if (rawOutput.status === 'rejected') {
@@ -235,9 +227,6 @@ export function createNvidiaRoleModelProviderAdapter(
           ...(rawOutput.nativeAssistantMessage === undefined
             ? {}
             : {nativeAssistantMessage: rawOutput.nativeAssistantMessage}),
-          ...nativeToolCallArgumentErrorsOption(
-            rawOutput.nativeToolCallArgumentErrors,
-          ),
           providerMetadata: Object.freeze({
             ...baseMetadata,
             response: Object.freeze({
@@ -253,9 +242,6 @@ export function createNvidiaRoleModelProviderAdapter(
             ...(rawOutput.nativeAssistantMessage === undefined
               ? {}
               : {nativeAssistantMessage: rawOutput.nativeAssistantMessage}),
-            ...(rawOutput.outputNormalization === undefined
-              ? {}
-              : {outputNormalization: rawOutput.outputNormalization}),
           }),
         } satisfies RoleModelAdapterRawOutput);
       } catch (error: unknown) {
@@ -353,7 +339,6 @@ function createNvidiaProviderExchange(options: {
   readonly finishReason?: string;
   readonly usage?: unknown;
   readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
-  readonly outputNormalization?: RoleModelProviderExchangeSnapshot['outputNormalization'];
 }): RoleModelProviderExchangeSnapshot {
   const candidate = Object.freeze({
     ...options.base,
@@ -366,9 +351,6 @@ function createNvidiaProviderExchange(options: {
     ...(options.nativeAssistantMessage === undefined
       ? {}
       : {nativeAssistantMessage: options.nativeAssistantMessage}),
-    ...(options.outputNormalization === undefined
-      ? {}
-      : {outputNormalization: options.outputNormalization}),
   } satisfies RoleModelProviderExchangeSnapshot);
 
   return freezeRoleModelProviderExchangeSnapshot(candidate);
@@ -551,8 +533,6 @@ type ParsedNvidiaResponseMessage =
       readonly usage?: unknown;
       /** Absent when the model's reply could not be normalised and goes to the parser as it is. */
       readonly nativeAssistantMessage?: RoleModelAssistantChatMessage;
-      readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-      readonly outputNormalization?: RoleModelProviderExchangeSnapshot['outputNormalization'];
     }
   | RejectedNvidiaProviderParseResult;
 
@@ -565,7 +545,6 @@ type RejectedNvidiaProviderParseResult = {
 function parseNvidiaResponseMessage(
   value: unknown,
   toolNameMappings: readonly RoleModelProviderToolNameMapping[],
-  visibleReplyAvailable: boolean,
 ): ParsedNvidiaResponseMessage {
   if (!isJsonRecord(value)) {
     return rejectResponse(
@@ -633,20 +612,14 @@ function parseNvidiaResponseMessage(
 
   const content = contentResult.content;
   const toolCalls = toolCallsResult.toolCalls;
-  const rawOutputResult = createRawOutputTextFromNvidiaMessage({
-    content,
-    toolCalls,
-    toolNameMappings,
-    visibleReplyAvailable,
-  });
-
-  if (rawOutputResult.status === 'rejected') {
-    return rawOutputResult;
-  }
 
   return Object.freeze({
     status: 'accepted',
-    rawOutputText: rawOutputResult.rawOutputText,
+    rawOutputText: createRawOutputTextFromNvidiaMessage({
+      content,
+      toolCalls,
+      toolNameMappings,
+    }),
     finishReason: finishReasonResult.finishReason,
     ...(value['usage'] === undefined ? {} : {usage: value['usage']}),
     nativeAssistantMessage: Object.freeze({
@@ -654,12 +627,6 @@ function parseNvidiaResponseMessage(
       content,
       ...(toolCalls.length === 0 ? {} : {tool_calls: toolCalls}),
     } satisfies RoleModelAssistantChatMessage),
-    ...nativeToolCallArgumentErrorsOption(
-      rawOutputResult.nativeToolCallArgumentErrors,
-    ),
-    ...(rawOutputResult.outputNormalization === undefined
-      ? {}
-      : {outputNormalization: rawOutputResult.outputNormalization}),
   } satisfies ParsedNvidiaResponseMessage);
 }
 
@@ -847,175 +814,51 @@ function parseNvidiaToolCall(
   } satisfies ParsedNvidiaToolCall);
 }
 
-type NvidiaRawOutputTextResult =
-  | {
-      readonly status: 'accepted';
-      readonly rawOutputText: string;
-      readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-      readonly outputNormalization?: RoleModelProviderExchangeSnapshot['outputNormalization'];
-    }
-  | RejectedNvidiaProviderParseResult;
-
+/**
+ * The wire message as a decision: content alone is the character speaking,
+ * so it becomes visible_reply; native tool calls become tool calls, and any
+ * content beside them is the model's own text. Arguments are handed to the
+ * parser as the model wrote them — parsed when they parse, the raw string
+ * when they do not — so a bad call is refused there like any other.
+ */
 function createRawOutputTextFromNvidiaMessage(options: {
   readonly content: string | null;
   readonly toolCalls: readonly RoleModelChatToolCall[];
   readonly toolNameMappings: readonly RoleModelProviderToolNameMapping[];
-  readonly visibleReplyAvailable: boolean;
-}): NvidiaRawOutputTextResult {
+}): string {
+  const content =
+    options.content === null || options.content.length === 0
+      ? undefined
+      : options.content;
+
   if (options.toolCalls.length === 0) {
     // Empty content is model behavior, not a transport fault.
-    if (options.content === null || options.content.length === 0) {
-      return Object.freeze({
-        status: 'accepted',
-        rawOutputText: JSON.stringify({toolCalls: []}),
-      } satisfies NvidiaRawOutputTextResult);
-    }
+    return JSON.stringify({
+      toolCalls:
+        content === undefined
+          ? []
+          : [{name: visibleReplyModelToolName, input: {text: content}}],
+    });
+  }
 
-    return Object.freeze({
-      status: 'accepted',
-      rawOutputText: JSON.stringify(
-        options.visibleReplyAvailable
-          ? {
-              toolCalls: [
-                {
-                  name: visibleReplyModelToolName,
-                  input: {
-                    text: options.content,
-                  },
-                },
-              ],
-            }
-          : {
-              toolCalls: [],
-              text: options.content,
-            },
+  return JSON.stringify({
+    toolCalls: options.toolCalls.map(call => ({
+      name: runtimeToolNameForProviderToolName(
+        call.function.name,
+        options.toolNameMappings,
       ),
-      outputNormalization: Object.freeze({
-        source: 'terminal_assistant_content',
-        committed: false,
-      } satisfies NonNullable<
-        RoleModelProviderExchangeSnapshot['outputNormalization']
-      >),
-    } satisfies NvidiaRawOutputTextResult);
-  }
-
-  const toolCalls: ModelToolCall[] = [];
-  const nativeToolCallArgumentErrors: RoleModelNativeToolCallArgumentError[] =
-    [];
-  let executableIndex = 0;
-
-  for (const [index, call] of options.toolCalls.entries()) {
-    const runtimeToolName = runtimeToolNameForProviderToolName(
-      call.function.name,
-      options.toolNameMappings,
-    );
-    const parsedArgs = parseNvidiaToolCallArguments({
-      call,
-      index,
-      runtimeToolName,
-    });
-
-    if (parsedArgs.status === 'rejected') {
-      // Empty text, not an empty object: the parser requires a string.
-      if (runtimeToolName === visibleReplyModelToolName) {
-        toolCalls.push({
-          name: visibleReplyModelToolName,
-          input: Object.freeze({text: ''}),
-        });
-        continue;
-      }
-
-      nativeToolCallArgumentErrors.push(
-        Object.freeze({
-          executableIndex,
-          toolName: runtimeToolName,
-          reason: 'invalid_native_tool_arguments',
-          message: parsedArgs.message,
-        } satisfies RoleModelNativeToolCallArgumentError),
-      );
-      toolCalls.push({
-        name: runtimeToolName,
-        input: Object.freeze({}),
-      });
-      executableIndex += 1;
-      continue;
-    }
-
-    toolCalls.push({
-      name: runtimeToolName,
-      input: parsedArgs.input,
-    });
-
-    if (runtimeToolName !== visibleReplyModelToolName) {
-      executableIndex += 1;
-    }
-  }
-
-  return Object.freeze({
-    status: 'accepted',
-    rawOutputText: JSON.stringify({
-      toolCalls,
-    }),
-    ...nativeToolCallArgumentErrorsOption(nativeToolCallArgumentErrors),
-    ...(options.content === null || options.content.length === 0
-      ? {}
-      : {
-          outputNormalization: Object.freeze({
-            source: 'native_tool_calls',
-            committed: false,
-          } satisfies NonNullable<
-            RoleModelProviderExchangeSnapshot['outputNormalization']
-          >),
-        }),
-  } satisfies NvidiaRawOutputTextResult);
+      input: decisionInputForNativeArguments(call.function.arguments),
+    })),
+    ...(content === undefined ? {} : {text: content}),
+  });
 }
 
-function nativeToolCallArgumentErrorsOption(
-  errors: readonly RoleModelNativeToolCallArgumentError[] | undefined,
-): {
-  readonly nativeToolCallArgumentErrors?: readonly RoleModelNativeToolCallArgumentError[];
-} {
-  return errors === undefined || errors.length === 0
-    ? {}
-    : {nativeToolCallArgumentErrors: Object.freeze([...errors])};
-}
-
-type ParsedNvidiaToolCallArguments =
-  | {
-      readonly status: 'accepted';
-      readonly input: Readonly<Record<string, unknown>>;
-    }
-  | RejectedNvidiaProviderParseResult;
-
-function parseNvidiaToolCallArguments(options: {
-  readonly call: RoleModelChatToolCall;
-  readonly index: number;
-  readonly runtimeToolName: string;
-}): ParsedNvidiaToolCallArguments {
-  let parsed: unknown;
-
+function decisionInputForNativeArguments(argumentsText: string): unknown {
   try {
-    parsed = JSON.parse(options.call.function.arguments);
+    return JSON.parse(argumentsText);
   } catch {
-    return rejectResponse(
-      'malformed_response',
-      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must be valid JSON.`,
-    );
+    return argumentsText;
   }
-
-  if (!isJsonRecord(parsed)) {
-    return rejectResponse(
-      'malformed_response',
-      `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments must parse to an object.`,
-    );
-  }
-
-  return Object.freeze({
-    status: 'accepted',
-    input: createJsonBoundaryObjectSnapshot(parsed, {
-      field: `NVIDIA response message.tool_calls[${String(options.index)}].function.arguments`,
-    }),
-  } satisfies ParsedNvidiaToolCallArguments);
 }
 
 function rejectResponse(

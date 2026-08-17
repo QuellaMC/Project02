@@ -1,5 +1,4 @@
 export const runtimePluginContractVersion = 'mvp-008.runtime_plugin.v2';
-export const firstPartyModelToolsPluginId = 'first_party.model_tools';
 export const runtimePluginId = 'runtime.plugin';
 export const characterMemoryPluginId = 'character-memory';
 export const characterStatePluginId = 'character-state';
@@ -82,7 +81,6 @@ export const runtimePluginSourceKindValues = [
 ] as const;
 
 export const runtimePluginToolValidationOwnerValues = [
-  'built_in_model_tools',
   'plugin_host',
   'adapter',
 ] as const;

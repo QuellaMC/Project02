@@ -28,7 +28,6 @@ import type {
   InspectRoleModelRoundEvidence,
   InspectParsedRoleModelDecision,
   InspectModelToolCall,
-  InspectNonCommittedTopLevelText,
   InspectRoleModelCommitValidation,
   InspectPluginEvidence,
   InspectPluginListing,
@@ -737,15 +736,9 @@ function parsedRoleModelDecision(
           } satisfies InspectModelToolCall),
         ),
       ),
-      ...(result.nonCommittedText !== undefined
-        ? {
-            nonCommittedTopLevelText: Object.freeze({
-              source: 'model_top_level_text',
-              committed: false,
-              text: result.nonCommittedText,
-            } satisfies InspectNonCommittedTopLevelText),
-          }
-        : {}),
+      ...(result.decision.text === undefined
+        ? {}
+        : {text: result.decision.text}),
     } satisfies InspectParsedRoleModelDecision);
   }
 

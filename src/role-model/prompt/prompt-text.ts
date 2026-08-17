@@ -57,7 +57,6 @@ export function systemProtocolTail(
 export function toolProtocolText(
   options: Addressee & {
     readonly inventoryToolName?: string;
-    readonly visibleReplyAvailable: boolean;
     readonly supportsParallelToolCalls: boolean;
   },
 ): string {
@@ -73,20 +72,14 @@ export function toolProtocolText(
           'You may call several independent tools in one response and each of them will run; there is no one-tool-per-turn rule.',
         ]
       : []),
-    ...(options.visibleReplyAvailable
+    `To say something to ${who.them}, call visible_reply — that is what ${who.name} ${who.hears}.`,
+    ...(options.supportsParallelToolCalls
       ? [
-          `To say something to ${who.them}, call visible_reply — that is what ${who.name} ${who.hears}.`,
-          ...(options.supportsParallelToolCalls
-            ? [
-                'A visible_reply sent alongside tool calls is only a first word; once the results are back, call visible_reply again with what you actually want to say.',
-              ]
-            : []),
-          'After all requested tool results, finish with visible_reply.',
-          `Plain text with no tool calls may be delivered to ${who.them} as your reply as well.`,
+          'A visible_reply sent alongside tool calls is only a first word; once the results are back, call visible_reply again with what you actually want to say.',
         ]
-      : [
-          `visible_reply is unavailable this turn; plain text you write is not shown to ${who.them}.`,
-        ]),
+      : []),
+    'After all requested tool results, finish with visible_reply.',
+    `Plain text with no tool calls may be delivered to ${who.them} as your reply as well; anything you write alongside tool calls is a note to yourself, not something ${who.name} ${who.hears}.`,
   ].join(' ');
 }
 

@@ -19,8 +19,6 @@ import {
   runtimePluginAccessFor,
   runtimePluginAccessSnapshot,
 } from '../../src/plugins/policy/access-control.ts';
-import {isFirstPartyBuiltInModelTool} from '../../src/plugins/policy/tool-policy.ts';
-import {createFirstPartyModelToolsPlugin} from '../../src/plugins/builtin/model-tools/index.ts';
 import {createRuntimePluginProvidedTool} from '../../src/plugins/api/index.ts';
 import {
   isApprovalGatedRuntimePluginTool,
@@ -782,35 +780,6 @@ describe('runtime plugin model-facing tool policy', () => {
         },
       }),
     ).toThrow('onShutdown hooks must declare on_shutdown.');
-  });
-
-  it('recognizes first-party built-in model tools only from the real host-owned instance', () => {
-    const firstPartyPlugin = createFirstPartyModelToolsPlugin();
-    const firstPartyTool = firstPartyPlugin.providedTools[0];
-    const copiedPlugin = createRuntimePlugin({
-      manifest: firstPartyPlugin.manifest,
-      providedTools: firstPartyPlugin.providedTools,
-      lifecycleHooks: firstPartyPlugin.lifecycleHooks,
-    });
-
-    if (firstPartyTool === undefined) {
-      throw new Error(
-        'Expected first-party model tools plugin to provide a tool.',
-      );
-    }
-
-    expect(
-      isFirstPartyBuiltInModelTool({
-        plugin: firstPartyPlugin,
-        tool: firstPartyTool,
-      }),
-    ).toBe(true);
-    expect(
-      isFirstPartyBuiltInModelTool({
-        plugin: copiedPlugin,
-        tool: firstPartyTool,
-      }),
-    ).toBe(false);
   });
 });
 

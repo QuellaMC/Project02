@@ -10,7 +10,6 @@ import {
 } from '../../src/runtime/storage/session-store.ts';
 import {
   createDecisionContext,
-  createDefaultRoleModelPluginToolDefinitions,
   createParsedRoleModelDecisionSnapshot,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
@@ -200,8 +199,7 @@ export function appendVisibleMessageWithCommitAnchor(
                   sessionId,
                   characterSnapshot: expectedCharacter ?? testCharacterProfile,
                 }),
-                pluginToolDefinitions:
-                  createDefaultRoleModelPluginToolDefinitions(),
+                pluginToolDefinitions: [],
               }),
               rawOutputText: JSON.stringify({
                 toolCalls: [

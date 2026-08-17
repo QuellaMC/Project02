@@ -22,11 +22,7 @@ import {
   type ActiveChatSession,
   type ContinueChatSession,
 } from './session-continuation.ts';
-import {
-  writeNonCommittedTopLevelText,
-  writeRuntimeProgress,
-  writeTraceSummary,
-} from './turn-output.ts';
+import {writeRuntimeProgress, writeTraceSummary} from './turn-output.ts';
 import {
   recordLocalUserMessageInputRejection,
   runLocalUserMessageEvent,
@@ -123,7 +119,6 @@ type RunChatCliOptions = Omit<ChatCliOptions, 'pluginHost'> & {
 
 type CompletedChatRuntimeTurn = {
   readonly status: 'completed';
-  readonly nonCommittedTopLevelText?: string;
   readonly traceSummary: ChatTraceSummary;
 };
 
@@ -147,9 +142,6 @@ type ChatToolConfirmationBridge = {
   ): () => void;
 };
 
-const modelTextToggleCommand = '/model-text';
-const showModelTextCommand = '/show-model-text';
-const hideModelTextCommand = '/hide-model-text';
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 
 function promptTextFor(session: ConversationSession): string {
@@ -685,8 +677,6 @@ async function runChatCliWithActiveWriter(
         stdout: options.stdout,
       }),
     );
-  let showNonCommittedTopLevelText = false;
-
   options.stdout.write(`${session.character.displayName} is ready.\n`);
   options.stdout.write(promptTextFor(session));
 
@@ -704,14 +694,11 @@ async function runChatCliWithActiveWriter(
         logStore: active.logStore,
         pluginHost,
         line: nextLine.value,
-        showNonCommittedTopLevelText,
       });
 
       if (lineResult.status === 'exit') {
         return lineResult.exitCode;
       }
-
-      showNonCommittedTopLevelText = lineResult.showNonCommittedTopLevelText;
 
       if (lineResult.turnCompleted) {
         const next = await continueChatSessionIfNeeded({
@@ -751,11 +738,7 @@ async function runChatCliWithActiveWriter(
 }
 
 type ChatInputLineResult =
-  | {
-      readonly status: 'continue';
-      readonly showNonCommittedTopLevelText: boolean;
-      readonly turnCompleted: boolean;
-    }
+  | {readonly status: 'continue'; readonly turnCompleted: boolean}
   | {readonly status: 'exit'; readonly exitCode: number};
 
 async function handleChatInputLine(options: {
@@ -764,29 +747,12 @@ async function handleChatInputLine(options: {
   readonly logStore: RuntimeLogStore;
   readonly pluginHost: RuntimePluginHost;
   readonly line: string;
-  readonly showNonCommittedTopLevelText: boolean;
 }): Promise<ChatInputLineResult> {
   const trimmedLine = options.line.trim();
 
   if (trimmedLine === exitCommand) {
     await endChatSession(options);
     return {status: 'exit', exitCode: 0};
-  }
-
-  const nextModelTextVisibility = modelTextVisibilityCommand(
-    trimmedLine,
-    options.showNonCommittedTopLevelText,
-  );
-
-  if (nextModelTextVisibility !== undefined) {
-    options.options.stdout.write(
-      `Model top-level text display: ${nextModelTextVisibility ? 'shown' : 'hidden'}.\n`,
-    );
-    return {
-      status: 'continue',
-      showNonCommittedTopLevelText: nextModelTextVisibility,
-      turnCompleted: false,
-    };
   }
 
   let turnCompleted: boolean;
@@ -820,12 +786,7 @@ async function handleChatInputLine(options: {
       },
     });
 
-    writeChatRuntimeResult({
-      options: options.options,
-      session: options.session,
-      result,
-      showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,
-    });
+    writeChatRuntimeResult({options: options.options, result});
 
     if (result.status === 'rejected' && result.fatal) {
       return {status: 'exit', exitCode: 1};
@@ -837,30 +798,17 @@ async function handleChatInputLine(options: {
     return {status: 'exit', exitCode: 1};
   }
 
-  return {
-    status: 'continue',
-    showNonCommittedTopLevelText: options.showNonCommittedTopLevelText,
-    turnCompleted,
-  };
+  return {status: 'continue', turnCompleted};
 }
 
 function writeChatRuntimeResult(options: {
   readonly options: RunChatCliOptions;
-  readonly session: ConversationSession;
   readonly result: Awaited<ReturnType<typeof handleUserMessageThroughRuntime>>;
-  readonly showNonCommittedTopLevelText: boolean;
 }): void {
-  if (options.result.status === 'completed') {
-    if (
-      options.showNonCommittedTopLevelText &&
-      options.result.nonCommittedTopLevelText !== undefined
-    ) {
-      writeNonCommittedTopLevelText(
-        options.options.stdout,
-        options.result.nonCommittedTopLevelText,
-      );
-    }
-  } else if (options.options.traceMode !== true) {
+  if (
+    options.result.status === 'rejected' &&
+    options.options.traceMode !== true
+  ) {
     options.options.stderr.write(`Error: ${options.result.errorMessage}\n`);
   }
 
@@ -968,7 +916,6 @@ function mapRuntimeResult(
   if (result.status === 'completed') {
     return {
       status: 'completed',
-      ...nonCommittedTopLevelTextOption(result.rawEvent),
       traceSummary: createTraceSummary(
         result.event,
         'completed',
@@ -994,39 +941,6 @@ function mapRuntimeResult(
       result.rawEventLogRecords,
     ),
   };
-}
-
-function nonCommittedTopLevelTextOption(rawEvent: RawEventLogRecord): {
-  readonly nonCommittedTopLevelText?: string;
-} {
-  const result = rawEvent.parsedRoleModelDecisionSnapshot?.result;
-
-  if (result?.status !== 'accepted' || result.nonCommittedText === undefined) {
-    return {};
-  }
-
-  return {
-    nonCommittedTopLevelText: result.nonCommittedText,
-  };
-}
-
-function modelTextVisibilityCommand(
-  trimmedLine: string,
-  currentlyVisible: boolean,
-): boolean | undefined {
-  if (trimmedLine === modelTextToggleCommand) {
-    return !currentlyVisible;
-  }
-
-  if (trimmedLine === showModelTextCommand) {
-    return true;
-  }
-
-  if (trimmedLine === hideModelTextCommand) {
-    return false;
-  }
-
-  return undefined;
 }
 
 function mapInputRejectionResult(

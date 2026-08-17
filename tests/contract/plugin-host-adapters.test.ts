@@ -1,15 +1,11 @@
 import {describe, expect, it} from 'vitest';
-import {createFirstPartyModelToolsPlugin} from '../../src/plugins/builtin/model-tools/index.ts';
-import {firstPartyModelToolsPluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {
   mapAstraMemoryProviderFixture,
-  mapFirstPartyModelToolsPlugin,
   mapMcpToolsResourcesFixture,
   mapTidepoolMemoryPluginFixture,
   mapCoralDbMemoryGatewayFixture,
 } from '../support/adapter-proofs/index.ts';
-import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {
   createMemorySearchPluginWithoutHandlerDeclaration,
   readAgentCapabilityFixture,
@@ -125,25 +121,6 @@ describe('runtime plugin host adapters and contracts', () => {
         .pluginToolDefinitions()
         .some(tool => adapterToolNames.has(tool.name)),
     ).toBe(false);
-  });
-
-  it('accepts first-party model tools as tool-provider-only mappings', () => {
-    const plugin = createFirstPartyModelToolsPlugin();
-    const mapping = mapFirstPartyModelToolsPlugin();
-
-    expect(plugin.manifest.id).toBe(firstPartyModelToolsPluginId);
-    expect(plugin.manifest.declaredPlugins).toEqual(['tool_provider']);
-    expect(plugin.lifecycleHooks.handleToolCall).toBeUndefined();
-    expect(plugin.providedTools.map(tool => tool.name)).toEqual([
-      visibleReplyModelToolName,
-    ]);
-
-    expect(mapping.plugin.manifest.id).toBe(firstPartyModelToolsPluginId);
-    expect(mapping.plugin.manifest.declaredPlugins).toEqual(['tool_provider']);
-    expect(mapping.plugin.lifecycleHooks.handleToolCall).toBeUndefined();
-    expect(mapping.plugin.providedTools.map(tool => tool.name)).toEqual([
-      visibleReplyModelToolName,
-    ]);
   });
 
   it('rejects handleToolCall hooks without a matching declaration', () => {

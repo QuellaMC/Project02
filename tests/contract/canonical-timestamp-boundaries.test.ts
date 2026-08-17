@@ -11,7 +11,6 @@ import {
   runtimePluginContractVersion,
 } from '../../src/plugins/api/index.ts';
 import {
-  createDefaultRoleModelPluginToolDefinitions,
   createDecisionContext,
   createRoleModelInputEnvelope,
   createRoleModelIOSnapshot,
@@ -181,6 +180,6 @@ function canonicalInputEnvelope() {
       sessionId: 'session-canonical-time',
       characterSnapshot: testCharacterProfile,
     }),
-    pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    pluginToolDefinitions: [],
   });
 }

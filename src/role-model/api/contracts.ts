@@ -69,15 +69,11 @@ export type RoleModelProviderExchangeSnapshot = {
   readonly usage?: RuntimePluginJsonValue;
   readonly nativeAssistantMessage?: RoleModelChatMessage;
   readonly nativeToolResultMessages: readonly RoleModelChatMessage[];
-  readonly outputNormalization?: {
-    readonly source: 'terminal_assistant_content' | 'native_tool_calls';
-    readonly committed: false;
-  };
 };
 
 export const roleModelDecisionOutputContract = Object.freeze({
   version: roleModelDecisionContractVersion,
-  text: 'Return exactly one complete valid JSON CharacterDecision object with ordered toolCalls. The only allowed top-level response fields are "toolCalls" and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, historyWindow, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is the only non-executed output tool. Any other tool call is executed and fed back as a tool observation. If visible_reply appears with executable tools, it is interim visible output. A response may use as many visible_reply calls as it has messages to send; each commits as its own message, in the order listed. A terminal response may end with visible_reply calls, or may use top-level text only as folded model text with no visible final reply.',
+  text: 'Return exactly one complete valid JSON CharacterDecision object. The only top-level fields are "toolCalls" (required, non-empty, in order) and optional "text". Do not include a version field; the runtime stamps the internal decision version after validation. Do not copy input envelope fields such as event, decisionContext, historyWindow, toolObservations, pluginContextItems, characterSnapshot, allowedTools, toolDefinitions, responseContract, or runtimeInput. Each toolCalls item must use string field "name", not "tool" or "type", and object field "input". visible_reply is how you speak: each visible_reply commits as its own message, in the order listed; any other tool call is executed and fed back as a tool observation; a visible_reply alongside executable calls is interim output, and the turn ends on a response whose calls are all visible_reply. A response must reply or call a tool. "text" is your own note next to your calls: it is kept with the decision and shown to you again, never to the person.',
 } satisfies RoleModelOutputContract);
 
 /**
@@ -130,7 +126,6 @@ export type RoleModelInputEnvelope = {
 export type CreateRoleModelInputEnvelopeOptions = {
   readonly event: UserMessageRuntimeEvent;
   readonly decisionContext: DecisionContext;
-  readonly allowedTools?: readonly RoleModelAllowedToolName[];
   readonly pluginToolDefinitions: readonly RoleModelPluginToolDefinition[];
   readonly toolObservations?: readonly RoleModelToolObservation[];
   readonly outputContract?: RoleModelOutputContract;
@@ -158,67 +153,38 @@ export type RoleModelToolObservationResult =
 export type CharacterDecision = {
   readonly version: typeof roleModelDecisionContractVersion;
   readonly toolCalls: readonly ModelToolCall[];
+  /**
+   * What the model wrote besides its tool calls. Kept with the decision and
+   * replayed to the model; never shown to the person.
+   */
+  readonly text?: string;
 };
 
+/**
+ * Who refuses a round: the parser owns malformed_output (any shape the
+ * decision contract does not allow); the provider adapters own
+ * provider_error (nothing usable arrived, the turn ends); the loop owns
+ * tool_rounds_exhausted and the runtime commit_validation_failure, both
+ * recorded in commit validation while the parsed snapshot stays accepted.
+ */
 export const roleModelMalformedOutputRejectionReason = 'malformed_output';
-export const roleModelMalformedToolCallRejectionReason = 'malformed_tool_call';
-export const roleModelDisallowedToolRejectionReason = 'disallowed_tool';
-export const roleModelUnsupportedEffectRejectionReason = 'unsupported_effect';
-export const roleModelInvalidVisibleReplyRejectionReason =
-  'invalid_visible_reply';
 export const roleModelProviderErrorRejectionReason = 'provider_error';
+export const roleModelToolRoundsExhaustedRejectionReason =
+  'tool_rounds_exhausted';
 export const roleModelCommitValidationFailureRejectionReason =
   'commit_validation_failure';
-export const roleModelPluginToolRejectedRejectionReason =
-  'plugin_tool_rejected';
-export const roleModelAdapterRawOutputMissingTextRejectionDetails =
-  'Adapter raw output must include string rawOutputText.';
-export const roleModelAdapterProviderExchangeMalformedDetails =
-  'Role-model adapter provider exchange is malformed.';
-export const roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails =
-  'Role-model adapter native tool-call argument errors are malformed.';
-export const roleModelAdapterRejectionNotReplayableDetails =
-  'Adapter rejection must be replayable from rawOutputText.';
-export const roleModelTerminalEmptyOutputRejectionDetails =
-  'Terminal model output must include visible_reply or top-level text.';
-
-export const roleModelMalformedAdapterRawOutputDetails = Object.freeze([
-  roleModelAdapterRawOutputMissingTextRejectionDetails,
-  roleModelAdapterProviderExchangeMalformedDetails,
-  roleModelAdapterNativeToolCallArgumentErrorsMalformedDetails,
-  roleModelAdapterRejectionNotReplayableDetails,
-] as const);
-
-export type RoleModelMalformedAdapterRawOutputDetails =
-  (typeof roleModelMalformedAdapterRawOutputDetails)[number];
-
-export function isRoleModelMalformedAdapterRawOutputDetails(
-  value: unknown,
-): value is RoleModelMalformedAdapterRawOutputDetails {
-  return roleModelMalformedAdapterRawOutputDetails.some(
-    details => details === value,
-  );
-}
 
 export type RoleModelDecisionRejectionReason =
   | typeof roleModelMalformedOutputRejectionReason
-  | typeof roleModelMalformedToolCallRejectionReason
-  | typeof roleModelDisallowedToolRejectionReason
-  | typeof roleModelUnsupportedEffectRejectionReason
-  | typeof roleModelInvalidVisibleReplyRejectionReason
   | typeof roleModelProviderErrorRejectionReason
-  | typeof roleModelCommitValidationFailureRejectionReason
-  | typeof roleModelPluginToolRejectedRejectionReason;
+  | typeof roleModelToolRoundsExhaustedRejectionReason
+  | typeof roleModelCommitValidationFailureRejectionReason;
 
 export const roleModelDecisionRejectionReasons = Object.freeze([
   roleModelMalformedOutputRejectionReason,
-  roleModelMalformedToolCallRejectionReason,
-  roleModelDisallowedToolRejectionReason,
-  roleModelUnsupportedEffectRejectionReason,
-  roleModelInvalidVisibleReplyRejectionReason,
   roleModelProviderErrorRejectionReason,
+  roleModelToolRoundsExhaustedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
-  roleModelPluginToolRejectedRejectionReason,
 ] satisfies readonly RoleModelDecisionRejectionReason[]);
 
 export type RoleModelDecisionRejection = {
@@ -229,13 +195,11 @@ export type RoleModelDecisionRejection = {
 export type AcceptedRoleModelDecisionResult = {
   readonly status: 'accepted';
   readonly decision: CharacterDecision;
-  readonly nonCommittedText?: string;
 };
 
 export type RejectedRoleModelDecisionResult = {
   readonly status: 'rejected';
   readonly rejection: RoleModelDecisionRejection;
-  readonly requestedToolNames?: readonly RoleModelAllowedToolName[];
 };
 
 export type RoleModelDecisionResult =

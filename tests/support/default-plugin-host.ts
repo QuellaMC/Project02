@@ -1,7 +1,6 @@
 import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
 import {
   characterStatePluginId,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
@@ -35,7 +34,6 @@ export function createDefaultProject02PluginHost(
     plugins: [createCharacterStatePlugin(), createSessionHistoryPlugin()],
     enabledPluginIds: options.enabledPluginIds ?? [
       runtimePluginId,
-      firstPartyModelToolsPluginId,
       characterStatePluginId,
     ],
   });

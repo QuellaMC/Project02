@@ -5,7 +5,6 @@ import type {
 } from '../../plugins/api/index.ts';
 import {runtimePluginListToolName} from '../../plugins/api/index.ts';
 import type {RoleModelInputEnvelope} from '../api/contracts.ts';
-import {visibleReplyModelToolName} from '../api/model-tools.ts';
 import {
   freezeRoleModelChatMessage,
   type RoleModelChatCompletionTool,
@@ -197,9 +196,6 @@ function createRoleModelPromptFrames(
           )
             ? {inventoryToolName: runtimePluginListToolName}
             : {}),
-          visibleReplyAvailable: inputEnvelope.allowedTools.includes(
-            visibleReplyModelToolName,
-          ),
           supportsParallelToolCalls:
             options.capabilities.supportsParallelToolCalls,
         }),

@@ -2,7 +2,6 @@ import {
   createAcceptedRoleModelDecisionResult,
   createRejectedRoleModelDecisionResult,
   createVisibleReplyModelToolCall,
-  isRoleModelAllowedToolName,
   roleModelDecisionContractVersion,
   roleModelDecisionRejectionReasons,
   visibleReplyModelToolName,
@@ -20,8 +19,8 @@ import type {
 } from '../evidence/records.ts';
 import {
   isOneOf,
+  optionalRecordString,
   optionalRecordStringAllowingEmpty,
-  optionalStringArray,
   requiredArray,
   requiredBoundedJsonObject,
   requiredNormalizedVisibleMessageText,
@@ -40,52 +39,31 @@ export function requiredRoleModelDecisionResult(
   const status = requiredRecordString(value, 'status', 'malformed_record');
 
   if (status === 'accepted') {
-    const nonCommittedText = optionalRecordStringAllowingEmpty(
-      value,
-      'nonCommittedText',
-      'malformed_record',
-    );
-
     return createAcceptedRoleModelDecisionResult(
       requiredCharacterDecision(value['decision']),
-      {
-        ...(nonCommittedText === undefined ? {} : {nonCommittedText}),
-      },
     );
   }
 
   if (status === 'rejected') {
     const rejection = requiredRoleModelDecisionRejection(value['rejection']);
-    const requestedToolNames = optionalStringArray(
-      value['requestedToolNames'],
-      'roleModelDecisionResult.requestedToolNames',
-    );
-
-    if (
-      requestedToolNames?.some(
-        toolName => !isRoleModelAllowedToolName(toolName),
-      ) === true
-    ) {
-      throwMalformedRecord('roleModelDecisionResult.requestedToolNames');
-    }
 
     return createRejectedRoleModelDecisionResult(
       rejection.reason,
       rejection.details,
-      {
-        ...(requestedToolNames === undefined ? {} : {requestedToolNames}),
-      },
     );
   }
 
   throwMalformedRecord('status');
 }
+
 export function requiredCharacterDecision(value: unknown): CharacterDecision {
   if (!isRecord(value)) {
     throwMalformedRecord('decision');
   }
 
   if (value['version'] === roleModelDecisionContractVersion) {
+    const text = optionalRecordString(value, 'text', 'malformed_record');
+
     return Object.freeze({
       version: roleModelDecisionContractVersion,
       toolCalls: Object.freeze(
@@ -93,6 +71,7 @@ export function requiredCharacterDecision(value: unknown): CharacterDecision {
           requiredModelToolCall,
         ),
       ),
+      ...(text === undefined ? {} : {text}),
     } satisfies CharacterDecision);
   }
 

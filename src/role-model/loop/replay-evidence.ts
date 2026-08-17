@@ -1,266 +1,47 @@
 import {canonicalJsonValuesEqual} from '../../shared/canonical-json.ts';
 import {
-  isRoleModelMalformedAdapterRawOutputDetails,
-  roleModelDisallowedToolRejectionReason,
-  roleModelInvalidVisibleReplyRejectionReason,
-  roleModelMalformedOutputRejectionReason,
-  roleModelPluginToolRejectedRejectionReason,
   roleModelProviderErrorRejectionReason,
-  roleModelTerminalEmptyOutputRejectionDetails,
-  type RejectedRoleModelDecisionResult,
   type RoleModelDecisionResult,
-  type RoleModelPluginToolDefinition,
-  type RoleModelProviderMetadata,
 } from '../api/contracts.ts';
-import {createRejectedRoleModelDecisionResult} from '../api/decision.ts';
-import {type RoleModelAllowedToolName} from '../api/tool-names.ts';
 import {parseRoleModelDecision} from './decision-parser.ts';
 
+/**
+ * A stored decision must be what the raw output says: the parser is
+ * deterministic, so re-parsing the raw text reproduces the accepted decision
+ * or the parser's own refusal. The one thing raw text cannot say is that
+ * nothing arrived — a provider error leaves the raw text empty.
+ */
 export function isRoleModelRawOutputReplayableDecisionEvidence(options: {
   readonly rawOutputText: string;
-  readonly providerMetadata: RoleModelProviderMetadata | undefined;
-  readonly decisionResult: RoleModelDecisionResult;
-  readonly allowedTools?: readonly RoleModelAllowedToolName[] | undefined;
-  readonly pluginToolDefinitions?:
-    readonly RoleModelPluginToolDefinition[] | undefined;
-}): boolean {
-  const parsedRawOutputDecision = parseRoleModelDecision(
-    options.rawOutputText,
-    options.allowedTools,
-    options.pluginToolDefinitions,
-  );
-
-  return (
-    roleModelDecisionResultsMatch({
-      actual: options.decisionResult,
-      expected: parsedRawOutputDecision,
-    }) ||
-    isRoleModelMalformedAdapterRawOutputEvidence({
-      rawOutputText: options.rawOutputText,
-      decisionResult: options.decisionResult,
-    }) ||
-    isRoleModelTerminalEmptyOutputRejectionEvidence({
-      parsedRawOutputDecision,
-      decisionResult: options.decisionResult,
-    }) ||
-    isRoleModelLoopSynthesizedRejectionEvidence({
-      parsedRawOutputDecision,
-      decisionResult: options.decisionResult,
-    }) ||
-    isRoleModelProviderErrorRawOutputEvidence({
-      rawOutputText: options.rawOutputText,
-      providerMetadata: options.providerMetadata,
-      decisionResult: options.decisionResult,
-    })
-  );
-}
-
-export function normalizeReplayableRejectedRoleModelDecisionResult(options: {
-  readonly rawOutputText: string;
-  readonly providerMetadata: RoleModelProviderMetadata | undefined;
-  readonly decisionResult: RejectedRoleModelDecisionResult;
-  readonly allowedTools?: readonly RoleModelAllowedToolName[];
-  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
-}): RejectedRoleModelDecisionResult | undefined {
-  // Fill names first: a nameless rejection may still be replayable as-is.
-  if (options.decisionResult.requestedToolNames === undefined) {
-    const normalized = fillRequestedToolNamesFromRawOutput(options);
-
-    if (normalized !== undefined) {
-      return normalized;
-    }
-  }
-
-  return isRoleModelRawOutputReplayableDecisionEvidence({
-    rawOutputText: options.rawOutputText,
-    providerMetadata: options.providerMetadata,
-    decisionResult: options.decisionResult,
-    ...(options.allowedTools === undefined
-      ? {}
-      : {allowedTools: options.allowedTools}),
-    ...(options.pluginToolDefinitions === undefined
-      ? {}
-      : {pluginToolDefinitions: options.pluginToolDefinitions}),
-  })
-    ? options.decisionResult
-    : undefined;
-}
-
-function fillRequestedToolNamesFromRawOutput(options: {
-  readonly rawOutputText: string;
-  readonly providerMetadata: RoleModelProviderMetadata | undefined;
-  readonly decisionResult: RejectedRoleModelDecisionResult;
-  readonly allowedTools?: readonly RoleModelAllowedToolName[];
-  readonly pluginToolDefinitions?: readonly RoleModelPluginToolDefinition[];
-}): RejectedRoleModelDecisionResult | undefined {
-  const canonicalResult = parseRoleModelDecision(
-    options.rawOutputText,
-    options.allowedTools,
-    options.pluginToolDefinitions,
-  );
-  const requestedToolNames =
-    canonicalResult.status === 'rejected'
-      ? canonicalResult.requestedToolNames
-      : loopSynthesizedRejectionReasons.includes(
-            options.decisionResult.rejection.reason,
-          )
-        ? Object.freeze(
-            canonicalResult.decision.toolCalls.map(call => call.name),
-          )
-        : undefined;
-
-  if (requestedToolNames === undefined) {
-    return undefined;
-  }
-
-  const normalizedResult = createRejectedRoleModelDecisionResult(
-    options.decisionResult.rejection.reason,
-    options.decisionResult.rejection.details,
-    {
-      requestedToolNames,
-    },
-  );
-
-  return isRoleModelRawOutputReplayableDecisionEvidence({
-    rawOutputText: options.rawOutputText,
-    providerMetadata: options.providerMetadata,
-    decisionResult: normalizedResult,
-    ...(options.allowedTools === undefined
-      ? {}
-      : {allowedTools: options.allowedTools}),
-    ...(options.pluginToolDefinitions === undefined
-      ? {}
-      : {pluginToolDefinitions: options.pluginToolDefinitions}),
-  })
-    ? normalizedResult
-    : undefined;
-}
-
-// These legitimately pair a rejected snapshot with raw output that re-parses
-// as accepted: they are synthesized above the parser, or by stricter old ones.
-const loopSynthesizedRejectionReasons: readonly string[] = Object.freeze([
-  roleModelPluginToolRejectedRejectionReason,
-  roleModelInvalidVisibleReplyRejectionReason,
-  roleModelDisallowedToolRejectionReason,
-]);
-
-function isRoleModelLoopSynthesizedRejectionEvidence(options: {
-  readonly parsedRawOutputDecision: RoleModelDecisionResult;
   readonly decisionResult: RoleModelDecisionResult;
 }): boolean {
-  if (
-    options.parsedRawOutputDecision.status !== 'accepted' ||
-    options.decisionResult.status !== 'rejected' ||
-    !loopSynthesizedRejectionReasons.includes(
-      options.decisionResult.rejection.reason,
-    )
-  ) {
-    return false;
-  }
+  const {rawOutputText, decisionResult} = options;
 
-  const recordedNames = options.decisionResult.requestedToolNames;
-
-  if (recordedNames === undefined) {
+  if (resultsMatch(decisionResult, parseRoleModelDecision(rawOutputText))) {
     return true;
   }
 
-  const parsedNames = options.parsedRawOutputDecision.decision.toolCalls.map(
-    call => call.name,
-  );
-
   return (
-    recordedNames.length === parsedNames.length &&
-    recordedNames.every((name, index) => name === parsedNames[index])
+    rawOutputText.length === 0 &&
+    decisionResult.status === 'rejected' &&
+    decisionResult.rejection.reason === roleModelProviderErrorRejectionReason
   );
 }
 
-function isRoleModelTerminalEmptyOutputRejectionEvidence(options: {
-  readonly parsedRawOutputDecision: RoleModelDecisionResult;
-  readonly decisionResult: RoleModelDecisionResult;
-}): boolean {
-  return (
-    options.parsedRawOutputDecision.status === 'accepted' &&
-    options.parsedRawOutputDecision.decision.toolCalls.length === 0 &&
-    options.parsedRawOutputDecision.nonCommittedText === undefined &&
-    options.decisionResult.status === 'rejected' &&
-    options.decisionResult.rejection.reason ===
-      roleModelMalformedOutputRejectionReason &&
-    options.decisionResult.rejection.details ===
-      roleModelTerminalEmptyOutputRejectionDetails
-  );
-}
-
-export function isRoleModelProviderErrorRawOutputEvidence(options: {
-  readonly rawOutputText: string;
-  readonly providerMetadata: RoleModelProviderMetadata | undefined;
-  readonly decisionResult: RoleModelDecisionResult;
-}): boolean {
-  const providerError = options.providerMetadata?.error;
-
-  return (
-    options.rawOutputText.length === 0 &&
-    providerError !== undefined &&
-    options.decisionResult.status === 'rejected' &&
-    options.decisionResult.rejection.reason ===
-      roleModelProviderErrorRejectionReason &&
-    options.decisionResult.rejection.details === providerError.message
-  );
-}
-
-function roleModelDecisionResultsMatch(options: {
-  readonly actual: RoleModelDecisionResult;
-  readonly expected: RoleModelDecisionResult;
-}): boolean {
-  if (options.actual.status !== options.expected.status) {
-    return false;
-  }
-
-  if (options.actual.status === 'accepted') {
+function resultsMatch(
+  stored: RoleModelDecisionResult,
+  reparsed: RoleModelDecisionResult,
+): boolean {
+  if (stored.status === 'accepted') {
     return (
-      options.expected.status === 'accepted' &&
-      options.actual.nonCommittedText === options.expected.nonCommittedText &&
-      canonicalJsonValuesEqual(
-        options.actual.decision,
-        options.expected.decision,
-      )
+      reparsed.status === 'accepted' &&
+      canonicalJsonValuesEqual(stored.decision, reparsed.decision)
     );
   }
 
   return (
-    options.expected.status === 'rejected' &&
-    options.actual.rejection.reason === options.expected.rejection.reason &&
-    options.actual.rejection.details === options.expected.rejection.details &&
-    isDeepEqualStringArray(
-      options.actual.requestedToolNames,
-      options.expected.requestedToolNames,
-    )
-  );
-}
-
-function isDeepEqualStringArray(
-  actual: readonly string[] | undefined,
-  expected: readonly string[] | undefined,
-): boolean {
-  return (
-    actual === expected ||
-    (actual !== undefined &&
-      expected !== undefined &&
-      actual.length === expected.length &&
-      actual.every((item, index) => item === expected[index]))
-  );
-}
-
-function isRoleModelMalformedAdapterRawOutputEvidence(options: {
-  readonly rawOutputText: string;
-  readonly decisionResult: RoleModelDecisionResult;
-}): boolean {
-  return (
-    options.rawOutputText.length === 0 &&
-    options.decisionResult.status === 'rejected' &&
-    options.decisionResult.rejection.reason ===
-      roleModelMalformedOutputRejectionReason &&
-    isRoleModelMalformedAdapterRawOutputDetails(
-      options.decisionResult.rejection.details,
-    )
+    reparsed.status === 'rejected' &&
+    stored.rejection.reason === reparsed.rejection.reason &&
+    stored.rejection.details === reparsed.rejection.details
   );
 }

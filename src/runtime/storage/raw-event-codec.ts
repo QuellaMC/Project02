@@ -12,20 +12,15 @@ import {
   createRoleModelIOSnapshot,
   createRoleModelToolObservation,
   freezeRoleModelPromptSize,
-  getRequiredVisibleReplyText,
   visibleReplyToolCalls,
-  hasDuplicateRoleModelAllowedTools,
-  isRoleModelAllowedToolName,
   isRoleModelRawOutputReplayableDecisionEvidence,
   parseRoleModelProviderExchangeSnapshot,
-  roleModelPluginToolRejectedRejectionReason,
+  roleModelToolRoundsExhaustedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
   roleModelDecisionContractVersion,
-  roleModelInvalidVisibleReplyRejectionReason,
   type CharacterDecision,
   type ParsedRoleModelDecisionSnapshot,
   type RoleModelPluginToolDefinition,
-  type RoleModelAllowedToolName,
   type RoleModelDecisionRejectionReason,
   type RoleModelInputEnvelope,
   type RoleModelCharacterRef,
@@ -35,7 +30,6 @@ import {
   type RoleModelProviderExchangeSnapshot,
   type RoleModelToolObservation,
 } from '../../role-model/index.ts';
-import {visibleReplyModelToolName} from '../../role-model/index.ts';
 import {
   createRuntimePluginEvidenceSnapshot,
   createRuntimePluginProvidedTool,
@@ -84,6 +78,7 @@ import {
   requiredRuntimeEventIdentity,
   requiredStringArray,
   throwMalformedRecord,
+  sameOrderedValues,
 } from './codec-primitives.ts';
 import {requiredDecisionContext} from './decision-context-codec.ts';
 import {
@@ -103,9 +98,10 @@ import {
   requiredRecordString,
 } from './layout-contract.ts';
 
+// Refused above the parser: the parsed snapshot stays accepted while the
+// commit validation carries the refusal.
 const commitOwnedRoleModelRejectionReasons = [
-  roleModelInvalidVisibleReplyRejectionReason,
-  roleModelPluginToolRejectedRejectionReason,
+  roleModelToolRoundsExhaustedRejectionReason,
   roleModelCommitValidationFailureRejectionReason,
 ] as const satisfies readonly RoleModelDecisionRejectionReason[];
 
@@ -763,10 +759,6 @@ function assertRoleModelRawEventEvidenceSemantics(options: {
     roleModelIOSnapshot,
     parsedRoleModelDecisionSnapshot,
   });
-  assertParsedRoleModelDecisionAllowedByEnvelope({
-    roleModelIOSnapshot,
-    parsedRoleModelDecisionSnapshot,
-  });
 
   if (commitValidation === undefined) {
     if (options.kind !== 'tool_call_started') {
@@ -826,42 +818,13 @@ function assertParsedRoleModelDecisionMatchesRawOutput(options: {
   if (
     isRoleModelRawOutputReplayableDecisionEvidence({
       rawOutputText: options.roleModelIOSnapshot.rawOutputText,
-      providerMetadata: options.roleModelIOSnapshot.providerMetadata,
       decisionResult: options.parsedRoleModelDecisionSnapshot.result,
-      allowedTools: options.roleModelIOSnapshot.inputEnvelope.allowedTools,
-      pluginToolDefinitions:
-        options.roleModelIOSnapshot.inputEnvelope.pluginToolDefinitions,
     })
   ) {
     return;
   }
 
   throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
-}
-
-function assertParsedRoleModelDecisionAllowedByEnvelope(options: {
-  readonly roleModelIOSnapshot: RoleModelIOSnapshot;
-  readonly parsedRoleModelDecisionSnapshot: ParsedRoleModelDecisionSnapshot;
-}): void {
-  const parsedResult = options.parsedRoleModelDecisionSnapshot.result;
-
-  if (parsedResult.status === 'rejected') {
-    return;
-  }
-
-  // Only visible_reply must be allowed when present: it commits without a
-  // routing gate, unlike executable calls the router rejects pre-dispatch.
-  const visibleReplyIsAllowed = parsedResult.decision.toolCalls.every(
-    call =>
-      call.name !== visibleReplyModelToolName ||
-      options.roleModelIOSnapshot.inputEnvelope.allowedTools.includes(
-        call.name,
-      ),
-  );
-
-  if (!visibleReplyIsAllowed) {
-    throwMalformedRecord('roleModelIOSnapshot.inputEnvelope.allowedTools');
-  }
 }
 
 function assertRoleModelCommitStatusMatchesRawEvent(options: {
@@ -999,31 +962,6 @@ function assertRejectedCommitMatchesParsedDecision(options: {
   ) {
     throwMalformedRecord('commitValidation.result.rejection.reason');
   }
-
-  if (
-    commitResult.rejection.reason ===
-    roleModelInvalidVisibleReplyRejectionReason
-  ) {
-    assertParsedDecisionTextFailsCommitValidation(
-      getRequiredVisibleReplyText(parsedResult.decision),
-    );
-  }
-}
-
-function assertParsedDecisionTextFailsCommitValidation(
-  parsedDecisionText: string,
-): void {
-  try {
-    normalizeVisibleMessageText(parsedDecisionText);
-  } catch (error: unknown) {
-    if (error instanceof VisibleMessageTextValidationError) {
-      return;
-    }
-
-    throw error;
-  }
-
-  throwMalformedRecord('commitValidation.result.rejection.reason');
 }
 
 function assertMatchingRoleModelIdentity(options: {
@@ -1060,16 +998,19 @@ function requiredRoleModelInputEnvelope(
   if (!isRecord(value)) {
     throwMalformedRecord('roleModelInputEnvelope');
   }
-  const allowedTools = requiredRoleModelAllowedTools(value['allowedTools']);
+  const storedAllowedTools = requiredStringArray(
+    value['allowedTools'],
+    'allowedTools',
+  );
   const pluginToolDefinitions = requiredRoleModelPluginToolDefinitions(
     value['pluginToolDefinitions'],
   );
+  let envelope: RoleModelInputEnvelope;
 
   try {
-    return createRoleModelInputEnvelope({
+    envelope = createRoleModelInputEnvelope({
       event: requiredUserMessageRuntimeEvent(value['event']),
       decisionContext: requiredDecisionContext(value['decisionContext']),
-      allowedTools,
       pluginToolDefinitions,
       toolObservations: optionalRoleModelToolObservations(
         value['toolObservations'],
@@ -1083,6 +1024,14 @@ function requiredRoleModelInputEnvelope(
 
     throw error;
   }
+
+  // What was offered is derived from the tools, so a stored list can only
+  // agree with it; anything else is a tampered record.
+  if (!sameOrderedValues(envelope.allowedTools, storedAllowedTools)) {
+    throwMalformedRecord('allowedTools');
+  }
+
+  return envelope;
 }
 
 function requiredUserMessageRuntimeEvent(
@@ -1217,26 +1166,6 @@ function requiredRoleModelToolObservationResult(
   }
 
   throwMalformedRecord('toolObservations.result.status');
-}
-
-function requiredRoleModelAllowedTools(
-  value: unknown,
-): readonly RoleModelAllowedToolName[] {
-  const tools: RoleModelAllowedToolName[] = [];
-
-  for (const item of requiredArray(value, 'allowedTools')) {
-    if (!isRoleModelAllowedToolName(item)) {
-      throwMalformedRecord('allowedTools');
-    }
-
-    tools.push(item);
-  }
-
-  if (hasDuplicateRoleModelAllowedTools(tools)) {
-    throwMalformedRecord('allowedTools');
-  }
-
-  return Object.freeze(tools);
 }
 
 function requiredRoleModelOutputContract(

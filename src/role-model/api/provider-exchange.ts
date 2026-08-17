@@ -99,14 +99,6 @@ export function freezeRoleModelProviderExchangeSnapshot(
     nativeToolResultMessages: Object.freeze(
       snapshot.nativeToolResultMessages.map(freezeRoleModelChatMessage),
     ),
-    ...(snapshot.outputNormalization === undefined
-      ? {}
-      : {
-          outputNormalization: Object.freeze({
-            source: snapshot.outputNormalization.source,
-            committed: false,
-          }),
-        }),
   } satisfies RoleModelProviderExchangeSnapshot);
 }
 
@@ -153,13 +145,7 @@ function isOptionalRoleModelProviderExchangeSnapshot(
   return (
     isOptionalString(value['finishReason']) &&
     (value['nativeAssistantMessage'] === undefined ||
-      isRoleModelProviderExchangeChatMessage(
-        value['nativeAssistantMessage'],
-      )) &&
-    (value['outputNormalization'] === undefined ||
-      isRoleModelProviderExchangeOutputNormalization(
-        value['outputNormalization'],
-      ))
+      isRoleModelProviderExchangeChatMessage(value['nativeAssistantMessage']))
   );
 }
 
@@ -273,17 +259,6 @@ function isRoleModelProviderToolNameMapping(value: unknown): boolean {
     isJsonRecord(value) &&
     typeof value['runtimeName'] === 'string' &&
     typeof value['providerName'] === 'string'
-  );
-}
-
-function isRoleModelProviderExchangeOutputNormalization(
-  value: unknown,
-): boolean {
-  return (
-    isJsonRecord(value) &&
-    (value['source'] === 'terminal_assistant_content' ||
-      value['source'] === 'native_tool_calls') &&
-    value['committed'] === false
   );
 }
 

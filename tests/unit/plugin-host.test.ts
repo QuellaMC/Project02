@@ -10,17 +10,14 @@ import {
 } from '../../src/plugins/host/catalog.ts';
 import {
   characterMemoryPluginId,
-  firstPartyModelToolsPluginId,
   runtimePluginId,
   runtimePluginListToolName,
   sessionHistoryPluginId,
 } from '../../src/plugins/api/contract.ts';
-import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {
   runtimeLocationForTest,
   runtimePluginConfigControlStateForTest,
 } from '../support/runtime-config.ts';
-import {visibleReplyModelToolName} from '../../src/role-model/index.ts';
 import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {resolveRuntimeConfigScopeTarget} from '../../src/runtime/config/index.ts';
@@ -236,15 +233,12 @@ describe('runtime plugin host catalog and routing', () => {
 
     expect([...hostFirstPartyRuntimePluginIds]).toEqual([
       runtimePluginId,
-      firstPartyModelToolsPluginId,
       characterMemoryPluginId,
       characterStatePluginId,
       sessionHistoryPluginId,
     ]);
     expect(Object.keys(catalog).sort()).toEqual(
-      [runtimePluginId, firstPartyModelToolsPluginId].sort((left, right) =>
-        left.localeCompare(right),
-      ),
+      [runtimePluginId].sort((left, right) => left.localeCompare(right)),
     );
     expect(Object.values(catalog)).toEqual(
       expect.arrayContaining([
@@ -267,11 +261,7 @@ describe('runtime plugin host catalog and routing', () => {
     const plugin = createMemorySearchPlugin();
     const host = createRuntimePluginHost({
       plugins: [plugin],
-      enabledPluginIds: [
-        runtimePluginId,
-        firstPartyModelToolsPluginId,
-        plugin.manifest.id,
-      ],
+      enabledPluginIds: [runtimePluginId, plugin.manifest.id],
     });
     const context = testPluginContext();
 
@@ -294,9 +284,6 @@ describe('runtime plugin host catalog and routing', () => {
       plugins: [
         {
           id: runtimePluginId,
-        },
-        {
-          id: firstPartyModelToolsPluginId,
         },
         {
           id: 'memory.search.fixture',
@@ -449,25 +436,6 @@ describe('runtime plugin host catalog and routing', () => {
     expect(fileStore.readJsonl('events.jsonl')).toEqual([]);
     expect(fileStore.readJson('current.json')).toBeUndefined();
     expect(fileStore.revision()).toBe(0);
-  });
-
-  it('keeps visible_reply terminal and routes character_state.patch through plugins', () => {
-    const host = createDefaultProject02PluginHost();
-    const visibleReply = host
-      .pluginToolDefinitions()
-      .find(tool => tool.name === visibleReplyModelToolName);
-    const characterStatePatch = host
-      .pluginToolDefinitions()
-      .find(tool => tool.name === characterStatePatchModelToolName);
-
-    expect(visibleReply).toMatchObject({
-      pluginId: firstPartyModelToolsPluginId,
-      validationOwner: 'built_in_model_tools',
-    });
-    expect(characterStatePatch).toMatchObject({
-      pluginId: characterStatePluginId,
-      validationOwner: 'plugin_host',
-    });
   });
 
   it('lists enabled plugins by default and includes disabled plugins for all scope', async () => {
