@@ -591,7 +591,7 @@ describe('role-model loop evidence and boundary validation', () => {
     });
   });
 
-  it('sends a correction note when visible_reply text normalizes to empty', async () => {
+  it('hands a blank visible_reply back to the model as its next round', async () => {
     const result = await runRoleModelLoop({
       onVisibleReply: () => {},
       event: createTestEvent('reply blank', 'evt_blank_reply_feedback'),
@@ -617,7 +617,9 @@ describe('role-model loop evidence and boundary validation', () => {
     expect(result.status).toBe('accepted');
     expect(result.rounds).toHaveLength(2);
     if (result.status !== 'accepted') {
-      throw new Error('Expected a blank visible_reply to be repaired.');
+      throw new Error(
+        'Expected the model to get another round after a blank reply.',
+      );
     }
     expect(executionResultVisibleReply(result)).toBe('real reply');
   });
