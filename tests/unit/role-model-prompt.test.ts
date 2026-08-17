@@ -7,6 +7,7 @@ import {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelInputEnvelope,
   defaultRoleModelProviderCapabilities,
+  measureRoleModelPromptSize,
   renderRoleModelTurnContext,
   type ConversationTurn,
   type RoleModelPluginToolDefinition,
@@ -227,6 +228,105 @@ describe('role-model prompt rendering', () => {
         }),
       ).frames.map(frame => frame.kind),
     ).not.toContain('context_summary');
+  });
+
+  it('measures the prompt per frame kind in wire order, tools and total included', () => {
+    const inputEnvelope = createRoleModelInputEnvelope({
+      event: createUserMessageRuntimeEvent('and the roses?', testIdentity()),
+      decisionContext: createDecisionContext({
+        sessionId: 'session-prompt-size',
+        characterSnapshot: testCharacterProfile,
+        historyWindow: {turnEventIds: ['evt_prior']},
+        pluginContextItems: [
+          createRuntimePluginContextItem({
+            pluginId: 'memory.fixture',
+            id: 'garden',
+            kind: 'memory',
+            text: 'Mike keeps roses.',
+            budget: {estimatedTokens: 8, priority: 70},
+            sourceReferences: [],
+            redactionLabels: [],
+          }),
+        ],
+      }),
+      pluginToolDefinitions: createDefaultRoleModelPluginToolDefinitions(),
+    });
+    const priorTurn: ConversationTurn = {
+      eventId: 'evt_prior',
+      traceId: 'trace_prior',
+      createdAt: '2026-06-15T00:00:00.000Z',
+      userMessage: {
+        id: 's:message-1',
+        role: 'user',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'how is the garden?',
+      },
+      toolRounds: [],
+      finalReplies: [
+        {
+          id: 's:message-2',
+          role: 'character',
+          speakerId: 'mira',
+          speakerName: 'Mira',
+          text: 'Blooming.',
+        },
+      ],
+    };
+    const turnContext = renderRoleModelTurnContext(inputEnvelope, {
+      conversationHistory: [priorTurn],
+      // This turn's own rounds so far: the model's message, a tool result,
+      // and a note the runtime put between them — three kinds, not one.
+      additionalMessages: [
+        {role: 'assistant', content: 'checking'},
+        {role: 'tool', tool_call_id: 'call-1', content: '{"ok":true}'},
+        {role: 'system', content: 'Your last reply could not be used.'},
+      ],
+    });
+    const size = measureRoleModelPromptSize(turnContext);
+    const wireChars = turnContext.messages.reduce(
+      (sum, message) => sum + JSON.stringify(message).length,
+      0,
+    );
+    const currentUserChars = JSON.stringify({
+      role: 'user',
+      content: 'and the roses?',
+    }).length;
+
+    expect(size.frames.map(frame => [frame.kind, frame.count])).toEqual([
+      ['system_protocol', 1],
+      ['developer_protocol', 1],
+      ['conversation_history', 2],
+      ['current_user_message', 1],
+      ['recalled_memory', 1],
+      ['native_assistant_message', 1],
+      ['native_tool_result_message', 1],
+      ['native_system_message', 1],
+    ]);
+    // Frames sum to the wire: a suffix frame is charged exactly the bytes it
+    // adds to the serialized user message, separator and escaping included.
+    expect(size.frames.reduce((sum, frame) => sum + frame.chars, 0)).toBe(
+      wireChars,
+    );
+    expect(
+      size.frames.find(frame => frame.kind === 'current_user_message')?.chars,
+    ).toBe(currentUserChars);
+    const currentUserMessage = turnContext.messages.find(
+      message =>
+        message.role === 'user' && message.content.startsWith('and the roses?'),
+    );
+    expect(
+      size.frames.find(frame => frame.kind === 'recalled_memory')?.chars,
+    ).toBe(JSON.stringify(currentUserMessage).length - currentUserChars);
+    expect(
+      size.frames.find(frame => frame.kind === 'conversation_history')?.chars,
+    ).toBe(
+      conversationTurnToChatMessages(priorTurn).reduce(
+        (sum, message) => sum + JSON.stringify(message).length,
+        0,
+      ),
+    );
+    expect(size.toolChars).toBe(JSON.stringify(turnContext.tools).length);
   });
 
   it('omits the curated context frame when no sections exist', () => {

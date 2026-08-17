@@ -42,7 +42,8 @@ type RoleModelPromptFrameKind =
   | 'recalled_memory'
   | 'untrusted_plugin_context'
   | 'native_assistant_message'
-  | 'native_tool_result_message';
+  | 'native_tool_result_message'
+  | 'native_system_message';
 
 type RoleModelPromptSuffixFrameKind = Extract<
   RoleModelPromptFrameKind,
@@ -293,12 +294,16 @@ function createRoleModelPromptFrames(
     frames.push(suffixFrame('untrusted_plugin_context', untrustedContext));
   }
 
+  // This turn's own rounds: the model's messages, the tool results, and any
+  // note the runtime put between them.
   frames.push(
     ...options.additionalMessages.map(message =>
       ownFrame(
         message.role === 'tool'
           ? 'native_tool_result_message'
-          : 'native_assistant_message',
+          : message.role === 'assistant'
+            ? 'native_assistant_message'
+            : 'native_system_message',
         freezeRoleModelChatMessage(message),
         true,
       ),

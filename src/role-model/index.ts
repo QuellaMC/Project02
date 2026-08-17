@@ -73,6 +73,13 @@ export {
   parseRoleModelProviderExchangeSnapshot,
 } from './api/provider-exchange.ts';
 export {
+  freezeRoleModelPromptSize,
+  type RoleModelPromptFrameSize,
+  type RoleModelPromptSize,
+} from './api/prompt-size.ts';
+export {measureRoleModelPromptSize} from './prompt/prompt-size.ts';
+export {estimateTokensForChars} from '../shared/token-estimate.ts';
+export {
   createDefaultRoleModelPluginToolDefinitions,
   createRoleModelPluginToolDefinitions,
   defaultAllowedToolsForPluginDefinitions,
