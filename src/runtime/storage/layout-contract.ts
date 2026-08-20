@@ -10,7 +10,7 @@ const defaultLocalRuntimeSessionId = 'local-session';
 
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
-export const localRuntimeStorageSchemaVersion = 12;
+export const localRuntimeStorageSchemaVersion = 13;
 
 const localRuntimeStorageScopeValues = Object.freeze([
   'home',
@@ -22,7 +22,9 @@ type LocalRuntimeStorageScope = (typeof localRuntimeStorageScopeValues)[number];
 export type LocalRuntimeStorageContractErrorCode =
   | 'character_identity_mismatch'
   | 'concurrent_write'
+  | 'conversation_busy'
   | 'invalid_character_id'
+  | 'invalid_conversation_id'
   | 'invalid_session_id'
   | 'invalid_plugin_id'
   | 'malformed_record'
@@ -49,8 +51,9 @@ export class LocalRuntimeStorageContractError extends Error {
   }
 }
 
-// Exactly one lock family lives here: runtime-control-file:* for the
-// global config and .env writes.
+// Home lock families: runtime-control-file:* for the global config and
+// .env writes, conversations-catalog for conversation creation, and
+// conversation-writer:* for one process owning an open conversation.
 export type Project02HomeLayout = {
   readonly homeRoot: string;
   readonly configPath: string;
@@ -60,6 +63,7 @@ export type Project02HomeLayout = {
   readonly pluginPackagesRoot: string;
   readonly characterPackagesRoot: string;
   readonly characterDataRoot: string;
+  readonly conversationsRoot: string;
 };
 
 // Deliberately has no package roots, so installable concerns cannot be
@@ -176,11 +180,20 @@ const charactersDirectoryName = 'characters';
 
 export const characterDataDirectoryName = 'character-data';
 
+const conversationsDirectoryName = 'conversations';
+
+export const conversationFileName = 'conversation.json';
+
 const rawEventsFileName = 'raw-events.jsonl';
 
 const pluginDataDirectoryName = 'plugin-data';
 
 const sessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
+
+// No dots and 56 max, so a segment id "<conversationId>.<n>" has exactly
+// one dot and stays inside the session-id pattern above, which is frozen:
+// it is also the plugin-facing JSON-schema pattern for session ids.
+const conversationIdPattern = /^[A-Za-z0-9][A-Za-z0-9_-]{0,55}$/u;
 
 export function createProject02HomeLayout(
   options: Project02HomeLayoutOptions = {},
@@ -199,6 +212,7 @@ export function createProject02HomeLayout(
     pluginPackagesRoot: join(homeRoot, pluginsDirectoryName),
     characterPackagesRoot: join(homeRoot, charactersDirectoryName),
     characterDataRoot: join(homeRoot, characterDataDirectoryName),
+    conversationsRoot: join(homeRoot, conversationsDirectoryName),
   } satisfies Project02HomeLayout);
 }
 
@@ -311,6 +325,80 @@ export function createLocalRuntimePluginPaths(
     pluginsRoot: sessionPaths.pluginsRoot,
     pluginRoot: join(sessionPaths.pluginsRoot, pluginId),
   } satisfies LocalRuntimePluginPaths);
+}
+
+export type LocalRuntimeConversationPaths = {
+  readonly homeRoot: string;
+  readonly conversationId: string;
+  readonly conversationRoot: string;
+  readonly conversationPath: string;
+};
+
+export function createLocalRuntimeConversationPaths(options: {
+  readonly homeRoot?: string;
+  readonly conversationId: string;
+}): LocalRuntimeConversationPaths {
+  const home = createProject02HomeLayout(
+    options.homeRoot === undefined ? {} : {homeRoot: options.homeRoot},
+  );
+  const conversationId = normalizeConversationId(options.conversationId);
+  const conversationRoot = join(home.conversationsRoot, conversationId);
+
+  return Object.freeze({
+    homeRoot: home.homeRoot,
+    conversationId,
+    conversationRoot,
+    conversationPath: join(conversationRoot, conversationFileName),
+  } satisfies LocalRuntimeConversationPaths);
+}
+
+export function normalizeConversationId(conversationId: string): string {
+  const normalized = conversationId.trim();
+
+  if (!conversationIdPattern.test(normalized)) {
+    throw new LocalRuntimeStorageContractError(
+      'invalid_conversation_id',
+      'Conversation ID must start with a letter or number and use only ' +
+        'letters, numbers, underscores, or hyphens, at most 56 characters.',
+    );
+  }
+
+  return normalized;
+}
+
+/** The one spelling of a character's participation in a conversation. */
+export function segmentSessionId(
+  conversationId: string,
+  segment: number,
+): string {
+  if (!Number.isSafeInteger(segment) || segment < 1) {
+    throw new LocalRuntimeStorageContractError(
+      'invalid_session_id',
+      'Session segment number must be a positive integer.',
+    );
+  }
+
+  return `${normalizeConversationId(conversationId)}.${String(segment)}`;
+}
+
+export function parseSegmentSessionId(sessionId: string): {
+  readonly conversationId: string;
+  readonly segment: number;
+} {
+  const dotIndex = sessionId.lastIndexOf('.');
+  const segmentText = dotIndex === -1 ? '' : sessionId.slice(dotIndex + 1);
+
+  if (!/^[1-9][0-9]*$/u.test(segmentText)) {
+    throw new LocalRuntimeStorageContractError(
+      'invalid_session_id',
+      `Session ID "${sessionId}" must be "<conversation-id>.<segment>" with a positive segment number.`,
+    );
+  }
+
+  return Object.freeze({
+    conversationId: normalizeConversationId(sessionId.slice(0, dotIndex)),
+    segment: Number(segmentText),
+  });
 }
 
 export function normalizeLocalRuntimeSessionId(

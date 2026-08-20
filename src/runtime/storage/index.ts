@@ -8,7 +8,10 @@ export {
   encodeStorageSchemaMarker,
   homeRootForCharacterDataDir,
   LocalRuntimeStorageContractError,
+  normalizeConversationId,
   normalizeLocalRuntimeSessionId,
+  parseSegmentSessionId,
+  segmentSessionId,
   type LocalRuntimeCharacterDataStorageSchemaMarker,
   type LocalRuntimeSessionMetadata,
 } from './layout-contract.ts';
@@ -16,6 +19,13 @@ export {
   createRuntimePluginFileStore,
   type RuntimePluginFileStoreProvider,
 } from './plugin-file-store/index.ts';
+export {
+  acquireLocalRuntimeConversationWriterLease,
+  createLocalRuntimeConversationStore,
+  LocalRuntimeConversationStoreError,
+  type CreateLocalRuntimeConversationOptions,
+  type LocalRuntimeConversationStore,
+} from './conversation-store.ts';
 export {
   createContinuedDurableChatRuntime,
   createDurableChatRuntime,
