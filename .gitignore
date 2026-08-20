@@ -13,6 +13,8 @@ node_modules/
 .vitest/
 .turbo/
 .project02/
+# The schema-12 store set aside for the v13 cut; restored or recreated by hand.
+.project02.v12-local/
 # Pre-split dev store; superseded by .project02/ but may still hold history.
 .project02-runtime/
 dist/
