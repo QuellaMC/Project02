@@ -29,29 +29,31 @@ import {
 
 export type DurableConversationExchange = readonly [string, string];
 
-/** Creates the session, then commits one turn per [user, character] pair. */
+/** Opens "<conversationId>.1", then commits one turn per exchange pair. */
 export async function writeDurableSession(options: {
   readonly storeRoot: string;
-  readonly sessionId: string;
+  readonly conversationId: string;
   readonly exchanges: readonly DurableConversationExchange[];
   readonly character?: CharacterProfile;
-}): Promise<void> {
+}): Promise<string> {
   const character = options.character ?? testCharacterProfile;
-
-  await createLocalRuntimeSessionStore({
+  const {sessionId} = await createLocalRuntimeSessionStore({
     storeRoot: options.storeRoot,
     characterId: character.id,
   }).createSession({
-    sessionId: options.sessionId,
+    conversationId: options.conversationId,
     createdAt: '2026-07-16T00:00:00.000Z',
   });
+
   await appendDurableConversationExchanges({
     storeRoot: options.storeRoot,
-    sessionId: options.sessionId,
+    sessionId,
     exchanges: options.exchanges,
     firstTurn: 0,
     character,
   });
+
+  return sessionId;
 }
 
 export async function appendDurableConversationExchanges(options: {

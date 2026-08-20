@@ -307,18 +307,15 @@ describe('store consent gate', () => {
     const storeRoot = createTestTempRoot('project02-consent-chat-');
     let stderr = '';
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'consent-refused'],
-      {
-        stdin: pipedStdin(),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-        pluginHost: createRuntimePluginHost({plugins: []}),
-      },
-    );
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: pipedStdin(),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {},
+      pluginHost: createRuntimePluginHost({plugins: []}),
+    });
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain(`No Project02 store at "${storeRoot}"`);

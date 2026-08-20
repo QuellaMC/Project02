@@ -8,7 +8,13 @@ import {PassThrough, Readable} from 'node:stream';
 
 import {describe, expect, it, vi} from 'vitest';
 
+import {configuredPluginConstructionCleanupSessionId} from '../../src/app/index.ts';
+import {createLocalRuntimeConversationStore} from '../../src/runtime/storage/conversation-store.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {
+  readCharacterConversation,
+  withOpenConversation,
+} from '../support/conversation-fixtures.ts';
 import {
   writeRuntimeConfig,
   runtimeLocationForTest,
@@ -19,7 +25,6 @@ import {
 } from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
-import {createSession} from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
@@ -33,8 +38,6 @@ import {
   type RuntimePlugin,
   type RuntimePluginContext,
 } from '../../src/plugins/api/index.ts';
-import {createRawEventAppendFailingLogStore} from '../support/plugin-tool-loop-fixtures.ts';
-import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {
   runtimeConfigEnvVarName,
   inspectRuntimePluginConfig,
@@ -46,10 +49,7 @@ import {
   createProject02HomeLayout,
   decodeStorageSchemaMarker,
 } from '../../src/runtime/storage/layout-contract.ts';
-import {
-  acquireLocalRuntimeSessionWriterLease,
-  createLocalRuntimeSessionStore,
-} from '../../src/runtime/storage/session-store.ts';
+import {acquireLocalRuntimeSessionWriterLease} from '../../src/runtime/storage/session-store.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {nvidiaApiKeyEnvName} from '../../src/role-model/providers/nvidia.ts';
 import {runChatCli, runChatCliFromArgs} from '../../src/cli/chat/main.ts';
@@ -62,113 +62,46 @@ const realSetTimeout = globalThis.setTimeout;
 describe('chat CLI model text', () => {
   it("never shows the model's text note next to its tool calls", async () => {
     let stdout = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['hello\n/exit\n']),
-      stdout: collect(chunk => {
-        stdout += chunk;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['hello\n/exit\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(() => {}),
+        roleModelAdapter: createReplyWithNoteAdapter(),
       }),
-      stderr: collect(() => {}),
-      roleModelAdapter: createReplyWithNoteAdapter(),
-    });
+    );
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain('hello back');
     expect(stdout).not.toContain('private note');
   });
-
-  it('rejects a direct invocation without a session or character profile', async () => {
-    await expect(
-      runChatCli({
-        pluginHost: createDefaultProject02PluginHost(),
-        stdin: Readable.from(['hello\n/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(() => {}),
-      }),
-    ).rejects.toThrow(
-      'Chat startup requires a session or a character profile.',
-    );
-  });
 });
 
 describe('chat CLI trace summary', () => {
-  it('keeps provider and terminal tool evidence when terminal persistence fails', async () => {
-    let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['hello\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      logStore: createRawEventAppendFailingLogStore({
-        matches: record => record.kind === 'runtime_turn_completed',
-        message: 'terminal raw event append failed',
-      }),
-      roleModelAdapter: {
-        invoke() {
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {
-                    text: 'hello from a failed terminal commit',
-                  },
-                },
-              ],
-            }),
-            providerMetadata: {
-              provider: 'nvidia',
-              model: 'trace-fixture',
-              request: {
-                messageCount: 3,
-                stream: false,
-              },
-              response: {
-                status: 200,
-              },
-            },
-          };
-        },
-      },
-    });
-
-    expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.trim())).toMatchObject({
-      status: 'rejected',
-      provider: {
-        name: 'nvidia',
-        model: 'trace-fixture',
-        responseStatus: 200,
-      },
-      requestedToolCalls: ['visible_reply'],
-      executedToolCalls: [],
-      terminalToolCalls: ['visible_reply'],
-    });
-  });
-
   it('traces every appended record for rejected user input', async () => {
     let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      // A whitespace-only line reaches the runtime and fails input validation.
-      stdin: Readable.from(['   \n', '/exit\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      roleModelAdapter: {
-        invoke() {
-          throw new Error('rejected input must never reach the model');
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        // A whitespace-only line reaches the runtime and fails input validation.
+        stdin: Readable.from(['   \n', '/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        traceMode: true,
+        roleModelAdapter: {
+          invoke() {
+            throw new Error('rejected input must never reach the model');
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(exitCode).toBe(0);
 
@@ -185,47 +118,49 @@ describe('chat CLI trace summary', () => {
   it('does not classify an interrupted executable round as terminal', async () => {
     let adapterRound = 0;
     let stderr = '';
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['inspect plugins\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      traceMode: true,
-      roleModelAdapter: {
-        invoke() {
-          adapterRound += 1;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['inspect plugins\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        traceMode: true,
+        roleModelAdapter: {
+          invoke() {
+            adapterRound += 1;
 
-          if (adapterRound > 1) {
-            throw new Error('provider failed before terminal output');
-          }
+            if (adapterRound > 1) {
+              throw new Error('provider failed before terminal output');
+            }
 
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'runtime.plugin.list',
-                  input: {},
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls: [
+                  {
+                    name: 'runtime.plugin.list',
+                    input: {},
+                  },
+                ],
+              }),
+              providerMetadata: {
+                provider: 'nvidia',
+                model: 'trace-fixture',
+                request: {
+                  messageCount: 3,
+                  stream: false,
                 },
-              ],
-            }),
-            providerMetadata: {
-              provider: 'nvidia',
-              model: 'trace-fixture',
-              request: {
-                messageCount: 3,
-                stream: false,
+                response: {
+                  status: 200,
+                },
               },
-              response: {
-                status: 200,
-              },
-            },
-          };
+            };
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(exitCode).toBe(1);
     expect(adapterRound).toBe(2);
@@ -287,17 +222,19 @@ describe('chat CLI trace summary', () => {
       },
     };
 
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['check plugins\n/exit\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['check plugins\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        traceMode: true,
+        roleModelAdapter,
       }),
-      traceMode: true,
-      roleModelAdapter,
-    });
+    );
 
     expect(exitCode).toBe(0);
     expect(adapterRound).toBe(2);
@@ -350,17 +287,19 @@ describe('chat CLI trace summary', () => {
       },
     };
 
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['try an unavailable tool\n/exit\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['try an unavailable tool\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        traceMode: true,
+        roleModelAdapter,
       }),
-      traceMode: true,
-      roleModelAdapter,
-    });
+    );
 
     expect(exitCode).toBe(0);
     expect(adapterRound).toBe(2);
@@ -404,17 +343,19 @@ describe('chat CLI trace summary', () => {
       },
     };
 
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['try invalid plugin arguments\n/exit\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['try invalid plugin arguments\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        traceMode: true,
+        roleModelAdapter,
       }),
-      traceMode: true,
-      roleModelAdapter,
-    });
+    );
 
     expect(exitCode).toBe(0);
     expect(adapterRound).toBe(2);
@@ -455,17 +396,19 @@ describe('chat CLI trace summary', () => {
       },
     };
 
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['try an invalid state patch\n/exit\n']),
-      stdout: collect(() => {}),
-      stderr: collect(chunk => {
-        stderr += chunk;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['try an invalid state patch\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        traceMode: true,
+        roleModelAdapter,
       }),
-      traceMode: true,
-      roleModelAdapter,
-    });
+    );
 
     expect(exitCode).toBe(0);
     expect(adapterRound).toBe(2);
@@ -491,49 +434,18 @@ describe('chat CLI character selection', () => {
       personaSections: ['You are Zeta, a fixture character.'],
     });
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'zeta-session'],
-      {
-        stdin: Readable.from(['hello\n/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(() => {}),
-        pluginHost: createRuntimePluginHost({plugins: []}),
-      },
-    );
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n/exit\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(() => {}),
+      pluginHost: createRuntimePluginHost({plugins: []}),
+    });
 
     expect(exitCode).toBe(0);
     expect(stdout).toContain('Zeta is ready.');
     expect(stdout).toContain('Zeta:');
-  });
-
-  it('rejects an invalid session id before materializing any character state', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-bad-session-');
-    let stderr = '';
-
-    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
-
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'bad/session'],
-      {
-        stdin: Readable.from([]),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        pluginHost: createRuntimePluginHost({plugins: []}),
-      },
-    );
-
-    expect(exitCode).toBe(1);
-    expect(stderr).toContain(
-      'Local runtime session ID must use only letters, numbers, dots, ' +
-        'underscores, or hyphens.',
-    );
-    // Session args were validated before startup.
-    expect(existsSync(join(storeRoot, 'schema.json'))).toBe(false);
-    expect(existsSync(characterDataDirPath(storeRoot, 'mira'))).toBe(false);
   });
 
   it('rejects an unknown configured character naming the discovered ids', async () => {
@@ -544,17 +456,14 @@ describe('chat CLI character selection', () => {
       project02: {character: 'ghost'},
     });
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'ghost-session'],
-      {
-        stdin: Readable.from(['hello\n/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        pluginHost: createRuntimePluginHost({plugins: []}),
-      },
-    );
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      pluginHost: createRuntimePluginHost({plugins: []}),
+    });
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('Character "ghost" was not found');
@@ -573,20 +482,17 @@ describe('chat CLI provider selection', () => {
       },
     });
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'configured-provider'],
-      {
-        stdin: Readable.from(['hello\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {
-          [nvidiaApiKeyEnvName]: '',
-        },
-        pluginHost: createRuntimePluginHost({plugins: []}),
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {
+        [nvidiaApiKeyEnvName]: '',
       },
-    );
+      pluginHost: createRuntimePluginHost({plugins: []}),
+    });
 
     expect(exitCode).toBe(0);
     expect(stderr).toContain(
@@ -595,11 +501,8 @@ describe('chat CLI provider selection', () => {
   });
 
   it('sizes the replayed history from project02.contextWindowTokens', async () => {
-    const storeRoot = createTestTempRoot('project02-chat-context-window-');
-    const historyLengthsFor = async (
-      contextWindowTokens: number,
-      sessionId: string,
-    ) => {
+    const historyLengthsFor = async (contextWindowTokens: number) => {
+      const storeRoot = createTestTempRoot('project02-chat-context-window-');
       const historyLengths: number[] = [];
       const adapter: RoleModelAdapter = {
         invoke(_inputEnvelope, invocation) {
@@ -617,24 +520,21 @@ describe('chat CLI provider selection', () => {
         project02: {contextWindowTokens},
       });
 
-      const exitCode = await runChatCliFromArgs(
-        ['--store', storeRoot, '--new-session', sessionId],
-        {
-          stdin: Readable.from(['first\n', 'second\n']),
-          stdout: collect(() => {}),
-          stderr: collect(() => {}),
-          roleModelAdapter: adapter,
-          pluginHost: createRuntimePluginHost({plugins: []}),
-        },
-      );
+      const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+        stdin: Readable.from(['first\n', 'second\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        roleModelAdapter: adapter,
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      });
 
       expect(exitCode).toBe(0);
       return historyLengths;
     };
 
     // Eight tokens leave no room for a whole prior turn; 4096 replay it.
-    expect(await historyLengthsFor(8, 'tiny-window')).toEqual([0, 0]);
-    expect(await historyLengthsFor(4096, 'roomy-window')).toEqual([0, 1]);
+    expect(await historyLengthsFor(8)).toEqual([0, 0]);
+    expect(await historyLengthsFor(4096)).toEqual([0, 1]);
   });
 
   it('continues into a new session when the history outgrows the window and resumes it next launch', async () => {
@@ -669,7 +569,9 @@ describe('chat CLI provider selection', () => {
           try {
             const lease = await acquireLocalRuntimeSessionWriterLease({
               storeRoot: characterDataDirPath(storeRoot, 'mira'),
-              sessionId: 'long-talk',
+              sessionId:
+                (await readCharacterConversation(storeRoot)).sessions[0]
+                  ?.sessionId ?? context.sessionId,
             });
 
             await lease.release();
@@ -689,51 +591,58 @@ describe('chat CLI provider selection', () => {
       project02: {contextWindowTokens: 100},
     });
 
-    // The chat exits right after the continuation, so the closed session's
-    // end evidence is the last write anywhere: the new session must still be
-    // the one a flagless launch resumes.
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'long-talk'],
-      {
-        stdin: Readable.from(['one\n', 'two\n', 'three\n', 'four\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stdout += `[stderr] ${chunk}`;
-        }),
-        roleModelAdapter: adapter,
-        pluginHost: createRuntimePluginHost({
-          plugins: [sessionEndPlugin],
-          enabledPluginIds: [sessionEndPlugin.manifest.id],
-        }),
-      },
-    );
+    // The chat exits right after the continuation, so the closed segment's
+    // end evidence is the last write anywhere: the new segment must still be
+    // the one a flagless relaunch resumes.
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['one\n', 'two\n', 'three\n', 'four\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stdout += `[stderr] ${chunk}`;
+      }),
+      roleModelAdapter: adapter,
+      pluginHost: createRuntimePluginHost({
+        plugins: [sessionEndPlugin],
+        enabledPluginIds: [sessionEndPlugin.manifest.id],
+      }),
+    });
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain(
-      'Mira: noted\n[context] Continuing in session long-talk.2: 2 earlier turns condensed into a summary.\nYou: ',
-    );
+    // Rotation is invisible: the person sees replies and prompts, nothing
+    // about sessions.
+    expect(stdout).toContain('Mira: noted\nYou: ');
+    expect(stdout).not.toContain('[context]');
+
+    const dm = await readCharacterConversation(storeRoot);
+    const conversationId = dm.conversation.id;
+
     // Each segment is closed under its own name: the first at continuation,
     // the second at exit. The root's lease is held only while it is the
-    // active segment: the fourth turn, already in long-talk.2, finds it free.
-    expect(endedSessions).toEqual(['long-talk', 'long-talk.2']);
-    expect(rootLeaseHeldWhen).toEqual(['long-talk', 'long-talk', 'long-talk']);
-    expect(
-      (
-        await createLocalRuntimeSessionStore({
-          storeRoot: characterDataDirPath(storeRoot, 'mira'),
-          characterId: 'mira',
-        }).newestSession()
-      )?.sessionId,
-    ).toBe('long-talk.2');
+    // active segment: the fourth turn, already in the second segment, finds
+    // it free.
+    expect(endedSessions).toEqual([
+      `${conversationId}.1`,
+      `${conversationId}.2`,
+    ]);
+    expect(rootLeaseHeldWhen).toEqual([
+      `${conversationId}.1`,
+      `${conversationId}.1`,
+      `${conversationId}.1`,
+    ]);
+    expect(dm.sessions.map(metadata => metadata.sessionId)).toEqual([
+      `${conversationId}.1`,
+      `${conversationId}.2`,
+    ]);
+    expect(dm.latestSessionId).toBe(`${conversationId}.2`);
 
-    // No session named: the continued segment is where the conversation
-    // resumes; the closed one opens on request and says where it went on.
+    // A flagless relaunch resumes the same conversation in its latest
+    // segment; no second conversation appears.
     let resumedStdout = '';
     expect(
       await runChatCliFromArgs(['--store', storeRoot], {
-        stdin: Readable.from(['/exit\n']),
+        stdin: Readable.from(['five\n', '/exit\n']),
         stdout: collect(chunk => {
           resumedStdout += chunk;
         }),
@@ -742,26 +651,18 @@ describe('chat CLI provider selection', () => {
         pluginHost: createRuntimePluginHost({plugins: []}),
       }),
     ).toBe(0);
-    expect(resumedStdout).not.toContain('was continued in');
+    expect(resumedStdout).toContain('Mira: noted');
 
-    let reopenedStdout = '';
+    const resumed = await readCharacterConversation(storeRoot);
+
+    expect(resumed.conversation.id).toBe(conversationId);
+    // The tiny window may rotate again; the thread never changes.
+    expect(resumed.latestSessionId.startsWith(`${conversationId}.`)).toBe(true);
     expect(
-      await runChatCliFromArgs(
-        ['--store', storeRoot, '--session', 'long-talk'],
-        {
-          stdin: Readable.from(['/exit\n']),
-          stdout: collect(chunk => {
-            reopenedStdout += chunk;
-          }),
-          stderr: collect(() => {}),
-          roleModelAdapter: adapter,
-          pluginHost: createRuntimePluginHost({plugins: []}),
-        },
-      ),
-    ).toBe(0);
-    expect(reopenedStdout).toContain(
-      'Session long-talk was continued in long-talk.2; opening the one you named.',
-    );
+      await createLocalRuntimeConversationStore({
+        homeRoot: storeRoot,
+      }).listConversations(),
+    ).toHaveLength(1);
   });
 
   it('lets the runtime env provider override project02.roleModelProvider', async () => {
@@ -775,20 +676,17 @@ describe('chat CLI provider selection', () => {
     });
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=local\n`);
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'env-over-config-provider'],
-      {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {
-          [nvidiaApiKeyEnvName]: '',
-        },
-        pluginHost: createRuntimePluginHost({plugins: []}),
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {
+        [nvidiaApiKeyEnvName]: '',
       },
-    );
+      pluginHost: createRuntimePluginHost({plugins: []}),
+    });
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
@@ -799,17 +697,14 @@ describe('chat CLI provider selection', () => {
       'project02-chat-provider-invalid-env-',
     );
     let stderr = '';
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'invalid-provider-env'],
-      {
-        stdin: Readable.from(['hello\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {[roleModelProviderEnvName]: 'bogus'},
-      },
-    );
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {[roleModelProviderEnvName]: 'bogus'},
+    });
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('must be either "local" or "nvidia"');
@@ -823,17 +718,14 @@ describe('chat CLI provider selection', () => {
     let stderr = '';
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=bogus\n`);
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'invalid-provider-env-file'],
-      {
-        stdin: Readable.from(['hello\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {},
-      },
-    );
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {},
+    });
 
     expect(exitCode).toBe(1);
     expect(stderr).toContain('must be either "local" or "nvidia"');
@@ -845,24 +737,20 @@ describe('chat CLI provider selection', () => {
     const storeRoot = createTestTempRoot(
       'project02-chat-provider-failure-lease-',
     );
-    const sessionId = 'provider-failure-lease';
     let firstStderr = '';
     let secondStderr = '';
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=nvidia\n`);
 
-    const failedExitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', sessionId],
-      {
-        stdin: Readable.from(['hello\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          firstStderr += chunk;
-        }),
-        env: {[nvidiaApiKeyEnvName]: ''},
-      },
-    );
+    const failedExitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        firstStderr += chunk;
+      }),
+      env: {[nvidiaApiKeyEnvName]: ''},
+    });
     const recoveredExitCode = await runChatCliFromArgs(
-      ['--provider', 'local', '--store', storeRoot, '--session', sessionId],
+      ['--provider', 'local', '--store', storeRoot],
       {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(() => {}),
@@ -906,16 +794,13 @@ describe('chat CLI provider selection', () => {
         },
       },
       async () => {
-        const exitCode = await runChatCliFromArgs(
-          ['--store', storeRoot, '--new-session', 'selected-store-env'],
-          {
-            stdin: Readable.from(['hello\n']),
-            stdout: collect(() => {}),
-            stderr: collect(chunk => {
-              stderr += chunk;
-            }),
-          },
-        );
+        const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+          stdin: Readable.from(['hello\n']),
+          stdout: collect(() => {}),
+          stderr: collect(chunk => {
+            stderr += chunk;
+          }),
+        });
 
         expect(exitCode).toBe(0);
         expect(stderr).toContain(
@@ -933,7 +818,6 @@ describe('chat CLI provider selection', () => {
     const selectedStoreRoot = await createInitializedTestStoreRoot(
       'project02-chat-selected-config-store-',
     );
-    const sessionId = 'selected-store-config';
     const defaultConfigPath = writeRuntimeConfig(
       join(defaultStoreRoot, 'config.json'),
       {
@@ -959,7 +843,7 @@ describe('chat CLI provider selection', () => {
       },
       async () => {
         const exitCode = await runChatCliFromArgs(
-          ['--store', selectedStoreRoot, '--new-session', sessionId],
+          ['--store', selectedStoreRoot],
           {
             stdin: Readable.from(['/exit\n']),
             stdout: collect(() => {}),
@@ -971,14 +855,11 @@ describe('chat CLI provider selection', () => {
 
         expect(exitCode).toBe(0);
         expect(stderr).toBe('');
-        await expect(
-          createLocalRuntimeSessionStore({
-            storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
-            characterId: 'mira',
-          }).readSession(sessionId),
-        ).resolves.toMatchObject({
-          sessionId,
-        });
+        expect(
+          (
+            await readCharacterConversation(selectedStoreRoot)
+          ).latestSessionId.endsWith('.1'),
+        ).toBe(true);
         expect(
           existsSync(
             createLocalRuntimeStorageLayout({
@@ -995,7 +876,6 @@ describe('chat CLI provider selection', () => {
     const storeRoot = await createInitializedTestStoreRoot(
       'project02-chat-selected-dotenv-error-',
     );
-    const sessionId = 'selected-store-before-cwd-dotenv';
     let stdout = '';
     let stderr = '';
 
@@ -1011,30 +891,24 @@ describe('chat CLI provider selection', () => {
         },
       },
       async () => {
-        const exitCode = await runChatCliFromArgs(
-          ['--store', storeRoot, '--new-session', sessionId],
-          {
-            stdin: Readable.from(['/exit\n']),
-            stdout: collect(chunk => {
-              stdout += chunk;
-            }),
-            stderr: collect(chunk => {
-              stderr += chunk;
-            }),
-          },
-        );
+        const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+          stdin: Readable.from(['/exit\n']),
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(chunk => {
+            stderr += chunk;
+          }),
+        });
 
         expect(exitCode).toBe(0);
         expect(stdout).toContain('Mira is ready.');
         expect(stderr).toBe('');
-        await expect(
-          createLocalRuntimeSessionStore({
-            storeRoot: characterDataDirPath(storeRoot, 'mira'),
-            characterId: 'mira',
-          }).readSession(sessionId),
-        ).resolves.toMatchObject({
-          sessionId,
-        });
+        expect(
+          (await readCharacterConversation(storeRoot)).latestSessionId.endsWith(
+            '.1',
+          ),
+        ).toBe(true);
       },
     );
   });
@@ -1053,7 +927,6 @@ describe('chat CLI provider selection', () => {
         storeRoot: selectedStoreRoot,
       },
     );
-    const sessionId = 'env-selected-store-before-cwd-dotenv';
     let stdout = '';
     let stderr = '';
 
@@ -1069,54 +942,44 @@ describe('chat CLI provider selection', () => {
         },
       },
       async () => {
-        const exitCode = await runChatCliFromArgs(
-          ['--new-session', sessionId],
-          {
-            stdin: Readable.from(['/exit\n']),
-            stdout: collect(chunk => {
-              stdout += chunk;
-            }),
-            stderr: collect(chunk => {
-              stderr += chunk;
-            }),
-          },
-        );
+        const exitCode = await runChatCliFromArgs([], {
+          stdin: Readable.from(['/exit\n']),
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(chunk => {
+            stderr += chunk;
+          }),
+        });
 
         expect(exitCode).toBe(0);
         expect(stdout).toContain('Mira is ready.');
         expect(stderr).toBe('');
-        await expect(
-          createLocalRuntimeSessionStore({
-            storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
-            characterId: 'mira',
-          }).readSession(sessionId),
-        ).resolves.toMatchObject({
-          sessionId,
-        });
+        expect(
+          (
+            await readCharacterConversation(selectedStoreRoot)
+          ).latestSessionId.endsWith('.1'),
+        ).toBe(true);
       },
     );
   });
 
   it('loads the runtime store env before selecting the default chat provider', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-env-');
-    const sessionId = 'runtime-env-provider';
     let stderr = '';
 
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=nvidia\n`);
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', sessionId],
-      {
-        stdin: Readable.from(['hello\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {
-          [nvidiaApiKeyEnvName]: '',
-        },
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {
+        [nvidiaApiKeyEnvName]: '',
       },
-    );
+    });
 
     expect(exitCode).toBe(0);
     expect(stderr).toContain(
@@ -1133,19 +996,16 @@ describe('chat CLI provider selection', () => {
       `${roleModelProviderEnvName}=nvidia\n${nvidiaApiKeyEnvName}=\n`,
     );
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'injected-env-provider'],
-      {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        env: {
-          [roleModelProviderEnvName]: 'local',
-        },
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      env: {
+        [roleModelProviderEnvName]: 'local',
       },
-    );
+    });
 
     expect(exitCode).toBe(0);
     expect(stderr).toBe('');
@@ -1163,14 +1023,7 @@ describe('chat CLI provider selection', () => {
     writeRuntimeEnv(storeRoot, `${roleModelProviderEnvName}=not-a-provider\n`);
 
     const exitCode = await runChatCliFromArgs(
-      [
-        '--provider',
-        'local',
-        '--store',
-        storeRoot,
-        '--new-session',
-        'cli-provider',
-      ],
+      ['--provider', 'local', '--store', storeRoot],
       {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(() => {}),
@@ -1198,18 +1051,15 @@ describe('chat CLI provider selection', () => {
     });
     mkdirSync(join(storeRoot, '.env'));
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'load-error-before-env'],
-      {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-      },
-    );
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+    });
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
@@ -1243,28 +1093,25 @@ describe('chat CLI provider selection', () => {
     });
     mkdirSync(homeLayout.envPath);
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'activation-before-env'],
-      {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create() {
-              throw new Error(
-                'chat startup should not construct invalid plugins',
-              );
-            },
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create() {
+            throw new Error(
+              'chat startup should not construct invalid plugins',
+            );
           },
         },
       },
-    );
+    });
 
     expect(exitCode).toBe(1);
     expect(stdout).toBe('');
@@ -1299,28 +1146,25 @@ describe('chat CLI provider selection', () => {
     });
     writeFileSync(homeLayout.envPath, `${envVar}=chat-secret\n`, 'utf8');
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', 'mixed-activation-env'],
-      {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        factories: {
-          [plugin.manifest.id]: {
-            manifest: plugin.manifest,
-            create() {
-              factoryCalls += 1;
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      factories: {
+        [plugin.manifest.id]: {
+          manifest: plugin.manifest,
+          create() {
+            factoryCalls += 1;
 
-              return plugin;
-            },
+            return plugin;
           },
         },
       },
-    );
+    });
 
     expect(exitCode).toBe(1);
     expect(factoryCalls).toBe(0);
@@ -1338,7 +1182,6 @@ describe('chat CLI plugin lifecycle', () => {
     const storeRoot = createTestTempRoot(
       'project02-chat-plugin-config-approval-',
     );
-    const sessionId = 'plugin-config-approval-session';
     const configurablePlugin = createChatConfigurablePlugin();
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
     await materializeChatCharacterConfig({
@@ -1360,16 +1203,7 @@ describe('chat CLI plugin lifecycle', () => {
     let stderr = '';
 
     const exitCode = await runChatCliFromArgs(
-      [
-        '--provider',
-        'local',
-        '--store',
-        storeRoot,
-        '--config',
-        configPath,
-        '--new-session',
-        sessionId,
-      ],
+      ['--provider', 'local', '--store', storeRoot, '--config', configPath],
       {
         stdin: Readable.from(['change the plugin tone\n', 'y\n', '/exit\n']),
         stdout: collect(chunk => {
@@ -1447,7 +1281,6 @@ describe('chat CLI plugin lifecycle', () => {
       const storeRoot = createTestTempRoot(
         'project02-chat-plugin-config-slow-approval-',
       );
-      const sessionId = 'plugin-config-slow-approval-session';
       const configurablePlugin = createChatConfigurablePlugin();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
       await materializeChatCharacterConfig({
@@ -1468,16 +1301,7 @@ describe('chat CLI plugin lifecycle', () => {
       let stdout = '';
       let stderr = '';
       const run = runChatCliFromArgs(
-        [
-          '--provider',
-          'local',
-          '--store',
-          storeRoot,
-          '--config',
-          configPath,
-          '--new-session',
-          sessionId,
-        ],
+        ['--provider', 'local', '--store', storeRoot, '--config', configPath],
         {
           stdin: input,
           stdout: collect(chunk => {
@@ -1570,7 +1394,6 @@ describe('chat CLI plugin lifecycle', () => {
       const storeRoot = createTestTempRoot(
         'project02-chat-plugin-config-timeout-',
       );
-      const sessionId = 'plugin-config-timeout-session';
       const configurablePlugin = createChatConfigurablePlugin();
       const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
       await materializeChatCharacterConfig({
@@ -1596,16 +1419,7 @@ describe('chat CLI plugin lifecycle', () => {
       let stdout = '';
       let stderr = '';
       const run = runChatCliFromArgs(
-        [
-          '--provider',
-          'local',
-          '--store',
-          storeRoot,
-          '--config',
-          configPath,
-          '--new-session',
-          sessionId,
-        ],
+        ['--provider', 'local', '--store', storeRoot, '--config', configPath],
         {
           stdin: input,
           stdout: collect(chunk => {
@@ -1684,7 +1498,6 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('runs session-end hooks when /exit closes the chat', async () => {
     const sessionEndContexts: RuntimePluginContext[] = [];
-    const logStore = createRuntimeLogStore();
     const sessionEndPlugin = createSessionEndPlugin(context => {
       sessionEndContexts.push(context);
     });
@@ -1693,23 +1506,31 @@ describe('chat CLI plugin lifecycle', () => {
       enabledPluginIds: [runtimePluginId, sessionEndPlugin.manifest.id],
     });
 
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      stdin: Readable.from(['/exit\n']),
-      stdout: collect(() => {}),
-      stderr: collect(() => {}),
-      logStore,
-      pluginHost,
+    let endedSessionId = '';
+    let lastRawEvent: unknown;
+    const exitCode = await withOpenConversation({}, async conversation => {
+      endedSessionId = conversation.session.id;
+
+      const code = await runChatCli({
+        conversation,
+        stdin: Readable.from(['/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        pluginHost,
+      });
+
+      lastRawEvent = conversation.logStore.rawEvents().at(-1);
+      return code;
     });
 
     expect(exitCode).toBe(0);
     expect(sessionEndContexts).toHaveLength(1);
     expect(sessionEndContexts[0]).toMatchObject({
-      sessionId: 'local-session',
+      sessionId: endedSessionId,
       currentUserMessage: '/exit',
       character: testCharacterProfile,
     });
-    expect(logStore.rawEvents().at(-1)).toMatchObject({
+    expect(lastRawEvent).toMatchObject({
       kind: 'runtime_turn_completed',
       status: 'completed',
       runtimePluginEvidence: [
@@ -1745,7 +1566,6 @@ describe('chat CLI plugin lifecycle', () => {
         },
       },
     });
-    const sessionId = 'injected-host-session';
     const sessionEndContexts: RuntimePluginContext[] = [];
     const sessionEndPlugin = createSessionEndPlugin(context => {
       sessionEndContexts.push(context);
@@ -1758,14 +1578,7 @@ describe('chat CLI plugin lifecycle', () => {
     let configuredFactoryCalls = 0;
 
     const exitCode = await runChatCliFromArgs(
-      [
-        '--store',
-        storeRoot,
-        '--config',
-        configPath,
-        '--new-session',
-        sessionId,
-      ],
+      ['--store', storeRoot, '--config', configPath],
       {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(() => {}),
@@ -1796,7 +1609,7 @@ describe('chat CLI plugin lifecycle', () => {
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId,
+      sessionId: (await readCharacterConversation(storeRoot)).latestSessionId,
     }).rawEvents();
 
     expect(storedRawEvents.at(-1)).toMatchObject({
@@ -1815,7 +1628,6 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('constructs configured manifest-backed plugins once during chat startup', async () => {
     const storeRoot = createTestTempRoot('project02-chat-configured-host-');
-    const sessionId = 'configured-host-session';
     const configuredPlugin = createSessionEndPlugin(() => {}, {
       beforeRoleModelCall() {
         return {contextItems: [], evidence: []};
@@ -1837,54 +1649,54 @@ describe('chat CLI plugin lifecycle', () => {
       },
     });
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', sessionId],
-      {
-        stdin: Readable.from(['hello\n/exit\n']),
-        stdout: collect(() => {}),
-        stderr: collect(() => {}),
-        factories: {
-          [configuredPlugin.manifest.id]: {
-            manifest: configuredPlugin.manifest,
-            create() {
-              factoryCalls += 1;
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['hello\n/exit\n']),
+      stdout: collect(() => {}),
+      stderr: collect(() => {}),
+      factories: {
+        [configuredPlugin.manifest.id]: {
+          manifest: configuredPlugin.manifest,
+          create() {
+            factoryCalls += 1;
 
-              return createSessionEndPlugin(
-                context => {
-                  sessionEndContexts.push(context);
+            return createSessionEndPlugin(
+              context => {
+                sessionEndContexts.push(context);
+              },
+              {
+                onShutdown(context) {
+                  shutdownContexts.push(context);
+                  return {status: 'completed', evidence: []};
                 },
-                {
-                  onShutdown(context) {
-                    shutdownContexts.push(context);
-                    return {status: 'completed', evidence: []};
-                  },
-                  beforeRoleModelCall(context) {
-                    beforeRoleModelCallContexts.push(context);
-                    return {contextItems: [], evidence: []};
-                  },
+                beforeRoleModelCall(context) {
+                  beforeRoleModelCallContexts.push(context);
+                  return {contextItems: [], evidence: []};
                 },
-              );
-            },
+              },
+            );
           },
         },
       },
-    );
+    });
 
     expect(exitCode).toBe(0);
     expect(factoryCalls).toBe(1);
+
+    const {latestSessionId} = await readCharacterConversation(storeRoot);
+
     expect(beforeRoleModelCallContexts).toHaveLength(1);
     expect(beforeRoleModelCallContexts[0]).toMatchObject({
-      sessionId,
+      sessionId: latestSessionId,
       currentUserMessage: 'hello',
     });
     expect(sessionEndContexts).toHaveLength(1);
     expect(sessionEndContexts[0]).toMatchObject({
-      sessionId,
+      sessionId: latestSessionId,
       currentUserMessage: '/exit',
     });
     expect(shutdownContexts).toHaveLength(1);
     expect(shutdownContexts[0]).toMatchObject({
-      sessionId,
+      sessionId: latestSessionId,
       character: testCharacterProfile,
     });
     expect(shutdownContexts[0]?.deadlineAt).toBeGreaterThan(Date.now());
@@ -1893,7 +1705,6 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('closes configured plugins when the session ends without /exit', async () => {
     const storeRoot = createTestTempRoot('project02-chat-fatal-cleanup-');
-    const sessionId = 'fatal-cleanup-session';
     const configuredPlugin = createSessionEndPlugin(() => {}, {
       pluginId: 'chat.session-end.fatal-cleanup.fixture',
       rejectsTurn: true,
@@ -1913,7 +1724,7 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const exitCode = await runChatCliFromArgs(
-      ['--provider', 'local', '--store', storeRoot, '--new-session', sessionId],
+      ['--provider', 'local', '--store', storeRoot],
       {
         stdin: Readable.from(['hello\n']),
         stdout: collect(() => {}),
@@ -1944,16 +1755,19 @@ describe('chat CLI plugin lifecycle', () => {
 
     expect(exitCode).toBe(0);
     expect(stderr).toContain('configured before-role-model hook failed');
+
+    const {latestSessionId} = await readCharacterConversation(storeRoot);
+
     expect(sessionEndContexts).toHaveLength(1);
     expect(sessionEndContexts[0]).toMatchObject({
-      sessionId,
+      sessionId: latestSessionId,
     });
 
     const storedRawEvents = createFileRuntimeLogStore({
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId,
+      sessionId: latestSessionId,
     }).rawEvents();
 
     expect(
@@ -1961,9 +1775,9 @@ describe('chat CLI plugin lifecycle', () => {
     ).toBe(true);
   });
 
-  it('closes configured pre-session plugins read-only when later session creation fails', async () => {
+  it('closes configured pre-session plugins read-only when the conversation cannot open', async () => {
     const storeRoot = createTestTempRoot('project02-chat-cleanup-');
-    const sessionId = 'pre-session-cleanup';
+    const sessionId = configuredPluginConstructionCleanupSessionId;
     const sessionEndContexts: RuntimePluginContext[] = [];
     const cleanupWriteBlocked: boolean[] = [];
     const configuredPlugin = createSessionEndPlugin(
@@ -1993,13 +1807,6 @@ describe('chat CLI plugin lifecycle', () => {
     let stdout = '';
     let stderr = '';
 
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-22T00:00:00.000Z',
-    });
     writeRuntimeConfig(join(storeRoot, 'config.json'), {
       plugins: {
         [configuredPlugin.manifest.id]: {
@@ -2008,9 +1815,9 @@ describe('chat CLI plugin lifecycle', () => {
       },
     });
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', sessionId],
-      {
+    // Another window holds the conversation open, so this launch cannot.
+    const exitCode = await withOpenConversation({homeRoot: storeRoot}, () =>
+      runChatCliFromArgs(['--store', storeRoot], {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(chunk => {
           stdout += chunk;
@@ -2028,15 +1835,13 @@ describe('chat CLI plugin lifecycle', () => {
             },
           },
         },
-      },
+      }),
     );
 
     expect(exitCode).toBe(1);
     expect(factoryCalls).toBe(1);
     expect(stdout).toBe('');
-    expect(stderr).toContain(
-      `Local runtime session "${sessionId}" already exists.`,
-    );
+    expect(stderr).toContain('busy: conversation-writer:');
     expect(sessionEndContexts).toHaveLength(1);
     expect(sessionEndContexts[0]).toMatchObject({
       sessionId,
@@ -2059,7 +1864,6 @@ describe('chat CLI plugin lifecycle', () => {
       'project02-chat-invalid-store-cleanup-',
     );
     const invalidStoreRoot = join(configRoot, 'store-root-file');
-    const sessionId = 'invalid-store-cleanup';
     const sessionEndContexts: RuntimePluginContext[] = [];
     const configuredPlugin = createSessionEndPlugin(
       context => {
@@ -2082,14 +1886,7 @@ describe('chat CLI plugin lifecycle', () => {
     });
 
     const exitCode = await runChatCliFromArgs(
-      [
-        '--store',
-        invalidStoreRoot,
-        '--config',
-        configPath,
-        '--new-session',
-        sessionId,
-      ],
+      ['--store', invalidStoreRoot, '--config', configPath],
       {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(chunk => {
@@ -2117,7 +1914,6 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('aborts manifest-backed factory construction failures before creating a durable session', async () => {
     const storeRoot = createTestTempRoot('project02-chat-factory-failure-');
-    const sessionId = 'manifest-factory-failure';
     const layout = createLocalRuntimeStorageLayout({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
     });
@@ -2135,32 +1931,29 @@ describe('chat CLI plugin lifecycle', () => {
       },
     });
 
-    const exitCode = await runChatCliFromArgs(
-      ['--store', storeRoot, '--new-session', sessionId],
-      {
-        stdin: Readable.from(['/exit\n']),
-        stdout: collect(chunk => {
-          stdout += chunk;
-        }),
-        stderr: collect(chunk => {
-          stderr += chunk;
-        }),
-        factories: {
-          [configuredPlugin.manifest.id]: {
-            manifest: configuredPlugin.manifest,
-            create() {
-              factoryCalls += 1;
-              createSessionEndPlugin(() => {
-                cleanupCalls += 1;
-              });
-              throw new Error(
-                'manifest-backed factory failed during construction',
-              );
-            },
+    const exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+      stdin: Readable.from(['/exit\n']),
+      stdout: collect(chunk => {
+        stdout += chunk;
+      }),
+      stderr: collect(chunk => {
+        stderr += chunk;
+      }),
+      factories: {
+        [configuredPlugin.manifest.id]: {
+          manifest: configuredPlugin.manifest,
+          create() {
+            factoryCalls += 1;
+            createSessionEndPlugin(() => {
+              cleanupCalls += 1;
+            });
+            throw new Error(
+              'manifest-backed factory failed during construction',
+            );
           },
         },
       },
-    );
+    });
 
     expect(exitCode).toBe(1);
     expect(factoryCalls).toBe(1);
@@ -2197,14 +1990,7 @@ describe('chat CLI plugin lifecycle', () => {
     let stderr = '';
 
     const exitCode = await runChatCliFromArgs(
-      [
-        '--store',
-        storeRoot,
-        '--config',
-        configPath,
-        '--new-session',
-        'activation-error',
-      ],
+      ['--store', storeRoot, '--config', configPath],
       {
         stdin: Readable.from(['/exit\n']),
         stdout: collect(chunk => {
@@ -2230,45 +2016,32 @@ describe('chat CLI plugin lifecycle', () => {
 
   it('persists session-end hook failures when stdin closes normally', async () => {
     const storeRoot = createTestTempRoot('project02-chat-session-end-');
-    const sessionId = 'session-end-failure';
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-06-16T00:00:00.000Z',
-    });
-    const logStore = createFileRuntimeLogStore({
-      boundCharacter: testCharacterProfile,
-      characterId: testCharacterProfile.id,
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId,
-    });
     const pluginHost = createRuntimePluginHost({
       plugins: [createFailingSessionEndPlugin()],
       enabledPluginIds: [runtimePluginId, 'chat.session-end.failure.fixture'],
     });
 
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      stdin: Readable.from([]),
-      stdout: collect(() => {}),
-      stderr: collect(() => {}),
-      session: createSession({
-        id: sessionId,
-        character: testCharacterProfile,
-      }),
-      logStore,
-      pluginHost,
-    });
+    const exitCode = await withOpenConversation(
+      {homeRoot: storeRoot},
+      conversation =>
+        runChatCli({
+          conversation,
+          stdin: Readable.from([]),
+          stdout: collect(() => {}),
+          stderr: collect(() => {}),
+          pluginHost,
+        }),
+    );
 
     expect(exitCode).toBe(0);
 
+    const {latestSessionId: sessionId} =
+      await readCharacterConversation(storeRoot);
     const storedRawEvents = createFileRuntimeLogStore({
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId,
+      sessionId: (await readCharacterConversation(storeRoot)).latestSessionId,
     }).rawEvents();
 
     expect(storedRawEvents.at(-1)).toMatchObject({
@@ -2338,46 +2111,48 @@ describe('chat CLI rejected-turn recovery', () => {
     let stdout = '';
     let stderr = '';
     let invocations = 0;
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['first\nsecond\n/exit\n']),
-      stdout: collect(chunk => {
-        stdout += chunk;
-      }),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      roleModelAdapter: {
-        invoke() {
-          invocations += 1;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['first\nsecond\n/exit\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        roleModelAdapter: {
+          invoke() {
+            invocations += 1;
 
-          // A provider failure is nothing the model can correct, so the turn
-          // ends; the next turn still runs.
-          if (invocations === 1) {
-            return {
-              rawOutputText: '',
-              providerMetadata: {
-                provider: 'nvidia',
-                error: {code: 'http_error', message: 'upstream 503'},
-              },
-              rejection: {reason: 'provider_error', details: 'upstream 503'},
-            };
-          }
-
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [
-                {
-                  name: 'visible_reply',
-                  input: {text: 'second turn reply'},
+            // A provider failure is nothing the model can correct, so the turn
+            // ends; the next turn still runs.
+            if (invocations === 1) {
+              return {
+                rawOutputText: '',
+                providerMetadata: {
+                  provider: 'nvidia',
+                  error: {code: 'http_error', message: 'upstream 503'},
                 },
-              ],
-            }),
-          };
+                rejection: {reason: 'provider_error', details: 'upstream 503'},
+              };
+            }
+
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls: [
+                  {
+                    name: 'visible_reply',
+                    input: {text: 'second turn reply'},
+                  },
+                ],
+              }),
+            };
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(exitCode).toBe(0);
     expect(stderr).toContain('Error: ');
@@ -2389,32 +2164,34 @@ describe('chat CLI rejected-turn recovery', () => {
     let stdout = '';
     let stderr = '';
     let invocations = 0;
-    const exitCode = await runChatCli({
-      characterProfile: testCharacterProfile,
-      pluginHost: createDefaultProject02PluginHost(),
-      stdin: Readable.from(['first\n/exit\n']),
-      stdout: collect(chunk => {
-        stdout += chunk;
-      }),
-      stderr: collect(chunk => {
-        stderr += chunk;
-      }),
-      roleModelAdapter: {
-        invoke() {
-          invocations += 1;
+    const exitCode = await withOpenConversation({}, conversation =>
+      runChatCli({
+        conversation,
+        pluginHost: createDefaultProject02PluginHost(),
+        stdin: Readable.from(['first\n/exit\n']),
+        stdout: collect(chunk => {
+          stdout += chunk;
+        }),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        roleModelAdapter: {
+          invoke() {
+            invocations += 1;
 
-          return invocations === 1
-            ? {rawOutputText: 'this is not a decision object'}
-            : {
-                rawOutputText: JSON.stringify({
-                  toolCalls: [
-                    {name: 'visible_reply', input: {text: 'corrected reply'}},
-                  ],
-                }),
-              };
+            return invocations === 1
+              ? {rawOutputText: 'this is not a decision object'}
+              : {
+                  rawOutputText: JSON.stringify({
+                    toolCalls: [
+                      {name: 'visible_reply', input: {text: 'corrected reply'}},
+                    ],
+                  }),
+                };
+          },
         },
-      },
-    });
+      }),
+    );
 
     expect(exitCode).toBe(0);
     expect(stderr).not.toContain('Error: ');

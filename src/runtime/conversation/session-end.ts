@@ -1,26 +1,24 @@
-import {type Session, createRuntimeEventIdentity} from '../../core/index.ts';
-import type {RuntimeLogStore} from '../../runtime/index.ts';
+import {createRuntimeEventIdentity, type Session} from '../../core/index.ts';
+import {createRuntimePluginContext} from '../../plugins/api/index.ts';
+import type {
+  RuntimePluginHookHostResult,
+  RuntimePluginHost,
+} from '../../plugins/index.ts';
+import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {
   runtimePluginEvidenceOption,
   runtimePluginTurnEvidenceOption,
-} from '../../runtime/turn/index.ts';
-import {
-  createRuntimePluginContext,
-  type RuntimePluginHookHostResult,
-  type RuntimePluginHost,
-} from '../../plugins/index.ts';
+} from '../turn/plugin-evidence.ts';
 
 export const exitCommand = '/exit';
 
-export type EndChatSessionOptions = {
+export type EndSessionOptions = {
   readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly pluginHost: RuntimePluginHost;
 };
 
-export async function endChatSession(
-  options: EndChatSessionOptions,
-): Promise<void> {
+export async function endSession(options: EndSessionOptions): Promise<void> {
   const identity = createRuntimeEventIdentity();
   const context = createRuntimePluginContext({
     ...identity,

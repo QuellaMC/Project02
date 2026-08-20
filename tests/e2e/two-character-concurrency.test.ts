@@ -14,6 +14,7 @@ import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {characterOverlayConfigPath} from '../../src/runtime/config/index.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
+import {readCharacterConversation} from '../support/conversation-fixtures.ts';
 
 function seedNovaPackage(homeRoot: string): void {
   const packageRoot = join(homeRoot, 'characters', 'nova');
@@ -37,19 +38,10 @@ function seedNovaPackage(homeRoot: string): void {
 function spawnCharacterChat(
   homeRoot: string,
   characterId: string,
-  newSessionId: string,
 ): ChildProcessWithoutNullStreams {
   return spawn(
     process.execPath,
-    [
-      'src/cli/chat/main.ts',
-      '--store',
-      homeRoot,
-      '--character',
-      characterId,
-      '--new-session',
-      newSessionId,
-    ],
+    ['src/cli/chat/main.ts', '--store', homeRoot, '--character', characterId],
     {cwd: process.cwd(), stdio: 'pipe'},
   );
 }
@@ -106,11 +98,11 @@ describe('two characters from one home', () => {
 
     const [mira, nova] = await Promise.all([
       runOneMessageChat(
-        spawnCharacterChat(homeRoot, 'mira', 'shared-session-id'),
+        spawnCharacterChat(homeRoot, 'mira'),
         'hello from the mira terminal',
       ),
       runOneMessageChat(
-        spawnCharacterChat(homeRoot, 'nova', 'shared-session-id'),
+        spawnCharacterChat(homeRoot, 'nova'),
         'hello from the nova terminal',
       ),
     ]);
@@ -121,20 +113,20 @@ describe('two characters from one home', () => {
     expect(nova.stdout).toContain('Nova:');
     expect(`${mira.stderr}${nova.stderr}`).not.toContain('busy');
 
-    // Leases are released on clean exit, and the home lock root never hosts
-    // session locks.
+    // Leases are released on clean exit; per-segment locks stay in each
+    // character's own lock root, while the home holds the conversation locks.
     for (const characterId of ['mira', 'nova']) {
       const dataRoot = characterDataDirPath(homeRoot, characterId);
+      const dm = await readCharacterConversation(homeRoot, characterId);
 
-      expect(existsSync(join(dataRoot, 'sessions', 'shared-session-id'))).toBe(
-        true,
-      );
+      expect(dm.latestSessionId.endsWith('.1')).toBe(true);
+      expect(existsSync(dm.latestSessionPaths.sessionRoot)).toBe(true);
       expect(existsSync(join(dataRoot, '.locks'))).toBe(true);
     }
     expect(
       existsSync(join(homeRoot, '.locks')) &&
         readdirSync(join(homeRoot, '.locks')).some(name =>
-          name.includes('session'),
+          name.includes('session-writer'),
         ),
     ).toBe(false);
     expect(
@@ -166,7 +158,7 @@ describe('two characters from one home', () => {
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
 
-    const first = spawnCharacterChat(homeRoot, 'mira', 'contended');
+    const first = spawnCharacterChat(homeRoot, 'mira');
     const firstReady = new Promise<void>((resolveReady, rejectReady) => {
       let stdout = '';
       const timeout = setTimeout(() => {
@@ -190,19 +182,7 @@ describe('two characters from one home', () => {
     try {
       await firstReady;
 
-      const second = spawn(
-        process.execPath,
-        [
-          'src/cli/chat/main.ts',
-          '--store',
-          homeRoot,
-          '--character',
-          'mira',
-          '--session',
-          'contended',
-        ],
-        {cwd: process.cwd(), stdio: 'pipe'},
-      );
+      const second = spawnCharacterChat(homeRoot, 'mira');
       const contended = await new Promise<{
         readonly code: number | null;
         readonly stderr: string;
@@ -220,7 +200,7 @@ describe('two characters from one home', () => {
       });
 
       expect(contended.code).toBe(1);
-      expect(contended.stderr).toContain('session');
+      expect(contended.stderr).toContain('busy: conversation-writer:');
     } finally {
       if (first.exitCode === null) {
         first.kill();

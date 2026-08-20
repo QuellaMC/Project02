@@ -34,7 +34,7 @@ describe('session history through the tool loop', () => {
 
     await writeDurableSession({
       storeRoot,
-      sessionId: 'earlier',
+      conversationId: 'earlier',
       exchanges: [
         [
           'remember the passphrase riddle?',
@@ -116,7 +116,8 @@ describe('session history through the tool loop', () => {
 
   it('recalls messages that scrolled out of the model window in the same session', async () => {
     const storeRoot = createTestTempRoot('project02-history-window-');
-    const sessionId = 'local-session';
+    const conversationId = 'local-session';
+    const sessionId = `${conversationId}.1`;
     const exchanges: readonly [string, string][] = [
       ['the wifi password is stormlight42', 'Saved it, I will remember.'],
       ...Array.from({length: 5}, (_, index): [string, string] => [
@@ -125,7 +126,7 @@ describe('session history through the tool loop', () => {
       ]),
     ];
 
-    await writeDurableSession({storeRoot, sessionId, exchanges});
+    await writeDurableSession({storeRoot, conversationId, exchanges});
 
     // Restore the same transcript the store holds; with a 256-token context
     // window the history budget (half of it) holds the five filler turns and
@@ -231,13 +232,14 @@ describe('session history through the tool loop', () => {
 
   it('never returns the model its own interim reply from the same turn', async () => {
     const storeRoot = createTestTempRoot('project02-history-interim-');
-    const sessionId = 'local-session';
+    const conversationId = 'local-session';
+    const sessionId = `${conversationId}.1`;
 
     // An empty durable session: the whole turn, including the interim
     // reply, commits into the store the search index reads.
     await writeDurableSession({
       storeRoot,
-      sessionId,
+      conversationId,
       exchanges: [],
     });
 

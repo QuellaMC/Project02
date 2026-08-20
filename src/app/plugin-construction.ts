@@ -170,7 +170,8 @@ export async function cleanupPartiallyInstantiatedPlugins(options: {
   }
 }
 
-const configuredPluginConstructionCleanupSessionId =
+/** Cleanup context for plugin lifecycles that end before a session exists. */
+export const configuredPluginConstructionCleanupSessionId =
   'configured-plugin-construction-cleanup';
 const configuredPluginConstructionCleanupMessage =
   'configured plugin construction failed before host creation';

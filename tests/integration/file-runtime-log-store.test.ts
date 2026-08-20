@@ -36,6 +36,7 @@ import {characterStatePatchModelToolName} from '../../src/plugins/api/contract.t
 import {
   LocalRuntimeStorageContractError,
   createLocalRuntimeStorageLayout,
+  parseSegmentSessionId,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
@@ -60,12 +61,13 @@ import {
 describe('file runtime log store plugin tool event validation', () => {
   it('rejects a store before reading or mutating data owned by another character', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-foreign-character-marker';
+    const conversationId = 'session-foreign-character-marker';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'foreign-character',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const evidenceReads: string[] = [];
@@ -115,12 +117,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it("refuses a store mutation under another owner token's writer lease", async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-owner-token-append';
+    const conversationId = 'session-owner-token-append';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const ownerA = createLocalRuntimeMutationLockOwnerToken();
@@ -161,12 +164,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('allows only the writer lease owner to scavenge abandoned evidence temporaries', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-owner-token-scavenge';
+    const conversationId = 'session-owner-token-scavenge';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const ownerA = createLocalRuntimeMutationLockOwnerToken();
@@ -212,12 +216,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects low-level durable mutation without the active session writer lease', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-low-level-writer';
+    const conversationId = 'session-low-level-writer';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -243,13 +248,14 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects canonical timestamps that disagree within one event identity', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-created-at-agreement';
+    const conversationId = 'session-created-at-agreement';
+    const sessionId = `${conversationId}.1`;
     const eventIdentity = identity('evt_created_at_agreement');
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: eventIdentity.createdAt,
     });
     const logStore = createFileRuntimeLogStore({
@@ -285,13 +291,14 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects non-canonical timestamps decoded from durable evidence', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-canonical-created-at';
+    const conversationId = 'session-canonical-created-at';
+    const sessionId = `${conversationId}.1`;
     const eventIdentity = identity('evt_canonical_created_at');
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: eventIdentity.createdAt,
     });
     const logStore = createFileRuntimeLogStore({
@@ -322,13 +329,14 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('validates full session evidence before returning an exact terminal identity', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-validated-terminal-lookup';
+    const conversationId = 'session-validated-terminal-lookup';
+    const sessionId = `${conversationId}.1`;
     const eventIdentity = identity('evt_patch_completed');
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: eventIdentity.createdAt,
     });
     const logStore = createFileRuntimeLogStore({
@@ -416,7 +424,7 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'catalog-session',
+      conversationId: 'catalog-session',
       createdAt: eventIdentity.createdAt,
     });
     const orphanedLogStore = createFileRuntimeLogStore({
@@ -606,7 +614,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('reloads a turn that ran out of tool rounds', async () => {
     const storedRecords = (
-      await persistedRoundsExhaustedRecords('rounds-exhausted-round-trip')
+      await persistedRoundsExhaustedRecords('rounds-exhausted-round-trip.1')
     ).map(record => decodeRawEventLogRecord(JSON.stringify(record)));
 
     // The parsed round stays what the model said; the refusal is the
@@ -636,7 +644,8 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it('round-trips trusted curated sections and runtime notes through the persisted envelope', () => {
-    const sessionId = 'curated-context-round-trip';
+    const conversationId = 'curated-context-round-trip';
+    const sessionId = `${conversationId}.1`;
     const storedRecord = patchRoundRecord(sessionId) as {
       roleModelIOSnapshot: {
         inputEnvelope: {
@@ -702,7 +711,8 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it('round-trips the history window and decodes records written before it had one', () => {
-    const sessionId = 'history-window-round-trip';
+    const conversationId = 'history-window-round-trip';
+    const sessionId = `${conversationId}.1`;
     const storedRecord = patchRoundRecord(sessionId) as {
       roleModelIOSnapshot: {
         inputEnvelope: {
@@ -731,7 +741,8 @@ describe('file runtime log store plugin tool event validation', () => {
   });
 
   it('round-trips the prompt size, decodes records without one, and rejects a malformed one', () => {
-    const sessionId = 'prompt-size-round-trip';
+    const conversationId = 'prompt-size-round-trip';
+    const sessionId = `${conversationId}.1`;
     const storedRecord = patchRoundRecord(sessionId) as {
       roleModelIOSnapshot: Record<string, unknown>;
     };
@@ -803,12 +814,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('reloads a durable malformed provider exchange adapter rejection', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-malformed-provider-exchange-rejection';
+    const conversationId = 'session-malformed-provider-exchange-rejection';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -873,13 +885,14 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('keeps provider credential-key values out of durable raw-event evidence', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-provider-exchange-credential-redaction';
+    const conversationId = 'session-provider-exchange-credential-redaction';
+    const sessionId = `${conversationId}.1`;
     const credentialSentinel = 'durable-provider-credential-sentinel';
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const fetchClient: NvidiaFetchClient = () =>
@@ -980,18 +993,18 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-multiline-visible',
+      conversationId: 'session-multiline-visible',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-multiline-visible',
+      sessionId: 'session-multiline-visible.1',
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const session = createSession({
       character: testCharacterProfile,
-      id: 'session-multiline-visible',
+      id: 'session-multiline-visible.1',
     });
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(
@@ -1002,7 +1015,7 @@ describe('file runtime log store plugin tool event validation', () => {
       logStore,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot,
-        sessionId: 'session-multiline-visible',
+        sessionId: 'session-multiline-visible.1',
       }),
       roleModelAdapter: createMultilineVisibleReplyAdapter(),
     });
@@ -1018,7 +1031,8 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('preserves a custom session character in durable conversation evidence', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-custom-character';
+    const conversationId = 'session-custom-character';
+    const sessionId = `${conversationId}.1`;
     const character = {
       id: 'nova',
       displayName: 'Nova',
@@ -1027,7 +1041,7 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: character.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const session = createSession({
@@ -1181,13 +1195,14 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('keeps a shown reply in the session when its raw append fails', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-custom-character-raw-append-failure';
+    const conversationId = 'session-custom-character-raw-append-failure';
+    const sessionId = `${conversationId}.1`;
     const character = {id: 'nova', displayName: 'Nova'};
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: character.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const underlying = createFileRuntimeLogStore({
@@ -1268,12 +1283,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a terminal event that omits one of its turn committed messages', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-terminal-omits-message';
+    const conversationId = 'session-terminal-omits-message';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -1338,7 +1354,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a character row edited away from its accepted reply', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-edited-character-text',
+      'session-edited-character-text.1',
     );
     const index = rawLines.findIndex(
       line =>
@@ -1376,7 +1392,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects replies committed out of their decision order', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-reply-order',
+      'session-reply-order.1',
       createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
     );
     const commits = rawLines.filter(
@@ -1432,7 +1448,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a character row that names a round the turn never ran', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-unrun-round-reference',
+      'session-unrun-round-reference.1',
       createSequencedVisibleReplyAdapter(['first thought', 'and a second']),
     );
     const commit = rawLines.findLast(
@@ -1464,7 +1480,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a model round out of sequence', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-round-out-of-sequence',
+      'session-round-out-of-sequence.1',
     );
     const round = rawLines.find(line => line.includes('"role_model_round"'));
 
@@ -1490,7 +1506,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it("rejects a terminal that judges a round other than the turn's last", async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-terminal-on-earlier-round',
+      'session-terminal-on-earlier-round.1',
       createSequencedAdapter([
         {toolCalls: [{name: 'visible_reply', input: {text: '   '}}]},
         {toolCalls: [{name: 'visible_reply', input: {text: 'real reply'}}]},
@@ -1524,7 +1540,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a completed terminal whose last round the parser refused', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-terminal-on-refused-round',
+      'session-terminal-on-refused-round.1',
     );
     const round = rawLines.find(line => line.includes('"role_model_round"'));
     const commit = rawLines.find(
@@ -1592,7 +1608,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a completed terminal on a round that still asked for a tool', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-terminal-on-tool-round',
+      'session-terminal-on-tool-round.1',
       createSequencedVisibleReplyAdapter(['a reply']),
     );
     const round = rawLines.find(line => line.includes('"role_model_round"'));
@@ -1635,7 +1651,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects an exhausted-budget rejection on a round that asked for no tool', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-exhausted-on-reply-round',
+      'session-exhausted-on-reply-round.1',
       createSequencedVisibleReplyAdapter(['a reply']),
     );
     const terminal = rawLines.find(line =>
@@ -1682,7 +1698,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it("rejects a rejection for one of the model's reasons that names no round", async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-model-rejection-without-round',
+      'session-model-rejection-without-round.1',
       createMalformedProviderExchangeAdapter(),
     );
     const terminal = rawLines.find(line =>
@@ -1715,7 +1731,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a completed terminal stripped of its round and verdict', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-terminal-without-verdict',
+      'session-terminal-without-verdict.1',
     );
     const terminal = rawLines.find(line =>
       line.includes('"runtime_turn_completed"'),
@@ -1747,7 +1763,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a completed terminal that anchors a reply its round never asked for', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-terminal-anchor',
+      'session-terminal-anchor.1',
     );
     const terminal = rawLines.find(line =>
       line.includes('"runtime_turn_completed"'),
@@ -1784,7 +1800,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a turn rejection whose reason disagrees with the round it judged', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-rejection-disagrees',
+      'session-rejection-disagrees.1',
       createMalformedProviderExchangeAdapter(),
     );
     const terminal = rawLines.find(line =>
@@ -1827,7 +1843,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects replies swapped across rounds behind self-consistent forged rounds', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-cross-round-swap',
+      'session-cross-round-swap.1',
       createRepeatedRoundAdapter(),
     );
     const commits = rawLines.filter(
@@ -1895,7 +1911,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects recorded model input that differs from the committed user row', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-input-drift',
+      'session-input-drift.1',
       createSequencedVisibleReplyAdapter(['a reply']),
     );
 
@@ -1935,11 +1951,15 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('refuses to persist a prepared record made stale by a later append', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-stale-prepared';
+    const conversationId = 'session-stale-prepared';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
-    }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+    }).createSession({
+      conversationId: parseSegmentSessionId(sessionId).conversationId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
       sessionId,
@@ -2013,7 +2033,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('accepts repeated replies whose text needed normalizing', async () => {
     const {paths} = await committedTurnRawLines(
-      'session-repeated-normalized-replies',
+      'session-repeated-normalized-replies.1',
       createSequencedVisibleReplyAdapter(['  checking  ', 'checking\r\n']),
     );
 
@@ -2027,12 +2047,16 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('keeps taking turns on the session whose reply the log never got', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-lagging-log-retry';
+    const conversationId = 'session-lagging-log-retry';
+    const sessionId = `${conversationId}.1`;
     const character = {id: 'nova', displayName: 'Nova'};
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: character.id,
-    }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+    }).createSession({
+      conversationId: parseSegmentSessionId(sessionId).conversationId,
+      createdAt: '2026-06-15T00:00:00.000Z',
+    });
 
     const underlying = createFileRuntimeLogStore({
       storeRoot,
@@ -2112,7 +2136,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('reads back two rounds of one turn that said exactly the same thing', async () => {
     const {paths} = await committedTurnRawLines(
-      'session-repeated-rounds',
+      'session-repeated-rounds.1',
       createRepeatedRoundAdapter(),
     );
 
@@ -2126,7 +2150,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a duplicated visible_message_committed anchor for one message', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-duplicate-commit-anchor',
+      'session-duplicate-commit-anchor.1',
     );
     const anchor = rawLines.find(line =>
       line.includes('"visible_message_committed"'),
@@ -2158,12 +2182,13 @@ describe('file runtime log store plugin tool event validation', () => {
   });
   it('rejects a forged character row committed without its round and anchor', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-forged-character-row';
+    const conversationId = 'session-forged-character-row';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -2230,7 +2255,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('rejects a second user row appended into one turn', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-second-user-row',
+      'session-second-user-row.1',
     );
     const index = rawLines.findIndex(
       line =>
@@ -2263,7 +2288,7 @@ describe('file runtime log store plugin tool event validation', () => {
   });
   it('rejects conversation rows reordered out of their session sequence', async () => {
     const {paths, rawLines} = await committedTurnRawLines(
-      'session-reordered-rows',
+      'session-reordered-rows.1',
     );
     const commits = rawLines.filter(line =>
       line.includes('"visible_message_committed"'),
@@ -2289,7 +2314,7 @@ describe('file runtime log store plugin tool event validation', () => {
     // A killed process ends the log mid-turn: messages committed, no terminal
     // event. The next writer's turn implicitly closes it.
     const {paths} = await committedTurnRawLines(
-      'session-crash-open-turn',
+      'session-crash-open-turn.1',
       createMultilineVisibleReplyAdapter(),
     );
     const survivingLines = readFileSync(paths.rawEventsPath, 'utf8')
@@ -2346,12 +2371,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('keeps a session readable when a crash left its last record unfinished', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-torn-final-record';
+    const conversationId = 'session-torn-final-record';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -2427,12 +2453,13 @@ describe('file runtime log store plugin tool event validation', () => {
 
   it('anchors the committed user message when beforeRoleModelCall rejects the turn', async () => {
     const storeRoot = createStoreRoot();
-    const sessionId = 'session-before-call-rejected';
+    const conversationId = 'session-before-call-rejected';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -2505,18 +2532,18 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-health-rejected',
+      conversationId: 'session-health-rejected',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-health-rejected',
+      sessionId: 'session-health-rejected.1',
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const session = createSession({
       character: testCharacterProfile,
-      id: 'session-health-rejected',
+      id: 'session-health-rejected.1',
     });
 
     const result = await runLocalUserMessageEvent({
@@ -2580,18 +2607,18 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-health-degraded-rejected',
+      conversationId: 'session-health-degraded-rejected',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-health-degraded-rejected',
+      sessionId: 'session-health-degraded-rejected.1',
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const session = createSession({
       character: testCharacterProfile,
-      id: 'session-health-degraded-rejected',
+      id: 'session-health-degraded-rejected.1',
     });
 
     const result = await runLocalUserMessageEvent({
@@ -2661,18 +2688,18 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-tools',
+      conversationId: 'session-tools',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-tools',
+      sessionId: 'session-tools.1',
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId: 'session-tools',
+      sessionId: 'session-tools.1',
       ownerToken: fileLogStoreWriterOwnerToken(logStore),
     });
 
@@ -2680,7 +2707,7 @@ describe('file runtime log store plugin tool event validation', () => {
       appendTurnPrefix(logStore);
       appendModelRound(logStore, identity(), {
         round: 1,
-        sessionId: 'session-tools',
+        sessionId: 'session-tools.1',
         decision: {
           toolCalls: [{name: 'memory.search', input: {query: 'Mira'}}],
         },
@@ -2703,7 +2730,7 @@ describe('file runtime log store plugin tool event validation', () => {
       // Claiming completion over an unfinished call is a writer bug.
       expect(() =>
         logStore.appendRawEvent(
-          completedTerminalRecord(identity(), {sessionId: 'session-tools'}),
+          completedTerminalRecord(identity(), {sessionId: 'session-tools.1'}),
         ),
       ).toThrow(/started without finish/iu);
     } finally {
@@ -2717,19 +2744,19 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-tools-rejected',
+      conversationId: 'session-tools-rejected',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-tools-rejected',
+      sessionId: 'session-tools-rejected.1',
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const eventId = 'evt_tool_finish_log_failed';
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId: 'session-tools-rejected',
+      sessionId: 'session-tools-rejected.1',
       ownerToken: fileLogStoreWriterOwnerToken(logStore),
     });
 
@@ -2737,7 +2764,7 @@ describe('file runtime log store plugin tool event validation', () => {
       appendTurnPrefix(logStore, eventId);
       appendModelRound(logStore, identity(eventId), {
         round: 1,
-        sessionId: 'session-tools-rejected',
+        sessionId: 'session-tools-rejected.1',
         decision: {
           toolCalls: [{name: 'memory.write', input: {value: 'planned'}}],
         },
@@ -2777,18 +2804,18 @@ describe('file runtime log store plugin tool event validation', () => {
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-terminal-tools',
+      conversationId: 'session-terminal-tools',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-terminal-tools',
+      sessionId: 'session-terminal-tools.1',
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
     const writerLease = await acquireLocalRuntimeSessionWriterLease({
       storeRoot,
-      sessionId: 'session-terminal-tools',
+      sessionId: 'session-terminal-tools.1',
       ownerToken: fileLogStoreWriterOwnerToken(logStore),
     });
 
@@ -2796,13 +2823,13 @@ describe('file runtime log store plugin tool event validation', () => {
       appendTurnPrefix(logStore, 'evt_terminal_tool_ref');
       appendModelRound(logStore, identity('evt_terminal_tool_ref'), {
         round: 1,
-        sessionId: 'session-terminal-tools',
+        sessionId: 'session-terminal-tools.1',
         decision: {toolCalls: [{name: 'memory.search', input: {}}]},
       });
       expect(() =>
         logStore.appendRawEvent({
           ...completedTerminalRecord(identity('evt_terminal_tool_ref'), {
-            sessionId: 'session-terminal-tools',
+            sessionId: 'session-terminal-tools.1',
           }),
           toolCallIds: ['round-1.1.memory.search'],
         }),
@@ -2873,7 +2900,7 @@ async function persistedRoundsExhaustedRecords(
     storeRoot,
     characterId: 'mira',
   }).createSession({
-    sessionId,
+    conversationId: parseSegmentSessionId(sessionId).conversationId,
     createdAt: '2026-06-15T00:00:00.000Z',
   });
   const logStore = createFileRuntimeLogStore({
@@ -3249,7 +3276,10 @@ async function committedTurnRawLines(
   await createLocalRuntimeSessionStore({
     storeRoot,
     characterId: 'mira',
-  }).createSession({sessionId, createdAt: '2026-06-15T00:00:00.000Z'});
+  }).createSession({
+    conversationId: parseSegmentSessionId(sessionId).conversationId,
+    createdAt: '2026-06-15T00:00:00.000Z',
+  });
 
   const logStore = createFileRuntimeLogStore({
     storeRoot,

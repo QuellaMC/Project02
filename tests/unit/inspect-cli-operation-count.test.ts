@@ -22,7 +22,8 @@ vi.mock('../../src/runtime/storage/file-runtime-log-store.ts', () => ({
 describe('inspect CLI evidence indexing', () => {
   it('visits each stored raw event at most twice while projecting a turn', async () => {
     const storeRoot = createTestTempRoot('project02-inspect-visit-gate-');
-    const sessionId = 'session-inspect-visit-gate';
+    const conversationId = 'session-inspect-visit-gate';
+    const sessionId = `${conversationId}.1`;
     const identity = {
       eventId: 'evt_inspect_visit_gate',
       traceId: 'trace_inspect_visit_gate',
@@ -57,7 +58,7 @@ describe('inspect CLI evidence indexing', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: identity.createdAt,
     });
     runtimeLogStoreFixture.readSessionEvidence.mockReturnValue({

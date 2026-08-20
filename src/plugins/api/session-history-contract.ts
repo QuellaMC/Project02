@@ -3,7 +3,6 @@ import type {VisibleMessageRole} from '../../core/index.ts';
 export type RuntimePluginSessionHistorySummary = {
   readonly sessionId: string;
   readonly createdAt: string;
-  readonly updatedAt: string;
 };
 
 export type RuntimePluginSessionHistoryListing = {

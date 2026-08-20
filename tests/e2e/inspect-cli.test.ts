@@ -1,8 +1,6 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {
-  createContinuedDurableChatRuntime,
-  createDurableChatRuntime,
   ensureCharacterDataMarker,
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
@@ -34,6 +32,8 @@ import {
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
+import {deliverUserMessage, openConversation} from '../../src/runtime/index.ts';
+import {readCharacterConversation} from '../support/conversation-fixtures.ts';
 import {
   defaultRoleModelProviderCapabilities,
   type RoleModelAdapter,
@@ -67,17 +67,17 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-inspect',
+      conversationId: 'session-inspect',
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
       boundCharacter: testCharacterProfile,
       characterId: testCharacterProfile.id,
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      sessionId: 'session-inspect',
+      sessionId: 'session-inspect.1',
     });
     const session = createSession({
-      id: 'session-inspect',
+      id: 'session-inspect.1',
       character: testCharacterProfile,
     });
 
@@ -94,7 +94,7 @@ describe('inspect CLI plugin evidence', () => {
       logStore,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot: characterDataDirPath(storeRoot, 'mira'),
-        sessionId: 'session-inspect',
+        sessionId: 'session-inspect.1',
         sessionIdentity: session,
       }),
       roleModelAdapter: createPatchThenReplyAdapter(),
@@ -114,7 +114,7 @@ describe('inspect CLI plugin evidence', () => {
       logStore,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot: characterDataDirPath(storeRoot, 'mira'),
-        sessionId: 'session-inspect',
+        sessionId: 'session-inspect.1',
         sessionIdentity: session,
       }),
       roleModelAdapter: createSequencedAdapter([
@@ -125,7 +125,7 @@ describe('inspect CLI plugin evidence', () => {
 
     let stdout = '';
     const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--session', 'session-inspect'],
+      ['--store', storeRoot, '--session', 'session-inspect.1'],
       {
         stdout: collect(chunk => {
           stdout += chunk;
@@ -330,47 +330,157 @@ describe('inspect CLI plugin evidence', () => {
     });
   });
 
-  it('shows how a continued session opened and the summary its turns saw', async () => {
-    const storeRoot = createTestTempRoot('project02-inspect-continued-');
-    const first = await createDurableChatRuntime({
+  it('lists conversations and shows one thread with its segments', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-conversations-');
+    const conversation = await openConversation({
       homeRoot: storeRoot,
       character: testCharacterProfile,
-      newSessionId: 'first',
-    });
-    await first.writerLease.release();
-    const continued = await createContinuedDurableChatRuntime({
-      homeRoot: storeRoot,
-      character: testCharacterProfile,
-      plan: {
-        continuedFrom: {sessionId: 'first', lastEventId: 'evt_first_last'},
-        summary: 'We talked about the garden.',
-        summarizedTurnCount: 2,
-        carriedTurns: [],
-        summarizer: {status: 'fallback', reason: 'no summariser'},
-      },
     });
 
     try {
-      const result = await runLocalUserMessageEvent({
-        event: createUserMessageRuntimeEvent('and the roses?'),
-        session: continued.session,
-        logStore: continued.logStore,
+      const delivery = await deliverUserMessage({
+        conversation,
+        line: 'hello',
         pluginHost: createDefaultProject02PluginHost({
           storeRoot: characterDataDirPath(storeRoot, 'mira'),
-          sessionId: continued.session.id,
-          sessionIdentity: continued.session,
+          sessionId: conversation.session.id,
+          sessionIdentity: conversation.session,
         }),
         roleModelAdapter: createPatchThenReplyAdapter(),
       });
 
-      expect(result.status).toBe('completed');
+      expect(delivery.status).toBe('completed');
     } finally {
-      await continued.writerLease.release();
+      await conversation.close();
     }
+
+    let listStdout = '';
+    const listExitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--conversations'],
+      {
+        stdout: collect(chunk => {
+          listStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+      },
+    );
+    const listOutput = JSON.parse(listStdout) as {
+      readonly conversations: readonly {
+        readonly id: string;
+        readonly participants: readonly {
+          readonly kind: string;
+          readonly id: string;
+        }[];
+      }[];
+    };
+
+    expect(listExitCode).toBe(0);
+    expect(listOutput.conversations).toHaveLength(1);
+    expect(
+      listOutput.conversations[0]?.participants.map(
+        participant => `${participant.kind}:${participant.id}`,
+      ),
+    ).toEqual(['character:mira', 'user:local-user']);
+
+    const conversationId = listOutput.conversations[0]?.id ?? '';
+    let threadStdout = '';
+    const threadExitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--conversation', conversationId],
+      {
+        stdout: collect(chunk => {
+          threadStdout += chunk;
+        }),
+        stderr: collect(() => {}),
+      },
+    );
+    const threadOutput = JSON.parse(threadStdout) as {
+      readonly conversation: {readonly id: string};
+      readonly sessions: readonly {readonly sessionId: string}[];
+    };
+
+    expect(threadExitCode).toBe(0);
+    expect(threadOutput.conversation.id).toBe(conversationId);
+    expect(threadOutput.sessions.map(metadata => metadata.sessionId)).toEqual([
+      `${conversationId}.1`,
+    ]);
+
+    let missingStderr = '';
+    const missingExitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--conversation', 'absent'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          missingStderr += chunk;
+        }),
+      },
+    );
+
+    expect(missingExitCode).toBe(1);
+    expect(missingStderr).toContain('does not exist');
+
+    let conflictStderr = '';
+    const conflictExitCode = await runInspectCliFromArgs(
+      ['--store', storeRoot, '--conversations', '--sessions'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          conflictStderr += chunk;
+        }),
+      },
+    );
+
+    expect(conflictExitCode).toBe(1);
+    expect(conflictStderr).toContain('exactly one of');
+  });
+
+  it('shows how a continued session opened and the summary its turns saw', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-continued-');
+    const conversation = await openConversation({
+      homeRoot: storeRoot,
+      character: testCharacterProfile,
+    });
+
+    try {
+      // A 100-token window rotates after the third completed turn; the
+      // fourth turn already runs in the continued segment and replays the
+      // mechanical summary (no summariser on this adapter).
+      for (const line of ['one', 'two', 'three', 'four']) {
+        const delivery = await deliverUserMessage({
+          conversation,
+          line,
+          pluginHost: createDefaultProject02PluginHost({
+            storeRoot: characterDataDirPath(storeRoot, 'mira'),
+            sessionId: conversation.session.id,
+            sessionIdentity: conversation.session,
+          }),
+          roleModelAdapter: createPatchThenReplyAdapter(),
+          contextWindowTokens: 100,
+        });
+
+        expect(delivery.status).toBe('completed');
+      }
+    } finally {
+      await conversation.close();
+    }
+
+    const dm = await readCharacterConversation(storeRoot);
+    const conversationId = dm.conversation.id;
+    const latestSegment = Number(dm.latestSessionId.split('.').at(-1));
+
+    // Inspect a continued segment that also ran a turn: the one before the
+    // latest, since the final rotation may have left the newest one empty.
+    const inspectedSegment = latestSegment - 1;
+
+    expect(inspectedSegment).toBeGreaterThan(1);
 
     let stdout = '';
     const exitCode = await runInspectCliFromArgs(
-      ['--store', storeRoot, '--session', 'first.2'],
+      [
+        '--store',
+        storeRoot,
+        '--session',
+        `${conversationId}.${String(inspectedSegment)}`,
+      ],
       {
         stdout: collect(chunk => {
           stdout += chunk;
@@ -379,7 +489,6 @@ describe('inspect CLI plugin evidence', () => {
       },
     );
     const output = JSON.parse(stdout) as {
-      readonly session: {readonly continuedFrom?: string};
       readonly continuation?: {
         readonly summary: string;
         readonly continuedFrom: {readonly sessionId: string};
@@ -395,15 +504,17 @@ describe('inspect CLI plugin evidence', () => {
     };
 
     expect(exitCode).toBe(0);
-    expect(output.session.continuedFrom).toBe('first');
     expect(output.continuation).toMatchObject({
-      summary: 'We talked about the garden.',
-      continuedFrom: {sessionId: 'first'},
+      continuedFrom: {
+        sessionId: `${conversationId}.${String(inspectedSegment - 1)}`,
+      },
       summarizer: {status: 'fallback'},
     });
+    expect(output.continuation?.summary).toContain('Earlier conversation');
     expect(
-      output.turns[0]?.modelRounds[0]?.roleModelEvidence.input?.contextSummary,
-    ).toBe('We talked about the garden.');
+      output.turns.at(-1)?.modelRounds[0]?.roleModelEvidence.input
+        ?.contextSummary,
+    ).toContain('Earlier conversation');
   });
 
   it('shows runtime config source and configured plugin activation', async () => {
@@ -424,7 +535,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: dataRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-config',
+      conversationId: 'session-config',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
@@ -501,7 +612,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-cwd-config',
+      conversationId: 'session-cwd-config',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
@@ -531,7 +642,7 @@ describe('inspect CLI plugin evidence', () => {
         });
         expect(output.sessions).toContainEqual(
           expect.objectContaining({
-            sessionId: 'session-cwd-config',
+            sessionId: 'session-cwd-config.1',
           }),
         );
       },
@@ -560,7 +671,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-selected-store',
+      conversationId: 'session-selected-store',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
@@ -591,7 +702,7 @@ describe('inspect CLI plugin evidence', () => {
         });
         expect(output.sessions).toContainEqual(
           expect.objectContaining({
-            sessionId: 'session-selected-store',
+            sessionId: 'session-selected-store.1',
           }),
         );
       },
@@ -611,7 +722,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-selected-before-cwd-dotenv',
+      conversationId: 'session-selected-before-cwd-dotenv',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
@@ -645,7 +756,7 @@ describe('inspect CLI plugin evidence', () => {
         });
         expect(output.sessions).toContainEqual(
           expect.objectContaining({
-            sessionId: 'session-selected-before-cwd-dotenv',
+            sessionId: 'session-selected-before-cwd-dotenv.1',
           }),
         );
       },
@@ -676,7 +787,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(selectedStoreRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-env-selected-before-cwd-dotenv',
+      conversationId: 'session-env-selected-before-cwd-dotenv',
       createdAt: '2026-06-22T00:00:00.000Z',
     });
 
@@ -709,7 +820,7 @@ describe('inspect CLI plugin evidence', () => {
         });
         expect(output.sessions).toContainEqual(
           expect.objectContaining({
-            sessionId: 'session-env-selected-before-cwd-dotenv',
+            sessionId: 'session-env-selected-before-cwd-dotenv.1',
           }),
         );
       },
@@ -733,7 +844,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-custom-factory',
+      conversationId: 'session-custom-factory',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 
@@ -1241,7 +1352,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-activation-before-env',
+      conversationId: 'session-activation-before-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
     mkdirSync(join(storeRoot, '.env'));
@@ -1310,7 +1421,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-mixed-activation-env',
+      conversationId: 'session-mixed-activation-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
     writeFileSync(
@@ -1380,7 +1491,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-close',
+      conversationId: 'session-close',
       createdAt: '2026-06-22T00:00:00.000Z',
     });
 
@@ -1413,7 +1524,7 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(output.sessions).toContainEqual(
-      expect.objectContaining({sessionId: 'session-close'}),
+      expect.objectContaining({sessionId: 'session-close.1'}),
     );
     expect(output.plugins).toContainEqual(
       expect.objectContaining({
@@ -1447,7 +1558,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'existing-session',
+      conversationId: 'existing-session',
       createdAt: '2026-06-22T00:00:00.000Z',
     });
 
@@ -1549,7 +1660,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'session-env',
+      conversationId: 'session-env',
       createdAt: '2026-06-21T00:00:00.000Z',
     });
 

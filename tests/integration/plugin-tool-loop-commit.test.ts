@@ -54,7 +54,8 @@ import {
 import {requiredDottedConfigPlugin} from '../support/runtime-config-fixtures.ts';
 
 async function createConfigEffectTestFixture(label: string) {
-  const sessionId = `session-config-effect-${label}`;
+  const conversationId = `session-config-effect-${label}`;
+  const sessionId = `${conversationId}.1`;
   const homeRoot = createTestTempRoot(`project02-config-effect-${label}-`);
   const storeRoot = characterDataDirPath(homeRoot, testCharacterProfile.id);
 
@@ -62,7 +63,7 @@ async function createConfigEffectTestFixture(label: string) {
     storeRoot,
     characterId: testCharacterProfile.id,
   }).createSession({
-    sessionId,
+    conversationId,
     createdAt: '2026-07-16T00:00:00.000Z',
   });
 
@@ -668,14 +669,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('commits a prepared Character State patch when terminal append throws after persisting', async () => {
-    const sessionId = 'session-character-state-terminal-append-then-throw';
+    const conversationId = 'session-character-state-terminal-append-then-throw';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
@@ -764,14 +766,15 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('keeps durable visible-reply evidence valid when terminal raw event append fails', async () => {
-    const sessionId = 'session-terminal-append-visible-reply-evidence';
+    const conversationId = 'session-terminal-append-visible-reply-evidence';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 

@@ -84,13 +84,14 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('commits interim visible_reply durably before executable tools run', async () => {
-    const sessionId = 'session-interim-visible-reload';
+    const conversationId = 'session-interim-visible-reload';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
     const session = createSession({
@@ -419,9 +420,10 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('keeps durable final visible_reply committed when progress callback fails', async () => {
-    const sessionId = 'session-final-progress-fails';
+    const conversationId = 'session-final-progress-fails';
+    const sessionId = `${conversationId}.1`;
     const {session, logStore, storeRoot} =
-      await createDurableCharacterStateHarness(sessionId);
+      await createDurableCharacterStateHarness(conversationId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [

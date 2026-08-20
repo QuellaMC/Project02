@@ -27,11 +27,6 @@ export {
   type LocalRuntimeConversationStore,
 } from './conversation-store.ts';
 export {
-  createContinuedDurableChatRuntime,
-  createDurableChatRuntime,
-  type DurableChatRuntime,
-} from './durable-session-bootstrap.ts';
-export {
   assertCharacterDataDirReadable,
   ensureCharacterDataDir,
   ensureCharacterDataMarker,
@@ -42,7 +37,6 @@ export {
   ensureInitializedProject02Home,
   project02HomeCreationIsNew,
 } from './home.ts';
-export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
 export {createLocalRuntimeSessionHistoryFeed} from './session-history-feed.ts';
 export {
   createRuntimePluginDatabaseOpener,

@@ -6,8 +6,6 @@ import {isOneOf} from '../../shared/one-of.ts';
 
 export const defaultProject02HomeRoot = '.project02';
 
-const defaultLocalRuntimeSessionId = 'local-session';
-
 // Bumped whenever a persisted shape changes; only stores written at this
 // exact version are readable, and older ones fail closed by version.
 export const localRuntimeStorageSchemaVersion = 13;
@@ -108,7 +106,7 @@ export type LocalRuntimeStorageLayoutOptions = {
 
 export type LocalRuntimeSessionPathsOptions =
   LocalRuntimeStorageLayoutOptions & {
-    readonly sessionId?: string;
+    readonly sessionId: string;
   };
 
 export type LocalRuntimePluginPathsOptions = LocalRuntimeSessionPathsOptions & {
@@ -145,19 +143,19 @@ export type CreateLocalRuntimeStorageSchemaMarkerOptions =
       readonly materializedCharacterPackageVersion?: string;
     };
 
+/**
+ * One character's participation in one conversation: the id is
+ * "<conversationId>.<segment>", so the binding has a single source and the
+ * previous segment is always the same id with the segment before it.
+ */
 export type LocalRuntimeSessionMetadata = {
   readonly sessionId: string;
   readonly createdAt: string;
-  readonly updatedAt: string;
-  /** The session this one continues, when a compaction opened it. */
-  readonly continuedFrom?: string;
 };
 
 export type CreateLocalRuntimeSessionMetadataOptions = {
-  readonly sessionId?: string;
+  readonly sessionId: string;
   readonly createdAt: string;
-  readonly updatedAt?: string;
-  readonly continuedFrom?: string;
 };
 
 const configFileName = 'config.json';
@@ -401,10 +399,8 @@ export function parseSegmentSessionId(sessionId: string): {
   });
 }
 
-export function normalizeLocalRuntimeSessionId(
-  sessionId: string | undefined,
-): string {
-  const normalizedSessionId = sessionId?.trim() ?? defaultLocalRuntimeSessionId;
+export function normalizeLocalRuntimeSessionId(sessionId: string): string {
+  const normalizedSessionId = sessionId.trim();
 
   if (normalizedSessionId.length === 0) {
     throw new LocalRuntimeStorageContractError(
@@ -444,31 +440,15 @@ export function createLocalRuntimeSessionMetadata(
   options: CreateLocalRuntimeSessionMetadataOptions,
 ): LocalRuntimeSessionMetadata {
   const sessionId = normalizeLocalRuntimeSessionId(options.sessionId);
-  const continuedFrom =
-    options.continuedFrom === undefined
-      ? undefined
-      : normalizeLocalRuntimeSessionId(options.continuedFrom);
-
-  if (continuedFrom === sessionId) {
-    throw new LocalRuntimeStorageContractError(
-      'malformed_record',
-      'A session cannot continue itself.',
-    );
-  }
+  const segment = parseSegmentSessionId(sessionId);
 
   return Object.freeze({
-    sessionId,
+    sessionId: segmentSessionId(segment.conversationId, segment.segment),
     createdAt: requiredCanonicalTimestamp(
       options.createdAt,
       'createdAt',
       'malformed_record',
     ),
-    updatedAt: requiredCanonicalTimestamp(
-      options.updatedAt ?? options.createdAt,
-      'updatedAt',
-      'malformed_record',
-    ),
-    ...(continuedFrom === undefined ? {} : {continuedFrom}),
   } satisfies LocalRuntimeSessionMetadata);
 }
 

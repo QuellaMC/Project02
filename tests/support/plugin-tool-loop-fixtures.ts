@@ -537,18 +537,20 @@ export function transactionIdentityFromContext(context: {
   };
 }
 
-export async function createDurableCharacterStateHarness(sessionId: string) {
+export async function createDurableCharacterStateHarness(
+  conversationId: string,
+) {
   const storeRoot = createTestTempRoot('project02-plugin-loop-');
-
-  await createLocalRuntimeSessionStore({
+  const {sessionId} = await createLocalRuntimeSessionStore({
     storeRoot,
     characterId: testCharacterProfile.id,
   }).createSession({
-    sessionId,
+    conversationId,
     createdAt: '2026-06-15T00:00:00.000Z',
   });
 
   return {
+    sessionId,
     storeRoot,
     session: createSession({
       id: sessionId,

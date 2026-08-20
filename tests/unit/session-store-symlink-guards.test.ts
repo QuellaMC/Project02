@@ -27,7 +27,7 @@ describe('local runtime session store symlink guards', () => {
     });
 
     await store.createSession({
-      sessionId: 'session-00',
+      conversationId: 'session-00',
       createdAt: '2026-08-14T00:00:00.000Z',
     });
     writeFileSync(join(store.layout.sessionsRoot, '.DS_Store'), 'finder');
@@ -35,11 +35,11 @@ describe('local runtime session store symlink guards', () => {
     // Browsing the store in Finder is an ordinary condition, not
     // corruption: listing and reading must keep working.
     await expect(store.listSessions()).resolves.toHaveLength(1);
-    await expect(store.readSession('session-00')).resolves.toBeDefined();
+    await expect(store.readSession('session-00.1')).resolves.toBeDefined();
 
     // A stray metadata file alone must not read as durable evidence
     // demanding a session catalog.
-    rmSync(join(store.layout.sessionsRoot, 'session-00'), {
+    rmSync(join(store.layout.sessionsRoot, 'session-00.1'), {
       force: true,
       recursive: true,
     });
@@ -56,12 +56,12 @@ describe('local runtime session store symlink guards', () => {
     });
 
     await store.createSession({
-      sessionId: 'session-00',
+      conversationId: 'session-00',
       createdAt: '2026-08-14T00:00:00.000Z',
     });
     rmSync(store.layout.sessionCatalogPath, {force: true});
 
-    const orphan = join(store.layout.sessionsRoot, 'session-00');
+    const orphan = join(store.layout.sessionsRoot, 'session-00.1');
 
     for (const name of listDirectoryNamesSync(orphan)) {
       rmSync(join(orphan, name), {force: true, recursive: true});
@@ -86,15 +86,15 @@ describe('local runtime session store symlink guards', () => {
     });
 
     await store.createSession({
-      sessionId: 'session-00',
+      conversationId: 'session-00',
       createdAt: '2026-07-16T00:00:00.000Z',
     });
 
-    const sessionRoot = join(store.layout.sessionsRoot, 'session-00');
+    const sessionRoot = join(store.layout.sessionsRoot, 'session-00.1');
     renameSync(sessionRoot, join(root, 'parked'));
     symlinkSync(outside, sessionRoot, 'dir');
 
-    await expect(store.readSession('session-00')).rejects.toThrow(
+    await expect(store.readSession('session-00.1')).rejects.toThrow(
       /must be a real directory/,
     );
   });
@@ -115,7 +115,7 @@ describe('local runtime session store symlink guards', () => {
 
     await expect(
       store.createSession({
-        sessionId: 'session-00',
+        conversationId: 'session-00',
         createdAt: '2026-07-16T00:00:00.000Z',
       }),
     ).rejects.toThrow(/must be a real directory/);
@@ -142,7 +142,7 @@ describe('local runtime session store symlink guards', () => {
 
     await expect(
       store.createSession({
-        sessionId: 'session-00',
+        conversationId: 'session-00',
         createdAt: '2026-07-16T00:00:00.000Z',
       }),
     ).rejects.toThrow(/must be a real directory/);
@@ -163,13 +163,13 @@ describe('local runtime session store symlink guards', () => {
     });
 
     await store.createSession({
-      sessionId: 'session-00',
+      conversationId: 'session-00',
       createdAt: '2026-07-16T00:00:00.000Z',
     });
 
     const logStore = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'session-00',
+      sessionId: 'session-00.1',
       characterId: 'mira',
       boundCharacter: testCharacterProfile,
     });
@@ -177,7 +177,7 @@ describe('local runtime session store symlink guards', () => {
     // First access caches session identity; realness is not settled with it.
     expect(logStore.rawEvents()).toEqual([]);
 
-    const sessionRoot = join(store.layout.sessionsRoot, 'session-00');
+    const sessionRoot = join(store.layout.sessionsRoot, 'session-00.1');
     renameSync(sessionRoot, join(root, 'parked'));
     symlinkSync(outside, sessionRoot, 'dir');
 

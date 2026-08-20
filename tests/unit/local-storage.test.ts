@@ -29,7 +29,7 @@ describe('local storage plugin schema', () => {
   it('uses scoped schema version 13 and no top-level character state path', () => {
     expect(localRuntimeStorageSchemaVersion).toBe(13);
     expect(
-      createLocalRuntimeSessionPaths({storeRoot: 'store'}),
+      createLocalRuntimeSessionPaths({storeRoot: 'store', sessionId: 'talk.1'}),
     ).not.toHaveProperty('characterStatePath');
   });
 
