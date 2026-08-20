@@ -10,7 +10,7 @@ import {describe, expect, it} from 'vitest';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {jsonArray, jsonRecord} from '../support/json-view.ts';
 import {createTestPluginContext} from '../support/role-model-loop-fixtures.ts';
-import {writeDurableConversationSession} from '../support/runtime-log-fixtures.ts';
+import {writeDurableSession} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 import {existsSync} from 'node:fs';
@@ -237,7 +237,7 @@ describe('session history plugin through the host', () => {
     // With the plugin disabled the hook never runs, so nothing materializes.
     const bareRoot = createTestTempRoot('project02-history-bare-');
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot: bareRoot,
       sessionId: 'alpha',
       exchanges: [['hi', 'ho']],
@@ -407,7 +407,7 @@ async function createHistoryHost(): Promise<{
 }> {
   const storeRoot = createTestTempRoot('project02-history-plugin-');
 
-  await writeDurableConversationSession({
+  await writeDurableSession({
     storeRoot,
     sessionId: 'alpha',
     exchanges: [
@@ -418,7 +418,7 @@ async function createHistoryHost(): Promise<{
       ['and how do we persist that?', 'In the JSONL log, one commit per line.'],
     ],
   });
-  await writeDurableConversationSession({
+  await writeDurableSession({
     storeRoot,
     sessionId: 'beta',
     exchanges: [['how is the weather?', 'Sunny.']],

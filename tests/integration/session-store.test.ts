@@ -14,7 +14,7 @@ import {afterEach, describe, expect, it} from 'vitest';
 
 import {
   ConversationRehydrationError,
-  createConversationSession,
+  createSession,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
@@ -337,7 +337,7 @@ describe('local runtime session store', () => {
     const logStore = createRuntimeLogStore({
       boundCharacter: testCharacterProfile,
     });
-    const originalSession = createConversationSession({
+    const originalSession = createSession({
       character: testCharacterProfile,
       id: 'mira-local',
     });
@@ -367,7 +367,7 @@ describe('local runtime session store', () => {
       sessionId: 'mira-local',
     });
 
-    const rehydrated = await store.rehydrateConversationSession('mira-local');
+    const rehydrated = await store.rehydrateSession('mira-local');
 
     expect(rehydrated.visibleTranscript).toEqual([
       {
@@ -418,7 +418,7 @@ describe('local runtime session store', () => {
       sessionId: 'mira-local',
     });
 
-    const rehydrated = await store.rehydrateConversationSession('mira-local');
+    const rehydrated = await store.rehydrateSession('mira-local');
 
     expect(rehydrated.visibleTranscript.map(message => message.text)).toEqual([
       'first',
@@ -484,8 +484,8 @@ describe('local runtime session store', () => {
       sessionId: 'beta',
     });
 
-    const alpha = await store.rehydrateConversationSession('alpha');
-    const beta = await store.rehydrateConversationSession('beta');
+    const alpha = await store.rehydrateSession('alpha');
+    const beta = await store.rehydrateSession('beta');
 
     appendUserMessage(alpha, 'second');
     const alphaReply = appendCharacterMessage(alpha, {text: 'alpha again'});
@@ -532,7 +532,7 @@ describe('local runtime session store', () => {
       sessionId: 'alpha',
     });
 
-    await expect(store.rehydrateConversationSession('alpha')).rejects.toThrow(
+    await expect(store.rehydrateSession('alpha')).rejects.toThrow(
       ConversationRehydrationError,
     );
   });
@@ -549,7 +549,7 @@ describe('local runtime session store', () => {
       sessionId: 'alpha',
     });
 
-    await expect(store.rehydrateConversationSession('alpha')).rejects.toThrow(
+    await expect(store.rehydrateSession('alpha')).rejects.toThrow(
       LocalRuntimeSessionStoreError,
     );
   });

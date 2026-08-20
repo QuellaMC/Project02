@@ -1,6 +1,6 @@
 import type {RawEventLogRecordInput} from '../../src/runtime/evidence/records.ts';
 import {testCharacterProfile} from './character-fixtures.ts';
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {characterStatePluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
@@ -550,7 +550,7 @@ export async function createDurableCharacterStateHarness(sessionId: string) {
 
   return {
     storeRoot,
-    session: createConversationSession({
+    session: createSession({
       id: sessionId,
       character: testCharacterProfile,
     }),

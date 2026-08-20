@@ -1,11 +1,11 @@
-import type {ConversationSession} from '../../core/index.ts';
+import type {Session} from '../../core/index.ts';
 import type {LocalRuntimeTurnProgressEvent} from '../../runtime/index.ts';
 import type {ChatTraceSummary} from '../../runtime/evidence/index.ts';
 
 /** What the person sees of a turn as it runs: replies, tool activity, trace. */
 export function writeRuntimeProgress(
   stdout: NodeJS.WritableStream,
-  session: ConversationSession,
+  session: Session,
   progressEvent: LocalRuntimeTurnProgressEvent,
 ): void {
   if (progressEvent.kind === 'visible_reply') {

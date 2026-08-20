@@ -2,8 +2,8 @@ import {createInterface} from 'node:readline';
 
 import {
   type CharacterProfile,
-  type ConversationSession,
-  createConversationSession,
+  type Session,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
   RuntimeEventInputError,
@@ -98,7 +98,7 @@ type ChatCliOptions = {
   readonly traceMode?: boolean;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost?: RuntimePluginHost;
-  readonly session?: ConversationSession;
+  readonly session?: Session;
   readonly characterProfile?: CharacterProfile;
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
@@ -144,7 +144,7 @@ type ChatToolConfirmationBridge = {
 
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 
-function promptTextFor(session: ConversationSession): string {
+function promptTextFor(session: Session): string {
   return `${session.userSpeaker.displayName}: `;
 }
 const startupFailurePluginCleanupMessage =
@@ -531,7 +531,7 @@ async function runChatCliAfterConfiguredHost(options: {
 
 async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
-  readonly session: ConversationSession;
+  readonly session: Session;
 }): Promise<void> {
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
@@ -645,7 +645,7 @@ async function runChatCliWithActiveWriter(
 ): Promise<number> {
   const session =
     options.session ??
-    createConversationSession({
+    createSession({
       character: requiredChatCharacterProfile(options.characterProfile),
       ...(options.userDisplayName === undefined
         ? {}
@@ -743,7 +743,7 @@ type ChatInputLineResult =
 
 async function handleChatInputLine(options: {
   readonly options: RunChatCliOptions;
-  readonly session: ConversationSession;
+  readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly pluginHost: RuntimePluginHost;
   readonly line: string;
@@ -831,7 +831,7 @@ function writeChatInputError(
 }
 
 type HandleUserMessageThroughRuntimeOptions = {
-  readonly session: ConversationSession;
+  readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly line: string;
   readonly roleModelAdapter?: RoleModelAdapter;

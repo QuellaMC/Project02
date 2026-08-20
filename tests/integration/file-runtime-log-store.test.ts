@@ -16,7 +16,7 @@ import {
 } from '../../src/runtime/storage/session-store.ts';
 import {createLocalRuntimeMutationLockOwnerToken} from '../../src/runtime/storage/mutation-lock.ts';
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
@@ -822,7 +822,7 @@ describe('file runtime log store plugin tool event validation', () => {
         'hello',
         identity('evt_malformed_provider_exchange_rejection'),
       ),
-      session: createConversationSession({
+      session: createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),
@@ -912,7 +912,7 @@ describe('file runtime log store plugin tool event validation', () => {
         'hello',
         identity('evt_provider_exchange_credential_redaction'),
       ),
-      session: createConversationSession({
+      session: createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),
@@ -989,7 +989,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'session-multiline-visible',
     });
@@ -1030,7 +1030,7 @@ describe('file runtime log store plugin tool event validation', () => {
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character,
     });
@@ -1096,7 +1096,7 @@ describe('file runtime log store plugin tool event validation', () => {
           };
         },
       },
-    }).rehydrateConversationSession(sessionId);
+    }).rehydrateSession(sessionId);
 
     expect(rehydrated.character).toEqual({
       id: 'nova',
@@ -1204,7 +1204,7 @@ describe('file runtime log store plugin tool event validation', () => {
         record.visibleMessage?.role === 'character',
       message: appendFailureMessage,
     });
-    const failedSession = createConversationSession({
+    const failedSession = createSession({
       id: sessionId,
       character,
     });
@@ -1244,7 +1244,7 @@ describe('file runtime log store plugin tool event validation', () => {
           'try again',
           identity('evt_custom_character_raw_retry'),
         ),
-        session: createConversationSession({
+        session: createSession({
           id: sessionId,
           character,
           visibleTranscript: reopened.conversationMessages(),
@@ -1282,7 +1282,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: sessionId,
     });
@@ -2047,7 +2047,7 @@ describe('file runtime log store plugin tool event validation', () => {
         record.visibleMessage?.role === 'character',
       message: 'visible reply raw append failed',
     });
-    const session = createConversationSession({id: sessionId, character});
+    const session = createSession({id: sessionId, character});
 
     await expect(
       runLocalUserMessageEvent({
@@ -2088,7 +2088,7 @@ describe('file runtime log store plugin tool event validation', () => {
           'after restart',
           identity('evt_lag_3'),
         ),
-        session: createConversationSession({
+        session: createSession({
           id: sessionId,
           character,
           visibleTranscript: underlying.conversationMessages(),
@@ -2172,7 +2172,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: sessionId,
     });
@@ -2316,7 +2316,7 @@ describe('file runtime log store plugin tool event validation', () => {
       reopened.conversationMessages().map(message => message.role),
     ).toEqual(['user', 'character']);
 
-    const session = createConversationSession({
+    const session = createSession({
       id: paths.sessionId,
       character: testCharacterProfile,
       visibleTranscript: reopened.conversationMessages(),
@@ -2363,7 +2363,7 @@ describe('file runtime log store plugin tool event validation', () => {
 
     await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent('hello', identity('evt_torn_first')),
-      session: createConversationSession({
+      session: createSession({
         character: testCharacterProfile,
         id: sessionId,
       }),
@@ -2404,7 +2404,7 @@ describe('file runtime log store plugin tool event validation', () => {
         'still there?',
         identity('evt_after_torn'),
       ),
-      session: createConversationSession({
+      session: createSession({
         character: testCharacterProfile,
         id: sessionId,
         visibleTranscript: reopened.conversationMessages(),
@@ -2441,7 +2441,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: sessionId,
     });
@@ -2472,7 +2472,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const followupSession = createConversationSession({
+    const followupSession = createSession({
       character: testCharacterProfile,
       id: sessionId,
       visibleTranscript: reopened.conversationMessages(),
@@ -2514,7 +2514,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'session-health-rejected',
     });
@@ -2589,7 +2589,7 @@ describe('file runtime log store plugin tool event validation', () => {
       characterId: testCharacterProfile.id,
       boundCharacter: testCharacterProfile,
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'session-health-degraded-rejected',
     });
@@ -2887,7 +2887,7 @@ async function persistedRoundsExhaustedRecords(
       'try unknown',
       identity(`evt_${sessionId}`),
     ),
-    session: createConversationSession({
+    session: createSession({
       id: sessionId,
       character: testCharacterProfile,
     }),
@@ -3260,7 +3260,7 @@ async function committedTurnRawLines(
 
   await runLocalUserMessageEvent({
     event: createUserMessageRuntimeEvent('hello', identity(`evt_${sessionId}`)),
-    session: createConversationSession({
+    session: createSession({
       character: testCharacterProfile,
       id: sessionId,
     }),

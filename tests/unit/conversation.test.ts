@@ -4,7 +4,7 @@ import {describe, expect, it} from 'vitest';
 import {
   CharacterInputError,
   CharacterReplyValidationError,
-  createConversationSession,
+  createSession,
   createUserSpeaker,
   maxSpeakerDisplayNameLength,
   ConversationRehydrationError,
@@ -17,7 +17,7 @@ import {
 
 describe('conversation core', () => {
   it('creates a local session for the provided character with an empty visible transcript', () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
 
@@ -31,7 +31,7 @@ describe('conversation core', () => {
   });
 
   it('appends normalized messages one at a time with sequential role-independent IDs', () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
 
@@ -58,7 +58,7 @@ describe('conversation core', () => {
   });
 
   it('commits several character messages for one user message in emission order', () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
 
@@ -82,7 +82,7 @@ describe('conversation core', () => {
   });
 
   it('allows multi-line character replies while keeping user input single-line', () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
 
@@ -101,7 +101,7 @@ describe('conversation core', () => {
   });
 
   it('exposes the visible transcript as an immutable snapshot of committed messages', () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
 
@@ -136,7 +136,7 @@ describe('conversation core', () => {
   });
 
   it('rejects invalid user input and invalid character replies without changing the transcript', () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
 
@@ -152,7 +152,7 @@ describe('conversation core', () => {
 
   it('restores transcripts of any role shape, including consecutive same-role and trailing messages', () => {
     // Commit-as-emitted histories are not user/character pairs.
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       visibleTranscript: [
         {
@@ -191,7 +191,7 @@ describe('conversation core', () => {
 
   it('rejects restored visible messages from a different session before creating a transcript', () => {
     expect(() =>
-      createConversationSession({
+      createSession({
         character: testCharacterProfile,
         id: 'selected-session',
         visibleTranscript: [
@@ -209,7 +209,7 @@ describe('conversation core', () => {
 
   it('rejects restored visible messages that would make the next message ID ambiguous', () => {
     expect(() =>
-      createConversationSession({
+      createSession({
         character: testCharacterProfile,
         visibleTranscript: [
           {
@@ -233,7 +233,7 @@ describe('conversation core', () => {
 
   it('rejects restored messages whose speaker metadata does not match the declared role', () => {
     expect(() =>
-      createConversationSession({
+      createSession({
         character: testCharacterProfile,
         visibleTranscript: [
           {

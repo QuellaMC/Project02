@@ -1,7 +1,7 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
 } from '../../src/core/index.ts';
 import {
@@ -35,7 +35,7 @@ import {
 
 describe('plugin-driven Character State tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -454,7 +454,7 @@ describe('plugin-driven Character State tool loop', () => {
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -770,7 +770,7 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('isolates default in-memory Character State by session object', async () => {
-    const firstSession = createConversationSession({
+    const firstSession = createSession({
       character: testCharacterProfile,
     });
     const firstLogStore = createRuntimeLogStore();
@@ -804,7 +804,7 @@ describe('plugin-driven Character State tool loop', () => {
       roleModelAdapter: firstAdapter,
     });
 
-    const secondSession = createConversationSession({
+    const secondSession = createSession({
       character: testCharacterProfile,
     });
     const secondLogStore = createRuntimeLogStore();

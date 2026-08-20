@@ -2,12 +2,12 @@ import {
   appendCommittedMessage,
   createCharacterMessage,
   createUserMessage,
-  type ConversationSession,
+  type Session,
   type VisibleMessage,
 } from '../../src/core/index.ts';
 
 export function appendUserMessage(
-  session: ConversationSession,
+  session: Session,
   text: string | undefined,
 ): VisibleMessage {
   const message = createUserMessage(session, text);
@@ -17,7 +17,7 @@ export function appendUserMessage(
 }
 
 export function appendCharacterMessage(
-  session: ConversationSession,
+  session: Session,
   reply: unknown,
 ): VisibleMessage {
   const message = createCharacterMessage(session, reply);

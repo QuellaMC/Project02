@@ -30,7 +30,7 @@ import {
 export type DurableConversationExchange = readonly [string, string];
 
 /** Creates the session, then commits one turn per [user, character] pair. */
-export async function writeDurableConversationSession(options: {
+export async function writeDurableSession(options: {
   readonly storeRoot: string;
   readonly sessionId: string;
   readonly exchanges: readonly DurableConversationExchange[];

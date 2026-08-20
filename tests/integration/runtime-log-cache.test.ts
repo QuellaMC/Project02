@@ -17,7 +17,7 @@ vi.mock('node:fs', async () => {
 });
 
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
@@ -45,7 +45,7 @@ describe('file runtime log store evidence cache', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -113,7 +113,7 @@ describe('file runtime log store evidence cache', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -183,7 +183,7 @@ describe('file runtime log store evidence cache', () => {
       sessionId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -261,7 +261,7 @@ describe('file runtime log store evidence cache', () => {
     try {
       staleStore.readSessionEvidence();
       await runTurn(
-        createConversationSession({
+        createSession({
           id: sessionId,
           character: testCharacterProfile,
         }),
@@ -325,7 +325,7 @@ describe('file runtime log store evidence cache', () => {
       boundCharacter: testCharacterProfile,
     });
     await runTurn(
-      createConversationSession({
+      createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),
@@ -355,7 +355,7 @@ describe('file runtime log store evidence cache', () => {
 });
 
 async function runTurn(
-  session: ReturnType<typeof createConversationSession>,
+  session: ReturnType<typeof createSession>,
   logStore: ReturnType<typeof createFileRuntimeLogStore>,
   turn: number,
 ): Promise<void> {

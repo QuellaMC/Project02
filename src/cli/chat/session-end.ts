@@ -1,7 +1,4 @@
-import {
-  type ConversationSession,
-  createRuntimeEventIdentity,
-} from '../../core/index.ts';
+import {type Session, createRuntimeEventIdentity} from '../../core/index.ts';
 import type {RuntimeLogStore} from '../../runtime/index.ts';
 import {
   runtimePluginEvidenceOption,
@@ -16,7 +13,7 @@ import {
 export const exitCommand = '/exit';
 
 export type EndChatSessionOptions = {
-  readonly session: ConversationSession;
+  readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly pluginHost: RuntimePluginHost;
 };

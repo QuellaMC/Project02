@@ -13,7 +13,7 @@ import {
   VisibleMessageTextValidationError,
 } from '../message/validation.ts';
 
-export type ConversationSession = {
+export type Session = {
   readonly id: string;
   readonly character: CharacterProfile;
   readonly userSpeaker: SpeakerIdentity;
@@ -36,7 +36,7 @@ export type CharacterAgent = {
   ): Promise<CharacterAgentReply> | CharacterAgentReply;
 };
 
-export type ConversationSessionOptions = {
+export type SessionOptions = {
   readonly id?: string;
   readonly character: CharacterProfile;
   readonly userDisplayName?: string;
@@ -92,7 +92,7 @@ export function validateConversationParticipants(options: {
 }
 
 const defaultSessionId = 'local-session';
-const sessionTranscripts = new WeakMap<ConversationSession, VisibleMessage[]>();
+const sessionTranscripts = new WeakMap<Session, VisibleMessage[]>();
 
 export class CharacterInputError extends Error {
   constructor(message: string) {
@@ -115,9 +115,7 @@ export class ConversationRehydrationError extends Error {
   }
 }
 
-export function createConversationSession(
-  options: ConversationSessionOptions,
-): ConversationSession {
+export function createSession(options: SessionOptions): Session {
   const sessionId = options.id ?? defaultSessionId;
   const character = freezeCharacterProfile(options.character);
   const userSpeaker = createUserSpeaker(options.userDisplayName);
@@ -133,7 +131,7 @@ export function createConversationSession(
         : {visibleTranscript: options.visibleTranscript}),
     }),
   ];
-  const session: ConversationSession = {
+  const session: Session = {
     id: sessionId,
     character,
     userSpeaker,
@@ -150,7 +148,7 @@ export function createConversationSession(
 }
 
 function validateRestoredVisibleTranscript(
-  options: ConversationSessionOptions,
+  options: SessionOptions,
 ): readonly VisibleMessage[] {
   const sessionId = options.id ?? defaultSessionId;
   const character = freezeCharacterProfile(options.character);
@@ -169,7 +167,7 @@ function validateRestoredVisibleTranscript(
 }
 
 /** Counted from the last ID, not the length: a failed write leaves a gap. */
-function nextMessageNumber(session: ConversationSession): number {
+function nextMessageNumber(session: Session): number {
   const transcript = getMutableTranscript(session);
   const lastMessage = transcript.at(-1);
 
@@ -181,7 +179,7 @@ function nextMessageNumber(session: ConversationSession): number {
 }
 
 export function createUserMessage(
-  session: ConversationSession,
+  session: Session,
   message: string | undefined,
 ): VisibleMessage {
   const normalizedMessage = normalizeCharacterInput(message);
@@ -196,14 +194,14 @@ export function createUserMessage(
 }
 
 export function appendCommittedMessage(
-  session: ConversationSession,
+  session: Session,
   message: VisibleMessage,
 ): void {
   getMutableTranscript(session).push(message);
 }
 
 export function createCharacterMessage(
-  session: ConversationSession,
+  session: Session,
   reply: unknown,
 ): VisibleMessage {
   return createCharacterVisibleMessage({
@@ -270,7 +268,7 @@ function isCharacterAgentReply(reply: unknown): reply is CharacterAgentReply {
   );
 }
 
-function getMutableTranscript(session: ConversationSession): VisibleMessage[] {
+function getMutableTranscript(session: Session): VisibleMessage[] {
   const transcript = sessionTranscripts.get(session);
 
   if (transcript === undefined) {
@@ -280,17 +278,14 @@ function getMutableTranscript(session: ConversationSession): VisibleMessage[] {
   return transcript;
 }
 
-function createMessageId(
-  session: ConversationSession,
-  messageNumber: number,
-): string {
+function createMessageId(session: Session, messageNumber: number): string {
   return createMessageIdForSessionId(session.id, messageNumber);
 }
 
 function createCharacterVisibleMessage(options: {
   readonly messageNumber: number;
   readonly replyText: string;
-  readonly session: ConversationSession;
+  readonly session: Session;
 }): VisibleMessage {
   return Object.freeze({
     id: createMessageId(options.session, options.messageNumber),

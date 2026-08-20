@@ -19,7 +19,7 @@ import {
 } from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
@@ -2254,7 +2254,7 @@ describe('chat CLI plugin lifecycle', () => {
       stdin: Readable.from([]),
       stdout: collect(() => {}),
       stderr: collect(() => {}),
-      session: createConversationSession({
+      session: createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),

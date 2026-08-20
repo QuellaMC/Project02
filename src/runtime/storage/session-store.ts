@@ -16,9 +16,9 @@ import {readStoreJsonLines} from './store-file.ts';
 import {describeRealEntry, type RealEntry} from '../../shared/real-path.ts';
 
 import {
-  createConversationSession,
+  createSession as createCoreSession,
   type CharacterProfile,
-  type ConversationSession,
+  type Session,
   type SpeakerIdentity,
   type VisibleMessage,
 } from '../../core/index.ts';
@@ -120,7 +120,7 @@ type SelectLocalRuntimeSessionOptions = {
   readonly updatedAt?: string;
 };
 
-type RehydrateLocalRuntimeConversationSessionOptions = {
+type RehydrateLocalRuntimeSessionOptions = {
   readonly conversationLogReader?: LocalRuntimeSessionConversationLogReader;
 };
 
@@ -155,10 +155,10 @@ type LocalRuntimeSessionStore = {
     sessionId?: string,
     options?: SelectLocalRuntimeSessionOptions,
   ): Promise<LocalRuntimeSessionMetadata>;
-  rehydrateConversationSession(
+  rehydrateSession(
     sessionId?: string,
-    options?: RehydrateLocalRuntimeConversationSessionOptions,
-  ): Promise<ConversationSession>;
+    options?: RehydrateLocalRuntimeSessionOptions,
+  ): Promise<Session>;
 };
 
 type AcquireLocalRuntimeSessionWriterLeaseOptions =
@@ -401,10 +401,10 @@ export function createLocalRuntimeSessionStore(
     });
   }
 
-  async function rehydrateConversationSession(
+  async function rehydrateSession(
     sessionId?: string,
-    rehydrateOptions: RehydrateLocalRuntimeConversationSessionOptions = {},
-  ): Promise<ConversationSession> {
+    rehydrateOptions: RehydrateLocalRuntimeSessionOptions = {},
+  ): Promise<Session> {
     const metadata = await readSession(sessionId);
     const conversationLogReader =
       rehydrateOptions.conversationLogReader ?? configuredConversationLogReader;
@@ -419,7 +419,7 @@ export function createLocalRuntimeSessionStore(
     const conversationEvidence =
       await conversationLogReader.readConversationEvidence(metadata.sessionId);
 
-    return createConversationSession({
+    return createCoreSession({
       id: metadata.sessionId,
       character: conversationEvidence.character,
       ...(conversationEvidence.userSpeaker === undefined
@@ -441,7 +441,7 @@ export function createLocalRuntimeSessionStore(
     successorOf,
     readSession,
     selectSession,
-    rehydrateConversationSession,
+    rehydrateSession,
   } satisfies LocalRuntimeSessionStore);
 }
 

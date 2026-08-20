@@ -27,7 +27,7 @@ import {withScopedProcessEnv} from '../support/runtime-config-fixtures.ts';
 import {collect} from '../support/streams.ts';
 
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
@@ -76,7 +76,7 @@ describe('inspect CLI plugin evidence', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       sessionId: 'session-inspect',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: 'session-inspect',
       character: testCharacterProfile,
     });

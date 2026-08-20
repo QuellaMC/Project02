@@ -1,6 +1,6 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
@@ -21,7 +21,7 @@ import {
 
 describe('plugin-driven tool loop progress and evidence', () => {
   it('does not expose plugin inventory through hidden runtime context', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -93,7 +93,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
       sessionId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -199,7 +199,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('continues after interim visible_reply progress callback failures', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -280,7 +280,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('feeds prior interim replies back through the next turn model context', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -378,7 +378,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     const reopened = captureWire();
     const thirdTurn = await runLocalUserMessageEvent({
       event: createTestEvent('still there?', 'evt_interim_context_third'),
-      session: createConversationSession({
+      session: createSession({
         id: session.id,
         character: testCharacterProfile,
         visibleTranscript: logStore
@@ -467,7 +467,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
         .map(event => event.kind),
     ).toEqual(['runtime_turn_completed']);
 
-    const restoredSession = createConversationSession({
+    const restoredSession = createSession({
       character: testCharacterProfile,
       id: sessionId,
       visibleTranscript: reopenedLogStore.conversationMessages(),
@@ -507,7 +507,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('records the refused round it handed back to the model, before the round that recovered', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -580,7 +580,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('preserves prior tool evidence when a later interim visible_reply is invalid', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();

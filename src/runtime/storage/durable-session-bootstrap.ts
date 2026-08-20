@@ -3,7 +3,7 @@ import {
   createUserSpeaker,
   validateConversationParticipants,
   type CharacterProfile,
-  type ConversationSession,
+  type Session,
   type SpeakerIdentity,
 } from '../../core/index.ts';
 import type {RuntimeLogStore} from '../evidence/contract.ts';
@@ -40,7 +40,7 @@ export type DurableSessionSelection = {
 };
 
 export type DurableChatRuntime = {
-  readonly session: ConversationSession;
+  readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly writerLease: LocalRuntimeMutationLockLease;
   /** The session that continued this one, when it was opened by name anyway. */
@@ -234,7 +234,7 @@ async function openDurableChatRuntime(options: {
 
     return Object.freeze({
       ...(successor === undefined ? {} : {continuedBy: successor.sessionId}),
-      session: await sessionStore.rehydrateConversationSession(sessionId, {
+      session: await sessionStore.rehydrateSession(sessionId, {
         conversationLogReader: {
           readConversationEvidence() {
             return readDurableConversationEvidence(

@@ -6,7 +6,7 @@ import {describe, expect, it} from 'vitest';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
   appendDurableConversationExchanges,
-  writeDurableConversationSession,
+  writeDurableSession,
 } from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -27,7 +27,7 @@ describe('session history engine', () => {
   it('searches across sessions with routed queries', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'alpha',
       exchanges: [
@@ -38,7 +38,7 @@ describe('session history engine', () => {
         ['and storage?', 'Keep the JSONL log canonical.'],
       ],
     });
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'beta',
       exchanges: [
@@ -97,17 +97,17 @@ describe('session history engine', () => {
       ]);
     }
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'hog',
       exchanges: hogExchanges,
     });
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'quiet',
       exchanges: [['one kraken mention here', 'noted']],
     });
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'ties',
       exchanges: [
@@ -147,7 +147,7 @@ describe('session history engine', () => {
       ]);
     }
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'long-session',
       exchanges,
@@ -183,7 +183,7 @@ describe('session history engine', () => {
   it('warms up without a query and ingests appends incrementally', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'grows',
       exchanges: [['first question', 'first answer']],
@@ -217,7 +217,7 @@ describe('session history engine', () => {
   it('rebuilds on version bumps and corruption, and adopts foreign databases only on success', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'kept',
       exchanges: [['keep this thread', 'kept']],
@@ -273,7 +273,7 @@ describe('session history engine', () => {
   it('rejects database names outside the identifier rules', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'only',
       exchanges: [['hello', 'hi']],
@@ -296,7 +296,7 @@ describe('session history engine', () => {
   it('rejects unknown sessions, anchors, and closed engines', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'only',
       exchanges: [['hello', 'hi']],
@@ -339,7 +339,7 @@ describe('session history engine', () => {
     // The first user message alone exceeds the 2 MiB slice cap, so a
     // capped read finds no newline; ingestion must still consume it and
     // reach the exchange behind it.
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'oversized',
       exchanges: [
@@ -366,7 +366,7 @@ describe('session history engine', () => {
   it('stops catch-up when the caller aborts', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'cold',
       exchanges: [['hello there', 'hi']],

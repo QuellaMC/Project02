@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
@@ -59,11 +59,11 @@ describe('durable runtime session writer ownership', () => {
     if (rawEventsPath === undefined) {
       throw new Error('Expected durable runtime session paths.');
     }
-    const firstSession = createConversationSession({
+    const firstSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
-    const secondSession = createConversationSession({
+    const secondSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -141,11 +141,11 @@ describe('durable runtime session writer ownership', () => {
       characterId: 'mira',
       boundCharacter: testCharacterProfile,
     });
-    const currentSession = createConversationSession({
+    const currentSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
-    const staleSession = createConversationSession({
+    const staleSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });

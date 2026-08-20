@@ -1,4 +1,4 @@
-import type {ConversationSession} from '../../core/index.ts';
+import type {Session} from '../../core/index.ts';
 import type {RuntimeLogStore} from '../../runtime/index.ts';
 import {
   createContinuedDurableChatRuntime,
@@ -14,7 +14,7 @@ import {endChatSession} from './session-end.ts';
 
 /** The session the chat loop is writing to, and how to let go of it. */
 export type ActiveChatSession = {
-  readonly session: ConversationSession;
+  readonly session: Session;
   readonly logStore: RuntimeLogStore;
   release(): Promise<void>;
 };
@@ -22,7 +22,7 @@ export type ActiveChatSession = {
 /** Opens the session that continues `current`, keeping its character and speaker. */
 export type ContinueChatSession = (
   plan: SessionContinuationPlan,
-  current: ConversationSession,
+  current: Session,
 ) => Promise<DurableChatRuntime>;
 
 /** Naming a closed segment opens it, but the person should know it went on. */

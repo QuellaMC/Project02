@@ -10,7 +10,7 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {writeDurableConversationSession} from '../support/runtime-log-fixtures.ts';
+import {writeDurableSession} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 import type {RuntimePluginSessionHistoryMessage} from '../../src/plugins/api/session-history-contract.ts';
@@ -28,7 +28,7 @@ describe('session history feed', () => {
   it('serves visible messages incrementally with an opaque cursor', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'alpha',
       exchanges: [
@@ -71,7 +71,7 @@ describe('session history feed', () => {
   it('leaves torn tails unconsumed and counts damaged records', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'damaged',
       exchanges: [['remember the riddle?', 'the silent drawbridge one']],
@@ -108,7 +108,7 @@ describe('session history feed', () => {
   it('lists the catalog leniently where the strict reader refuses it', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'alpha',
       exchanges: [['hello', 'hi']],
@@ -151,7 +151,7 @@ describe('session history feed', () => {
   it('resets when the transcript shrinks or the cursor is unreadable', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'shrinks',
       exchanges: [['forget this thread', 'ok']],
@@ -190,7 +190,7 @@ describe('session history feed', () => {
   it('honors a byte budget and terminates when slicing', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'sliced',
       exchanges: [
@@ -236,7 +236,7 @@ describe('session history feed', () => {
   it('refuses a linked session directory instead of reading through it', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
       sessionId: 'linked',
       exchanges: [['hello', 'hi']],
@@ -290,7 +290,7 @@ describe('session history feed', () => {
 
     const foreignRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot: foreignRoot,
       sessionId: 'theirs',
       exchanges: [['their secret', 'kept']],

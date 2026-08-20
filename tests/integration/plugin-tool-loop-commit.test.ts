@@ -3,7 +3,7 @@ import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {readFileSync} from 'node:fs';
 
 import {describe, expect, it} from 'vitest';
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {
   characterStatePluginId,
   createCharacterStatePlugin,
@@ -117,7 +117,7 @@ async function createConfigEffectTestFixture(label: string) {
 
 function createConfigEffectTestHost(options: {
   readonly fixture: Awaited<ReturnType<typeof createConfigEffectTestFixture>>;
-  readonly session: ReturnType<typeof createConversationSession>;
+  readonly session: ReturnType<typeof createSession>;
 }): RuntimePluginHost {
   const {fixture} = options;
 
@@ -254,7 +254,7 @@ async function createLiveReloadLoopFixture(label: string) {
 
     return config.plugins?.[manifest.id]?.config?.tone ?? 'cool';
   };
-  const session = createConversationSession({
+  const session = createSession({
     id: fixture.sessionId,
     character: testCharacterProfile,
   });
@@ -334,7 +334,7 @@ async function createLiveReloadLoopFixture(label: string) {
 
 describe('plugin-driven tool loop commit and rollback', () => {
   it("keeps the model's text next to its tool calls in the stored decision", async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore({
@@ -384,7 +384,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('commits every visible reply a round asks for, in order', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore({
@@ -413,7 +413,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('commits multi-line final visible replies', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore({
@@ -449,7 +449,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('runs afterTurnCommitted after visible messages and terminal evidence commit', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore({
@@ -495,7 +495,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('persists afterTurnCommitted failures as follow-up turn evidence', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore({
@@ -554,7 +554,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('keeps the completed turn when afterTurnCommitted evidence append fails', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRawEventAppendFailingLogStore({
@@ -610,7 +610,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
   });
 
   it('does not run afterTurnCommitted when terminal raw event append fails', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRawEventAppendFailingLogStore({
@@ -710,7 +710,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
         'hello',
         'evt_character_state_terminal_append_then_throw',
       ),
-      session: createConversationSession({
+      session: createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),
@@ -787,7 +787,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       message: 'terminal raw event append failed',
     });
     const pluginHost = createRuntimePluginHost({plugins: []});
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -848,7 +848,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
       visibleMessageIds,
     });
 
-    const restoredSession = createConversationSession({
+    const restoredSession = createSession({
       character: testCharacterProfile,
       id: sessionId,
       visibleTranscript: conversationMessages,
@@ -887,7 +887,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
     const fixture = await createConfigEffectTestFixture('applied-at-execution');
     const messagesByRound: RoleModelChatMessage[][] = [];
     const toneSeenByRound: string[] = [];
-    const session = createConversationSession({
+    const session = createSession({
       id: fixture.sessionId,
       character: testCharacterProfile,
     });
@@ -971,7 +971,7 @@ describe('plugin-driven tool loop commit and rollback', () => {
 
   it('lets the model correct a rejected config update in the same turn', async () => {
     const fixture = await createConfigEffectTestFixture('rejected-retry');
-    const session = createConversationSession({
+    const session = createSession({
       id: fixture.sessionId,
       character: testCharacterProfile,
     });

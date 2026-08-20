@@ -1,5 +1,5 @@
 import {
-  type ConversationSession,
+  type Session,
   type RuntimeEventIdentity,
   type UserMessageRuntimeEvent,
 } from '../../core/index.ts';
@@ -37,7 +37,7 @@ export type LocalRuntimeUserMessageRejectionReason =
 
 export type RunLocalUserMessageEventOptions = {
   readonly event: UserMessageRuntimeEvent;
-  readonly session: ConversationSession;
+  readonly session: Session;
   readonly logStore: RuntimeLogStore;
   readonly rawInput?: string;
   readonly roleModelAdapter?: RoleModelAdapter;
