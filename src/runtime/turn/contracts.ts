@@ -57,6 +57,9 @@ export type RunLocalUserMessageEventOptions = {
 export type LocalRuntimeTurnProgressEvent =
   | {
       readonly kind: 'visible_reply';
+      readonly messageId: string;
+      readonly speakerId: string;
+      readonly speakerName: string;
       readonly text: string;
     }
   | {

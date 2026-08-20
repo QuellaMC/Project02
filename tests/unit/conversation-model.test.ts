@@ -71,9 +71,9 @@ describe('conversation model', () => {
   it('rejects malformed conversations', () => {
     const base = {id: 'conv_d', createdAt: '2026-08-20T00:00:00.000Z'};
 
-    expect(() =>
-      createConversation({...base, participants: [user]}),
-    ).toThrow(ConversationValidationError);
+    expect(() => createConversation({...base, participants: [user]})).toThrow(
+      ConversationValidationError,
+    );
     expect(() =>
       createConversation({...base, participants: [mira, {...mira}]}),
     ).toThrow('unique by kind and ID');

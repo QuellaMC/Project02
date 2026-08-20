@@ -778,11 +778,7 @@ async function handleChatInputLine(options: {
         : {contextWindowTokens: options.options.contextWindowTokens}),
       pluginHost: options.pluginHost,
       onProgress(progressEvent) {
-        writeRuntimeProgress(
-          options.options.stdout,
-          options.session,
-          progressEvent,
-        );
+        writeRuntimeProgress(options.options.stdout, progressEvent);
       },
     });
 

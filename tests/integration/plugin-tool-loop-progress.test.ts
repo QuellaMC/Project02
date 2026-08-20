@@ -162,6 +162,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
+        messageId: `${sessionId}:message-2`,
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'Authorization: Bearer interim-secret',
       },
       {
@@ -177,6 +180,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
       {
         kind: 'visible_reply',
+        messageId: `${sessionId}:message-3`,
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'finished',
       },
     ]);
@@ -254,6 +260,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
+        messageId: 'local-session:message-2',
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'checking',
       },
       {
@@ -269,6 +278,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
       {
         kind: 'visible_reply',
+        messageId: 'local-session:message-3',
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'finished',
       },
     ]);
