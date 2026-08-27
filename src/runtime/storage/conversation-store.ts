@@ -234,7 +234,9 @@ async function insertConversation(
     conversationId: conversation.id,
   });
 
-  if (describeRealEntry(paths.conversationRoot).kind !== 'absent') {
+  // A conversation exists once its file does: a directory without one is an
+  // interrupted create, and writing the file completes it.
+  if (decodeConversationDirectory(paths.conversationRoot) !== undefined) {
     throw new LocalRuntimeConversationStoreError(
       'conversation_already_exists',
       `Conversation "${conversation.id}" already exists.`,

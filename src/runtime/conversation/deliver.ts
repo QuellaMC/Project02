@@ -153,7 +153,17 @@ async function rotateIfNeeded(
   let next;
 
   try {
-    next = await openContinuedSegment(state.context, plan);
+    // The next segment keeps the identities this segment really has: a
+    // rehydrated session keeps its recorded character and speaker even when
+    // the configuration has since changed, and its continuation must too.
+    next = await openContinuedSegment(
+      {
+        ...state.context,
+        character: session.character,
+        boundUserSpeaker: session.userSpeaker,
+      },
+      plan,
+    );
   } catch (error: unknown) {
     return {
       status: 'failed',

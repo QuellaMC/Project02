@@ -164,6 +164,19 @@ describe('local runtime conversation store', () => {
       conversation.id,
     ]);
 
+    // Writing the file completes the interrupted create instead of refusing
+    // its id forever.
+    const completed = await store.createConversation({
+      id: 'interrupted',
+      participants: [user, kai],
+    });
+
+    expect(completed.id).toBe('interrupted');
+    expect((await store.listConversations()).map(entry => entry.id)).toEqual([
+      conversation.id,
+      'interrupted',
+    ]);
+
     const damaged = createLocalRuntimeConversationPaths({
       homeRoot,
       conversationId: 'damaged',

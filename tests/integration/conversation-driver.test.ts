@@ -235,6 +235,55 @@ describe('conversation driver', () => {
     });
   });
 
+  it('keeps the recorded identities when rotation opens the next segment', async () => {
+    let homeRoot = '';
+
+    // The first chat records who spoke; the configuration then renames both.
+    await withOpenConversation(
+      {userDisplayName: 'Mike'},
+      async (conversation, root) => {
+        homeRoot = root;
+
+        const delivery = await deliverUserMessage({
+          conversation,
+          line: 'one',
+          pluginHost: createRuntimePluginHost({plugins: []}),
+          roleModelAdapter: replyAdapter(),
+        });
+
+        expect(delivery.status).toBe('completed');
+      },
+    );
+
+    const reopened = await openConversation({
+      homeRoot,
+      character: {id: testCharacterProfile.id, displayName: 'Mira Prime'},
+      userDisplayName: 'Maya',
+    });
+
+    try {
+      const pluginHost = createRuntimePluginHost({plugins: []});
+
+      for (const line of ['two', 'three', 'four']) {
+        await deliverUserMessage({
+          conversation: reopened,
+          line,
+          pluginHost,
+          roleModelAdapter: replyAdapter(),
+          contextWindowTokens,
+        });
+      }
+
+      expect(reopened.session.id).toBe(`${reopened.conversation.id}.2`);
+      expect(reopened.session.character.displayName).toBe(
+        testCharacterProfile.displayName,
+      );
+      expect(reopened.session.userSpeaker.displayName).toBe('Mike');
+    } finally {
+      await reopened.close();
+    }
+  });
+
   it('discards a continuation a crash left empty and resumes its predecessor', async () => {
     await withOpenConversation({}, async (conversation, homeRoot) => {
       const conversationId = conversation.conversation.id;

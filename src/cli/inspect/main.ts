@@ -390,11 +390,17 @@ async function writeConversationSegments(
     storeRoot: runtimeLocation.characterScope.dataRoot,
     characterId: runtimeLocation.characterScope.characterId,
   });
-  const sessions = (await sessionStore.listSessions()).filter(
-    metadata =>
-      parseSegmentSessionId(metadata.sessionId).conversationId ===
-      conversation.id,
-  );
+  const sessions = (await sessionStore.listSessions())
+    .filter(
+      metadata =>
+        parseSegmentSessionId(metadata.sessionId).conversationId ===
+        conversation.id,
+    )
+    .sort(
+      (left, right) =>
+        parseSegmentSessionId(left.sessionId).segment -
+        parseSegmentSessionId(right.sessionId).segment,
+    );
 
   writeJson(stdout, {
     runtimeConfig: createRuntimeConfigInspectShape(

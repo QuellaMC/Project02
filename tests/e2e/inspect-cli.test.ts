@@ -1,6 +1,7 @@
 import {characterDataDirPath} from '../../src/runtime/storage/layout-contract.ts';
 import {localRuntimeStorageSchemaVersion} from '../../src/runtime/storage/layout-contract.ts';
 import {
+  createLocalRuntimeConversationStore,
   ensureCharacterDataMarker,
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
@@ -431,6 +432,62 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(conflictExitCode).toBe(1);
     expect(conflictStderr).toContain('exactly one of');
+  });
+
+  it('orders a thread of ten segments numerically, not lexicographically', async () => {
+    const storeRoot = createTestTempRoot('project02-inspect-segment-order-');
+    const conversation = await createLocalRuntimeConversationStore({
+      homeRoot: storeRoot,
+    }).createConversation({
+      id: 'talk',
+      participants: [
+        {kind: 'user', id: 'local-user', displayName: 'You'},
+        {kind: 'character', id: 'mira', displayName: 'Mira'},
+      ],
+    });
+    const sessionStore = createLocalRuntimeSessionStore({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      characterId: 'mira',
+    });
+    // One shared timestamp: the catalog's own order cannot tell `.10` from
+    // `.2` here, so only numeric segment order gets this right.
+    const createdAt = '2026-08-20T00:00:00.000Z';
+
+    await sessionStore.createSession({
+      conversationId: conversation.id,
+      createdAt,
+    });
+    for (let segment = 2; segment <= 10; segment += 1) {
+      await sessionStore.createContinuedSession({
+        continuedFrom: `${conversation.id}.${String(segment - 1)}`,
+        createdAt,
+      });
+    }
+
+    let stdout = '';
+
+    expect(
+      await runInspectCliFromArgs(
+        ['--store', storeRoot, '--conversation', conversation.id],
+        {
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(() => {}),
+        },
+      ),
+    ).toBe(0);
+
+    const output = JSON.parse(stdout) as {
+      readonly sessions: readonly {readonly sessionId: string}[];
+    };
+
+    expect(output.sessions.map(metadata => metadata.sessionId)).toEqual(
+      Array.from(
+        {length: 10},
+        (_, index) => `${conversation.id}.${String(index + 1)}`,
+      ),
+    );
   });
 
   it('shows how a continued session opened and the summary its turns saw', async () => {
