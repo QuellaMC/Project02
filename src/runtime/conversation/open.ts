@@ -1,6 +1,7 @@
 import {
   validateConversationParticipants,
   type Conversation,
+  type ConversationParticipant,
 } from '../../core/index.ts';
 import type {RuntimeLogStore} from '../evidence/contract.ts';
 import {
@@ -91,12 +92,15 @@ export async function openConversation(
 
   try {
     const storageOptions = {storeRoot: dataRoot, characterId};
+    // The thread's identities were recorded when it began: segments bind to
+    // the conversation's participants, so a configured rename never renames
+    // an existing conversation — not even an evidence-empty continuation.
     const context: SegmentContext = {
       storageOptions,
       sessionStore: createLocalRuntimeSessionStore(storageOptions),
       ownerToken,
-      character,
-      boundUserSpeaker: userSpeaker,
+      character: conversationParticipantIdentity(conversation, 'character'),
+      boundUserSpeaker: conversationParticipantIdentity(conversation, 'user'),
     };
     const metadata =
       (await resumableSegment(context.sessionStore, conversation.id)) ??
@@ -117,6 +121,26 @@ export async function openConversation(
     await conversationLease.release();
     throw error;
   }
+}
+
+function conversationParticipantIdentity(
+  conversation: Conversation,
+  kind: ConversationParticipant['kind'],
+): {readonly id: string; readonly displayName: string} {
+  const participant = conversation.participants.find(
+    candidate => candidate.kind === kind,
+  );
+
+  if (participant === undefined) {
+    throw new TypeError(
+      `Conversation "${conversation.id}" has no ${kind} participant.`,
+    );
+  }
+
+  return Object.freeze({
+    id: participant.id,
+    displayName: participant.displayName,
+  });
 }
 
 /**

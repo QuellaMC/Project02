@@ -42,6 +42,8 @@ export type ActiveConversation = {
 export type DeliverUserMessageOptions = {
   readonly conversation: ActiveConversation;
   readonly line: string;
+  /** Session-agnostic: a host constructed with its own session binding would
+   * pin plugin file-store scoping to that session across rotations. */
   readonly pluginHost: RuntimePluginHost;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly characterPersonaSections?: readonly string[];

@@ -265,13 +265,21 @@ describe('conversation driver', () => {
       const pluginHost = createRuntimePluginHost({plugins: []});
 
       for (const line of ['two', 'three', 'four']) {
-        await deliverUserMessage({
+        const delivery = await deliverUserMessage({
           conversation: reopened,
           line,
           pluginHost,
           roleModelAdapter: replyAdapter(),
           contextWindowTokens,
         });
+
+        // Stop at the rotation itself, so the new segment holds no turns.
+        if (
+          delivery.status === 'completed' &&
+          delivery.rotation !== undefined
+        ) {
+          break;
+        }
       }
 
       expect(reopened.session.id).toBe(`${reopened.conversation.id}.2`);
@@ -281,6 +289,26 @@ describe('conversation driver', () => {
       expect(reopened.session.userSpeaker.displayName).toBe('Mike');
     } finally {
       await reopened.close();
+    }
+
+    // Reopening the turn-free continuation must not fall back to the
+    // configured names either: the thread's participants are its identities.
+    const reopenedEmpty = await openConversation({
+      homeRoot,
+      character: {id: testCharacterProfile.id, displayName: 'Mira Prime'},
+      userDisplayName: 'Maya',
+    });
+
+    try {
+      expect(reopenedEmpty.session.id).toBe(
+        `${reopenedEmpty.conversation.id}.2`,
+      );
+      expect(reopenedEmpty.session.character.displayName).toBe(
+        testCharacterProfile.displayName,
+      );
+      expect(reopenedEmpty.session.userSpeaker.displayName).toBe('Mike');
+    } finally {
+      await reopenedEmpty.close();
     }
   });
 
