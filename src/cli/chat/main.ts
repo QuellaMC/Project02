@@ -7,7 +7,11 @@ import {
   validateChatStoreArgs,
   type ChatCliArgs,
 } from './args.ts';
-import {writeRuntimeProgress, writeTraceSummary} from './turn-output.ts';
+import {
+  writeRotationWarnings,
+  writeRuntimeProgress,
+  writeTraceSummary,
+} from './turn-output.ts';
 import {
   deliverUserMessage,
   endSession,
@@ -632,6 +636,10 @@ async function handleChatInputLine(options: {
     const result = mapDelivery(delivery);
 
     writeChatRuntimeResult({options: options.options, result});
+
+    if (delivery.status === 'completed' && delivery.rotation !== undefined) {
+      writeRotationWarnings(options.options.stderr, delivery.rotation);
+    }
 
     if (result.status === 'rejected' && result.fatal) {
       return {status: 'exit', exitCode: 1};

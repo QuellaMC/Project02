@@ -235,6 +235,91 @@ describe('conversation driver', () => {
     });
   });
 
+  it('discards a continuation a crash left empty and resumes its predecessor', async () => {
+    await withOpenConversation({}, async (conversation, homeRoot) => {
+      const conversationId = conversation.conversation.id;
+      const delivery = await deliverUserMessage({
+        conversation,
+        line: 'one',
+        pluginHost: createRuntimePluginHost({plugins: []}),
+        roleModelAdapter: replyAdapter(),
+      });
+
+      expect(delivery.status).toBe('completed');
+      await conversation.close();
+
+      const sessionStore = createLocalRuntimeSessionStore({
+        storeRoot: characterDataDirPath(homeRoot, testCharacterProfile.id),
+        characterId: testCharacterProfile.id,
+      });
+
+      // A crash between publishing the next segment and writing its opening
+      // record leaves an empty `.2` in the catalog.
+      await sessionStore.createContinuedSession({
+        continuedFrom: `${conversationId}.1`,
+      });
+
+      const reopened = await openConversation({
+        homeRoot,
+        character: testCharacterProfile,
+      });
+
+      try {
+        expect(reopened.session.id).toBe(`${conversationId}.1`);
+        expect(
+          reopened.session.visibleTranscript.map(message => message.text),
+        ).toContain('noted');
+        expect(
+          (await sessionStore.listSessions()).map(
+            metadata => metadata.sessionId,
+          ),
+        ).toEqual([`${conversationId}.1`]);
+      } finally {
+        await reopened.close();
+      }
+    });
+  });
+
+  it('lets every concurrent close observe the same finished cleanup', async () => {
+    await withOpenConversation({}, async (conversation, homeRoot) => {
+      let releaseReply = () => {};
+      const gate = new Promise<void>(resolve => {
+        releaseReply = resolve;
+      });
+      const delivery = deliverUserMessage({
+        conversation,
+        line: 'one',
+        pluginHost: createRuntimePluginHost({plugins: []}),
+        roleModelAdapter: {
+          async invoke() {
+            await gate;
+
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+              }),
+            };
+          },
+        },
+      });
+      const firstClose = conversation.close();
+      const secondClose = conversation.close();
+
+      releaseReply();
+      await secondClose;
+
+      // The second closer returned, so both leases must already be free.
+      const reopened = await openConversation({
+        homeRoot,
+        character: testCharacterProfile,
+      });
+
+      await reopened.close();
+      await firstClose;
+      expect((await delivery).status).toBe('completed');
+    });
+  });
+
   it('resumes the latest segment after closing, and refuses a second opener', async () => {
     await withOpenConversation({}, async (conversation, homeRoot) => {
       const conversationId = conversation.conversation.id;

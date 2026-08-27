@@ -29,7 +29,7 @@ export async function deliverUserMessage(
 ): Promise<UserMessageDelivery> {
   const state = activeConversationState(options.conversation);
 
-  if (state.closed) {
+  if (state.closing !== undefined) {
     throw new TypeError('Cannot deliver into a closed conversation.');
   }
 

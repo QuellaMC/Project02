@@ -8,12 +8,20 @@ import {
   createLocalRuntimeConversationStore,
 } from '../storage/conversation-store.ts';
 import {ensureCharacterDataDir} from '../storage/character-data.ts';
-import {normalizeLocalRuntimeCharacterId} from '../storage/layout-contract.ts';
+import {
+  normalizeLocalRuntimeCharacterId,
+  parseSegmentSessionId,
+  type LocalRuntimeSessionMetadata,
+} from '../storage/layout-contract.ts';
 import {
   createLocalRuntimeMutationLockOwnerToken,
   type LocalRuntimeMutationLockLease,
 } from '../storage/mutation-lock.ts';
-import {createLocalRuntimeSessionStore} from '../storage/session-store.ts';
+import {
+  createLocalRuntimeSessionStore,
+  LocalRuntimeSessionStoreError,
+  type LocalRuntimeSessionStore,
+} from '../storage/session-store.ts';
 import type {ActiveConversation, OpenConversationOptions} from './contracts.ts';
 import {
   openSegment,
@@ -27,7 +35,7 @@ export type ActiveConversationState = {
   readonly conversationLease: LocalRuntimeMutationLockLease;
   segment: ConversationSegment;
   queue: Promise<void>;
-  closed: boolean;
+  closing: Promise<void> | undefined;
 };
 
 const activeConversations = new WeakMap<
@@ -91,7 +99,7 @@ export async function openConversation(
       boundUserSpeaker: userSpeaker,
     };
     const metadata =
-      (await context.sessionStore.latestSegment(conversation.id)) ??
+      (await resumableSegment(context.sessionStore, conversation.id)) ??
       (await context.sessionStore.createSession({
         conversationId: conversation.id,
       }));
@@ -103,11 +111,46 @@ export async function openConversation(
       conversationLease,
       segment,
       queue: Promise.resolve(),
-      closed: false,
+      closing: undefined,
     });
   } catch (error: unknown) {
     await conversationLease.release();
     throw error;
+  }
+}
+
+/**
+ * A continued segment opens with its continuation record, so an empty one is
+ * the leftover of a rotation interrupted between publishing the segment and
+ * writing that record. Discard it and resume its predecessor, exactly as an
+ * in-process rotation failure would have.
+ */
+async function resumableSegment(
+  sessionStore: LocalRuntimeSessionStore,
+  conversationId: string,
+): Promise<LocalRuntimeSessionMetadata | undefined> {
+  for (;;) {
+    const latest = await sessionStore.latestSegment(conversationId);
+
+    if (
+      latest === undefined ||
+      parseSegmentSessionId(latest.sessionId).segment === 1
+    ) {
+      return latest;
+    }
+
+    try {
+      await sessionStore.discardEmptySession(latest.sessionId);
+    } catch (error: unknown) {
+      if (
+        error instanceof LocalRuntimeSessionStoreError &&
+        error.code === 'session_not_empty'
+      ) {
+        return latest;
+      }
+
+      throw error;
+    }
   }
 }
 
@@ -123,18 +166,20 @@ function createActiveConversation(
       return state.segment.logStore;
     },
     async close(): Promise<void> {
-      if (state.closed) {
-        return;
-      }
-
-      state.closed = true;
-      await state.queue.catch(() => undefined);
-      await state.segment.writerLease.release();
-      await state.conversationLease.release();
+      state.closing ??= closeActiveConversation(state);
+      await state.closing;
     },
   });
 
   activeConversations.set(active, state);
 
   return active;
+}
+
+async function closeActiveConversation(
+  state: ActiveConversationState,
+): Promise<void> {
+  await state.queue.catch(() => undefined);
+  await state.segment.writerLease.release();
+  await state.conversationLease.release();
 }

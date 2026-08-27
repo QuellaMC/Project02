@@ -665,6 +665,79 @@ describe('chat CLI provider selection', () => {
     ).toHaveLength(1);
   });
 
+  it('warns on stderr when the conversation cannot continue in a new session', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-rotation-warning-');
+    const adapter: RoleModelAdapter = {
+      invoke() {
+        return {
+          rawOutputText: JSON.stringify({
+            toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+          }),
+        };
+      },
+    };
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {
+      project02: {contextWindowTokens: 100},
+    });
+
+    // Two turns still fit the window, so the first chat ends with the root
+    // segment only.
+    expect(
+      await runChatCliFromArgs(['--store', storeRoot], {
+        stdin: Readable.from(['one\n', 'two\n']),
+        stdout: collect(() => {}),
+        stderr: collect(() => {}),
+        roleModelAdapter: adapter,
+        pluginHost: createRuntimePluginHost({plugins: []}),
+      }),
+    ).toBe(0);
+
+    const dm = await readCharacterConversation(storeRoot);
+    const conversationId = dm.conversation.id;
+
+    expect(dm.latestSessionId).toBe(`${conversationId}.1`);
+
+    // Another window holds the next segment's writer lease, so the third
+    // completed turn plans a continuation that cannot open.
+    const blocker = await acquireLocalRuntimeSessionWriterLease({
+      storeRoot: characterDataDirPath(storeRoot, 'mira'),
+      sessionId: `${conversationId}.2`,
+    });
+
+    try {
+      let stdout = '';
+      let stderr = '';
+
+      expect(
+        await runChatCliFromArgs(['--store', storeRoot], {
+          stdin: Readable.from(['three\n']),
+          stdout: collect(chunk => {
+            stdout += chunk;
+          }),
+          stderr: collect(chunk => {
+            stderr += chunk;
+          }),
+          roleModelAdapter: adapter,
+          pluginHost: createRuntimePluginHost({plugins: []}),
+        }),
+      ).toBe(0);
+
+      // The reply stands; the person still hears that maintenance broke.
+      expect(stdout).toContain('Mira: noted');
+      expect(stderr).toContain(
+        `Warning: the conversation could not continue in a new session and stays in ${conversationId}.1:`,
+      );
+      expect(
+        (await readCharacterConversation(storeRoot)).sessions.map(
+          metadata => metadata.sessionId,
+        ),
+      ).toEqual([`${conversationId}.1`]);
+    } finally {
+      await blocker.release();
+    }
+  });
+
   it('lets the runtime env provider override project02.roleModelProvider', async () => {
     const storeRoot = createTestTempRoot('project02-chat-provider-env-config-');
     let stderr = '';
