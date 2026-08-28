@@ -146,6 +146,11 @@ export function assertRealHomeEnvFileSync(
 function assertRealHomeControlEntries(layout: Project02HomeLayout): void {
   for (const entry of [
     {path: layout.locksRoot, kind: 'directory' as const, label: 'lock root'},
+    {
+      path: layout.conversationsRoot,
+      kind: 'directory' as const,
+      label: 'conversations root',
+    },
     {path: layout.configPath, kind: 'file' as const, label: 'config file'},
   ]) {
     if (isPresentButNot(describeRealEntry(entry.path), entry.kind)) {
@@ -246,9 +251,11 @@ function isProject02HomeControlEntry(
 
   if (
     entryPath === layout.characterDataRoot ||
+    entryPath === layout.conversationsRoot ||
     entryPath === layout.locksRoot
   ) {
-    // A linked data or lock root would carry this home's state outside it.
+    // A linked data, conversation, or lock root would carry this home's
+    // state outside it.
     return entry.isDirectory();
   }
 

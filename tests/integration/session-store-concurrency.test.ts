@@ -1,4 +1,4 @@
-import {appendFile, mkdtemp, readFile, rm} from 'node:fs/promises';
+import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
@@ -47,14 +47,14 @@ describe('local runtime session catalog concurrency', () => {
 
   it('preserves distinct sessions created by concurrent child processes', async () => {
     const storeRoot = await createTempStoreRoot();
-    const sessionIds = Array.from(
+    const conversationIds = Array.from(
       {length: 24},
       (_, index) => `child-session-${String(index).padStart(2, '0')}`,
     );
     const results = await Promise.all(
-      sessionIds.map(
-        async sessionId =>
-          await createSessionInChildProcess(storeRoot, sessionId),
+      conversationIds.map(
+        async conversationId =>
+          await createSessionInChildProcess(storeRoot, conversationId),
       ),
     );
 
@@ -63,7 +63,9 @@ describe('local runtime session catalog concurrency', () => {
       storeRoot,
       characterId: 'mira',
     }).listSessions();
-    expect(sessions.map(session => session.sessionId)).toEqual(sessionIds);
+    expect(sessions.map(session => session.sessionId)).toEqual(
+      conversationIds.map(conversationId => `${conversationId}.1`),
+    );
   }, 20_000);
 
   it('allows exactly one creator for a shared session ID', async () => {
@@ -75,7 +77,7 @@ describe('local runtime session catalog concurrency', () => {
     const results = await Promise.allSettled(
       stores.map(async store => {
         return await store.createSession({
-          sessionId: 'shared-session',
+          conversationId: 'shared-session',
           createdAt: '2026-07-11T00:00:00.000Z',
         });
       }),
@@ -102,18 +104,18 @@ describe('local runtime session catalog concurrency', () => {
 
   it('preserves every distinct session created concurrently', async () => {
     const storeRoot = await createTempStoreRoot();
-    const sessionIds = Array.from(
+    const conversationIds = Array.from(
       {length: 24},
       (_, index) => `session-${String(index).padStart(2, '0')}`,
     );
 
     await Promise.all(
-      sessionIds.map(async sessionId => {
+      conversationIds.map(async conversationId => {
         await createLocalRuntimeSessionStore({
           storeRoot,
           characterId: 'mira',
         }).createSession({
-          sessionId,
+          conversationId,
           createdAt: '2026-07-11T00:00:00.000Z',
         });
       }),
@@ -123,44 +125,13 @@ describe('local runtime session catalog concurrency', () => {
       storeRoot,
       characterId: 'mira',
     }).listSessions();
-    expect(sessions.map(session => session.sessionId)).toEqual(sessionIds);
-
-    const catalog = await readFile(join(storeRoot, 'sessions.jsonl'), 'utf8');
-    expect(catalog.trim().split('\n')).toHaveLength(sessionIds.length);
-  }, 20_000);
-
-  it('compacts legacy duplicate catalog history on selection', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const store = createLocalRuntimeSessionStore({
-      storeRoot,
-      characterId: 'mira',
-    });
-    const created = await store.createSession({
-      sessionId: 'legacy-history',
-      createdAt: '2026-07-11T00:00:00.000Z',
-    });
-    const catalogPath = join(storeRoot, 'sessions.jsonl');
-    await appendFile(
-      catalogPath,
-      `${JSON.stringify({
-        ...created,
-        updatedAt: '2026-07-11T00:00:01.000Z',
-      })}\n`,
-      'utf8',
+    expect(sessions.map(session => session.sessionId)).toEqual(
+      conversationIds.map(conversationId => `${conversationId}.1`),
     );
 
-    await store.selectSession('legacy-history', {
-      updatedAt: '2026-07-11T00:00:02.000Z',
-    });
-
-    const lines = (await readFile(catalogPath, 'utf8')).trim().split('\n');
-    expect(lines).toHaveLength(1);
-    expect(JSON.parse(lines[0] ?? '')).toMatchObject({
-      sessionId: 'legacy-history',
-      createdAt: '2026-07-11T00:00:00.000Z',
-      updatedAt: '2026-07-11T00:00:02.000Z',
-    });
-  });
+    const catalog = await readFile(join(storeRoot, 'sessions.jsonl'), 'utf8');
+    expect(catalog.trim().split('\n')).toHaveLength(conversationIds.length);
+  }, 20_000);
 });
 
 async function createTempStoreRoot(): Promise<string> {
@@ -181,7 +152,7 @@ async function createSessionInChildProcess(
     "import { createLocalRuntimeSessionStore } from './src/runtime/storage/session-store.ts';",
     'try {',
     "  await createLocalRuntimeSessionStore({ storeRoot: process.argv[1], characterId: 'mira' }).createSession({",
-    '    sessionId: process.argv[2],',
+    '    conversationId: process.argv[2],',
     "    createdAt: '2026-07-11T00:00:00.000Z'",
     '  });',
     "  process.stdout.write(JSON.stringify({ status: 'created' }));",

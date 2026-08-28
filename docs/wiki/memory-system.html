@@ -159,30 +159,35 @@
         automatic extraction.
       </p>
 
-      <h2>Continuing a full session</h2>
+      <h2>Conversations and their segments</h2>
+
+      <p>
+        A conversation is one persistent thread between the user and a
+        character, held once in the home
+        (<code>conversations/&lt;id&gt;/conversation.json</code>: identity and
+        participants). The character keeps its own record of the thread as
+        sessions named <code>&lt;conversationId&gt;.&lt;segment&gt;</code> in
+        its data directory. Opening the chat resumes the thread's latest
+        segment; there is nothing to name and no session flag.
+      </p>
 
       <p>
         The model's history window is a token budget over whole prior turns
         (half of
         <code>project02.contextWindowTokens</code>), replayed newest-first with
-        each turn's tool calls and results. When a completed turn no longer fits
-        with the rest, the runtime continues the conversation in a new session:
-        the older turns are condensed into the character's own recollection by
-        the same model the character speaks through (or mechanically when that
-        model offers no plain completion), the newest turns are carried over
-        verbatim, and the new session opens with one record holding both. The
-        closed session's log is complete and untouched; the new one links back
-        to it, so a chain of sessions reads as one conversation. The
-        recollection reaches the model as a fenced user-role message just ahead
-        of the replayed turns — where the earlier conversation would have been —
-        byte-stable for the session's lifetime.
-      </p>
-
-      <p>
-        Opening the chat without naming a session resumes the newest one,
-        wherever the chain is; <code>--session</code> opens exactly the session
-        named, with a note when a later one continues it;
-        <code>--new-session</code> starts a fresh chain.
+        each turn's tool calls and results. When a completed turn no longer
+        fits with the rest, the runtime continues the conversation in the next
+        segment: the older turns are condensed into the character's own
+        recollection by the same model the character speaks through (or
+        mechanically when that model offers no plain completion), the newest
+        turns are carried over verbatim, and the new segment opens with one
+        record holding both. The closed segment's log is complete and
+        untouched, so the chain of segments reads as one conversation &mdash;
+        and the person sees none of it: rotation is the character's memory
+        management, not a conversation event. The recollection reaches the
+        model as a fenced user-role message just ahead of the replayed turns
+        &mdash; where the earlier conversation would have been &mdash;
+        byte-stable for the segment's lifetime.
       </p>
 
       <h2>Session search</h2>

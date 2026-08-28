@@ -8,7 +8,10 @@ export {
   encodeStorageSchemaMarker,
   homeRootForCharacterDataDir,
   LocalRuntimeStorageContractError,
+  normalizeConversationId,
   normalizeLocalRuntimeSessionId,
+  parseSegmentSessionId,
+  segmentSessionId,
   type LocalRuntimeCharacterDataStorageSchemaMarker,
   type LocalRuntimeSessionMetadata,
 } from './layout-contract.ts';
@@ -17,10 +20,12 @@ export {
   type RuntimePluginFileStoreProvider,
 } from './plugin-file-store/index.ts';
 export {
-  createContinuedDurableChatRuntime,
-  createDurableChatRuntime,
-  type DurableChatRuntime,
-} from './durable-session-bootstrap.ts';
+  acquireLocalRuntimeConversationWriterLease,
+  createLocalRuntimeConversationStore,
+  LocalRuntimeConversationStoreError,
+  type CreateLocalRuntimeConversationOptions,
+  type LocalRuntimeConversationStore,
+} from './conversation-store.ts';
 export {
   assertCharacterDataDirReadable,
   ensureCharacterDataDir,
@@ -32,7 +37,6 @@ export {
   ensureInitializedProject02Home,
   project02HomeCreationIsNew,
 } from './home.ts';
-export {runtimeLogStoreWithWriterOwner} from './log-store-writer-lease.ts';
 export {createLocalRuntimeSessionHistoryFeed} from './session-history-feed.ts';
 export {
   createRuntimePluginDatabaseOpener,

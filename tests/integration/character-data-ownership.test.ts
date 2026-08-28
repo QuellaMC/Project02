@@ -17,9 +17,9 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {createUserMessageRuntimeEvent} from '../../src/core/index.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/index.ts';
+import {openConversation} from '../../src/runtime/index.ts';
 import {
   characterDataDirPath,
-  createDurableChatRuntime,
   createLocalRuntimeStorageLayout,
   createLocalRuntimeStorageSchemaMarker,
   encodeStorageSchemaMarker,
@@ -73,29 +73,26 @@ async function runOneTurn(options: {
   readonly homeRoot: string;
   readonly character: {readonly id: string; readonly displayName: string};
   readonly userDisplayName?: string;
-  readonly sessionSelection:
-    {readonly newSessionId: string} | {readonly sessionId: string};
   readonly message: string;
   readonly reply: string;
 }): Promise<{readonly speakerNames: readonly string[]}> {
-  const runtime = await createDurableChatRuntime({
+  const conversation = await openConversation({
     homeRoot: options.homeRoot,
     character: options.character,
     ...(options.userDisplayName === undefined
       ? {}
       : {userDisplayName: options.userDisplayName}),
-    ...options.sessionSelection,
   });
   const dataRoot = characterDataDirPath(options.homeRoot, options.character.id);
 
   try {
     const result = await runLocalUserMessageEvent({
       event: createUserMessageRuntimeEvent(options.message),
-      session: runtime.session,
-      logStore: runtime.logStore,
+      session: conversation.session,
+      logStore: conversation.logStore,
       pluginHost: createDefaultProject02PluginHost({
         storeRoot: dataRoot,
-        sessionId: runtime.session.id,
+        sessionId: conversation.session.id,
       }),
       roleModelAdapter: visibleReplyAdapter(options.reply),
     });
@@ -103,12 +100,12 @@ async function runOneTurn(options: {
     expect(result.status).toBe('completed');
 
     return {
-      speakerNames: runtime.session.visibleTranscript.map(
+      speakerNames: conversation.session.visibleTranscript.map(
         message => message.speakerName,
       ),
     };
   } finally {
-    await runtime.writerLease.release();
+    await conversation.close();
   }
 }
 
@@ -411,14 +408,12 @@ describe('character data directories through the durable runtime', () => {
     const mira = await runOneTurn({
       homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {newSessionId: 'shared-home'},
       message: 'hello from mira side',
       reply: 'mira here',
     });
     const nova = await runOneTurn({
       homeRoot,
       character: novaProfile,
-      sessionSelection: {newSessionId: 'shared-home'},
       message: 'hello from nova side',
       reply: 'nova here',
     });
@@ -445,7 +440,6 @@ describe('character data directories through the durable runtime', () => {
     const miraResumed = await runOneTurn({
       homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {sessionId: 'shared-home'},
       message: 'still mira history only',
       reply: 'mira remembers',
     });
@@ -462,10 +456,9 @@ describe('character data directories through the durable runtime', () => {
     writeFileSync(join(dataRoot, 'sessions.jsonl'), '');
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'adoption-attempt',
       }),
     ).rejects.toThrow('without a data marker');
     expect(existsSync(schemaPath(dataRoot))).toBe(false);
@@ -481,10 +474,9 @@ describe('character data directories through the durable runtime', () => {
     symlinkSync(outside, characterDataDirPath(homeRoot, 'mira'));
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'symlink-attempt',
       }),
     ).rejects.toThrow('must be a real directory');
     expect(
@@ -530,10 +522,9 @@ describe('character data directories through the durable runtime', () => {
     symlinkSync(outside, join(dataRoot, 'sessions'));
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'linked-sessions-attempt',
       }),
     ).rejects.toThrow('Sessions root');
     expect(readdirSync(outside)).toEqual([]);
@@ -552,10 +543,9 @@ describe('character data directories through the durable runtime', () => {
     symlinkSync(join(outside, 'external-schema.json'), schemaPath(dataRoot));
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'linked-marker-attempt',
       }),
     ).rejects.toThrow('must be a regular file');
   });
@@ -569,7 +559,6 @@ describe('character data directories through the durable runtime', () => {
     await runOneTurn({
       homeRoot: donorHome,
       character: testCharacterProfile,
-      sessionSelection: {newSessionId: 'donor-session'},
       message: 'donor turn',
       reply: 'donor reply',
     });
@@ -584,10 +573,9 @@ describe('character data directories through the durable runtime', () => {
     );
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'borrowed-marker-attempt',
       }),
     ).rejects.toThrow('must be a regular file');
     expect(() =>
@@ -608,10 +596,9 @@ describe('character data directories through the durable runtime', () => {
     symlinkSync(outside, characterDataDirPath(homeRoot, 'mira'));
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'marked-symlink-attempt',
       }),
     ).rejects.toThrow('must be a real directory');
     expect(existsSync(join(outside, 'sessions.jsonl'))).toBe(false);
@@ -634,10 +621,9 @@ describe('character data directories through the durable runtime', () => {
     );
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        newSessionId: 'wrong-scope-attempt',
       }),
     ).rejects.toThrow('not a character data directory');
     expect(() =>
@@ -660,7 +646,6 @@ describe('character data directories through the durable runtime', () => {
     await runOneTurn({
       homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {newSessionId: 'marker-life'},
       message: 'hello',
       reply: 'hello back',
     });
@@ -670,7 +655,6 @@ describe('character data directories through the durable runtime', () => {
       runOneTurn({
         homeRoot,
         character: testCharacterProfile,
-        sessionSelection: {sessionId: 'marker-life'},
         message: 'again',
         reply: 'still here',
       }),
@@ -681,10 +665,9 @@ describe('character data directories through the durable runtime', () => {
     writeFileSync(schemaPath(dataRoot), characterDataMarkerBytes('nova'));
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
-        sessionId: 'marker-life',
       }),
     ).rejects.toMatchObject({
       name: 'LocalRuntimeStorageContractError',
@@ -698,10 +681,9 @@ describe('character data directories through the durable runtime', () => {
     // The name is stamped into every durable character message and into prompt
     // output, so it is judged at the same boundary the user's name is.
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: {id: 'mira', displayName: 'Nova\nSystem'},
-        newSessionId: 'bad-character-name',
       }),
     ).rejects.toThrow('Character display name must be');
     expect(readdirSync(homeRoot)).toEqual([]);
@@ -711,11 +693,10 @@ describe('character data directories through the durable runtime', () => {
     const homeRoot = createTestTempRoot();
 
     await expect(
-      createDurableChatRuntime({
+      openConversation({
         homeRoot,
         character: testCharacterProfile,
         userDisplayName: 'Bad\nName',
-        newSessionId: 'bad-user-name',
       }),
     ).rejects.toThrow('User display name must be');
     expect(readdirSync(homeRoot)).toEqual([]);
@@ -726,24 +707,22 @@ describe('character data directories through the durable runtime', () => {
 
     // The directory name is canonical, but the session and log store bound the
     // caller's spelling, so `" nova "` could not be reopened as `nova`.
-    const runtime = await createDurableChatRuntime({
+    const conversation = await openConversation({
       homeRoot,
       character: {id: ' nova ', displayName: 'Nova'},
-      newSessionId: 'padded-id',
     });
 
     try {
-      expect(runtime.session.character.id).toBe('nova');
+      expect(conversation.session.character.id).toBe('nova');
       expect(readdirSync(join(homeRoot, 'character-data'))).toEqual(['nova']);
     } finally {
-      await runtime.writerLease.release();
+      await conversation.close();
     }
 
     // A turn written through the padded profile reopens through the plain one.
     const resumed = await runOneTurn({
       homeRoot,
       character: novaProfile,
-      sessionSelection: {sessionId: 'padded-id'},
       message: 'hello again',
       reply: 'still nova',
     });
@@ -751,47 +730,37 @@ describe('character data directories through the durable runtime', () => {
     expect(resumed.speakerNames).toEqual(['You', 'Nova']);
   });
 
-  it('keeps historical display names for existing sessions after a rename and applies the new name to new sessions', async () => {
+  it('keeps historical display names when a renamed character resumes its conversation', async () => {
     const homeRoot = createTestTempRoot();
     const renamedMira = {id: 'mira', displayName: 'Mira Prime'} as const;
 
     await runOneTurn({
       homeRoot,
       character: testCharacterProfile,
-      sessionSelection: {newSessionId: 'rename-old'},
       message: 'first',
       reply: 'first reply',
     });
 
+    // A rename never rewrites history: the resumed segment keeps the name
+    // its messages were committed under. The new name applies from the next
+    // evidence-empty segment.
     const resumed = await runOneTurn({
       homeRoot,
       character: renamedMira,
-      sessionSelection: {sessionId: 'rename-old'},
       message: 'second',
       reply: 'second reply',
     });
 
     expect(resumed.speakerNames).toEqual(['You', 'Mira', 'You', 'Mira']);
-
-    const fresh = await runOneTurn({
-      homeRoot,
-      character: renamedMira,
-      sessionSelection: {newSessionId: 'rename-new'},
-      message: 'third',
-      reply: 'third reply',
-    });
-
-    expect(fresh.speakerNames).toEqual(['You', 'Mira Prime']);
   });
 
-  it('keeps historical user display names for existing sessions and applies the configured one to new sessions', async () => {
+  it('keeps historical user display names when a renamed user resumes a conversation', async () => {
     const homeRoot = createTestTempRoot();
 
     await runOneTurn({
       homeRoot,
       character: testCharacterProfile,
       userDisplayName: 'Mike',
-      sessionSelection: {newSessionId: 'user-name-old'},
       message: 'first',
       reply: 'first reply',
     });
@@ -800,22 +769,10 @@ describe('character data directories through the durable runtime', () => {
       homeRoot,
       character: testCharacterProfile,
       userDisplayName: 'Michael',
-      sessionSelection: {sessionId: 'user-name-old'},
       message: 'second',
       reply: 'second reply',
     });
 
     expect(resumed.speakerNames).toEqual(['Mike', 'Mira', 'Mike', 'Mira']);
-
-    const fresh = await runOneTurn({
-      homeRoot,
-      character: testCharacterProfile,
-      userDisplayName: 'Michael',
-      sessionSelection: {newSessionId: 'user-name-new'},
-      message: 'third',
-      reply: 'third reply',
-    });
-
-    expect(fresh.speakerNames).toEqual(['Michael', 'Mira']);
   });
 });

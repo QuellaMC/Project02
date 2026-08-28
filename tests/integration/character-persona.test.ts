@@ -3,7 +3,7 @@ import {describe, expect, it} from 'vitest';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {createDefaultProject02PluginHost} from '../support/default-plugin-host.ts';
 import {
-  createConversationSession,
+  createSession,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
@@ -41,7 +41,7 @@ function capturingVisibleReplyAdapter(
 
 describe('character persona through the role-model loop', () => {
   it('renders persona into the loop-prepared request and stamps characterRef into durable evidence', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'persona-proof',
     });
@@ -81,7 +81,7 @@ describe('character persona through the role-model loop', () => {
 
   it('rejects committing a turn for a foreign character on a bound store even with role-model anchoring', async () => {
     const novaProfile = {id: 'nova', displayName: 'Nova'} as const;
-    const session = createConversationSession({
+    const session = createSession({
       character: novaProfile,
       id: 'foreign-anchored',
     });
@@ -104,7 +104,7 @@ describe('character persona through the role-model loop', () => {
   });
 
   it('rejects a characterRef whose id differs from the decision-context character', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'persona-ref-mismatch',
     });
@@ -132,7 +132,7 @@ describe('character persona through the role-model loop', () => {
   });
 
   it('keeps records without characterRef decoding as before', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'persona-absent',
     });

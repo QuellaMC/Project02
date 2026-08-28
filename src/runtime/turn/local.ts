@@ -1,4 +1,4 @@
-import type {ConversationSession} from '../../core/index.ts';
+import type {Session} from '../../core/index.ts';
 import {acquireLocalRuntimeSessionWriterLease} from '../storage/session-store.ts';
 import {runSerializedLocalUserMessageEvent} from './model.ts';
 import type {
@@ -18,10 +18,7 @@ export type {
   RunLocalUserMessageEventOptions,
 } from './contracts.ts';
 
-const localRuntimeTurnQueues = new WeakMap<
-  ConversationSession,
-  Promise<void>
->();
+const localRuntimeTurnQueues = new WeakMap<Session, Promise<void>>();
 
 export async function runLocalUserMessageEvent(
   options: RunLocalUserMessageEventOptions,
@@ -56,7 +53,7 @@ async function runLocalUserMessageEventWithWriterLease(
 }
 
 async function enqueueLocalRuntimeTurn<T>(
-  session: ConversationSession,
+  session: Session,
   operation: () => Promise<T>,
 ): Promise<T> {
   const previousTurn = localRuntimeTurnQueues.get(session) ?? Promise.resolve();

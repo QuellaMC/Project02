@@ -9,10 +9,10 @@ import {
   createSequencedAdapter,
   createTestEvent,
 } from '../support/role-model-loop-fixtures.ts';
-import {writeDurableConversationSession} from '../support/runtime-log-fixtures.ts';
+import {writeDurableSession} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {
   characterStatePluginId,
   runtimePluginId,
@@ -32,9 +32,9 @@ describe('session history through the tool loop', () => {
   it('recalls a past session and replies from what it found', async () => {
     const storeRoot = createTestTempRoot('project02-history-loop-');
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'earlier',
+      conversationId: 'earlier',
       exchanges: [
         [
           'remember the passphrase riddle?',
@@ -55,7 +55,7 @@ describe('session history through the tool loop', () => {
         sessionHistoryPluginId,
       ],
     });
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -116,7 +116,8 @@ describe('session history through the tool loop', () => {
 
   it('recalls messages that scrolled out of the model window in the same session', async () => {
     const storeRoot = createTestTempRoot('project02-history-window-');
-    const sessionId = 'local-session';
+    const conversationId = 'local-session';
+    const sessionId = `${conversationId}.1`;
     const exchanges: readonly [string, string][] = [
       ['the wifi password is stormlight42', 'Saved it, I will remember.'],
       ...Array.from({length: 5}, (_, index): [string, string] => [
@@ -125,12 +126,12 @@ describe('session history through the tool loop', () => {
       ]),
     ];
 
-    await writeDurableConversationSession({storeRoot, sessionId, exchanges});
+    await writeDurableSession({storeRoot, conversationId, exchanges});
 
     // Restore the same transcript the store holds; with a 256-token context
     // window the history budget (half of it) holds the five filler turns and
     // not the wifi exchange, which sits beyond what the model sees.
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
       visibleTranscript: exchanges.flatMap(
@@ -231,13 +232,14 @@ describe('session history through the tool loop', () => {
 
   it('never returns the model its own interim reply from the same turn', async () => {
     const storeRoot = createTestTempRoot('project02-history-interim-');
-    const sessionId = 'local-session';
+    const conversationId = 'local-session';
+    const sessionId = `${conversationId}.1`;
 
     // An empty durable session: the whole turn, including the interim
     // reply, commits into the store the search index reads.
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId,
+      conversationId,
       exchanges: [],
     });
 
@@ -273,7 +275,7 @@ describe('session history through the tool loop', () => {
     ]);
     const result = await runLocalUserMessageEvent({
       event: createTestEvent('what was that phrase?', 'evt_history_interim'),
-      session: createConversationSession({
+      session: createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),

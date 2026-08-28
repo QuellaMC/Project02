@@ -10,7 +10,7 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {testCharacterProfile} from '../support/character-fixtures.ts';
-import {writeDurableConversationSession} from '../support/runtime-log-fixtures.ts';
+import {writeDurableSession} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 import type {RuntimePluginSessionHistoryMessage} from '../../src/plugins/api/session-history-contract.ts';
@@ -28,9 +28,9 @@ describe('session history feed', () => {
   it('serves visible messages incrementally with an opaque cursor', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'alpha',
+      conversationId: 'alpha',
       exchanges: [
         ['hello there', 'hi'],
         ['how are you?', 'well'],
@@ -41,10 +41,10 @@ describe('session history feed', () => {
       storeRoot,
       characterId: character.id,
     });
-    const first = feed.readNewMessages({sessionId: 'alpha'});
+    const first = feed.readNewMessages({sessionId: 'alpha.1'});
     const expected = createFileRuntimeLogStore({
       storeRoot,
-      sessionId: 'alpha',
+      sessionId: 'alpha.1',
       characterId: character.id,
       boundCharacter: character,
     }).conversationMessages();
@@ -59,7 +59,7 @@ describe('session history feed', () => {
     );
 
     const caughtUp = feed.readNewMessages({
-      sessionId: 'alpha',
+      sessionId: 'alpha.1',
       cursor: first.nextCursor,
     });
 
@@ -71,15 +71,15 @@ describe('session history feed', () => {
   it('leaves torn tails unconsumed and counts damaged records', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'damaged',
+      conversationId: 'damaged',
       exchanges: [['remember the riddle?', 'the silent drawbridge one']],
     });
 
     const rawEventsPath = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'damaged',
+      sessionId: 'damaged.1',
     }).rawEventsPath;
     const feed = createLocalRuntimeSessionHistoryFeed({
       storeRoot,
@@ -88,7 +88,7 @@ describe('session history feed', () => {
 
     appendFileSync(rawEventsPath, '{"eventId":"evt_torn', 'utf8');
 
-    const torn = feed.readNewMessages({sessionId: 'damaged'});
+    const torn = feed.readNewMessages({sessionId: 'damaged.1'});
 
     expect(torn.messages).toHaveLength(2);
     expect(torn.damagedRecordCount).toBe(0);
@@ -96,7 +96,7 @@ describe('session history feed', () => {
     appendFileSync(rawEventsPath, '"}\n', 'utf8');
 
     const damaged = feed.readNewMessages({
-      sessionId: 'damaged',
+      sessionId: 'damaged.1',
       cursor: torn.nextCursor,
     });
 
@@ -108,9 +108,9 @@ describe('session history feed', () => {
   it('lists the catalog leniently where the strict reader refuses it', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'alpha',
+      conversationId: 'alpha',
       exchanges: [['hello', 'hi']],
     });
 
@@ -119,7 +119,7 @@ describe('session history feed', () => {
     appendFileSync(layout.sessionCatalogPath, '{"sessionId":42}\n', 'utf8');
     appendFileSync(
       layout.sessionCatalogPath,
-      '{"sessionId":"ghost","createdAt":"2026-07-16T00:00:00.000Z","updatedAt":"2026-07-16T00:00:00.000Z"}\n',
+      '{"sessionId":"ghost.1","createdAt":"2026-07-16T00:00:00.000Z"}\n',
       'utf8',
     );
 
@@ -130,8 +130,8 @@ describe('session history feed', () => {
     const listing = feed.listSessions();
 
     expect(listing.sessions.map(session => session.sessionId)).toEqual([
-      'alpha',
-      'ghost',
+      'alpha.1',
+      'ghost.1',
     ]);
     expect(listing.damagedEntryCount).toBe(1);
     await expect(
@@ -151,9 +151,9 @@ describe('session history feed', () => {
   it('resets when the transcript shrinks or the cursor is unreadable', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'shrinks',
+      conversationId: 'shrinks',
       exchanges: [['forget this thread', 'ok']],
     });
 
@@ -161,18 +161,18 @@ describe('session history feed', () => {
       storeRoot,
       characterId: character.id,
     });
-    const first = feed.readNewMessages({sessionId: 'shrinks'});
+    const first = feed.readNewMessages({sessionId: 'shrinks.1'});
 
     expect(first.messages).toHaveLength(2);
 
     truncateSync(
-      createLocalRuntimeSessionPaths({storeRoot, sessionId: 'shrinks'})
+      createLocalRuntimeSessionPaths({storeRoot, sessionId: 'shrinks.1'})
         .rawEventsPath,
       0,
     );
 
     const afterShrink = feed.readNewMessages({
-      sessionId: 'shrinks',
+      sessionId: 'shrinks.1',
       cursor: first.nextCursor,
     });
 
@@ -180,7 +180,7 @@ describe('session history feed', () => {
     expect(afterShrink.messages).toEqual([]);
 
     const unreadable = feed.readNewMessages({
-      sessionId: 'shrinks',
+      sessionId: 'shrinks.1',
       cursor: 'not-a-cursor',
     });
 
@@ -190,9 +190,9 @@ describe('session history feed', () => {
   it('honors a byte budget and terminates when slicing', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'sliced',
+      conversationId: 'sliced',
       exchanges: [
         ['first question', 'first answer'],
         ['second question', 'second answer'],
@@ -209,7 +209,7 @@ describe('session history feed', () => {
 
     for (let slices = 0; slices < 100; slices += 1) {
       const batch = feed.readNewMessages({
-        sessionId: 'sliced',
+        sessionId: 'sliced.1',
         ...(cursor === undefined ? {} : {cursor}),
         maxBytes: 4_096,
       });
@@ -236,9 +236,9 @@ describe('session history feed', () => {
   it('refuses a linked session directory instead of reading through it', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'linked',
+      conversationId: 'linked',
       exchanges: [['hello', 'hi']],
     });
 
@@ -249,7 +249,7 @@ describe('session history feed', () => {
 
     const sessionRoot = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'linked',
+      sessionId: 'linked.1',
     }).sessionRoot;
 
     rmSync(sessionRoot, {recursive: true});
@@ -260,7 +260,7 @@ describe('session history feed', () => {
       characterId: character.id,
     });
 
-    expect(() => feed.readNewMessages({sessionId: 'linked'})).toThrow(
+    expect(() => feed.readNewMessages({sessionId: 'linked.1'})).toThrow(
       expect.objectContaining({code: 'read_failed'}),
     );
   });
@@ -290,9 +290,9 @@ describe('session history feed', () => {
 
     const foreignRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot: foreignRoot,
-      sessionId: 'theirs',
+      conversationId: 'theirs',
       exchanges: [['their secret', 'kept']],
       character: {id: 'nova', displayName: 'Nova'},
     });

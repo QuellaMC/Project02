@@ -40,6 +40,7 @@ describe('project02 home initialization', () => {
 
     mkdirSync(layout.characterPackagesRoot, {recursive: true});
     mkdirSync(layout.pluginPackagesRoot, {recursive: true});
+    mkdirSync(layout.conversationsRoot, {recursive: true});
     writeFileSync(layout.configPath, '{"version":"project02.config.v2"}\n');
     writeFileSync(layout.envPath, 'API_KEY=x\n');
 
@@ -121,6 +122,22 @@ describe('project02 home initialization', () => {
     await expect(ensureInitializedProject02Home({homeRoot})).rejects.toThrow(
       'is a symlink',
     );
+  });
+
+  it('rejects an initialized home whose conversations root became a symlink', async () => {
+    const homeRoot = join(createTestTempRoot(), 'linked-conversations-home');
+    const outside = createTestTempRoot('project02-conversations-target-');
+    const layout = createProject02HomeLayout({homeRoot});
+
+    await ensureInitializedProject02Home({homeRoot});
+    symlinkSync(outside, layout.conversationsRoot);
+
+    await expect(
+      ensureInitializedProject02Home({homeRoot}),
+    ).rejects.toMatchObject({
+      name: 'LocalRuntimeStorageContractError',
+      code: 'missing_file',
+    });
   });
 
   it('treats a symlinked character-data root in a marker-less home as foreign', async () => {

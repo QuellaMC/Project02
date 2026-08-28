@@ -1,6 +1,6 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/host/index.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
 import {type RoleModelChatMessage} from '../../src/role-model/index.ts';
@@ -17,7 +17,7 @@ import {
 
 describe('plugin-driven native tool loop routing', () => {
   it("replays a tool round with the runtime's call id and the plugin's result", async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -76,7 +76,7 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it("folds an interim visible_reply into the replayed round's assistant content instead of a tool call", async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -129,7 +129,7 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('hands a native tool call with non-object arguments back to the model', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -181,7 +181,7 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('returns undeclared executable tools to the model without dispatching them', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -234,7 +234,7 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('does not synthesize Character State when the injected host omits it', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -281,7 +281,7 @@ describe('plugin-driven native tool loop routing', () => {
   });
 
   it('logs only valid pluginStoreRevision metadata from accepted tool output', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();

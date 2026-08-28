@@ -20,3 +20,4 @@ export {
   enforceCharacterPluginExpectations,
   planCharacterPackagePluginMaterialization,
 } from './character-plugins.ts';
+export {configuredPluginConstructionCleanupSessionId} from './plugin-construction.ts';

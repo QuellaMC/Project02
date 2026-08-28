@@ -6,6 +6,7 @@ import {
   RuntimeEnvFileError,
 } from '../../runtime/config/index.ts';
 import {
+  LocalRuntimeConversationStoreError,
   LocalRuntimeSessionStoreError,
   LocalRuntimeStorageContractError,
 } from '../../runtime/storage/index.ts';
@@ -23,6 +24,7 @@ export class ChatCliStartupError extends Error {
 type LocalRuntimeTerminalError =
   | ConversationRehydrationError
   | RuntimeConfigLocationError
+  | LocalRuntimeConversationStoreError
   | LocalRuntimeSessionStoreError
   | LocalRuntimeStorageContractError;
 
@@ -32,6 +34,7 @@ function isLocalRuntimeTerminalError(
   return (
     error instanceof ConversationRehydrationError ||
     error instanceof RuntimeConfigLocationError ||
+    error instanceof LocalRuntimeConversationStoreError ||
     error instanceof LocalRuntimeSessionStoreError ||
     error instanceof LocalRuntimeStorageContractError
   );
