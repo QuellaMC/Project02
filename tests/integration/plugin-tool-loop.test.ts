@@ -1,7 +1,7 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
 } from '../../src/core/index.ts';
 import {
@@ -35,7 +35,7 @@ import {
 
 describe('plugin-driven Character State tool loop', () => {
   it('executes character_state.patch through the built-in plugin and continues', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -133,9 +133,10 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('persists every model round as its own record, referenced by its tool call and by the terminal', async () => {
-    const sessionId = 'session-tool-round-evidence';
+    const conversationId = 'session-tool-round-evidence';
+    const sessionId = `${conversationId}.1`;
     const {session, logStore, storeRoot} =
-      await createDurableCharacterStateHarness(sessionId);
+      await createDurableCharacterStateHarness(conversationId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
@@ -235,9 +236,10 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('persists repeated same tool calls across separate durable turns', async () => {
-    const sessionId = 'session-repeated-tool-turns';
+    const conversationId = 'session-repeated-tool-turns';
+    const sessionId = `${conversationId}.1`;
     const {session, logStore, storeRoot} =
-      await createDurableCharacterStateHarness(sessionId);
+      await createDurableCharacterStateHarness(conversationId);
 
     for (const eventId of [
       'evt_repeated_tool_first',
@@ -292,9 +294,10 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('replays a durably stored turn that recovered through decision-error feedback', async () => {
-    const sessionId = 'session-feedback-replay';
+    const conversationId = 'session-feedback-replay';
+    const sessionId = `${conversationId}.1`;
     const {session, logStore, storeRoot} =
-      await createDurableCharacterStateHarness(sessionId);
+      await createDurableCharacterStateHarness(conversationId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
@@ -443,18 +446,19 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('keeps a completed character_state.patch when precommit plugin health rejects', async () => {
-    const sessionId = 'session-plugin-patch-health-rejected';
+    const conversationId = 'session-plugin-patch-health-rejected';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -522,14 +526,15 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('commits accepted character_state.patch once for repeated tool call identity', async () => {
-    const sessionId = 'session-plugin-patch-idempotent';
+    const conversationId = 'session-plugin-patch-idempotent';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
@@ -587,14 +592,15 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('replays the stored Character State result after intervening state changes', async () => {
-    const sessionId = 'session-plugin-patch-idempotent-replay';
+    const conversationId = 'session-plugin-patch-idempotent-replay';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
 
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
 
@@ -770,7 +776,7 @@ describe('plugin-driven Character State tool loop', () => {
   });
 
   it('isolates default in-memory Character State by session object', async () => {
-    const firstSession = createConversationSession({
+    const firstSession = createSession({
       character: testCharacterProfile,
     });
     const firstLogStore = createRuntimeLogStore();
@@ -804,7 +810,7 @@ describe('plugin-driven Character State tool loop', () => {
       roleModelAdapter: firstAdapter,
     });
 
-    const secondSession = createConversationSession({
+    const secondSession = createSession({
       character: testCharacterProfile,
     });
     const secondLogStore = createRuntimeLogStore();

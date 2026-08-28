@@ -252,7 +252,7 @@ describe('configured runtime plugin package activation', () => {
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId: 'cold-package-inspect',
+      conversationId: 'cold-package-inspect',
       createdAt: '2026-07-15T00:00:00.000Z',
     });
     writeOperatorPackage({

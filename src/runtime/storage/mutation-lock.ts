@@ -32,7 +32,7 @@ const defaultLocalRuntimeMutationLockIncompleteGraceMs = 30_000;
 
 type LocalRuntimeMutationLockBusyCode = Extract<
   LocalRuntimeStorageContractErrorCode,
-  'session_busy' | 'storage_busy'
+  'conversation_busy' | 'session_busy' | 'storage_busy'
 >;
 
 type AcquireLocalRuntimeMutationLockOptions = {

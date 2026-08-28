@@ -46,7 +46,7 @@ describe('local runtime session catalog mutation failures', () => {
         storeRoot,
         characterId: 'mira',
       }).createSession({
-        sessionId: 'rolled-back-session',
+        conversationId: 'rolled-back-session',
         createdAt: '2026-07-11T00:00:00.000Z',
       }),
     ).rejects.toThrow('Could not rewrite local runtime session catalog');
@@ -63,19 +63,19 @@ describe('local runtime session catalog mutation failures', () => {
       characterId: 'mira',
     });
     await store.createSession({
-      sessionId: 'existing-session',
+      conversationId: 'existing-session',
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    await mkdir(join(storeRoot, 'sessions', 'orphan-session'));
+    await mkdir(join(storeRoot, 'sessions', 'orphan-session.1'));
     await writeFile(
-      join(storeRoot, 'sessions', 'orphan-session', 'evidence.jsonl'),
+      join(storeRoot, 'sessions', 'orphan-session.1', 'evidence.jsonl'),
       '{}\n',
       'utf8',
     );
 
     await expect(
       store.createSession({
-        sessionId: 'orphan-session',
+        conversationId: 'orphan-session',
         createdAt: '2026-07-11T00:00:01.000Z',
       }),
     ).rejects.toMatchObject({code: 'missing_file'});

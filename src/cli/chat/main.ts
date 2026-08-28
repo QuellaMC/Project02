@@ -1,62 +1,44 @@
 import {createInterface} from 'node:readline';
 
-import {
-  type CharacterProfile,
-  type ConversationSession,
-  createConversationSession,
-  createRuntimeEventIdentity,
-  createUserMessageRuntimeEvent,
-  RuntimeEventInputError,
-} from '../../core/index.ts';
+import type {CharacterProfile} from '../../core/index.ts';
 import {shutdownConfiguredChatPluginHost} from './plugin-host-shutdown.ts';
-import {endChatSession, exitCommand} from './session-end.ts';
 import {
   parseChatCliArgs,
-  validateDurableSessionArgs,
+  validateChatStoreArgs,
   type ChatCliArgs,
 } from './args.ts';
 import {
-  continueChatSessionIfNeeded,
-  durableSessionContinuation,
-  writeContinuedSessionNotice,
-  type ActiveChatSession,
-  type ContinueChatSession,
-} from './session-continuation.ts';
-import {writeRuntimeProgress, writeTraceSummary} from './turn-output.ts';
+  writeRotationWarnings,
+  writeRuntimeProgress,
+  writeTraceSummary,
+} from './turn-output.ts';
 import {
-  recordLocalUserMessageInputRejection,
-  runLocalUserMessageEvent,
-  type LocalRuntimeTurnProgressEvent,
+  deliverUserMessage,
+  endSession,
+  exitCommand,
+  openConversation,
+  type ActiveConversation,
   type LocalRuntimeUserMessageInputRejectedResult,
   type LocalRuntimeUserMessageResult,
+  type UserMessageDelivery,
+} from '../../runtime/index.ts';
+import type {
+  RawEventLogRecord,
+  RuntimeTraceEntry,
 } from '../../runtime/index.ts';
 import {
-  type RawEventLogRecord,
-  type RuntimeLogStore,
-  type RuntimeTraceEntry,
-} from '../../runtime/index.ts';
-import {
-  type ChatTraceSummary,
-  createRuntimeLogStore,
   createTraceSummary,
   deriveRuntimeTraceEntries,
-  sameTraceIdentity,
+  type ChatTraceSummary,
   type TraceIdentity,
 } from '../../runtime/evidence/index.ts';
-import {
-  acquireLocalRuntimeSessionWriterLease,
-  createDurableChatRuntime,
-  createLocalRuntimeMutationLockOwnerToken,
-  type DurableChatRuntime,
-  normalizeLocalRuntimeSessionId,
-  runtimeLogStoreWithWriterOwner,
-} from '../../runtime/storage/index.ts';
 import {
   type RuntimePluginHost,
   type RuntimePluginToolConfirmationHandler,
   type RuntimePluginToolConfirmationRequest,
 } from '../../plugins/index.ts';
 import {
+  configuredPluginConstructionCleanupSessionId,
   createConfiguredProject02PluginHostFromPlan,
   resolveRuntimeCliStartup,
   type PreparedProject02PluginActivationPlan,
@@ -98,23 +80,21 @@ type ChatCliOptions = {
   readonly traceMode?: boolean;
   readonly roleModelAdapter?: RoleModelAdapter;
   readonly pluginHost?: RuntimePluginHost;
-  readonly session?: ConversationSession;
-  readonly characterProfile?: CharacterProfile;
-  readonly characterPersonaSections?: readonly string[];
-  readonly characterRef?: RoleModelCharacterRef;
-  readonly userDisplayName?: string;
-  readonly contextWindowTokens?: number;
-  /** Opens the session that continues the current one once its history outgrows the window. */
-  readonly continueSession?: ContinueChatSession;
-  /** Frees the first session's writer lease when the chat leaves it, not only at exit. */
-  readonly releaseSession?: () => Promise<void>;
-  readonly logStore?: RuntimeLogStore;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-  readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
 };
 
-type RunChatCliOptions = Omit<ChatCliOptions, 'pluginHost'> & {
+export type RunChatCliOptions = {
+  readonly conversation: ActiveConversation;
   readonly pluginHost: RuntimePluginHost;
+  readonly stdin: NodeJS.ReadableStream;
+  readonly stdout: NodeJS.WritableStream;
+  readonly stderr: NodeJS.WritableStream;
+  readonly traceMode?: boolean;
+  readonly roleModelAdapter?: RoleModelAdapter;
+  readonly characterPersonaSections?: readonly string[];
+  readonly characterRef?: RoleModelCharacterRef;
+  readonly contextWindowTokens?: number;
+  readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
 };
 
 type CompletedChatRuntimeTurn = {
@@ -144,25 +124,10 @@ type ChatToolConfirmationBridge = {
 
 const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
 
-function promptTextFor(session: ConversationSession): string {
-  return `${session.userSpeaker.displayName}: `;
-}
 const startupFailurePluginCleanupMessage =
   'chat startup failed before opening a durable session';
 const fatalFailurePluginCleanupMessage =
   'chat turn failed before normal /exit cleanup';
-
-function requiredChatCharacterProfile(
-  characterProfile: CharacterProfile | undefined,
-): CharacterProfile {
-  if (characterProfile === undefined) {
-    throw new ChatCliStartupError(
-      'Chat startup requires a session or a character profile.',
-    );
-  }
-
-  return characterProfile;
-}
 
 /** Plugins hold the bridge from startup; the terminal handler arrives later. */
 function createChatToolConfirmationBridge(): ChatToolConfirmationBridge {
@@ -280,7 +245,7 @@ export async function runChatCliFromArgs(
     const parsedArgs = parseChatCliArgs(args);
 
     // Fails before startup materializes any durable character state.
-    validateDurableSessionArgs(parsedArgs);
+    validateChatStoreArgs(parsedArgs);
 
     await assertProject02StoreConsent({
       location: parsedArgs,
@@ -350,7 +315,7 @@ export async function runChatCliFromArgs(
       storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
     } satisfies ChatCliArgs;
 
-    validateDurableSessionArgs(runtimeArgs);
+    validateChatStoreArgs(runtimeArgs);
 
     // Character activation ran inside startup, before any plugin resources.
     const characterActivation = startup.characterActivation;
@@ -419,32 +384,33 @@ async function runChatCliAfterConfiguredHost(options: {
   readonly userDisplayName?: string;
   readonly contextWindowTokens?: number;
 }): Promise<number> {
-  let durableRuntime: DurableChatRuntime;
+  let conversation: ActiveConversation;
   let pluginHost: RuntimePluginHost;
   let roleModelAdapter: RoleModelAdapter | undefined;
 
   try {
-    durableRuntime = await createDurableChatRuntime({
+    conversation = await openConversation({
       ...(options.runtimeArgs.storeRoot === undefined
         ? {}
         : {homeRoot: options.runtimeArgs.storeRoot}),
-      ...(options.runtimeArgs.sessionId === undefined
-        ? {}
-        : {sessionId: options.runtimeArgs.sessionId}),
-      ...(options.runtimeArgs.newSessionId === undefined
-        ? {}
-        : {newSessionId: options.runtimeArgs.newSessionId}),
       character: options.characterProfile,
       ...(options.userDisplayName === undefined
         ? {}
         : {userDisplayName: options.userDisplayName}),
     });
-    writeContinuedSessionNotice(
-      options.options.stdout,
-      options.runtimeArgs.sessionId,
-      durableRuntime,
-    );
+  } catch (error: unknown) {
+    if (options.configuredHost !== undefined) {
+      await cleanupConfiguredChatPluginHostAfterStartupFailure({
+        configuredHost: options.configuredHost,
+        character: options.characterProfile,
+        stderr: options.options.stderr,
+      });
+    }
 
+    throw error;
+  }
+
+  try {
     const startupPluginHost =
       options.options.pluginHost ?? options.configuredHost?.host;
 
@@ -455,35 +421,19 @@ async function runChatCliAfterConfiguredHost(options: {
     }
 
     pluginHost = startupPluginHost;
-    roleModelAdapter = createSelectedRoleModelAdapter(
-      options.runtimeArgs.provider,
-      options.runtimeEnv,
-    );
-  } catch (error: unknown) {
-    if (options.configuredHost !== undefined) {
-      await cleanupConfiguredChatPluginHostAfterStartupFailure({
-        configuredHost: options.configuredHost,
-        args: options.runtimeArgs,
-        character: options.characterProfile,
-        stderr: options.options.stderr,
-      });
-    }
+    // The selected provider wins; an injected adapter covers the rest.
+    roleModelAdapter =
+      createSelectedRoleModelAdapter(
+        options.runtimeArgs.provider,
+        options.runtimeEnv,
+      ) ?? options.options.roleModelAdapter;
 
-    throw error;
-  }
-
-  // The chat may continue into later sessions; cleanup and shutdown name the
-  // one it was in at the end, which every continuation reports here.
-  const continueSession = durableSessionContinuation({
-    homeRoot: options.runtimeArgs.storeRoot,
-  });
-  let activeSession = durableRuntime.session;
-
-  try {
     const exitCode = await runChatCli({
-      ...options.options,
-      session: durableRuntime.session,
-      logStore: durableRuntime.logStore,
+      conversation,
+      pluginHost,
+      stdin: options.options.stdin,
+      stdout: options.options.stdout,
+      stderr: options.options.stderr,
       ...(roleModelAdapter === undefined ? {} : {roleModelAdapter}),
       ...(options.characterPersonaSections === undefined
         ? {}
@@ -494,14 +444,6 @@ async function runChatCliAfterConfiguredHost(options: {
       ...(options.contextWindowTokens === undefined
         ? {}
         : {contextWindowTokens: options.contextWindowTokens}),
-      async continueSession(plan, current) {
-        const next = await continueSession(plan, current);
-
-        activeSession = next.session;
-        return next;
-      },
-      releaseSession: () => durableRuntime.writerLease.release(),
-      pluginHost,
       ...(options.toolConfirmationBridge === undefined
         ? {}
         : {toolConfirmationBridge: options.toolConfirmationBridge}),
@@ -509,58 +451,44 @@ async function runChatCliAfterConfiguredHost(options: {
     });
 
     if (exitCode !== 0 && options.configuredHost !== undefined) {
-      await cleanupConfiguredChatPluginHostAfterFatalExit({
-        configuredHost: options.configuredHost,
-        session: activeSession,
+      await runBestEffortPluginSessionEnd({
+        pluginHost: options.configuredHost.host,
+        sessionId: conversation.session.id,
+        currentUserMessage: fatalFailurePluginCleanupMessage,
+        character: conversation.session.character,
       });
     }
 
     return exitCode;
   } finally {
+    // Cleanup and shutdown name the segment the chat ended in.
     if (options.configuredHost !== undefined) {
       await shutdownConfiguredChatPluginHost({
         pluginHost: options.configuredHost.host,
-        sessionId: activeSession.id,
-        character: activeSession.character,
+        sessionId: conversation.session.id,
+        character: conversation.session.character,
         stderr: options.options.stderr,
       });
     }
-    await durableRuntime.writerLease.release();
+    await conversation.close();
   }
-}
-
-async function cleanupConfiguredChatPluginHostAfterFatalExit(options: {
-  readonly configuredHost: ConfiguredChatPluginHost;
-  readonly session: ConversationSession;
-}): Promise<void> {
-  await runBestEffortPluginSessionEnd({
-    pluginHost: options.configuredHost.host,
-    sessionId: options.session.id,
-    currentUserMessage: fatalFailurePluginCleanupMessage,
-    character: options.session.character,
-  });
 }
 
 async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
   readonly configuredHost: ConfiguredChatPluginHost;
-  readonly args: ChatCliArgs;
   readonly character: CharacterProfile;
   readonly stderr: NodeJS.WritableStream;
 }): Promise<void> {
   await runBestEffortPluginSessionEnd({
     pluginHost: options.configuredHost.host,
-    sessionId: normalizeLocalRuntimeSessionId(
-      options.args.newSessionId ?? options.args.sessionId,
-    ),
+    sessionId: configuredPluginConstructionCleanupSessionId,
     currentUserMessage: startupFailurePluginCleanupMessage,
     character: options.character,
     hookOptions: {allowFileStoreWrites: false},
   });
   await shutdownConfiguredChatPluginHost({
     pluginHost: options.configuredHost.host,
-    sessionId: normalizeLocalRuntimeSessionId(
-      options.args.newSessionId ?? options.args.sessionId,
-    ),
+    sessionId: configuredPluginConstructionCleanupSessionId,
     character: options.character,
     stderr: options.stderr,
   });
@@ -606,63 +534,7 @@ function formatRuntimeConfigDiagnosticError(
 }
 
 export async function runChatCli(options: RunChatCliOptions): Promise<number> {
-  const configuredLogStore = options.logStore;
-  const sessionPaths = configuredLogStore?.localRuntimeSessionPaths;
-
-  if (configuredLogStore === undefined || sessionPaths === undefined) {
-    return await runChatCliWithActiveWriter(options);
-  }
-
-  const writerOwnerToken =
-    configuredLogStore.localRuntimeWriterLockOwnerToken ??
-    createLocalRuntimeMutationLockOwnerToken();
-  const writerLease = await acquireLocalRuntimeSessionWriterLease({
-    storeRoot: sessionPaths.storeRoot,
-    sessionId: sessionPaths.sessionId,
-    ownerToken: writerOwnerToken,
-  });
-  const activeLogStore =
-    configuredLogStore.localRuntimeWriterLockOwnerToken === undefined
-      ? runtimeLogStoreWithWriterOwner(configuredLogStore, writerOwnerToken)
-      : configuredLogStore;
-
-  try {
-    return await runChatCliWithActiveWriter({
-      ...options,
-      logStore: activeLogStore,
-      async releaseSession() {
-        await writerLease.release();
-        await options.releaseSession?.();
-      },
-    });
-  } finally {
-    await writerLease.release();
-  }
-}
-
-async function runChatCliWithActiveWriter(
-  options: RunChatCliOptions,
-): Promise<number> {
-  const session =
-    options.session ??
-    createConversationSession({
-      character: requiredChatCharacterProfile(options.characterProfile),
-      ...(options.userDisplayName === undefined
-        ? {}
-        : {userDisplayName: options.userDisplayName}),
-    });
-  let active: ActiveChatSession = {
-    session,
-    logStore:
-      options.logStore ??
-      createRuntimeLogStore({
-        sessionId: session.id,
-        boundCharacter: session.character,
-        boundUserSpeaker: session.userSpeaker,
-      }),
-    release: options.releaseSession ?? (() => Promise.resolve()),
-  };
-  const pluginHost = options.pluginHost;
+  const {conversation, pluginHost} = options;
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
@@ -677,8 +549,10 @@ async function runChatCliWithActiveWriter(
         stdout: options.stdout,
       }),
     );
-  options.stdout.write(`${session.character.displayName} is ready.\n`);
-  options.stdout.write(promptTextFor(session));
+  options.stdout.write(
+    `${conversation.session.character.displayName} is ready.\n`,
+  );
+  options.stdout.write(promptTextFor(conversation));
 
   try {
     for (;;) {
@@ -690,9 +564,6 @@ async function runChatCliWithActiveWriter(
 
       const lineResult = await handleChatInputLine({
         options,
-        session: active.session,
-        logStore: active.logStore,
-        pluginHost,
         line: nextLine.value,
       });
 
@@ -700,36 +571,15 @@ async function runChatCliWithActiveWriter(
         return lineResult.exitCode;
       }
 
-      if (lineResult.turnCompleted) {
-        const next = await continueChatSessionIfNeeded({
-          current: active,
-          pluginHost,
-          continueSession: options.continueSession,
-          ...(options.roleModelAdapter === undefined
-            ? {}
-            : {roleModelAdapter: options.roleModelAdapter}),
-          ...(options.contextWindowTokens === undefined
-            ? {}
-            : {contextWindowTokens: options.contextWindowTokens}),
-          stdout: options.stdout,
-        });
-
-        if (next !== undefined) {
-          await active.release();
-          active = next;
-        }
-      }
-
-      options.stdout.write(promptTextFor(active.session));
+      options.stdout.write(promptTextFor(conversation));
     }
 
-    await endChatSession({
-      session: active.session,
-      logStore: active.logStore,
+    await endSession({
+      session: conversation.session,
+      logStore: conversation.logStore,
       pluginHost,
     });
   } finally {
-    await active.release();
     releaseTerminalConfirmationHandler?.();
     lines.close();
   }
@@ -737,31 +587,34 @@ async function runChatCliWithActiveWriter(
   return 0;
 }
 
+function promptTextFor(conversation: ActiveConversation): string {
+  return `${conversation.session.userSpeaker.displayName}: `;
+}
+
 type ChatInputLineResult =
-  | {readonly status: 'continue'; readonly turnCompleted: boolean}
+  | {readonly status: 'continue'}
   | {readonly status: 'exit'; readonly exitCode: number};
 
 async function handleChatInputLine(options: {
   readonly options: RunChatCliOptions;
-  readonly session: ConversationSession;
-  readonly logStore: RuntimeLogStore;
-  readonly pluginHost: RuntimePluginHost;
   readonly line: string;
 }): Promise<ChatInputLineResult> {
-  const trimmedLine = options.line.trim();
+  const {conversation, pluginHost} = options.options;
 
-  if (trimmedLine === exitCommand) {
-    await endChatSession(options);
+  if (options.line.trim() === exitCommand) {
+    await endSession({
+      session: conversation.session,
+      logStore: conversation.logStore,
+      pluginHost,
+    });
     return {status: 'exit', exitCode: 0};
   }
 
-  let turnCompleted: boolean;
-
   try {
-    const result = await handleUserMessageThroughRuntime({
-      session: options.session,
-      logStore: options.logStore,
+    const delivery = await deliverUserMessage({
+      conversation,
       line: options.line,
+      pluginHost,
       ...(options.options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.options.roleModelAdapter}),
@@ -776,34 +629,52 @@ async function handleChatInputLine(options: {
       ...(options.options.contextWindowTokens === undefined
         ? {}
         : {contextWindowTokens: options.options.contextWindowTokens}),
-      pluginHost: options.pluginHost,
       onProgress(progressEvent) {
-        writeRuntimeProgress(
-          options.options.stdout,
-          options.session,
-          progressEvent,
-        );
+        writeRuntimeProgress(options.options.stdout, progressEvent);
       },
     });
+    const result = mapDelivery(delivery);
 
     writeChatRuntimeResult({options: options.options, result});
+
+    if (delivery.status === 'completed' && delivery.rotation !== undefined) {
+      writeRotationWarnings(options.options.stderr, delivery.rotation);
+    }
 
     if (result.status === 'rejected' && result.fatal) {
       return {status: 'exit', exitCode: 1};
     }
-
-    turnCompleted = result.status === 'completed';
   } catch (error: unknown) {
     writeChatInputError(options.options.stderr, error);
     return {status: 'exit', exitCode: 1};
   }
 
-  return {status: 'continue', turnCompleted};
+  return {status: 'continue'};
+}
+
+function mapDelivery(delivery: UserMessageDelivery): ChatRuntimeTurn {
+  switch (delivery.status) {
+    case 'completed':
+    case 'rejected':
+      return mapRuntimeResult(delivery.turn);
+    case 'input_rejected':
+      return mapInputRejectionResult(delivery.turn);
+    case 'failed':
+      if (isCliTerminalError(delivery.error)) {
+        throw delivery.error;
+      }
+
+      return mapUnexpectedRuntimeFailureResult(
+        delivery.identity,
+        delivery.traceEntries,
+        delivery.rawEvents,
+      );
+  }
 }
 
 function writeChatRuntimeResult(options: {
   readonly options: RunChatCliOptions;
-  readonly result: Awaited<ReturnType<typeof handleUserMessageThroughRuntime>>;
+  readonly result: ChatRuntimeTurn;
 }): void {
   if (
     options.result.status === 'rejected' &&
@@ -828,86 +699,6 @@ function writeChatInputError(
         : chatFailedBeforeReplyMessage
     }\n`,
   );
-}
-
-type HandleUserMessageThroughRuntimeOptions = {
-  readonly session: ConversationSession;
-  readonly logStore: RuntimeLogStore;
-  readonly line: string;
-  readonly roleModelAdapter?: RoleModelAdapter;
-  readonly characterPersonaSections?: readonly string[];
-  readonly characterRef?: RoleModelCharacterRef;
-  readonly contextWindowTokens?: number;
-  readonly pluginHost: RuntimePluginHost;
-  readonly onProgress?: (
-    event: LocalRuntimeTurnProgressEvent,
-  ) => Promise<void> | void;
-};
-
-async function handleUserMessageThroughRuntime(
-  options: HandleUserMessageThroughRuntimeOptions,
-): Promise<ChatRuntimeTurn> {
-  const identity = createRuntimeEventIdentity();
-
-  try {
-    const event = createUserMessageRuntimeEvent(options.line, identity);
-
-    try {
-      const result = await runLocalUserMessageEvent({
-        event,
-        session: options.session,
-        logStore: options.logStore,
-        rawInput: options.line,
-        ...(options.roleModelAdapter === undefined
-          ? {}
-          : {roleModelAdapter: options.roleModelAdapter}),
-        ...(options.characterPersonaSections === undefined
-          ? {}
-          : {characterPersonaSections: options.characterPersonaSections}),
-        ...(options.characterRef === undefined
-          ? {}
-          : {characterRef: options.characterRef}),
-        ...(options.contextWindowTokens === undefined
-          ? {}
-          : {contextWindowTokens: options.contextWindowTokens}),
-        pluginHost: options.pluginHost,
-        ...(options.onProgress === undefined
-          ? {}
-          : {onProgress: options.onProgress}),
-      });
-
-      return mapRuntimeResult(result);
-    } catch (error: unknown) {
-      if (isCliTerminalError(error)) {
-        throw error;
-      }
-
-      const evidence = options.logStore.readSessionEvidence();
-
-      return mapUnexpectedRuntimeFailureResult(
-        identity,
-        options.logStore
-          .traceEntries()
-          .filter(traceEntry => sameTraceIdentity(traceEntry, identity)),
-        evidence.rawEvents.filter(rawEvent =>
-          sameTraceIdentity(rawEvent, identity),
-        ),
-      );
-    }
-  } catch (error: unknown) {
-    if (error instanceof RuntimeEventInputError) {
-      const result = recordLocalUserMessageInputRejection({
-        identity: error.identity,
-        logStore: options.logStore,
-        message: error.message,
-        rawInput: options.line,
-      });
-
-      return mapInputRejectionResult(result);
-    }
-
-    throw error;
-  }
 }
 
 function mapRuntimeResult(

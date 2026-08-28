@@ -1,6 +1,6 @@
 import type {RawEventLogRecordInput} from '../../src/runtime/evidence/records.ts';
 import {testCharacterProfile} from './character-fixtures.ts';
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {characterStatePluginId} from '../../src/plugins/api/contract.ts';
 import {createRuntimePluginFileStore} from '../../src/runtime/storage/plugin-file-store/index.ts';
 import {testRuntimePluginFileStoreProvider} from './plugin-host-fixtures.ts';
@@ -537,20 +537,22 @@ export function transactionIdentityFromContext(context: {
   };
 }
 
-export async function createDurableCharacterStateHarness(sessionId: string) {
+export async function createDurableCharacterStateHarness(
+  conversationId: string,
+) {
   const storeRoot = createTestTempRoot('project02-plugin-loop-');
-
-  await createLocalRuntimeSessionStore({
+  const {sessionId} = await createLocalRuntimeSessionStore({
     storeRoot,
     characterId: testCharacterProfile.id,
   }).createSession({
-    sessionId,
+    conversationId,
     createdAt: '2026-06-15T00:00:00.000Z',
   });
 
   return {
+    sessionId,
     storeRoot,
-    session: createConversationSession({
+    session: createSession({
       id: sessionId,
       character: testCharacterProfile,
     }),

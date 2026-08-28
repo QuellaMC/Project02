@@ -1,12 +1,16 @@
 import {readFlagValue} from '../shared/flags.ts';
 import {writeJson} from '../shared/output.ts';
 import type {CharacterProfile} from '../../core/index.ts';
+import type {Conversation} from '../../core/index.ts';
 import {
   createFileRuntimeLogStore,
+  createLocalRuntimeConversationStore,
   createLocalRuntimeSessionStore,
   createProject02HomeLayout,
-  type LocalRuntimeSessionMetadata,
+  normalizeConversationId,
   normalizeLocalRuntimeSessionId,
+  parseSegmentSessionId,
+  type LocalRuntimeSessionMetadata,
 } from '../../runtime/storage/index.ts';
 import {
   isCliTerminalError,
@@ -50,25 +54,44 @@ type InspectCliOptions = {
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
 };
 
+type InspectCliLocationArgs = {
+  readonly storeRoot?: string;
+  readonly configPath?: string;
+  readonly character?: string;
+};
+
 type InspectCliArgs =
-  | {
-      readonly mode: 'sessions';
-      readonly storeRoot?: string;
-      readonly configPath?: string;
-      readonly character?: string;
-    }
-  | {
+  | (InspectCliLocationArgs & {readonly mode: 'sessions'})
+  | (InspectCliLocationArgs & {
       readonly mode: 'session';
-      readonly storeRoot?: string;
-      readonly configPath?: string;
-      readonly character?: string;
       readonly sessionId: string;
-    };
+    })
+  | (InspectCliLocationArgs & {readonly mode: 'conversations'})
+  | (InspectCliLocationArgs & {
+      readonly mode: 'conversation';
+      readonly conversationId: string;
+    });
 
 type InspectSessionListOutput = {
   readonly runtimeConfig: RuntimeConfigInspectShape;
   readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
   readonly plugins: readonly InspectConfiguredPlugin[];
+  readonly sessions: readonly LocalRuntimeSessionMetadata[];
+};
+
+type InspectConversationListOutput = {
+  readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly plugins: readonly InspectConfiguredPlugin[];
+  readonly conversations: readonly Conversation[];
+};
+
+type InspectConversationOutput = {
+  readonly runtimeConfig: RuntimeConfigInspectShape;
+  readonly activationDiagnostics: readonly RuntimeConfigDiagnostic[];
+  readonly plugins: readonly InspectConfiguredPlugin[];
+  readonly conversation: Conversation;
+  /** The configured character's segments of this conversation, in order. */
   readonly sessions: readonly LocalRuntimeSessionMetadata[];
 };
 
@@ -131,6 +154,25 @@ export async function runInspectCliFromArgs(
       return 0;
     }
 
+    if (parsedArgs.mode === 'conversations') {
+      await writeConversationList(
+        options.stdout,
+        usable.activationPlan,
+        usable.runtimeLocation,
+      );
+      return 0;
+    }
+
+    if (parsedArgs.mode === 'conversation') {
+      await writeConversationSegments(
+        parsedArgs,
+        options.stdout,
+        usable.activationPlan,
+        usable.runtimeLocation,
+      );
+      return 0;
+    }
+
     await writeSessionEvidence(
       parsedArgs,
       options.stdout,
@@ -153,6 +195,8 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
   let location: RuntimeLocationCliState = {};
   let sessionsMode = false;
   let sessionId: string | undefined;
+  let conversationsMode = false;
+  let conversationId: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -204,35 +248,57 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
       continue;
     }
 
+    if (arg === '--conversations') {
+      if (conversationsMode) {
+        throw new CliUsageError('--conversations can only be provided once.');
+      }
+
+      conversationsMode = true;
+      continue;
+    }
+
+    if (arg === '--conversation') {
+      if (conversationId !== undefined) {
+        throw new CliUsageError('--conversation can only be provided once.');
+      }
+
+      conversationId = readFlagValue(args, index, '--conversation');
+      index += 1;
+      continue;
+    }
+
     throw new CliUsageError(`Unknown inspect option: ${arg}.`);
   }
 
-  if (sessionsMode && sessionId !== undefined) {
-    throw new CliUsageError('Use either --sessions or --session, not both.');
+  return resolveInspectMode(
+    {sessionsMode, sessionId, conversationsMode, conversationId},
+    location,
+  );
+}
+
+function resolveInspectMode(
+  modes: {
+    readonly sessionsMode: boolean;
+    readonly sessionId: string | undefined;
+    readonly conversationsMode: boolean;
+    readonly conversationId: string | undefined;
+  },
+  location: RuntimeLocationCliState,
+): InspectCliArgs {
+  const modeCount = [
+    modes.sessionsMode,
+    modes.sessionId !== undefined,
+    modes.conversationsMode,
+    modes.conversationId !== undefined,
+  ].filter(Boolean).length;
+
+  if (modeCount > 1) {
+    throw new CliUsageError(
+      'Use exactly one of --sessions, --session, --conversations, or --conversation.',
+    );
   }
 
-  if (sessionsMode) {
-    return {
-      mode: 'sessions',
-      ...(location.storeRoot === undefined
-        ? {}
-        : {storeRoot: location.storeRoot}),
-      ...(location.configPath === undefined
-        ? {}
-        : {configPath: location.configPath}),
-      ...(location.character === undefined
-        ? {}
-        : {character: location.character}),
-    } satisfies InspectCliArgs;
-  }
-
-  if (sessionId === undefined) {
-    throw new CliUsageError('Use --sessions or --session <session-id>.');
-  }
-
-  return {
-    mode: 'session',
-    sessionId,
+  const locationArgs = {
     ...(location.storeRoot === undefined
       ? {}
       : {storeRoot: location.storeRoot}),
@@ -242,6 +308,34 @@ function parseInspectCliArgs(args: readonly string[]): InspectCliArgs {
     ...(location.character === undefined
       ? {}
       : {character: location.character}),
+  } satisfies InspectCliLocationArgs;
+
+  if (modes.sessionsMode) {
+    return {mode: 'sessions', ...locationArgs} satisfies InspectCliArgs;
+  }
+
+  if (modes.conversationsMode) {
+    return {mode: 'conversations', ...locationArgs} satisfies InspectCliArgs;
+  }
+
+  if (modes.conversationId !== undefined) {
+    return {
+      mode: 'conversation',
+      conversationId: modes.conversationId,
+      ...locationArgs,
+    } satisfies InspectCliArgs;
+  }
+
+  if (modes.sessionId === undefined) {
+    throw new CliUsageError(
+      'Use --sessions, --session <session-id>, --conversations, or --conversation <conversation-id>.',
+    );
+  }
+
+  return {
+    mode: 'session',
+    sessionId: modes.sessionId,
+    ...locationArgs,
   } satisfies InspectCliArgs;
 }
 
@@ -253,6 +347,72 @@ function validateInspectCliArgs(args: InspectCliArgs): void {
   if (args.mode === 'session') {
     normalizeLocalRuntimeSessionId(args.sessionId);
   }
+
+  if (args.mode === 'conversation') {
+    normalizeConversationId(args.conversationId);
+  }
+}
+
+async function writeConversationList(
+  stdout: NodeJS.WritableStream,
+  runtimeConfig: Project02ConfiguredPluginActivation,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): Promise<void> {
+  const conversationStore = createLocalRuntimeConversationStore({
+    homeRoot: runtimeLocation.homeRoot,
+  });
+
+  writeJson(stdout, {
+    runtimeConfig: createRuntimeConfigInspectShape(
+      runtimeConfig.resolvedConfig,
+    ),
+    activationDiagnostics: Object.freeze([
+      ...runtimeConfig.activation.diagnostics,
+    ]),
+    plugins: inspectConfiguredPlugins(runtimeConfig),
+    conversations: await conversationStore.listConversations(),
+  } satisfies InspectConversationListOutput);
+}
+
+async function writeConversationSegments(
+  args: InspectCliArgs & {readonly mode: 'conversation'},
+  stdout: NodeJS.WritableStream,
+  runtimeConfig: Project02ConfiguredPluginActivation,
+  runtimeLocation: ResolvedProject02RuntimeLocation,
+): Promise<void> {
+  const conversationStore = createLocalRuntimeConversationStore({
+    homeRoot: runtimeLocation.homeRoot,
+  });
+  const conversation = await conversationStore.readConversation(
+    args.conversationId,
+  );
+  const sessionStore = createLocalRuntimeSessionStore({
+    storeRoot: runtimeLocation.characterScope.dataRoot,
+    characterId: runtimeLocation.characterScope.characterId,
+  });
+  const sessions = (await sessionStore.listSessions())
+    .filter(
+      metadata =>
+        parseSegmentSessionId(metadata.sessionId).conversationId ===
+        conversation.id,
+    )
+    .sort(
+      (left, right) =>
+        parseSegmentSessionId(left.sessionId).segment -
+        parseSegmentSessionId(right.sessionId).segment,
+    );
+
+  writeJson(stdout, {
+    runtimeConfig: createRuntimeConfigInspectShape(
+      runtimeConfig.resolvedConfig,
+    ),
+    activationDiagnostics: Object.freeze([
+      ...runtimeConfig.activation.diagnostics,
+    ]),
+    plugins: inspectConfiguredPlugins(runtimeConfig),
+    conversation,
+    sessions,
+  } satisfies InspectConversationOutput);
 }
 
 async function writeSessionList(

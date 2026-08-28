@@ -1,5 +1,5 @@
 export {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from './core/index.ts';

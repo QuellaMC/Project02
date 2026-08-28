@@ -32,6 +32,15 @@ export {
   type UserMessageRuntimeEvent,
 } from './message/event.ts';
 export {
+  conversationParticipantKindValues,
+  ConversationValidationError,
+  createConversation,
+  sameConversationParticipants,
+  type Conversation,
+  type ConversationParticipant,
+  type ConversationParticipantKind,
+} from './conversation/conversation.ts';
+export {
   appendCommittedMessage,
   createCharacterMessage,
   createUserMessage,
@@ -40,12 +49,12 @@ export {
   CharacterInputError,
   CharacterReplyValidationError,
   ConversationRehydrationError,
-  createConversationSession,
+  createSession,
   createUserSpeaker,
   localUserSpeaker,
   normalizeCharacterAgentReply,
   validateCharacterAgentReply,
   validateConversationParticipants,
   type CharacterAgent,
-  type ConversationSession,
+  type Session,
 } from './conversation/session.ts';

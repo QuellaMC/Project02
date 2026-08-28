@@ -1,6 +1,6 @@
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {describe, expect, it} from 'vitest';
-import {createConversationSession} from '../../src/core/index.ts';
+import {createSession} from '../../src/core/index.ts';
 import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-log-store.ts';
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {createRuntimeLogStore} from '../../src/runtime/evidence/index.ts';
@@ -21,7 +21,7 @@ import {
 
 describe('plugin-driven tool loop progress and evidence', () => {
   it('does not expose plugin inventory through hidden runtime context', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -84,16 +84,17 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('commits interim visible_reply durably before executable tools run', async () => {
-    const sessionId = 'session-interim-visible-reload';
+    const conversationId = 'session-interim-visible-reload';
+    const sessionId = `${conversationId}.1`;
     const storeRoot = createTestTempRoot('project02-plugin-loop-');
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: testCharacterProfile.id,
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-06-15T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -162,6 +163,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
+        messageId: `${sessionId}:message-2`,
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'Authorization: Bearer interim-secret',
       },
       {
@@ -177,6 +181,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
       {
         kind: 'visible_reply',
+        messageId: `${sessionId}:message-3`,
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'finished',
       },
     ]);
@@ -199,7 +206,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('continues after interim visible_reply progress callback failures', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -254,6 +261,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
     expect(progress).toEqual([
       {
         kind: 'visible_reply',
+        messageId: 'local-session:message-2',
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'checking',
       },
       {
@@ -269,6 +279,9 @@ describe('plugin-driven tool loop progress and evidence', () => {
       },
       {
         kind: 'visible_reply',
+        messageId: 'local-session:message-3',
+        speakerId: 'mira',
+        speakerName: 'Mira',
         text: 'finished',
       },
     ]);
@@ -280,7 +293,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('feeds prior interim replies back through the next turn model context', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -378,7 +391,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
     const reopened = captureWire();
     const thirdTurn = await runLocalUserMessageEvent({
       event: createTestEvent('still there?', 'evt_interim_context_third'),
-      session: createConversationSession({
+      session: createSession({
         id: session.id,
         character: testCharacterProfile,
         visibleTranscript: logStore
@@ -407,9 +420,10 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('keeps durable final visible_reply committed when progress callback fails', async () => {
-    const sessionId = 'session-final-progress-fails';
+    const conversationId = 'session-final-progress-fails';
+    const sessionId = `${conversationId}.1`;
     const {session, logStore, storeRoot} =
-      await createDurableCharacterStateHarness(sessionId);
+      await createDurableCharacterStateHarness(conversationId);
     const adapter = createSequencedAdapter([
       {
         toolCalls: [
@@ -467,7 +481,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
         .map(event => event.kind),
     ).toEqual(['runtime_turn_completed']);
 
-    const restoredSession = createConversationSession({
+    const restoredSession = createSession({
       character: testCharacterProfile,
       id: sessionId,
       visibleTranscript: reopenedLogStore.conversationMessages(),
@@ -507,7 +521,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('records the refused round it handed back to the model, before the round that recovered', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();
@@ -580,7 +594,7 @@ describe('plugin-driven tool loop progress and evidence', () => {
   });
 
   it('preserves prior tool evidence when a later interim visible_reply is invalid', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
     });
     const logStore = createRuntimeLogStore();

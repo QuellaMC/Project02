@@ -179,7 +179,13 @@ async function commitVisibleMessage(
   appendCommittedMessage(state.options.session, message);
 
   if (message.role === 'character') {
-    await emitProgress(state, {kind: 'visible_reply', text: message.text});
+    await emitProgress(state, {
+      kind: 'visible_reply',
+      messageId: message.id,
+      speakerId: message.speakerId,
+      speakerName: message.speakerName,
+      text: message.text,
+    });
   }
 
   // Evidence bookkeeping describes the log, so it follows the write: a

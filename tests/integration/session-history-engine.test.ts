@@ -6,7 +6,7 @@ import {describe, expect, it} from 'vitest';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {
   appendDurableConversationExchanges,
-  writeDurableConversationSession,
+  writeDurableSession,
 } from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
@@ -27,9 +27,9 @@ describe('session history engine', () => {
   it('searches across sessions with routed queries', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'alpha',
+      conversationId: 'alpha',
       exchanges: [
         [
           'what should the plugin permission architecture be?',
@@ -38,9 +38,9 @@ describe('session history engine', () => {
         ['and storage?', 'Keep the JSONL log canonical.'],
       ],
     });
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'beta',
+      conversationId: 'beta',
       exchanges: [
         ['how is the weather?', 'Sunny, with a chance of tool calls.'],
         ['我们讨论了插件权限设计吗？', '讨论过，结论是每个插件一个能力授权。'],
@@ -52,7 +52,7 @@ describe('session history engine', () => {
     const result = await engine.search({query: 'permission', sessionLimit: 3});
 
     expect(result.totalSessionsWithHits).toBe(1);
-    expect(result.sessions[0]?.sessionId).toBe('alpha');
+    expect(result.sessions[0]?.sessionId).toBe('alpha.1');
     expect(
       result.sessions[0]?.window.some(
         message => message.messageId === result.sessions[0]?.matchMessageId,
@@ -62,19 +62,19 @@ describe('session history engine', () => {
 
     const cjk = await engine.search({query: '插件权限', sessionLimit: 3});
 
-    expect(cjk.sessions.map(view => view.sessionId)).toContain('beta');
+    expect(cjk.sessions.map(view => view.sessionId)).toContain('beta.1');
 
     const short = await engine.search({query: 'su', sessionLimit: 3});
 
     expect(short.totalSessionsWithHits).toBe(1);
-    expect(short.sessions[0]?.sessionId).toBe('beta');
+    expect(short.sessions[0]?.sessionId).toBe('beta.1');
 
     // SQLite's built-in lower() folds ASCII only; the registered fold
     // makes short non-ASCII queries case-insensitive too.
     const cyrillic = await engine.search({query: 'ПР', sessionLimit: 3});
 
     expect(cyrillic.totalSessionsWithHits).toBe(1);
-    expect(cyrillic.sessions[0]?.sessionId).toBe('beta');
+    expect(cyrillic.sessions[0]?.sessionId).toBe('beta.1');
 
     const literal = await engine.search({
       query: '"permission" OR archi*',
@@ -97,19 +97,19 @@ describe('session history engine', () => {
       ]);
     }
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'hog',
+      conversationId: 'hog',
       exchanges: hogExchanges,
     });
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'quiet',
+      conversationId: 'quiet',
       exchanges: [['one kraken mention here', 'noted']],
     });
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'ties',
+      conversationId: 'ties',
       exchanges: [
         ['echoed unique phrase', 'first reply'],
         ['echoed unique phrase', 'second reply'],
@@ -121,15 +121,15 @@ describe('session history engine', () => {
 
     expect(grouped.totalSessionsWithHits).toBe(2);
     expect(grouped.sessions.map(view => view.sessionId).sort()).toEqual([
-      'hog',
-      'quiet',
+      'hog.1',
+      'quiet.1',
     ]);
 
     // Equal-rank hits within a session resolve to the newest message
     // (fixture ids are 1-based: the two user turns are messages 1 and 3).
     const tied = await engine.search({query: 'echoed unique', sessionLimit: 1});
 
-    expect(tied.sessions[0]?.matchMessageId).toBe('ties:message-3');
+    expect(tied.sessions[0]?.matchMessageId).toBe('ties.1:message-3');
 
     engine.close();
   });
@@ -147,9 +147,9 @@ describe('session history engine', () => {
       ]);
     }
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'long-session',
+      conversationId: 'long-session',
       exchanges,
     });
 
@@ -168,7 +168,7 @@ describe('session history engine', () => {
     ]);
 
     const scrolled = await engine.readAround({
-      sessionId: 'long-session',
+      sessionId: 'long-session.1',
       anchorMessageId: view?.matchMessageId ?? '',
       window: 2,
     });
@@ -183,9 +183,9 @@ describe('session history engine', () => {
   it('warms up without a query and ingests appends incrementally', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'grows',
+      conversationId: 'grows',
       exchanges: [['first question', 'first answer']],
     });
 
@@ -200,7 +200,7 @@ describe('session history engine', () => {
 
     await appendDurableConversationExchanges({
       storeRoot,
-      sessionId: 'grows',
+      sessionId: 'grows.1',
       firstTurn: 2,
       exchanges: [['second question about narwhals', 'second answer']],
     });
@@ -217,10 +217,10 @@ describe('session history engine', () => {
   it('rebuilds on version bumps and corruption, and adopts foreign databases only on success', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'kept',
-      exchanges: [['keep this thread', 'kept']],
+      conversationId: 'kept',
+      exchanges: [['keep this thread', 'kept.1']],
     });
 
     const engine = createEngine(storeRoot);
@@ -273,9 +273,9 @@ describe('session history engine', () => {
   it('rejects database names outside the identifier rules', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'only',
+      conversationId: 'only',
       exchanges: [['hello', 'hi']],
     });
 
@@ -296,9 +296,9 @@ describe('session history engine', () => {
   it('rejects unknown sessions, anchors, and closed engines', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'only',
+      conversationId: 'only',
       exchanges: [['hello', 'hi']],
     });
 
@@ -312,8 +312,8 @@ describe('session history engine', () => {
     ).rejects.toThrow(expect.objectContaining({code: 'session_not_found'}));
     await expect(
       engine.readAround({
-        sessionId: 'only',
-        anchorMessageId: 'only:message-99',
+        sessionId: 'only.1',
+        anchorMessageId: 'only.1:message-99',
         window: 5,
       }),
     ).rejects.toThrow(expect.objectContaining({code: 'message_not_found'}));
@@ -339,9 +339,9 @@ describe('session history engine', () => {
     // The first user message alone exceeds the 2 MiB slice cap, so a
     // capped read finds no newline; ingestion must still consume it and
     // reach the exchange behind it.
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'oversized',
+      conversationId: 'oversized',
       exchanges: [
         [
           `please archive this dump: ${'x'.repeat(3 * 1024 * 1024)}`,
@@ -358,7 +358,7 @@ describe('session history engine', () => {
     });
 
     expect(result.totalSessionsWithHits).toBe(1);
-    expect(result.sessions[0]?.sessionId).toBe('oversized');
+    expect(result.sessions[0]?.sessionId).toBe('oversized.1');
     expect(result.damagedRecordCount).toBe(0);
     engine.close();
   });
@@ -366,9 +366,9 @@ describe('session history engine', () => {
   it('stops catch-up when the caller aborts', async () => {
     const storeRoot = createStoreRoot();
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot,
-      sessionId: 'cold',
+      conversationId: 'cold',
       exchanges: [['hello there', 'hi']],
     });
 

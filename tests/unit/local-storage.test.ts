@@ -1,10 +1,14 @@
 import {describe, expect, it} from 'vitest';
 
 import type {CreateFileRuntimeLogStoreOptions} from '../../src/runtime/storage/file-runtime-log-store.ts';
+import {sessionIdFromMessageId} from '../../src/core/index.ts';
 import {
   createLocalRuntimeSessionPaths,
   decodeStorageSchemaMarker,
   localRuntimeStorageSchemaVersion,
+  normalizeConversationId,
+  parseSegmentSessionId,
+  segmentSessionId,
 } from '../../src/runtime/storage/layout-contract.ts';
 import {decodeRawEventLogRecord} from '../../src/runtime/storage/raw-event-codec.ts';
 
@@ -22,11 +26,31 @@ describe('local storage plugin schema', () => {
     expect(requiresCharacter).toBe(true);
   });
 
-  it('uses scoped schema version 12 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(12);
+  it('uses scoped schema version 13 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(13);
     expect(
-      createLocalRuntimeSessionPaths({storeRoot: 'store'}),
+      createLocalRuntimeSessionPaths({storeRoot: 'store', sessionId: 'talk.1'}),
     ).not.toHaveProperty('characterStatePath');
+  });
+
+  it('bounds conversation ids so a segment id stays a valid session id', () => {
+    const longest = `c${'x'.repeat(55)}`;
+
+    expect(normalizeConversationId(` ${longest} `)).toBe(longest);
+    expect(() => normalizeConversationId(`c${'x'.repeat(56)}`)).toThrow(
+      'at most 56 characters',
+    );
+    expect(() => normalizeConversationId('a.b')).toThrow('Conversation ID');
+    expect(() => normalizeConversationId('a:b')).toThrow('Conversation ID');
+    expect(segmentSessionId('conv_x', 12)).toBe('conv_x.12');
+    expect(() => segmentSessionId('conv_x', 0)).toThrow('positive integer');
+    expect(parseSegmentSessionId('conv_x.12')).toEqual({
+      conversationId: 'conv_x',
+      segment: 12,
+    });
+    expect(() => parseSegmentSessionId('conv_x')).toThrow('segment');
+    expect(() => parseSegmentSessionId('conv_x.0')).toThrow('segment');
+    expect(sessionIdFromMessageId('conv_x.12:message-3')).toBe('conv_x.12');
   });
 
   it('round-trips scoped schema markers and rejects pre-split versions', () => {

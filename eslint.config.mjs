@@ -65,15 +65,6 @@ export default tseslint.config(
     },
   },
   {
-    files: ['src/cli/chat/main.ts'],
-    rules: {
-      'max-lines': [
-        'error',
-        {max: 878, skipBlankLines: true, skipComments: true},
-      ],
-    },
-  },
-  {
     files: ['src/role-model/loop/loop.ts'],
     rules: {
       'max-lines': [

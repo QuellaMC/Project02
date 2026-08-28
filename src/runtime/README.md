@@ -1,11 +1,24 @@
 # runtime
 
-The committing runtime: turn orchestration (`turn/`), durable storage
-engines and codecs (`storage/`), durable-evidence validation and
-projection (`evidence/`), and configuration (`config/`). This module
-owns everything that persists or replays a session. It may depend on the
-plugin _contract_ (`plugins/api`) but never on host, policy, or package
-behavior (arch rules `runtime-plugins-*`).
+The committing runtime: turn orchestration (`turn/`), the conversation
+driver (`conversation/`), durable storage engines and codecs
+(`storage/`), durable-evidence validation and projection (`evidence/`),
+and configuration (`config/`). This module owns everything that persists
+or replays a conversation. It may depend on the plugin _contract_
+(`plugins/api`) but never on host, policy, or package behavior (arch
+rules `runtime-plugins-*`).
+
+A conversation is a thread between a set of contacts, held once at
+`conversations/<id>/conversation.json` in the home — identity and
+participants, at most one thread per participant set. A direct message
+is the two-participant case; groups and character-to-character threads
+are the same shape with another set. Each character participant keeps
+its own record of the thread as sessions named
+`<conversationId>.<segment>` under its own data directory — what that
+character saw and said, never shared. `conversation/` drives the
+user-and-character case: open the thread (one process at a time, under
+the conversation writer lease), deliver a user message through the turn,
+and end sessions.
 
 A turn's log is one record per thing that happened, each carrying its own
 facts once. Every model round is a `role_model_round` record — what the
@@ -29,7 +42,8 @@ A session is one stable-prefix segment of a conversation. When its history
 outgrows the model's window, `turn/compaction-policy.ts` decides what to
 condense and what to carry, `turn/session-continuation.ts` plans the
 continuation (summariser first, mechanical fallback, never throwing), and
-`storage/durable-session-bootstrap.ts` opens the continuing session whose
-first record is `session_continued`. The chat loop sequences plan → open the
-next session → close the current one, so a failure leaves the current
-session in place.
+`conversation/segment.ts` opens the next segment, whose first record is
+`session_continued`. `conversation/deliver.ts` sequences plan → open the
+next segment → end the current one, so a failure leaves the current
+segment in place — and the person sees nothing of it: rotation is the
+character's memory management, not a conversation event.

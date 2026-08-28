@@ -35,7 +35,8 @@ type RuntimeLogStoreFixture = {
   release(): Promise<void>;
 };
 
-const sessionId = 'matrix-session';
+const conversationId = 'matrix-session';
+const sessionId = `${conversationId}.1`;
 const identity = {
   eventId: 'evt_runtime_log_conformance',
   traceId: 'trace_runtime_log_conformance',
@@ -301,7 +302,7 @@ async function createRuntimeLogStoreFixture(
     storeRoot,
     characterId: testCharacterProfile.id,
   }).createSession({
-    sessionId,
+    conversationId,
     createdAt: identity.createdAt,
   });
   const ownerToken = createLocalRuntimeMutationLockOwnerToken();

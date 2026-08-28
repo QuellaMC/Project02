@@ -10,7 +10,7 @@ import {describe, expect, it} from 'vitest';
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {jsonArray, jsonRecord} from '../support/json-view.ts';
 import {createTestPluginContext} from '../support/role-model-loop-fixtures.ts';
-import {writeDurableConversationSession} from '../support/runtime-log-fixtures.ts';
+import {writeDurableSession} from '../support/runtime-log-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 import {existsSync} from 'node:fs';
@@ -67,7 +67,7 @@ describe('session history plugin through the host', () => {
     const sessions = jsonArray(jsonRecord(searchResult.output)['sessions']);
 
     expect(sessions).toHaveLength(1);
-    expect(jsonRecord(sessions[0])['sessionId']).toBe('alpha');
+    expect(jsonRecord(sessions[0])['sessionId']).toBe('alpha.1');
 
     const matchedRows = jsonArray(jsonRecord(sessions[0])['aroundMatch'])
       .map(row => jsonRecord(row))
@@ -78,8 +78,8 @@ describe('session history plugin through the host', () => {
 
     const readResult = await host.handleToolCall(
       historyToolCall('evt_history_read', sessionHistoryReadToolName, {
-        sessionId: 'alpha',
-        anchorMessageId: 'alpha:message-1',
+        sessionId: 'alpha.1',
+        anchorMessageId: 'alpha.1:message-1',
         window: 1,
       }),
       createTestPluginContext('evt_history_read'),
@@ -91,7 +91,7 @@ describe('session history plugin through the host', () => {
     }
 
     expect(readResult.output).toMatchObject({
-      sessionId: 'alpha',
+      sessionId: 'alpha.1',
       hasBefore: false,
       hasAfter: true,
     });
@@ -158,7 +158,7 @@ describe('session history plugin through the host', () => {
     });
 
     appendFileSync(
-      createLocalRuntimeSessionPaths({storeRoot, sessionId: 'alpha'})
+      createLocalRuntimeSessionPaths({storeRoot, sessionId: 'alpha.1'})
         .rawEventsPath,
       'not-json\n',
       'utf8',
@@ -228,7 +228,7 @@ describe('session history plugin through the host', () => {
     expect(existsSync(historyIndexPath(storeRoot))).toBe(false);
 
     const committed = await host.afterTurnCommitted(
-      afterTurnContext('evt_history_warm', 'alpha'),
+      afterTurnContext('evt_history_warm', 'alpha.1'),
     );
 
     expect(committed.status).toBe('completed');
@@ -237,9 +237,9 @@ describe('session history plugin through the host', () => {
     // With the plugin disabled the hook never runs, so nothing materializes.
     const bareRoot = createTestTempRoot('project02-history-bare-');
 
-    await writeDurableConversationSession({
+    await writeDurableSession({
       storeRoot: bareRoot,
-      sessionId: 'alpha',
+      conversationId: 'alpha',
       exchanges: [['hi', 'ho']],
     });
 
@@ -249,7 +249,7 @@ describe('session history plugin through the host', () => {
       ...historyCapabilities(bareRoot),
     });
     const skipped = await bareHost.afterTurnCommitted(
-      afterTurnContext('evt_history_cold', 'alpha'),
+      afterTurnContext('evt_history_cold', 'alpha.1'),
     );
 
     expect(skipped.status).toBe('completed');
@@ -267,7 +267,7 @@ describe('session history plugin through the host', () => {
           traceId: `trace_${eventId}`,
           createdAt: '2026-06-15T00:00:00.000Z',
         }),
-        sessionId: 'alpha',
+        sessionId: 'alpha.1',
         eventType: 'USER_MESSAGE',
         currentUserMessage: 'what was the permission design?',
         recentVisibleMessageIds: visibleIds,
@@ -278,8 +278,8 @@ describe('session history plugin through the host', () => {
         query: 'permission',
       }),
       activeContext('evt_history_scrolled', [
-        'alpha:message-3',
-        'alpha:message-4',
+        'alpha.1:message-3',
+        'alpha.1:message-4',
       ]),
     );
 
@@ -299,7 +299,7 @@ describe('session history plugin through the host', () => {
 
     expect(aroundMatch.some(row => row['matched'] === true)).toBe(true);
     expect(
-      aroundMatch.some(row => row['messageId'] === 'alpha:message-4'),
+      aroundMatch.some(row => row['messageId'] === 'alpha.1:message-4'),
     ).toBe(true);
 
     const allVisible = await host.handleToolCall(
@@ -307,10 +307,10 @@ describe('session history plugin through the host', () => {
         query: 'permission',
       }),
       activeContext('evt_history_visible', [
-        'alpha:message-1',
-        'alpha:message-2',
-        'alpha:message-3',
-        'alpha:message-4',
+        'alpha.1:message-1',
+        'alpha.1:message-2',
+        'alpha.1:message-3',
+        'alpha.1:message-4',
       ]),
     );
 
@@ -324,7 +324,7 @@ describe('session history plugin through the host', () => {
     const restricted = await host.handleToolCall(
       historyToolCall('evt_history_restrict', sessionHistorySearchToolName, {
         query: 'permission',
-        sessionId: 'beta',
+        sessionId: 'beta.1',
       }),
       activeContext('evt_history_restrict', []),
     );
@@ -349,7 +349,7 @@ describe('session history plugin through the host', () => {
 
     const sessionRoot = createLocalRuntimeSessionPaths({
       storeRoot,
-      sessionId: 'alpha',
+      sessionId: 'alpha.1',
     }).sessionRoot;
 
     rmSync(sessionRoot, {recursive: true});
@@ -407,9 +407,9 @@ async function createHistoryHost(): Promise<{
 }> {
   const storeRoot = createTestTempRoot('project02-history-plugin-');
 
-  await writeDurableConversationSession({
+  await writeDurableSession({
     storeRoot,
-    sessionId: 'alpha',
+    conversationId: 'alpha',
     exchanges: [
       [
         'what should the plugin permission architecture be?',
@@ -418,9 +418,9 @@ async function createHistoryHost(): Promise<{
       ['and how do we persist that?', 'In the JSONL log, one commit per line.'],
     ],
   });
-  await writeDurableConversationSession({
+  await writeDurableSession({
     storeRoot,
-    sessionId: 'beta',
+    conversationId: 'beta',
     exchanges: [['how is the weather?', 'Sunny.']],
   });
 

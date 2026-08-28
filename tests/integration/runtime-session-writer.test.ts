@@ -8,7 +8,7 @@ import {join} from 'node:path';
 import {afterEach, describe, expect, it} from 'vitest';
 
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
@@ -34,12 +34,13 @@ afterEach(async () => {
 describe('durable runtime session writer ownership', () => {
   it('rejects a second active writer before it appends evidence', async () => {
     const storeRoot = await createTempStoreRoot();
-    const sessionId = 'shared-writer-session';
+    const conversationId = 'shared-writer-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -59,11 +60,11 @@ describe('durable runtime session writer ownership', () => {
     if (rawEventsPath === undefined) {
       throw new Error('Expected durable runtime session paths.');
     }
-    const firstSession = createConversationSession({
+    const firstSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
-    const secondSession = createConversationSession({
+    const secondSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -127,12 +128,13 @@ describe('durable runtime session writer ownership', () => {
 
   it('refuses a second session writing over an existing transcript', async () => {
     const storeRoot = await createTempStoreRoot();
-    const sessionId = 'stale-writer-session';
+    const conversationId = 'stale-writer-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot: characterDataDirPath(storeRoot, 'mira'),
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
     const logStore = createFileRuntimeLogStore({
@@ -141,11 +143,11 @@ describe('durable runtime session writer ownership', () => {
       characterId: 'mira',
       boundCharacter: testCharacterProfile,
     });
-    const currentSession = createConversationSession({
+    const currentSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
-    const staleSession = createConversationSession({
+    const staleSession = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -190,28 +192,20 @@ describe('durable runtime session writer ownership', () => {
     ]);
   });
 
-  it('holds the writer lease for the full interactive chat process', async () => {
+  it('holds the conversation writer lease for the full interactive chat process', async () => {
     const storeRoot = await createTempStoreRoot();
-    const sessionId = 'interactive-writer-session';
-    await createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    }).createSession({
-      sessionId,
-      createdAt: '2026-07-11T00:00:00.000Z',
-    });
-    const first = spawnChatProcess(storeRoot, sessionId);
+    const first = spawnChatProcess(storeRoot, '--init');
 
     try {
       await waitForOutput(first, 'is ready.');
       const durableFilesBeforeSecondWriter =
         await snapshotDurableFiles(storeRoot);
-      const second = spawnChatProcess(storeRoot, sessionId);
+      const second = spawnChatProcess(storeRoot);
       const secondResult = await collectChildExit(second);
 
       expect(secondResult.code).toBe(1);
       expect(secondResult.stderr).toContain(
-        `Local runtime mutation resource is busy: session-writer:${sessionId}.`,
+        'Local runtime mutation resource is busy: conversation-writer:',
       );
       expect(await snapshotDurableFiles(storeRoot)).toEqual(
         durableFilesBeforeSecondWriter,
@@ -226,57 +220,6 @@ describe('durable runtime session writer ownership', () => {
       }
     }
   }, 40_000);
-
-  it('runs child writers for different sessions concurrently', async () => {
-    const storeRoot = await createTempStoreRoot();
-    const sessionIds = [
-      'parallel-writer-alpha',
-      'parallel-writer-beta',
-    ] as const;
-    const sessionStore = createLocalRuntimeSessionStore({
-      storeRoot: characterDataDirPath(storeRoot, 'mira'),
-      characterId: 'mira',
-    });
-
-    for (const sessionId of sessionIds) {
-      await sessionStore.createSession({
-        sessionId,
-        createdAt: '2026-07-11T00:00:00.000Z',
-      });
-    }
-
-    const first = spawnChatProcess(storeRoot, sessionIds[0]);
-    const second = spawnChatProcess(storeRoot, sessionIds[1]);
-
-    try {
-      await Promise.all([
-        waitForOutput(first, 'is ready.'),
-        waitForOutput(second, 'is ready.'),
-      ]);
-      first.stdin.write('hello alpha\n');
-      second.stdin.write('hello beta\n');
-      await Promise.all([
-        waitForOutput(first, 'Mira:'),
-        waitForOutput(second, 'Mira:'),
-      ]);
-      first.stdin.write('/exit\n');
-      second.stdin.write('/exit\n');
-      const [firstResult, secondResult] = await Promise.all([
-        collectChildExit(first),
-        collectChildExit(second),
-      ]);
-
-      expect(firstResult.code).toBe(0);
-      expect(secondResult.code).toBe(0);
-    } finally {
-      if (first.exitCode === null) {
-        first.kill();
-      }
-      if (second.exitCode === null) {
-        second.kill();
-      }
-    }
-  }, 40_000);
 });
 
 async function createTempStoreRoot(): Promise<string> {
@@ -287,11 +230,11 @@ async function createTempStoreRoot(): Promise<string> {
 
 function spawnChatProcess(
   storeRoot: string,
-  sessionId: string,
+  ...extraArgs: readonly string[]
 ): ChildProcessWithoutNullStreams {
   return spawn(
     process.execPath,
-    ['src/cli/chat/main.ts', '--store', storeRoot, '--session', sessionId],
+    ['src/cli/chat/main.ts', '--store', storeRoot, ...extraArgs],
     {cwd: process.cwd(), stdio: 'pipe'},
   );
 }

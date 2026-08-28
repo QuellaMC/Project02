@@ -6,7 +6,7 @@ import {describe, expect, it} from 'vitest';
 import * as project02 from '../../src/index.ts';
 
 import {
-  createConversationSession,
+  createSession,
   createDeterministicLocalRoleModelAdapter,
   createRuntimePluginHost,
   createRuntimeEventIdentity,
@@ -95,7 +95,7 @@ describe('role-model module smoke', () => {
   });
 
   it('keeps root runtime compatibility exports usable together', async () => {
-    const session = createConversationSession({
+    const session = createSession({
       character: testCharacterProfile,
       id: 'root-compat-session',
     });

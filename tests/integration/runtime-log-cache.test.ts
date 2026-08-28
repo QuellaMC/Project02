@@ -17,7 +17,7 @@ vi.mock('node:fs', async () => {
 });
 
 import {
-  createConversationSession,
+  createSession,
   createRuntimeEventIdentity,
   createUserMessageRuntimeEvent,
 } from '../../src/core/index.ts';
@@ -37,15 +37,16 @@ afterEach(() => {
 describe('file runtime log store evidence cache', () => {
   it('retries one mixed generation and fails when both coherent-read attempts race', async () => {
     const storeRoot = createTestTempRoot('project02-log-race-');
-    const sessionId = 'coherent-race-session';
+    const conversationId = 'coherent-race-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -105,15 +106,16 @@ describe('file runtime log store evidence cache', () => {
 
   it('loads a coherent snapshot once and performs no historical reads on 750 warm appends', async () => {
     const storeRoot = createTestTempRoot('project02-log-cache-');
-    const sessionId = 'cache-session';
+    const conversationId = 'cache-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -175,15 +177,16 @@ describe('file runtime log store evidence cache', () => {
 
   it('reloads exactly once after one external mutation and then remains warm', async () => {
     const storeRoot = createTestTempRoot('project02-log-external-change-');
-    const sessionId = 'external-change-session';
+    const conversationId = 'external-change-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
-    const session = createConversationSession({
+    const session = createSession({
       id: sessionId,
       character: testCharacterProfile,
     });
@@ -230,12 +233,13 @@ describe('file runtime log store evidence cache', () => {
 
   it('does not authorize another store cache under a different owner lease', async () => {
     const storeRoot = createTestTempRoot('project02-log-stale-writer-cache-');
-    const sessionId = 'stale-writer-cache-session';
+    const conversationId = 'stale-writer-cache-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
     const writerOwnerToken = createLocalRuntimeMutationLockOwnerToken();
@@ -261,7 +265,7 @@ describe('file runtime log store evidence cache', () => {
     try {
       staleStore.readSessionEvidence();
       await runTurn(
-        createConversationSession({
+        createSession({
           id: sessionId,
           character: testCharacterProfile,
         }),
@@ -292,12 +296,13 @@ describe('file runtime log store evidence cache', () => {
 
   it('refreshes cached evidence when the store reacquires a later writer lease', async () => {
     const storeRoot = createTestTempRoot('project02-log-writer-generation-');
-    const sessionId = 'writer-generation-session';
+    const conversationId = 'writer-generation-session';
+    const sessionId = `${conversationId}.1`;
     await createLocalRuntimeSessionStore({
       storeRoot,
       characterId: 'mira',
     }).createSession({
-      sessionId,
+      conversationId,
       createdAt: '2026-07-11T00:00:00.000Z',
     });
     const staleStore = createFileRuntimeLogStore({
@@ -325,7 +330,7 @@ describe('file runtime log store evidence cache', () => {
       boundCharacter: testCharacterProfile,
     });
     await runTurn(
-      createConversationSession({
+      createSession({
         id: sessionId,
         character: testCharacterProfile,
       }),
@@ -355,7 +360,7 @@ describe('file runtime log store evidence cache', () => {
 });
 
 async function runTurn(
-  session: ReturnType<typeof createConversationSession>,
+  session: ReturnType<typeof createSession>,
   logStore: ReturnType<typeof createFileRuntimeLogStore>,
   turn: number,
 ): Promise<void> {

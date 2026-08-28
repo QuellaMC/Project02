@@ -1,6 +1,7 @@
 import {defineConfig} from 'vitest/config';
 
 const processSpawningTests = [
+  'tests/integration/conversation-store-concurrency.test.ts',
   'tests/integration/layered-control-locking.test.ts',
   'tests/integration/runtime-config-concurrency.test.ts',
   'tests/integration/runtime-session-writer.test.ts',

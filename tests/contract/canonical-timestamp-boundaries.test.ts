@@ -133,18 +133,8 @@ describe('canonical timestamp boundaries', () => {
       'session metadata',
       () =>
         createLocalRuntimeSessionMetadata({
-          sessionId: 'session-canonical-time',
+          sessionId: 'session-canonical-time.1',
           createdAt: nonCanonicalTimestamp,
-          updatedAt: canonicalTimestamp,
-        }),
-    ],
-    [
-      'session metadata update',
-      () =>
-        createLocalRuntimeSessionMetadata({
-          sessionId: 'session-canonical-time',
-          createdAt: canonicalTimestamp,
-          updatedAt: nonCanonicalTimestamp,
         }),
     ],
     [

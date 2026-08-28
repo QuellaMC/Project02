@@ -10,10 +10,7 @@ import {
   providerOption,
   type ChatProviderName,
 } from '../../role-model/index.ts';
-import {
-  createProject02HomeLayout,
-  normalizeLocalRuntimeSessionId,
-} from '../../runtime/storage/index.ts';
+import {createProject02HomeLayout} from '../../runtime/storage/index.ts';
 
 export type ChatCliArgs = {
   readonly traceMode: boolean;
@@ -22,8 +19,6 @@ export type ChatCliArgs = {
   readonly storeRoot?: string;
   readonly configPath?: string;
   readonly character?: string;
-  readonly sessionId?: string;
-  readonly newSessionId?: string;
 };
 
 export function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
@@ -31,8 +26,6 @@ export function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
   let provider: ChatProviderName | undefined;
   let location: RuntimeLocationCliState = {};
   let init = false;
-  let sessionId: string | undefined;
-  let newSessionId: string | undefined;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index];
@@ -77,31 +70,7 @@ export function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
       continue;
     }
 
-    if (arg === '--session') {
-      if (sessionId !== undefined) {
-        throw new CliUsageError('--session can only be provided once.');
-      }
-
-      sessionId = readFlagValue(args, index, '--session');
-      index += 1;
-      continue;
-    }
-
-    if (arg === '--new-session') {
-      if (newSessionId !== undefined) {
-        throw new CliUsageError('--new-session can only be provided once.');
-      }
-
-      newSessionId = readFlagValue(args, index, '--new-session');
-      index += 1;
-      continue;
-    }
-
     throw new CliUsageError(`Unknown chat option: ${arg}.`);
-  }
-
-  if (sessionId !== undefined && newSessionId !== undefined) {
-    throw new CliUsageError('Use either --session or --new-session, not both.');
   }
 
   return {
@@ -117,21 +86,11 @@ export function parseChatCliArgs(args: readonly string[]): ChatCliArgs {
     ...(location.configPath === undefined
       ? {}
       : {configPath: location.configPath}),
-    ...(sessionId === undefined ? {} : {sessionId}),
-    ...(newSessionId === undefined ? {} : {newSessionId}),
   } satisfies ChatCliArgs;
 }
 
-export function validateDurableSessionArgs(args: ChatCliArgs): void {
+export function validateChatStoreArgs(args: ChatCliArgs): void {
   if (args.storeRoot !== undefined) {
     createProject02HomeLayout({homeRoot: args.storeRoot});
-  }
-
-  if (args.sessionId !== undefined) {
-    normalizeLocalRuntimeSessionId(args.sessionId);
-  }
-
-  if (args.newSessionId !== undefined) {
-    normalizeLocalRuntimeSessionId(args.newSessionId);
   }
 }
