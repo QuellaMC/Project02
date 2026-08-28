@@ -204,6 +204,12 @@ async function closeActiveConversation(
   state: ActiveConversationState,
 ): Promise<void> {
   await state.queue.catch(() => undefined);
-  await state.segment.writerLease.release();
-  await state.conversationLease.release();
+
+  // A stuck segment lease is reported, but never keeps the conversation
+  // itself held: the whole thread would otherwise stay unopenable.
+  try {
+    await state.segment.writerLease.release();
+  } finally {
+    await state.conversationLease.release();
+  }
 }

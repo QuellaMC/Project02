@@ -1,4 +1,4 @@
-import {mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
+import {chmodSync, mkdirSync, symlinkSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -89,6 +89,23 @@ describe('local runtime conversation store', () => {
 
     expect(other.id).not.toBe(created.id);
     expect(await store.listConversations()).toHaveLength(2);
+  });
+
+  it('reports a creation write failure as a storage error', async () => {
+    const homeRoot = tempHomeRoot();
+    const store = createLocalRuntimeConversationStore({homeRoot});
+    const layout = createProject02HomeLayout({homeRoot});
+
+    await store.createConversation({participants: [user, mira]});
+    chmodSync(layout.conversationsRoot, 0o500);
+
+    try {
+      await expect(
+        store.createConversation({participants: [user, kai]}),
+      ).rejects.toMatchObject({code: 'write_failed'});
+    } finally {
+      chmodSync(layout.conversationsRoot, 0o755);
+    }
   });
 
   it('fails closed on a home written at an older schema version', async () => {

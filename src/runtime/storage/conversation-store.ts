@@ -244,12 +244,21 @@ async function insertConversation(
   }
 
   await ensureInitializedProject02Home({homeRoot: layout.homeRoot});
-  await makeDirectory(paths.conversationRoot, {recursive: true});
-  atomicReplaceFileSync({
-    targetPath: paths.conversationPath,
-    content: `${JSON.stringify(conversation)}\n`,
-    mode: 0o600,
-  });
+
+  try {
+    await makeDirectory(paths.conversationRoot, {recursive: true});
+    atomicReplaceFileSync({
+      targetPath: paths.conversationPath,
+      content: `${JSON.stringify(conversation)}\n`,
+      mode: 0o600,
+    });
+  } catch (error: unknown) {
+    throw new LocalRuntimeStorageContractError(
+      'write_failed',
+      `Could not write local runtime conversation: ${paths.conversationPath}.`,
+      {cause: error},
+    );
+  }
 
   return conversation;
 }

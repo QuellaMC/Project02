@@ -1,3 +1,6 @@
+import {chmodSync} from 'node:fs';
+import {join} from 'node:path';
+
 import {describe, expect, it} from 'vitest';
 
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
@@ -7,6 +10,7 @@ import type {
 } from '../../src/role-model/index.ts';
 import {deliverUserMessage, openConversation} from '../../src/runtime/index.ts';
 import {
+  acquireLocalRuntimeConversationWriterLease,
   acquireLocalRuntimeSessionWriterLease,
   characterDataDirPath,
   createLocalRuntimeSessionStore,
@@ -14,6 +18,7 @@ import {
 import {testCharacterProfile} from '../support/character-fixtures.ts';
 import {createSessionEndFileStoreProbePlugin} from '../support/plugin-host-fixtures.ts';
 import {withOpenConversation} from '../support/conversation-fixtures.ts';
+import {createTestTempRoot} from '../support/temp-root.ts';
 
 const contextWindowTokens = 100;
 
@@ -407,6 +412,37 @@ describe('conversation driver', () => {
         await reopened.close();
       }
     });
+  });
+
+  it('releases the conversation even when the segment lease cannot be released', async () => {
+    const homeRoot = join(
+      createTestTempRoot('project02-conversation-'),
+      'home',
+    );
+    const conversation = await openConversation({
+      homeRoot,
+      character: testCharacterProfile,
+    });
+    const characterLocksRoot = join(
+      characterDataDirPath(homeRoot, testCharacterProfile.id),
+      '.locks',
+    );
+
+    chmodSync(characterLocksRoot, 0o500);
+
+    try {
+      await expect(conversation.close()).rejects.toThrow();
+    } finally {
+      chmodSync(characterLocksRoot, 0o755);
+    }
+
+    // The stuck segment lease is reported, but the thread itself is free.
+    const probe = await acquireLocalRuntimeConversationWriterLease({
+      homeRoot,
+      conversationId: conversation.conversation.id,
+    });
+
+    await probe.release();
   });
 
   it('lets every concurrent close observe the same finished cleanup', async () => {
