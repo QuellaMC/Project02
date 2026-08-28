@@ -791,6 +791,39 @@ describe('local runtime session store', () => {
     expect(await store.listSessions()).toEqual([existing, created]);
   });
 
+  it('treats a torn uncataloged directory as an interrupted discard and reuses it', async () => {
+    const storeRoot = await createTempStoreRoot();
+    const store = createLocalRuntimeSessionStore({
+      storeRoot,
+      characterId: 'mira',
+      now: fixedClock(['2026-06-04T00:00:00.000Z', '2026-06-04T00:01:00.000Z']),
+    });
+    const first = await store.createSession({conversationId: 'talk'});
+    const tornPaths = createLocalRuntimeSessionPaths({
+      storeRoot,
+      sessionId: 'talk.2',
+    });
+
+    // An interrupted discard rewrote the catalog without the segment but
+    // crashed before deleting its torn opening record.
+    await mkdir(tornPaths.sessionRoot, {recursive: true});
+    await writeFile(
+      tornPaths.rawEventsPath,
+      '{"kind":"session_continu',
+      'utf8',
+    );
+
+    expect(await store.listSessions()).toEqual([first]);
+    expect((await store.latestSegment('talk'))?.sessionId).toBe('talk.1');
+
+    const continued = await store.createContinuedSession({
+      continuedFrom: 'talk.1',
+    });
+
+    expect(continued.sessionId).toBe('talk.2');
+    expect(await store.listSessions()).toEqual([first, continued]);
+  });
+
   it('tolerates an empty sessions root when the schema marker was never created', async () => {
     const storeRoot = await createTempStoreRoot();
     const layout = createLocalRuntimeStorageLayout({storeRoot});

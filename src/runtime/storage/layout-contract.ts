@@ -182,7 +182,7 @@ const conversationsDirectoryName = 'conversations';
 
 export const conversationFileName = 'conversation.json';
 
-const rawEventsFileName = 'raw-events.jsonl';
+export const rawEventsFileName = 'raw-events.jsonl';
 
 const pluginDataDirectoryName = 'plugin-data';
 

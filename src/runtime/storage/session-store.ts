@@ -1,4 +1,4 @@
-import {basename, join} from 'node:path';
+import {join} from 'node:path';
 import {
   listDirectoryEntries,
   listDirectoryNamesSync,
@@ -29,9 +29,9 @@ import {
   normalizeConversationId,
   normalizeLocalRuntimeSessionId,
   parseSegmentSessionId,
+  rawEventsFileName,
   segmentSessionId,
   type LocalRuntimeSessionMetadata,
-  type LocalRuntimeSessionPaths,
   type LocalRuntimeSessionPathsOptions,
   type LocalRuntimeStorageLayout,
   type LocalRuntimeStorageLayoutOptions,
@@ -627,14 +627,21 @@ async function localRuntimeSessionsRootHasDurableEvidence(
   }
 }
 
+/**
+ * Durable evidence means a committed record. An interrupted start or
+ * discard leaves at most a raw-events file holding the torn tail of a
+ * write that never completed, which no reader would return — every caller
+ * treats such a directory as absent, so the cleanup finishes on the next
+ * create or discard of the same id. Anything else in the directory is
+ * evidence, and Finder metadata is ignored on both sides.
+ */
 function localRuntimeSessionDirectoryHasDurableEvidence(
   sessionRoot: string,
 ): boolean {
+  let meaningful: readonly string[];
+
   try {
-    // The same Finder file can land inside a session directory an
-    // interrupted start left empty; treating it as evidence would block
-    // listing or recreating a session that is otherwise recoverable.
-    return listDirectoryNamesSync(sessionRoot).some(
+    meaningful = listDirectoryNamesSync(sessionRoot).filter(
       name => !isOperatingSystemMetadataEntry(name),
     );
   } catch (error: unknown) {
@@ -647,6 +654,20 @@ function localRuntimeSessionDirectoryHasDurableEvidence(
       `Could not inspect local runtime session directory: ${sessionRoot}.`,
     );
   }
+
+  if (meaningful.length === 0) {
+    return false;
+  }
+
+  if (meaningful.length > 1 || meaningful[0] !== rawEventsFileName) {
+    return true;
+  }
+
+  return (
+    readUndamagedJsonLines(
+      readTextFileSync(join(sessionRoot, rawEventsFileName)),
+    ).length > 0
+  );
 }
 
 function throwMissingSessionCatalogEntry(sessionRoot: string): never {
@@ -933,7 +954,7 @@ async function discardEmptySessionFromCatalog(
       sessionId,
     });
 
-    if (!localRuntimeSessionIsEmpty(paths)) {
+    if (localRuntimeSessionDirectoryHasDurableEvidence(paths.sessionRoot)) {
       throw new LocalRuntimeSessionStoreError(
         'session_not_empty',
         `Local runtime session "${sessionId}" holds evidence and cannot be discarded.`,
@@ -947,39 +968,6 @@ async function discardEmptySessionFromCatalog(
     removePathSync(paths.rawEventsPath, {force: true});
     await removeDirectory(paths.sessionRoot);
   });
-}
-
-/**
- * Empty means no committed record: a raw-events file whose only content is
- * the torn tail of a write that never completed holds nothing the reader
- * would return, and nothing else may live in the directory.
- */
-function localRuntimeSessionIsEmpty(paths: LocalRuntimeSessionPaths): boolean {
-  let entries: readonly string[];
-
-  try {
-    entries = listDirectoryNamesSync(paths.sessionRoot);
-  } catch (error: unknown) {
-    if (isNodeErrorWithCode(error, 'ENOENT')) {
-      return true;
-    }
-
-    throw error;
-  }
-
-  const meaningful = entries.filter(
-    name => !isOperatingSystemMetadataEntry(name),
-  );
-
-  if (meaningful.length === 0) {
-    return true;
-  }
-
-  return (
-    meaningful.length === 1 &&
-    meaningful[0] === basename(paths.rawEventsPath) &&
-    readUndamagedJsonLines(readTextFileSync(paths.rawEventsPath)).length === 0
-  );
 }
 
 function compareSessionMetadata(
