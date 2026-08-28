@@ -235,6 +235,58 @@ describe('conversation driver', () => {
     });
   });
 
+  it('adopts the committed continuation even when the old segment does not close cleanly', async () => {
+    await withOpenConversation({}, async conversation => {
+      const conversationId = conversation.conversation.id;
+      const host = createRuntimePluginHost({plugins: []});
+      const failingEndHost = {
+        ...host,
+        onSessionEnd(): never {
+          throw new Error('session end exploded');
+        },
+      };
+      let rotation;
+
+      for (const line of ['one', 'two', 'three', 'four']) {
+        const delivery = await deliverUserMessage({
+          conversation,
+          line,
+          pluginHost: failingEndHost,
+          roleModelAdapter: replyAdapter(),
+          contextWindowTokens,
+        });
+
+        expect(delivery.status).toBe('completed');
+
+        if (
+          delivery.status === 'completed' &&
+          delivery.rotation !== undefined
+        ) {
+          rotation = delivery.rotation;
+        }
+      }
+
+      // The continuation record committed, so the failure to close the old
+      // segment is reported without abandoning the new one.
+      expect(rotation).toMatchObject({
+        status: 'rotated',
+        from: `${conversationId}.1`,
+        to: `${conversationId}.2`,
+        endFailure: expect.stringContaining('session end exploded') as string,
+      });
+      expect(conversation.session.id).toBe(`${conversationId}.2`);
+
+      const next = await deliverUserMessage({
+        conversation,
+        line: 'five',
+        pluginHost: createRuntimePluginHost({plugins: []}),
+        roleModelAdapter: replyAdapter(),
+      });
+
+      expect(next.status).toBe('completed');
+    });
+  });
+
   it('keeps the recorded identities when rotation opens the next segment', async () => {
     let homeRoot = '';
 

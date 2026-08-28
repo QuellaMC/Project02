@@ -45,7 +45,6 @@ export type SegmentContext = {
 export async function openSegment(
   context: SegmentContext,
   sessionId: string,
-  prepare?: (logStore: RuntimeLogStore) => void,
 ): Promise<ConversationSegment> {
   const writerLease = await acquireLocalRuntimeSessionWriterLease({
     ...context.storageOptions,
@@ -61,8 +60,6 @@ export async function openSegment(
       boundCharacter: context.character,
       boundUserSpeaker: context.boundUserSpeaker,
     });
-
-    prepare?.(logStore);
 
     return Object.freeze({
       session: await context.sessionStore.rehydrateSession(sessionId, {
@@ -87,9 +84,10 @@ export async function openSegment(
 
 /**
  * Opens the segment that continues the plan's source: its first record
- * carries the summary and the turns brought along. A segment that could not
- * receive that record is discarded again, so nothing ever resumes into an
- * empty continuation.
+ * carries the summary and the turns brought along. That record is the
+ * commit point and the last thing that can fail — the segment is fully
+ * open before it lands — so a failure always rolls back to an uncommitted
+ * segment, and a committed continuation is always the one handed back.
  */
 export async function openContinuedSegment(
   context: SegmentContext,
@@ -100,10 +98,12 @@ export async function openContinuedSegment(
   });
 
   try {
-    return await openSegment(context, metadata.sessionId, logStore => {
+    const segment = await openSegment(context, metadata.sessionId);
+
+    try {
       const identity = createRuntimeEventIdentity();
 
-      logStore.appendRawEvent({
+      segment.logStore.appendRawEvent({
         ...identity,
         kind: 'session_continued',
         eventType: 'USER_MESSAGE',
@@ -117,7 +117,12 @@ export async function openContinuedSegment(
           summarizer: plan.summarizer,
         }),
       });
-    });
+    } catch (error: unknown) {
+      await segment.writerLease.release();
+      throw error;
+    }
+
+    return segment;
   } catch (error: unknown) {
     try {
       await context.sessionStore.discardEmptySession(metadata.sessionId);

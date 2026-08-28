@@ -172,6 +172,12 @@ async function rotateIfNeeded(
     };
   }
 
+  // The continuation is committed: the conversation is in the new segment
+  // from here on, however closing the old one goes.
+  const previous = state.segment;
+
+  state.segment = next;
+
   let endFailure: string | undefined;
 
   try {
@@ -180,8 +186,14 @@ async function rotateIfNeeded(
     endFailure = error instanceof Error ? error.message : String(error);
   }
 
-  await state.segment.writerLease.release();
-  state.segment = next;
+  try {
+    await previous.writerLease.release();
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    endFailure =
+      endFailure === undefined ? message : `${endFailure}; ${message}`;
+  }
 
   return {
     status: 'rotated',
