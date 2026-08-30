@@ -2,6 +2,11 @@
  * Cross-module imports of gateway land here; arch:check rule 5 accepts
  * first- and second-level barrels.
  */
+export {
+  createLocalCharacterRuntime,
+  type LocalCharacterRuntime,
+  type LocalCharacterRuntimeOptions,
+} from './runtime/character-runtime.ts';
 export type {
   CharacterRuntime,
   CharacterRuntimeHealth,

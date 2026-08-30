@@ -23,6 +23,8 @@ export type CharacterRuntimeState =
 export type ConversationRef = {
   readonly conversationId: string;
   readonly characterId: string;
+  /** Who the caller is in this thread — the senderId a delivery must carry. */
+  readonly userParticipantId: string;
 };
 
 /** One committed visible message, as a client renders it. */
