@@ -113,14 +113,33 @@ export default {
       name: 'nothing-imports-app',
       comment:
         'src/app is the composition root: it wires runtime, plugins, and ' +
-        'role-model together. Only the public barrel and cli may import it. ' +
-        'Green (zero baseline entries).',
+        'role-model together. Only the public barrel, gateway, and cli may ' +
+        'import it. Green (zero baseline entries).',
       severity: 'error',
       from: {
         path: '^src/',
-        pathNot: ['^src/app/', '^src/cli/', '^src/index\\.ts$'],
+        pathNot: [
+          '^src/app/',
+          '^src/cli/',
+          '^src/gateway/',
+          '^src/index\\.ts$',
+        ],
       },
       to: {path: '^src/app/'},
+    },
+    {
+      name: 'nothing-imports-gateway',
+      comment:
+        'src/gateway is the daemon composition layer above app: it holds ' +
+        'the character runtimes and the client façade. Only the public ' +
+        'barrel and cli may import it; app, runtime, plugins, and core ' +
+        'never reach upward into it. Green (zero baseline entries).',
+      severity: 'error',
+      from: {
+        path: '^src/',
+        pathNot: ['^src/gateway/', '^src/cli/', '^src/index\\.ts$'],
+      },
+      to: {path: '^src/gateway/'},
     },
     {
       name: 'nothing-imports-cli',
