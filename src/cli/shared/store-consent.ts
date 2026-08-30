@@ -2,7 +2,7 @@
  * The one place a store is born: creation happens here, whole and in one
  * call, before any command writes, so no write precedes a rejection.
  */
-import {resolveRuntimeCliStartup} from '../../app/index.ts';
+import {loadProject02Home} from '../../app/index.ts';
 import {
   ensureInitializedProject02Store,
   type ResolvedProject02ConfigLocation,
@@ -38,16 +38,15 @@ type Project02StoreConsentOptions = {
 export async function assertProject02StoreConsent(
   options: Project02StoreConsentOptions,
 ): Promise<void> {
-  const startup = resolveRuntimeCliStartup({
-    stage: 'config',
+  const home = loadProject02Home({
     location: options.location,
     ...(options.cwdDotEnv === undefined ? {} : {cwdDotEnv: options.cwdDotEnv}),
     ...(options.env === undefined ? {} : {env: options.env}),
   });
-  const homeRoot = startup.runtimeLocation.homeRoot;
+  const homeRoot = home.runtimeLocation.homeRoot;
 
   if (
-    !runWouldCreateStore(options, startup.runtimeLocation) ||
+    !runWouldCreateStore(options, home.runtimeLocation) ||
     !project02HomeCreationIsNew({homeRoot})
   ) {
     return;

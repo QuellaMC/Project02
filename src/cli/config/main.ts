@@ -24,6 +24,7 @@ import {
   type RuntimeConfigMutationResult,
 } from '../../runtime/config/index.ts';
 import {
+  loadProject02Home,
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
 } from '../../app/index.ts';
@@ -223,8 +224,7 @@ async function runRuntimePluginSecretSetCommand(
   // config-stage startup stages it without creating anything.
   const command = parseRuntimeConfigCommand(
     parsedArgs.commandArgs,
-    resolveRuntimeCliStartup({
-      stage: 'config',
+    loadProject02Home({
       location: parsedArgs.location,
       cwdDotEnv,
       ...(options.env === undefined ? {} : {env: options.env}),
@@ -264,8 +264,7 @@ async function runRuntimeConfigDocumentCommand(
   options: RuntimeConfigCliOptions,
   cwdDotEnv: 'always' | 'auto',
 ): Promise<number> {
-  const configStartup = resolveRuntimeCliStartup({
-    stage: 'config',
+  const configStartup = loadProject02Home({
     location: parsedArgs.location,
     cwdDotEnv,
     ...(options.env === undefined ? {} : {env: options.env}),

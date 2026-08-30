@@ -17,6 +17,7 @@ import {
 import {installedRuntimePluginCatalogEntry} from '../plugins/index.ts';
 import type {CharacterPluginExpectations} from '../characters/index.ts';
 import type {RuntimePluginManifest} from '../plugins/api/index.ts';
+import {loadProject02Home, type Project02Home} from './home.ts';
 import {
   applyRuntimeConfigControlOperation,
   assertResolvedProject02HomeAdoptable,
@@ -26,17 +27,13 @@ import {
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
   configuredProject02CharacterId,
-  defaultDotEnvForRuntimeLocation,
   diagnosticsHaveErrors,
   loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
-  loadProject02RuntimeConfigWithLocation,
   loadRuntimeConfigEnvFile,
-  readDefaultDotEnvFile,
   resolveRuntimeConfigScopeTarget,
   RuntimeConfigMutationError,
   runtimeConfigDiagnosticIsReadinessFailure,
-  shouldReadDefaultDotEnvForRuntimeLocation,
   simulateCharacterOverlayCandidate,
   withRuntimeConfigDiagnosticOrigin,
   type LoadedProject02CharacterOverlayConfig,
@@ -247,48 +244,99 @@ export function resolveRuntimeCliStartup(
   | RuntimeCliConfigStartupResult
   | RuntimeCliStartupResult
   | Promise<RuntimeCliStartupResult> {
-  const location = Object.freeze({...(options.location ?? {})});
-  const suppliedEnv = options.env ?? process.env;
-  const cwdDotEnv = resolveCwdDotEnv({
-    location,
-    suppliedEnv,
-    mode: options.cwdDotEnv ?? 'auto',
-    mayReadProcessCwd: options.env === undefined || options.env === process.env,
-  });
-  const configEnv = Object.freeze({...cwdDotEnv, ...suppliedEnv});
-  const {loadedConfig, configLocation} = loadProject02RuntimeConfigWithLocation(
-    {
-      selection: location,
-      env: configEnv,
-    },
-  );
-  const startupBase = {
-    runtimeLocation: configLocation,
-    cwdDotEnv,
-    configEnv,
-    loadedConfig,
-  };
+  const home = loadProject02Home(options);
 
   if (options.stage === 'config') {
-    return Object.freeze(startupBase);
+    return home;
   }
 
-  const activationInput = {
-    configLocation,
-    ...(location.character === undefined
+  const characterId = options.location?.character;
+  const shared = {
+    ...(characterId === undefined ? {} : {characterId}),
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
+    ...(options.continueAfterActivationErrors === undefined
       ? {}
-      : {characterOverride: location.character}),
-    suppliedEnv,
-    cwdDotEnv,
-    configEnv,
+      : {continueAfterActivationErrors: options.continueAfterActivationErrors}),
+    ...(options.validateRuntimeEnv === undefined
+      ? {}
+      : {validateRuntimeEnv: options.validateRuntimeEnv}),
+  };
+
+  if (options.stage === 'report') {
+    return activateProject02Character(home, {...shared, stage: 'report'});
+  }
+
+  return activateProject02Character(home, {
+    ...shared,
+    ...(options.characterConfigRequest === undefined
+      ? {}
+      : {characterConfigRequest: options.characterConfigRequest}),
+  });
+}
+
+export type ActivateProject02CharacterOptions = {
+  /** Overrides the configured character selection. */
+  readonly characterId?: string;
+  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
+  readonly continueAfterActivationErrors?: boolean;
+  /** Throwing here rejects the startup before anything durable is written. */
+  readonly validateRuntimeEnv?: (env: NodeJS.ProcessEnv) => void;
+  /** Composed with package materialization into one locked overlay commit. */
+  readonly characterConfigRequest?: RuntimeCliCharacterConfigRequest;
+};
+
+/**
+ * Activates one character against an already-loaded home: package
+ * resolution, overlay, plugin activation plan, per-character env. The
+ * 'report' stage makes the same decisions without the durable write.
+ */
+export function activateProject02Character(
+  home: Project02Home,
+  options: Omit<ActivateProject02CharacterOptions, 'characterConfigRequest'> & {
+    readonly stage: 'report';
+  },
+): RuntimeCliStartupResult;
+export function activateProject02Character(
+  home: Project02Home,
+  options?: ActivateProject02CharacterOptions,
+): Promise<RuntimeCliStartupResult>;
+export function activateProject02Character(
+  home: Project02Home,
+  options: ActivateProject02CharacterOptions & {
+    readonly stage?: 'report';
+  } = {},
+): RuntimeCliStartupResult | Promise<RuntimeCliStartupResult> {
+  const startupBase = {
+    runtimeLocation: home.runtimeLocation,
+    cwdDotEnv: home.cwdDotEnv,
+    configEnv: home.configEnv,
+    loadedConfig: home.loadedConfig,
+  };
+  const activationInput = {
+    configLocation: home.runtimeLocation,
+    ...(options.characterId === undefined
+      ? {}
+      : {characterOverride: options.characterId}),
+    suppliedEnv: home.suppliedEnv,
+    cwdDotEnv: home.cwdDotEnv,
+    configEnv: home.configEnv,
     startupBase,
-    loadedConfig,
+    loadedConfig: home.loadedConfig,
+  };
+  const stagelessOptions = {
+    ...(options.factories === undefined ? {} : {factories: options.factories}),
+    ...(options.continueAfterActivationErrors === undefined
+      ? {}
+      : {continueAfterActivationErrors: options.continueAfterActivationErrors}),
+    ...(options.validateRuntimeEnv === undefined
+      ? {}
+      : {validateRuntimeEnv: options.validateRuntimeEnv}),
   };
 
   if (options.stage === 'report') {
     const planned = planRuntimeCliActivationStartup({
       ...activationInput,
-      options,
+      options: {...stagelessOptions, stage: 'report'},
     });
 
     return planned.outcome === 'rejected'
@@ -296,7 +344,15 @@ export function resolveRuntimeCliStartup(
       : simulatePlannedRuntimeCliActivationStartup(planned.plan);
   }
 
-  return resolveRuntimeCliActivationStartup({...activationInput, options});
+  return resolveRuntimeCliActivationStartup({
+    ...activationInput,
+    options: {
+      ...stagelessOptions,
+      ...(options.characterConfigRequest === undefined
+        ? {}
+        : {characterConfigRequest: options.characterConfigRequest}),
+    },
+  });
 }
 
 /**
@@ -955,28 +1011,6 @@ function readCharacterDataMarkerForStartup(
   runtimeLocation: ResolvedProject02RuntimeLocation,
 ): LocalRuntimeCharacterDataStorageSchemaMarker | undefined {
   return readCharacterOverlayForScope(runtimeLocation.characterScope).marker;
-}
-
-function resolveCwdDotEnv(options: {
-  readonly location: RuntimeLocationCliState;
-  readonly suppliedEnv: NodeJS.ProcessEnv;
-  readonly mayReadProcessCwd: boolean;
-  readonly mode: 'auto' | 'always';
-}): NodeJS.ProcessEnv {
-  if (
-    !options.mayReadProcessCwd ||
-    (options.mode === 'auto' &&
-      !shouldReadDefaultDotEnvForRuntimeLocation({
-        location: options.location,
-        env: options.suppliedEnv,
-      }))
-  ) {
-    return Object.freeze({});
-  }
-
-  return Object.freeze(
-    defaultDotEnvForRuntimeLocation(readDefaultDotEnvFile(), options.location),
-  );
 }
 
 function loadRuntimeEnv(options: {
