@@ -121,15 +121,16 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         throw new TypeError('The gateway is stopped.');
       }
 
-      const listed = listProject02Characters(home).find(
-        character => character.id === characterId,
-      );
+      const characters = listProject02Characters(home);
 
-      if (listed?.enabled === false) {
+      // characters() reports installed characters only, so a runtime for an
+      // unknown id would fail invisibly; refuse the client mistake here.
+      // The enabled decision belongs to the runtime's own assembly, where
+      // reactivation passes too.
+      if (!characters.some(character => character.id === characterId)) {
         throw new TypeError(
-          `Character "${characterId}" is disabled. Set project02.enabled ` +
-            'to true in its character config, or remove the global ' +
-            'project02.enabled.',
+          `Character "${characterId}" is not installed. Installed: ` +
+            `${characters.map(character => character.id).join(', ') || '(none)'}.`,
         );
       }
 

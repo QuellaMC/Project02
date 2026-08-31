@@ -138,6 +138,12 @@ export function createLocalCharacterRuntime(
       };
     },
     openDirectConversation(): Promise<ConversationRef> {
+      // A cached attachment is only as alive as the runtime: off ready,
+      // openDirect explains the state instead of handing back a stale ref.
+      if (lifecycleLeft(context, 'ready')) {
+        return openDirect(context);
+      }
+
       context.opening ??= openDirect(context).catch((error: unknown) => {
         context.opening = undefined;
         throw error;
@@ -263,6 +269,19 @@ async function assemble(
 
   const activation = startup.characterActivation;
   const project02 = startup.activationPlan.resolvedConfig.project02;
+
+  // The enabled decision lives on this seam so reactivation honors a
+  // disable that landed while the character was running.
+  if (!project02.enabled) {
+    setState(
+      context,
+      'failed',
+      `Character "${characterId}" is disabled. Set project02.enabled to ` +
+        'true in its character config, or remove the global ' +
+        'project02.enabled.',
+    );
+    return undefined;
+  }
   const shared = {
     profile: activation.profile,
     personaSections: activation.personaSections,

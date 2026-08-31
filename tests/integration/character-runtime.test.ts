@@ -249,6 +249,7 @@ describe('local character runtime', () => {
       status: 'refused',
       reason: 'character_unavailable',
     });
+    await expect(runtime.openDirectConversation()).rejects.toThrow('failed');
 
     await runtime.reactivate();
     expect(runtime.health().state).toBe('ready');

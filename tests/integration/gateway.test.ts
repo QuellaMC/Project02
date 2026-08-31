@@ -124,7 +124,7 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('refuses to start a disabled character', async () => {
+  it('refuses a disabled character at the one assembly seam', async () => {
     const homeRoot = await createGatewayHome();
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
@@ -133,10 +133,65 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
 
-    await expect(gateway.startCharacter('mira')).rejects.toThrow('disabled');
-    expect(gateway.characters()).toEqual([
-      {id: 'mira', enabled: false, state: 'not_started'},
-    ]);
+    await gateway.startCharacter('mira');
+
+    const summary = gateway.characters()[0];
+
+    expect(summary).toMatchObject({enabled: false, state: 'failed'});
+    expect(summary?.diagnostic).toContain('disabled');
+  });
+
+  it('refuses an unknown character before creating a runtime', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+
+    await expect(gateway.startCharacter('ghost')).rejects.toThrow(
+      'not installed',
+    );
+  });
+
+  it('declines automatic recovery for a character disabled while running', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    const ref = await gateway.openDirectConversation('mira');
+
+    writeRuntimeConfig(
+      join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
+      {project02: {enabled: false}},
+    );
+
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    await vi.waitFor(() => {
+      const summary = gateway.characters()[0];
+
+      expect(summary?.state).toBe('failed');
+      expect(summary?.diagnostic).toContain('disabled');
+    });
+    await gateway.stop();
   });
 
   it('refuses a conversation it never attached', async () => {

@@ -22,8 +22,10 @@ import {
   type ResolvedProject02RuntimeLocation,
   type ResolvedRuntimeConfigScopeTarget,
   type RuntimeConfigMutationResult,
+  type RuntimeLocationCliState,
 } from '../../runtime/config/index.ts';
 import {
+  listProject02Characters,
   loadProject02Home,
   resolveRuntimeCliStartup,
   type RuntimePluginFactoryDefinition,
@@ -89,7 +91,10 @@ export function runRuntimeConfigCliFromArgs(
       assertNoExtraArgs(parsedArgs.commandArgs, 0, 'ui');
       await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
       const startup = await resolveRuntimeCliStartup({
-        location: parsedArgs.location,
+        location: consoleCatalogLocation({
+          location: parsedArgs.location,
+          ...(options.env === undefined ? {} : {env: options.env}),
+        }),
         ...(options.env === undefined ? {} : {env: options.env}),
         ...(options.factories === undefined
           ? {}
@@ -187,7 +192,10 @@ async function runRuntimeConfigCheckCommand(
 
   await assertRuntimeConfigCliStoreConsent(parsedArgs, options);
   const startup = await resolveRuntimeCliStartup({
-    location: parsedArgs.location,
+    location: consoleCatalogLocation({
+      location: parsedArgs.location,
+      ...(options.env === undefined ? {} : {env: options.env}),
+    }),
     ...(options.env === undefined ? {} : {env: options.env}),
     ...(options.factories === undefined ? {} : {factories: options.factories}),
   });
@@ -642,7 +650,13 @@ async function resolveRuntimeConfigCliActivationStartup(options: {
 }): Promise<Awaited<ReturnType<typeof resolveRuntimeCliStartup>>> {
   try {
     return await resolveRuntimeCliStartup({
-      location: options.parsedArgs.location,
+      location: consoleCatalogLocation({
+        location: options.parsedArgs.location,
+        cwdDotEnv: options.cwdDotEnv,
+        ...(options.options.env === undefined
+          ? {}
+          : {env: options.options.env}),
+      }),
       cwdDotEnv: options.cwdDotEnv,
       ...(options.options.factories === undefined
         ? {}
@@ -659,6 +673,36 @@ async function resolveRuntimeConfigCliActivationStartup(options: {
       `Could not read runtime config env file at ${error.path}.`,
     );
   }
+}
+
+/**
+ * The console reads config through one character's lens; for global
+ * operations any installed character serves, so several enabled characters
+ * must not block a global command. Command routing keeps reading the
+ * parsed location, so the lens never changes a write's scope.
+ */
+function consoleCatalogLocation(input: {
+  readonly location: RuntimeLocationCliState;
+  readonly env?: NodeJS.ProcessEnv;
+  readonly cwdDotEnv?: 'always' | 'auto';
+}): RuntimeLocationCliState {
+  const {location} = input;
+
+  if (location.character !== undefined) {
+    return location;
+  }
+
+  const characters = listProject02Characters(
+    loadProject02Home({
+      location,
+      ...(input.cwdDotEnv === undefined ? {} : {cwdDotEnv: input.cwdDotEnv}),
+      ...(input.env === undefined ? {} : {env: input.env}),
+    }),
+  );
+  const enabled = characters.filter(character => character.enabled);
+  const lens = enabled.length === 1 ? enabled[0] : characters[0];
+
+  return lens === undefined ? location : {...location, character: lens.id};
 }
 
 function applyRuntimePluginSecretSetCommand(options: {

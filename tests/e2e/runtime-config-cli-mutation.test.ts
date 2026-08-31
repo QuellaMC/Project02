@@ -17,6 +17,7 @@ import {
   createProject02HomeLayout,
   ensureInitializedProject02Home,
 } from '../../src/runtime/storage/index.ts';
+import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   applyRuntimeConfigControlOperation,
@@ -49,6 +50,31 @@ const installedSecretFactories = Object.freeze({
 });
 
 describe('runtime config CLI mutation and storage', () => {
+  it('writes global config while several characters are enabled', async () => {
+    const storeRoot = createTestTempRoot('project02-config-multi-enabled-');
+
+    writeTestCharacterPackage(storeRoot, {id: 'zeta', displayName: 'Zeta'});
+    const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+    let stderr = '';
+
+    const exitCode = await runRuntimeConfigCliFromArgs(
+      ['--store', storeRoot, 'set', 'project02.userDisplayName', 'Mike'],
+      {
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+      },
+    );
+
+    expect(stderr).toBe('');
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(readFileSync(configPath, 'utf8'))).toMatchObject({
+      project02: {userDisplayName: 'Mike'},
+    });
+  });
+
   it('repairs an invalid authored field without resolving its data path', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-invalid-character-repair-',
