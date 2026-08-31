@@ -278,6 +278,37 @@ describe('local character runtime', () => {
     expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
   });
 
+  it('stays failed when recovery cannot release its resources', async () => {
+    const {homeRoot, runtime} = await createStartedRuntime();
+    const ref = await runtime.openDirectConversation();
+    const dataRoot = characterDataDirPath(homeRoot, 'mira');
+    const sessionsRoot = join(dataRoot, 'sessions');
+    const locksRoot = join(dataRoot, '.locks');
+
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await runtime.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    chmodSync(locksRoot, 0o500);
+
+    try {
+      await runtime.reactivate();
+    } finally {
+      chmodSync(locksRoot, 0o755);
+    }
+
+    expect(runtime.health().state).toBe('failed');
+    expect(runtime.health().failure).toContain('could not release');
+  });
+
   it('stop waits for the in-flight turn and runs session-end hooks', async () => {
     const endedSessions: string[] = [];
     const probe = createSessionEndFileStoreProbePlugin({

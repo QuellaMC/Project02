@@ -1,4 +1,4 @@
-import {chmodSync} from 'node:fs';
+import {chmodSync, existsSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
@@ -139,6 +139,7 @@ describe('gateway façade', () => {
 
     expect(summary).toMatchObject({enabled: false, state: 'failed'});
     expect(summary?.diagnostic).toContain('disabled');
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
   });
 
   it('refuses an unknown character before creating a runtime', async () => {

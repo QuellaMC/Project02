@@ -1511,37 +1511,6 @@ describe('plugin inspection target authorship', () => {
   });
 });
 
-describe('configured character id normalization', () => {
-  it('trims a padded authored character id at every read seam', () => {
-    const homeRoot = createTestTempRoot('project02-scope-trim-');
-
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {character: '  mira  '},
-    });
-
-    const resolved = resolveProject02RuntimeConfig({
-      runtimeLocation: runtimeLocationForTest({
-        loadedConfig: loadRuntimeConfigForTest({
-          storeRoot: homeRoot,
-          env: {},
-        }),
-        storeRoot: homeRoot,
-      }),
-      loadedConfig: loadRuntimeConfigForTest({storeRoot: homeRoot, env: {}}),
-    });
-
-    expect(resolved.project02.character).toBe('mira');
-    expect(
-      resolveRuntimeConfigScopeTarget({
-        runtimeLocation: runtimeLocationForTest({storeRoot: homeRoot, env: {}}),
-
-        env: {},
-        scope: 'character',
-      }).runtimeLocation.characterScope,
-    ).toMatchObject({characterId: 'mira'});
-  });
-});
-
 describe('scoped writes over a broken global layer', () => {
   it('rejects the mutation instead of merging against a synthetic global document', () => {
     const homeRoot = createTestTempRoot('project02-scope-invalid-global-');

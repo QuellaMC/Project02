@@ -2,6 +2,7 @@ import {
   activateProject02Character,
   configuredPluginConstructionCleanupSessionId,
   createConfiguredProject02PluginHostFromPlan,
+  listProject02Characters,
   type Project02Home,
   type RuntimeCliStartupResult,
 } from '../../app/index.ts';
@@ -249,6 +250,25 @@ async function assemble(
   context: RuntimeContext,
 ): Promise<AssembledCharacter | undefined> {
   const {options, characterId} = context;
+
+  // The enabled decision lives on this seam so reactivation honors a
+  // disable that landed while the character was running — and it runs
+  // before activation, which materializes durable character state.
+  const listed = listProject02Characters(options.home).find(
+    character => character.id === characterId,
+  );
+
+  if (listed?.enabled === false) {
+    setState(
+      context,
+      'failed',
+      `Character "${characterId}" is disabled. Set project02.enabled to ` +
+        'true in its character config, or remove the global ' +
+        'project02.enabled.',
+    );
+    return undefined;
+  }
+
   const startup = await activateProject02Character(options.home, {
     characterId,
     continueAfterActivationErrors: options.pluginHost !== undefined,
@@ -269,19 +289,6 @@ async function assemble(
 
   const activation = startup.characterActivation;
   const project02 = startup.activationPlan.resolvedConfig.project02;
-
-  // The enabled decision lives on this seam so reactivation honors a
-  // disable that landed while the character was running.
-  if (!project02.enabled) {
-    setState(
-      context,
-      'failed',
-      `Character "${characterId}" is disabled. Set project02.enabled to ` +
-        'true in its character config, or remove the global ' +
-        'project02.enabled.',
-    );
-    return undefined;
-  }
   const shared = {
     profile: activation.profile,
     personaSections: activation.personaSections,
@@ -567,7 +574,24 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
     return;
   }
 
-  await releaseResources(context);
+  const problems = await releaseResources(context);
+
+  // The same rule holds across the release await.
+  if (lifecycleLeft(context, 'failed')) {
+    return;
+  }
+
+  // A restart over unreleased resources would report ready with its DM
+  // still locked; staying failed keeps the one-shot policy honest.
+  if (problems.length > 0) {
+    setState(
+      context,
+      'failed',
+      `Recovery could not release resources: ${problems.join('; ')}`,
+    );
+    return;
+  }
+
   context.state = 'stopped';
   await startRuntime(context);
 }

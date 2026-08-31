@@ -11,7 +11,10 @@ import {
   type Gateway,
 } from '../../gateway/index.ts';
 import type {RuntimePluginHost} from '../../plugins/index.ts';
-import type {RoleModelAdapter} from '../../role-model/index.ts';
+import {
+  selectChatProvider,
+  type RoleModelAdapter,
+} from '../../role-model/index.ts';
 import {
   roleModelProviderEnvVarName,
   type RuntimeLocationCliState,
@@ -53,6 +56,14 @@ export async function runChatCliFromArgs(
 
   try {
     const flags = parseChatCliFlags(args);
+
+    // The one provider validator runs before consent can create a store,
+    // so a typo never mutates durable state.
+    if (flags.provider !== undefined) {
+      selectChatProvider(undefined, {
+        [roleModelProviderEnvVarName]: flags.provider,
+      });
+    }
 
     await assertProject02StoreConsent({
       location: flags.location,
