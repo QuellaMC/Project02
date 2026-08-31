@@ -81,9 +81,17 @@ type RuntimeContext = {
   queue: Promise<unknown>;
   opening: Promise<ConversationRef> | undefined;
   stopping: Promise<void> | undefined;
+  releasing: Promise<string[]> | undefined;
 };
 
 const hostShutdownMessage = 'character runtime plugin host lifetime ended';
+
+function disabledMessage(characterId: string): string {
+  return (
+    `Character "${characterId}" is disabled. Set project02.enabled to ` +
+    'true in its character config, or remove the global project02.enabled.'
+  );
+}
 const constructionFailureMessage =
   'Configured plugin construction failed before creating a durable session.';
 
@@ -109,6 +117,7 @@ export function createLocalCharacterRuntime(
     queue: Promise.resolve(),
     opening: undefined,
     stopping: undefined,
+    releasing: undefined,
   };
 
   return Object.freeze({
@@ -259,13 +268,7 @@ async function assemble(
   );
 
   if (listed?.enabled === false) {
-    setState(
-      context,
-      'failed',
-      `Character "${characterId}" is disabled. Set project02.enabled to ` +
-        'true in its character config, or remove the global ' +
-        'project02.enabled.',
-    );
+    setState(context, 'failed', disabledMessage(characterId));
     return undefined;
   }
 
@@ -289,6 +292,14 @@ async function assemble(
 
   const activation = startup.characterActivation;
   const project02 = startup.activationPlan.resolvedConfig.project02;
+
+  // The resolved plan has the final word on enabled: a disable that landed
+  // between the listing read above and this activation still refuses.
+  if (!project02.enabled) {
+    setState(context, 'failed', disabledMessage(characterId));
+    return undefined;
+  }
+
   const shared = {
     profile: activation.profile,
     personaSections: activation.personaSections,
@@ -544,7 +555,7 @@ async function stopRuntime(context: RuntimeContext): Promise<void> {
     () => undefined,
   );
 
-  const problems = await releaseResources(context);
+  const problems = await releaseResourcesOnce(context);
 
   setState(
     context,
@@ -574,7 +585,7 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
     return;
   }
 
-  const problems = await releaseResources(context);
+  const problems = await releaseResourcesOnce(context);
 
   // The same rule holds across the release await.
   if (lifecycleLeft(context, 'failed')) {
@@ -594,6 +605,15 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
 
   context.state = 'stopped';
   await startRuntime(context);
+}
+
+/** Stop and recovery share one release, so cleanup never runs twice. */
+function releaseResourcesOnce(context: RuntimeContext): Promise<string[]> {
+  context.releasing ??= releaseResources(context).finally(() => {
+    context.releasing = undefined;
+  });
+
+  return context.releasing;
 }
 
 async function releaseResources(context: RuntimeContext): Promise<string[]> {

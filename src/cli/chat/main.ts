@@ -25,6 +25,7 @@ import {
   matchesRuntimeStoreInitFlag,
   parseRuntimeStoreFlag,
 } from '../shared/runtime-location-flags.ts';
+import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
 import {assertProject02StoreConsent} from '../shared/store-consent.ts';
 import {
   formatCliTerminalErrorMessage,
@@ -58,12 +59,15 @@ export async function runChatCliFromArgs(
     const flags = parseChatCliFlags(args);
 
     // The one provider validator runs before consent can create a store,
-    // so a typo never mutates durable state.
-    if (flags.provider !== undefined) {
-      selectChatProvider(undefined, {
-        [roleModelProviderEnvVarName]: flags.provider,
-      });
-    }
+    // so a typo never mutates durable state — and its typed result rides
+    // the gateway option, leaving the process env (and its cwd-dotenv
+    // mode) untouched.
+    const provider =
+      flags.provider === undefined
+        ? undefined
+        : selectChatProvider(undefined, {
+            [roleModelProviderEnvVarName]: flags.provider,
+          });
 
     await assertProject02StoreConsent({
       location: flags.location,
@@ -74,7 +78,8 @@ export async function runChatCliFromArgs(
     });
     gateway = createGateway({
       location: flags.location,
-      ...chatGatewayEnvOption(options.env, flags.provider),
+      ...(options.env === undefined ? {} : {env: options.env}),
+      ...(provider === undefined ? {} : {provider}),
       ...(options.roleModelAdapter === undefined
         ? {}
         : {roleModelAdapter: options.roleModelAdapter}),
@@ -153,23 +158,6 @@ function parseChatCliFlags(args: readonly string[]): ChatCliFlags {
   return {location, init, ...(provider === undefined ? {} : {provider})};
 }
 
-/**
- * --provider rides the provider env var, so the one existing seam
- * validates the name and decides precedence.
- */
-function chatGatewayEnvOption(
-  env: NodeJS.ProcessEnv | undefined,
-  provider: string | undefined,
-): {env?: NodeJS.ProcessEnv} {
-  if (provider === undefined) {
-    return env === undefined ? {} : {env};
-  }
-
-  return {
-    env: {...(env ?? process.env), [roleModelProviderEnvVarName]: provider},
-  };
-}
-
 async function runChat(
   gateway: Gateway,
   characterId: string,
@@ -212,12 +200,18 @@ async function runChat(
           `${event.request.summary}\n` +
           `${JSON.stringify(event.request.preview, null, 2)}\n[y/N] `,
       );
-      void nextLine().then(line => {
-        gateway.answerConfirmation(
-          event.id,
-          line?.trim() === 'y' ? 'approved' : 'denied',
-        );
-      });
+      void nextLine().then(
+        line => {
+          gateway.answerConfirmation(
+            event.id,
+            cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
+          );
+        },
+        () => {
+          // A failed read is a denial, never a parked confirmation.
+          gateway.answerConfirmation(event.id, 'denied');
+        },
+      );
     } else if (event.state === 'failed' && event.message !== undefined) {
       // Turn failures reach the user through the delivery outcome; this
       // remembers the one failure with no outcome to carry it.
