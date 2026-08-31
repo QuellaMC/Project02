@@ -113,7 +113,7 @@ describe('runtime config loader validation', () => {
     const document = {
       version: runtimeConfigVersion,
       project02: {
-        character: '../bad',
+        contextWindowTokens: -5,
         userDisplayName: 'Ada',
       },
       plugins: {
@@ -133,8 +133,8 @@ describe('runtime config loader validation', () => {
     expect(Object.isFrozen(result.authoredDocument?.['project02'])).toBe(true);
     expect(result.diagnostics).toEqual([
       expect.objectContaining({
-        code: 'runtime_config_string_invalid',
-        path: 'project02.character',
+        code: 'runtime_config_context_window_tokens_invalid',
+        path: 'project02.contextWindowTokens',
       }),
     ]);
   });

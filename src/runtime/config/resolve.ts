@@ -158,24 +158,11 @@ export function resolveEffectiveProject02RuntimeConfig(
     ...options.diagnostics,
     ...pluginResolution.diagnostics,
   ]);
-  const defaultMemoryProvider = config?.project02?.defaultMemoryProvider;
-  const roleModelProvider = config?.project02?.roleModelProvider ?? 'local';
-  const contextWindowTokens =
-    config?.project02?.contextWindowTokens ??
-    defaultProject02ContextWindowTokens;
-  // Already trimmed by the character-scope helper.
-  const character = options.runtimeLocation.characterScope.characterId;
-  // Trimmed here: the strict speaker constructor would crash on padding.
-  const userDisplayName = (
-    config?.project02?.userDisplayName ?? defaultProject02UserDisplayName
-  ).trim();
-  const project02 = Object.freeze({
+  const project02 = resolvedProject02HostSection({
+    config,
     storeRoot,
-    character,
-    userDisplayName,
-    ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
-    roleModelProvider,
-    contextWindowTokens,
+    // Already trimmed by the character-scope helper.
+    character: options.runtimeLocation.characterScope.characterId,
   });
 
   return Object.freeze({
@@ -189,13 +176,37 @@ export function resolveEffectiveProject02RuntimeConfig(
       effectiveFingerprintInput({
         config,
         storeRoot,
-        character,
-        userDisplayName,
+        character: project02.character,
+        enabled: project02.enabled,
+        userDisplayName: project02.userDisplayName,
         redactedPluginConfigs: pluginResolution.redactedPluginConfigs,
       }),
       options.pluginManifests ?? [],
     ),
   } satisfies ResolvedProject02RuntimeConfig);
+}
+
+function resolvedProject02HostSection(options: {
+  readonly config: Project02RuntimeConfig | undefined;
+  readonly storeRoot: string;
+  readonly character: string;
+}): ResolvedProject02RuntimeConfig['project02'] {
+  const authored = options.config?.project02;
+  const defaultMemoryProvider = authored?.defaultMemoryProvider;
+
+  return Object.freeze({
+    storeRoot: options.storeRoot,
+    character: options.character,
+    enabled: authored?.enabled ?? true,
+    // Trimmed here: the strict speaker constructor would crash on padding.
+    userDisplayName: (
+      authored?.userDisplayName ?? defaultProject02UserDisplayName
+    ).trim(),
+    ...(defaultMemoryProvider === undefined ? {} : {defaultMemoryProvider}),
+    roleModelProvider: authored?.roleModelProvider ?? 'local',
+    contextWindowTokens:
+      authored?.contextWindowTokens ?? defaultProject02ContextWindowTokens,
+  });
 }
 
 export function diagnosticsHaveErrors(
@@ -639,6 +650,7 @@ function effectiveFingerprintInput(options: {
   readonly config: Project02RuntimeConfig | undefined;
   readonly storeRoot: string;
   readonly character: string;
+  readonly enabled: boolean;
   readonly userDisplayName: string;
   readonly redactedPluginConfigs: Readonly<
     Record<string, RedactedPluginRuntimeConfig>
@@ -651,6 +663,7 @@ function effectiveFingerprintInput(options: {
     project02: Object.freeze({
       storeRoot: options.storeRoot,
       character: options.character,
+      enabled: options.enabled,
       userDisplayName: options.userDisplayName,
       defaultMemoryProvider:
         options.config?.project02?.defaultMemoryProvider ?? null,

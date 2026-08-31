@@ -49,13 +49,13 @@ const installedSecretFactories = Object.freeze({
 });
 
 describe('runtime config CLI mutation and storage', () => {
-  it('repairs an invalid authored character without resolving its data path', async () => {
+  it('repairs an invalid authored field without resolving its data path', async () => {
     const storeRoot = createTestTempRoot(
       'project02-config-invalid-character-repair-',
     );
     const authoredConfig = {
       project02: {
-        character: '../bad',
+        contextWindowTokens: -5,
         userDisplayName: 'Ada',
         roleModelProvider: 'nvidia',
         defaultMemoryProvider: 'demo-memory',
@@ -73,7 +73,7 @@ describe('runtime config CLI mutation and storage', () => {
     let stderr = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'set', 'project02.character', 'mira'],
+      ['--store', storeRoot, 'set', 'project02.contextWindowTokens', '4096'],
       {
         stdout: collect(() => {}),
         stderr: collect(chunk => {
@@ -90,7 +90,7 @@ describe('runtime config CLI mutation and storage', () => {
       ...authoredConfig,
       project02: {
         ...authoredConfig.project02,
-        character: 'mira',
+        contextWindowTokens: 4096,
       },
     });
   });
@@ -110,7 +110,7 @@ describe('runtime config CLI mutation and storage', () => {
     let stderr = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'set', 'project02.character', 'mira'],
+      ['--store', storeRoot, 'set', 'project02.contextWindowTokens', '4096'],
       {
         stdout: collect(() => {}),
         stderr: collect(chunk => {
@@ -131,7 +131,7 @@ describe('runtime config CLI mutation and storage', () => {
     );
     const configPath = writeRuntimeConfig(join(storeRoot, 'config.json'), {
       project02: {
-        character: '../bad',
+        contextWindowTokens: -5,
         userDisplayName: 'Ada',
         roleModelProvider: 'nvidia',
       },
@@ -145,7 +145,7 @@ describe('runtime config CLI mutation and storage', () => {
     let stderr = '';
 
     const exitCode = await runRuntimeConfigCliFromArgs(
-      ['--store', storeRoot, 'unset', 'project02.character'],
+      ['--store', storeRoot, 'unset', 'project02.contextWindowTokens'],
       {
         stdout: collect(() => {}),
         stderr: collect(chunk => {

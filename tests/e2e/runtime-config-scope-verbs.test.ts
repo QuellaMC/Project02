@@ -266,8 +266,8 @@ describe('runtime-config --character verbs', () => {
       '--character',
       'mira',
       'set',
-      'project02.character',
-      'nova',
+      'project02.storeRoot',
+      '/elsewhere',
     ]);
 
     expect(globalOnly.code).toBe(1);
@@ -421,13 +421,13 @@ describe('runtime-config --character verbs', () => {
       '--character',
       'mira',
       'set',
-      'project02.character',
-      'nova',
+      'project02.storeRoot',
+      '/elsewhere',
     ]);
 
     expect(rejected.code).toBe(1);
     expect(rejected.stderr).toContain(
-      'Config field "project02.character" is global-only; set it in the ' +
+      'Config field "project02.storeRoot" is global-only; set it in the ' +
         'home config.json, not the character overlay.',
     );
     // The dialect violation failed before ensure ran.

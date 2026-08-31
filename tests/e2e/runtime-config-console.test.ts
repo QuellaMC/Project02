@@ -95,7 +95,7 @@ describe('runtime config console UI', () => {
         }),
         stderr: collect(() => {}),
         env: {},
-        prompt: scriptedPrompt(['1', '3', '1', 'Aliased Name', '1']),
+        prompt: scriptedPrompt(['1', '4', '1', 'Aliased Name', '1']),
       },
     );
 

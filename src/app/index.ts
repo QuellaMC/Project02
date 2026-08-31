@@ -22,7 +22,13 @@ export {
   type ActivateProject02CharacterOptions,
   type RuntimeCliStartupResult,
 } from './startup.ts';
-export {type Project02CharacterActivation} from './character.ts';
+export {
+  listProject02Characters,
+  selectProject02CharacterId,
+  type Project02CharacterActivation,
+  type Project02CharacterListing,
+  type Project02CharacterSelection,
+} from './character.ts';
 export {
   enforceCharacterPluginExpectations,
   planCharacterPackagePluginMaterialization,

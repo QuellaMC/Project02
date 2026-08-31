@@ -8,6 +8,7 @@ import {
 } from './activation.ts';
 import {
   prepareProject02CharacterActivation,
+  selectSoleEnabledCharacterId,
   type Project02CharacterActivation,
 } from './character.ts';
 import {
@@ -26,7 +27,6 @@ import {
   blockingRuntimeConfigLayerDiagnostic,
   createLayeredProject02RuntimeConfigSnapshot,
   createRuntimeConfigDiagnostic,
-  configuredProject02CharacterId,
   diagnosticsHaveErrors,
   loadCharacterSecretsEnv,
   readCharacterOverlayForScope,
@@ -250,9 +250,19 @@ export function resolveRuntimeCliStartup(
     return home;
   }
 
-  const characterId = options.location?.character;
+  const characterId =
+    options.location?.character ?? selectSoleEnabledCharacterId(home);
+
+  if (typeof characterId !== 'string') {
+    return Object.freeze({
+      ...home,
+      status: 'character_invalid',
+      characterActivation: characterId,
+    });
+  }
+
   const shared = {
-    ...(characterId === undefined ? {} : {characterId}),
+    characterId,
     ...(options.factories === undefined ? {} : {factories: options.factories}),
     ...(options.continueAfterActivationErrors === undefined
       ? {}
@@ -275,8 +285,7 @@ export function resolveRuntimeCliStartup(
 }
 
 export type ActivateProject02CharacterOptions = {
-  /** Overrides the configured character selection. */
-  readonly characterId?: string;
+  readonly characterId: string;
   readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
   readonly continueAfterActivationErrors?: boolean;
   /** Throwing here rejects the startup before anything durable is written. */
@@ -298,13 +307,13 @@ export function activateProject02Character(
 ): RuntimeCliStartupResult;
 export function activateProject02Character(
   home: Project02Home,
-  options?: ActivateProject02CharacterOptions,
+  options: ActivateProject02CharacterOptions,
 ): Promise<RuntimeCliStartupResult>;
 export function activateProject02Character(
   home: Project02Home,
   options: ActivateProject02CharacterOptions & {
     readonly stage?: 'report';
-  } = {},
+  },
 ): RuntimeCliStartupResult | Promise<RuntimeCliStartupResult> {
   const startupBase = {
     runtimeLocation: home.runtimeLocation,
@@ -314,9 +323,7 @@ export function activateProject02Character(
   };
   const activationInput = {
     configLocation: home.runtimeLocation,
-    ...(options.characterId === undefined
-      ? {}
-      : {characterOverride: options.characterId}),
+    characterId: options.characterId,
     suppliedEnv: home.suppliedEnv,
     cwdDotEnv: home.cwdDotEnv,
     configEnv: home.configEnv,
@@ -362,7 +369,7 @@ export function activateProject02Character(
 async function resolveRuntimeCliActivationStartup(input: {
   readonly options: RuntimeCliActivationStartupOptions;
   readonly configLocation: ResolvedProject02ConfigLocation;
-  readonly characterOverride?: string;
+  readonly characterId: string;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
@@ -384,7 +391,7 @@ function planRuntimeCliActivationStartup(input: {
   readonly options:
     RuntimeCliActivationStartupOptions | RuntimeCliReportStartupOptions;
   readonly configLocation: ResolvedProject02ConfigLocation;
-  readonly characterOverride?: string;
+  readonly characterId: string;
   readonly suppliedEnv: NodeJS.ProcessEnv;
   readonly cwdDotEnv: NodeJS.ProcessEnv;
   readonly configEnv: NodeJS.ProcessEnv;
@@ -397,10 +404,7 @@ function planRuntimeCliActivationStartup(input: {
       readonly plan: PlannedRuntimeCliActivationStartup;
     } {
   const {options, configLocation, loadedConfig} = input;
-  const activeCharacterId = configuredProject02CharacterId(
-    loadedConfig.config,
-    input.characterOverride,
-  );
+  const activeCharacterId = input.characterId.trim();
   const homeRoot = configLocation.homeRoot;
 
   // Judged first so the operator hears about the home, not a subdirectory.
