@@ -509,6 +509,10 @@ async function stopRuntime(context: RuntimeContext): Promise<void> {
   }
 
   setState(context, 'stopping');
+  // A parked confirmation is part of the queue: cancel it first, so an
+  // interrupted process drains promptly instead of waiting out the host's
+  // approval deadline.
+  context.broker.cancelAll();
   await context.queue.then(
     () => undefined,
     () => undefined,

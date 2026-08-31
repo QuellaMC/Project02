@@ -43,6 +43,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const listeners = new Set<GatewayEventListener>();
   const lastStates = new Map<string, string>();
   const startsInFlight = new Map<string, Promise<void>>();
+  let stopped = false;
 
   // A client rendering bug must not break a character's turn: listener
   // failures stay the listener's problem.
@@ -116,6 +117,10 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       );
     },
     async startCharacter(characterId: string): Promise<void> {
+      if (stopped) {
+        throw new TypeError('The gateway is stopped.');
+      }
+
       const listed = listProject02Characters(home).find(
         character => character.id === characterId,
       );
@@ -196,6 +201,12 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       };
     },
     async stop(): Promise<void> {
+      // Terminal by design: no new starts, and the starts already in
+      // flight are joined so every runtime they create is stopped too.
+      stopped = true;
+      await Promise.all(
+        [...startsInFlight.values()].map(start => start.catch(() => undefined)),
+      );
       await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
     },
   });

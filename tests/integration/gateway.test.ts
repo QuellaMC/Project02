@@ -202,7 +202,7 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
-  it('lets a stop that races a starting character win, and start again after', async () => {
+  it('lets a stop that races a starting character win, terminally', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({
       location: {storeRoot: homeRoot},
@@ -211,13 +211,13 @@ describe('gateway façade', () => {
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
 
+    // The start creates the runtime mid-race; stop joins it and wins.
     await Promise.all([gateway.startCharacter('mira'), gateway.stop()]);
 
     expect(gateway.characters()[0]?.state).toBe('stopped');
-
-    await gateway.startCharacter('mira');
-    expect(gateway.characters()[0]?.state).toBe('ready');
-    await gateway.stop();
+    await expect(gateway.startCharacter('mira')).rejects.toThrow(
+      'gateway is stopped',
+    );
   });
 
   it('never leaks a conversation lease when an attach races a stop', async () => {
