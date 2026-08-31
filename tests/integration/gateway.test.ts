@@ -220,6 +220,87 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('never leaks a conversation lease when an attach races a stop', async () => {
+    const homeRoot = await createGatewayHome();
+    const gatewayOptions = {
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    };
+    const racing = createGateway(gatewayOptions);
+
+    await racing.startCharacter('mira');
+    await Promise.all([
+      racing.openDirectConversation('mira').catch(() => undefined),
+      racing.stop(),
+    ]);
+
+    // The invariant is the lease: whatever the race decided, a fresh
+    // gateway must be able to open the same thread.
+    const fresh = createGateway(gatewayOptions);
+
+    await fresh.startCharacter('mira');
+    await expect(fresh.openDirectConversation('mira')).resolves.toMatchObject({
+      characterId: 'mira',
+    });
+    await fresh.stop();
+  });
+
+  it('lets a stop win over the automatic recovery of a fatal turn', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    const ref = await gateway.openDirectConversation('mira');
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    await gateway.stop();
+    await new Promise(resolve => setTimeout(resolve, 50));
+    expect(gateway.characters()[0]?.state).toBe('stopped');
+  });
+
+  it('joins a start already in flight instead of resolving early', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await Promise.all([
+      gateway.startCharacter('mira'),
+      gateway
+        .startCharacter('mira')
+        .then(() => gateway.openDirectConversation('mira')),
+    ]);
+
+    expect(gateway.characters()[0]?.state).toBe('ready');
+    await gateway.stop();
+  });
+
   it('leaves a boot failure failed instead of crash-looping', async () => {
     const homeRoot = await createGatewayHome();
 

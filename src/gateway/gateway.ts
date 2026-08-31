@@ -42,6 +42,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const conversationRoutes = new Map<string, string>();
   const listeners = new Set<GatewayEventListener>();
   const lastStates = new Map<string, string>();
+  const startsInFlight = new Map<string, Promise<void>>();
 
   // A client rendering bug must not break a character's turn: listener
   // failures stay the listener's problem.
@@ -128,10 +129,25 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       }
 
       const runtime = runtimeFor(characterId);
+      // A second caller joins the start already in flight instead of
+      // resolving before the character is ready.
+      const pending = startsInFlight.get(characterId);
 
-      if (runtime.health().state === 'stopped') {
-        await runtime.start();
+      if (pending !== undefined) {
+        return pending;
       }
+
+      if (runtime.health().state !== 'stopped') {
+        return;
+      }
+
+      const start = runtime.start().finally(() => {
+        startsInFlight.delete(characterId);
+      });
+
+      startsInFlight.set(characterId, start);
+
+      return start;
     },
     async openDirectConversation(
       characterId: string,

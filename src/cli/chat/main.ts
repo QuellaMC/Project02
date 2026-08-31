@@ -170,10 +170,18 @@ async function runChat(
     terminal: false,
   });
   const lineIterator = lines[Symbol.asyncIterator]();
-  const nextLine = async (): Promise<string | undefined> => {
-    const next = await lineIterator.next();
+  // One shared in-flight read: a confirmation read abandoned by the host's
+  // timeout and the REPL then receive the same next line, so no message is
+  // silently eaten — the stale late answer is a no-op on a settled id.
+  let inFlightLine: Promise<string | undefined> | undefined;
+  const nextLine = (): Promise<string | undefined> => {
+    inFlightLine ??= lineIterator.next().then(next => {
+      inFlightLine = undefined;
 
-    return next.done === true ? undefined : next.value;
+      return next.done === true ? undefined : next.value;
+    });
+
+    return inFlightLine;
   };
   let bootFailure: string | undefined;
   const stopListening = gateway.events(event => {
@@ -186,9 +194,12 @@ async function runChat(
     } else if (event.kind === 'confirmation_requested') {
       // Between the prompt and the answer the REPL is mid-deliver, so the
       // confirmation is the only reader of the line stream.
+      // The person approves exactly what will happen: summary and the full
+      // proposed change, never the summary alone.
       options.stdout.write(
         `Confirm ${event.request.toolName} (${event.request.pluginId}): ` +
-          `${event.request.summary} [y/N] `,
+          `${event.request.summary}\n` +
+          `${JSON.stringify(event.request.preview, null, 2)}\n[y/N] `,
       );
       void nextLine().then(line => {
         gateway.answerConfirmation(

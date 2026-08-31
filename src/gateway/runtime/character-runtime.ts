@@ -217,7 +217,7 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   }
 
   // A stop that arrived while assembly ran wins: discard what was built.
-  if (startWasOvertaken(context)) {
+  if (lifecycleLeft(context, 'starting')) {
     if (assembled !== undefined && assembled.ownsHost) {
       await cleanUpHostAfterFailedStart(assembled.host, assembled.profile);
     }
@@ -231,8 +231,12 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   }
 }
 
-function startWasOvertaken(context: RuntimeContext): boolean {
-  return context.state !== 'starting';
+/** True when the lifecycle moved off `expected` while an await ran. */
+function lifecycleLeft(
+  context: RuntimeContext,
+  expected: CharacterRuntimeState,
+): boolean {
+  return context.state !== expected;
 }
 
 async function assemble(
@@ -345,6 +349,15 @@ async function openDirect(context: RuntimeContext): Promise<ConversationRef> {
     character: assembled.profile,
     userDisplayName: assembled.userDisplayName,
   });
+
+  // A stop that arrived while the thread opened wins: release the lease
+  // this attachment holds instead of leaking it past shutdown.
+  if (lifecycleLeft(context, 'ready')) {
+    await active.close();
+    throw new TypeError(
+      `Character "${context.characterId}" stopped while attaching.`,
+    );
+  }
 
   context.conversations.set(active.conversation.id, active);
 
@@ -495,15 +508,13 @@ async function stopRuntime(context: RuntimeContext): Promise<void> {
     return;
   }
 
-  const runSessionEnd = context.state === 'ready';
-
   setState(context, 'stopping');
   await context.queue.then(
     () => undefined,
     () => undefined,
   );
 
-  const problems = await releaseResources(context, runSessionEnd);
+  const problems = await releaseResources(context);
 
   setState(
     context,
@@ -527,15 +538,18 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
     () => undefined,
     () => undefined,
   );
-  await releaseResources(context, false);
+
+  // A stop that completed while the queue drained wins over recovery.
+  if (lifecycleLeft(context, 'failed')) {
+    return;
+  }
+
+  await releaseResources(context);
   context.state = 'stopped';
   await startRuntime(context);
 }
 
-async function releaseResources(
-  context: RuntimeContext,
-  runSessionEnd: boolean,
-): Promise<string[]> {
+async function releaseResources(context: RuntimeContext): Promise<string[]> {
   const {assembled, conversations} = context;
   const problems: string[] = [];
   const record = (error: unknown): void => {
@@ -544,8 +558,10 @@ async function releaseResources(
 
   context.broker.cancelAll();
 
+  // Best-effort on every path: after a fatal turn the store may refuse the
+  // records, but session-scoped providers still get their end hook.
   for (const active of conversations.values()) {
-    if (runSessionEnd && assembled !== undefined) {
+    if (assembled !== undefined) {
       try {
         await endSession({
           session: active.session,
