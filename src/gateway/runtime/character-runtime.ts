@@ -489,6 +489,13 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
     );
   }
 
+  // Deliveries queued behind the fatal turn drain first (each refused while
+  // the state is failed); releasing under them would hand a closed
+  // conversation to a turn that already holds the old reference.
+  await context.queue.then(
+    () => undefined,
+    () => undefined,
+  );
   await releaseResources(context, false);
   context.state = 'stopped';
   await startRuntime(context);

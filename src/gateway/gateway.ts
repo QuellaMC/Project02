@@ -1,0 +1,185 @@
+import {
+  listProject02Characters,
+  loadProject02Home,
+  type Project02HomeOptions,
+} from '../app/index.ts';
+import type {RuntimePluginHost} from '../plugins/index.ts';
+import type {ChatProviderName, RoleModelAdapter} from '../role-model/index.ts';
+import type {
+  CharacterSummary,
+  ConversationRef,
+  Gateway,
+  GatewayEvent,
+  GatewayEventListener,
+  GatewayMessage,
+  TurnOutcome,
+  Unsubscribe,
+} from './api/contract.ts';
+import {
+  createLocalCharacterRuntime,
+  type LocalCharacterRuntime,
+} from './runtime/character-runtime.ts';
+
+export type CreateGatewayOptions = Project02HomeOptions & {
+  /** Test and dev injection, applied to every character this gateway starts. */
+  readonly provider?: ChatProviderName;
+  readonly roleModelAdapter?: RoleModelAdapter;
+  readonly createPluginHost?: (characterId: string) => RuntimePluginHost;
+};
+
+/**
+ * The one object a client holds: the registry of character runtimes and the
+ * routing between them. Boot problems are per-character states, visible in
+ * characters() and the event stream, never throws — the exceptions are
+ * client mistakes (starting a disabled character, attaching before start).
+ */
+export function createGateway(options: CreateGatewayOptions = {}): Gateway {
+  const home = loadProject02Home(options);
+  const runtimes = new Map<string, LocalCharacterRuntime>();
+  // The routing table the gateway builds by attaching clients to
+  // conversations: conversation → the character runtime holding it. Room
+  // policy replaces this single-participant lookup when groups arrive.
+  const conversationRoutes = new Map<string, string>();
+  const listeners = new Set<GatewayEventListener>();
+  const lastStates = new Map<string, string>();
+
+  // A client rendering bug must not break a character's turn: listener
+  // failures stay the listener's problem.
+  const emit = (event: GatewayEvent): void => {
+    for (const listener of [...listeners]) {
+      try {
+        listener(event);
+      } catch {
+        // Isolation is the rule; there is no one to report a listener to.
+      }
+    }
+  };
+
+  const runtimeFor = (characterId: string): LocalCharacterRuntime => {
+    const existing = runtimes.get(characterId);
+
+    if (existing !== undefined) {
+      return existing;
+    }
+
+    const runtime = createLocalCharacterRuntime({
+      home,
+      characterId,
+      ...(options.provider === undefined ? {} : {provider: options.provider}),
+      ...(options.roleModelAdapter === undefined
+        ? {}
+        : {roleModelAdapter: options.roleModelAdapter}),
+      ...(options.createPluginHost === undefined
+        ? {}
+        : {pluginHost: options.createPluginHost(characterId)}),
+    });
+
+    runtime.events(event => {
+      if (event.kind === 'state_changed') {
+        const previous = lastStates.get(event.characterId);
+
+        lastStates.set(event.characterId, event.state);
+
+        // One automatic restart, and only for a fatal turn: a boot failure
+        // arrives from 'starting' and stays failed rather than crash-looping.
+        if (event.state === 'failed' && previous === 'ready') {
+          runtime.reactivate().catch(() => {
+            // The failure is already visible in health; a reactivate lost to
+            // a racing lifecycle change has nothing further to report.
+          });
+        }
+      }
+
+      emit(event);
+    });
+    runtimes.set(characterId, runtime);
+
+    return runtime;
+  };
+
+  return Object.freeze({
+    characters(): readonly CharacterSummary[] {
+      return Object.freeze(
+        listProject02Characters(home).map(character => {
+          const health = runtimes.get(character.id)?.health();
+
+          return Object.freeze({
+            id: character.id,
+            enabled: character.enabled,
+            state: health?.state ?? ('not_started' as const),
+            ...(health?.failure === undefined
+              ? {}
+              : {diagnostic: health.failure}),
+          });
+        }),
+      );
+    },
+    async startCharacter(characterId: string): Promise<void> {
+      const listed = listProject02Characters(home).find(
+        character => character.id === characterId,
+      );
+
+      if (listed?.enabled === false) {
+        throw new TypeError(
+          `Character "${characterId}" is disabled. Enable it by unsetting ` +
+            'project02.enabled in its character config.',
+        );
+      }
+
+      const runtime = runtimeFor(characterId);
+
+      if (runtime.health().state === 'stopped') {
+        await runtime.start();
+      }
+    },
+    async openDirectConversation(
+      characterId: string,
+    ): Promise<ConversationRef> {
+      const runtime = runtimes.get(characterId);
+
+      if (runtime === undefined) {
+        throw new TypeError(`Character "${characterId}" has not been started.`);
+      }
+
+      const ref = await runtime.openDirectConversation();
+
+      conversationRoutes.set(ref.conversationId, characterId);
+
+      return ref;
+    },
+    async deliver(message: GatewayMessage): Promise<TurnOutcome> {
+      const characterId = conversationRoutes.get(message.conversationId);
+      const runtime =
+        characterId === undefined ? undefined : runtimes.get(characterId);
+
+      if (runtime === undefined) {
+        return Object.freeze({
+          status: 'refused' as const,
+          reason: 'unknown_conversation' as const,
+          message:
+            'The gateway holds no open conversation ' +
+            `"${message.conversationId}".`,
+        });
+      }
+
+      return runtime.deliver(message);
+    },
+    answerConfirmation(id, decision) {
+      // Ids are gateway-unique and a miss is a benign no-op, so routing is
+      // asking everyone.
+      for (const runtime of runtimes.values()) {
+        runtime.answerConfirmation(id, decision);
+      }
+    },
+    events(listener: GatewayEventListener): Unsubscribe {
+      listeners.add(listener);
+
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+    async stop(): Promise<void> {
+      await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
+    },
+  });
+}
