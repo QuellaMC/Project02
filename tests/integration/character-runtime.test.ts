@@ -1,4 +1,4 @@
-import {chmodSync} from 'node:fs';
+import {chmodSync, existsSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -260,6 +260,21 @@ describe('local character runtime', () => {
       status: 'completed',
     });
     await runtime.stop();
+  });
+
+  it('turns an invalid provider env into a failed boot before any character state exists', async () => {
+    const {homeRoot} = await createConsentedHome();
+    const home = loadProject02Home({
+      location: {storeRoot: homeRoot},
+      env: {PROJECT02_ROLE_MODEL_PROVIDER: 'bogus'},
+    });
+    const runtime = createLocalCharacterRuntime({home, characterId: 'mira'});
+
+    await runtime.start();
+
+    expect(runtime.health().state).toBe('failed');
+    expect(runtime.health().failure).toContain('"local" or "nvidia"');
+    expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
   });
 
   it('stop waits for the in-flight turn and runs session-end hooks', async () => {

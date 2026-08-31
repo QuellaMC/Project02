@@ -121,8 +121,9 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
       if (listed?.enabled === false) {
         throw new TypeError(
-          `Character "${characterId}" is disabled. Enable it by unsetting ` +
-            'project02.enabled in its character config.',
+          `Character "${characterId}" is disabled. Set project02.enabled ` +
+            'to true in its character config, or remove the global ' +
+            'project02.enabled.',
         );
       }
 

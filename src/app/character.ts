@@ -43,19 +43,25 @@ export function listProject02Characters(
 }
 
 function characterIsEnabled(home: Project02Home, characterId: string): boolean {
-  const {overlay} = readCharacterOverlayForScope(
-    bindProject02CharacterRuntimeLocation({
-      configLocation: home.runtimeLocation,
-      characterId,
-    }).characterScope,
-  );
+  try {
+    const {overlay} = readCharacterOverlayForScope(
+      bindProject02CharacterRuntimeLocation({
+        configLocation: home.runtimeLocation,
+        characterId,
+      }).characterScope,
+    );
 
-  return (
-    createLayeredProject02RuntimeConfigSnapshot({
-      loadedConfig: home.loadedConfig,
-      overlayConfig: overlay,
-    }).effective.config?.project02?.enabled ?? true
-  );
+    return (
+      createLayeredProject02RuntimeConfigSnapshot({
+        loadedConfig: home.loadedConfig,
+        overlayConfig: overlay,
+      }).effective.config?.project02?.enabled ?? true
+    );
+  } catch {
+    // One character's damaged data directory must not take the roster
+    // down; the damage speaks, in full, when that character is started.
+    return true;
+  }
 }
 
 export type Project02CharacterSelection =
@@ -105,9 +111,9 @@ export function selectProject02CharacterId(
     status: 'failed',
     message:
       enabled.length === 0
-        ? 'No enabled character. Install a character package, or enable an ' +
-          'installed one by unsetting project02.enabled in its character ' +
-          'config.'
+        ? 'No enabled character. Install a character package, or set ' +
+          'project02.enabled to true for an installed one — a global ' +
+          'project02.enabled of false disables them all.'
         : 'Several characters are enabled: ' +
           `${enabled.map(character => character.id).join(', ')}. ` +
           'Pick one explicitly.',

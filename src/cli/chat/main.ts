@@ -81,9 +81,7 @@ export async function runChatCliFromArgs(
       throw new CliUsageError(`${selection.message} (pass --character <id>)`);
     }
 
-    await runChat(gateway, selection.characterId, options);
-
-    return 0;
+    return await runChat(gateway, selection.characterId, options);
   } catch (error: unknown) {
     options.stderr.write(
       `Error: ${
@@ -97,7 +95,18 @@ export async function runChatCliFromArgs(
 
     return 1;
   } finally {
-    await gateway?.stop();
+    if (gateway !== undefined) {
+      // Shutdown problems ride the event stream only; listen through the
+      // stop so failed plugin cleanup reaches the person leaving.
+      const stopListening = gateway.events(event => {
+        if (event.kind === 'state_changed' && event.message !== undefined) {
+          options.stderr.write(`Warning: ${event.message}\n`);
+        }
+      });
+
+      await gateway.stop();
+      stopListening();
+    }
   }
 }
 
@@ -154,7 +163,7 @@ async function runChat(
   gateway: Gateway,
   characterId: string,
   options: ChatCliOptions,
-): Promise<void> {
+): Promise<number> {
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
@@ -227,7 +236,15 @@ async function runChat(
       if (outcome.status !== 'completed') {
         options.stderr.write(`Error: ${outcome.message}\n`);
       }
+
+      // The gateway restarts the character, but this terminal's attachment
+      // died with the turn; exiting nonzero beats chatting into the void.
+      if (outcome.status === 'failed') {
+        return 1;
+      }
     }
+
+    return 0;
   } finally {
     stopListening();
     lines.close();

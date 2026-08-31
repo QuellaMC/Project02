@@ -202,11 +202,37 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
 
   context.stopping = undefined;
   setState(context, 'starting');
-  context.assembled = await assemble(context);
 
-  if (context.assembled !== undefined) {
+  let assembled: AssembledCharacter | undefined;
+
+  try {
+    assembled = await assemble(context);
+  } catch (error: unknown) {
+    setState(
+      context,
+      'failed',
+      error instanceof Error ? error.message : String(error),
+    );
+    return;
+  }
+
+  // A stop that arrived while assembly ran wins: discard what was built.
+  if (startWasOvertaken(context)) {
+    if (assembled !== undefined && assembled.ownsHost) {
+      await cleanUpHostAfterFailedStart(assembled.host, assembled.profile);
+    }
+    return;
+  }
+
+  context.assembled = assembled;
+
+  if (assembled !== undefined) {
     setState(context, 'ready');
   }
+}
+
+function startWasOvertaken(context: RuntimeContext): boolean {
+  return context.state !== 'starting';
 }
 
 async function assemble(
@@ -216,6 +242,11 @@ async function assemble(
   const startup = await activateProject02Character(options.home, {
     characterId,
     continueAfterActivationErrors: options.pluginHost !== undefined,
+    // Runs in the planning phase, so a bad provider value is refused
+    // before any durable character state is written.
+    validateRuntimeEnv: env => {
+      selectChatProvider(options.provider, env);
+    },
   });
 
   if (

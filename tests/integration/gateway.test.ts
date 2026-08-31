@@ -202,6 +202,24 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('lets a stop that races a starting character win, and start again after', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await Promise.all([gateway.startCharacter('mira'), gateway.stop()]);
+
+    expect(gateway.characters()[0]?.state).toBe('stopped');
+
+    await gateway.startCharacter('mira');
+    expect(gateway.characters()[0]?.state).toBe('ready');
+    await gateway.stop();
+  });
+
   it('leaves a boot failure failed instead of crash-looping', async () => {
     const homeRoot = await createGatewayHome();
 

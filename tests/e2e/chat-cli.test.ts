@@ -1,3 +1,4 @@
+import {chmodSync} from 'node:fs';
 import {join} from 'node:path';
 import {Readable} from 'node:stream';
 
@@ -6,6 +7,7 @@ import {describe, expect, it} from 'vitest';
 import {runChatCliFromArgs} from '../../src/cli/chat/main.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
+import {characterDataDirPath} from '../../src/runtime/storage/index.ts';
 import {writeTestCharacterPackage} from '../support/character-fixtures.ts';
 import {writeRuntimeConfig} from '../support/runtime-config.ts';
 import {collect} from '../support/streams.ts';
@@ -104,6 +106,48 @@ describe('chat shim', () => {
     expect(exitCode).toBe(1);
     expect(stderr).toContain('Character "ghost" was not found');
     expect(stderr).toContain('mira');
+  });
+
+  it('exits nonzero when a turn dies fatally', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-shim-fatal-');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const sessionsRoot = join(
+      characterDataDirPath(storeRoot, 'mira'),
+      'sessions',
+    );
+    let stderr = '';
+    let exitCode: number;
+
+    try {
+      exitCode = await runChatCliFromArgs(['--store', storeRoot], {
+        stdin: Readable.from(['hello there\n/exit\n']),
+        stdout: collect(() => {}),
+        stderr: collect(chunk => {
+          stderr += chunk;
+        }),
+        env: {},
+        pluginHost: createRuntimePluginHost({plugins: []}),
+        roleModelAdapter: {
+          invoke() {
+            // Break the session store mid-turn so the commit fails.
+            chmodSync(sessionsRoot, 0o000);
+
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+              }),
+            };
+          },
+        },
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('Error:');
   });
 
   it('reports a rejected turn and keeps the session alive', async () => {

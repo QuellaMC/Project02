@@ -1,3 +1,4 @@
+import {mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
@@ -77,6 +78,25 @@ describe('project02 character listing', () => {
     expect(
       listProject02Characters(disabledHome).map(character => character.enabled),
     ).toEqual([false, false]);
+  });
+
+  it('keeps listing when one character has a damaged data directory', () => {
+    const homeRoot = createTestTempRoot('project02-character-damaged-');
+
+    writeTestCharacterPackage(homeRoot, {id: 'zeta', displayName: 'Zeta'});
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    mkdirSync(join(homeRoot, 'character-data', 'zeta'), {recursive: true});
+    writeFileSync(
+      join(homeRoot, 'character-data', 'zeta', 'schema.json'),
+      'not json',
+      'utf8',
+    );
+
+    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+
+    expect(
+      listProject02Characters(home).map(character => character.id),
+    ).toEqual(['mira', 'zeta']);
   });
 
   it('fails closed on a config still carrying the retired character field', () => {
