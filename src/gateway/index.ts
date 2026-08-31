@@ -4,6 +4,10 @@
  */
 export {createGateway, type CreateGatewayOptions} from './gateway.ts';
 export {
+  selectProject02CharacterId,
+  type Project02CharacterSelection,
+} from '../app/index.ts';
+export {
   createLocalCharacterRuntime,
   type LocalCharacterRuntime,
   type LocalCharacterRuntimeOptions,

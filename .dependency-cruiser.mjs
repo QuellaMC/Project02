@@ -113,14 +113,16 @@ export default {
       name: 'nothing-imports-app',
       comment:
         'src/app is the composition root: it wires runtime, plugins, and ' +
-        'role-model together. Only the public barrel, gateway, and cli may ' +
-        'import it. Green (zero baseline entries).',
+        'role-model together. Only the public barrel, gateway, and the ' +
+        'surviving CLIs (config console, inspect, shared helpers) may ' +
+        'import it; the chat shim goes through the gateway. Green (zero ' +
+        'baseline entries).',
       severity: 'error',
       from: {
         path: '^src/',
         pathNot: [
           '^src/app/',
-          '^src/cli/',
+          '^src/cli/(config|inspect|shared)/',
           '^src/gateway/',
           '^src/index\\.ts$',
         ],

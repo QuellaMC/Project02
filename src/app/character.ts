@@ -84,7 +84,7 @@ export function selectSoleEnabledCharacterId(
  * otherwise exactly one enabled character is the character to talk to.
  */
 export function selectProject02CharacterId(
-  characters: readonly Project02CharacterListing[],
+  characters: readonly {readonly id: string; readonly enabled: boolean}[],
   explicitCharacterId?: string,
 ): Project02CharacterSelection {
   if (explicitCharacterId !== undefined) {
