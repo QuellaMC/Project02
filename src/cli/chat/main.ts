@@ -218,12 +218,15 @@ async function runChat(
 
         return nextLine().then(
           line => {
-            // Landed past the deadline: the broker already cancelled, so
-            // the no-op answer discards the line — say so.
+            // Landed past the deadline: deny outright rather than trust the
+            // host's timer to have cancelled first — and say the line was
+            // discarded.
             if (Date.now() >= event.deadlineAt) {
               options.stderr.write(
                 'Confirmation timed out; the answer was discarded.\n',
               );
+              gateway.answerConfirmation(event.id, 'denied');
+              return;
             }
 
             gateway.answerConfirmation(
