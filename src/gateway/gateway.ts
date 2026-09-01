@@ -2,6 +2,7 @@ import {
   listProject02Characters,
   loadProject02Home,
   prepareProject02CharacterActivation,
+  reloadProject02Home,
   type Project02Home,
   type Project02HomeOptions,
 } from '../app/index.ts';
@@ -36,9 +37,11 @@ export type CreateGatewayOptions = Project02HomeOptions & {
  * client mistakes (starting a disabled character, attaching before start).
  */
 export function createGateway(options: CreateGatewayOptions = {}): Gateway {
-  // Loaded per use, never snapshotted: a config fix the operator makes
-  // between a failed boot and the retry must reach that retry.
-  const loadHome = (): Project02Home => loadProject02Home(options);
+  // The home identity binds once; only its config document reloads per
+  // use. A config fix reaches the retry, while an env or store redirect
+  // made later cannot split the gateway across two homes.
+  const boundHome = loadProject02Home(options);
+  const loadHome = (): Project02Home => reloadProject02Home(boundHome);
   const runtimes = new Map<string, LocalCharacterRuntime>();
   // The routing table the gateway builds by attaching clients to
   // conversations: conversation → the character runtime holding it. Room

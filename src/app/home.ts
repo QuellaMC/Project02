@@ -1,5 +1,6 @@
 import {
   defaultDotEnvForRuntimeLocation,
+  loadProject02RuntimeConfigForLocation,
   loadProject02RuntimeConfigWithLocation,
   readDefaultDotEnvFile,
   shouldReadDefaultDotEnvForRuntimeLocation,
@@ -52,6 +53,17 @@ export function loadProject02Home(
     cwdDotEnv,
     configEnv,
     loadedConfig,
+  });
+}
+
+/**
+ * The same home, its config document re-read. Identity never re-resolves:
+ * an env or store redirect made after binding cannot move a running home.
+ */
+export function reloadProject02Home(home: Project02Home): Project02Home {
+  return Object.freeze({
+    ...home,
+    loadedConfig: loadProject02RuntimeConfigForLocation(home.runtimeLocation),
   });
 }
 

@@ -151,6 +151,36 @@ describe('gateway façade', () => {
     );
   });
 
+  it('keeps the bound home when the document redirects its store', async () => {
+    const homeA = await createGatewayHome();
+    const homeB = join(
+      createTestTempRoot('project02-gateway-redirect-'),
+      'other',
+    );
+
+    await ensureInitializedProject02Store({homeRoot: homeB});
+    writeTestCharacterPackage(homeB, {id: 'zeta', displayName: 'Zeta'});
+
+    const configPath = join(homeA, 'config.json');
+
+    writeRuntimeConfig(configPath, {project02: {storeRoot: homeA}});
+
+    const gateway = createGateway({location: {configPath}, env: {}});
+
+    expect(gateway.characters().map(character => character.id)).toEqual([
+      'mira',
+    ]);
+
+    // Another window redirects the document's store; the running gateway
+    // keeps the home it bound.
+    writeRuntimeConfig(configPath, {project02: {storeRoot: homeB}});
+
+    expect(gateway.characters().map(character => character.id)).toEqual([
+      'mira',
+    ]);
+    await gateway.stop();
+  });
+
   it('reloads the global config for an explicit retry', async () => {
     const homeRoot = await createGatewayHome();
 

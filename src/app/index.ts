@@ -12,6 +12,7 @@ export {
 } from './activation.ts';
 export {
   loadProject02Home,
+  reloadProject02Home,
   type Project02Home,
   type Project02HomeOptions,
 } from './home.ts';

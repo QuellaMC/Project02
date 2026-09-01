@@ -169,9 +169,9 @@ async function runChat(
     terminal: false,
   });
   const lineIterator = lines[Symbol.asyncIterator]();
-  // One shared in-flight read: a confirmation read abandoned by the host's
-  // timeout and the REPL then receive the same next line, so no message is
-  // silently eaten — the stale late answer is a no-op on a settled id.
+  // One shared in-flight read guards against double reads; the REPL waits
+  // out the confirmation chain besides, so a line typed under a visible
+  // [y/N] always answers that prompt and never becomes a chat message.
   let inFlightLine: Promise<string | undefined> | undefined;
   const nextLine = (): Promise<string | undefined> => {
     inFlightLine ??= lineIterator.next().then(next => {
@@ -214,6 +214,14 @@ async function runChat(
 
         return nextLine().then(
           line => {
+            // Landed past the deadline: the broker already cancelled, so
+            // the no-op answer discards the line — say so.
+            if (Date.now() >= event.deadlineAt) {
+              options.stderr.write(
+                'Confirmation timed out; the answer was discarded.\n',
+              );
+            }
+
             gateway.answerConfirmation(
               event.id,
               cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
@@ -246,7 +254,7 @@ async function runChat(
     for (;;) {
       options.stdout.write('> ');
 
-      const line = await nextLine();
+      const line = await confirmations.then(nextLine);
 
       if (line === undefined || line.trim() === '/exit') {
         break;
