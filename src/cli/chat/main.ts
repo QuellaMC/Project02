@@ -147,6 +147,10 @@ function parseChatCliFlags(args: readonly string[]): ChatCliFlags {
     }
 
     if (arg === '--provider') {
+      if (provider !== undefined) {
+        throw new CliUsageError('--provider can only be provided once.');
+      }
+
       provider = readFlagValue(args, index, '--provider');
       index += 1;
       continue;
@@ -252,9 +256,12 @@ async function runChat(
     options.stdout.write(`${characterId} is ready.\n`);
 
     for (;;) {
+      // The prompt appears only once the confirmation chain is idle, so
+      // every keystroke answers the prompt that is actually on screen.
+      await confirmations;
       options.stdout.write('> ');
 
-      const line = await confirmations.then(nextLine);
+      const line = await nextLine();
 
       if (line === undefined || line.trim() === '/exit') {
         break;

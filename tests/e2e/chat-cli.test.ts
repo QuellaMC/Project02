@@ -91,6 +91,24 @@ describe('chat shim', () => {
     expect(picked.stdout).toContain('Zeta: noted');
   });
 
+  it('rejects a repeated provider flag', async () => {
+    const storeRoot = createTestTempRoot('project02-chat-shim-provider-');
+
+    writeRuntimeConfig(join(storeRoot, 'config.json'), {});
+
+    const {exitCode, stderr} = await runChat([
+      '--store',
+      storeRoot,
+      '--provider',
+      'local',
+      '--provider',
+      'local',
+    ]);
+
+    expect(exitCode).toBe(1);
+    expect(stderr).toContain('--provider can only be provided once');
+  });
+
   it('rejects an unknown explicit character naming the discovered ids', async () => {
     const storeRoot = createTestTempRoot('project02-chat-shim-unknown-');
 
