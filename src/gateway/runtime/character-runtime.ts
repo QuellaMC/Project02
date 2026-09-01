@@ -647,25 +647,27 @@ async function releaseResources(context: RuntimeContext): Promise<string[]> {
   let hostReleased = true;
 
   if (assembled !== undefined && assembled.ownsHost) {
-    try {
-      const result = await runBestEffortPluginShutdown({
-        pluginHost: assembled.host,
-        sessionId:
-          [...conversations.values()][0]?.session.id ??
-          configuredPluginConstructionCleanupSessionId,
-        currentUserMessage: hostShutdownMessage,
-        character: assembled.profile,
-      });
+    const result = await runBestEffortPluginShutdown({
+      pluginHost: assembled.host,
+      sessionId:
+        [...conversations.values()][0]?.session.id ??
+        configuredPluginConstructionCleanupSessionId,
+      currentUserMessage: hostShutdownMessage,
+      character: assembled.profile,
+    });
 
-      for (const evidence of result?.evidence ?? []) {
-        if (evidence.status !== 'accepted') {
-          problems.push(`${evidence.pluginId}: ${evidence.summary}`);
-          hostReleased = false;
-        }
-      }
-    } catch (error: unknown) {
-      record(error);
+    // The helper converts a rejected shutdown into undefined: that is an
+    // unreleased host, not a clean one.
+    if (result === undefined) {
+      problems.push('Plugin host shutdown failed.');
       hostReleased = false;
+    }
+
+    for (const evidence of result?.evidence ?? []) {
+      if (evidence.status !== 'accepted') {
+        problems.push(`${evidence.pluginId}: ${evidence.summary}`);
+        hostReleased = false;
+      }
     }
   }
 
