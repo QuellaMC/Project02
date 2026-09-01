@@ -335,6 +335,26 @@ describe('local character runtime', () => {
     await start;
   });
 
+  it('stop joins an attachment in flight before reporting shutdown complete', async () => {
+    const {runtime} = await createStartedRuntime();
+    let attachSettled = false;
+    const attach = runtime
+      .openDirectConversation()
+      .catch(() => undefined)
+      .finally(() => {
+        attachSettled = true;
+      });
+
+    await runtime.stop();
+
+    expect(attachSettled).toBe(true);
+    expect(runtime.health()).toMatchObject({
+      state: 'stopped',
+      openConversationIds: [],
+    });
+    await attach;
+  });
+
   it('holds what recovery could not release and frees it on the retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
     const ref = await runtime.openDirectConversation();

@@ -553,7 +553,13 @@ function releaseOwnedMutationLock(lockPath: string, nonce: string): void {
   const retiredPath = `${lockPath}.released-${randomUUID()}`;
 
   renamePathSync(lockPath, retiredPath);
-  removePathSync(retiredPath, {force: true, recursive: true});
+
+  try {
+    removePathSync(retiredPath, {force: true, recursive: true});
+  } catch {
+    // The rename already freed the resource; inert remains beat reporting
+    // a failed release for a mutation that committed.
+  }
 }
 
 /** @internal Exposed only for deterministic generation-race regression tests. */

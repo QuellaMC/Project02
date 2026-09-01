@@ -10,8 +10,8 @@ import type {CharacterProfile} from '../../core/index.ts';
 import {
   runBestEffortPluginSessionEnd,
   runBestEffortPluginShutdown,
-} from '../../plugins/host/index.ts';
-import type {RuntimePluginHost} from '../../plugins/index.ts';
+  type RuntimePluginHost,
+} from '../../plugins/index.ts';
 import {
   createSelectedRoleModelAdapter,
   selectChatProvider,
@@ -248,15 +248,15 @@ async function runStart(context: RuntimeContext): Promise<void> {
     return;
   }
 
-  // A stop that arrived while assembly ran wins: discard what was built.
+  context.assembled = assembled;
+
+  // A stop that arrived while assembly ran wins: what was built is handed
+  // to the draining stop's release, which shuts it down like any assembled
+  // host and reports what its cleanup could not free.
   if (lifecycleLeft(context, 'starting')) {
-    if (assembled.ownsHost) {
-      await cleanUpHostAfterFailedStart(assembled.host, assembled.profile);
-    }
     return;
   }
 
-  context.assembled = assembled;
   setState(context, 'ready');
 }
 
@@ -548,10 +548,7 @@ async function stopRuntime(context: RuntimeContext): Promise<void> {
   // interrupted process drains promptly instead of waiting out the host's
   // approval deadline.
   context.broker.cancelAll();
-  await context.queue.then(
-    () => undefined,
-    () => undefined,
-  );
+  await quiesce(context);
 
   const problems = await releaseResourcesOnce(context);
 
@@ -573,10 +570,7 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
   // Deliveries queued behind the fatal turn drain first (each refused while
   // the state is failed); releasing under them would hand a closed
   // conversation to a turn that already holds the old reference.
-  await context.queue.then(
-    () => undefined,
-    () => undefined,
-  );
+  await quiesce(context);
 
   // A stop that completed while the queue drained wins over recovery.
   if (lifecycleLeft(context, 'failed')) {
@@ -603,6 +597,17 @@ async function reactivateRuntime(context: RuntimeContext): Promise<void> {
 
   context.state = 'stopped';
   await startRuntime(context);
+}
+
+/** Joins accepted turns and the attachment in flight before release. */
+async function quiesce(context: RuntimeContext): Promise<void> {
+  await context.queue.then(
+    () => undefined,
+    () => undefined,
+  );
+  // An attachment holds real leases while it opens; joined here, its own
+  // overtake cleanup finishes before release snapshots the conversations.
+  await context.opening?.catch(() => undefined);
 }
 
 /** Stop and recovery share one release, so cleanup never runs twice. */
