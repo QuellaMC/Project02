@@ -1,6 +1,7 @@
 import {
   listProject02Characters,
   loadProject02Home,
+  prepareProject02CharacterActivation,
   type Project02HomeOptions,
 } from '../app/index.ts';
 import type {RuntimePluginHost} from '../plugins/index.ts';
@@ -121,17 +122,18 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         throw new TypeError('The gateway is stopped.');
       }
 
-      const characters = listProject02Characters(home);
+      // The same resolution activation will use: a typo'd id fails fast with
+      // the discovered roster instead of a runtime characters() never lists,
+      // and a broken package reports its own diagnostic instead of posing as
+      // not installed. The enabled decision belongs to the runtime's own
+      // assembly, where reactivation passes too.
+      const resolution = prepareProject02CharacterActivation({
+        storeRoot: home.runtimeLocation.homeRoot,
+        configuredCharacterId: characterId,
+      });
 
-      // characters() reports installed characters only, so a runtime for an
-      // unknown id would fail invisibly; refuse the client mistake here.
-      // The enabled decision belongs to the runtime's own assembly, where
-      // reactivation passes too.
-      if (!characters.some(character => character.id === characterId)) {
-        throw new TypeError(
-          `Character "${characterId}" is not installed. Installed: ` +
-            `${characters.map(character => character.id).join(', ') || '(none)'}.`,
-        );
+      if (resolution.status === 'failed') {
+        throw new TypeError(resolution.messages.join(' '));
       }
 
       const runtime = runtimeFor(characterId);

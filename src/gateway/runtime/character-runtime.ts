@@ -219,11 +219,17 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   context.stopping = undefined;
   setState(context, 'starting');
 
-  let assembled: AssembledCharacter | undefined;
+  let assembled: AssembledCharacter;
 
   try {
     assembled = await assemble(context);
   } catch (error: unknown) {
+    // A stop that overtook the failing assembly wins: it already published
+    // 'stopped', and a late 'failed' would outlive the shutdown.
+    if (lifecycleLeft(context, 'starting')) {
+      return;
+    }
+
     setState(
       context,
       'failed',
@@ -234,17 +240,14 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
 
   // A stop that arrived while assembly ran wins: discard what was built.
   if (lifecycleLeft(context, 'starting')) {
-    if (assembled !== undefined && assembled.ownsHost) {
+    if (assembled.ownsHost) {
       await cleanUpHostAfterFailedStart(assembled.host, assembled.profile);
     }
     return;
   }
 
   context.assembled = assembled;
-
-  if (assembled !== undefined) {
-    setState(context, 'ready');
-  }
+  setState(context, 'ready');
 }
 
 /** True when the lifecycle moved off `expected` while an await ran. */
@@ -255,9 +258,8 @@ function lifecycleLeft(
   return context.state !== expected;
 }
 
-async function assemble(
-  context: RuntimeContext,
-): Promise<AssembledCharacter | undefined> {
+/** Failures throw: startRuntime is the one place that publishes them. */
+async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   const {options, characterId} = context;
 
   // The enabled decision lives on this seam so reactivation honors a
@@ -268,8 +270,7 @@ async function assemble(
   );
 
   if (listed?.enabled === false) {
-    setState(context, 'failed', disabledMessage(characterId));
-    return undefined;
+    throw new Error(disabledMessage(characterId));
   }
 
   const startup = await activateProject02Character(options.home, {
@@ -286,8 +287,7 @@ async function assemble(
     startup.status !== 'resolved' ||
     startup.characterActivation.status !== 'resolved'
   ) {
-    setState(context, 'failed', startupFailureMessage(startup));
-    return undefined;
+    throw new Error(startupFailureMessage(startup));
   }
 
   const activation = startup.characterActivation;
@@ -296,8 +296,7 @@ async function assemble(
   // The resolved plan has the final word on enabled: a disable that landed
   // between the listing read above and this activation still refuses.
   if (!project02.enabled) {
-    setState(context, 'failed', disabledMessage(characterId));
-    return undefined;
+    throw new Error(disabledMessage(characterId));
   }
 
   const shared = {
@@ -334,12 +333,7 @@ async function assemble(
   );
 
   if (blocking !== undefined) {
-    setState(
-      context,
-      'failed',
-      `Runtime config activation failed: ${blocking.message}`,
-    );
-    return undefined;
+    throw new Error(`Runtime config activation failed: ${blocking.message}`);
   }
 
   let configured;
@@ -350,8 +344,7 @@ async function assemble(
       toolConfirmationHandler: context.broker.handler,
     });
   } catch {
-    setState(context, 'failed', constructionFailureMessage);
-    return undefined;
+    throw new Error(constructionFailureMessage);
   }
 
   const constructed = configured.activation.diagnostics.find(
@@ -360,12 +353,7 @@ async function assemble(
 
   if (constructed !== undefined) {
     await cleanUpHostAfterFailedStart(configured.host, activation.profile);
-    setState(
-      context,
-      'failed',
-      `Runtime config activation failed: ${constructed.message}`,
-    );
-    return undefined;
+    throw new Error(`Runtime config activation failed: ${constructed.message}`);
   }
 
   return {...shared, ...adapterOption, host: configured.host, ownsHost: true};

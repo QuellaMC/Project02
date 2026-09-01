@@ -24,6 +24,7 @@ export {
 } from './startup.ts';
 export {
   listProject02Characters,
+  prepareProject02CharacterActivation,
   selectProject02CharacterId,
   type Project02CharacterActivation,
   type Project02CharacterListing,

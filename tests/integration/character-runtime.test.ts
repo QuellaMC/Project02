@@ -1,5 +1,5 @@
 import {chmodSync, existsSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
@@ -276,6 +276,35 @@ describe('local character runtime', () => {
     expect(runtime.health().state).toBe('failed');
     expect(runtime.health().failure).toContain('"local" or "nvidia"');
     expect(existsSync(characterDataDirPath(homeRoot, 'mira'))).toBe(false);
+  });
+
+  it('keeps a stop that overtakes a failing start as the last word', async () => {
+    const {homeRoot, home} = await createConsentedHome();
+    const runtime = createLocalCharacterRuntime({home, characterId: 'mira'});
+    let stopping: Promise<void> | undefined;
+
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'starting') {
+        stopping = runtime.stop();
+      }
+    });
+
+    // A read-only data root fails activation when it materializes the
+    // character's data dir — real async fs, landing after the stop settled.
+    const dataRoot = dirname(characterDataDirPath(homeRoot, 'mira'));
+
+    chmodSync(dataRoot, 0o555);
+
+    try {
+      await runtime.start();
+      expect(stopping).toBeDefined();
+      await stopping;
+    } finally {
+      chmodSync(dataRoot, 0o755);
+    }
+
+    expect(runtime.health().state).toBe('stopped');
+    expect(runtime.health().failure).toBeUndefined();
   });
 
   it('stays failed when recovery cannot release its resources', async () => {

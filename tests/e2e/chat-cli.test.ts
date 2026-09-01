@@ -104,7 +104,7 @@ describe('chat shim', () => {
     ]);
 
     expect(exitCode).toBe(1);
-    expect(stderr).toContain('Character "ghost" is not installed');
+    expect(stderr).toContain('Character "ghost" was not found');
     expect(stderr).toContain('mira');
   });
 

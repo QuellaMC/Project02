@@ -1,4 +1,4 @@
-import {chmodSync, existsSync} from 'node:fs';
+import {chmodSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
@@ -147,7 +147,25 @@ describe('gateway façade', () => {
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
 
     await expect(gateway.startCharacter('ghost')).rejects.toThrow(
-      'not installed',
+      'was not found',
+    );
+  });
+
+  it('reports a broken package by its diagnostic, not as missing', async () => {
+    const homeRoot = await createGatewayHome();
+    const packageRoot = join(homeRoot, 'characters', 'broken');
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(
+      join(packageRoot, 'project02.character.json'),
+      '{not json',
+      'utf8',
+    );
+
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+
+    await expect(gateway.startCharacter('broken')).rejects.toThrow(
+      'invalid_descriptor',
     );
   });
 
