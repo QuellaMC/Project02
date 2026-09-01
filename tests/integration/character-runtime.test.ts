@@ -307,6 +307,34 @@ describe('local character runtime', () => {
     expect(runtime.health().failure).toBeUndefined();
   });
 
+  it('stop joins the in-flight start before reporting shutdown complete', async () => {
+    const {home} = await createConsentedHome();
+    const runtime = createLocalCharacterRuntime({
+      home,
+      characterId: 'mira',
+      roleModelAdapter: replyAdapter(),
+    });
+    let stopping: Promise<void> | undefined;
+    let startSettled = false;
+
+    runtime.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'starting') {
+        stopping = runtime.stop();
+      }
+    });
+
+    const start = runtime.start().finally(() => {
+      startSettled = true;
+    });
+
+    expect(stopping).toBeDefined();
+    await stopping;
+
+    expect(startSettled).toBe(true);
+    expect(runtime.health().state).toBe('stopped');
+    await start;
+  });
+
   it('stays failed when recovery cannot release its resources', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
     const ref = await runtime.openDirectConversation();

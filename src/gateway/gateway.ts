@@ -145,11 +145,18 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         return pending;
       }
 
-      if (runtime.health().state !== 'stopped') {
+      const state = runtime.health().state;
+
+      if (state !== 'stopped' && state !== 'failed') {
         return;
       }
 
-      const start = runtime.start().finally(() => {
+      // Boot problems are states, not throws, so an explicit start is the
+      // operator's retry of a failed character; automatic restarts stay
+      // one-shot. Reactivation releases what the failure left behind.
+      const start = (
+        state === 'failed' ? runtime.reactivate() : runtime.start()
+      ).finally(() => {
         startsInFlight.delete(characterId);
       });
 

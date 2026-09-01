@@ -217,8 +217,18 @@ async function startRuntime(context: RuntimeContext): Promise<void> {
   }
 
   context.stopping = undefined;
+
+  // Assembly rides the queue — enqueued before 'starting' is announced, so
+  // even a stop issued from that event drains it: shutdown never resolves
+  // while construction or its discard cleanup is still running.
+  const run = enqueue(context, () => runStart(context));
+
   setState(context, 'starting');
 
+  return run;
+}
+
+async function runStart(context: RuntimeContext): Promise<void> {
   let assembled: AssembledCharacter;
 
   try {

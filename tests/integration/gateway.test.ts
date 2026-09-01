@@ -1,5 +1,5 @@
 import {chmodSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
-import {join} from 'node:path';
+import {dirname, join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
 
@@ -149,6 +149,33 @@ describe('gateway façade', () => {
     await expect(gateway.startCharacter('ghost')).rejects.toThrow(
       'was not found',
     );
+  });
+
+  it('retries a failed character on an explicit start after the fix', async () => {
+    const homeRoot = await createGatewayHome();
+    const dataRoot = dirname(characterDataDirPath(homeRoot, 'mira'));
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    // A read-only data root fails the boot; the operator then fixes it.
+    chmodSync(dataRoot, 0o555);
+
+    try {
+      await gateway.startCharacter('mira');
+    } finally {
+      chmodSync(dataRoot, 0o755);
+    }
+
+    expect(gateway.characters()[0]?.state).toBe('failed');
+
+    await gateway.startCharacter('mira');
+
+    expect(gateway.characters()[0]?.state).toBe('ready');
+    await gateway.stop();
   });
 
   it('reports a broken package by its diagnostic, not as missing', async () => {
