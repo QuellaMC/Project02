@@ -183,6 +183,9 @@ async function runChat(
     return inFlightLine;
   };
   let bootFailure: string | undefined;
+  // Between a prompt and its answer the REPL is mid-deliver, so a
+  // confirmation is the only reader of the line stream.
+  let confirmations: Promise<void> = Promise.resolve();
   const stopListening = gateway.events(event => {
     if (event.kind === 'turn_progress') {
       if (event.progress.kind === 'visible_reply') {
@@ -191,27 +194,30 @@ async function runChat(
         );
       }
     } else if (event.kind === 'confirmation_requested') {
-      // Between the prompt and the answer the REPL is mid-deliver, so the
-      // confirmation is the only reader of the line stream.
-      // The person approves exactly what will happen: summary and the full
-      // proposed change, never the summary alone.
-      options.stdout.write(
-        `Confirm ${event.request.toolName} (${event.request.pluginId}): ` +
-          `${event.request.summary}\n` +
-          `${JSON.stringify(event.request.preview, null, 2)}\n[y/N] `,
-      );
-      void nextLine().then(
-        line => {
-          gateway.answerConfirmation(
-            event.id,
-            cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
-          );
-        },
-        () => {
-          // A failed read is a denial, never a parked confirmation.
-          gateway.answerConfirmation(event.id, 'denied');
-        },
-      );
+      // Concurrent requests chain: each prompt prints only when it is next
+      // and consumes its own line, so one keystroke never approves two
+      // proposed effects. The person approves exactly what will happen:
+      // summary and the full proposed change, never the summary alone.
+      confirmations = confirmations.then(() => {
+        options.stdout.write(
+          `Confirm ${event.request.toolName} (${event.request.pluginId}): ` +
+            `${event.request.summary}\n` +
+            `${JSON.stringify(event.request.preview, null, 2)}\n[y/N] `,
+        );
+
+        return nextLine().then(
+          line => {
+            gateway.answerConfirmation(
+              event.id,
+              cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
+            );
+          },
+          () => {
+            // A failed read is a denial, never a parked confirmation.
+            gateway.answerConfirmation(event.id, 'denied');
+          },
+        );
+      });
     } else if (event.state === 'failed' && event.message !== undefined) {
       // Turn failures reach the user through the delivery outcome; this
       // remembers the one failure with no outcome to carry it.

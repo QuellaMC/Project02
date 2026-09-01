@@ -85,11 +85,20 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
         // One automatic restart, and only for a fatal turn: a boot failure
         // arrives from 'starting' and stays failed rather than crash-looping.
+        // Registered like an explicit start, so a retry or attach that lands
+        // mid-recovery joins it instead of resolving early.
         if (event.state === 'failed' && previous === 'ready') {
-          runtime.reactivate().catch(() => {
-            // The failure is already visible in health; a reactivate lost to
-            // a racing lifecycle change has nothing further to report.
-          });
+          const recovery = runtime
+            .reactivate()
+            .catch(() => {
+              // The failure is already visible in health; a reactivate lost
+              // to a racing lifecycle change has nothing further to report.
+            })
+            .finally(() => {
+              startsInFlight.delete(event.characterId);
+            });
+
+          startsInFlight.set(event.characterId, recovery);
         }
       }
 
