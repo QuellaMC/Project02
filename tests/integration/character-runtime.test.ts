@@ -361,6 +361,35 @@ describe('local character runtime', () => {
     await attach;
   });
 
+  it('releases an attachment a stop overtook through the one release path', async () => {
+    const endedSessions: string[] = [];
+    const probe = createSessionEndFileStoreProbePlugin({
+      pluginId: 'session.end.probe',
+      requestedAccess: {},
+      onSessionEnd(context) {
+        endedSessions.push(context.sessionId);
+      },
+    });
+    const {runtime} = await createStartedRuntime({
+      pluginHost: createRuntimePluginHost({
+        plugins: [probe],
+        enabledPluginIds: ['session.end.probe'],
+      }),
+    });
+    const attach = runtime.openDirectConversation().catch(() => undefined);
+
+    await runtime.stop();
+    await attach;
+
+    // Ended, not merely closed: the overtaken attachment went through
+    // release, where a failed close would also have retained it.
+    expect(endedSessions).toHaveLength(1);
+    expect(runtime.health()).toMatchObject({
+      state: 'stopped',
+      openConversationIds: [],
+    });
+  });
+
   it('stays failed when stop cannot release a conversation, and stops on retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
     const ref = await runtime.openDirectConversation();

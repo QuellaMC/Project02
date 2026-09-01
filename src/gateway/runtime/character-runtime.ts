@@ -387,16 +387,16 @@ async function openDirect(context: RuntimeContext): Promise<ConversationRef> {
     userDisplayName: assembled.userDisplayName,
   });
 
-  // A stop that arrived while the thread opened wins: release the lease
-  // this attachment holds instead of leaking it past shutdown.
+  // Registered before the overtake check: a stop that arrived while the
+  // thread opened releases it through the one release path, which retains
+  // it like any conversation if that close fails.
+  context.conversations.set(active.conversation.id, active);
+
   if (lifecycleLeft(context, 'ready')) {
-    await active.close();
     throw new TypeError(
       `Character "${context.characterId}" stopped while attaching.`,
     );
   }
-
-  context.conversations.set(active.conversation.id, active);
 
   return Object.freeze({
     conversationId: active.conversation.id,
