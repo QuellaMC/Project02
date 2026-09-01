@@ -361,6 +361,33 @@ describe('local character runtime', () => {
     await attach;
   });
 
+  it('stays failed when stop cannot release a conversation, and stops on retry', async () => {
+    const {homeRoot, runtime} = await createStartedRuntime();
+    const ref = await runtime.openDirectConversation();
+    const locksRoot = join(characterDataDirPath(homeRoot, 'mira'), '.locks');
+
+    chmodSync(locksRoot, 0o500);
+
+    try {
+      await runtime.stop();
+    } finally {
+      chmodSync(locksRoot, 0o755);
+    }
+
+    expect(runtime.health()).toMatchObject({
+      state: 'failed',
+      openConversationIds: [ref.conversationId],
+    });
+    expect(runtime.health().failure).toContain('could not release');
+
+    await runtime.stop();
+
+    expect(runtime.health()).toMatchObject({
+      state: 'stopped',
+      openConversationIds: [],
+    });
+  });
+
   it('holds what recovery could not release and frees it on the retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
     const ref = await runtime.openDirectConversation();

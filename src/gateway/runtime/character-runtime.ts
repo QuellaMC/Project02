@@ -554,6 +554,19 @@ async function stopRuntime(context: RuntimeContext): Promise<void> {
 
   const problems = await releaseResourcesOnce(context);
 
+  // A retained conversation still holds its lock, so 'stopped' would be a
+  // lie: the runtime stays failed, and this stop — like a reactivate —
+  // can be retried until the release lands.
+  if (context.conversations.size > 0) {
+    context.stopping = undefined;
+    setState(
+      context,
+      'failed',
+      `Stop could not release resources: ${problems.join('; ')}`,
+    );
+    return;
+  }
+
   setState(
     context,
     'stopped',
