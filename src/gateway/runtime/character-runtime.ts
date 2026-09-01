@@ -639,6 +639,8 @@ async function releaseResources(context: RuntimeContext): Promise<string[]> {
     }
   }
 
+  let hostReleased = true;
+
   if (assembled !== undefined && assembled.ownsHost) {
     try {
       const result = await runBestEffortPluginShutdown({
@@ -653,24 +655,31 @@ async function releaseResources(context: RuntimeContext): Promise<string[]> {
       for (const evidence of result?.evidence ?? []) {
         if (evidence.status !== 'accepted') {
           problems.push(`${evidence.pluginId}: ${evidence.summary}`);
+          hostReleased = false;
         }
       }
     } catch (error: unknown) {
       record(error);
+      hostReleased = false;
     }
   }
 
-  for (const active of conversations.values()) {
+  // What failed to release stays referenced, so a retry frees it instead
+  // of restarting over a live writer lock or host.
+  for (const [conversationId, active] of conversations) {
     try {
       await active.close();
+      conversations.delete(conversationId);
     } catch (error: unknown) {
       record(error);
     }
   }
 
-  conversations.clear();
   context.opening = undefined;
-  context.assembled = undefined;
+
+  if (hostReleased) {
+    context.assembled = undefined;
+  }
 
   return problems;
 }

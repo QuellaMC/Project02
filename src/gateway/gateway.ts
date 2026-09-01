@@ -220,13 +220,15 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       };
     },
     async stop(): Promise<void> {
-      // Terminal by design: no new starts, and the starts already in
-      // flight are joined so every runtime they create is stopped too.
+      // Terminal by design: no new starts. Runtimes are signalled first so
+      // a start or recovery in flight is overtaken — refused at the door,
+      // drained, discarded — never finished into a ready character during
+      // shutdown; the joins then confirm those promises settled.
       stopped = true;
+      await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
       await Promise.all(
         [...startsInFlight.values()].map(start => start.catch(() => undefined)),
       );
-      await Promise.all([...runtimes.values()].map(runtime => runtime.stop()));
     },
   });
 }

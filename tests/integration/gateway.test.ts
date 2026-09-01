@@ -277,6 +277,50 @@ describe('gateway façade', () => {
     await gateway.stop();
   });
 
+  it('overtakes the automatic recovery on stop instead of finishing it', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    const ref = await gateway.openDirectConversation('mira');
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    // Recovery is mid-flight; the stop wins without the character coming
+    // back to accept deliveries first.
+    const readyAfterStopBegan: GatewayEvent[] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'state_changed' && event.state === 'ready') {
+        readyAfterStopBegan.push(event);
+      }
+    });
+    await gateway.stop();
+
+    expect(readyAfterStopBegan).toEqual([]);
+    expect(gateway.characters()[0]?.state).toBe('stopped');
+  });
+
   it('refuses a conversation it never attached', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});

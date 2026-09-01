@@ -335,7 +335,7 @@ describe('local character runtime', () => {
     await start;
   });
 
-  it('stays failed when recovery cannot release its resources', async () => {
+  it('holds what recovery could not release and frees it on the retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
     const ref = await runtime.openDirectConversation();
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
@@ -364,6 +364,16 @@ describe('local character runtime', () => {
 
     expect(runtime.health().state).toBe('failed');
     expect(runtime.health().failure).toContain('could not release');
+    expect(runtime.health().openConversationIds).toEqual([ref.conversationId]);
+
+    await runtime.reactivate();
+
+    expect(runtime.health().state).toBe('ready');
+
+    const reopened = await runtime.openDirectConversation();
+
+    expect(reopened.conversationId).toBe(ref.conversationId);
+    await runtime.stop();
   });
 
   it('stop waits for the in-flight turn and runs session-end hooks', async () => {

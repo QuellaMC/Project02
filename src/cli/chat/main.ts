@@ -199,6 +199,13 @@ async function runChat(
       // proposed effects. The person approves exactly what will happen:
       // summary and the full proposed change, never the summary alone.
       confirmations = confirmations.then(() => {
+        // Expired while queued behind earlier prompts: the broker already
+        // cancelled it, and asking now would feed the answer to the REPL.
+        if (Date.now() >= event.deadlineAt) {
+          gateway.answerConfirmation(event.id, 'denied');
+          return;
+        }
+
         options.stdout.write(
           `Confirm ${event.request.toolName} (${event.request.pluginId}): ` +
             `${event.request.summary}\n` +
