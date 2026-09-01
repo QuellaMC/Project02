@@ -2,6 +2,7 @@ import {
   listProject02Characters,
   loadProject02Home,
   prepareProject02CharacterActivation,
+  type Project02Home,
   type Project02HomeOptions,
 } from '../app/index.ts';
 import type {RuntimePluginHost} from '../plugins/index.ts';
@@ -35,7 +36,9 @@ export type CreateGatewayOptions = Project02HomeOptions & {
  * client mistakes (starting a disabled character, attaching before start).
  */
 export function createGateway(options: CreateGatewayOptions = {}): Gateway {
-  const home = loadProject02Home(options);
+  // Loaded per use, never snapshotted: a config fix the operator makes
+  // between a failed boot and the retry must reach that retry.
+  const loadHome = (): Project02Home => loadProject02Home(options);
   const runtimes = new Map<string, LocalCharacterRuntime>();
   // The routing table the gateway builds by attaching clients to
   // conversations: conversation → the character runtime holding it. Room
@@ -66,7 +69,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
     }
 
     const runtime = createLocalCharacterRuntime({
-      home,
+      loadHome,
       characterId,
       ...(options.provider === undefined ? {} : {provider: options.provider}),
       ...(options.roleModelAdapter === undefined
@@ -112,7 +115,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   return Object.freeze({
     characters(): readonly CharacterSummary[] {
       return Object.freeze(
-        listProject02Characters(home).map(character => {
+        listProject02Characters(loadHome()).map(character => {
           const health = runtimes.get(character.id)?.health();
 
           return Object.freeze({
@@ -137,7 +140,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       // not installed. The enabled decision belongs to the runtime's own
       // assembly, where reactivation passes too.
       const resolution = prepareProject02CharacterActivation({
-        storeRoot: home.runtimeLocation.homeRoot,
+        storeRoot: loadHome().runtimeLocation.homeRoot,
         configuredCharacterId: characterId,
       });
 

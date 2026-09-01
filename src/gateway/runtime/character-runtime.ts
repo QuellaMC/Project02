@@ -44,7 +44,8 @@ import {
 } from './confirmation-broker.ts';
 
 export type LocalCharacterRuntimeOptions = {
-  readonly home: Project02Home;
+  /** Loaded fresh per assembly, so config fixes reach retries. */
+  readonly loadHome: () => Project02Home;
   readonly characterId: string;
   /** Test and dev injection; a production start constructs everything. */
   readonly pluginHost?: RuntimePluginHost;
@@ -271,11 +272,12 @@ function lifecycleLeft(
 /** Failures throw: startRuntime is the one place that publishes them. */
 async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   const {options, characterId} = context;
+  const home = options.loadHome();
 
   // The enabled decision lives on this seam so reactivation honors a
   // disable that landed while the character was running — and it runs
   // before activation, which materializes durable character state.
-  const listed = listProject02Characters(options.home).find(
+  const listed = listProject02Characters(home).find(
     character => character.id === characterId,
   );
 
@@ -283,7 +285,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
     throw new Error(disabledMessage(characterId));
   }
 
-  const startup = await activateProject02Character(options.home, {
+  const startup = await activateProject02Character(home, {
     characterId,
     continueAfterActivationErrors: options.pluginHost !== undefined,
     // Runs in the planning phase, so a bad provider value is refused
@@ -644,8 +646,9 @@ async function releaseResources(context: RuntimeContext): Promise<string[]> {
     }
   }
 
-  let hostReleased = true;
-
+  // Shutdown hooks are read-only reporters and the phase itself retires
+  // the plugin instances, so a shutdown problem is surfaced once — never
+  // retried against the same host; a retry assembles a fresh one.
   if (assembled !== undefined && assembled.ownsHost) {
     const result = await runBestEffortPluginShutdown({
       pluginHost: assembled.host,
@@ -656,17 +659,13 @@ async function releaseResources(context: RuntimeContext): Promise<string[]> {
       character: assembled.profile,
     });
 
-    // The helper converts a rejected shutdown into undefined: that is an
-    // unreleased host, not a clean one.
     if (result === undefined) {
       problems.push('Plugin host shutdown failed.');
-      hostReleased = false;
     }
 
     for (const evidence of result?.evidence ?? []) {
       if (evidence.status !== 'accepted') {
         problems.push(`${evidence.pluginId}: ${evidence.summary}`);
-        hostReleased = false;
       }
     }
   }
@@ -683,10 +682,7 @@ async function releaseResources(context: RuntimeContext): Promise<string[]> {
   }
 
   context.opening = undefined;
-
-  if (hostReleased) {
-    context.assembled = undefined;
-  }
+  context.assembled = undefined;
 
   return problems;
 }

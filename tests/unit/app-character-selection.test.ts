@@ -3,6 +3,7 @@ import {join} from 'node:path';
 
 import {describe, expect, it} from 'vitest';
 
+import {selectSoleEnabledCharacterId} from '../../src/app/character.ts';
 import {
   listProject02Characters,
   loadProject02Home,
@@ -48,6 +49,23 @@ describe('project02 character selection rule', () => {
     expect(several.status).toBe('failed');
     expect(several.status === 'failed' && several.message).toContain(
       'Several characters are enabled: mira, zeta.',
+    );
+  });
+});
+
+describe('project02 sole-enabled startup selection', () => {
+  it('routes an invalid global config to activation instead of ambiguity', () => {
+    const homeRoot = createTestTempRoot('project02-selection-invalid-config-');
+
+    writeTestCharacterPackage(homeRoot, {id: 'zeta', displayName: 'Zeta'});
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: -5},
+    });
+
+    const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
+
+    expect(selectSoleEnabledCharacterId(home)).toBe(
+      listProject02Characters(home)[0]?.id,
     );
   });
 });

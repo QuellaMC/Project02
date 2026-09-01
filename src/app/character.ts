@@ -72,7 +72,22 @@ export type Project02CharacterSelection =
 export function selectSoleEnabledCharacterId(
   home: Project02Home,
 ): string | Extract<Project02CharacterActivation, {status: 'failed'}> {
-  const selection = selectProject02CharacterId(listProject02Characters(home));
+  const characters = listProject02Characters(home);
+  const [first] = characters;
+
+  // An unloadable global config defaults every enabled value, so the rule
+  // would misreport the config problem as ambiguity; any discovered
+  // character routes the operator to activation's real diagnostic instead.
+  if (
+    first !== undefined &&
+    home.loadedConfig.diagnostics.some(
+      diagnostic => diagnostic.severity === 'error',
+    )
+  ) {
+    return first.id;
+  }
+
+  const selection = selectProject02CharacterId(characters);
 
   return selection.status === 'selected'
     ? selection.characterId

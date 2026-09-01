@@ -57,7 +57,7 @@ async function createStartedRuntime(
   const {homeRoot, home} = await createConsentedHome();
   const events: GatewayEvent[] = [];
   const runtime = createLocalCharacterRuntime({
-    home,
+    loadHome: () => home,
     characterId: 'mira',
     pluginHost: createRuntimePluginHost({plugins: []}),
     roleModelAdapter: replyAdapter(),
@@ -77,7 +77,7 @@ describe('local character runtime', () => {
     // from the activation plan, with the broker on the confirmation seam.
     const events: GatewayEvent[] = [];
     const runtime = createLocalCharacterRuntime({
-      home,
+      loadHome: () => home,
       characterId: 'mira',
       roleModelAdapter: replyAdapter(),
     });
@@ -161,7 +161,7 @@ describe('local character runtime', () => {
   it('refuses deliveries it never ran, with a structured reason', async () => {
     const {home} = await createConsentedHome();
     const unstarted = createLocalCharacterRuntime({
-      home,
+      loadHome: () => home,
       characterId: 'mira',
       pluginHost: createRuntimePluginHost({plugins: []}),
       roleModelAdapter: replyAdapter(),
@@ -269,7 +269,10 @@ describe('local character runtime', () => {
       location: {storeRoot: homeRoot},
       env: {PROJECT02_ROLE_MODEL_PROVIDER: 'bogus'},
     });
-    const runtime = createLocalCharacterRuntime({home, characterId: 'mira'});
+    const runtime = createLocalCharacterRuntime({
+      loadHome: () => home,
+      characterId: 'mira',
+    });
 
     await runtime.start();
 
@@ -280,7 +283,10 @@ describe('local character runtime', () => {
 
   it('keeps a stop that overtakes a failing start as the last word', async () => {
     const {homeRoot, home} = await createConsentedHome();
-    const runtime = createLocalCharacterRuntime({home, characterId: 'mira'});
+    const runtime = createLocalCharacterRuntime({
+      loadHome: () => home,
+      characterId: 'mira',
+    });
     let stopping: Promise<void> | undefined;
 
     runtime.events(event => {
@@ -310,7 +316,7 @@ describe('local character runtime', () => {
   it('stop joins the in-flight start before reporting shutdown complete', async () => {
     const {home} = await createConsentedHome();
     const runtime = createLocalCharacterRuntime({
-      home,
+      loadHome: () => home,
       characterId: 'mira',
       roleModelAdapter: replyAdapter(),
     });

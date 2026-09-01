@@ -151,6 +151,34 @@ describe('gateway façade', () => {
     );
   });
 
+  it('reloads the global config for an explicit retry', async () => {
+    const homeRoot = await createGatewayHome();
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {contextWindowTokens: -5},
+    });
+
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    expect(gateway.characters()[0]).toMatchObject({state: 'failed'});
+    expect(gateway.characters()[0]?.diagnostic).toContain(
+      'contextWindowTokens',
+    );
+
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {});
+    await gateway.startCharacter('mira');
+
+    expect(gateway.characters()[0]?.state).toBe('ready');
+    await gateway.stop();
+  });
+
   it('retries a failed character on an explicit start after the fix', async () => {
     const homeRoot = await createGatewayHome();
     const dataRoot = dirname(characterDataDirPath(homeRoot, 'mira'));
