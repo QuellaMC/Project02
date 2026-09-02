@@ -11,11 +11,26 @@ export {
   type RuntimePluginFactoryDefinition,
 } from './activation.ts';
 export {
+  loadProject02Home,
+  reloadProject02Home,
+  type Project02Home,
+  type Project02HomeOptions,
+} from './home.ts';
+export {
+  activateProject02Character,
   initializeProject02CharacterRuntime,
   resolveRuntimeCliStartup,
+  type ActivateProject02CharacterOptions,
   type RuntimeCliStartupResult,
 } from './startup.ts';
-export {type Project02CharacterActivation} from './character.ts';
+export {
+  listProject02Characters,
+  prepareProject02CharacterActivation,
+  selectProject02CharacterId,
+  type Project02CharacterActivation,
+  type Project02CharacterListing,
+  type Project02CharacterSelection,
+} from './character.ts';
 export {
   enforceCharacterPluginExpectations,
   planCharacterPackagePluginMaterialization,

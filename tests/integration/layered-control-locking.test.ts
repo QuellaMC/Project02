@@ -265,7 +265,7 @@ async function createLayeredHome(): Promise<{
   const homeRoot = realpathSync(root);
 
   writeRuntimeConfig(join(homeRoot, 'config.json'), {
-    project02: {storeRoot: homeRoot, character: 'mira'},
+    project02: {storeRoot: homeRoot},
   });
   await ensureCharacterDataDir({homeRoot, characterId: 'mira'});
 

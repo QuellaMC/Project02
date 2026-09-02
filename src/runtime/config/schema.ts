@@ -3,8 +3,6 @@ import {
   maxSpeakerDisplayNameLength,
 } from '../../core/index.ts';
 import type {RuntimePluginConfigField} from '../../plugins/api/index.ts';
-import {isProject02Identifier} from '../../shared/identifier.ts';
-
 import {
   defaultProject02ContextWindowTokens,
   project02RoleModelProviderValues,
@@ -67,22 +65,21 @@ const project02ConfigFieldDefinitions = Object.freeze([
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),
   Object.freeze({
-    path: 'project02.character',
-    name: 'character',
-    label: 'Character',
+    path: 'project02.enabled',
+    name: 'enabled',
+    label: 'Enabled',
     description:
-      'Selects the default active character package for this Project02 home.',
-    invalidValueCode: 'runtime_config_string_invalid',
-    invalidValueMessage:
-      'Project02 character must start with a letter and use only letters, numbers, dots, underscores, or hyphens.',
+      'Whether this character is an active contact. Installed characters ' +
+      'are enabled unless this says otherwise; a disabled character is ' +
+      'offline and never boots.',
+    invalidValueCode: 'runtime_config_boolean_invalid',
+    invalidValueMessage: 'Project02 enabled must be a boolean.',
     required: false,
     secret: false,
-    valueType: 'string',
-    defaultValueSummary: 'mira',
-    acceptsValue: value =>
-      typeof value === 'string' && isProject02Identifier(value.trim()),
+    valueType: 'boolean',
+    defaultValueSummary: 'true',
     redactionLabels: Object.freeze([]),
-    scopes: globalOnlyFieldScopes,
+    scopes: characterScopedFieldScopes,
     agentMutable: false,
     reloadRequired: true,
   } satisfies Project02ConfigFieldDefinition),

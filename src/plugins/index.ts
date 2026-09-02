@@ -70,6 +70,10 @@ export {
   type RuntimePluginBeforeRoleModelCallRejectionReason,
 } from './api/contract.ts';
 export {
+  runBestEffortPluginSessionEnd,
+  runBestEffortPluginShutdown,
+} from './host/lifecycle.ts';
+export {
   createRuntimePluginHost,
   runRuntimePluginSessionEndHooksForTargets,
   runRuntimePluginShutdownHooksForTargets,

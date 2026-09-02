@@ -18,6 +18,7 @@ export {
   runLocalUserMessageEvent,
   type LocalRuntimeTurnProgressEvent,
   type LocalRuntimeUserMessageInputRejectedResult,
+  type LocalRuntimeUserMessageRejectionReason,
   type LocalRuntimeUserMessageResult,
 } from './turn/local.ts';
 export type {

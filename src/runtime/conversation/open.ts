@@ -190,7 +190,15 @@ function createActiveConversation(
       return state.segment.logStore;
     },
     async close(): Promise<void> {
-      state.closing ??= closeActiveConversation(state);
+      // Only success is final: a failed release clears the memo, so a
+      // recovery retry releases what is still held instead of replaying
+      // the first failure.
+      state.closing ??= closeActiveConversation(state).catch(
+        (error: unknown) => {
+          state.closing = undefined;
+          throw error;
+        },
+      );
       await state.closing;
     },
   });

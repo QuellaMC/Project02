@@ -290,8 +290,10 @@ export function acquireLocalRuntimeMutationLocksSync(
         return;
       }
 
-      released = true;
+      // Only success latches: a failed release stays retryable, and the
+      // members already freed no-op on the retry through their own latches.
       releaseMutationLocksReverse(leases);
+      released = true;
     },
   } satisfies LocalRuntimeMutationLocksLeaseSync);
 }
@@ -402,15 +404,24 @@ function createReenteredLease(
         return;
       }
 
-      released = true;
       owned.count -= 1;
 
       if (owned.count !== 0) {
+        released = true;
         return;
       }
 
+      // Ownership survives a failed release: the lock file is still on
+      // disk, and the retry needs the count and the owned entry intact.
+      try {
+        owned.lease.release();
+      } catch (error: unknown) {
+        owned.count += 1;
+        throw error;
+      }
+
       ownedMutationLocks.get(ownerToken)?.delete(options.lockPath);
-      owned.lease.release();
+      released = true;
     },
   } satisfies LocalRuntimeMutationLockLeaseSync);
 }
@@ -522,8 +533,9 @@ function tryCreateMutationLock(
         return;
       }
 
-      released = true;
+      // Only success latches; the nonce check makes the retry exact.
       releaseOwnedMutationLock(options.lockPath, owner.nonce);
+      released = true;
     },
   } satisfies LocalRuntimeMutationLockLeaseSync);
 }
@@ -535,7 +547,19 @@ function releaseOwnedMutationLock(lockPath: string, nonce: string): void {
     return;
   }
 
-  removePathSync(lockPath, {force: true, recursive: true});
+  // Retire by atomic rename: a failed release leaves the lock whole, owner
+  // intact, so a retry can still prove ownership — never a half-deleted
+  // directory that reads as another process mid-acquire.
+  const retiredPath = `${lockPath}.released-${randomUUID()}`;
+
+  renamePathSync(lockPath, retiredPath);
+
+  try {
+    removePathSync(retiredPath, {force: true, recursive: true});
+  } catch {
+    // The rename already freed the resource; inert remains beat reporting
+    // a failed release for a mutation that committed.
+  }
 }
 
 /** @internal Exposed only for deterministic generation-race regression tests. */

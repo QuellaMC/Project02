@@ -3,7 +3,6 @@ import {dirname} from 'node:path';
 
 import {
   bindProject02CharacterRuntimeLocation,
-  configuredProject02CharacterId,
   loadProject02RuntimeConfigWithLocation,
   resolveRuntimeConfigScopeTarget,
   runtimeConfigEnvVarName,
@@ -67,10 +66,9 @@ export function runtimeLocationForTest(
           options.env,
         ),
   );
-  const loadedConfig = options.loadedConfig ?? selectedSnapshot.loadedConfig;
   const runtimeLocation = bindProject02CharacterRuntimeLocation({
     configLocation: selectedSnapshot.configLocation,
-    characterId: configuredProject02CharacterId(loadedConfig.config, character),
+    characterId: character ?? 'mira',
   });
 
   if (

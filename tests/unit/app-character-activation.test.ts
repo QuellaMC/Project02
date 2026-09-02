@@ -4,10 +4,7 @@ import {join} from 'node:path';
 import {describe, expect, it} from 'vitest';
 
 import {createTestTempRoot} from '../support/temp-root.ts';
-import {
-  defaultProject02CharacterId,
-  prepareProject02CharacterActivation,
-} from '../../src/app/character.ts';
+import {prepareProject02CharacterActivation} from '../../src/app/character.ts';
 import {operatorCharacterPackagesRoot} from '../../src/characters/index.ts';
 
 function writeOperatorCharacter(
@@ -32,12 +29,14 @@ function writeOperatorCharacter(
 }
 
 describe('project02 character activation', () => {
-  it('resolves the bundled default character with no store root', () => {
-    const activation = prepareProject02CharacterActivation();
+  it('resolves the bundled character with no store root', () => {
+    const activation = prepareProject02CharacterActivation({
+      configuredCharacterId: 'mira',
+    });
 
     expect(activation).toMatchObject({
       status: 'resolved',
-      configuredCharacterId: defaultProject02CharacterId,
+      configuredCharacterId: 'mira',
       profile: {id: 'mira', displayName: 'Mira'},
       warnings: [],
     });
@@ -65,7 +64,10 @@ describe('project02 character activation', () => {
 
     writeOperatorCharacter(storeRoot, 'broken', '{not json');
 
-    const activation = prepareProject02CharacterActivation({storeRoot});
+    const activation = prepareProject02CharacterActivation({
+      storeRoot,
+      configuredCharacterId: 'mira',
+    });
 
     expect(activation.status).toBe('resolved');
     if (activation.status !== 'resolved') {
@@ -114,7 +116,10 @@ describe('project02 character activation', () => {
 
     writeOperatorCharacter(storeRoot, 'mira');
 
-    const activation = prepareProject02CharacterActivation({storeRoot});
+    const activation = prepareProject02CharacterActivation({
+      storeRoot,
+      configuredCharacterId: 'mira',
+    });
 
     expect(activation.status).toBe('failed');
     if (activation.status !== 'failed') {
