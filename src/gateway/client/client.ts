@@ -214,20 +214,30 @@ function resolveOptions(options: GatewayClientOptions): {
   baseUrl: string;
   token: string;
 } {
-  if ('baseUrl' in options) {
-    return {baseUrl: options.baseUrl.replace(/\/$/u, ''), token: options.token};
-  }
-
+  const given = 'baseUrl' in options ? options.baseUrl : options.url;
   let url: URL;
 
   try {
-    url = new URL(options.url);
+    url = new URL(given);
   } catch {
     throw new GatewayClientError(
       0,
       'invalid_url',
-      `Not a gateway URL: ${options.url}`,
+      `Not a gateway URL: ${given}`,
     );
+  }
+
+  // The daemon speaks plain HTTP on loopback; anything else is a typo.
+  if (url.protocol !== 'http:') {
+    throw new GatewayClientError(
+      0,
+      'invalid_url',
+      `A gateway URL starts with http://, not ${url.protocol}//: ${given}`,
+    );
+  }
+
+  if ('baseUrl' in options) {
+    return {baseUrl: url.origin, token: options.token};
   }
 
   const token = new URLSearchParams(url.hash.slice(1)).get('token');
@@ -411,52 +421,57 @@ function fetchWithoutTimeouts(
     };
 
     request.text().then(body => {
-      if (signal?.aborted === true) {
-        reject(
-          new GatewayClientError(0, 'aborted', 'The request was aborted.'),
+      try {
+        if (signal?.aborted === true) {
+          reject(
+            new GatewayClientError(0, 'aborted', 'The request was aborted.'),
+          );
+
+          return;
+        }
+
+        const headers = Object.fromEntries(request.headers);
+
+        if (body.length > 0) {
+          headers['content-length'] = String(Buffer.byteLength(body));
+        }
+
+        const outgoing = httpRequest(
+          request.url,
+          {method: request.method, headers},
+          incoming => {
+            resolve(
+              new Response(Readable.toWeb(incoming), {
+                status: incoming.statusCode ?? 500,
+                headers: Object.entries(incoming.headers).flatMap(
+                  ([name, value]) =>
+                    typeof value === 'string' ? [[name, value] as const] : [],
+                ),
+              }),
+            );
+          },
         );
 
-        return;
+        // The listener lives as long as the exchange: a signal reused across
+        // reconnects must not keep every finished request alive.
+        const onAbort = (): void => {
+          outgoing.destroy(new Error('aborted'));
+        };
+        const release = (): void => {
+          signal?.removeEventListener('abort', onAbort);
+        };
+
+        signal?.addEventListener('abort', onAbort, {once: true});
+        outgoing.once('response', incoming => {
+          incoming.once('close', release);
+        });
+        outgoing.once('close', release);
+        outgoing.on('error', fail);
+        outgoing.end(body);
+      } catch (error: unknown) {
+        // A request that cannot even be built fails like one that never connected.
+        fail(error);
       }
-
-      const headers = Object.fromEntries(request.headers);
-
-      if (body.length > 0) {
-        headers['content-length'] = String(Buffer.byteLength(body));
-      }
-
-      const outgoing = httpRequest(
-        request.url,
-        {method: request.method, headers},
-        incoming => {
-          resolve(
-            new Response(Readable.toWeb(incoming), {
-              status: incoming.statusCode ?? 500,
-              headers: Object.entries(incoming.headers).flatMap(
-                ([name, value]) =>
-                  typeof value === 'string' ? [[name, value] as const] : [],
-              ),
-            }),
-          );
-        },
-      );
-
-      // The listener lives as long as the exchange: a signal reused across
-      // reconnects must not keep every finished request alive.
-      const onAbort = (): void => {
-        outgoing.destroy(new Error('aborted'));
-      };
-      const release = (): void => {
-        signal?.removeEventListener('abort', onAbort);
-      };
-
-      signal?.addEventListener('abort', onAbort, {once: true});
-      outgoing.once('response', incoming => {
-        incoming.once('close', release);
-      });
-      outgoing.once('close', release);
-      outgoing.on('error', fail);
-      outgoing.end(body);
     }, fail);
   });
 }
