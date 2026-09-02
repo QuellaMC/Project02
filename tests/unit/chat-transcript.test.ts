@@ -234,16 +234,18 @@ describe('chat transcript', () => {
     expect(harness.printed()).toContain('Your line "third" did land.');
 
     // Or until the daemon says how its turn ended — in either order, since
-    // the stream can carry the turn's end before the answer fails.
-    transcript.expectLanding('c4', 'fourth');
+    // the stream can carry the turn's end before the answer fails. The
+    // line's own record decides whether it reached the thread at all.
+    transcript.showProgress(own(4, 'fourth', 'c4'));
     transcript.settleLanding('c4', 'rejected');
+    transcript.expectLanding('c4', 'fourth');
     transcript.settleLanding('c5', 'failed');
     transcript.expectLanding('c5', 'fifth');
     expect(harness.printed()).toContain(
       'Your line "fourth" did reach the character; its turn was rejected.',
     );
     expect(harness.printed()).toContain(
-      'Your line "fifth" did reach the character; its turn was failed.',
+      'Your line "fifth" was failed before it reached the thread; send it again',
     );
   });
 
