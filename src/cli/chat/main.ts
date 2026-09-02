@@ -5,7 +5,6 @@
  * it.
  */
 import {randomUUID} from 'node:crypto';
-import {createInterface} from 'node:readline';
 
 import {
   createGatewayClient,
@@ -19,10 +18,12 @@ import {
   type PendingConfirmation,
 } from '../../gateway/index.ts';
 import {runtimeConfigDiagnosticAttribution} from '../../runtime/config/index.ts';
+import type {LocalRuntimeTurnProgressEvent} from '../../runtime/index.ts';
 import {readFlagValue} from '../shared/flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
+import {createLineDispatcher, type LineDispatcher} from './lines.ts';
 
 export type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
@@ -30,9 +31,6 @@ export type ChatCliOptions = {
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
 };
-
-/** How long a settled turn may take to show up on the stream. */
-const turnEchoTimeoutMs = 5_000;
 
 export async function runChatCliFromArgs(
   args: readonly string[],
@@ -142,137 +140,40 @@ async function runChat(
   }
 
   const source = `chat-shim:${String(process.pid)}`;
-  const lines = createInterface({
-    input: options.stdin,
-    crlfDelay: Infinity,
-    terminal: false,
-  });
-  const lineIterator = lines[Symbol.asyncIterator]();
-  // One shared in-flight read guards against double reads; the REPL waits
-  // out the confirmation chain besides, so a line typed under a visible
-  // [y/N] always answers that prompt and never becomes a chat message.
-  let inFlightLine: Promise<string | undefined> | undefined;
-  const nextLine = (): Promise<string | undefined> => {
-    inFlightLine ??= lineIterator.next().then(next => {
-      inFlightLine = undefined;
-
-      return next.done === true ? undefined : next.value;
-    });
-
-    return inFlightLine;
-  };
+  const lines = createLineDispatcher(options.stdin);
   const reportError = (error: unknown): void => {
     options.stderr.write(
       `Error: ${error instanceof Error ? error.message : String(error)}\n`,
     );
   };
-  const answer = (
-    id: string,
-    decision: GatewayConfirmationDecision,
-  ): Promise<void> =>
-    client.answerConfirmation(id, decision).then(() => undefined, reportError);
-  // Prompts chain: each prints only when it is next and consumes its own
-  // line, so one keystroke never approves two proposed effects. The person
-  // approves exactly what will happen: the summary and the full change.
-  let confirmations: Promise<void> = Promise.resolve();
-  const asked = new Set<string>();
-  const ask = (pending: PendingConfirmation): void => {
-    if (asked.has(pending.id)) {
-      return;
-    }
-
-    asked.add(pending.id);
-    confirmations = confirmations.then(async () => {
-      // Expired while queued: the daemon already cancelled it, and asking
-      // now would feed the answer to the REPL.
-      if (Date.now() >= pending.deadlineAt) {
-        await answer(pending.id, 'denied');
-
-        return;
-      }
-
-      options.stdout.write(
-        `Confirm ${pending.request.toolName} (${pending.request.pluginId}): ` +
-          `${pending.request.summary}\n` +
-          `${JSON.stringify(pending.request.preview, null, 2)}\n[y/N] `,
-      );
-
-      let line: string | undefined;
-
-      try {
-        line = await nextLine();
-      } catch {
-        // A failed read is a denial, never a parked confirmation.
-        await answer(pending.id, 'denied');
-
-        return;
-      }
-
-      if (Date.now() >= pending.deadlineAt) {
-        options.stderr.write(
-          'Confirmation timed out; the answer was discarded.\n',
-        );
-        await answer(pending.id, 'denied');
-
-        return;
-      }
-
-      await answer(
-        pending.id,
-        cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
-      );
-    });
-  };
-  // Replies render from the stream, never from the turn's answer, so this
-  // terminal shows the same thread every other surface shows. A turn is
-  // done here once the stream says so.
-  let turnsSeen = 0;
-  const turnWaiters: {readonly after: number; resolve(): void}[] = [];
-  const turnSeen = (after: number): Promise<void> =>
-    turnsSeen > after
-      ? Promise.resolve()
-      : new Promise(resolve => {
-          const timer = setTimeout(resolve, turnEchoTimeoutMs);
-
-          turnWaiters.push({
-            after,
-            resolve() {
-              clearTimeout(timer);
-              resolve();
-            },
-          });
-        });
+  const transcript = await createTranscript({
+    client,
+    conversationId: opened.conversationId,
+    source,
+    stdout: options.stdout,
+  });
+  const confirmations = createConfirmationPrompts({
+    client,
+    characterId,
+    lines,
+    stdout: options.stdout,
+    stderr: options.stderr,
+  });
+  const turns = createTurnTracker();
   const streaming = new AbortController();
   const streamEnded = client
     .events(
       event => {
         if (event.kind === 'turn_progress') {
-          if (event.conversationId !== opened.conversationId) {
-            return;
-          }
-
-          const {progress} = event;
-
-          if (
-            progress.kind === 'visible_reply' ||
-            (progress.kind === 'user_message' && progress.source !== source)
-          ) {
-            options.stdout.write(`${progress.speakerName}: ${progress.text}\n`);
+          if (event.conversationId === opened.conversationId) {
+            transcript.showProgress(event.progress);
           }
         } else if (event.kind === 'turn_completed') {
           if (event.conversationId === opened.conversationId) {
-            turnsSeen += 1;
-
-            for (const waiter of turnWaiters.splice(0)) {
-              if (turnsSeen > waiter.after) {
-                waiter.resolve();
-              } else {
-                turnWaiters.push(waiter);
-              }
-            }
+            turns.completed();
           }
         } else if (event.kind === 'confirmation_requested') {
-          ask(event);
+          confirmations.ask(event);
         } else if (
           event.kind === 'state_changed' &&
           event.characterId === characterId &&
@@ -283,12 +184,16 @@ async function runChat(
       },
       {
         signal: streaming.signal,
-        // Every handshake: whatever was asked while this terminal was away
-        // is still waiting in the list.
+        // Every handshake: what the stream did not carry — a confirmation
+        // asked while this terminal was away, a message committed while
+        // the stream was down — is read back from the daemon.
         onReady: () => {
           client.pendingConfirmations().then(pending => {
-            pending.forEach(ask);
+            for (const request of pending) {
+              confirmations.ask(request);
+            }
           }, reportError);
+          transcript.catchUp().catch(reportError);
         },
       },
     )
@@ -300,10 +205,10 @@ async function runChat(
     for (;;) {
       // The prompt appears only once the confirmation chain is idle, so
       // every keystroke answers the prompt that is actually on screen.
-      await confirmations;
+      await confirmations.idle();
       options.stdout.write('> ');
 
-      const line = await nextLine();
+      const line = await lines.replLine();
 
       if (line === undefined || line.trim() === '/exit') {
         break;
@@ -313,7 +218,7 @@ async function runChat(
         continue;
       }
 
-      const before = turnsSeen;
+      const before = turns.count();
       const outcome = await client.deliver({
         conversationId: opened.conversationId,
         senderId: opened.userParticipantId,
@@ -332,7 +237,7 @@ async function runChat(
         return 1;
       }
 
-      await turnSeen(before);
+      await turns.seen(before);
     }
 
     return 0;
@@ -341,6 +246,207 @@ async function runChat(
     await streamEnded;
     lines.close();
   }
+}
+
+type ShownMessage = {
+  readonly messageId: string;
+  readonly speakerName: string;
+  readonly text: string;
+  readonly source?: string;
+};
+
+/**
+ * Replies render from the stream, never from the turn's answer, so this
+ * terminal shows the same thread every other surface shows. What the stream
+ * did not carry is read back from history on every handshake, and nothing
+ * shows twice.
+ */
+async function createTranscript(options: {
+  readonly client: GatewayClient;
+  readonly conversationId: string;
+  readonly source: string;
+  readonly stdout: NodeJS.WritableStream;
+}): Promise<{
+  showProgress(progress: LocalRuntimeTurnProgressEvent): void;
+  catchUp(): Promise<void>;
+}> {
+  const shown = new Set<string>();
+  const show = (message: ShownMessage): void => {
+    if (shown.has(message.messageId)) {
+      return;
+    }
+
+    shown.add(message.messageId);
+
+    // This terminal's own lines are already on its screen.
+    if (message.source !== options.source) {
+      options.stdout.write(`${message.speakerName}: ${message.text}\n`);
+    }
+  };
+  // The thread before this terminal joined stays where it was.
+  const newest = await options.client.history(options.conversationId, {
+    limit: 1,
+  });
+  const startAfter =
+    newest.status === 'ok' ? (newest.messages.at(-1)?.messageId ?? null) : null;
+
+  return {
+    showProgress(progress) {
+      if (
+        progress.kind === 'visible_reply' ||
+        progress.kind === 'user_message'
+      ) {
+        show(progress);
+      }
+    },
+    async catchUp() {
+      const page = await options.client.history(options.conversationId, {
+        limit: 100,
+      });
+
+      if (page.status !== 'ok') {
+        throw new Error(page.message);
+      }
+
+      // Not on the page any more means the whole page is newer than it.
+      const from =
+        startAfter === null
+          ? 0
+          : page.messages.findIndex(
+              message => message.messageId === startAfter,
+            ) + 1;
+
+      for (const message of page.messages.slice(from)) {
+        show(message);
+      }
+    },
+  };
+}
+
+/**
+ * Prompts chain: each prints only when it is next and consumes its own
+ * line, so one keystroke never approves two proposed effects. The person
+ * approves exactly what will happen: the summary and the full change — and
+ * only for the character this terminal talks to.
+ */
+function createConfirmationPrompts(options: {
+  readonly client: GatewayClient;
+  readonly characterId: string;
+  readonly lines: LineDispatcher;
+  readonly stdout: NodeJS.WritableStream;
+  readonly stderr: NodeJS.WritableStream;
+}): {ask(pending: PendingConfirmation): void; idle(): Promise<void>} {
+  const asked = new Set<string>();
+  let chain: Promise<void> = Promise.resolve();
+  const answer = (
+    id: string,
+    decision: GatewayConfirmationDecision,
+  ): Promise<void> =>
+    options.client.answerConfirmation(id, decision).then(
+      () => undefined,
+      (error: unknown) => {
+        options.stderr.write(
+          `Error: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      },
+    );
+  const prompt = async (pending: PendingConfirmation): Promise<void> => {
+    // Expired while queued: the daemon already cancelled it, and asking
+    // now would feed the answer to the REPL.
+    if (Date.now() >= pending.deadlineAt) {
+      await answer(pending.id, 'denied');
+
+      return;
+    }
+
+    options.stdout.write(
+      `Confirm ${pending.request.toolName} (${pending.request.pluginId}): ` +
+        `${pending.request.summary}\n` +
+        `${JSON.stringify(pending.request.preview, null, 2)}\n[y/N] `,
+    );
+
+    let line: string | undefined;
+
+    try {
+      line = await options.lines.promptLine();
+    } catch {
+      // A failed read is a denial, never a parked confirmation.
+      await answer(pending.id, 'denied');
+
+      return;
+    }
+
+    if (Date.now() >= pending.deadlineAt) {
+      options.stderr.write(
+        'Confirmation timed out; the answer was discarded.\n',
+      );
+      await answer(pending.id, 'denied');
+
+      return;
+    }
+
+    await answer(
+      pending.id,
+      cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
+    );
+  };
+
+  return {
+    ask: pending => {
+      if (
+        pending.characterId !== options.characterId ||
+        asked.has(pending.id)
+      ) {
+        return;
+      }
+
+      asked.add(pending.id);
+      chain = chain.then(() => prompt(pending));
+    },
+    idle: () => chain,
+  };
+}
+
+/** How long a settled turn may take to show up on the stream. */
+const turnEchoTimeoutMs = 5_000;
+
+/** A turn is done here once the stream says so, not when the answer lands. */
+function createTurnTracker(): {
+  count(): number;
+  completed(): void;
+  seen(after: number): Promise<void>;
+} {
+  let completed = 0;
+  const waiters: {readonly after: number; resolve(): void}[] = [];
+
+  return {
+    count: () => completed,
+    completed() {
+      completed += 1;
+
+      for (const waiter of waiters.splice(0)) {
+        if (completed > waiter.after) {
+          waiter.resolve();
+        } else {
+          waiters.push(waiter);
+        }
+      }
+    },
+    seen: after =>
+      completed > after
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            const timer = setTimeout(resolve, turnEchoTimeoutMs);
+
+            waiters.push({
+              after,
+              resolve() {
+                clearTimeout(timer);
+                resolve();
+              },
+            });
+          }),
+  };
 }
 
 if (isMainModule(import.meta.url)) {
