@@ -23,6 +23,8 @@ import {
   type GatewayEventListener,
   type GatewayHealth,
   type GatewayMessage,
+  type HistoryOutcome,
+  type HistoryPage,
   type OpenOutcome,
   type PendingConfirmation,
   type StartOutcome,
@@ -33,6 +35,7 @@ import {
   createLocalCharacterRuntime,
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
+import {readConversationHistory} from './history.ts';
 import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
@@ -143,6 +146,16 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   return Object.freeze({
     health(): GatewayHealth {
       return readHealth(loadHome(), runtimes);
+    },
+    history(
+      conversationId: string,
+      page?: HistoryPage,
+    ): Promise<HistoryOutcome> {
+      return readConversationHistory({
+        homeRoot: boundHome.runtimeLocation.homeRoot,
+        conversationId,
+        ...(page === undefined ? {} : {page}),
+      });
     },
     async startCharacter(characterId: string): Promise<StartOutcome> {
       if (stopped) {

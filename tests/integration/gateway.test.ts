@@ -1,5 +1,12 @@
 import {randomUUID} from 'node:crypto';
-import {chmodSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
+import {
+  appendFileSync,
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import {dirname, join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
@@ -23,7 +30,10 @@ import {
 import {
   acquireLocalRuntimeSessionWriterLease,
   characterDataDirPath,
+  createLocalRuntimeStorageLayout,
+  listConversationSegments,
 } from '../../src/runtime/storage/index.ts';
+import {createLocalRuntimeSessionPaths} from '../../src/runtime/storage/layout-contract.ts';
 import {
   writeTestCharacterPackage,
   testCharacterProfile,
@@ -139,6 +149,48 @@ function authoredTone(
   inspected: ReturnType<typeof inspectRuntimePluginConfig>,
 ): unknown {
   return inspected.fields.find(field => field.name === 'tone')?.authored.value;
+}
+
+/** A chat long enough to have rotated: the window is tiny, the turns many. */
+async function createRotatedChat(texts: readonly string[]) {
+  const homeRoot = await createGatewayHome();
+
+  writeRuntimeConfig(join(homeRoot, 'config.json'), {
+    project02: {contextWindowTokens: 100},
+  });
+
+  const gateway = createGateway({
+    location: {storeRoot: homeRoot},
+    env: {},
+    roleModelAdapter: replyAdapter(),
+    createPluginHost: () => createRuntimePluginHost({plugins: []}),
+  });
+
+  await gateway.startCharacter('mira');
+
+  const ref = await open(gateway, 'mira');
+
+  for (const text of texts) {
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text,
+        source: 'web',
+        clientMessageId: `msg-${text}`,
+      }),
+    ).resolves.toMatchObject({status: 'completed'});
+  }
+
+  const {segments} = listConversationSegments({
+    storeRoot: characterDataDirPath(homeRoot, 'mira'),
+    characterId: 'mira',
+    conversationId: ref.conversationId,
+  });
+
+  expect(segments.length).toBeGreaterThan(1);
+
+  return {homeRoot, gateway, ref, segments};
 }
 
 async function createGatewayHome(): Promise<string> {
@@ -1150,5 +1202,154 @@ describe('gateway façade', () => {
     );
     expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
+  });
+  it('reads a conversation as one scrollback, newest page first, back across segments', async () => {
+    const texts = ['one', 'two', 'three', 'four', 'five', 'six'];
+    const {gateway, ref} = await createRotatedChat(texts);
+    const newest = await gateway.history(ref.conversationId, {limit: '3'});
+
+    expect(newest).toMatchObject({status: 'ok', characterId: 'mira'});
+
+    if (newest.status !== 'ok') {
+      throw new Error(newest.message);
+    }
+
+    expect(newest.messages.map(message => message.text)).toEqual([
+      'noted',
+      'six',
+      'noted',
+    ]);
+    expect(newest.earlier).toBeDefined();
+
+    const pages = [newest.messages];
+    let earlier = newest.earlier;
+
+    while (earlier !== undefined) {
+      const page = await gateway.history(ref.conversationId, {
+        before: earlier,
+        limit: 3,
+      });
+
+      if (page.status !== 'ok') {
+        throw new Error(page.message);
+      }
+
+      pages.unshift(page.messages);
+      earlier = page.earlier;
+    }
+
+    const whole = pages.flat();
+
+    expect(whole.map(message => message.text)).toEqual(
+      texts.flatMap(text => [text, 'noted']),
+    );
+    expect(whole.map(message => message.role)).toEqual(
+      texts.flatMap(() => ['user', 'character']),
+    );
+    expect(whole[0]).toMatchObject({
+      speakerName: 'You',
+      source: 'web',
+      clientMessageId: 'msg-one',
+    });
+    expect(whole[1]?.source).toBeUndefined();
+
+    // The whole thread in one page, and a cursor the client kept is still
+    // exactly where it pointed.
+    const all = await gateway.history(ref.conversationId);
+
+    expect(all.status === 'ok' && all.messages).toHaveLength(whole.length);
+    expect(all.status === 'ok' && all.earlier).toBeUndefined();
+    await gateway.stop();
+  });
+
+  it('refuses an unknown conversation and a page it did not describe', async () => {
+    const {gateway, ref} = await createRotatedChat([
+      'one',
+      'two',
+      'three',
+      'four',
+    ]);
+
+    await expect(gateway.history('conv_missing')).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'unknown_conversation',
+    });
+    await expect(gateway.history('not valid!')).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'unknown_conversation',
+    });
+
+    for (const limit of [0, -1, 1.5, '1e2', 501, 'abc', '']) {
+      await expect(
+        gateway.history(ref.conversationId, {limit}),
+      ).resolves.toMatchObject({status: 'refused', reason: 'invalid_page'});
+    }
+
+    for (const before of ['nonsense', 'v1:9:0', 'v1:1:999', 'v2:1:0']) {
+      await expect(
+        gateway.history(ref.conversationId, {before}),
+      ).resolves.toMatchObject({status: 'refused', reason: 'invalid_page'});
+    }
+    await gateway.stop();
+  });
+
+  it('reads a stopped character, and an empty thread whose character has no data yet', async () => {
+    const {homeRoot, gateway, ref} = await createRotatedChat([
+      'one',
+      'two',
+      'three',
+      'four',
+    ]);
+
+    await gateway.stop();
+    await expect(gateway.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'ok',
+      messages: expect.arrayContaining([
+        expect.objectContaining({text: 'two'}),
+      ]) as unknown[],
+    });
+
+    rmSync(characterDataDirPath(homeRoot, 'mira'), {recursive: true});
+    await expect(gateway.history(ref.conversationId)).resolves.toEqual({
+      status: 'ok',
+      conversationId: ref.conversationId,
+      characterId: 'mira',
+      messages: [],
+    });
+  });
+
+  it('keeps a thread readable beside a damaged catalog row and refuses a damaged segment', async () => {
+    const {homeRoot, gateway, ref, segments} = await createRotatedChat([
+      'one',
+      'two',
+      'three',
+      'four',
+    ]);
+    const storeRoot = characterDataDirPath(homeRoot, 'mira');
+
+    await gateway.stop();
+    appendFileSync(
+      createLocalRuntimeStorageLayout({storeRoot}).sessionCatalogPath,
+      '{"not": "a session"}\nnot json\n',
+    );
+    await expect(gateway.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'ok',
+    });
+
+    const latest = segments.at(-1);
+
+    if (latest === undefined) {
+      throw new Error('Expected a rotated chat.');
+    }
+
+    appendFileSync(
+      createLocalRuntimeSessionPaths({storeRoot, sessionId: latest.sessionId})
+        .rawEventsPath,
+      '{"eventId": "evt_torn"}\n',
+    );
+    await expect(gateway.history(ref.conversationId)).resolves.toMatchObject({
+      status: 'failed',
+      code: 'malformed_record',
+    });
   });
 });
