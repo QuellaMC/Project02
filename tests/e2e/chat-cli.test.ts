@@ -618,12 +618,17 @@ describe('chat shim', () => {
           // reopened the thread on its own. Its catch-up shows the message
           // committed meanwhile, which is when the handshake has run.
           await shim.printed('You: boom');
+          shim.stdin.write('hello again\n');
         } else {
+          // Typed while the character may still be recovering: the line
+          // waits for the thread to be back rather than going into a
+          // stale one.
+          shim.stdin.write('hello again\n');
           await shim.printed('mira is back.');
         }
 
-        shim.stdin.write('hello again\n');
         await shim.printed('Mira: noted');
+        expect(shim.errors()).not.toContain('holds no open conversation');
 
         const {exitCode} = await shim.exit();
 
