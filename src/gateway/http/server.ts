@@ -1,3 +1,5 @@
+import {Server} from 'node:http';
+
 import {createAdaptorServer, type ServerType} from '@hono/node-server';
 
 import type {Gateway} from '../api/contract.ts';
@@ -25,8 +27,6 @@ export type GatewayServer = {
 };
 
 const loopback = '127.0.0.1';
-/** How long an answer still on its way out may take before the socket goes. */
-const responseGraceMs = 2_000;
 
 /** The daemon's one socket: the API and the UI on a loopback port. */
 export async function createGatewayServer(
@@ -42,6 +42,7 @@ export async function createGatewayServer(
     ...(options.uiRoot === undefined ? {} : {uiRoot: options.uiRoot}),
   });
   const server = createAdaptorServer({fetch: app.fetch});
+  const responses = trackResponses(server);
   const port = await listen(server, options.port);
 
   return Object.freeze({
@@ -51,26 +52,58 @@ export async function createGatewayServer(
       events.closeAll();
       await options.gateway.stop();
       await new Promise<void>(resolve => {
-        const closed = (): void => {
-          clearTimeout(cutoff);
+        server.close(() => {
           resolve();
-        };
+        });
+
         // An outcome the gateway just produced may still be leaving on a
-        // slow socket; idle connections go now, active ones get a moment.
-        const cutoff = setTimeout(() => {
-          if ('closeAllConnections' in server) {
-            server.closeAllConnections();
-          }
-        }, responseGraceMs);
-
-        server.close(closed);
-
+        // slow socket. Idle connections go now; every answer still being
+        // written is waited for, and only then is whatever remains cut.
         if ('closeIdleConnections' in server) {
           server.closeIdleConnections();
         }
+
+        void responses.drained().then(() => {
+          if ('closeAllConnections' in server) {
+            server.closeAllConnections();
+          }
+        });
       });
     },
   });
+}
+
+/** Counts answers still being written, so shutdown can wait for them. */
+function trackResponses(server: ServerType): {drained(): Promise<void>} {
+  let active = 0;
+  const waiting: (() => void)[] = [];
+
+  // The adaptor is built on node:http here; the type allows more.
+  if (!(server instanceof Server)) {
+    return {drained: () => Promise.resolve()};
+  }
+
+  server.on('request', (_request, response) => {
+    active += 1;
+    response.once('close', () => {
+      active -= 1;
+
+      if (active === 0) {
+        for (const resolve of waiting.splice(0)) {
+          resolve();
+        }
+      }
+    });
+  });
+
+  return {
+    drained: () =>
+      active === 0
+        ? Promise.resolve()
+        : new Promise(resolve => {
+            waiting.push(resolve);
+          }),
+  };
 }
 
 /** Binds the loopback port, or a free one when the asked-for port is taken. */
