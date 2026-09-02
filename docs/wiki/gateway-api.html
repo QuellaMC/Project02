@@ -68,11 +68,11 @@
         </tr>
         <tr>
           <td>One way in</td>
-          <td>Loopback only. <code>Authorization: Bearer &lt;token&gt;</code>, compared in constant
-            time. The <code>Host</code> hostname must be <code>127.0.0.1</code>,
-            <code>localhost</code>, or <code>[::1]</code>; an <code>Origin</code>, when present,
-            must be <code>http://</code> plus that host. No CORS headers, no cookie, no query
-            token. One events stream per tab.</td>
+          <td>Loopback only: the daemon binds <code>127.0.0.1</code>. <code>Authorization: Bearer &lt;token&gt;</code>,
+            compared in constant time. The <code>Host</code> hostname must be <code>127.0.0.1</code>
+            or <code>localhost</code>; an <code>Origin</code>, when present, must be
+            <code>http://</code> plus that host. No CORS headers, no cookie, no query token. One
+            events stream per tab.</td>
         </tr>
         <tr>
           <td>Every submission has an identity</td>

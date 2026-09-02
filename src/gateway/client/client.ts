@@ -296,7 +296,7 @@ function resolveOptions(options: GatewayClientOptions): {
     throw new GatewayClientError(
       0,
       'invalid_url',
-      `A gateway URL points at this machine (127.0.0.1, localhost, or [::1]), not ${url.hostname}: ${given}`,
+      `A gateway URL points at this machine (127.0.0.1 or localhost), not ${url.hostname}: ${given}`,
     );
   }
 
