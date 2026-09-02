@@ -1,19 +1,21 @@
-import type {TurnOutcome} from './api/contract.ts';
+import type {GatewayMessage, TurnOutcome} from './api/contract.ts';
 
-type ConversationSubmissions = {
-  readonly inFlight: Map<string, Promise<TurnOutcome>>;
-  readonly recent: Map<string, TurnOutcome>;
+type Submission = {
+  /** What the id was first used for; the same id must mean the same line. */
+  readonly fingerprint: string;
+  readonly outcome: Promise<TurnOutcome>;
+  settled: TurnOutcome | undefined;
 };
 
 export type SubmissionLedger = {
   /**
    * Runs `turn` once per submission id within a conversation: a repeat
    * joins the run in flight, and a repeat of a finished one gets its
-   * outcome back instead of a second turn.
+   * outcome back instead of a second turn. An id reused for a different
+   * line is refused, so no line is ever silently swallowed by an old one.
    */
   submit(
-    conversationId: string,
-    clientMessageId: string,
+    message: GatewayMessage,
     turn: () => Promise<TurnOutcome>,
   ): Promise<TurnOutcome>;
 };
@@ -27,60 +29,77 @@ const recentSubmissionsPerConversation = 32;
  * again without saying it twice.
  */
 export function createSubmissionLedger(): SubmissionLedger {
-  const conversations = new Map<string, ConversationSubmissions>();
+  const conversations = new Map<string, Map<string, Submission>>();
 
   return Object.freeze({
-    submit(conversationId, clientMessageId, turn) {
-      let submissions = conversations.get(conversationId);
+    submit(message, turn) {
+      let submissions = conversations.get(message.conversationId);
 
       if (submissions === undefined) {
-        submissions = {inFlight: new Map(), recent: new Map()};
-        conversations.set(conversationId, submissions);
+        submissions = new Map();
+        conversations.set(message.conversationId, submissions);
       }
 
-      const recent = submissions.recent.get(clientMessageId);
+      const fingerprint = fingerprintOf(message);
+      const known = submissions.get(message.clientMessageId);
 
-      if (recent !== undefined) {
-        return Promise.resolve(recent);
+      if (known !== undefined) {
+        return known.fingerprint === fingerprint
+          ? known.outcome
+          : Promise.resolve(reusedId(message.clientMessageId));
       }
 
-      const inFlight = submissions.inFlight.get(clientMessageId);
-
-      if (inFlight !== undefined) {
-        return inFlight;
-      }
-
-      const settled = submissions;
-      const run = turn()
-        .then(outcome => {
-          remember(settled.recent, clientMessageId, outcome);
+      const submission: Submission = {
+        fingerprint,
+        outcome: turn().then(outcome => {
+          submission.settled = outcome;
+          forget(submissions, recentSubmissionsPerConversation);
 
           return outcome;
-        })
-        .finally(() => {
-          settled.inFlight.delete(clientMessageId);
-        });
+        }),
+        settled: undefined,
+      };
 
-      submissions.inFlight.set(clientMessageId, run);
+      submissions.set(message.clientMessageId, submission);
 
-      return run;
+      return submission.outcome;
     },
   });
 }
 
-function remember(
-  recent: Map<string, TurnOutcome>,
-  clientMessageId: string,
-  outcome: TurnOutcome,
-): void {
-  recent.set(clientMessageId, outcome);
+function fingerprintOf(message: GatewayMessage): string {
+  return JSON.stringify([message.senderId, message.source, message.text]);
+}
 
-  // Insertion order is age: the first key is the oldest.
-  for (const oldest of recent.keys()) {
-    if (recent.size <= recentSubmissionsPerConversation) {
+function reusedId(clientMessageId: string): TurnOutcome {
+  return Object.freeze({
+    status: 'refused' as const,
+    reason: 'invalid_message' as const,
+    message:
+      `clientMessageId "${clientMessageId}" was already used for a ` +
+      'different message on this conversation; give each message its own.',
+  });
+}
+
+/** Drops the oldest settled submissions past the bound; in-flight ones stay. */
+function forget(submissions: Map<string, Submission>, keep: number): void {
+  let settledCount = 0;
+
+  for (const submission of submissions.values()) {
+    if (submission.settled !== undefined) {
+      settledCount += 1;
+    }
+  }
+
+  // Insertion order is age: the first keys are the oldest.
+  for (const [id, submission] of submissions) {
+    if (settledCount <= keep) {
       break;
     }
 
-    recent.delete(oldest);
+    if (submission.settled !== undefined) {
+      submissions.delete(id);
+      settledCount -= 1;
+    }
   }
 }

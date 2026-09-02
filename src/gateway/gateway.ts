@@ -170,15 +170,12 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         );
       }
 
-      return submissions.submit(
-        message.conversationId,
-        message.clientMessageId,
-        () =>
-          runtime.deliver(message).then(outcome => {
-            emit(turnCompleted(characterId, message, outcome));
+      return submissions.submit(message, () =>
+        runtime.deliver(message).then(outcome => {
+          emit(turnCompleted(characterId, message, outcome));
 
-            return outcome;
-          }),
+          return outcome;
+        }),
       );
     },
     pendingConfirmations(): readonly PendingConfirmation[] {

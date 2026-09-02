@@ -934,6 +934,13 @@ describe('gateway façade', () => {
       gateway.deliver({...message, clientMessageId: 'msg-2'}),
     ).resolves.toMatchObject({status: 'completed'});
     expect(adapter.invocations()).toBe(2);
+
+    // The same id for a different line is refused, never swallowed by the
+    // old outcome.
+    await expect(
+      gateway.deliver({...message, text: 'something else entirely'}),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid_message'});
+    expect(adapter.invocations()).toBe(2);
     await gateway.stop();
   });
   it('parks a tool confirmation for any client to answer and tells every client it settled', async () => {
