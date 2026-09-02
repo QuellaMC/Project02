@@ -20,7 +20,7 @@ import {runtimeConfigDiagnosticAttribution} from '../../runtime/config/index.ts'
 import {readFlagValue} from '../shared/flags.ts';
 import {isMainModule} from '../shared/main-module.ts';
 import {CliUsageError} from '../shared/usage-error.ts';
-import {createLineDispatcher} from './lines.ts';
+import {createLineDispatcher, type LineDispatcher} from './lines.ts';
 import {createConfirmationPrompts} from './prompts.ts';
 import {createTranscript} from './transcript.ts';
 
@@ -285,6 +285,10 @@ async function runChat(
       },
     );
 
+  // Lines read while one was held for the thread: an exit ends the hold,
+  // anything else is next in line.
+  const later = createReadAhead(lines);
+
   try {
     await streamListening;
 
@@ -302,7 +306,7 @@ async function runChat(
       options.stdout.write('> ');
       replWaiting = true;
 
-      const line = await lines.replLine();
+      const line = await later.next();
 
       replWaiting = false;
 
@@ -314,52 +318,27 @@ async function runChat(
         continue;
       }
 
-      if (!(await watch.attached())) {
-        options.stderr.write(
-          `Your line was not sent: ${characterId} is gone.\n`,
-        );
-        continue;
+      const sent = await sendLine(
+        {
+          client,
+          watch,
+          later,
+          transcript,
+          opened,
+          source,
+          characterId,
+          options,
+        },
+        line,
+      );
+
+      if (sent === 'exit') {
+        break;
       }
 
-      const clientMessageId = randomUUID();
-      const outcome = await deliverOrReport(client, {
-        conversationId: opened.conversationId,
-        senderId: opened.userParticipantId,
-        text: line,
-        source,
-        clientMessageId,
-      });
-
-      // The daemon could not be reached: the turn may or may not have
-      // landed, and only the thread can say. The transcript keeps the
-      // line's id and says which, as soon as the thread is read again.
-      if (outcome === undefined) {
-        options.stderr.write(
-          `${characterId}'s daemon could not be reached; whether that line landed shows once it is back.\n`,
-        );
-        transcript.expectLanding(clientMessageId, line);
-        // The stream may be fine and bring no handshake: read the thread now.
-        transcript.catchUp().catch(reportError);
-        continue;
-      }
-
-      if (outcome.status !== 'completed') {
-        options.stderr.write(`Error: ${outcome.message}\n`);
-      }
-
-      // The daemon restarts the character, but this thread died with the
-      // turn; exiting nonzero beats chatting into the void.
-      if (outcome.status === 'failed') {
+      if (sent === 'failed') {
         return 1;
       }
-
-      // This turn is done here once its own messages are on the screen.
-      await transcript.whenShown(
-        outcome.status === 'completed'
-          ? outcome.messages.map(message => message.messageId)
-          : [],
-      );
-      await transcript.settled();
     }
 
     return streamFailure === undefined ? 0 : 1;
@@ -393,6 +372,8 @@ function createCharacterWatch(options: {
    */
   attached(): Promise<boolean>;
   isAttached(): boolean;
+  /** The daemon refused the thread: it is lost until reopened. */
+  lost(): void;
   /** Nothing will attach any more: every held line is let go. */
   giveUp(): void;
   stateChanged(state: string, message: string | undefined): void;
@@ -474,6 +455,9 @@ function createCharacterWatch(options: {
       });
     },
     isAttached: () => attached,
+    lost() {
+      attached = false;
+    },
     giveUp() {
       gone = true;
 
@@ -506,6 +490,167 @@ function createCharacterWatch(options: {
 
       if (summary?.state === 'failed' && summary.diagnostic !== undefined) {
         options.stderr.write(`Warning: ${summary.diagnostic}\n`);
+      }
+    },
+  };
+}
+
+type SendContext = {
+  readonly client: GatewayClient;
+  readonly watch: ReturnType<typeof createCharacterWatch>;
+  readonly later: ReturnType<typeof createReadAhead>;
+  readonly transcript: Awaited<ReturnType<typeof createTranscript>>;
+  readonly opened: {
+    readonly conversationId: string;
+    readonly userParticipantId: string;
+  };
+  readonly source: string;
+  readonly characterId: string;
+  readonly options: ChatCliOptions;
+};
+
+/**
+ * One line, sent once the thread is attached — held while it is not — and
+ * sent once more, under a fresh id, if the daemon refused it because the
+ * thread had gone before this terminal heard so.
+ */
+async function sendLine(
+  context: SendContext,
+  line: string,
+): Promise<'sent' | 'exit' | 'failed' | 'dropped'> {
+  const {client, watch, later, transcript, opened, options} = context;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    // Only a thread that is lost holds the line; an attached one sends it
+    // at once, with no read run ahead of it.
+    const held = watch.isAttached()
+      ? 'attached'
+      : await later.holdUntil(watch.attached());
+
+    if (held === 'exit') {
+      watch.giveUp();
+
+      return 'exit';
+    }
+
+    if (held === 'gone') {
+      options.stderr.write(
+        `Your line was not sent: ${context.characterId} is gone.\n`,
+      );
+
+      return 'dropped';
+    }
+
+    const clientMessageId = randomUUID();
+    const outcome = await deliverOrReport(client, {
+      conversationId: opened.conversationId,
+      senderId: opened.userParticipantId,
+      text: line,
+      source: context.source,
+      clientMessageId,
+    });
+
+    // The daemon could not be reached: the turn may or may not have
+    // landed, and only the thread can say. The transcript keeps the
+    // line's id and says which, as soon as the thread is read again.
+    if (outcome === undefined) {
+      options.stderr.write(
+        `${context.characterId}'s daemon could not be reached; whether that line landed shows once it is back.\n`,
+      );
+      transcript.expectLanding(clientMessageId, line);
+      // The stream may be fine and bring no handshake: read the thread now.
+      transcript.catchUp().catch((error: unknown) => {
+        options.stderr.write(
+          `Error: ${error instanceof Error ? error.message : String(error)}\n`,
+        );
+      });
+
+      return 'dropped';
+    }
+
+    // The thread went before this terminal heard so: the line was never
+    // taken, so once the thread is back it goes again, under a new id.
+    if (
+      attempt === 0 &&
+      outcome.status === 'refused' &&
+      (outcome.reason === 'unknown_conversation' ||
+        outcome.reason === 'character_unavailable')
+    ) {
+      watch.lost();
+      continue;
+    }
+
+    if (outcome.status !== 'completed') {
+      options.stderr.write(`Error: ${outcome.message}\n`);
+    }
+
+    // The daemon restarts the character, but this thread died with the
+    // turn; exiting nonzero beats chatting into the void.
+    if (outcome.status === 'failed') {
+      return 'failed';
+    }
+
+    // This turn is done here once its own messages are on the screen.
+    await transcript.whenShown(
+      outcome.status === 'completed'
+        ? outcome.messages.map(message => message.messageId)
+        : [],
+    );
+    await transcript.settled();
+
+    return 'sent';
+  }
+
+  return 'dropped';
+}
+
+/**
+ * The REPL's reads, with one read kept ahead while a line is held for the
+ * thread: an exit typed meanwhile ends the hold and leaves the held line
+ * unsent; any other line waits its turn.
+ */
+function createReadAhead(lines: Pick<LineDispatcher, 'replLine'>): {
+  next(): Promise<string | undefined>;
+  holdUntil(attached: Promise<boolean>): Promise<'attached' | 'gone' | 'exit'>;
+} {
+  const queued: (string | undefined)[] = [];
+  let ahead: Promise<string | undefined> | undefined;
+
+  return {
+    next() {
+      const read =
+        queued.length > 0
+          ? Promise.resolve(queued.shift())
+          : (ahead ?? lines.replLine());
+
+      ahead = undefined;
+
+      return read;
+    },
+    async holdUntil(attached) {
+      const outcome = attached.then((ok): 'attached' | 'gone' =>
+        ok ? 'attached' : 'gone',
+      );
+
+      for (;;) {
+        ahead ??= lines.replLine();
+
+        const first = await Promise.race([
+          outcome,
+          ahead.then(line => ({line})),
+        ]);
+
+        if (typeof first === 'string') {
+          return first;
+        }
+
+        ahead = undefined;
+
+        if (first.line === undefined || first.line.trim() === '/exit') {
+          return 'exit';
+        }
+
+        queued.push(first.line);
       }
     },
   };
