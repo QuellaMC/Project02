@@ -158,12 +158,11 @@ export function createGatewayClient(
             return;
           }
 
-          // Auth and protocol refusals do not mend themselves; a daemon
-          // that is down or stopping comes back.
+          // A daemon that is down or stopping comes back; a refused token,
+          // a wrong protocol, or a listener's own failure does not.
           if (
-            error instanceof GatewayClientError &&
-            error.status !== 0 &&
-            error.status !== 503
+            !(error instanceof GatewayClientError) ||
+            (error.status !== 0 && error.status !== 503)
           ) {
             throw error;
           }
@@ -185,7 +184,30 @@ export function createGatewayClient(
 async function readOutcome<T>(response: Response): Promise<T> {
   await rejectUnlessOk(response);
 
-  return (await response.json()) as T;
+  return JSON.parse(await readBody(response)) as T;
+}
+
+/** A body cut short or not JSON is a transport failure, never a raw throw. */
+async function readBody(response: Response): Promise<string> {
+  const text = await response.text().catch((error: unknown) => {
+    throw new GatewayClientError(
+      response.status,
+      'malformed_response',
+      `The daemon's answer was cut short: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  });
+
+  try {
+    JSON.parse(text);
+  } catch {
+    throw new GatewayClientError(
+      response.status,
+      'malformed_response',
+      `The daemon answered ${String(response.status)} with something other than JSON.`,
+    );
+  }
+
+  return text;
 }
 
 function resolveOptions(options: GatewayClientOptions): {
@@ -234,27 +256,44 @@ async function followStream(
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   const frames = createSseFrameSplitter();
 
-  for (;;) {
-    const {value, done} = await reader.read();
+  try {
+    for (;;) {
+      const {value, done} = await reader.read();
 
-    if (done) {
-      return;
-    }
-
-    for (const frame of frames.push(value)) {
-      if (frame.data === undefined) {
-        continue;
+      if (done) {
+        return;
       }
 
-      const data: unknown = JSON.parse(frame.data);
+      for (const frame of frames.push(value)) {
+        if (frame.data === undefined) {
+          continue;
+        }
 
-      if (frame.event === 'ready') {
-        assertProtocol(data);
-        onReady();
-      } else if (isGatewayEvent(data)) {
-        listener(data);
+        const data = parseFrameData(frame.data);
+
+        if (frame.event === 'ready') {
+          assertProtocol(data);
+          onReady();
+        } else if (isGatewayEvent(data)) {
+          listener(data);
+        }
       }
     }
+  } finally {
+    // Whatever ended the loop, the socket does not outlive it.
+    await reader.cancel().catch(() => undefined);
+  }
+}
+
+function parseFrameData(data: string): unknown {
+  try {
+    return JSON.parse(data);
+  } catch {
+    throw new GatewayClientError(
+      200,
+      'malformed_event',
+      'The daemon sent an event that is not JSON.',
+    );
   }
 }
 
@@ -292,7 +331,7 @@ async function rejectUnlessOk(response: Response): Promise<void> {
     return;
   }
 
-  const text = await response.text();
+  const text = await response.text().catch(() => '');
   let envelope: unknown;
 
   try {
@@ -367,6 +406,14 @@ function fetchWithoutTimeouts(
     };
 
     request.text().then(body => {
+      if (request.signal.aborted) {
+        reject(
+          new GatewayClientError(0, 'aborted', 'The request was aborted.'),
+        );
+
+        return;
+      }
+
       const headers = Object.fromEntries(request.headers);
 
       if (body.length > 0) {
