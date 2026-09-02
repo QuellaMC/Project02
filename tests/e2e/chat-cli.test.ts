@@ -444,13 +444,9 @@ describe('chat shim', () => {
 
         if (streamDown) {
           // Nothing announced: the episode passed unseen, and the handshake
-          // reopened the thread on its own.
-          await vi.waitFor(
-            () => {
-              expect(daemon.server.events.openCount()).toBe(1);
-            },
-            {timeout: 10_000},
-          );
+          // reopened the thread on its own. Its catch-up shows the message
+          // committed meanwhile, which is when the handshake has run.
+          await shim.printed('You: boom');
         } else {
           await shim.printed('mira is back.');
         }

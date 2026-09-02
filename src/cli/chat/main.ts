@@ -172,7 +172,7 @@ async function runChat(
   // The REPL waits for the latest reopen before it delivers, so a line
   // typed right after a reconnect is never refused for a thread mid-reopen.
   let attachment: Promise<void> = Promise.resolve();
-  const ensureAttached = (): void => {
+  const ensureAttached = (): Promise<void> => {
     attachment = client.openDirectConversation(characterId).then(outcome => {
       if (outcome.status === 'opened') {
         if (!attached) {
@@ -185,6 +185,8 @@ async function runChat(
         options.stderr.write(`Error: ${outcome.message}\n`);
       }
     }, reportError);
+
+    return attachment;
   };
   const streaming = new AbortController();
   const streamEnded = client
@@ -211,7 +213,8 @@ async function runChat(
           }
 
           if (event.state === 'ready' && !attached) {
-            ensureAttached();
+            // Reports its own failure; nothing here waits on it.
+            void ensureAttached();
           }
         }
       },
@@ -220,13 +223,18 @@ async function runChat(
         // Every handshake: what the stream did not carry — a confirmation
         // asked while this terminal was away, a message committed while
         // the stream was down — is read back from the daemon.
-        onReady: () => {
-          ensureAttached();
-          client.pendingConfirmations().then(pending => {
-            confirmations.reconcile(pending);
-          }, reportError);
-          transcript.catchUp().catch(reportError);
-        },
+        // The stream waits for this: the snapshots are in place before any
+        // event that followed the handshake is handled, so an older
+        // snapshot can never undo what a newer event just did. Each step
+        // reports its own failure; the stream itself stays up.
+        onReady: () =>
+          Promise.all([
+            ensureAttached(),
+            client.pendingConfirmations().then(pending => {
+              confirmations.reconcile(pending);
+            }, reportError),
+            transcript.catchUp().catch(reportError),
+          ]).then(() => undefined),
       },
     )
     .catch(reportError);
