@@ -37,7 +37,11 @@ export {
   ensureInitializedProject02Home,
   project02HomeCreationIsNew,
 } from './home.ts';
-export {createLocalRuntimeSessionHistoryFeed} from './session-history-feed.ts';
+export {
+  createLocalRuntimeSessionHistoryFeed,
+  readCommittedConversationMessages,
+  type CommittedConversationMessages,
+} from './session-history-feed.ts';
 export {
   createRuntimePluginDatabaseOpener,
   createRuntimePluginDatabaseProvider,

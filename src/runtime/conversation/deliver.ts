@@ -75,6 +75,10 @@ async function deliverThroughSegment(
           ? {}
           : {contextWindowTokens: options.contextWindowTokens}),
         pluginHost: options.pluginHost,
+        ...(options.source === undefined ? {} : {source: options.source}),
+        ...(options.clientMessageId === undefined
+          ? {}
+          : {clientMessageId: options.clientMessageId}),
         ...(options.onProgress === undefined
           ? {}
           : {onProgress: options.onProgress}),

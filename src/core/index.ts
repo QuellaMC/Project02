@@ -10,6 +10,8 @@ export {
 export {
   characterLength,
   isValidSpeakerDisplayName,
+  clientStampPattern,
+  isValidClientStamp,
   maxSpeakerDisplayNameLength,
   normalizeOneLineMessage,
   normalizeVisibleMessageText,

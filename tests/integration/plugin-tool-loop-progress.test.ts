@@ -12,6 +12,7 @@ import {
 import {createTestTempRoot} from '../support/temp-root.ts';
 import {
   createDurableCharacterStateHarness,
+  createRawEventAppendFailingLogStore,
   runLocalUserMessageEventWithDefaultTestHost as runLocalUserMessageEvent,
 } from '../support/plugin-tool-loop-fixtures.ts';
 import {
@@ -162,6 +163,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ]);
     expect(progress).toEqual([
       {
+        kind: 'user_message',
+        messageId: `${sessionId}:message-1`,
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'needs tool',
+      },
+      {
         kind: 'visible_reply',
         messageId: `${sessionId}:message-2`,
         speakerId: 'mira',
@@ -260,6 +268,13 @@ describe('plugin-driven tool loop progress and evidence', () => {
     ).toEqual(['needs tool', 'checking', 'finished']);
     expect(progress).toEqual([
       {
+        kind: 'user_message',
+        messageId: 'local-session:message-1',
+        speakerId: 'local-user',
+        speakerName: 'You',
+        text: 'needs tool',
+      },
+      {
         kind: 'visible_reply',
         messageId: 'local-session:message-2',
         speakerId: 'mira',
@@ -290,6 +305,42 @@ describe('plugin-driven tool loop progress and evidence', () => {
         .rawEvents()
         .some(event => event.kind === 'runtime_turn_rejected'),
     ).toBe(false);
+  });
+
+  it('shows a reply only once it is durable', async () => {
+    const session = createSession({
+      character: testCharacterProfile,
+    });
+    const logStore = createRawEventAppendFailingLogStore({
+      matches: record =>
+        record.kind === 'visible_message_committed' &&
+        record.visibleMessage?.role === 'character',
+      message: 'the disk is full',
+    });
+    const progress: unknown[] = [];
+
+    await expect(
+      runLocalUserMessageEvent({
+        event: createTestEvent('hello there', 'evt_reply_persist_fails'),
+        session,
+        logStore,
+        roleModelAdapter: createSequencedAdapter([
+          {toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}]},
+        ]),
+        onProgress(event) {
+          progress.push(event);
+        },
+      }),
+    ).rejects.toThrow('the disk is full');
+
+    // The person's message landed and was announced; the reply that never
+    // reached disk was never announced either.
+    expect(progress).toEqual([
+      expect.objectContaining({kind: 'user_message', text: 'hello there'}),
+    ]);
+    expect(
+      logStore.conversationMessages().map(message => message.text),
+    ).toEqual(['hello there']);
   });
 
   it('feeds prior interim replies back through the next turn model context', async () => {

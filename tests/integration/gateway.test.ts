@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {chmodSync, existsSync, mkdirSync, writeFileSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
@@ -21,13 +22,18 @@ import {createTestTempRoot} from '../support/temp-root.ts';
 
 function replyAdapter(
   options: {readonly beforeReply?: () => Promise<void> | void} = {},
-): RoleModelAdapter & {readonly maxInFlight: () => number} {
+): RoleModelAdapter & {
+  readonly maxInFlight: () => number;
+  readonly invocations: () => number;
+} {
   let inFlight = 0;
   let maxInFlight = 0;
+  let invocations = 0;
 
   return {
     async invoke() {
       inFlight += 1;
+      invocations += 1;
       maxInFlight = Math.max(maxInFlight, inFlight);
       await options.beforeReply?.();
       inFlight -= 1;
@@ -39,6 +45,7 @@ function replyAdapter(
       };
     },
     maxInFlight: () => maxInFlight,
+    invocations: () => invocations,
   };
 }
 
@@ -91,11 +98,15 @@ describe('gateway façade', () => {
       gateway.deliver({
         conversationId: mira.conversationId,
         senderId: mira.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello mira',
       }),
       gateway.deliver({
         conversationId: zeta.conversationId,
         senderId: zeta.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello zeta',
       }),
     ]);
@@ -308,6 +319,8 @@ describe('gateway façade', () => {
       await gateway.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -346,6 +359,8 @@ describe('gateway façade', () => {
       await gateway.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -383,6 +398,8 @@ describe('gateway façade', () => {
       await gateway.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -427,6 +444,8 @@ describe('gateway façade', () => {
       await gateway.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -444,7 +463,13 @@ describe('gateway façade', () => {
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
 
     await expect(
-      gateway.deliver({conversationId: 'no-such', senderId: 'u', text: 'hi'}),
+      gateway.deliver({
+        conversationId: 'no-such',
+        senderId: 'u',
+        source: 'test',
+        clientMessageId: randomUUID(),
+        text: 'hi',
+      }),
     ).resolves.toMatchObject({
       status: 'refused',
       reason: 'unknown_conversation',
@@ -466,6 +491,8 @@ describe('gateway façade', () => {
     const message = {
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     };
     const sessionsRoot = join(
@@ -475,13 +502,13 @@ describe('gateway façade', () => {
 
     chmodSync(sessionsRoot, 0o000);
 
+    // Each send is its own submission; the same id would join the first.
+    const send = () =>
+      gateway.deliver({...message, clientMessageId: randomUUID()});
     let outcomes;
 
     try {
-      outcomes = await Promise.all([
-        gateway.deliver(message),
-        gateway.deliver(message),
-      ]);
+      outcomes = await Promise.all([send(), send()]);
     } finally {
       chmodSync(sessionsRoot, 0o755);
     }
@@ -496,9 +523,7 @@ describe('gateway façade', () => {
     });
 
     await gateway.openDirectConversation('mira');
-    await expect(gateway.deliver(message)).resolves.toMatchObject({
-      status: 'completed',
-    });
+    await expect(send()).resolves.toMatchObject({status: 'completed'});
     await gateway.stop();
   });
 
@@ -572,6 +597,8 @@ describe('gateway façade', () => {
       await gateway.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -737,6 +764,117 @@ describe('gateway façade', () => {
     await expect(gateway.openDirectConversation('mira')).resolves.toMatchObject(
       {status: 'opened'},
     );
+    await gateway.stop();
+  });
+  it("puts the person's message on the stream, stamped, once it is durable", async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const progress: unknown[] = [];
+
+    gateway.events(event => {
+      if (event.kind === 'turn_progress') {
+        progress.push(event.progress);
+      }
+    });
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+    const outcome = await gateway.deliver({
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'hello there',
+      source: 'web',
+      clientMessageId: 'msg-1',
+    });
+
+    expect(outcome.status).toBe('completed');
+    expect(progress).toEqual([
+      expect.objectContaining({
+        kind: 'user_message',
+        speakerName: 'You',
+        text: 'hello there',
+        source: 'web',
+        clientMessageId: 'msg-1',
+      }),
+      expect.objectContaining({kind: 'visible_reply', text: 'noted'}),
+    ]);
+    await gateway.stop();
+  });
+
+  it('refuses a malformed stamp before the runtime sees the message', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const events: GatewayEvent[] = [];
+
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+
+    gateway.events(event => events.push(event));
+    await expect(
+      gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+        source: 'web ui',
+        clientMessageId: 'msg-1',
+      }),
+    ).resolves.toMatchObject({status: 'refused', reason: 'invalid_message'});
+    expect(events).toEqual([]);
+    await gateway.stop();
+  });
+
+  it('runs one turn per submission id, however often it is sent', async () => {
+    const homeRoot = await createGatewayHome();
+    const adapter = replyAdapter({
+      beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
+    });
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: adapter,
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    const ref = await open(gateway, 'mira');
+    const message = {
+      conversationId: ref.conversationId,
+      senderId: ref.userParticipantId,
+      text: 'hello there',
+      source: 'web',
+      clientMessageId: 'msg-1',
+    };
+    // Sent twice while the first is in flight: one turn, one outcome.
+    const [first, second] = await Promise.all([
+      gateway.deliver(message),
+      gateway.deliver(message),
+    ]);
+
+    expect(first.status).toBe('completed');
+    expect(second).toEqual(first);
+    expect(adapter.invocations()).toBe(1);
+
+    // Sent again after it finished: the remembered outcome, no new turn.
+    await expect(gateway.deliver(message)).resolves.toEqual(first);
+    expect(adapter.invocations()).toBe(1);
+
+    // A new submission id is a new turn.
+    await expect(
+      gateway.deliver({...message, clientMessageId: 'msg-2'}),
+    ).resolves.toMatchObject({status: 'completed'});
+    expect(adapter.invocations()).toBe(2);
     await gateway.stop();
   });
 });

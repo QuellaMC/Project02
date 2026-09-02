@@ -513,6 +513,8 @@ async function runTurn(
     delivery = await deliverUserMessage({
       conversation: active,
       line: message.text,
+      source: message.source,
+      clientMessageId: message.clientMessageId,
       pluginHost: assembled.host,
       ...(assembled.adapter === undefined
         ? {}
