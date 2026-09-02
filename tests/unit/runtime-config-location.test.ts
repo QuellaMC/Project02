@@ -147,7 +147,6 @@ describe('selected config and activated runtime locations', () => {
         version: runtimeConfigVersion,
         project02: {
           storeRoot: authoredHome,
-          character: 'mira',
         },
       })}\n`,
       'utf8',

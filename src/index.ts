@@ -17,3 +17,19 @@ export {
   initializeProject02CharacterRuntime,
   prepareConfiguredProject02PluginActivation,
 } from './app/index.ts';
+export {
+  createGateway,
+  type CharacterRuntimeState,
+  type CharacterSummary,
+  type ConversationRef,
+  type CreateGatewayOptions,
+  type Gateway,
+  type GatewayConfirmationDecision,
+  type GatewayEvent,
+  type GatewayEventListener,
+  type GatewayMessage,
+  type GatewayRefusalReason,
+  type GatewayVisibleMessage,
+  type TurnOutcome,
+  type Unsubscribe,
+} from './gateway/index.ts';

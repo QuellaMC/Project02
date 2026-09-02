@@ -37,7 +37,7 @@
   "version": "project02.config.v2",
   "project02": {
     "storeRoot": ".project02",
-    "character": "mira",
+    "enabled": true,
     "userDisplayName": "You",
     "defaultMemoryProvider": "memory.example",
     "roleModelProvider": "local",
@@ -57,7 +57,7 @@
     <table>
       <thead><tr><th>Section</th><th>Owner</th><th>Purpose</th></tr></thead>
       <tbody>
-        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, active character, user display name, selected memory provider, default role-model provider, and the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit).</td></tr>
+        <tr><td><code>project02</code></td><td>Project02 host</td><td>Runtime location, per-character enabled state, user display name, selected memory provider, default role-model provider, and the model's context window in tokens (the replayed conversation history may use half of it; a stopgap until providers report their own limit).</td></tr>
         <tr><td><code>plugins.&lt;id&gt;</code></td><td>Host activation plus the named plugin manifest</td><td>Explicit enablement and manifest-declared plugin fields.</td></tr>
       </tbody>
     </table>
@@ -88,10 +88,13 @@
     </ol>
 
     <p>
-      Character selection is <code>--character</code>, then
-      <code>project02.character</code>, then <code>mira</code>. Its overlay lives at
-      <code>&lt;home&gt;/character-data/&lt;id&gt;/config.json</code>. Effective values resolve in
-      this order:
+      Character selection is <code>--character</code>, otherwise the sole enabled character;
+      with several enabled, the CLI demands an explicit pick. Installed characters are enabled
+      unless <code>project02.enabled</code> says otherwise — it layers like every
+      character-scoped field, so a global <code>false</code> disables them all and a
+      character's overlay value overrides it. A character's overlay lives at
+      <code>&lt;home&gt;/character-data/&lt;id&gt;/config.json</code>. Effective values resolve
+      in this order:
     </p>
 
     <pre><code>character overlay &gt; global config &gt; plugin manifest defaults</code></pre>

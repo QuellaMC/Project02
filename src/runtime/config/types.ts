@@ -30,28 +30,15 @@ export type RuntimeConfigValue =
 type Project02RoleModelProvider =
   (typeof project02RoleModelProviderValues)[number];
 
-export const defaultProject02CharacterId = 'mira';
 /** A safe floor for small local models; a stopgap until providers report their own limit. */
 export const defaultProject02ContextWindowTokens = 32768;
 export const defaultProject02UserDisplayName = 'You';
-
-/** Trimmed here so no reader re-trims: a padded authored id is not missing. */
-export function configuredProject02CharacterId(
-  config: Project02RuntimeConfig | undefined,
-  override?: string,
-): string {
-  return (
-    override ??
-    config?.project02?.character ??
-    defaultProject02CharacterId
-  ).trim();
-}
 
 export type Project02HostConfig = Readonly<
   Record<string, RuntimeConfigValue | undefined>
 > & {
   readonly storeRoot?: string;
-  readonly character?: string;
+  readonly enabled?: boolean;
   readonly userDisplayName?: string;
   readonly defaultMemoryProvider?: string;
   readonly roleModelProvider?: Project02RoleModelProvider;
@@ -175,6 +162,7 @@ export type ResolvedProject02RuntimeConfig = {
   readonly project02: {
     readonly storeRoot: string;
     readonly character: string;
+    readonly enabled: boolean;
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;
@@ -194,6 +182,7 @@ export type RuntimeConfigInspectShape = {
   readonly project02: {
     readonly storeRoot: string;
     readonly character: string;
+    readonly enabled: boolean;
     readonly userDisplayName: string;
     readonly defaultMemoryProvider?: string;
     readonly roleModelProvider: Project02RoleModelProvider;

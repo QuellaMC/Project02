@@ -1,5 +1,6 @@
 import {createHash} from 'node:crypto';
 import {
+  chmod,
   mkdir,
   mkdtemp,
   readFile,
@@ -35,6 +36,35 @@ afterEach(async () => {
 });
 
 describe('local runtime mutation locks', () => {
+  it('treats a landed rename as released even when the remains linger', async () => {
+    const locksRoot = await createTempLocksRoot();
+    const lease = await acquireLocalRuntimeMutationLock({
+      locksRoot,
+      resourceKey: 'session-writer:remains',
+      waitTimeoutMs: 0,
+    });
+
+    // Read-only lock contents block only the post-rename removal; the
+    // rename itself rewrites the parent and frees the resource.
+    await chmod(lease.lockPath, 0o500);
+
+    try {
+      await expect(lease.release()).resolves.toBeUndefined();
+    } finally {
+      for (const entry of await readdir(locksRoot)) {
+        await chmod(join(locksRoot, entry), 0o755);
+      }
+    }
+
+    const reacquired = await acquireLocalRuntimeMutationLock({
+      locksRoot,
+      resourceKey: 'session-writer:remains',
+      waitTimeoutMs: 0,
+    });
+
+    await reacquired.release();
+  });
+
   it('excludes the same resource without blocking unrelated resources', async () => {
     const locksRoot = await createTempLocksRoot();
     const first = await acquireLocalRuntimeMutationLock({

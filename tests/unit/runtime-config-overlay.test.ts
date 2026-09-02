@@ -152,7 +152,6 @@ describe('character overlay config loader', () => {
     writeRuntimeConfig(characterOverlayConfigPath(dataRoot), {
       project02: {
         storeRoot: '/elsewhere',
-        character: 'nova',
         userDisplayName: 'Mike',
       },
     });
@@ -170,10 +169,6 @@ describe('character overlay config loader', () => {
           characterId: 'mira',
           path: characterOverlayConfigPath(dataRoot),
         },
-      }),
-      expect.objectContaining({
-        code: 'runtime_config_field_global_only',
-        path: 'project02.character',
       }),
     ]);
     const globalOnly = overlay.diagnostics[0];
@@ -194,12 +189,6 @@ describe('character overlay config loader', () => {
       'project02.storeRoot',
       '/tmp/home',
       {version: runtimeConfigVersion, project02: {storeRoot: '/tmp/home'}},
-      true,
-    ],
-    [
-      'project02.character',
-      'mira',
-      {version: runtimeConfigVersion, project02: {character: 'mira'}},
       true,
     ],
     [
@@ -357,11 +346,9 @@ describe('character overlay config loader', () => {
 });
 
 describe('layered runtime config resolution', () => {
-  const character = {character: 'mira'};
-
   it('is byte-identical to the global resolve without an overlay', () => {
     const loadedConfig = loadedGlobalConfig({
-      project02: {...character, userDisplayName: 'Global Name'},
+      project02: {userDisplayName: 'Global Name'},
     });
     const globalResolved = resolveProject02RuntimeConfig({
       ...runtimeConfigSnapshotForTest({loadedConfig: loadedConfig}),
@@ -398,7 +385,6 @@ describe('layered runtime config resolution', () => {
   it('overrides only character-scoped project02 fields and keeps the global path', () => {
     const loadedConfig = loadedGlobalConfig({
       project02: {
-        ...character,
         userDisplayName: 'Global Name',
         roleModelProvider: 'local',
       },
@@ -444,7 +430,6 @@ describe('layered runtime config resolution', () => {
   it('merges plugin enablement and config at field level', () => {
     const plugin = structuredConfigPlugin('demo.layered');
     const loadedConfig = loadedGlobalConfig({
-      project02: character,
       plugins: {
         'demo.layered': {
           enabled: false,
@@ -494,7 +479,6 @@ describe('layered runtime config resolution', () => {
     const disabledByOverlay = resolveLayeredProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig: loadedGlobalConfig({
-          project02: character,
           plugins: {'demo.layered': {enabled: true}},
         }),
         characterId: loadedOverlay({
@@ -502,7 +486,6 @@ describe('layered runtime config resolution', () => {
         }).characterId,
       }),
       loadedConfig: loadedGlobalConfig({
-        project02: character,
         plugins: {'demo.layered': {enabled: true}},
       }),
       pluginManifests: [plugin.manifest],
@@ -519,44 +502,45 @@ describe('layered runtime config resolution', () => {
     const base = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig: loadedGlobalConfig({
-          project02: {...character, userDisplayName: 'One'},
+          project02: {userDisplayName: 'One'},
         }),
       }),
       loadedConfig: loadedGlobalConfig({
-        project02: {...character, userDisplayName: 'One'},
+        project02: {userDisplayName: 'One'},
       }),
     });
     const renamedUser = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig: loadedGlobalConfig({
-          project02: {...character, userDisplayName: 'Two'},
+          project02: {userDisplayName: 'Two'},
         }),
       }),
       loadedConfig: loadedGlobalConfig({
-        project02: {...character, userDisplayName: 'Two'},
+        project02: {userDisplayName: 'Two'},
       }),
     });
     const otherCharacter = resolveProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
+        character: 'nova',
         loadedConfig: loadedGlobalConfig({
-          project02: {character: 'nova', userDisplayName: 'One'},
+          project02: {userDisplayName: 'One'},
         }),
       }),
       loadedConfig: loadedGlobalConfig({
-        project02: {character: 'nova', userDisplayName: 'One'},
+        project02: {userDisplayName: 'One'},
       }),
     });
     const overlayApplied = resolveLayeredProject02RuntimeConfig({
       runtimeLocation: runtimeLocationForTest({
         loadedConfig: loadedGlobalConfig({
-          project02: {...character, userDisplayName: 'One'},
+          project02: {userDisplayName: 'One'},
         }),
         characterId: loadedOverlay({
           project02: {userDisplayName: 'Two'},
         }).characterId,
       }),
       loadedConfig: loadedGlobalConfig({
-        project02: {...character, userDisplayName: 'One'},
+        project02: {userDisplayName: 'One'},
       }),
       overlayConfig: loadedOverlay({
         project02: {userDisplayName: 'Two'},
@@ -661,12 +645,8 @@ describe('startup with a character overlay', () => {
   it('fails startup as character_invalid for an unknown configured character', async () => {
     const homeRoot = createTestTempRoot();
 
-    writeRuntimeConfig(join(homeRoot, 'config.json'), {
-      project02: {character: 'nova'},
-    });
-
     const startup = await resolveRuntimeCliStartup({
-      location: {storeRoot: homeRoot},
+      location: {storeRoot: homeRoot, character: 'nova'},
       env: {},
       factories: {},
     });

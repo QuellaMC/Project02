@@ -1,775 +1,301 @@
+/**
+ * The disposable dev chat: a terminal over the gateway façade, and nothing
+ * more. It reads a line, delivers it, prints events, and answers tool
+ * confirmations; the web UI replaces it at parity and deletes it.
+ */
 import {createInterface} from 'node:readline';
 
-import type {CharacterProfile} from '../../core/index.ts';
-import {shutdownConfiguredChatPluginHost} from './plugin-host-shutdown.ts';
 import {
-  parseChatCliArgs,
-  validateChatStoreArgs,
-  type ChatCliArgs,
-} from './args.ts';
+  createGateway,
+  selectProject02CharacterId,
+  type Gateway,
+} from '../../gateway/index.ts';
+import type {RuntimePluginHost} from '../../plugins/index.ts';
 import {
-  writeRotationWarnings,
-  writeRuntimeProgress,
-  writeTraceSummary,
-} from './turn-output.ts';
-import {
-  deliverUserMessage,
-  endSession,
-  exitCommand,
-  openConversation,
-  type ActiveConversation,
-  type LocalRuntimeUserMessageInputRejectedResult,
-  type LocalRuntimeUserMessageResult,
-  type UserMessageDelivery,
-} from '../../runtime/index.ts';
-import type {
-  RawEventLogRecord,
-  RuntimeTraceEntry,
-} from '../../runtime/index.ts';
-import {
-  createTraceSummary,
-  deriveRuntimeTraceEntries,
-  type ChatTraceSummary,
-  type TraceIdentity,
-} from '../../runtime/evidence/index.ts';
-import {
-  type RuntimePluginHost,
-  type RuntimePluginToolConfirmationHandler,
-  type RuntimePluginToolConfirmationRequest,
-} from '../../plugins/index.ts';
-import {
-  configuredPluginConstructionCleanupSessionId,
-  createConfiguredProject02PluginHostFromPlan,
-  resolveRuntimeCliStartup,
-  type PreparedProject02PluginActivationPlan,
-  type RuntimePluginFactoryDefinition,
-} from '../../app/index.ts';
-import {
-  diagnosticsHaveErrors,
-  runtimeConfigDiagnosticAttribution,
-  runtimeConfigDiagnosticLocation,
-  type RuntimeConfigDiagnostic,
-} from '../../runtime/config/index.ts';
-import type {
-  RoleModelAdapter,
-  RoleModelCharacterRef,
+  selectChatProvider,
+  type RoleModelAdapter,
 } from '../../role-model/index.ts';
 import {
-  ChatCliStartupError,
-  isCliTerminalError,
-  formatCliTerminalErrorMessage,
-} from '../shared/terminal-errors.ts';
-import {CliUsageError} from '../shared/usage-error.ts';
-import {characterActivationFailureMessage} from '../shared/startup-outcome.ts';
+  roleModelProviderEnvVarName,
+  type RuntimeLocationCliState,
+} from '../../runtime/config/index.ts';
+import {readFlagValue} from '../shared/flags.ts';
+import {isMainModule} from '../shared/main-module.ts';
+import {
+  matchesRuntimeStoreInitFlag,
+  parseRuntimeStoreFlag,
+} from '../shared/runtime-location-flags.ts';
 import {cliPromptAnswerIsYes} from '../shared/prompt.ts';
 import {assertProject02StoreConsent} from '../shared/store-consent.ts';
 import {
-  createSelectedRoleModelAdapter,
-  providerOption,
-  selectChatProvider,
-} from '../../role-model/index.ts';
-import {runBestEffortPluginSessionEnd} from '../../plugins/host/index.ts';
-import {isMainModule} from '../shared/main-module.ts';
-import {writeJson} from '../shared/output.ts';
+  formatCliTerminalErrorMessage,
+  isCliTerminalError,
+} from '../shared/terminal-errors.ts';
+import {CliUsageError} from '../shared/usage-error.ts';
 
-type ChatCliOptions = {
+export type ChatCliOptions = {
   readonly stdin: NodeJS.ReadableStream;
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly env?: NodeJS.ProcessEnv;
-  readonly traceMode?: boolean;
-  readonly roleModelAdapter?: RoleModelAdapter;
+  /** Test and dev injection, handed through to the gateway. */
   readonly pluginHost?: RuntimePluginHost;
-  readonly factories?: Readonly<Record<string, RuntimePluginFactoryDefinition>>;
-};
-
-export type RunChatCliOptions = {
-  readonly conversation: ActiveConversation;
-  readonly pluginHost: RuntimePluginHost;
-  readonly stdin: NodeJS.ReadableStream;
-  readonly stdout: NodeJS.WritableStream;
-  readonly stderr: NodeJS.WritableStream;
-  readonly traceMode?: boolean;
   readonly roleModelAdapter?: RoleModelAdapter;
-  readonly characterPersonaSections?: readonly string[];
-  readonly characterRef?: RoleModelCharacterRef;
-  readonly contextWindowTokens?: number;
-  readonly toolConfirmationBridge?: ChatToolConfirmationBridge;
 };
 
-type CompletedChatRuntimeTurn = {
-  readonly status: 'completed';
-  readonly traceSummary: ChatTraceSummary;
+type ChatCliFlags = {
+  readonly location: RuntimeLocationCliState;
+  readonly init: boolean;
+  readonly provider?: string;
 };
-
-type RejectedChatRuntimeTurn = {
-  readonly status: 'rejected';
-  readonly errorMessage: string;
-  readonly fatal: boolean;
-  readonly traceSummary: ChatTraceSummary;
-};
-
-type ChatRuntimeTurn = CompletedChatRuntimeTurn | RejectedChatRuntimeTurn;
-
-type ConfiguredChatPluginHost = Awaited<
-  ReturnType<typeof createConfiguredProject02PluginHostFromPlan>
->;
-
-type ChatToolConfirmationBridge = {
-  readonly handler: RuntimePluginToolConfirmationHandler;
-  installTerminalHandler(
-    handler: RuntimePluginToolConfirmationHandler,
-  ): () => void;
-};
-
-const chatFailedBeforeReplyMessage = 'Chat failed before producing a reply.';
-
-const startupFailurePluginCleanupMessage =
-  'chat startup failed before opening a durable session';
-const fatalFailurePluginCleanupMessage =
-  'chat turn failed before normal /exit cleanup';
-
-/** Plugins hold the bridge from startup; the terminal handler arrives later. */
-function createChatToolConfirmationBridge(): ChatToolConfirmationBridge {
-  let activeHandler: RuntimePluginToolConfirmationHandler | undefined;
-
-  return Object.freeze({
-    handler(request, context) {
-      if (activeHandler === undefined) {
-        return {status: 'cancelled'};
-      }
-
-      return activeHandler(request, context);
-    },
-    installTerminalHandler(handler) {
-      activeHandler = handler;
-
-      return () => {
-        if (activeHandler === handler) {
-          activeHandler = undefined;
-        }
-      };
-    },
-  } satisfies ChatToolConfirmationBridge);
-}
-
-function createTerminalToolConfirmationHandler(options: {
-  readonly lines: ChatLineBroker;
-  readonly stdout: NodeJS.WritableStream;
-}): RuntimePluginToolConfirmationHandler {
-  return async (request, context) => {
-    writeTerminalToolConfirmationRequest(options.stdout, request);
-    const response = await options.lines.next(context.signal);
-
-    if (response.status !== 'line') {
-      return {status: 'cancelled'};
-    }
-
-    return cliPromptAnswerIsYes(response.value)
-      ? {status: 'approved'}
-      : {status: 'denied'};
-  };
-}
-
-type ChatLineResult =
-  | {readonly status: 'line'; readonly value: string}
-  | {readonly status: 'end'}
-  | {readonly status: 'cancelled'};
-
-type ChatLineBroker = {
-  next(signal?: AbortSignal): Promise<ChatLineResult>;
-};
-
-function createChatLineBroker(iterator: AsyncIterator<string>): ChatLineBroker {
-  let pendingRead: Promise<IteratorResult<string>> | undefined;
-
-  return Object.freeze({
-    async next(signal?: AbortSignal): Promise<ChatLineResult> {
-      if (signal?.aborted === true) {
-        return {status: 'cancelled'};
-      }
-
-      const read = pendingRead ?? iterator.next();
-      pendingRead = read;
-      let removeAbortListener: (() => void) | undefined;
-      const result = await Promise.race([
-        read.then(value => ({status: 'read' as const, value})),
-        ...(signal === undefined
-          ? []
-          : [
-              new Promise<{readonly status: 'cancelled'}>(resolve => {
-                const abort = () => {
-                  resolve({status: 'cancelled'});
-                };
-
-                signal.addEventListener('abort', abort, {once: true});
-                removeAbortListener = () => {
-                  signal.removeEventListener('abort', abort);
-                };
-              }),
-            ]),
-      ]);
-
-      removeAbortListener?.();
-
-      if (result.status === 'cancelled') {
-        return result;
-      }
-
-      if (pendingRead === read) {
-        pendingRead = undefined;
-      }
-
-      return result.value.done === true
-        ? {status: 'end'}
-        : {status: 'line', value: result.value.value};
-    },
-  });
-}
-
-function writeTerminalToolConfirmationRequest(
-  stdout: NodeJS.WritableStream,
-  request: RuntimePluginToolConfirmationRequest,
-): void {
-  stdout.write('\nPlugin config update requires your approval.\n');
-  stdout.write(`${request.summary}\n`);
-  writeJson(stdout, request.preview);
-  stdout.write('Approve this one exact change? [y/N] ');
-}
 
 export async function runChatCliFromArgs(
   args: readonly string[],
   options: ChatCliOptions,
 ): Promise<number> {
-  try {
-    const parsedArgs = parseChatCliArgs(args);
+  let gateway: Gateway | undefined;
 
-    // Fails before startup materializes any durable character state.
-    validateChatStoreArgs(parsedArgs);
+  try {
+    const flags = parseChatCliFlags(args);
+
+    // The one provider validator runs before consent can create a store,
+    // so a typo never mutates durable state — and its typed result rides
+    // the gateway option, leaving the process env (and its cwd-dotenv
+    // mode) untouched.
+    const provider =
+      flags.provider === undefined
+        ? undefined
+        : selectChatProvider(undefined, {
+            [roleModelProviderEnvVarName]: flags.provider,
+          });
 
     await assertProject02StoreConsent({
-      location: parsedArgs,
-      init: parsedArgs.init,
+      location: flags.location,
+      init: flags.init,
       stdout: options.stdout,
       stdin: options.stdin,
       ...(options.env === undefined ? {} : {env: options.env}),
     });
-
-    const startup = await resolveRuntimeCliStartup({
-      location: parsedArgs,
+    gateway = createGateway({
+      location: flags.location,
       ...(options.env === undefined ? {} : {env: options.env}),
-      ...(options.factories === undefined
+      ...(provider === undefined ? {} : {provider}),
+      ...(options.roleModelAdapter === undefined
         ? {}
-        : {factories: options.factories}),
-      continueAfterActivationErrors: options.pluginHost !== undefined,
-      // Run early so an unusable provider env var is reported before
-      // startup writes any marker. The config fallback cannot rescue it.
-      validateRuntimeEnv: env => {
-        selectChatProvider(parsedArgs.provider, env);
-      },
+        : {roleModelAdapter: options.roleModelAdapter}),
+      ...(options.pluginHost === undefined
+        ? {}
+        : {createPluginHost: () => options.pluginHost as RuntimePluginHost}),
     });
 
-    if (startup.status === 'character_invalid') {
-      throw new CliUsageError(characterActivationFailureMessage(startup));
-    }
-
-    if (startup.status === 'config_invalid') {
-      // Resolved-config diagnostics carry both layers, overlay included.
-      assertNoRuntimeConfigErrors(
-        startup.activationPlan.resolvedConfig.diagnostics,
-        'Runtime config is invalid',
-      );
-      throw new CliUsageError('Runtime config is invalid.');
-    }
-
-    if (startup.status === 'activation_blocked_before_runtime_env') {
-      assertNoRuntimeConfigErrors(
-        startup.activationPlan.activation.diagnostics,
-        'Runtime config activation failed',
-      );
-      throw new CliUsageError('Runtime config activation failed.');
-    }
-
-    const runtimeEnv = startup.runtimeEnv;
-    const selectedArgs = {
-      ...parsedArgs,
-      ...providerOption(
-        selectChatProvider(
-          parsedArgs.provider,
-          runtimeEnv,
-          startup.activationPlan.resolvedConfig.project02.roleModelProvider,
-        ),
-      ),
-    } satisfies ChatCliArgs;
-
-    const preparedActivationPlan =
-      options.pluginHost === undefined ? startup.activationPlan : undefined;
-    if (preparedActivationPlan !== undefined) {
-      assertNoRuntimeConfigErrors(
-        preparedActivationPlan.activation.diagnostics,
-        'Runtime config activation failed',
-      );
-    }
-    const runtimeArgs = {
-      ...selectedArgs,
-      storeRoot: startup.activationPlan.resolvedConfig.project02.storeRoot,
-    } satisfies ChatCliArgs;
-
-    validateChatStoreArgs(runtimeArgs);
-
-    // Character activation ran inside startup, before any plugin resources.
-    const characterActivation = startup.characterActivation;
-
-    if (characterActivation.status !== 'resolved') {
-      throw new CliUsageError(characterActivationFailureMessage(startup));
-    }
-    for (const warning of characterActivation.warnings) {
-      options.stderr.write(`Warning: ${warning}\n`);
-    }
-    const toolConfirmationBridge =
-      options.pluginHost === undefined
-        ? createChatToolConfirmationBridge()
-        : undefined;
-    const configuredHost =
-      preparedActivationPlan === undefined
-        ? undefined
-        : await createConfiguredChatPluginHostBeforeSession({
-            activationPlan: preparedActivationPlan,
-            ...(toolConfirmationBridge === undefined
-              ? {}
-              : {toolConfirmationHandler: toolConfirmationBridge.handler}),
-          });
-    if (configuredHost !== undefined) {
-      assertNoRuntimeConfigErrors(
-        configuredHost.activation.diagnostics,
-        'Runtime config activation failed',
-      );
-    }
-
-    return await runChatCliAfterConfiguredHost({
-      options,
-      runtimeArgs,
-      runtimeEnv,
-      parsedTraceMode: parsedArgs.traceMode,
-      configuredHost,
-      toolConfirmationBridge,
-      characterProfile: characterActivation.profile,
-      characterPersonaSections: characterActivation.personaSections,
-      characterRef: characterActivation.characterRef,
-      userDisplayName:
-        startup.activationPlan.resolvedConfig.project02.userDisplayName,
-      contextWindowTokens:
-        startup.activationPlan.resolvedConfig.project02.contextWindowTokens,
-    });
-  } catch (error: unknown) {
-    if (isCliTerminalError(error)) {
-      options.stderr.write(`Error: ${formatCliTerminalErrorMessage(error)}\n`);
-      return 1;
-    }
-
-    throw error;
-  }
-}
-
-async function runChatCliAfterConfiguredHost(options: {
-  readonly options: ChatCliOptions;
-  readonly runtimeArgs: ChatCliArgs;
-  readonly runtimeEnv: NodeJS.ProcessEnv;
-  readonly parsedTraceMode: boolean;
-  readonly configuredHost: ConfiguredChatPluginHost | undefined;
-  readonly toolConfirmationBridge: ChatToolConfirmationBridge | undefined;
-  readonly characterProfile: CharacterProfile;
-  readonly characterPersonaSections?: readonly string[];
-  readonly characterRef?: RoleModelCharacterRef;
-  readonly userDisplayName?: string;
-  readonly contextWindowTokens?: number;
-}): Promise<number> {
-  let conversation: ActiveConversation;
-  let pluginHost: RuntimePluginHost;
-  let roleModelAdapter: RoleModelAdapter | undefined;
-
-  try {
-    conversation = await openConversation({
-      ...(options.runtimeArgs.storeRoot === undefined
-        ? {}
-        : {homeRoot: options.runtimeArgs.storeRoot}),
-      character: options.characterProfile,
-      ...(options.userDisplayName === undefined
-        ? {}
-        : {userDisplayName: options.userDisplayName}),
-    });
-  } catch (error: unknown) {
-    if (options.configuredHost !== undefined) {
-      await cleanupConfiguredChatPluginHostAfterStartupFailure({
-        configuredHost: options.configuredHost,
-        character: options.characterProfile,
-        stderr: options.options.stderr,
-      });
-    }
-
-    throw error;
-  }
-
-  try {
-    const startupPluginHost =
-      options.options.pluginHost ?? options.configuredHost?.host;
-
-    if (startupPluginHost === undefined) {
-      throw new ChatCliStartupError(
-        'Chat startup did not provide a configured plugin host.',
-      );
-    }
-
-    pluginHost = startupPluginHost;
-    // The selected provider wins; an injected adapter covers the rest.
-    roleModelAdapter =
-      createSelectedRoleModelAdapter(
-        options.runtimeArgs.provider,
-        options.runtimeEnv,
-      ) ?? options.options.roleModelAdapter;
-
-    const exitCode = await runChatCli({
-      conversation,
-      pluginHost,
-      stdin: options.options.stdin,
-      stdout: options.options.stdout,
-      stderr: options.options.stderr,
-      ...(roleModelAdapter === undefined ? {} : {roleModelAdapter}),
-      ...(options.characterPersonaSections === undefined
-        ? {}
-        : {characterPersonaSections: options.characterPersonaSections}),
-      ...(options.characterRef === undefined
-        ? {}
-        : {characterRef: options.characterRef}),
-      ...(options.contextWindowTokens === undefined
-        ? {}
-        : {contextWindowTokens: options.contextWindowTokens}),
-      ...(options.toolConfirmationBridge === undefined
-        ? {}
-        : {toolConfirmationBridge: options.toolConfirmationBridge}),
-      traceMode: options.options.traceMode === true || options.parsedTraceMode,
-    });
-
-    if (exitCode !== 0 && options.configuredHost !== undefined) {
-      await runBestEffortPluginSessionEnd({
-        pluginHost: options.configuredHost.host,
-        sessionId: conversation.session.id,
-        currentUserMessage: fatalFailurePluginCleanupMessage,
-        character: conversation.session.character,
-      });
-    }
-
-    return exitCode;
-  } finally {
-    // Cleanup and shutdown name the segment the chat ended in.
-    if (options.configuredHost !== undefined) {
-      await shutdownConfiguredChatPluginHost({
-        pluginHost: options.configuredHost.host,
-        sessionId: conversation.session.id,
-        character: conversation.session.character,
-        stderr: options.options.stderr,
-      });
-    }
-    await conversation.close();
-  }
-}
-
-async function cleanupConfiguredChatPluginHostAfterStartupFailure(options: {
-  readonly configuredHost: ConfiguredChatPluginHost;
-  readonly character: CharacterProfile;
-  readonly stderr: NodeJS.WritableStream;
-}): Promise<void> {
-  await runBestEffortPluginSessionEnd({
-    pluginHost: options.configuredHost.host,
-    sessionId: configuredPluginConstructionCleanupSessionId,
-    currentUserMessage: startupFailurePluginCleanupMessage,
-    character: options.character,
-    hookOptions: {allowFileStoreWrites: false},
-  });
-  await shutdownConfiguredChatPluginHost({
-    pluginHost: options.configuredHost.host,
-    sessionId: configuredPluginConstructionCleanupSessionId,
-    character: options.character,
-    stderr: options.stderr,
-  });
-}
-
-async function createConfiguredChatPluginHostBeforeSession(options: {
-  readonly activationPlan: PreparedProject02PluginActivationPlan;
-  readonly toolConfirmationHandler?: RuntimePluginToolConfirmationHandler;
-}): Promise<ConfiguredChatPluginHost> {
-  try {
-    return await createConfiguredProject02PluginHostFromPlan(options);
-  } catch {
-    throw new ChatCliStartupError(
-      'Configured plugin construction failed before creating a durable session.',
+    const selection = selectProject02CharacterId(
+      gateway.characters(),
+      flags.location.character,
     );
+
+    if (selection.status === 'failed') {
+      throw new CliUsageError(`${selection.message} (pass --character <id>)`);
+    }
+
+    return await runChat(gateway, selection.characterId, options);
+  } catch (error: unknown) {
+    options.stderr.write(
+      `Error: ${
+        isCliTerminalError(error)
+          ? formatCliTerminalErrorMessage(error)
+          : error instanceof Error
+            ? error.message
+            : String(error)
+      }\n`,
+    );
+
+    return 1;
+  } finally {
+    if (gateway !== undefined) {
+      // Shutdown problems ride the event stream only; listen through the
+      // stop so failed plugin cleanup reaches the person leaving.
+      const stopListening = gateway.events(event => {
+        if (event.kind === 'state_changed' && event.message !== undefined) {
+          options.stderr.write(`Warning: ${event.message}\n`);
+        }
+      });
+
+      await gateway.stop();
+      stopListening();
+    }
   }
 }
 
-function assertNoRuntimeConfigErrors(
-  diagnostics: readonly RuntimeConfigDiagnostic[],
-  messagePrefix: string,
-): void {
-  if (!diagnosticsHaveErrors(diagnostics)) {
-    return;
+function parseChatCliFlags(args: readonly string[]): ChatCliFlags {
+  let location: RuntimeLocationCliState = {};
+  let init = false;
+  let provider: string | undefined;
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index] ?? '';
+    const store = parseRuntimeStoreFlag({args, index, location});
+
+    if (store.status === 'matched') {
+      location = store.location;
+      index = store.nextIndex;
+      continue;
+    }
+
+    if (matchesRuntimeStoreInitFlag(arg, init)) {
+      init = true;
+      continue;
+    }
+
+    if (arg === '--provider') {
+      if (provider !== undefined) {
+        throw new CliUsageError('--provider can only be provided once.');
+      }
+
+      provider = readFlagValue(args, index, '--provider');
+      index += 1;
+      continue;
+    }
+
+    throw new CliUsageError(`Unknown chat option: ${arg}.`);
   }
 
-  const diagnostic = diagnostics.find(item => item.severity === 'error');
-  throw new CliUsageError(
-    diagnostic === undefined
-      ? messagePrefix
-      : formatRuntimeConfigDiagnosticError(messagePrefix, diagnostic),
-  );
+  return {location, init, ...(provider === undefined ? {} : {provider})};
 }
 
-function formatRuntimeConfigDiagnosticError(
-  messagePrefix: string,
-  diagnostic: RuntimeConfigDiagnostic,
-): string {
-  return (
-    `${messagePrefix}: ${runtimeConfigDiagnosticAttribution(diagnostic)}` +
-    `${diagnostic.message} (${runtimeConfigDiagnosticLocation(diagnostic)})`
-  );
-}
-
-export async function runChatCli(options: RunChatCliOptions): Promise<number> {
-  const {conversation, pluginHost} = options;
+async function runChat(
+  gateway: Gateway,
+  characterId: string,
+  options: ChatCliOptions,
+): Promise<number> {
   const lines = createInterface({
     input: options.stdin,
     crlfDelay: Infinity,
     terminal: false,
   });
   const lineIterator = lines[Symbol.asyncIterator]();
-  const lineBroker = createChatLineBroker(lineIterator);
-  const releaseTerminalConfirmationHandler =
-    options.toolConfirmationBridge?.installTerminalHandler(
-      createTerminalToolConfirmationHandler({
-        lines: lineBroker,
-        stdout: options.stdout,
-      }),
-    );
-  options.stdout.write(
-    `${conversation.session.character.displayName} is ready.\n`,
-  );
-  options.stdout.write(promptTextFor(conversation));
+  // One shared in-flight read guards against double reads; the REPL waits
+  // out the confirmation chain besides, so a line typed under a visible
+  // [y/N] always answers that prompt and never becomes a chat message.
+  let inFlightLine: Promise<string | undefined> | undefined;
+  const nextLine = (): Promise<string | undefined> => {
+    inFlightLine ??= lineIterator.next().then(next => {
+      inFlightLine = undefined;
+
+      return next.done === true ? undefined : next.value;
+    });
+
+    return inFlightLine;
+  };
+  let bootFailure: string | undefined;
+  // Between a prompt and its answer the REPL is mid-deliver, so a
+  // confirmation is the only reader of the line stream.
+  let confirmations: Promise<void> = Promise.resolve();
+  const stopListening = gateway.events(event => {
+    if (event.kind === 'turn_progress') {
+      if (event.progress.kind === 'visible_reply') {
+        options.stdout.write(
+          `${event.progress.speakerName}: ${event.progress.text}\n`,
+        );
+      }
+    } else if (event.kind === 'confirmation_requested') {
+      // Concurrent requests chain: each prompt prints only when it is next
+      // and consumes its own line, so one keystroke never approves two
+      // proposed effects. The person approves exactly what will happen:
+      // summary and the full proposed change, never the summary alone.
+      confirmations = confirmations.then(() => {
+        // Expired while queued behind earlier prompts: the broker already
+        // cancelled it, and asking now would feed the answer to the REPL.
+        if (Date.now() >= event.deadlineAt) {
+          gateway.answerConfirmation(event.id, 'denied');
+          return;
+        }
+
+        options.stdout.write(
+          `Confirm ${event.request.toolName} (${event.request.pluginId}): ` +
+            `${event.request.summary}\n` +
+            `${JSON.stringify(event.request.preview, null, 2)}\n[y/N] `,
+        );
+
+        return nextLine().then(
+          line => {
+            // Landed past the deadline: deny outright rather than trust the
+            // host's timer to have cancelled first — and say the line was
+            // discarded.
+            if (Date.now() >= event.deadlineAt) {
+              options.stderr.write(
+                'Confirmation timed out; the answer was discarded.\n',
+              );
+              gateway.answerConfirmation(event.id, 'denied');
+              return;
+            }
+
+            gateway.answerConfirmation(
+              event.id,
+              cliPromptAnswerIsYes(line) ? 'approved' : 'denied',
+            );
+          },
+          () => {
+            // A failed read is a denial, never a parked confirmation.
+            gateway.answerConfirmation(event.id, 'denied');
+          },
+        );
+      });
+    } else if (event.state === 'failed' && event.message !== undefined) {
+      // Turn failures reach the user through the delivery outcome; this
+      // remembers the one failure with no outcome to carry it.
+      bootFailure ??= event.message;
+    }
+  });
 
   try {
-    for (;;) {
-      const nextLine = await lineBroker.next();
+    await gateway.startCharacter(characterId);
 
-      if (nextLine.status !== 'line') {
+    if (bootFailure !== undefined) {
+      throw new CliUsageError(bootFailure);
+    }
+
+    const ref = await gateway.openDirectConversation(characterId);
+
+    options.stdout.write(`${characterId} is ready.\n`);
+
+    for (;;) {
+      // The prompt appears only once the confirmation chain is idle, so
+      // every keystroke answers the prompt that is actually on screen.
+      await confirmations;
+      options.stdout.write('> ');
+
+      const line = await nextLine();
+
+      if (line === undefined || line.trim() === '/exit') {
         break;
       }
 
-      const lineResult = await handleChatInputLine({
-        options,
-        line: nextLine.value,
+      if (line.trim().length === 0) {
+        continue;
+      }
+
+      const outcome = await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: line,
       });
 
-      if (lineResult.status === 'exit') {
-        return lineResult.exitCode;
+      if (outcome.status !== 'completed') {
+        options.stderr.write(`Error: ${outcome.message}\n`);
       }
 
-      options.stdout.write(promptTextFor(conversation));
+      // The gateway restarts the character, but this terminal's attachment
+      // died with the turn; exiting nonzero beats chatting into the void.
+      if (outcome.status === 'failed') {
+        return 1;
+      }
     }
 
-    await endSession({
-      session: conversation.session,
-      logStore: conversation.logStore,
-      pluginHost,
-    });
+    return 0;
   } finally {
-    releaseTerminalConfirmationHandler?.();
+    stopListening();
     lines.close();
   }
-
-  return 0;
-}
-
-function promptTextFor(conversation: ActiveConversation): string {
-  return `${conversation.session.userSpeaker.displayName}: `;
-}
-
-type ChatInputLineResult =
-  | {readonly status: 'continue'}
-  | {readonly status: 'exit'; readonly exitCode: number};
-
-async function handleChatInputLine(options: {
-  readonly options: RunChatCliOptions;
-  readonly line: string;
-}): Promise<ChatInputLineResult> {
-  const {conversation, pluginHost} = options.options;
-
-  if (options.line.trim() === exitCommand) {
-    await endSession({
-      session: conversation.session,
-      logStore: conversation.logStore,
-      pluginHost,
-    });
-    return {status: 'exit', exitCode: 0};
-  }
-
-  try {
-    const delivery = await deliverUserMessage({
-      conversation,
-      line: options.line,
-      pluginHost,
-      ...(options.options.roleModelAdapter === undefined
-        ? {}
-        : {roleModelAdapter: options.options.roleModelAdapter}),
-      ...(options.options.characterPersonaSections === undefined
-        ? {}
-        : {
-            characterPersonaSections: options.options.characterPersonaSections,
-          }),
-      ...(options.options.characterRef === undefined
-        ? {}
-        : {characterRef: options.options.characterRef}),
-      ...(options.options.contextWindowTokens === undefined
-        ? {}
-        : {contextWindowTokens: options.options.contextWindowTokens}),
-      onProgress(progressEvent) {
-        writeRuntimeProgress(options.options.stdout, progressEvent);
-      },
-    });
-    const result = mapDelivery(delivery);
-
-    writeChatRuntimeResult({options: options.options, result});
-
-    if (delivery.status === 'completed' && delivery.rotation !== undefined) {
-      writeRotationWarnings(options.options.stderr, delivery.rotation);
-    }
-
-    if (result.status === 'rejected' && result.fatal) {
-      return {status: 'exit', exitCode: 1};
-    }
-  } catch (error: unknown) {
-    writeChatInputError(options.options.stderr, error);
-    return {status: 'exit', exitCode: 1};
-  }
-
-  return {status: 'continue'};
-}
-
-function mapDelivery(delivery: UserMessageDelivery): ChatRuntimeTurn {
-  switch (delivery.status) {
-    case 'completed':
-    case 'rejected':
-      return mapRuntimeResult(delivery.turn);
-    case 'input_rejected':
-      return mapInputRejectionResult(delivery.turn);
-    case 'failed':
-      if (isCliTerminalError(delivery.error)) {
-        throw delivery.error;
-      }
-
-      return mapUnexpectedRuntimeFailureResult(
-        delivery.identity,
-        delivery.traceEntries,
-        delivery.rawEvents,
-      );
-  }
-}
-
-function writeChatRuntimeResult(options: {
-  readonly options: RunChatCliOptions;
-  readonly result: ChatRuntimeTurn;
-}): void {
-  if (
-    options.result.status === 'rejected' &&
-    options.options.traceMode !== true
-  ) {
-    options.options.stderr.write(`Error: ${options.result.errorMessage}\n`);
-  }
-
-  if (options.options.traceMode === true) {
-    writeTraceSummary(options.options.stderr, options.result.traceSummary);
-  }
-}
-
-function writeChatInputError(
-  stderr: NodeJS.WritableStream,
-  error: unknown,
-): void {
-  stderr.write(
-    `Error: ${
-      isCliTerminalError(error)
-        ? formatCliTerminalErrorMessage(error)
-        : chatFailedBeforeReplyMessage
-    }\n`,
-  );
-}
-
-function mapRuntimeResult(
-  result: LocalRuntimeUserMessageResult,
-): ChatRuntimeTurn {
-  if (result.status === 'completed') {
-    return {
-      status: 'completed',
-      traceSummary: createTraceSummary(
-        result.event,
-        'completed',
-        deriveRuntimeTraceEntries(result.rawEventLogRecords),
-        undefined,
-        result.rawEvent,
-        result.rawEventLogRecords,
-      ),
-    };
-  }
-
-  // Session-safe by construction: the rejection was already durably appended.
-  return {
-    status: 'rejected',
-    errorMessage: result.message,
-    fatal: false,
-    traceSummary: createTraceSummary(
-      result.event,
-      'rejected',
-      deriveRuntimeTraceEntries(result.rawEventLogRecords),
-      result.message,
-      result.rawEvent,
-      result.rawEventLogRecords,
-    ),
-  };
-}
-
-function mapInputRejectionResult(
-  result: LocalRuntimeUserMessageInputRejectedResult,
-): RejectedChatRuntimeTurn {
-  return {
-    status: 'rejected',
-    errorMessage: result.message,
-    fatal: false,
-    traceSummary: createTraceSummary(
-      result.identity,
-      'rejected',
-      deriveRuntimeTraceEntries(result.rawEventLogRecords),
-      result.message,
-      result.rawEvent,
-      result.rawEventLogRecords,
-    ),
-  };
-}
-
-function mapUnexpectedRuntimeFailureResult(
-  identity: TraceIdentity,
-  traceEntries: readonly RuntimeTraceEntry[],
-  rawEvents: readonly RawEventLogRecord[],
-): RejectedChatRuntimeTurn {
-  return {
-    status: 'rejected',
-    errorMessage: chatFailedBeforeReplyMessage,
-    fatal: true,
-    traceSummary: createTraceSummary(
-      identity,
-      'rejected',
-      traceEntries,
-      chatFailedBeforeReplyMessage,
-      undefined,
-      rawEvents,
-    ),
-  };
 }
 
 if (isMainModule(import.meta.url)) {
