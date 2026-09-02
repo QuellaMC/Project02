@@ -18,12 +18,15 @@ export type GatewayServer = {
    * Stops in the order that loses nothing. New API requests answer 503 at
    * once, event streams end, the gateway drains its turns and releases its
    * leases with the socket still open — so an accepted turn still receives
-   * its outcome — and only then does the listener close.
+   * its outcome — and only then does the listener close, giving a response
+   * still being written a moment to finish before its socket is cut.
    */
   close(): Promise<void>;
 };
 
 const loopback = '127.0.0.1';
+/** How long an answer still on its way out may take before the socket goes. */
+const responseGraceMs = 2_000;
 
 /** The daemon's one socket: the API and the UI on a loopback port. */
 export async function createGatewayServer(
@@ -48,12 +51,22 @@ export async function createGatewayServer(
       events.closeAll();
       await options.gateway.stop();
       await new Promise<void>(resolve => {
-        server.close(() => {
+        const closed = (): void => {
+          clearTimeout(cutoff);
           resolve();
-        });
+        };
+        // An outcome the gateway just produced may still be leaving on a
+        // slow socket; idle connections go now, active ones get a moment.
+        const cutoff = setTimeout(() => {
+          if ('closeAllConnections' in server) {
+            server.closeAllConnections();
+          }
+        }, responseGraceMs);
 
-        if ('closeAllConnections' in server) {
-          server.closeAllConnections();
+        server.close(closed);
+
+        if ('closeIdleConnections' in server) {
+          server.closeIdleConnections();
         }
       });
     },
