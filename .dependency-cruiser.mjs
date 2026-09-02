@@ -144,6 +144,21 @@ export default {
       to: {path: '^src/gateway/'},
     },
     {
+      name: 'gateway-client-sees-only-the-wire',
+      comment:
+        'src/gateway/client is a client of the wire: it may value-import only ' +
+        'gateway/api and itself, never the façade, the runtimes, or the HTTP ' +
+        'server. The Hono app type it derives its calls from is imported ' +
+        'type-only. Green (zero baseline entries).',
+      severity: 'error',
+      from: {path: '^src/gateway/client/'},
+      to: {
+        path: '^src/gateway/',
+        pathNot: ['^src/gateway/client/', '^src/gateway/api/'],
+        dependencyTypesNot: ['type-only'],
+      },
+    },
+    {
       name: 'nothing-imports-cli',
       comment:
         'Rule 4 — src/cli is a pure composition shell; no production code ' +
