@@ -158,7 +158,10 @@ describe('chat transcript', () => {
     harness.release();
     await catchingUp;
 
-    expect(harness.printed()).toBe('Your line "mine" did land.\n');
+    // Landed first, in order; and, as its own turn, how it ended.
+    expect(harness.printed()).toBe(
+      'Your line "mine" did land.\nYour line "mine": its turn was rejected.\n',
+    );
   });
 
   it('walks earlier pages until the anchor when more was missed than one page holds', async () => {
@@ -265,16 +268,30 @@ describe('chat transcript', () => {
     // the stream can carry the turn's end before the answer fails. The
     // line's own record decides whether it reached the thread at all.
     transcript.showProgress(own(4, 'fourth', 'c4'));
-    transcript.turnEnded('c4', 'rejected');
+    transcript.turnEnded('c4', 'rejected', 'the reply was not usable');
     transcript.expectLanding('c4', 'fourth');
     transcript.turnEnded('c5', 'failed');
     transcript.expectLanding('c5', 'fifth');
     expect(harness.printed()).toContain(
-      'Your line "fourth" did reach the character; its turn was rejected.',
+      'Your line "fourth" did reach the character; its turn was rejected: the reply was not usable.',
     );
     expect(harness.printed()).toContain(
       'Your line "fifth" was failed before it reached the thread; send it again',
     );
+
+    // Landed first, ended later: the ending is still said, since this
+    // terminal's own turns are not warned about from the stream.
+    transcript.expectLanding('c6', 'sixth');
+    transcript.showProgress(own(6, 'sixth', 'c6'));
+    expect(harness.printed()).toContain('Your line "sixth" did land.');
+    transcript.turnEnded('c6', 'rejected', 'no reply came');
+    expect(harness.printed()).toContain(
+      'Your line "sixth": its turn was rejected: no reply came.',
+    );
+    transcript.expectLanding('c7', 'seventh');
+    transcript.showProgress(own(7, 'seventh', 'c7'));
+    transcript.turnEnded('c7', 'completed');
+    expect(harness.printed()).not.toContain('"seventh": its turn');
   });
 
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {
