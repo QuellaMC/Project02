@@ -110,6 +110,36 @@ describe('gateway reference client', () => {
     await close();
   });
 
+  it('waits for an async bootstrap before handing on events, and fails with it', async () => {
+    const {gateway, client, close} = await startServer();
+    const order: string[] = [];
+    const abort = new AbortController();
+    const following = client.events(event => order.push(event.kind), {
+      signal: abort.signal,
+      onReady: async () => {
+        // Something happens on the daemon while the snapshots are read.
+        await gateway.startCharacter('mira');
+        await new Promise(resolve => setTimeout(resolve, 50));
+        order.push('bootstrap');
+      },
+    });
+
+    await vi.waitFor(() => {
+      expect(order).toContain('state_changed');
+    });
+    expect(order[0]).toBe('bootstrap');
+    abort.abort();
+    await following;
+
+    await expect(
+      client.events(() => undefined, {
+        signal: new AbortController().signal,
+        onReady: () => Promise.reject(new Error('snapshot failed')),
+      }),
+    ).rejects.toThrow('snapshot failed');
+    await close();
+  });
+
   it('lets go of each finished stream, so reconnects never pile up abort listeners', async () => {
     const {server, client, close} = await startServer();
     const readies: boolean[] = [];
@@ -117,7 +147,9 @@ describe('gateway reference client', () => {
     const following = client.events(() => undefined, {
       signal: abort.signal,
       retryMs: 10,
-      onReady: ({reconnected}) => readies.push(reconnected),
+      onReady: ({reconnected}) => {
+        readies.push(reconnected);
+      },
     });
 
     for (let round = 1; round <= 4; round += 1) {
@@ -146,7 +178,9 @@ describe('gateway reference client', () => {
     const following = client.events(event => events.push(event), {
       signal: abort.signal,
       retryMs: 20,
-      onReady: ({reconnected}) => readies.push(reconnected),
+      onReady: ({reconnected}) => {
+        readies.push(reconnected);
+      },
     });
 
     await vi.waitFor(() => {

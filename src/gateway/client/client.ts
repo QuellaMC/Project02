@@ -29,8 +29,15 @@ export type GatewayClientOptions =
 
 export type GatewayEventsOptions = {
   readonly signal: AbortSignal;
-  /** Runs on every `ready` frame; the caller reads its snapshots here. */
-  readonly onReady?: (info: {readonly reconnected: boolean}) => void;
+  /**
+   * Runs on every `ready` frame; the caller reads its snapshots here. The
+   * stream waits for a returned promise, so the snapshots are installed
+   * before any event that followed the handshake is handed on — and a
+   * bootstrap that fails ends the stream with its error.
+   */
+  readonly onReady?: (info: {
+    readonly reconnected: boolean;
+  }) => void | Promise<void>;
   /** The pause before reconnecting after the stream ends. */
   readonly retryMs?: number;
 };
@@ -149,9 +156,11 @@ export function createGatewayClient(
           });
 
           await rejectUnlessOk(response);
-          await followStream(response, listener, () => {
-            eventsOptions.onReady?.({reconnected});
+          await followStream(response, listener, async () => {
+            const wasReconnect = reconnected;
+
             reconnected = true;
+            await eventsOptions.onReady?.({reconnected: wasReconnect});
           });
         } catch (error: unknown) {
           if (aborted()) {
@@ -257,7 +266,7 @@ function resolveOptions(options: GatewayClientOptions): {
 async function followStream(
   response: Response,
   listener: (event: GatewayEvent) => void,
-  onReady: () => void,
+  onReady: () => void | Promise<void>,
 ): Promise<void> {
   if (response.body === null) {
     return;
@@ -283,7 +292,7 @@ async function followStream(
 
         if (frame.event === 'ready') {
           assertProtocol(data);
-          onReady();
+          await onReady();
         } else if (isGatewayEvent(data)) {
           listener(data);
         }
