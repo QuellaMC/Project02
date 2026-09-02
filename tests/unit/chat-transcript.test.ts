@@ -233,14 +233,18 @@ describe('chat transcript', () => {
     transcript.showProgress(own(3, 'third', 'c3'));
     expect(harness.printed()).toContain('Your line "third" did land.');
 
-    // Or until the daemon says how its turn ended.
+    // Or until the daemon says how its turn ended — in either order, since
+    // the stream can carry the turn's end before the answer fails.
     transcript.expectLanding('c4', 'fourth');
     transcript.settleLanding('c4', 'rejected');
-    transcript.settleLanding('c5', 'completed');
+    transcript.settleLanding('c5', 'failed');
+    transcript.expectLanding('c5', 'fifth');
     expect(harness.printed()).toContain(
       'Your line "fourth" did reach the character; its turn was rejected.',
     );
-    expect(harness.printed()).not.toContain('c5');
+    expect(harness.printed()).toContain(
+      'Your line "fifth" did reach the character; its turn was failed.',
+    );
   });
 
   it("keeps this terminal's own lines off its screen while counting them as shown", async () => {

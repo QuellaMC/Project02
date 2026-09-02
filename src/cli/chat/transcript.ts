@@ -42,6 +42,8 @@ type ShownMessage = {
 };
 
 const catchUpPageSize = 100;
+/** How many of this terminal's own recent lines stay accounted for. */
+const recentOwnLines = 64;
 /** The thread's recent tail, shown when a terminal joins it. */
 const joinTailSize = 20;
 /** How long a settled turn may take to show up on the stream. */
@@ -55,10 +57,29 @@ export async function createTranscript(options: {
   readonly stdout: NodeJS.WritableStream;
 }): Promise<Transcript> {
   const shown = new Set<string>();
-  // This terminal's own lines the thread has, by the id it sent them with.
+  // What is known about this terminal's own lines, by the id each was sent
+  // with: on the thread, and how its turn ended. Both may arrive before the
+  // line is asked about — the stream can beat a failing answer — so both
+  // are kept, for the recent lines it could concern.
   const landed = new Set<string>();
+  const ended = new Map<string, string>();
   const uncertain = new Map<string, string>();
   const noted = new Set<string>();
+  const remember = <T>(recent: Set<T> | Map<T, unknown>, key: T): void => {
+    for (const oldest of recent.keys()) {
+      if (recent.size < recentOwnLines) {
+        break;
+      }
+
+      recent.delete(oldest);
+    }
+
+    if (recent instanceof Set) {
+      recent.add(key);
+    }
+  };
+  const verdict = (text: string, status: string): string =>
+    `Your line "${text}" did reach the character; its turn ${status === 'completed' ? 'completed' : `was ${status}`}.`;
   const awaiting: {readonly ids: readonly string[]; resolve(): void}[] = [];
   const say = (text: string): void => {
     options.stdout.write(`${text}\n`);
@@ -77,7 +98,7 @@ export async function createTranscript(options: {
     if (message.source !== options.source) {
       options.stdout.write(`${message.speakerName}: ${message.text}\n`);
     } else if (message.clientMessageId !== undefined) {
-      landed.add(message.clientMessageId);
+      remember(landed, message.clientMessageId);
 
       const text = uncertain.get(message.clientMessageId);
 
@@ -210,7 +231,11 @@ export async function createTranscript(options: {
     },
     settled: () => queue,
     expectLanding(clientMessageId, text) {
-      if (landed.has(clientMessageId)) {
+      const status = ended.get(clientMessageId);
+
+      if (status !== undefined) {
+        say(verdict(text, status));
+      } else if (landed.has(clientMessageId)) {
         say(`Your line "${text}" did land.`);
       } else {
         uncertain.set(clientMessageId, text);
@@ -221,10 +246,13 @@ export async function createTranscript(options: {
 
       if (text !== undefined) {
         uncertain.delete(clientMessageId);
-        say(
-          `Your line "${text}" did reach the character; its turn ${status === 'completed' ? 'completed' : `was ${status}`}.`,
-        );
+        say(verdict(text, status));
+
+        return;
       }
+
+      remember(ended, clientMessageId);
+      ended.set(clientMessageId, status);
     },
     whenShown: messageIds =>
       messageIds.every(id => shown.has(id))
