@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import type {GatewayEvent} from '../../src/gateway/index.ts';
 import {createConfirmationBroker} from '../../src/gateway/runtime/confirmation-broker.ts';
@@ -20,10 +20,10 @@ function createBrokerHarness() {
       }
     },
   });
-  const ask = (signal?: AbortSignal) =>
+  const ask = (signal?: AbortSignal, deadlineAt = Date.now() + 60_000) =>
     broker.handler(request, {
       signal: signal ?? new AbortController().signal,
-      deadlineAt: 1_000,
+      deadlineAt,
     });
 
   return {broker, events, ask};
@@ -37,14 +37,12 @@ describe('gateway confirmation broker', () => {
 
     expect(events).toHaveLength(2);
     expect(events[0]?.id).not.toBe(events[1]?.id);
-    expect(events[0]).toMatchObject({
-      characterId: 'mira',
-      request,
-      deadlineAt: 1_000,
-    });
+    expect(events[0]).toMatchObject({characterId: 'mira', request});
+    expect(events[0]?.deadlineAt).toBeTypeOf('number');
 
-    broker.answer(events[0]?.id ?? '', 'approved');
-    broker.answer(events[1]?.id ?? '', 'denied');
+    expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('answered');
+    expect(broker.answer(events[1]?.id ?? '', 'denied')).toBe('answered');
+    expect(broker.answer(events[1]?.id ?? '', 'denied')).toBe('unknown');
 
     await expect(first).resolves.toEqual({status: 'approved'});
     await expect(second).resolves.toEqual({status: 'denied'});
@@ -58,8 +56,26 @@ describe('gateway confirmation broker', () => {
     abort.abort();
 
     await expect(decision).resolves.toEqual({status: 'cancelled'});
-    broker.answer(events[0]?.id ?? '', 'approved');
+    expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('unknown');
     await expect(decision).resolves.toEqual({status: 'cancelled'});
+  });
+
+  it('refuses an answer at the deadline even before the host aborts', async () => {
+    vi.useFakeTimers();
+
+    try {
+      vi.setSystemTime(10_000);
+
+      const {broker, events, ask} = createBrokerHarness();
+      const decision = ask(undefined, 11_000);
+
+      vi.setSystemTime(11_000);
+
+      expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('expired');
+      await expect(decision).resolves.toEqual({status: 'cancelled'});
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('cancels everything still parked on cancelAll', async () => {
@@ -88,7 +104,7 @@ describe('gateway confirmation broker', () => {
     const afterRestart = ask();
 
     expect(events).toHaveLength(1);
-    broker.answer(events[0]?.id ?? '', 'approved');
+    expect(broker.answer(events[0]?.id ?? '', 'approved')).toBe('answered');
     await expect(afterRestart).resolves.toEqual({status: 'approved'});
   });
 });

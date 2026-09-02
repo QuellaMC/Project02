@@ -3,7 +3,11 @@ import {dirname, join} from 'node:path';
 
 import {describe, expect, it, vi} from 'vitest';
 
-import {createGateway, type GatewayEvent} from '../../src/gateway/index.ts';
+import {
+  createGateway,
+  type Gateway,
+  type GatewayEvent,
+} from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {ensureInitializedProject02Store} from '../../src/runtime/config/index.ts';
@@ -38,6 +42,16 @@ function replyAdapter(
   };
 }
 
+async function open(gateway: Gateway, characterId: string) {
+  const outcome = await gateway.openDirectConversation(characterId);
+
+  if (outcome.status !== 'opened') {
+    throw new Error(outcome.message);
+  }
+
+  return outcome;
+}
+
 async function createGatewayHome(): Promise<string> {
   const homeRoot = join(
     createTestTempRoot('project02-gateway-facade-'),
@@ -68,8 +82,8 @@ describe('gateway façade', () => {
     await gateway.startCharacter('mira');
     await gateway.startCharacter('zeta');
 
-    const mira = await gateway.openDirectConversation('mira');
-    const zeta = await gateway.openDirectConversation('zeta');
+    const mira = await open(gateway, 'mira');
+    const zeta = await open(gateway, 'zeta');
 
     expect(mira.conversationId).not.toBe(zeta.conversationId);
 
@@ -97,10 +111,9 @@ describe('gateway façade', () => {
     expect(adapter.maxInFlight()).toBe(2);
 
     await gateway.stop();
-    expect(gateway.characters().map(character => character.state)).toEqual([
-      'stopped',
-      'stopped',
-    ]);
+    expect(
+      gateway.health().characters.map(character => character.state),
+    ).toEqual(['stopped', 'stopped']);
   });
 
   it('reports installed characters with enabled and lifecycle state', async () => {
@@ -112,14 +125,14 @@ describe('gateway façade', () => {
       createPluginHost: () => createRuntimePluginHost({plugins: []}),
     });
 
-    expect(gateway.characters()).toEqual([
-      {id: 'mira', enabled: true, state: 'not_started'},
+    expect(gateway.health().characters).toEqual([
+      {id: 'mira', displayName: 'Mira', enabled: true, state: 'not_started'},
     ]);
 
     await gateway.startCharacter('mira');
 
-    expect(gateway.characters()).toEqual([
-      {id: 'mira', enabled: true, state: 'ready'},
+    expect(gateway.health().characters).toEqual([
+      {id: 'mira', displayName: 'Mira', enabled: true, state: 'ready'},
     ]);
     await gateway.stop();
   });
@@ -135,7 +148,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const summary = gateway.characters()[0];
+    const summary = gateway.health().characters[0];
 
     expect(summary).toMatchObject({enabled: false, state: 'failed'});
     expect(summary?.diagnostic).toContain('disabled');
@@ -146,7 +159,13 @@ describe('gateway façade', () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
 
-    await expect(gateway.startCharacter('ghost')).rejects.toThrow(
+    const outcome = await gateway.startCharacter('ghost');
+
+    expect(outcome).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_character',
+    });
+    expect(outcome.status === 'refused' && outcome.message).toContain(
       'was not found',
     );
   });
@@ -167,7 +186,7 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({location: {configPath}, env: {}});
 
-    expect(gateway.characters().map(character => character.id)).toEqual([
+    expect(gateway.health().characters.map(character => character.id)).toEqual([
       'mira',
     ]);
 
@@ -175,7 +194,7 @@ describe('gateway façade', () => {
     // keeps the home it bound.
     writeRuntimeConfig(configPath, {project02: {storeRoot: homeB}});
 
-    expect(gateway.characters().map(character => character.id)).toEqual([
+    expect(gateway.health().characters.map(character => character.id)).toEqual([
       'mira',
     ]);
     await gateway.stop();
@@ -197,15 +216,15 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    expect(gateway.characters()[0]).toMatchObject({state: 'failed'});
-    expect(gateway.characters()[0]?.diagnostic).toContain(
+    expect(gateway.health().characters[0]).toMatchObject({state: 'failed'});
+    expect(gateway.health().characters[0]?.diagnostic).toContain(
       'contextWindowTokens',
     );
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {});
     await gateway.startCharacter('mira');
 
-    expect(gateway.characters()[0]?.state).toBe('ready');
+    expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
   });
 
@@ -228,11 +247,11 @@ describe('gateway façade', () => {
       chmodSync(dataRoot, 0o755);
     }
 
-    expect(gateway.characters()[0]?.state).toBe('failed');
+    expect(gateway.health().characters[0]?.state).toBe('failed');
 
     await gateway.startCharacter('mira');
 
-    expect(gateway.characters()[0]?.state).toBe('ready');
+    expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
   });
 
@@ -249,7 +268,13 @@ describe('gateway façade', () => {
 
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
 
-    await expect(gateway.startCharacter('broken')).rejects.toThrow(
+    const outcome = await gateway.startCharacter('broken');
+
+    expect(outcome).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_character',
+    });
+    expect(outcome.status === 'refused' && outcome.message).toContain(
       'invalid_descriptor',
     );
   });
@@ -265,7 +290,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const ref = await gateway.openDirectConversation('mira');
+    const ref = await open(gateway, 'mira');
 
     writeRuntimeConfig(
       join(characterDataDirPath(homeRoot, 'mira'), 'config.json'),
@@ -290,7 +315,7 @@ describe('gateway façade', () => {
     }
 
     await vi.waitFor(() => {
-      const summary = gateway.characters()[0];
+      const summary = gateway.health().characters[0];
 
       expect(summary?.state).toBe('failed');
       expect(summary?.diagnostic).toContain('disabled');
@@ -309,7 +334,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const ref = await gateway.openDirectConversation('mira');
+    const ref = await open(gateway, 'mira');
     const sessionsRoot = join(
       characterDataDirPath(homeRoot, 'mira'),
       'sessions',
@@ -329,7 +354,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const reopened = await gateway.openDirectConversation('mira');
+    const reopened = await open(gateway, 'mira');
 
     expect(reopened.conversationId).toBe(ref.conversationId);
     await gateway.stop();
@@ -346,7 +371,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const ref = await gateway.openDirectConversation('mira');
+    const ref = await open(gateway, 'mira');
     const sessionsRoot = join(
       characterDataDirPath(homeRoot, 'mira'),
       'sessions',
@@ -376,7 +401,7 @@ describe('gateway façade', () => {
     await gateway.stop();
 
     expect(readyAfterStopBegan).toEqual([]);
-    expect(gateway.characters()[0]?.state).toBe('stopped');
+    expect(gateway.health().characters[0]?.state).toBe('stopped');
   });
 
   it('joins the automatic recovery when a client reattaches straight away', async () => {
@@ -390,7 +415,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const ref = await gateway.openDirectConversation('mira');
+    const ref = await open(gateway, 'mira');
     const sessionsRoot = join(
       characterDataDirPath(homeRoot, 'mira'),
       'sessions',
@@ -408,7 +433,7 @@ describe('gateway façade', () => {
       chmodSync(sessionsRoot, 0o755);
     }
 
-    const reopened = await gateway.openDirectConversation('mira');
+    const reopened = await open(gateway, 'mira');
 
     expect(reopened.conversationId).toBe(ref.conversationId);
     await gateway.stop();
@@ -437,7 +462,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const ref = await gateway.openDirectConversation('mira');
+    const ref = await open(gateway, 'mira');
     const message = {
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
@@ -467,7 +492,7 @@ describe('gateway façade', () => {
     ]);
 
     await vi.waitFor(() => {
-      expect(gateway.characters()[0]?.state).toBe('ready');
+      expect(gateway.health().characters[0]?.state).toBe('ready');
     });
 
     await gateway.openDirectConversation('mira');
@@ -489,10 +514,11 @@ describe('gateway façade', () => {
     // The start creates the runtime mid-race; stop joins it and wins.
     await Promise.all([gateway.startCharacter('mira'), gateway.stop()]);
 
-    expect(gateway.characters()[0]?.state).toBe('stopped');
-    await expect(gateway.startCharacter('mira')).rejects.toThrow(
-      'gateway is stopped',
-    );
+    expect(gateway.health().characters[0]?.state).toBe('stopped');
+    await expect(gateway.startCharacter('mira')).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'gateway_stopped',
+    });
   });
 
   it('never leaks a conversation lease when an attach races a stop', async () => {
@@ -517,6 +543,7 @@ describe('gateway façade', () => {
 
     await fresh.startCharacter('mira');
     await expect(fresh.openDirectConversation('mira')).resolves.toMatchObject({
+      status: 'opened',
       characterId: 'mira',
     });
     await fresh.stop();
@@ -533,7 +560,7 @@ describe('gateway façade', () => {
 
     await gateway.startCharacter('mira');
 
-    const ref = await gateway.openDirectConversation('mira');
+    const ref = await open(gateway, 'mira');
     const sessionsRoot = join(
       characterDataDirPath(homeRoot, 'mira'),
       'sessions',
@@ -553,7 +580,7 @@ describe('gateway façade', () => {
 
     await gateway.stop();
     await new Promise(resolve => setTimeout(resolve, 50));
-    expect(gateway.characters()[0]?.state).toBe('stopped');
+    expect(gateway.health().characters[0]?.state).toBe('stopped');
   });
 
   it('joins a start already in flight instead of resolving early', async () => {
@@ -572,7 +599,7 @@ describe('gateway façade', () => {
         .then(() => gateway.openDirectConversation('mira')),
     ]);
 
-    expect(gateway.characters()[0]?.state).toBe('ready');
+    expect(gateway.health().characters[0]?.state).toBe('ready');
     await gateway.stop();
   });
 
@@ -590,7 +617,7 @@ describe('gateway façade', () => {
     gateway.events(event => events.push(event));
     await gateway.startCharacter('mira');
 
-    const summary = gateway.characters()[0];
+    const summary = gateway.health().characters[0];
 
     expect(summary).toMatchObject({state: 'failed'});
     expect(summary?.diagnostic).toContain('contextWindowTokens');
@@ -601,5 +628,115 @@ describe('gateway façade', () => {
         event => event.kind === 'state_changed' && event.state === 'starting',
       ),
     ).toHaveLength(1);
+  });
+  it('reports config and package problems the roster cannot carry', async () => {
+    const homeRoot = await createGatewayHome();
+    const packageRoot = join(homeRoot, 'characters', 'broken');
+
+    mkdirSync(packageRoot, {recursive: true});
+    writeFileSync(
+      join(packageRoot, 'project02.character.json'),
+      '{not json',
+      'utf8',
+    );
+    writeRuntimeConfig(join(homeRoot, 'config.json'), {
+      project02: {character: 'mira'},
+    });
+
+    const health = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+    }).health();
+
+    expect(health.protocolVersion).toBe(1);
+    expect(health.homeRoot).toBe(homeRoot);
+    expect(health.config.diagnostics).toEqual([
+      expect.objectContaining({severity: 'error', path: 'project02.character'}),
+    ]);
+    expect(health.packages.diagnostics).toEqual([
+      expect.objectContaining({code: 'invalid_descriptor'}),
+    ]);
+    expect(health.packages.diagnostics[0]?.path).toContain('broken');
+    expect(health.characters.map(character => character.id)).toEqual(['mira']);
+  });
+
+  it('tells an installed but unstarted character apart from an unknown one', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
+
+    await expect(gateway.openDirectConversation('mira')).resolves.toMatchObject(
+      {status: 'refused', reason: 'character_unavailable'},
+    );
+    const unknown = await gateway.openDirectConversation('ghost');
+
+    expect(unknown).toMatchObject({
+      status: 'refused',
+      reason: 'unknown_character',
+    });
+    expect(unknown.status === 'refused' && unknown.message).toContain('mira');
+    expect(gateway.answerConfirmation('nope', 'approved')).toEqual({
+      status: 'unknown',
+    });
+  });
+
+  it('refuses a thread another gateway holds, then opens it once that one lets go', async () => {
+    const homeRoot = await createGatewayHome();
+    const options = {
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    };
+    const first = createGateway(options);
+    const second = createGateway(options);
+
+    await first.startCharacter('mira');
+    await second.startCharacter('mira');
+
+    const held = await open(first, 'mira');
+
+    await expect(second.openDirectConversation('mira')).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'conversation_busy',
+    });
+    // The holder keeps its thread, and the refusal left nothing cached.
+    await expect(first.openDirectConversation('mira')).resolves.toMatchObject({
+      status: 'opened',
+      conversationId: held.conversationId,
+    });
+    await first.stop();
+    await expect(second.openDirectConversation('mira')).resolves.toMatchObject({
+      status: 'opened',
+      conversationId: held.conversationId,
+    });
+    await second.stop();
+  });
+
+  it('reports an unreadable conversation store as a failure, not a bug', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+    const conversationsRoot = join(homeRoot, 'conversations');
+
+    await gateway.startCharacter('mira');
+    mkdirSync(conversationsRoot, {recursive: true});
+    chmodSync(conversationsRoot, 0o000);
+
+    try {
+      await expect(
+        gateway.openDirectConversation('mira'),
+      ).resolves.toMatchObject({status: 'failed', code: 'read_failed'});
+    } finally {
+      chmodSync(conversationsRoot, 0o755);
+    }
+
+    await expect(gateway.openDirectConversation('mira')).resolves.toMatchObject(
+      {status: 'opened'},
+    );
+    await gateway.stop();
   });
 });

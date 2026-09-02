@@ -19,17 +19,22 @@ export {
 } from './app/index.ts';
 export {
   createGateway,
+  gatewayProtocolVersion,
+  type AnswerOutcome,
   type CharacterRuntimeState,
   type CharacterSummary,
-  type ConversationRef,
   type CreateGatewayOptions,
   type Gateway,
   type GatewayConfirmationDecision,
   type GatewayEvent,
   type GatewayEventListener,
+  type GatewayHealth,
   type GatewayMessage,
   type GatewayRefusalReason,
   type GatewayVisibleMessage,
+  type OpenOutcome,
+  type StartOutcome,
+  type StorageFailure,
   type TurnOutcome,
   type Unsubscribe,
 } from './gateway/index.ts';

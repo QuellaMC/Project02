@@ -3,20 +3,26 @@ import {
   loadProject02Home,
   prepareProject02CharacterActivation,
   reloadProject02Home,
+  type Project02CharacterListing,
   type Project02Home,
   type Project02HomeOptions,
 } from '../app/index.ts';
 import type {RuntimePluginHost} from '../plugins/index.ts';
 import type {ChatProviderName, RoleModelAdapter} from '../role-model/index.ts';
-import type {
-  CharacterSummary,
-  ConversationRef,
-  Gateway,
-  GatewayEvent,
-  GatewayEventListener,
-  GatewayMessage,
-  TurnOutcome,
-  Unsubscribe,
+import {
+  gatewayProtocolVersion,
+  type AnswerOutcome,
+  type CharacterRuntimeHealth,
+  type CharacterSummary,
+  type Gateway,
+  type GatewayEvent,
+  type GatewayEventListener,
+  type GatewayHealth,
+  type GatewayMessage,
+  type OpenOutcome,
+  type StartOutcome,
+  type TurnOutcome,
+  type Unsubscribe,
 } from './api/contract.ts';
 import {
   createLocalCharacterRuntime,
@@ -30,11 +36,14 @@ export type CreateGatewayOptions = Project02HomeOptions & {
   readonly createPluginHost?: (characterId: string) => RuntimePluginHost;
 };
 
+type Runtimes = ReadonlyMap<string, LocalCharacterRuntime>;
+
 /**
  * The one object a client holds: the registry of character runtimes and the
  * routing between them. Boot problems are per-character states, visible in
- * characters() and the event stream, never throws — the exceptions are
- * client mistakes (starting a disabled character, attaching before start).
+ * health() and the event stream, never throws; a client mistake (opening a
+ * character that was never started, starting on a stopped gateway) is a
+ * refused outcome.
  */
 export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   // The home identity binds once; only its config document reloads per
@@ -116,29 +125,16 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   };
 
   return Object.freeze({
-    characters(): readonly CharacterSummary[] {
-      return Object.freeze(
-        listProject02Characters(loadHome()).map(character => {
-          const health = runtimes.get(character.id)?.health();
-
-          return Object.freeze({
-            id: character.id,
-            enabled: character.enabled,
-            state: health?.state ?? ('not_started' as const),
-            ...(health?.failure === undefined
-              ? {}
-              : {diagnostic: health.failure}),
-          });
-        }),
-      );
+    health(): GatewayHealth {
+      return readHealth(loadHome(), runtimes);
     },
-    async startCharacter(characterId: string): Promise<void> {
+    async startCharacter(characterId: string): Promise<StartOutcome> {
       if (stopped) {
-        throw new TypeError('The gateway is stopped.');
+        return refusedStart('gateway_stopped', 'The gateway is stopped.');
       }
 
       // The same resolution activation will use: a typo'd id fails fast with
-      // the discovered roster instead of a runtime characters() never lists,
+      // the discovered roster instead of a runtime health() never lists,
       // and a broken package reports its own diagnostic instead of posing as
       // not installed. The enabled decision belongs to the runtime's own
       // assembly, where reactivation passes too.
@@ -148,55 +144,43 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       });
 
       if (resolution.status === 'failed') {
-        throw new TypeError(resolution.messages.join(' '));
+        return refusedStart('unknown_character', resolution.messages.join(' '));
       }
 
       const runtime = runtimeFor(characterId);
-      // A second caller joins the start already in flight instead of
-      // resolving before the character is ready.
-      const pending = startsInFlight.get(characterId);
 
-      if (pending !== undefined) {
-        return pending;
-      }
+      await startOrJoin(runtime);
 
-      const state = runtime.health().state;
-
-      if (state !== 'stopped' && state !== 'failed') {
-        return;
-      }
-
-      // Boot problems are states, not throws, so an explicit start is the
-      // operator's retry of a failed character; automatic restarts stay
-      // one-shot. Reactivation releases what the failure left behind.
-      const start = (
-        state === 'failed' ? runtime.reactivate() : runtime.start()
-      ).finally(() => {
-        startsInFlight.delete(characterId);
+      return Object.freeze({
+        status: 'settled' as const,
+        character: settledSummary(
+          loadHome(),
+          runtime,
+          resolution.profile.displayName,
+        ),
       });
-
-      startsInFlight.set(characterId, start);
-
-      return start;
     },
-    async openDirectConversation(
-      characterId: string,
-    ): Promise<ConversationRef> {
+    async openDirectConversation(characterId: string): Promise<OpenOutcome> {
       const runtime = runtimes.get(characterId);
 
       if (runtime === undefined) {
-        throw new TypeError(`Character "${characterId}" has not been started.`);
+        return notStartedOutcome(
+          characterId,
+          listProject02Characters(loadHome()).characters,
+        );
       }
 
       // A start or automatic recovery in flight is joined first, so an
       // attach that follows a fatal turn lands on the restarted character.
       await startsInFlight.get(characterId)?.catch(() => undefined);
 
-      const ref = await runtime.openDirectConversation();
+      const outcome = await runtime.openDirectConversation();
 
-      conversationRoutes.set(ref.conversationId, characterId);
+      if (outcome.status === 'opened') {
+        conversationRoutes.set(outcome.conversationId, characterId);
+      }
 
-      return ref;
+      return outcome;
     },
     async deliver(message: GatewayMessage): Promise<TurnOutcome> {
       const characterId = conversationRoutes.get(message.conversationId);
@@ -215,12 +199,18 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
 
       return runtime.deliver(message);
     },
-    answerConfirmation(id, decision) {
-      // Ids are gateway-unique and a miss is a benign no-op, so routing is
-      // asking everyone.
+    answerConfirmation(id, decision): AnswerOutcome {
+      // Ids are gateway-unique, so routing is asking everyone; the one
+      // runtime that parked the id has the answer.
       for (const runtime of runtimes.values()) {
-        runtime.answerConfirmation(id, decision);
+        const status = runtime.answerConfirmation(id, decision);
+
+        if (status !== 'unknown') {
+          return Object.freeze({status});
+        }
       }
+
+      return Object.freeze({status: 'unknown' as const});
     },
     events(listener: GatewayEventListener): Unsubscribe {
       listeners.add(listener);
@@ -240,5 +230,111 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         [...startsInFlight.values()].map(start => start.catch(() => undefined)),
       );
     },
+  });
+
+  /**
+   * A second caller joins the start already in flight instead of resolving
+   * before the character is ready. Boot problems are states, not throws,
+   * so an explicit start is the operator's retry of a failed character;
+   * automatic restarts stay one-shot. Reactivation releases what the
+   * failure left behind.
+   */
+  function startOrJoin(runtime: LocalCharacterRuntime): Promise<void> {
+    const pending = startsInFlight.get(runtime.characterId);
+
+    if (pending !== undefined) {
+      return pending;
+    }
+
+    const state = runtime.health().state;
+
+    if (state !== 'stopped' && state !== 'failed') {
+      return Promise.resolve();
+    }
+
+    const start = (
+      state === 'failed' ? runtime.reactivate() : runtime.start()
+    ).finally(() => {
+      startsInFlight.delete(runtime.characterId);
+    });
+
+    startsInFlight.set(runtime.characterId, start);
+
+    return start;
+  }
+}
+
+function readHealth(home: Project02Home, runtimes: Runtimes): GatewayHealth {
+  const roster = listProject02Characters(home);
+
+  return Object.freeze({
+    protocolVersion: gatewayProtocolVersion,
+    homeRoot: home.runtimeLocation.homeRoot,
+    config: Object.freeze({diagnostics: home.loadedConfig.diagnostics}),
+    packages: Object.freeze({diagnostics: roster.diagnostics}),
+    characters: Object.freeze(
+      roster.characters.map(character =>
+        summarize(character, runtimes.get(character.id)?.health()),
+      ),
+    ),
+  });
+}
+
+function summarize(
+  character: Project02CharacterListing,
+  health: CharacterRuntimeHealth | undefined,
+): CharacterSummary {
+  return Object.freeze({
+    id: character.id,
+    displayName: character.displayName,
+    enabled: character.enabled,
+    state: health?.state ?? ('not_started' as const),
+    ...(health?.failure === undefined ? {} : {diagnostic: health.failure}),
+  });
+}
+
+/**
+ * The roster is read again after the start settled, so the summary carries
+ * the enabled flag as it stands now; a package that vanished meanwhile
+ * still gets its runtime's own state.
+ */
+function settledSummary(
+  home: Project02Home,
+  runtime: LocalCharacterRuntime,
+  displayName: string,
+): CharacterSummary {
+  const listed = listProject02Characters(home).characters.find(
+    character => character.id === runtime.characterId,
+  );
+
+  return summarize(
+    listed ?? {id: runtime.characterId, displayName, enabled: true},
+    runtime.health(),
+  );
+}
+
+function refusedStart(
+  reason: Extract<StartOutcome, {status: 'refused'}>['reason'],
+  message: string,
+): StartOutcome {
+  return Object.freeze({status: 'refused' as const, reason, message});
+}
+
+/** Installed but never started is a different answer from not installed. */
+function notStartedOutcome(
+  characterId: string,
+  roster: readonly Project02CharacterListing[],
+): OpenOutcome {
+  const installed = roster.some(character => character.id === characterId);
+
+  return Object.freeze({
+    status: 'refused' as const,
+    reason: installed
+      ? ('character_unavailable' as const)
+      : ('unknown_character' as const),
+    message: installed
+      ? `Character "${characterId}" has not been started.`
+      : `Character "${characterId}" is not installed. Installed characters: ` +
+        `${roster.length === 0 ? '(none)' : roster.map(character => character.id).join(', ')}.`,
   });
 }

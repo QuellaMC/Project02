@@ -2,17 +2,31 @@ import {randomUUID} from 'node:crypto';
 
 import type {RuntimePluginToolConfirmationHandler} from '../../plugins/index.ts';
 import type {
+  ConfirmationAnswerStatus,
   GatewayConfirmationDecision,
   GatewayEvent,
 } from '../api/contract.ts';
 
 type Decision = Awaited<ReturnType<RuntimePluginToolConfirmationHandler>>;
 
+type ParkedRequest = {
+  readonly deadlineAt: number;
+  readonly settle: (decision: Decision) => void;
+};
+
 export type ConfirmationBroker = {
   /** Plugs into the host's tool-confirmation seam; nothing else changes there. */
   readonly handler: RuntimePluginToolConfirmationHandler;
-  /** Unknown or already-settled ids are a no-op: a late answer is benign. */
-  answer(id: string, decision: GatewayConfirmationDecision): void;
+  /**
+   * Unknown or already-settled ids are `unknown`: a late answer is benign.
+   * An answer at or past the deadline settles the request as cancelled and
+   * reports `expired` — the deadline is enforced here, never trusted to the
+   * client or to the host's timer having fired first.
+   */
+  answer(
+    id: string,
+    decision: GatewayConfirmationDecision,
+  ): ConfirmationAnswerStatus;
   /** Cancel every parked request, and settle later ones at once. */
   cancelAll(): void;
   /** Re-arm after a cancelAll, so a fresh boot parks confirmations again. */
@@ -29,7 +43,7 @@ export function createConfirmationBroker(options: {
   readonly characterId: string;
   readonly emit: (event: GatewayEvent) => void;
 }): ConfirmationBroker {
-  const pending = new Map<string, (decision: Decision) => void>();
+  const pending = new Map<string, ParkedRequest>();
   let cancelling = false;
 
   return Object.freeze({
@@ -51,7 +65,7 @@ export function createConfirmationBroker(options: {
           }
         };
 
-        pending.set(id, settle);
+        pending.set(id, {deadlineAt: context.deadlineAt, settle});
         context.signal.addEventListener(
           'abort',
           () => {
@@ -69,12 +83,24 @@ export function createConfirmationBroker(options: {
       });
     },
     answer(id, decision) {
-      pending.get(id)?.({status: decision});
+      const parked = pending.get(id);
+
+      if (parked === undefined) {
+        return 'unknown';
+      }
+
+      if (Date.now() >= parked.deadlineAt) {
+        parked.settle({status: 'cancelled'});
+        return 'expired';
+      }
+
+      parked.settle({status: decision});
+      return 'answered';
     },
     cancelAll() {
       cancelling = true;
-      for (const settle of [...pending.values()]) {
-        settle({status: 'cancelled'});
+      for (const parked of [...pending.values()]) {
+        parked.settle({status: 'cancelled'});
       }
     },
     arm() {

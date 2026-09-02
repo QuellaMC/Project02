@@ -29,6 +29,7 @@ export {
   selectProject02CharacterId,
   type Project02CharacterActivation,
   type Project02CharacterListing,
+  type Project02CharacterRoster,
   type Project02CharacterSelection,
 } from './character.ts';
 export {

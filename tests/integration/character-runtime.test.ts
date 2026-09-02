@@ -7,6 +7,7 @@ import {loadProject02Home, type Project02Home} from '../../src/app/index.ts';
 import {
   createLocalCharacterRuntime,
   type GatewayEvent,
+  type LocalCharacterRuntime,
   type LocalCharacterRuntimeOptions,
 } from '../../src/gateway/index.ts';
 import {createRuntimePluginHost} from '../../src/plugins/index.ts';
@@ -35,6 +36,16 @@ function replyAdapter(
       };
     },
   };
+}
+
+async function open(runtime: LocalCharacterRuntime) {
+  const outcome = await runtime.openDirectConversation();
+
+  if (outcome.status !== 'opened') {
+    throw new Error(outcome.message);
+  }
+
+  return outcome;
 }
 
 async function createConsentedHome(): Promise<{
@@ -89,8 +100,8 @@ describe('local character runtime', () => {
       state: 'ready',
     });
 
-    const ref = await runtime.openDirectConversation();
-    const again = await runtime.openDirectConversation();
+    const ref = await open(runtime);
+    const again = await open(runtime);
 
     expect(again).toEqual(ref);
     expect(ref.characterId).toBe('mira');
@@ -138,7 +149,7 @@ describe('local character runtime', () => {
       },
     });
     const {runtime} = await createStartedRuntime({roleModelAdapter: adapter});
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const message = (text: string) => ({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
@@ -175,7 +186,7 @@ describe('local character runtime', () => {
     });
 
     const {runtime} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
 
     await expect(
       runtime.deliver({conversationId: 'no-such', senderId: 'u', text: 'hi'}),
@@ -200,7 +211,7 @@ describe('local character runtime', () => {
     const {runtime} = await createStartedRuntime({
       roleModelAdapter: replyAdapter({rawOutputText: 'not json at all'}),
     });
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const rejected = await runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
@@ -217,7 +228,7 @@ describe('local character runtime', () => {
 
   it('fails the character on a fatal turn and comes back through reactivate', async () => {
     const {homeRoot, runtime, events} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const sessionsRoot = join(
       characterDataDirPath(homeRoot, 'mira'),
       'sessions',
@@ -249,12 +260,15 @@ describe('local character runtime', () => {
       status: 'refused',
       reason: 'character_unavailable',
     });
-    await expect(runtime.openDirectConversation()).rejects.toThrow('failed');
+    await expect(runtime.openDirectConversation()).resolves.toMatchObject({
+      status: 'refused',
+      reason: 'character_unavailable',
+    });
 
     await runtime.reactivate();
     expect(runtime.health().state).toBe('ready');
 
-    const reopened = await runtime.openDirectConversation();
+    const reopened = await open(runtime);
 
     expect(reopened.conversationId).toBe(ref.conversationId);
     await expect(runtime.deliver(message)).resolves.toMatchObject({
@@ -344,12 +358,9 @@ describe('local character runtime', () => {
   it('stop joins an attachment in flight before reporting shutdown complete', async () => {
     const {runtime} = await createStartedRuntime();
     let attachSettled = false;
-    const attach = runtime
-      .openDirectConversation()
-      .catch(() => undefined)
-      .finally(() => {
-        attachSettled = true;
-      });
+    const attach = runtime.openDirectConversation().finally(() => {
+      attachSettled = true;
+    });
 
     await runtime.stop();
 
@@ -376,7 +387,7 @@ describe('local character runtime', () => {
         enabledPluginIds: ['session.end.probe'],
       }),
     });
-    const attach = runtime.openDirectConversation().catch(() => undefined);
+    const attach = runtime.openDirectConversation();
 
     await runtime.stop();
     await attach;
@@ -392,7 +403,7 @@ describe('local character runtime', () => {
 
   it('stays failed when stop cannot release a conversation, and stops on retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const locksRoot = join(characterDataDirPath(homeRoot, 'mira'), '.locks');
 
     chmodSync(locksRoot, 0o500);
@@ -419,7 +430,7 @@ describe('local character runtime', () => {
 
   it('holds what recovery could not release and frees it on the retry', async () => {
     const {homeRoot, runtime} = await createStartedRuntime();
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const dataRoot = characterDataDirPath(homeRoot, 'mira');
     const sessionsRoot = join(dataRoot, 'sessions');
     const locksRoot = join(dataRoot, '.locks');
@@ -452,7 +463,7 @@ describe('local character runtime', () => {
 
     expect(runtime.health().state).toBe('ready');
 
-    const reopened = await runtime.openDirectConversation();
+    const reopened = await open(runtime);
 
     expect(reopened.conversationId).toBe(ref.conversationId);
     await runtime.stop();
@@ -476,7 +487,7 @@ describe('local character runtime', () => {
         beforeReply: () => new Promise(resolve => setTimeout(resolve, 30)),
       }),
     });
-    const ref = await runtime.openDirectConversation();
+    const ref = await open(runtime);
     const inFlight = runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,

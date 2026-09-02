@@ -21,25 +21,34 @@ export type Project02CharacterListing = {
   readonly enabled: boolean;
 };
 
+/** The installed roster, plus the packages discovery could not publish. */
+export type Project02CharacterRoster = {
+  readonly characters: readonly Project02CharacterListing[];
+  readonly diagnostics: readonly CharacterPackageDiagnostic[];
+};
+
 /** Installed characters with their effective enabled state. */
 export function listProject02Characters(
   home: Project02Home,
-): readonly Project02CharacterListing[] {
+): Project02CharacterRoster {
   const discovery = discoverCharacterPackages({
     sources: defaultCharacterPackageSources(home.runtimeLocation.homeRoot),
   });
 
-  return Object.freeze(
-    discovery.characters.map(character => {
-      const identity = character.definition.identity;
+  return Object.freeze({
+    characters: Object.freeze(
+      discovery.characters.map(character => {
+        const identity = character.definition.identity;
 
-      return Object.freeze({
-        id: identity.id,
-        displayName: identity.displayName,
-        enabled: characterIsEnabled(home, identity.id),
-      });
-    }),
-  );
+        return Object.freeze({
+          id: identity.id,
+          displayName: identity.displayName,
+          enabled: characterIsEnabled(home, identity.id),
+        });
+      }),
+    ),
+    diagnostics: discovery.diagnostics,
+  });
 }
 
 function characterIsEnabled(home: Project02Home, characterId: string): boolean {
@@ -72,7 +81,7 @@ export type Project02CharacterSelection =
 export function selectSoleEnabledCharacterId(
   home: Project02Home,
 ): string | Extract<Project02CharacterActivation, {status: 'failed'}> {
-  const characters = listProject02Characters(home);
+  const {characters} = listProject02Characters(home);
   const [first] = characters;
 
   // An unloadable global config defaults every enabled value, so the rule
