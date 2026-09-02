@@ -13,16 +13,79 @@ import {
 import {isNodeErrorWithCode} from '../../shared/node-error.ts';
 import {conversationMessageForRawEvent} from '../evidence/cache.ts';
 import type {ConversationLogRecord} from '../evidence/records.ts';
-import {requireCharacterDataMarker} from './character-data.ts';
+import {
+  assertCharacterDataDirReadable,
+  requireCharacterDataMarker,
+} from './character-data.ts';
 import {readUndamagedJsonLines} from './json-lines.ts';
 import {
   createLocalRuntimeSessionPaths,
   createLocalRuntimeStorageLayout,
   LocalRuntimeStorageContractError,
   normalizeLocalRuntimeCharacterId,
+  parseSegmentSessionId,
   type LocalRuntimeSessionMetadata,
   type LocalRuntimeStorageLayout,
 } from './layout-contract.ts';
+
+export type ConversationSegmentListing = {
+  /** This conversation's segments in order; the last is the current one. */
+  readonly segments: readonly {
+    readonly sessionId: string;
+    readonly segment: number;
+  }[];
+  /** Catalog rows that would not decode; they are nobody's segment. */
+  readonly damagedEntryCount: number;
+};
+
+/**
+ * One character's segments of one conversation, read leniently: a damaged
+ * or stray catalog row is skipped, and a character without a data directory
+ * has no segments yet. The catalog's own order is by creation, so the
+ * segment number decides.
+ */
+export function listConversationSegments(options: {
+  readonly storeRoot: string;
+  readonly characterId: string;
+  readonly conversationId: string;
+}): ConversationSegmentListing {
+  const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
+  const storageOptions = {storeRoot: options.storeRoot};
+
+  if (
+    assertCharacterDataDirReadable({storageOptions, characterId}) === undefined
+  ) {
+    return Object.freeze({segments: Object.freeze([]), damagedEntryCount: 0});
+  }
+
+  const catalog = readLenientSessionCatalog(
+    createLocalRuntimeStorageLayout(storageOptions),
+  );
+  const segments: {readonly sessionId: string; readonly segment: number}[] = [];
+
+  for (const metadata of catalog.sessions) {
+    let parsed;
+
+    try {
+      parsed = parseSegmentSessionId(metadata.sessionId);
+    } catch {
+      continue;
+    }
+
+    if (parsed.conversationId === options.conversationId) {
+      segments.push(
+        Object.freeze({sessionId: metadata.sessionId, segment: parsed.segment}),
+      );
+    }
+  }
+
+  segments.sort((left, right) => left.segment - right.segment);
+
+  return Object.freeze({
+    segments: Object.freeze(segments),
+    damagedEntryCount: catalog.damagedEntryCount,
+  });
+}
 
 export type CommittedConversationMessages = {
   readonly messages: readonly ConversationLogRecord[];

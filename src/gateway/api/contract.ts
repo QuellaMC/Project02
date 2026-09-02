@@ -103,6 +103,45 @@ export type OpenOutcome =
     }
   | StorageFailure;
 
+export type HistoryPage = {
+  /** A cursor the previous page returned; absent means the newest page. */
+  readonly before?: string;
+  /** 1 to 500, default 100. A string is fine, so a query needs no second parser. */
+  readonly limit?: string | number;
+};
+
+export type HistoryMessage = {
+  readonly messageId: string;
+  readonly role: 'user' | 'character';
+  readonly speakerId: string;
+  readonly speakerName: string;
+  readonly text: string;
+  readonly committedAt: string;
+  readonly source?: string;
+  readonly clientMessageId?: string;
+};
+
+/**
+ * One page of the conversation, chronological within the page; pages are
+ * read backward through `earlier`. The character's segments are the
+ * daemon's business and never appear here.
+ */
+export type HistoryOutcome =
+  | {
+      readonly status: 'ok';
+      readonly conversationId: string;
+      readonly characterId: string;
+      readonly messages: readonly HistoryMessage[];
+      /** Present while older messages exist. */
+      readonly earlier?: string;
+    }
+  | {
+      readonly status: 'refused';
+      readonly reason: 'unknown_conversation' | 'invalid_page';
+      readonly message: string;
+    }
+  | StorageFailure;
+
 /** `settled` says the start ran; the summary's state says how it ended. */
 export type StartOutcome =
   | {readonly status: 'settled'; readonly character: CharacterSummary}
@@ -242,6 +281,8 @@ export type CharacterRuntime = {
  */
 export type Gateway = {
   health(): GatewayHealth;
+  /** Reads the committed log, so an offline character's thread is readable too. */
+  history(conversationId: string, page?: HistoryPage): Promise<HistoryOutcome>;
   openDirectConversation(characterId: string): Promise<OpenOutcome>;
   deliver(message: GatewayMessage): Promise<TurnOutcome>;
   /** What is parked right now; a client that missed the event reads this. */
