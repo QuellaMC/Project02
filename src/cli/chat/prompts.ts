@@ -67,11 +67,24 @@ export function createConfirmationPrompts(options: {
       (error: unknown) => {
         // The daemon never heard the answer. If it still holds the request,
         // ask again now — the stream may be fine and bring no handshake.
+        // Only this request: a list read now may predate what the stream
+        // just delivered, and must not retire it.
         asked.delete(pending.id);
         options.stderr.write(
           `Error: ${error instanceof Error ? error.message : String(error)}\n`,
         );
-        options.client.pendingConfirmations().then(reconcile, () => undefined);
+        options.client.pendingConfirmations().then(
+          stillPending => {
+            const again = stillPending.find(
+              request => request.id === pending.id,
+            );
+
+            if (again !== undefined) {
+              ask(again);
+            }
+          },
+          () => undefined,
+        );
       },
     );
   const prompt = async (pending: PendingConfirmation): Promise<void> => {

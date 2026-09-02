@@ -1,4 +1,4 @@
-import {describe, expect, it} from 'vitest';
+import {describe, expect, it, vi} from 'vitest';
 
 import {createConfirmationPrompts} from '../../src/cli/chat/prompts.ts';
 import type {PendingConfirmation} from '../../src/gateway/index.ts';
@@ -102,12 +102,31 @@ describe('chat confirmation prompts', () => {
     harness.prompts.ask(pending('lost'));
     await new Promise(resolve => setImmediate(resolve));
     harness.reads[0]?.resolve('y');
-    await harness.prompts.idle();
+    // A newer request the stream delivered meanwhile is not on that list
+    // yet; it must survive the recovery read.
+    harness.prompts.ask(pending('newer'));
+    await vi.waitFor(() => {
+      expect(harness.stderr()).toContain('could not be reached');
+    });
 
-    expect(harness.stderr()).toContain('could not be reached');
-    // No handshake needed: the daemon's list was read right away.
-    await new Promise(resolve => setImmediate(resolve));
-    expect(harness.shown()).toBe(2);
+    // No handshake needed: the daemon's list was read right away, and the
+    // newer request was not retired by it.
+    await vi.waitFor(() => {
+      expect(harness.reads).toHaveLength(2);
+    });
+    harness.reads[1]?.resolve('n');
+    await vi.waitFor(() => {
+      expect(harness.reads).toHaveLength(3);
+    });
+    harness.reads[2]?.resolve('n');
+    await harness.prompts.idle();
+    expect(harness.shown()).toBe(3);
+    expect(harness.stdout()).not.toContain('settled elsewhere');
+    expect(harness.answers).toEqual([
+      'lost:approved',
+      'newer:denied',
+      'lost:denied',
+    ]);
   });
 
   it('retires what the pending list no longer holds, showing or queued', async () => {

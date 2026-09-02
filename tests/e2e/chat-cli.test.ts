@@ -292,13 +292,35 @@ describe('chat shim', () => {
     }
   });
 
-  it('reports a rejected turn and keeps the session alive', async () => {
+  it("reports a rejected turn once, and another surface's rejected turn from the stream", async () => {
     const daemon = await startDaemon(replyAdapter('not json at all'));
-    const {exitCode, stdout, stderr} = await runChat([], {env: daemon.env});
+    const shim = openShim([], daemon.env);
+
+    await shim.printed('mira is ready.');
+    shim.stdin.write('hello there\n');
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain('Error:');
+    });
+    await vi.waitFor(() => {
+      expect(shim.seen().match(/> /gu)).toHaveLength(2);
+    });
+    // Its own turn is reported once, from the answer, never again from
+    // the stream.
+    expect(shim.errors().match(/^Error:/gmu)).toHaveLength(1);
+    expect(shim.errors()).not.toContain('Warning');
+
+    const web = await deliverFromWeb(daemon.gateway, 'mira', 'from the web');
+
+    await expect(web.outcome).resolves.toMatchObject({status: 'rejected'});
+    await vi.waitFor(() => {
+      expect(shim.errors()).toContain(
+        'Warning: a turn on this thread was rejected',
+      );
+    });
+
+    const {exitCode} = await shim.exit();
 
     expect(exitCode).toBe(0);
-    expect(stdout).toContain('mira is ready.');
-    expect(stderr).toContain('Error:');
     await daemon.close();
   });
   it('answers a confirmation raised elsewhere with the next line, which never becomes a message', async () => {
