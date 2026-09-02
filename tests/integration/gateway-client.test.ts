@@ -1,3 +1,5 @@
+import {Hono} from 'hono';
+import {streamSSE} from 'hono/streaming';
 import {describe, expect, it, vi} from 'vitest';
 
 import {
@@ -9,6 +11,7 @@ import {createRuntimePluginHost} from '../../src/plugins/index.ts';
 import type {RoleModelAdapter} from '../../src/role-model/index.ts';
 import {createGatewayTestHome} from '../support/gateway-fixtures.ts';
 import {
+  listen,
   startTestGatewayServer,
   testGatewayToken as token,
 } from '../support/gateway-http.ts';
@@ -131,5 +134,73 @@ describe('gateway reference client', () => {
     abort.abort();
     await expect(following).resolves.toBeUndefined();
     await close();
+  });
+});
+
+describe('gateway reference client error boundary', () => {
+  it('reports a body that is not JSON as a client error, not a raw throw', async () => {
+    const app = new Hono().get('/api/health', c => c.text('not json'));
+    const server = await listen(app);
+    const client = createGatewayClient({baseUrl: server.baseUrl, token});
+
+    await expect(client.health()).rejects.toMatchObject({
+      name: 'GatewayClientError',
+      status: 200,
+      code: 'malformed_response',
+    });
+    await server.close();
+  });
+
+  it('never opens the stream for a signal that was already aborted', async () => {
+    let requests = 0;
+    const app = new Hono().get('/api/events', c => {
+      requests += 1;
+
+      return c.text('unexpected');
+    });
+    const server = await listen(app);
+    const client = createGatewayClient({baseUrl: server.baseUrl, token});
+    const abort = new AbortController();
+
+    abort.abort();
+    await expect(
+      client.events(() => undefined, {signal: abort.signal}),
+    ).resolves.toBeUndefined();
+    expect(requests).toBe(0);
+    await server.close();
+  });
+
+  it('closes the socket when the stream is unusable, for a wrong protocol or a bad frame', async () => {
+    for (const [frame, code] of [
+      ['event: ready\ndata: {"protocolVersion":2}\n\n', 'protocol_mismatch'],
+      ['event: ready\ndata: not json\n\n', 'malformed_event'],
+    ] as const) {
+      let aborted = 0;
+      const app = new Hono().get('/api/events', c =>
+        streamSSE(c, async stream => {
+          const connection = {open: true};
+
+          stream.onAbort(() => {
+            connection.open = false;
+            aborted += 1;
+          });
+          await stream.write(frame);
+
+          while (connection.open) {
+            await stream.sleep(20);
+          }
+        }),
+      );
+      const server = await listen(app);
+      const client = createGatewayClient({baseUrl: server.baseUrl, token});
+
+      await expect(
+        client.events(() => undefined, {signal: new AbortController().signal}),
+      ).rejects.toMatchObject({name: 'GatewayClientError', code});
+      await vi.waitFor(() => {
+        expect(aborted).toBe(1);
+      });
+      await server.close();
+    }
   });
 });
