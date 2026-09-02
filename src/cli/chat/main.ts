@@ -89,7 +89,7 @@ export async function runChatCliFromArgs(
     });
 
     const selection = selectProject02CharacterId(
-      gateway.characters(),
+      gateway.health().characters,
       flags.location.character,
     );
 
@@ -248,13 +248,21 @@ async function runChat(
   });
 
   try {
-    await gateway.startCharacter(characterId);
+    const started = await gateway.startCharacter(characterId);
+
+    if (started.status === 'refused') {
+      throw new CliUsageError(started.message);
+    }
 
     if (bootFailure !== undefined) {
       throw new CliUsageError(bootFailure);
     }
 
     const ref = await gateway.openDirectConversation(characterId);
+
+    if (ref.status !== 'opened') {
+      throw new CliUsageError(ref.message);
+    }
 
     options.stdout.write(`${characterId} is ready.\n`);
 

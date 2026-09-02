@@ -26,15 +26,16 @@ import {
   type ActiveConversation,
   type UserMessageDelivery,
 } from '../../runtime/index.ts';
+import {LocalRuntimeStorageContractError} from '../../runtime/storage/index.ts';
 import type {
   CharacterRuntime,
   CharacterRuntimeHealth,
   CharacterRuntimeState,
-  ConversationRef,
   GatewayEvent,
   GatewayEventListener,
   GatewayMessage,
   GatewayRefusalReason,
+  OpenOutcome,
   TurnOutcome,
   Unsubscribe,
 } from '../api/contract.ts';
@@ -55,7 +56,7 @@ export type LocalCharacterRuntimeOptions = {
 
 export type LocalCharacterRuntime = CharacterRuntime & {
   /** Open-or-resume the user DM; idempotent while the runtime is ready. */
-  openDirectConversation(): Promise<ConversationRef>;
+  openDirectConversation(): Promise<OpenOutcome>;
 };
 
 type AssembledCharacter = {
@@ -80,7 +81,7 @@ type RuntimeContext = {
   failure: string | undefined;
   assembled: AssembledCharacter | undefined;
   queue: Promise<unknown>;
-  opening: Promise<ConversationRef> | undefined;
+  opening: Promise<OpenOutcome> | undefined;
   stopping: Promise<void> | undefined;
   releasing: Promise<string[]> | undefined;
 };
@@ -131,7 +132,7 @@ export function createLocalCharacterRuntime(
     reactivate: () => reactivateRuntime(context),
     deliver: (message: GatewayMessage) => deliverMessage(context, message),
     answerConfirmation(id, decision) {
-      context.broker.answer(id, decision);
+      return context.broker.answer(id, decision);
     },
     health(): CharacterRuntimeHealth {
       return Object.freeze({
@@ -148,17 +149,28 @@ export function createLocalCharacterRuntime(
         listeners.delete(listener);
       };
     },
-    openDirectConversation(): Promise<ConversationRef> {
+    openDirectConversation(): Promise<OpenOutcome> {
       // A cached attachment is only as alive as the runtime: off ready,
-      // openDirect explains the state instead of handing back a stale ref.
+      // the outcome explains the state instead of handing back a stale ref.
       if (lifecycleLeft(context, 'ready')) {
-        return openDirect(context);
+        return Promise.resolve(unavailableOutcome(context));
       }
 
-      context.opening ??= openDirect(context).catch((error: unknown) => {
-        context.opening = undefined;
-        throw error;
-      });
+      // Only an opened thread is worth remembering: a refusal or a failure
+      // clears the memo so the next attach tries again.
+      context.opening ??= openDirect(context).then(
+        outcome => {
+          if (outcome.status !== 'opened') {
+            context.opening = undefined;
+          }
+
+          return outcome;
+        },
+        (error: unknown) => {
+          context.opening = undefined;
+          throw error;
+        },
+      );
 
       return context.opening;
     },
@@ -279,7 +291,7 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   // The enabled decision lives on this seam so reactivation honors a
   // disable that landed while the character was running — and it runs
   // before activation, which materializes durable character state.
-  const listed = listProject02Characters(home).find(
+  const listed = listProject02Characters(home).characters.find(
     character => character.id === characterId,
   );
 
@@ -373,21 +385,36 @@ async function assemble(context: RuntimeContext): Promise<AssembledCharacter> {
   return {...shared, ...adapterOption, host: configured.host, ownsHost: true};
 }
 
-async function openDirect(context: RuntimeContext): Promise<ConversationRef> {
+async function openDirect(context: RuntimeContext): Promise<OpenOutcome> {
   const {assembled} = context;
 
   if (context.state !== 'ready' || assembled === undefined) {
-    throw new TypeError(
-      `Character "${context.characterId}" has no open runtime (state ` +
-        `"${context.state}").`,
-    );
+    return unavailableOutcome(context);
   }
 
-  const active = await openConversation({
-    homeRoot: assembled.storeRoot,
-    character: assembled.profile,
-    userDisplayName: assembled.userDisplayName,
-  });
+  let active: ActiveConversation;
+
+  try {
+    active = await openConversation({
+      homeRoot: assembled.storeRoot,
+      character: assembled.profile,
+      userDisplayName: assembled.userDisplayName,
+    });
+  } catch (error: unknown) {
+    // Another process holds the thread, or the store itself is broken:
+    // both are the caller's to hear about, and neither is a bug.
+    if (error instanceof LocalRuntimeStorageContractError) {
+      return error.code === 'conversation_busy'
+        ? refusedOpen('conversation_busy', error.message)
+        : Object.freeze({
+            status: 'failed' as const,
+            code: error.code,
+            message: error.message,
+          });
+    }
+
+    throw error;
+  }
 
   // Registered before the overtake check: a stop that arrived while the
   // thread opened releases it through the one release path, which retains
@@ -395,16 +422,33 @@ async function openDirect(context: RuntimeContext): Promise<ConversationRef> {
   context.conversations.set(active.conversation.id, active);
 
   if (lifecycleLeft(context, 'ready')) {
-    throw new TypeError(
+    return refusedOpen(
+      'character_unavailable',
       `Character "${context.characterId}" stopped while attaching.`,
     );
   }
 
   return Object.freeze({
+    status: 'opened' as const,
     conversationId: active.conversation.id,
     characterId: context.characterId,
     userParticipantId: active.session.userSpeaker.id,
   });
+}
+
+function unavailableOutcome(context: RuntimeContext): OpenOutcome {
+  return refusedOpen(
+    'character_unavailable',
+    `Character "${context.characterId}" is not ready (state ` +
+      `"${context.state}").`,
+  );
+}
+
+function refusedOpen(
+  reason: Extract<OpenOutcome, {status: 'refused'}>['reason'],
+  message: string,
+): OpenOutcome {
+  return Object.freeze({status: 'refused' as const, reason, message});
 }
 
 function deliverMessage(

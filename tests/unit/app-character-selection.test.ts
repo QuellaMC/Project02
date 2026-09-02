@@ -65,7 +65,7 @@ describe('project02 sole-enabled startup selection', () => {
     const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
 
     expect(selectSoleEnabledCharacterId(home)).toBe(
-      listProject02Characters(home)[0]?.id,
+      listProject02Characters(home).characters[0]?.id,
     );
   });
 });
@@ -79,10 +79,13 @@ describe('project02 character listing', () => {
 
     const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
 
-    expect(listProject02Characters(home)).toEqual([
-      {id: 'mira', displayName: 'Mira', enabled: true},
-      {id: 'zeta', displayName: 'Zeta', enabled: true},
-    ]);
+    expect(listProject02Characters(home)).toEqual({
+      characters: [
+        {id: 'mira', displayName: 'Mira', enabled: true},
+        {id: 'zeta', displayName: 'Zeta', enabled: true},
+      ],
+      diagnostics: [],
+    });
 
     writeRuntimeConfig(join(homeRoot, 'config.json'), {
       project02: {enabled: false},
@@ -94,7 +97,9 @@ describe('project02 character listing', () => {
     });
 
     expect(
-      listProject02Characters(disabledHome).map(character => character.enabled),
+      listProject02Characters(disabledHome).characters.map(
+        character => character.enabled,
+      ),
     ).toEqual([false, false]);
   });
 
@@ -113,7 +118,7 @@ describe('project02 character listing', () => {
     const home = loadProject02Home({location: {storeRoot: homeRoot}, env: {}});
 
     expect(
-      listProject02Characters(home).map(character => character.id),
+      listProject02Characters(home).characters.map(character => character.id),
     ).toEqual(['mira', 'zeta']);
   });
 
