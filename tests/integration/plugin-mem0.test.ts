@@ -777,13 +777,19 @@ describe('mem0 plugin package', () => {
       // ping health leads with -- answers normally.
       if (url.endsWith('/memories')) {
         return new Promise((_resolve, reject) => {
-          init.signal.addEventListener(
-            'abort',
-            () => {
-              reject(new Error('aborted'));
-            },
-            {once: true},
-          );
+          const abandon = () => {
+            reject(new Error('aborted'));
+          };
+
+          // `fetch` rejects a request whose signal is already aborted; the
+          // shutdown can abort before the queued capture reaches the wire,
+          // and waiting for an event that has already fired hangs forever.
+          if (init.signal.aborted) {
+            abandon();
+            return;
+          }
+
+          init.signal.addEventListener('abort', abandon, {once: true});
         });
       }
 

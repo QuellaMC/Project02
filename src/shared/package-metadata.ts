@@ -330,7 +330,13 @@ export function readBoundedJsonFileSource(options: {
     : Object.freeze({status: 'accepted', source});
 }
 
-/** Every file-change stamp in the runtime compares these fields. */
+/**
+ * Every file-change stamp in the runtime compares these fields, which makes
+ * change detection best effort rather than a guarantee: timestamps advance
+ * once per filesystem tick — 4 ms on ext4 — so a change landing in the same
+ * tick as the one before it, moving no bytes, stamps identically and reads
+ * as no change at all.
+ */
 export function filesystemMetadataIdentity(stat: BigIntStats): string {
   return [
     stat.dev,

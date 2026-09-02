@@ -35,6 +35,7 @@ import type {
   RuntimePlugin,
   RuntimePluginManifest,
 } from '../../src/plugins/api/types.ts';
+import {agePackageSourceRoot} from '../support/package-source-fixtures.ts';
 import {createTestTempRoot} from '../support/temp-root.ts';
 
 afterEach(() => {
@@ -333,6 +334,8 @@ describe('runtime plugin package loader', () => {
     const externalPackageRoot = join(externalRoot, manifest.id);
     const parkedPackageRoot = join(parentRoot, 'parked');
     let swapped = false;
+
+    agePackageSourceRoot(sourceRoot);
 
     vi.resetModules();
     vi.doMock('node:fs', async () => {

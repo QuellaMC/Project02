@@ -34,7 +34,6 @@ import {createFileRuntimeLogStore} from '../../src/runtime/storage/file-runtime-
 import {createLocalRuntimeSessionStore} from '../../src/runtime/storage/session-store.ts';
 import {runLocalUserMessageEvent} from '../../src/runtime/turn/local.ts';
 import {deliverUserMessage, openConversation} from '../../src/runtime/index.ts';
-import {readCharacterConversation} from '../support/conversation-fixtures.ts';
 import {
   defaultRoleModelProviderCapabilities,
   type RoleModelAdapter,
@@ -496,48 +495,43 @@ describe('inspect CLI plugin evidence', () => {
       homeRoot: storeRoot,
       character: testCharacterProfile,
     });
+    // A 100-token window holds no whole turn, so every completed turn
+    // rotates the segment and the next one replays the mechanical summary
+    // (no summariser on this adapter).
+    const deliver = async (line: string): Promise<void> => {
+      const delivery = await deliverUserMessage({
+        conversation,
+        line,
+        pluginHost: createDefaultProject02PluginHost({
+          storeRoot: characterDataDirPath(storeRoot, 'mira'),
+          sessionId: conversation.session.id,
+          sessionIdentity: conversation.session,
+        }),
+        roleModelAdapter: createPatchThenReplyAdapter(),
+        contextWindowTokens: 100,
+      });
+
+      expect(delivery).toMatchObject({
+        status: 'completed',
+        rotation: {status: 'rotated'},
+      });
+    };
+    const openedFrom = conversation.session.id;
+    let inspectedSession: string;
 
     try {
-      // A 100-token window rotates after the third completed turn; the
-      // fourth turn already runs in the continued segment and replays the
-      // mechanical summary (no summariser on this adapter).
-      for (const line of ['one', 'two', 'three', 'four']) {
-        const delivery = await deliverUserMessage({
-          conversation,
-          line,
-          pluginHost: createDefaultProject02PluginHost({
-            storeRoot: characterDataDirPath(storeRoot, 'mira'),
-            sessionId: conversation.session.id,
-            sessionIdentity: conversation.session,
-          }),
-          roleModelAdapter: createPatchThenReplyAdapter(),
-          contextWindowTokens: 100,
-        });
-
-        expect(delivery.status).toBe('completed');
-      }
+      await deliver('one');
+      // Where the first rotation left the conversation, and so the segment
+      // that both continues another one and runs a turn of its own.
+      inspectedSession = conversation.session.id;
+      await deliver('two');
     } finally {
       await conversation.close();
     }
 
-    const dm = await readCharacterConversation(storeRoot);
-    const conversationId = dm.conversation.id;
-    const latestSegment = Number(dm.latestSessionId.split('.').at(-1));
-
-    // Inspect a continued segment that also ran a turn: the one before the
-    // latest, since the final rotation may have left the newest one empty.
-    const inspectedSegment = latestSegment - 1;
-
-    expect(inspectedSegment).toBeGreaterThan(1);
-
     let stdout = '';
     const exitCode = await runInspectCliFromArgs(
-      [
-        '--store',
-        storeRoot,
-        '--session',
-        `${conversationId}.${String(inspectedSegment)}`,
-      ],
+      ['--store', storeRoot, '--session', inspectedSession],
       {
         stdout: collect(chunk => {
           stdout += chunk;
@@ -562,9 +556,7 @@ describe('inspect CLI plugin evidence', () => {
 
     expect(exitCode).toBe(0);
     expect(output.continuation).toMatchObject({
-      continuedFrom: {
-        sessionId: `${conversationId}.${String(inspectedSegment - 1)}`,
-      },
+      continuedFrom: {sessionId: openedFrom},
       summarizer: {status: 'fallback'},
     });
     expect(output.continuation?.summary).toContain('Earlier conversation');
