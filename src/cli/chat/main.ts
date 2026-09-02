@@ -158,15 +158,23 @@ async function runChat(
     stderr: options.stderr,
   });
   const turns = createTurnTracker();
-  // A fatal turn — anyone's — costs the character its open threads; when
-  // it is back, this terminal opens the same one again.
+  // A fatal turn — anyone's — costs the character its open threads. This
+  // terminal opens the same one again when the character is back, and on
+  // every handshake, since the stream may have missed the whole episode.
   let attached = true;
-  const reattach = (): void => {
-    client.openDirectConversation(characterId).then(outcome => {
+  // The REPL waits for the latest reopen before it delivers, so a line
+  // typed right after a reconnect is never refused for a thread mid-reopen.
+  let attachment: Promise<void> = Promise.resolve();
+  const ensureAttached = (): void => {
+    attachment = client.openDirectConversation(characterId).then(outcome => {
       if (outcome.status === 'opened') {
+        if (!attached) {
+          options.stdout.write(`${characterId} is back.\n`);
+        }
+
         attached = true;
-        options.stdout.write(`${characterId} is back.\n`);
       } else {
+        attached = false;
         options.stderr.write(`Error: ${outcome.message}\n`);
       }
     }, reportError);
@@ -200,7 +208,7 @@ async function runChat(
           }
 
           if (event.state === 'ready' && !attached) {
-            reattach();
+            ensureAttached();
           }
         }
       },
@@ -210,10 +218,9 @@ async function runChat(
         // asked while this terminal was away, a message committed while
         // the stream was down — is read back from the daemon.
         onReady: () => {
+          ensureAttached();
           client.pendingConfirmations().then(pending => {
-            for (const request of pending) {
-              confirmations.ask(request);
-            }
+            confirmations.reconcile(pending);
           }, reportError);
           transcript.catchUp().catch(reportError);
         },
@@ -239,6 +246,8 @@ async function runChat(
       if (line.trim().length === 0) {
         continue;
       }
+
+      await attachment;
 
       const before = turns.count();
       const outcome = await client.deliver({

@@ -378,59 +378,91 @@ describe('chat shim', () => {
     await expect(shim.exit()).resolves.toMatchObject({exitCode: 0});
     await daemon.close();
   });
-  it("reattaches its thread after another surface's turn killed it", async () => {
-    let sessionsRoot = '';
-    let breakNextTurn = false;
-    const daemon = await startDaemon(
-      {
-        invoke() {
-          if (breakNextTurn) {
-            breakNextTurn = false;
-            // Break the session store mid-turn so the commit fails.
-            chmodSync(sessionsRoot, 0o000);
-          }
+  it.each([
+    ['while it was watching', false],
+    ['while its stream was down', true],
+  ])(
+    "reattaches its thread after another surface's turn killed it %s",
+    async (_when, streamDown) => {
+      let sessionsRoot = '';
+      let breakNextTurn = false;
+      const daemon = await startDaemon(
+        {
+          invoke() {
+            if (breakNextTurn) {
+              breakNextTurn = false;
+              // Break the session store mid-turn so the commit fails.
+              chmodSync(sessionsRoot, 0o000);
+            }
 
-          return {
-            rawOutputText: JSON.stringify({
-              toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
-            }),
-          };
+            return {
+              rawOutputText: JSON.stringify({
+                toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+              }),
+            };
+          },
         },
-      },
-      storeRoot => {
-        sessionsRoot = join(
-          characterDataDirPath(storeRoot, 'mira'),
-          'sessions',
-        );
-      },
-    );
-    // The store is mended the moment the failure lands, before recovery.
-    const stopMending = daemon.gateway.events(event => {
-      if (event.kind === 'state_changed' && event.state === 'failed') {
+        storeRoot => {
+          sessionsRoot = join(
+            characterDataDirPath(storeRoot, 'mira'),
+            'sessions',
+          );
+        },
+      );
+      // The store is mended the moment the failure lands, before recovery.
+      const stopMending = daemon.gateway.events(event => {
+        if (event.kind === 'state_changed' && event.state === 'failed') {
+          chmodSync(sessionsRoot, 0o755);
+        }
+      });
+
+      try {
+        const shim = openShim([], daemon.env);
+
+        await shim.printed('mira is ready.');
+        await vi.waitFor(() => {
+          expect(daemon.server.events.openCount()).toBe(1);
+        });
+
+        if (streamDown) {
+          // The whole episode happens before the shim is back.
+          daemon.server.events.closeAll();
+        }
+
+        breakNextTurn = true;
+
+        const web = await deliverFromWeb(daemon.gateway, 'mira', 'boom');
+
+        await expect(web.outcome).resolves.toMatchObject({status: 'failed'});
+        await vi.waitFor(() => {
+          expect(daemon.gateway.health().characters[0]?.state).toBe('ready');
+        });
+
+        if (streamDown) {
+          // Nothing announced: the episode passed unseen, and the handshake
+          // reopened the thread on its own.
+          await vi.waitFor(
+            () => {
+              expect(daemon.server.events.openCount()).toBe(1);
+            },
+            {timeout: 10_000},
+          );
+        } else {
+          await shim.printed('mira is back.');
+        }
+
+        shim.stdin.write('hello again\n');
+        await shim.printed('Mira: noted');
+
+        const {exitCode} = await shim.exit();
+
+        expect(exitCode).toBe(0);
+      } finally {
+        stopMending();
         chmodSync(sessionsRoot, 0o755);
+        await daemon.close();
       }
-    });
-
-    try {
-      const shim = openShim([], daemon.env);
-
-      await shim.printed('mira is ready.');
-      breakNextTurn = true;
-
-      const web = await deliverFromWeb(daemon.gateway, 'mira', 'boom');
-
-      await expect(web.outcome).resolves.toMatchObject({status: 'failed'});
-      await shim.printed('mira is back.');
-      shim.stdin.write('hello again\n');
-      await shim.printed('Mira: noted');
-
-      const {exitCode} = await shim.exit();
-
-      expect(exitCode).toBe(0);
-    } finally {
-      stopMending();
-      chmodSync(sessionsRoot, 0o755);
-      await daemon.close();
-    }
-  });
+    },
+    20_000,
+  );
 });

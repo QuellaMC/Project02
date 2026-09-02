@@ -18,7 +18,9 @@ function pending(id: string, characterId = 'mira'): PendingConfirmation {
   };
 }
 
-function createHarness(taken: 'answered' | 'expired' | 'unknown' = 'answered') {
+function createHarness(
+  taken: 'answered' | 'expired' | 'unknown' | 'unreachable' = 'answered',
+) {
   let stdout = '';
   let stderr = '';
   const answers: string[] = [];
@@ -28,7 +30,9 @@ function createHarness(taken: 'answered' | 'expired' | 'unknown' = 'answered') {
       answerConfirmation(id, decision) {
         answers.push(`${id}:${decision}`);
 
-        return Promise.resolve({status: taken});
+        return taken === 'unreachable'
+          ? Promise.reject(new Error('The daemon could not be reached.'))
+          : Promise.resolve({status: taken});
       },
     },
     characterId: 'mira',
@@ -86,6 +90,42 @@ describe('chat confirmation prompts', () => {
     expect(harness.stdout()).toContain(
       'demo_tool was not approved: the confirmation had expired.',
     );
+  });
+
+  it('asks again on the next handshake when the daemon never heard the answer', async () => {
+    const harness = createHarness('unreachable');
+
+    harness.prompts.ask(pending('lost'));
+    await new Promise(resolve => setImmediate(resolve));
+    harness.reads[0]?.resolve('y');
+    await harness.prompts.idle();
+
+    expect(harness.stderr()).toContain('could not be reached');
+
+    // The pending list still holds it: it is asked once more.
+    harness.prompts.reconcile([pending('lost')]);
+    await new Promise(resolve => setImmediate(resolve));
+    expect(harness.shown()).toBe(2);
+  });
+
+  it('retires what the pending list no longer holds, showing or queued', async () => {
+    const harness = createHarness();
+
+    harness.prompts.ask(pending('showing'));
+    harness.prompts.ask(pending('queued'));
+    harness.prompts.ask(pending('kept'));
+    await new Promise(resolve => setImmediate(resolve));
+    expect(harness.shown()).toBe(1);
+
+    harness.prompts.reconcile([pending('kept')]);
+    await new Promise(resolve => setImmediate(resolve));
+
+    // "showing" was withdrawn, "queued" never showed, "kept" is up now.
+    expect(harness.stdout()).toContain('demo_tool was settled elsewhere.');
+    expect(harness.shown()).toBe(2);
+    harness.reads[1]?.resolve('n');
+    await harness.prompts.idle();
+    expect(harness.answers).toEqual(['kept:denied']);
   });
 
   it('withdraws a showing prompt settled elsewhere and never shows a queued one', async () => {
