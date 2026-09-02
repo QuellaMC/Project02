@@ -188,6 +188,10 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
         throw new TypeError(`Character "${characterId}" has not been started.`);
       }
 
+      // A start or automatic recovery in flight is joined first, so an
+      // attach that follows a fatal turn lands on the restarted character.
+      await startsInFlight.get(characterId)?.catch(() => undefined);
+
       const ref = await runtime.openDirectConversation();
 
       conversationRoutes.set(ref.conversationId, characterId);

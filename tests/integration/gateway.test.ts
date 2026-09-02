@@ -379,6 +379,41 @@ describe('gateway façade', () => {
     expect(gateway.characters()[0]?.state).toBe('stopped');
   });
 
+  it('joins the automatic recovery when a client reattaches straight away', async () => {
+    const homeRoot = await createGatewayHome();
+    const gateway = createGateway({
+      location: {storeRoot: homeRoot},
+      env: {},
+      roleModelAdapter: replyAdapter(),
+      createPluginHost: () => createRuntimePluginHost({plugins: []}),
+    });
+
+    await gateway.startCharacter('mira');
+
+    const ref = await gateway.openDirectConversation('mira');
+    const sessionsRoot = join(
+      characterDataDirPath(homeRoot, 'mira'),
+      'sessions',
+    );
+
+    chmodSync(sessionsRoot, 0o000);
+
+    try {
+      await gateway.deliver({
+        conversationId: ref.conversationId,
+        senderId: ref.userParticipantId,
+        text: 'hello there',
+      });
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+    }
+
+    const reopened = await gateway.openDirectConversation('mira');
+
+    expect(reopened.conversationId).toBe(ref.conversationId);
+    await gateway.stop();
+  });
+
   it('refuses a conversation it never attached', async () => {
     const homeRoot = await createGatewayHome();
     const gateway = createGateway({location: {storeRoot: homeRoot}, env: {}});
