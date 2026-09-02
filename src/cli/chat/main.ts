@@ -183,6 +183,30 @@ async function runChat(
   // every handshake, since the stream may have missed the whole episode.
   let attached = true;
   const isAttached = (): boolean => attached;
+  // What the stream may have missed while it was down lives in health:
+  // the character's last maintenance failure, and a failed state.
+  let reportedMaintenanceAt: string | undefined;
+  const reportMaintenance = (failure: {at: string; message: string}): void => {
+    if (reportedMaintenanceAt === failure.at) {
+      return;
+    }
+
+    reportedMaintenanceAt = failure.at;
+    options.stderr.write(`Warning: ${failure.message}\n`);
+  };
+  const reportHealth = async (): Promise<void> => {
+    const summary = (await client.health()).characters.find(
+      character => character.id === characterId,
+    );
+
+    if (summary?.maintenance !== undefined) {
+      reportMaintenance(summary.maintenance);
+    }
+
+    if (summary?.state === 'failed' && summary.diagnostic !== undefined) {
+      options.stderr.write(`Warning: ${summary.diagnostic}\n`);
+    }
+  };
   // The REPL waits for the latest reopen before it delivers, so a line
   // typed right after a reconnect is never refused for a thread mid-reopen.
   let attachment: Promise<void> = Promise.resolve();
@@ -211,6 +235,7 @@ async function runChat(
     return attachment;
   };
   const streaming = new AbortController();
+  let streamFailure: unknown;
   const streamEnded = client
     .events(
       event => {
@@ -232,7 +257,7 @@ async function runChat(
           event.kind === 'maintenance_failed' &&
           event.characterId === characterId
         ) {
-          options.stderr.write(`Warning: ${event.message}\n`);
+          reportMaintenance(event);
         } else if (event.kind === 'confirmation_requested') {
           confirmations.ask(event);
         } else if (event.kind === 'confirmation_settled') {
@@ -265,6 +290,7 @@ async function runChat(
         // reports its own failure; the stream itself stays up.
         onReady: () =>
           Promise.all([
+            reportHealth().catch(reportUnlessUnreachable),
             ensureAttached().catch(reportUnlessUnreachable),
             client.pendingConfirmations().then(pending => {
               confirmations.reconcile(pending);
@@ -273,7 +299,16 @@ async function runChat(
           ]).then(() => undefined),
       },
     )
-    .catch(reportError);
+    .then(
+      () => undefined,
+      (error: unknown) => {
+        // Replies and confirmations come only from the stream; without it
+        // this terminal would keep taking lines it can show nothing for.
+        streamFailure = error;
+        reportError(error);
+        lines.close();
+      },
+    );
 
   try {
     options.stdout.write(`${characterId} is ready.\n`);
@@ -340,7 +375,7 @@ async function runChat(
       await transcript.settled();
     }
 
-    return 0;
+    return streamFailure === undefined ? 0 : 1;
   } finally {
     streaming.abort();
     await streamEnded;
