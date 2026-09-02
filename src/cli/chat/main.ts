@@ -150,14 +150,21 @@ async function runChat(
     source,
     stdout: options.stdout,
   });
+  // A prompt that interrupted the REPL's read leaves it waiting without a
+  // visible prompt; the REPL's own `> ` comes back once the prompt is gone.
+  let replWaiting = false;
   const confirmations = createConfirmationPrompts({
     client,
     characterId,
     lines,
     stdout: options.stdout,
     stderr: options.stderr,
+    afterPrompt: () => {
+      if (replWaiting) {
+        options.stdout.write('> ');
+      }
+    },
   });
-  const turns = createTurnTracker();
   // A fatal turn — anyone's — costs the character its open threads. This
   // terminal opens the same one again when the character is back, and on
   // every handshake, since the stream may have missed the whole episode.
@@ -186,10 +193,6 @@ async function runChat(
         if (event.kind === 'turn_progress') {
           if (event.conversationId === opened.conversationId) {
             transcript.showProgress(event.progress);
-          }
-        } else if (event.kind === 'turn_completed') {
-          if (event.conversationId === opened.conversationId) {
-            turns.completed();
           }
         } else if (event.kind === 'confirmation_requested') {
           confirmations.ask(event);
@@ -236,8 +239,11 @@ async function runChat(
       // every keystroke answers the prompt that is actually on screen.
       await confirmations.idle();
       options.stdout.write('> ');
+      replWaiting = true;
 
       const line = await lines.replLine();
+
+      replWaiting = false;
 
       if (line === undefined || line.trim() === '/exit') {
         break;
@@ -249,7 +255,6 @@ async function runChat(
 
       await attachment;
 
-      const before = turns.count();
       const outcome = await client.deliver({
         conversationId: opened.conversationId,
         senderId: opened.userParticipantId,
@@ -268,7 +273,12 @@ async function runChat(
         return 1;
       }
 
-      await turns.seen(before);
+      // This turn is done here once its own messages are on the screen.
+      await transcript.whenShown(
+        outcome.status === 'completed'
+          ? outcome.messages.map(message => message.messageId)
+          : [],
+      );
       await transcript.settled();
     }
 
@@ -279,48 +289,6 @@ async function runChat(
     await transcript.settled();
     lines.close();
   }
-}
-
-/** How long a settled turn may take to show up on the stream. */
-const turnEchoTimeoutMs = 5_000;
-
-/** A turn is done here once the stream says so, not when the answer lands. */
-function createTurnTracker(): {
-  count(): number;
-  completed(): void;
-  seen(after: number): Promise<void>;
-} {
-  let completed = 0;
-  const waiters: {readonly after: number; resolve(): void}[] = [];
-
-  return {
-    count: () => completed,
-    completed() {
-      completed += 1;
-
-      for (const waiter of waiters.splice(0)) {
-        if (completed > waiter.after) {
-          waiter.resolve();
-        } else {
-          waiters.push(waiter);
-        }
-      }
-    },
-    seen: after =>
-      completed > after
-        ? Promise.resolve()
-        : new Promise(resolve => {
-            const timer = setTimeout(resolve, turnEchoTimeoutMs);
-
-            waiters.push({
-              after,
-              resolve() {
-                clearTimeout(timer);
-                resolve();
-              },
-            });
-          }),
-  };
 }
 
 if (isMainModule(import.meta.url)) {

@@ -1,16 +1,17 @@
 /**
- * One reader over stdin, and one consumer per line. A confirmation prompt
- * takes the next line ahead of the REPL, so a line typed under a visible
- * [y/N] answers that prompt and never becomes a chat message — and a line
- * meant for the REPL is never also read as an approval.
+ * One reader over stdin, and one consumer per line. Lines are taken in as
+ * they arrive and numbered, so a confirmation prompt can insist on a line
+ * typed after it appeared: whatever was typed before it — a chat line sent
+ * while a turn was still running — stays the REPL's, and never approves
+ * an action the person had not yet seen.
  */
 import {createInterface} from 'node:readline';
 
 export type LineDispatcher = {
-  /** The next line no prompt claims: the REPL's read. */
+  /** The oldest line no prompt claims: the REPL's read. */
   replLine(): Promise<string | undefined>;
   /**
-   * The next line, ahead of the REPL; prompts take turns in order. An
+   * The first line typed after this call; prompts take turns in order. An
    * aborted signal withdraws the prompt and resolves `undefined`.
    */
   promptLine(signal?: AbortSignal): Promise<string | undefined>;
@@ -22,94 +23,89 @@ type Waiter = {
   reject(error: unknown): void;
 };
 
+type PromptWaiter = Waiter & {
+  /** Sequence number of the first line this prompt may take. */
+  readonly since: number;
+};
+
 export function createLineDispatcher(
   input: NodeJS.ReadableStream,
 ): LineDispatcher {
   const lines = createInterface({input, crlfDelay: Infinity, terminal: false});
-  const iterator = lines[Symbol.asyncIterator]();
-  const prompts: Waiter[] = [];
+  const queued: {readonly line: string; readonly seq: number}[] = [];
+  const prompts: PromptWaiter[] = [];
   let repl: Waiter | undefined;
-  // A line read for a prompt that was withdrawn meanwhile waits here for
-  // whoever asks next; nothing typed is dropped.
-  let held: string | undefined;
-  let reading = false;
+  let seq = 0;
   let closed = false;
+  let failure: unknown;
 
-  // A line is read only when someone waits for it, so nothing typed before
-  // a prompt appeared is held back to answer it.
-  const pump = (): void => {
-    if (reading || closed || (prompts.length === 0 && repl === undefined)) {
-      return;
+  const dispatch = (): void => {
+    for (const prompt of [...prompts]) {
+      const at = queued.findIndex(entry => entry.seq >= prompt.since);
+
+      if (at !== -1) {
+        const [entry] = queued.splice(at, 1);
+
+        prompts.splice(prompts.indexOf(prompt), 1);
+        prompt.resolve(entry?.line);
+      }
     }
 
-    reading = true;
-    iterator.next().then(
-      next => {
-        reading = false;
+    const waiter = repl;
 
-        const line = next.done === true ? undefined : next.value;
+    if (waiter !== undefined && queued.length > 0) {
+      const [entry] = queued.splice(0, 1);
 
-        if (line === undefined) {
-          closed = true;
-          settleAll();
+      repl = undefined;
+      waiter.resolve(entry?.line);
+    }
 
-          return;
-        }
-
-        const waiter = takeWaiter();
-
-        if (waiter === undefined) {
-          held = line;
-        } else {
-          waiter.resolve(line);
-        }
-
-        pump();
-      },
-      (error: unknown) => {
-        reading = false;
-        closed = true;
-        takeWaiter()?.reject(error);
-        settleAll();
-      },
-    );
+    if (closed) {
+      settleAll();
+    }
   };
-  const takeWaiter = (): Waiter | undefined => {
-    const prompt = prompts.shift();
-
-    if (prompt !== undefined) {
-      return prompt;
+  const settleAll = (): void => {
+    for (const prompt of prompts.splice(0)) {
+      if (failure === undefined) {
+        prompt.resolve(undefined);
+      } else {
+        prompt.reject(failure);
+      }
     }
 
     const waiter = repl;
 
     repl = undefined;
 
-    return waiter;
-  };
-  const settleAll = (): void => {
-    for (const waiter of prompts.splice(0)) {
-      waiter.resolve(undefined);
+    if (failure === undefined) {
+      waiter?.resolve(undefined);
+    } else {
+      waiter?.reject(failure);
     }
-
-    repl?.resolve(undefined);
-    repl = undefined;
   };
+
+  lines.on('line', line => {
+    seq += 1;
+    queued.push({line, seq});
+    dispatch();
+  });
+  lines.once('close', () => {
+    closed = true;
+    dispatch();
+  });
+  input.once('error', (error: unknown) => {
+    failure = error;
+    closed = true;
+    dispatch();
+  });
+
   const take = (
     register: (waiter: Waiter) => void,
     withdraw: (waiter: Waiter) => void,
     signal?: AbortSignal,
   ): Promise<string | undefined> => {
-    if (closed || signal?.aborted === true) {
+    if (signal?.aborted === true) {
       return Promise.resolve(undefined);
-    }
-
-    if (held !== undefined) {
-      const line = held;
-
-      held = undefined;
-
-      return Promise.resolve(line);
     }
 
     return new Promise((resolve, reject) => {
@@ -124,7 +120,7 @@ export function createLineDispatcher(
         },
         {once: true},
       );
-      pump();
+      dispatch();
     });
   };
 
@@ -139,10 +135,12 @@ export function createLineDispatcher(
     promptLine: signal =>
       take(
         waiter => {
-          prompts.push(waiter);
+          prompts.push({...waiter, since: seq + 1});
         },
         waiter => {
-          const index = prompts.indexOf(waiter);
+          const index = prompts.findIndex(
+            prompt => prompt.resolve === waiter.resolve,
+          );
 
           if (index !== -1) {
             prompts.splice(index, 1);

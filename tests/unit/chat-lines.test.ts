@@ -18,6 +18,29 @@ describe('chat line dispatcher', () => {
     lines.close();
   });
 
+  it('leaves a line typed before the prompt appeared to the REPL, and takes only a later one', async () => {
+    const stdin = new PassThrough();
+    const lines = createLineDispatcher(stdin);
+
+    // Typed while a turn was running, before anyone read.
+    stdin.write('yes I will\n');
+    await new Promise(resolve => setImmediate(resolve));
+
+    const prompt = lines.promptLine();
+    let answered = false;
+
+    void prompt.then(() => {
+      answered = true;
+    });
+    await new Promise(resolve => setImmediate(resolve));
+    expect(answered).toBe(false);
+
+    stdin.write('n\n');
+    await expect(prompt).resolves.toBe('n');
+    await expect(lines.replLine()).resolves.toBe('yes I will');
+    lines.close();
+  });
+
   it('withdraws a prompt on abort and keeps a line read for it for the next reader', async () => {
     const stdin = new PassThrough();
     const lines = createLineDispatcher(stdin);
@@ -27,7 +50,7 @@ describe('chat line dispatcher', () => {
     withdrawn.abort();
     await expect(prompt).resolves.toBeUndefined();
 
-    // The read the prompt started still completes; nothing typed is lost.
+    // Nothing typed is lost: the next line is the REPL's.
     stdin.write('hello\n');
     await new Promise(resolve => setImmediate(resolve));
     await expect(lines.replLine()).resolves.toBe('hello');
