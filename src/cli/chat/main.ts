@@ -3,6 +3,7 @@
  * more. It reads a line, delivers it, prints events, and answers tool
  * confirmations; the web UI replaces it at parity and deletes it.
  */
+import {randomUUID} from 'node:crypto';
 import {createInterface} from 'node:readline';
 
 import {
@@ -286,6 +287,8 @@ async function runChat(
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
         text: line,
+        source: `chat-shim:${String(process.pid)}`,
+        clientMessageId: randomUUID(),
       });
 
       if (outcome.status !== 'completed') {

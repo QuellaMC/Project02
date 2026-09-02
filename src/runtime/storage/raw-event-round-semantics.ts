@@ -33,6 +33,8 @@ type RawEventRoundSemantics = {
   readonly message: string | undefined;
   readonly round: number | undefined;
   readonly visibleMessage: VisibleMessage | undefined;
+  readonly source: string | undefined;
+  readonly clientMessageId: string | undefined;
   readonly payloadSummary: RawEventLogPayloadSummary | undefined;
   readonly roleModelIOSnapshot: RoleModelIOSnapshot | undefined;
   readonly parsedRoleModelDecisionSnapshot:
@@ -44,6 +46,7 @@ export function assertRoundRawEventSemantics(
   options: RawEventRoundSemantics,
 ): void {
   assertRejectionFields(options);
+  assertClientStampsOnUserCommitOnly(options);
 
   if (options.kind === 'role_model_round') {
     assertRoleModelRoundRecord(options);
@@ -161,6 +164,24 @@ function assertRoleModelRoundRecord(options: RawEventRoundSemantics): void {
     })
   ) {
     throwMalformedRecord('parsedRoleModelDecisionSnapshot.result');
+  }
+}
+
+/** A client stamps only what it carried: the person's own committed message. */
+function assertClientStampsOnUserCommitOnly(
+  options: RawEventRoundSemantics,
+): void {
+  if (options.source === undefined && options.clientMessageId === undefined) {
+    return;
+  }
+
+  if (
+    options.kind !== 'visible_message_committed' ||
+    options.visibleMessage?.role !== 'user'
+  ) {
+    throwMalformedRecord(
+      options.source === undefined ? 'clientMessageId' : 'source',
+    );
   }
 }
 

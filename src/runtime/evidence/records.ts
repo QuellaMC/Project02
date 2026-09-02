@@ -88,6 +88,13 @@ export type RawEventLogRecord = RuntimeEventIdentity & {
   readonly visibleMessage?: VisibleMessage;
   readonly committedAt?: string;
   /**
+   * The client's stamps on a user commit: the surface that carried the
+   * message and its submission id. Provenance of the event, never part of
+   * what the model reads.
+   */
+  readonly source?: string;
+  readonly clientMessageId?: string;
+  /**
    * The model round a record belongs to. A role_model_round record is that
    * round; a tool call, a character commit, or a terminal record judging a
    * decision references the round it came from.
@@ -236,6 +243,8 @@ export function createSessionContinuationSnapshot(
 export type ConversationLogRecord = VisibleMessage &
   RuntimeEventIdentity & {
     readonly committedAt: string;
+    readonly source?: string;
+    readonly clientMessageId?: string;
   };
 
 /** What a caller hands the log store; the store returns the stored record. */

@@ -36,6 +36,10 @@ export function conversationMessageForRawEvent(
     createdAt: rawEvent.createdAt,
     committedAt: rawEvent.committedAt,
     ...rawEvent.visibleMessage,
+    ...(rawEvent.source === undefined ? {} : {source: rawEvent.source}),
+    ...(rawEvent.clientMessageId === undefined
+      ? {}
+      : {clientMessageId: rawEvent.clientMessageId}),
   } satisfies ConversationLogRecord);
 }
 

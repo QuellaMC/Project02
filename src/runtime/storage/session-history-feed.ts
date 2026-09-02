@@ -23,6 +23,46 @@ import {
   type LocalRuntimeSessionMetadata,
   type LocalRuntimeStorageLayout,
 } from './layout-contract.ts';
+
+export type CommittedConversationMessages = {
+  readonly messages: readonly ConversationLogRecord[];
+  /** Lines that would not decode; the tolerant read skips them. */
+  readonly damagedRecordCount: number;
+};
+
+/**
+ * One segment's committed visible messages, whole, through the same
+ * tolerant read the plugin feed uses: torn tails invisible, damaged records
+ * counted and skipped. The gateway's history is built on this.
+ */
+export function readCommittedConversationMessages(options: {
+  readonly storeRoot: string;
+  readonly characterId: string;
+  readonly sessionId: string;
+}): CommittedConversationMessages {
+  const characterId = normalizeLocalRuntimeCharacterId(options.characterId);
+
+  requireCharacterDataMarker({
+    storageOptions: {storeRoot: options.storeRoot},
+    characterId,
+  });
+
+  const layout = createLocalRuntimeStorageLayout({
+    storeRoot: options.storeRoot,
+  });
+
+  assertSessionDirectoryReadable(layout, options.sessionId, 'allow');
+
+  return committedMessagesFromTail(
+    readCommittedTranscriptTail(
+      createLocalRuntimeSessionPaths({
+        storeRoot: layout.storeRoot,
+        sessionId: options.sessionId,
+      }).rawEventsPath,
+      0,
+    ),
+  );
+}
 import {decodeRawEventLogRecord} from './raw-event-codec.ts';
 import {
   assertSessionDirectoryReadable,
@@ -241,7 +281,35 @@ function sessionHistoryBatch(
     return emptySessionHistoryBatch(reset);
   }
 
-  const messages: RuntimePluginSessionHistoryMessage[] = [];
+  const committed = committedMessagesFromTail(tail);
+  const messages: RuntimePluginSessionHistoryMessage[] = committed.messages.map(
+    record =>
+      Object.freeze({
+        sessionId,
+        messageId: record.id,
+        role: record.role,
+        speakerName: record.speakerName,
+        text: record.text,
+        committedAt: record.committedAt,
+      }),
+  );
+
+  return Object.freeze({
+    messages: Object.freeze(messages),
+    nextCursor: encodeSessionHistoryCursor(fromOffset + tail.consumedBytes),
+    damagedRecordCount: committed.damagedRecordCount,
+    reset,
+  });
+}
+
+function committedMessagesFromTail(
+  tail: CommittedTranscriptTail,
+): CommittedConversationMessages {
+  if (tail.kind !== 'lines') {
+    return Object.freeze({messages: Object.freeze([]), damagedRecordCount: 0});
+  }
+
+  const messages: ConversationLogRecord[] = [];
   let damagedRecordCount = 0;
 
   for (const line of tail.lines) {
@@ -254,28 +322,12 @@ function sessionHistoryBatch(
       continue;
     }
 
-    if (record === undefined) {
-      continue;
+    if (record !== undefined) {
+      messages.push(record);
     }
-
-    messages.push(
-      Object.freeze({
-        sessionId,
-        messageId: record.id,
-        role: record.role,
-        speakerName: record.speakerName,
-        text: record.text,
-        committedAt: record.committedAt,
-      }),
-    );
   }
 
-  return Object.freeze({
-    messages: Object.freeze(messages),
-    nextCursor: encodeSessionHistoryCursor(fromOffset + tail.consumedBytes),
-    damagedRecordCount,
-    reset,
-  });
+  return Object.freeze({messages: Object.freeze(messages), damagedRecordCount});
 }
 
 function emptySessionHistoryBatch(reset: boolean): SessionHistoryMessageBatch {

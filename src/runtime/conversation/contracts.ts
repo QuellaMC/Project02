@@ -49,6 +49,9 @@ export type DeliverUserMessageOptions = {
   readonly characterPersonaSections?: readonly string[];
   readonly characterRef?: RoleModelCharacterRef;
   readonly contextWindowTokens?: number;
+  /** The client's stamps on the message; see RunLocalUserMessageEventOptions. */
+  readonly source?: string;
+  readonly clientMessageId?: string;
   readonly onProgress?: (
     event: LocalRuntimeTurnProgressEvent,
   ) => Promise<void> | void;

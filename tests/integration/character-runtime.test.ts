@@ -1,3 +1,4 @@
+import {randomUUID} from 'node:crypto';
 import {chmodSync, existsSync} from 'node:fs';
 import {dirname, join} from 'node:path';
 
@@ -109,6 +110,8 @@ describe('local character runtime', () => {
     const outcome = await runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     });
 
@@ -153,6 +156,8 @@ describe('local character runtime', () => {
     const message = (text: string) => ({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text,
     });
 
@@ -179,7 +184,13 @@ describe('local character runtime', () => {
     });
 
     await expect(
-      unstarted.deliver({conversationId: 'c', senderId: 'u', text: 'hi'}),
+      unstarted.deliver({
+        conversationId: 'c',
+        senderId: 'u',
+        source: 'test',
+        clientMessageId: randomUUID(),
+        text: 'hi',
+      }),
     ).resolves.toMatchObject({
       status: 'refused',
       reason: 'character_unavailable',
@@ -189,7 +200,13 @@ describe('local character runtime', () => {
     const ref = await open(runtime);
 
     await expect(
-      runtime.deliver({conversationId: 'no-such', senderId: 'u', text: 'hi'}),
+      runtime.deliver({
+        conversationId: 'no-such',
+        senderId: 'u',
+        source: 'test',
+        clientMessageId: randomUUID(),
+        text: 'hi',
+      }),
     ).resolves.toMatchObject({
       status: 'refused',
       reason: 'unknown_conversation',
@@ -198,6 +215,8 @@ describe('local character runtime', () => {
       runtime.deliver({
         conversationId: ref.conversationId,
         senderId: 'mira',
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hi',
       }),
     ).resolves.toMatchObject({
@@ -215,6 +234,8 @@ describe('local character runtime', () => {
     const rejected = await runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     });
 
@@ -236,6 +257,8 @@ describe('local character runtime', () => {
     const message = {
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     };
 
@@ -441,6 +464,8 @@ describe('local character runtime', () => {
       await runtime.deliver({
         conversationId: ref.conversationId,
         senderId: ref.userParticipantId,
+        source: 'test',
+        clientMessageId: randomUUID(),
         text: 'hello there',
       });
     } finally {
@@ -491,6 +516,8 @@ describe('local character runtime', () => {
     const inFlight = runtime.deliver({
       conversationId: ref.conversationId,
       senderId: ref.userParticipantId,
+      source: 'test',
+      clientMessageId: randomUUID(),
       text: 'hello there',
     });
 

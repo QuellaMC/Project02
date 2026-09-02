@@ -101,8 +101,12 @@ export async function commitUserMessage(
     state.options.session,
     state.event.payload.currentUserMessage,
   );
+  const {source, clientMessageId} = state.options;
 
-  return await commitVisibleMessage(state, message, {});
+  return await commitVisibleMessage(state, message, {
+    ...(source === undefined ? {} : {source}),
+    ...(clientMessageId === undefined ? {} : {clientMessageId}),
+  });
 }
 
 /** Every model round lands as one record before anything it decided happens. */
@@ -149,8 +153,9 @@ export async function appendVisibleReplyForDecision(
 }
 
 /**
- * The message reaches the user before it reaches disk; a storage failure
- * after that point is reported, never un-said.
+ * A message reaches the stream only once it reached disk: every surface is
+ * shown exactly what history holds, and a storage failure surfaces as the
+ * turn's failure with nothing un-said.
  */
 async function commitVisibleMessage(
   state: RuntimeTurnState,
@@ -178,16 +183,6 @@ async function commitVisibleMessage(
 
   appendCommittedMessage(state.options.session, message);
 
-  if (message.role === 'character') {
-    await emitProgress(state, {
-      kind: 'visible_reply',
-      messageId: message.id,
-      speakerId: message.speakerId,
-      speakerName: message.speakerName,
-      text: message.text,
-    });
-  }
-
   // Evidence bookkeeping describes the log, so it follows the write: a
   // terminal event must never reference a record that failed to land.
   state.options.logStore.persistPreparedRawEvent(
@@ -196,6 +191,29 @@ async function commitVisibleMessage(
   );
   state.rawEventLogRecords.push(rawEvent);
   state.committedVisibleMessages.push(record);
+
+  await emitProgress(
+    state,
+    message.role === 'character'
+      ? {
+          kind: 'visible_reply',
+          messageId: message.id,
+          speakerId: message.speakerId,
+          speakerName: message.speakerName,
+          text: message.text,
+        }
+      : {
+          kind: 'user_message',
+          messageId: message.id,
+          speakerId: message.speakerId,
+          speakerName: message.speakerName,
+          text: message.text,
+          ...(record.source === undefined ? {} : {source: record.source}),
+          ...(record.clientMessageId === undefined
+            ? {}
+            : {clientMessageId: record.clientMessageId}),
+        },
+  );
   return record;
 }
 

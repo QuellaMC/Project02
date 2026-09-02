@@ -26,8 +26,8 @@ describe('local storage plugin schema', () => {
     expect(requiresCharacter).toBe(true);
   });
 
-  it('uses scoped schema version 13 and no top-level character state path', () => {
-    expect(localRuntimeStorageSchemaVersion).toBe(13);
+  it('uses scoped schema version 14 and no top-level character state path', () => {
+    expect(localRuntimeStorageSchemaVersion).toBe(14);
     expect(
       createLocalRuntimeSessionPaths({storeRoot: 'store', sessionId: 'talk.1'}),
     ).not.toHaveProperty('characterStatePath');
@@ -250,5 +250,60 @@ describe('local storage plugin schema', () => {
         code: 'malformed_record',
       }),
     );
+  });
+});
+
+describe('client stamps on raw event records', () => {
+  const identity = {
+    eventId: 'evt_storage_stamped',
+    traceId: 'trace_storage_stamped',
+    createdAt: '2026-06-15T00:00:00.000Z',
+  } as const;
+  const commit = (role: 'user' | 'character', extra: object) =>
+    JSON.stringify({
+      ...identity,
+      kind: 'visible_message_committed',
+      eventType: 'USER_MESSAGE',
+      visibleMessageIds: ['local-session:message-1'],
+      visibleMessage: {
+        id: 'local-session:message-1',
+        role,
+        speakerId: role === 'user' ? 'local-user' : 'mira',
+        speakerName: role === 'user' ? 'You' : 'Mira',
+        text: 'hello',
+      },
+      committedAt: '2026-06-15T00:00:01.000Z',
+      ...extra,
+    });
+
+  it('round-trips the stamps on a user commit', () => {
+    const record = decodeRawEventLogRecord(
+      commit('user', {source: 'web', clientMessageId: 'msg-1'}),
+    );
+
+    expect(record).toMatchObject({source: 'web', clientMessageId: 'msg-1'});
+    expect(decodeRawEventLogRecord(JSON.stringify(record))).toEqual(record);
+  });
+
+  it('refuses a stamp on a character commit or on any other kind', () => {
+    expect(() =>
+      decodeRawEventLogRecord(commit('character', {round: 1, source: 'web'})),
+    ).toThrow(expect.objectContaining({code: 'malformed_record'}));
+    expect(() =>
+      decodeRawEventLogRecord(
+        JSON.stringify({
+          ...identity,
+          kind: 'runtime_event_received',
+          eventType: 'USER_MESSAGE',
+          clientMessageId: 'msg-1',
+        }),
+      ),
+    ).toThrow(expect.objectContaining({code: 'malformed_record'}));
+  });
+
+  it('refuses a stamp that is not one token', () => {
+    expect(() =>
+      decodeRawEventLogRecord(commit('user', {source: 'web ui'})),
+    ).toThrow(expect.objectContaining({code: 'malformed_record'}));
   });
 });

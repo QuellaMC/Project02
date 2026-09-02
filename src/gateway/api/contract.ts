@@ -16,12 +16,18 @@ export const gatewayProtocolVersion = 1;
 /**
  * A message from one participant into one conversation. The shape is
  * participant-agnostic; the current gateway accepts only the local user as
- * sender and refuses anything else with a structured outcome.
+ * sender and refuses anything else with a structured outcome. The two
+ * stamps are the client's own words about the submission, persisted with
+ * it and echoed on the stream: which surface carried it (`web`,
+ * `telegram:<bot>`) and an id a repeat of the same submission reuses.
+ * Neither is trusted for anything but rendering and correlation.
  */
 export type GatewayMessage = {
   readonly conversationId: string;
   readonly senderId: string;
   readonly text: string;
+  readonly source: string;
+  readonly clientMessageId: string;
 };
 
 export type GatewayConfirmationDecision = 'approved' | 'denied';
@@ -42,7 +48,8 @@ export type GatewayRefusalReason =
   | 'unknown_character'
   | 'unknown_conversation'
   | 'sender_not_supported'
-  | 'character_unavailable';
+  | 'character_unavailable'
+  | 'invalid_message';
 
 export type TurnOutcome =
   | {

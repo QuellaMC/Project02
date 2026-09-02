@@ -7,6 +7,7 @@ import {
   type Project02Home,
   type Project02HomeOptions,
 } from '../app/index.ts';
+import {isValidClientStamp} from '../core/index.ts';
 import type {RuntimePluginHost} from '../plugins/index.ts';
 import type {ChatProviderName, RoleModelAdapter} from '../role-model/index.ts';
 import {
@@ -28,6 +29,7 @@ import {
   createLocalCharacterRuntime,
   type LocalCharacterRuntime,
 } from './runtime/character-runtime.ts';
+import {createSubmissionLedger} from './submissions.ts';
 
 export type CreateGatewayOptions = Project02HomeOptions & {
   /** Test and dev injection, applied to every character this gateway starts. */
@@ -59,6 +61,7 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
   const listeners = new Set<GatewayEventListener>();
   const lastStates = new Map<string, string>();
   const startsInFlight = new Map<string, Promise<void>>();
+  const submissions = createSubmissionLedger();
   let stopped = false;
 
   // A client rendering bug must not break a character's turn: listener
@@ -183,21 +186,36 @@ export function createGateway(options: CreateGatewayOptions = {}): Gateway {
       return outcome;
     },
     async deliver(message: GatewayMessage): Promise<TurnOutcome> {
+      // Refused before the runtime, so a malformed stamp never reaches a
+      // commit record — the codec would refuse it there, fatally.
+      if (
+        !isValidClientStamp(message.source) ||
+        !isValidClientStamp(message.clientMessageId)
+      ) {
+        return refusedTurn(
+          'invalid_message',
+          'A message names its source and its own id as single tokens: ' +
+            'letters, digits, and any of ":._-", at most 64 characters.',
+        );
+      }
+
       const characterId = conversationRoutes.get(message.conversationId);
       const runtime =
         characterId === undefined ? undefined : runtimes.get(characterId);
 
       if (runtime === undefined) {
-        return Object.freeze({
-          status: 'refused' as const,
-          reason: 'unknown_conversation' as const,
-          message:
-            'The gateway holds no open conversation ' +
+        return refusedTurn(
+          'unknown_conversation',
+          'The gateway holds no open conversation ' +
             `"${message.conversationId}".`,
-        });
+        );
       }
 
-      return runtime.deliver(message);
+      return submissions.submit(
+        message.conversationId,
+        message.clientMessageId,
+        () => runtime.deliver(message),
+      );
     },
     answerConfirmation(id, decision): AnswerOutcome {
       // Ids are gateway-unique, so routing is asking everyone; the one
@@ -311,6 +329,13 @@ function settledSummary(
     listed ?? {id: runtime.characterId, displayName, enabled: true},
     runtime.health(),
   );
+}
+
+function refusedTurn(
+  reason: Extract<TurnOutcome, {status: 'refused'}>['reason'],
+  message: string,
+): TurnOutcome {
+  return Object.freeze({status: 'refused' as const, reason, message});
 }
 
 function refusedStart(
