@@ -118,7 +118,10 @@ export function discoverCharacterPackages(options: {
       diagnostics.push(characterPackageSourceUnavailable(source));
       continue;
     }
-    // Publish nothing unless the source directory is still the one enumerated.
+    // Publish nothing unless the source directory still stamps as it did
+    // when it was enumerated: a listed name can be repointed before the
+    // lstat that resolves it, and no Node API binds a listed name to the
+    // inode it named.
     const sourceCandidates: DiscoveredCharacterPackage[] = [];
     const sourceDiagnostics: CharacterPackageDiagnostic[] = [];
 

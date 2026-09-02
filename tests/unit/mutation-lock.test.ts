@@ -720,30 +720,53 @@ describe('local runtime mutation locks', () => {
       string,
       unknown
     >;
-    // A fresh nonce under the same live pid is what a contender sees when the
-    // queue hands the lock on; the lock itself stays held throughout.
-    const handOffs = (async () => {
+
+    // The budget is measured against the clock, so the clock is the test's
+    // to move: on a loaded runner a real hand-off can land after the budget
+    // it was written to renew.
+    vi.useFakeTimers();
+
+    try {
+      let settled = false;
+      const outcome = acquireLocalRuntimeMutationLock({
+        ...target,
+        waitTimeoutMs,
+      }).then(
+        lease => {
+          settled = true;
+          return lease;
+        },
+        (error: unknown) => {
+          settled = true;
+          return error;
+        },
+      );
+
       for (let index = 0; index < handOffCount; index += 1) {
-        await delay(waitTimeoutMs / 2);
+        await vi.advanceTimersByTimeAsync(waitTimeoutMs / 2);
+        // A fresh nonce under the same live pid is what a contender sees
+        // when the queue hands the lock on; the lock itself stays held
+        // throughout.
         await writeFile(
           ownerFile,
           `${JSON.stringify({...heldOwner, nonce: `hand-off-${String(index)}`})}\n`,
           'utf8',
         );
+        // Long past one whole budget by now, and still waiting: each
+        // hand-off started the stall budget over.
+        expect(settled).toBe(false);
       }
-    })();
-    const startedAt = Date.now();
 
-    // A stall budget gives up only once the hand-offs stop.
-    await expect(
-      acquireLocalRuntimeMutationLock({...target, waitTimeoutMs}),
-    ).rejects.toBeInstanceOf(LocalRuntimeMutationLockBusyError);
-    expect(Date.now() - startedAt).toBeGreaterThan(
-      (waitTimeoutMs / 2) * handOffCount,
-    );
+      // Nothing hands off any more, so the running budget is the last one.
+      await vi.runAllTimersAsync();
 
-    await handOffs;
-    await holder.release();
+      await expect(outcome).resolves.toBeInstanceOf(
+        LocalRuntimeMutationLockBusyError,
+      );
+    } finally {
+      vi.useRealTimers();
+      await holder.release();
+    }
   });
 
   it('rejects a contender once the holder stops making progress', async () => {
@@ -764,12 +787,6 @@ describe('local runtime mutation locks', () => {
     await holder.release();
   });
 });
-
-async function delay(milliseconds: number): Promise<void> {
-  await new Promise<void>(resolveDelay => {
-    setTimeout(resolveDelay, milliseconds);
-  });
-}
 
 function lockPathForTarget(target: {
   readonly locksRoot: string;
