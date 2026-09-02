@@ -1,5 +1,9 @@
 import {serve} from '@hono/node-server';
 
+import {
+  createSseFrameSplitter,
+  type SseFrame,
+} from '../../src/gateway/client/index.ts';
 import {createGatewayApp} from '../../src/gateway/http/app.ts';
 import {
   createEventStreams,
@@ -86,11 +90,7 @@ export async function startTestGatewayServer(options: {
   };
 }
 
-export type SseFrame = {
-  readonly event?: string;
-  readonly data?: string;
-  readonly comment?: string;
-};
+export type {SseFrame};
 
 export type EventSubscription = {
   readonly response: Response;
@@ -118,13 +118,13 @@ export async function subscribeToEvents(
   }
 
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
+  const splitter = createSseFrameSplitter();
   const frames: SseFrame[] = [];
   const waiters: {
     readonly match: (frame: SseFrame) => boolean;
     readonly resolve: (frame: SseFrame) => void;
   }[] = [];
   let cursor = 0;
-  let buffer = '';
   const ended = (async () => {
     for (;;) {
       const {value, done} = await reader.read();
@@ -133,14 +133,7 @@ export async function subscribeToEvents(
         return;
       }
 
-      buffer += value;
-
-      let boundary = buffer.indexOf('\n\n');
-
-      while (boundary !== -1) {
-        const frame = parseFrame(buffer.slice(0, boundary));
-
-        buffer = buffer.slice(boundary + 2);
+      for (const frame of splitter.push(value)) {
         frames.push(frame);
 
         const waiting = waiters.findIndex(waiter => waiter.match(frame));
@@ -151,8 +144,6 @@ export async function subscribeToEvents(
           cursor = frames.length;
           waiter?.resolve(frame);
         }
-
-        boundary = buffer.indexOf('\n\n');
       }
     }
   })().catch(() => undefined);
@@ -192,28 +183,6 @@ export async function subscribeToEvents(
     ended,
     cancel: () => reader.cancel(),
   };
-}
-
-function parseFrame(raw: string): SseFrame {
-  let event: string | undefined;
-  let comment: string | undefined;
-  const data: string[] = [];
-
-  for (const line of raw.split('\n')) {
-    if (line.startsWith(':')) {
-      comment = line.slice(1).trim();
-    } else if (line.startsWith('event:')) {
-      event = line.slice('event:'.length).trim();
-    } else if (line.startsWith('data:')) {
-      data.push(line.slice('data:'.length).trimStart());
-    }
-  }
-
-  return Object.freeze({
-    ...(event === undefined ? {} : {event}),
-    ...(data.length === 0 ? {} : {data: data.join('\n')}),
-    ...(comment === undefined ? {} : {comment}),
-  });
 }
 
 export function frameData(frame: SseFrame): unknown {
