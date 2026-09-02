@@ -390,7 +390,12 @@ function fetchWithoutTimeouts(
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> {
-  const request = new Request(input, init);
+  // The signal stays out of the Request: the platform would derive its own
+  // and hold a listener on the caller's until garbage collection, and a
+  // signal reused across reconnects must not collect one per stream.
+  const {signal: given, ...rest} = init ?? {};
+  const signal = given ?? undefined;
+  const request = new Request(input, rest);
 
   return new Promise((resolve, reject) => {
     const fail = (error: unknown): void => {
@@ -406,7 +411,7 @@ function fetchWithoutTimeouts(
     };
 
     request.text().then(body => {
-      if (request.signal.aborted) {
+      if (signal?.aborted === true) {
         reject(
           new GatewayClientError(0, 'aborted', 'The request was aborted.'),
         );
@@ -436,13 +441,20 @@ function fetchWithoutTimeouts(
         },
       );
 
-      request.signal.addEventListener(
-        'abort',
-        () => {
-          outgoing.destroy(new Error('aborted'));
-        },
-        {once: true},
-      );
+      // The listener lives as long as the exchange: a signal reused across
+      // reconnects must not keep every finished request alive.
+      const onAbort = (): void => {
+        outgoing.destroy(new Error('aborted'));
+      };
+      const release = (): void => {
+        signal?.removeEventListener('abort', onAbort);
+      };
+
+      signal?.addEventListener('abort', onAbort, {once: true});
+      outgoing.once('response', incoming => {
+        incoming.once('close', release);
+      });
+      outgoing.once('close', release);
       outgoing.on('error', fail);
       outgoing.end(body);
     }, fail);
