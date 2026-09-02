@@ -194,6 +194,9 @@ async function runChat(
   const streamListening = new Promise<void>(resolve => {
     firstHandshake = resolve;
   });
+  // A handshake's snapshots are only as good as their handshake: one that
+  // failed and was replaced must not have a slow answer applied late.
+  let handshakes = 0;
   const streamEnded = client
     .events(
       event => {
@@ -203,7 +206,7 @@ async function runChat(
           }
         } else if (event.kind === 'turn_completed') {
           if (event.conversationId === opened.conversationId) {
-            transcript.settleLanding(event.clientMessageId, event.status);
+            transcript.turnEnded(event.clientMessageId, event.status);
 
             // This terminal's own turn reports through its answer; another
             // surface's turn has only the stream to say how it ended.
@@ -238,18 +241,25 @@ async function runChat(
         // event that followed the handshake is handled, so an older
         // snapshot can never undo what a newer event just did. Each step
         // reports its own failure; the stream itself stays up.
-        onReady: () =>
-          Promise.all([
+        onReady: () => {
+          handshakes += 1;
+
+          const mine = handshakes;
+
+          return Promise.all([
             watch.reportHealth().catch(reportUnlessUnreachable),
             watch.ensureAttached().catch(reportUnlessUnreachable),
             client.pendingConfirmations().then(pending => {
-              confirmations.reconcile(pending);
+              if (mine === handshakes) {
+                confirmations.reconcile(pending);
+              }
             }, reportUnlessUnreachable),
             transcript.catchUp().catch(reportUnlessUnreachable),
           ]).then(() => {
             firstHandshake?.();
             firstHandshake = undefined;
-          }),
+          });
+        },
       },
     )
     .then(
@@ -347,7 +357,6 @@ async function runChat(
   } finally {
     streaming.abort();
     await streamEnded;
-    await transcript.settled();
     lines.close();
   }
 }
