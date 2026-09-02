@@ -157,11 +157,13 @@ async function runChat(
 
     reportError(error);
   };
+  const streaming = new AbortController();
   const transcript = await createTranscript({
     client,
     conversationId: opened.conversationId,
     source,
     stdout: options.stdout,
+    signal: streaming.signal,
   });
   // A prompt that interrupted the REPL's read leaves it waiting without a
   // visible prompt; the REPL's own `> ` comes back once the prompt is gone.
@@ -177,6 +179,7 @@ async function runChat(
         options.stdout.write('> ');
       }
     },
+    signal: streaming.signal,
   });
   const watch = createCharacterWatch({
     client,
@@ -184,8 +187,8 @@ async function runChat(
     stdout: options.stdout,
     stderr: options.stderr,
     reportError,
+    signal: streaming.signal,
   });
-  const streaming = new AbortController();
   let streamFailure: unknown;
   // Nothing is read until the first handshake is through: a line typed —
   // or piped — before the stream listens would run a turn whose messages
@@ -206,7 +209,11 @@ async function runChat(
           }
         } else if (event.kind === 'turn_completed') {
           if (event.conversationId === opened.conversationId) {
-            transcript.turnEnded(event.clientMessageId, event.status);
+            transcript.turnEnded(
+              event.clientMessageId,
+              event.status,
+              event.message,
+            );
 
             // This terminal's own turn reports through its answer; another
             // surface's turn has only the stream to say how it ended.
@@ -249,11 +256,13 @@ async function runChat(
           return Promise.all([
             watch.reportHealth().catch(reportUnlessUnreachable),
             watch.ensureAttached().catch(reportUnlessUnreachable),
-            client.pendingConfirmations().then(pending => {
-              if (mine === handshakes) {
-                confirmations.reconcile(pending);
-              }
-            }, reportUnlessUnreachable),
+            client
+              .pendingConfirmations({signal: streaming.signal})
+              .then(pending => {
+                if (mine === handshakes) {
+                  confirmations.reconcile(pending);
+                }
+              }, reportUnlessUnreachable),
             transcript.catchUp().catch(reportUnlessUnreachable),
           ]).then(() => {
             firstHandshake?.();
@@ -373,6 +382,8 @@ function createCharacterWatch(options: {
   readonly stdout: NodeJS.WritableStream;
   readonly stderr: NodeJS.WritableStream;
   readonly reportError: (error: unknown) => void;
+  /** Ends any reopen or health read still in flight when the terminal leaves. */
+  readonly signal?: AbortSignal;
 }): {
   ensureAttached(): Promise<void>;
   /**
@@ -389,13 +400,14 @@ function createCharacterWatch(options: {
   reportHealth(): Promise<void>;
 } {
   const {client, characterId} = options;
+  const call = options.signal === undefined ? {} : {signal: options.signal};
   let attached = true;
   let gone = false;
   let attachment: Promise<void> = Promise.resolve();
   let reportedMaintenanceAt: string | undefined;
   const waiting: ((attached: boolean) => void)[] = [];
   const ensureAttached = (): Promise<void> => {
-    attachment = client.openDirectConversation(characterId).then(
+    attachment = client.openDirectConversation(characterId, call).then(
       outcome => {
         if (outcome.status === 'opened') {
           if (!attached) {
@@ -484,7 +496,7 @@ function createCharacterWatch(options: {
     },
     maintenanceFailed,
     async reportHealth() {
-      const summary = (await client.health()).characters.find(
+      const summary = (await client.health(call)).characters.find(
         character => character.id === characterId,
       );
 

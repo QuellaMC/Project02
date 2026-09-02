@@ -39,6 +39,8 @@ export function createConfirmationPrompts(options: {
   readonly stderr: NodeJS.WritableStream;
   /** Runs once a prompt has left the screen, answered or withdrawn. */
   readonly afterPrompt?: () => void;
+  /** Ends any read of the pending list still in flight when the terminal leaves. */
+  readonly signal?: AbortSignal;
 }): ConfirmationPrompts {
   const asked = new Set<string>();
   // Asked and not yet through the prompt: showing, or queued behind one.
@@ -73,18 +75,22 @@ export function createConfirmationPrompts(options: {
         options.stderr.write(
           `Error: ${error instanceof Error ? error.message : String(error)}\n`,
         );
-        options.client.pendingConfirmations().then(
-          stillPending => {
-            const again = stillPending.find(
-              request => request.id === pending.id,
-            );
+        options.client
+          .pendingConfirmations(
+            options.signal === undefined ? {} : {signal: options.signal},
+          )
+          .then(
+            stillPending => {
+              const again = stillPending.find(
+                request => request.id === pending.id,
+              );
 
-            if (again !== undefined) {
-              ask(again);
-            }
-          },
-          () => undefined,
-        );
+              if (again !== undefined) {
+                ask(again);
+              }
+            },
+            () => undefined,
+          );
       },
     );
   const prompt = async (pending: PendingConfirmation): Promise<void> => {
