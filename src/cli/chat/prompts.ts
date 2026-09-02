@@ -16,7 +16,12 @@ import type {LineDispatcher} from './lines.ts';
 export type ConfirmationPrompts = {
   ask(pending: PendingConfirmation): void;
   /** The daemon settled it — here or elsewhere; nothing to ask any more. */
-  settle(id: string, decision: SettledDecision): void;
+  settle(id: string, decision?: SettledDecision): void;
+  /**
+   * The daemon's pending list, read on a handshake, is the whole truth:
+   * what it holds is asked, and what it no longer holds is retired.
+   */
+  reconcile(pending: readonly PendingConfirmation[]): void;
   /** Resolves once no prompt is showing or queued. */
   idle(): Promise<void>;
 };
@@ -31,7 +36,9 @@ export function createConfirmationPrompts(options: {
   readonly stderr: NodeJS.WritableStream;
 }): ConfirmationPrompts {
   const asked = new Set<string>();
-  const settled = new Map<string, SettledDecision>();
+  // Asked and not yet through the prompt: showing, or queued behind one.
+  const outstanding = new Set<string>();
+  const settled = new Map<string, SettledDecision | undefined>();
   let showing: {readonly id: string; withdraw(): void} | undefined;
   let chain: Promise<void> = Promise.resolve();
   // The daemon has the last word: an answer that lands after the deadline,
@@ -53,6 +60,9 @@ export function createConfirmationPrompts(options: {
         }
       },
       (error: unknown) => {
+        // The daemon never heard the answer; the request is still pending
+        // there, and the next handshake may ask again.
+        asked.delete(pending.id);
         options.stderr.write(
           `Error: ${error instanceof Error ? error.message : String(error)}\n`,
         );
@@ -118,23 +128,41 @@ export function createConfirmationPrompts(options: {
     await answer(pending, cliPromptAnswerIsYes(line) ? 'approved' : 'denied');
   };
 
+  const ask = (pending: PendingConfirmation): void => {
+    if (pending.characterId !== options.characterId || asked.has(pending.id)) {
+      return;
+    }
+
+    asked.add(pending.id);
+    outstanding.add(pending.id);
+    chain = chain.then(() =>
+      prompt(pending).finally(() => {
+        outstanding.delete(pending.id);
+      }),
+    );
+  };
+  const settle = (id: string, decision?: SettledDecision): void => {
+    settled.set(id, decision);
+
+    if (showing?.id === id) {
+      showing.withdraw();
+    }
+  };
+
   return {
-    ask: pending => {
-      if (
-        pending.characterId !== options.characterId ||
-        asked.has(pending.id)
-      ) {
-        return;
+    ask,
+    settle,
+    reconcile: pending => {
+      const present = new Set(pending.map(request => request.id));
+
+      for (const id of outstanding) {
+        if (!present.has(id)) {
+          settle(id);
+        }
       }
 
-      asked.add(pending.id);
-      chain = chain.then(() => prompt(pending));
-    },
-    settle: (id, decision) => {
-      settled.set(id, decision);
-
-      if (showing?.id === id) {
-        showing.withdraw();
+      for (const request of pending) {
+        ask(request);
       }
     },
     idle: () => chain,
