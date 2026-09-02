@@ -509,6 +509,70 @@ describe('chat shim', () => {
     }
   }, 20_000);
 
+  it('lets /exit end a line held for a character that stays down', async () => {
+    let sessionsRoot = '';
+    let breakNextTurn = false;
+    const daemon = await startDaemon(
+      {
+        invoke() {
+          if (breakNextTurn) {
+            breakNextTurn = false;
+            chmodSync(sessionsRoot, 0o000);
+          }
+
+          return {
+            rawOutputText: JSON.stringify({
+              toolCalls: [{name: 'visible_reply', input: {text: 'noted'}}],
+            }),
+          };
+        },
+      },
+      storeRoot => {
+        sessionsRoot = join(
+          characterDataDirPath(storeRoot, 'mira'),
+          'sessions',
+        );
+      },
+    );
+
+    try {
+      const shim = openShim([], daemon.env);
+
+      await shim.printed('mira is ready.');
+      breakNextTurn = true;
+
+      // The store stays broken, so recovery fails and the character stays
+      // down; the line typed now is held for a thread that never comes.
+      const web = await deliverFromWeb(daemon.gateway, 'mira', 'boom');
+
+      await expect(web.outcome).resolves.toMatchObject({status: 'failed'});
+      shim.stdin.write('into the void\n');
+      await vi.waitFor(() => {
+        expect(shim.errors()).toContain(
+          'your line will be sent when it is back',
+        );
+      });
+
+      // Leaving does not wait for it, and the held line is not sent.
+      shim.stdin.write('/exit\n');
+
+      const {exitCode} = await shim.run;
+
+      expect(exitCode).toBe(0);
+      chmodSync(sessionsRoot, 0o755);
+
+      const history = await daemon.gateway.history(web.conversationId);
+
+      expect(
+        history.status === 'ok' &&
+          history.messages.map(message => message.text),
+      ).not.toContain('into the void');
+    } finally {
+      chmodSync(sessionsRoot, 0o755);
+      await daemon.close();
+    }
+  }, 20_000);
+
   it('ends, nonzero, when its stream can never come back', async () => {
     const daemon = await startDaemon();
     const shim = openShim([], daemon.env);
