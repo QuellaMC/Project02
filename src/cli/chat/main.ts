@@ -138,7 +138,9 @@ async function runChat(
     throw new CliUsageError(opened.message);
   }
 
-  const source = `chat-shim:${String(process.pid)}`;
+  // Per invocation, not per process id: a reused pid would make a new
+  // terminal take an earlier one's lines for its own and hide them.
+  const source = `chat-shim:${randomUUID()}`;
   const lines = createLineDispatcher(options.stdin);
   const reportError = (error: unknown): void => {
     options.stderr.write(
